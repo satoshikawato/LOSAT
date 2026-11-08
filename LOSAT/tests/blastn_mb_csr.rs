@@ -7,7 +7,7 @@
 //! shows the switch's sides. 200 kb of Sakai (both strands 400,000 positions, a 4^12-cell table)
 //! against five copies of MG1655 (23 Mb) is above the rule of 8 letters per position and one per
 //! cell (19.9 M); against one copy (4.6 Mb) it is below. Each against a subject file (`-subject`)
-//! and a database (`-db`), at one and four threads.
+//! and a database (`-db`), at one, four, eight and sixteen threads.
 //! That those bytes equal NCBI's is the business of the fixture suites.
 //! `-task blastn` of 50 kb against 2 Mb has a packed table of 4^11 cells, whose scan tests each
 //! word once (`LOSAT_X_BNPVONCE`); the report does not depend on that either.

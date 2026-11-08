@@ -3,15 +3,15 @@
 //! A reaped preliminary HSP list gives back its spare room and the serial redo (one thread) frees
 //! each query's preliminary list after its redo. Every test states the default it runs with: the
 //! reference is the one-thread search of all queries (`LOSAT_X_BPQBLOCK=0`, where one line per
-//! search is counted). These tests compare the reports at one and four threads, alone and with the
-//! block search of `LOSAT_X_BPQBLOCK`, with the reference (that the reports equal NCBI's is the
-//! business of the frozen fixtures), and check from the `[TIMING] x_bppfree: freed_lists=<n>`
-//! lines that the serial redo freed lists, not only that the report is equal.
-//! The switch acts on each query's lists, so three queries of the fixture are enough (`queries`),
-//! each its own query batch (`BATCH`); the block test sets the blocks' letters so that there are
-//! two and three blocks. `blastp_redo_par.rs` runs all the fixture's queries (batches of 3,000
-//! letters) at one and four threads: a query without a preliminary list, batches of many queries,
-//! and the release of the lists window by window in the redo of `LOSAT_X_BPREDOPAR`.
+//! search is counted). These tests compare the reports at one, four, eight and sixteen threads,
+//! alone and with the block search of `LOSAT_X_BPQBLOCK`, with the reference (that the reports
+//! equal NCBI's is the business of the frozen fixtures), and check from the `[TIMING] x_bppfree:
+//! freed_lists=<n>` lines that the serial redo freed lists, not only that the report is equal. The
+//! switch acts on each query's lists, so three queries of the fixture are enough (`queries`), each
+//! its own query batch (`BATCH`); the block test sets the blocks' letters so that there are two and
+//! three blocks. `blastp_redo_par.rs` runs all the fixture's queries (batches of 3,000 letters) at
+//! one and four threads: a query without a preliminary list, batches of many queries, and the
+//! release of the lists window by window in the redo of `LOSAT_X_BPREDOPAR`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3734-3738
 //! ```c

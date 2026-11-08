@@ -1,7 +1,7 @@
 //! BLAST XML (outfmt 5) of TBLASTX: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
 //! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2), made before the first byte
-//! of stdout or `-out` at 1 and 4 threads, and the document across several query batches (one
-//! header, global Iteration numbers, one trailer: TBLASTX renders once per run, after every
+//! of stdout or `-out` at 1, 4, 8 and 16 threads, and the document across several query batches
+//! (one header, global Iteration numbers, one trailer: TBLASTX renders once per run, after every
 //! batch is searched), and the run that stops at a failing batch (the earlier batches' Iterations,
 //! no trailer).
 //!

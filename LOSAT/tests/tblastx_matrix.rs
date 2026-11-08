@@ -2,7 +2,7 @@
 //! (`score.tblastx.*` of `outfmt0_manifest.tsv`, exit status 0) cannot hold. The bytes of NCBI
 //! BLAST+ 2.17.0 are in `tests/fixtures/tblastx_matrix` (`<case>.out`, `<case>.err`: `tblastx
 //! ARGS -num_threads 1`, run from LOSAT/ with an empty pipe as standard input). LOSAT prints them
-//! at 1 and 4 threads.
+//! at 1, 4, 8 and 16 threads.
 //!
 //! NCBI reference: c++/src/algo/blast/core/blast_message.c:242-247 (a name without a table:
 //! `Blast_ScoreBlkMatrixFill` returns -1, one message per query of the batch)
@@ -90,7 +90,7 @@ fn run_with_env(args: &[&str], threads: &str, stdin: &[u8], envs: &[(&str, &Path
     child.wait_with_output().expect("LOSAT output")
 }
 
-/// LOSAT prints NCBI's bytes of `case` and exits with `status`, at 1 and 4 threads.
+/// LOSAT prints NCBI's bytes of `case` and exits with `status`, at 1, 4, 8 and 16 threads.
 fn equals_ncbi(case: &str, args: &[&str], status: i32) {
     equals_ncbi_with_stdin(case, args, b"", status)
 }

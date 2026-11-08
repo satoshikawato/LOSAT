@@ -82,8 +82,8 @@ fn counts<const K: usize>(stderr: &str, head: &str, fields: [&str; K]) -> [u64; 
     })
 }
 
-/// The default's report is `=0`'s at one and four threads, with the same results computed ahead and
-/// taken; the default drops some of the results not taken, `=0` none.
+/// The default's report is `=0`'s at one, four, eight and sixteen threads, with the same results
+/// computed ahead and taken; the default drops some of the results not taken, `=0` none.
 #[test]
 fn dropping_results_not_taken_keeps_the_report() {
     for threads in [1, 4, 8, 16] {

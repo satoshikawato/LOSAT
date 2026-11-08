@@ -369,7 +369,7 @@ fn a_split_query_gives_the_report_without_the_switches() {
 
 /// `LOSAT_X_BXKAONCE` (a query batch's Karlin blocks computed once, `blastx/search.rs`): the report
 /// equals that without it. The reuse runs in the serial chunk loop for a batch that is not split,
-/// so the search is run at one thread (the loop) and at four (the batch flow).
+/// so the search is run at one thread (the loop) and at four, eight and sixteen (the batch flow).
 #[test]
 fn several_queries_give_the_report_without_ka_once() {
     let dir = temp_dir("ka-once");
@@ -397,7 +397,7 @@ fn several_queries_give_the_report_without_ka_once() {
 /// `LOSAT_X_BXPOOLN1` (a search on one thread builds and frees its lookup tables without the pool,
 /// `tblastx/lookup/x_lut_direct.rs`): at one thread the report equals that without it, for several
 /// query batches (one table each) and for a split query (a table per chunk); `LOSAT_X_REACH` shows
-/// that it acts at one thread and not at four (where both build pooled).
+/// that it acts at one thread and not at four, eight or sixteen (where both build pooled).
 #[test]
 fn queries_give_the_report_without_pool_n1() {
     let dir = temp_dir("pool-n1");

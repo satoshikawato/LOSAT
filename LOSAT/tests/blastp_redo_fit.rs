@@ -3,9 +3,9 @@
 //! The composition-based redo builds each redone HSP list with room for exactly its alignments.
 //! Every test states the default it runs with: the reference is the one-thread search of all
 //! queries (`LOSAT_X_BPQBLOCK=0`, where one line per search is counted). These tests compare the
-//! reports, alone and with the block search of `LOSAT_X_BPQBLOCK`, at one and four threads, with
-//! the reference (that the reports equal NCBI's is the business of the frozen fixtures), and check
-//! from the
+//! reports, alone and with the block search of `LOSAT_X_BPQBLOCK`, at one, four, eight and sixteen
+//! threads, with the reference (that the reports equal NCBI's is the business of the frozen
+//! fixtures), and check from the
 //! `[TIMING] x_bpredofit: lists=<n> hsps=<m>` lines that lists were built that way, not only that
 //! the report is equal.
 //! The switch acts on each query's lists, so three queries of the fixture are enough (`queries`),

@@ -117,7 +117,7 @@ fn in_place_stats(stderr: &str) -> Option<[u64; 3]> {
 }
 
 /// `[X_STATS] PAIRPAR`: units. At one thread the cost rule sends the fixture pair to the reference
-/// frame loop (`units=0`), at four threads it runs its units.
+/// frame loop (`units=0`), at four, eight and sixteen threads it runs its units.
 fn check_path(stderr: &str, threads: u32, what: &str) {
     let [units] = counters(stderr, "[X_STATS] PAIRPAR ", ["units"])
         .unwrap_or_else(|| panic!("{what}: no [X_STATS] PAIRPAR line:\n{stderr}"));
@@ -188,8 +188,8 @@ fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
 // The slices together with the other variables of the linking call: the literal port
 // (LOSAT_LINKING_LEGACY: its groups are linked on copies of the slices and written back, never
 // handed back to the cut) and the literal port beside the default kernel
-// (LOSAT_LINK_FAST_SHADOW). Threads 1 and 4 cover the reference frame loop and the unit path. The
-// report is NCBI's and the path ran in every run.
+// (LOSAT_LINK_FAST_SHADOW). Threads 1, 4, 8 and 16 cover the reference frame loop and the unit
+// path. The report is NCBI's and the path ran in every run.
 #[test]
 fn the_path_with_the_other_linking_variables() {
     let expected = ncbi_report();

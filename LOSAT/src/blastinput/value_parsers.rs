@@ -1294,7 +1294,7 @@ mod tests {
 /// with the given message (clap's error for a value its parser refuses, as every other
 /// option's), and any other name is clap's invalid-value error.
 ///
-/// NCBI's `-task` is a `CArgAllowStringSet` (`blast_args.cpp:3158-3163`); the rejected
+/// NCBI's `-task` is a `CArgAllowStringSet` (`blast_args.cpp:105`); the rejected
 /// names are NCBI tasks outside LOSAT's implementation.
 #[derive(Clone)]
 pub struct TaskParser {

@@ -1,7 +1,7 @@
 //! outfmt 8 (ASN.1 text), 9 (ASN.1 binary) and 12 (JSON) of the LOSAT CLI against NCBI BLAST+ 2.17.0's output
-//! for the same `-subject` searches, byte for byte, at one and four threads: BLASTN's three
-//! tasks (megablast, blastn, dc-megablast), BLASTP, BLASTX (gapped and `-ungapped`), TBLASTN
-//! (with and without `-subject_loc`) and TBLASTX on the outfmt sample inputs
+//! for the same `-subject` searches, byte for byte, at one, four, eight and sixteen threads:
+//! BLASTN's three tasks (megablast, blastn, dc-megablast), BLASTP, BLASTX (gapped and `-ungapped`),
+//! TBLASTN (with and without `-subject_loc`) and TBLASTX on the outfmt sample inputs
 //! (`tests/fixtures/seqalign/in/`; outfmt-20261019 `ncbi-samples/fixture/`).
 //!
 //! The translated searches' files: `ncbi-samples/out/<name>.out` of `blastx -query

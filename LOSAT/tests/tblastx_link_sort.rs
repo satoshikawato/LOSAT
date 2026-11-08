@@ -29,7 +29,7 @@
 //! the unit tests of `x_link_sort.rs` (each comparator, lists below and above the threshold,
 //! pools of 1, 2 and 8 threads) and by searches of large pairs outside this suite. What these
 //! tests cover is the dispatch at the two sort sites, the single final sort and the summary
-//! line, at one thread and on a pool of four.
+//! line, at one thread and on pools of four, eight and sixteen.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -108,7 +108,8 @@ fn stats(stderr: &str) -> Option<[u64; 5]> {
 }
 
 /// `[X_STATS] PAIRPAR`: units, fallback_cost. At one thread the default search takes the reference
-/// frame loop (the cost rule: `units=0 fallback_cost=1`), at four threads its units (`units>0`).
+/// frame loop (the cost rule: `units=0 fallback_cost=1`), at four, eight and sixteen threads its
+/// units (`units>0`).
 fn check_path(stderr: &str, threads: u32, what: &str) {
     let [units, fallback_cost] = counters(stderr, "[X_STATS] PAIRPAR ", ["units", "fallback_cost"])
         .unwrap_or_else(|| panic!("{what}: no [X_STATS] PAIRPAR line:\n{stderr}"));
@@ -149,11 +150,11 @@ fn check_stats(stderr: &str, what: &str) -> (u64, u64) {
 //          s_FwdCompareHSPsTransl);
 // ```
 // The default search: the report is NCBI's and the subject's two linking calls each sort their
-// output order once. One thread runs the reference frame loop, four threads the unit path (the
-// `[X_STATS] PAIRPAR` line tells which). The counters also count the index sorts of the seed
-// stage's merge: with `LOSAT_X_TBXKMERGE=0` the unit path (four threads) makes the sorts of the
-// reference frame loop (one thread) and the counts are equal; with that switch on (the default)
-// its merge replaces some of them, so four threads make no more than one.
+// output order once. One thread runs the reference frame loop, four, eight and sixteen threads the
+// unit path (the `[X_STATS] PAIRPAR` line tells which). The counters also count the index sorts of
+// the seed stage's merge: with `LOSAT_X_TBXKMERGE=0` the unit path (four threads) makes the sorts
+// of the reference frame loop (one thread) and the counts are equal; with that switch on (the
+// default) its merge replaces some of them, so four threads make no more than one.
 #[test]
 fn the_default_search_gives_ncbis_report_with_one_final_sort_per_linking_call() {
     let expected = ncbi_report();

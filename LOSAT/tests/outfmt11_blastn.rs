@@ -13,9 +13,9 @@
 //!
 //! Frozen bytes: `tests/fixtures/outfmt11/<case>.out` and `.err`, written by NCBI's `blastn
 //! -num_threads 1 <args> -outfmt 11` run from `LOSAT/` with the case's environment
-//! (S/of8/scripts/freeze_outfmt11_tests.sh of the line OF8 records). Every case runs at 1 and 4
-//! threads, and the batch cases without report streaming (`LOSAT_X_RPTSTREAM=0`, the archives
-//! of every batch written after the search from the batch ranges) and with it (`=1`).
+//! (S/of8/scripts/freeze_outfmt11_tests.sh of the line OF8 records). Every case runs at 1, 4, 8
+//! and 16 threads, and the batch cases without report streaming (`LOSAT_X_RPTSTREAM=0`, the
+//! archives of every batch written after the search from the batch ranges) and with it (`=1`).
 //! A database that does not exist (rc 2) carries the search path in its message, which depends
 //! on where the test runs: only the structure is compared.
 
@@ -264,7 +264,7 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
 }
 
 #[test]
-fn archives_equal_ncbis_at_one_and_four_threads() {
+fn archives_equal_ncbis_at_1_4_8_and_16_threads() {
     for case in CASES {
         for threads in ["1", "4", "8", "16"] {
             check(case, &[], threads);

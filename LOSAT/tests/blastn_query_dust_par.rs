@@ -8,16 +8,15 @@
 //! or the per-query map split over the search pool and collected in query order. So the property under
 //! test is that the report does not depend on it: for megablast, blastn and dc-megablast with
 //! several queries (pieces of LC738874 with microsatellites, runs of `N`, a poly-A query and a
-//! query shorter than a triplet) at 1 and 4 threads, the searches without the switch and with it
-//! give the same bytes, and `-dust no` makes no masks (no `[X_STATS] QDUSTPAR` line). The
-//! same holds with several query batches (`BATCH_SIZE`) and when a batch is split into query
-//! chunks (`CHUNK_SIZE`, which reaches `chunk_query_masks`). That the masks are made on the
-//! pool's threads is checked by the unit test `masks_are_made_on_the_pool_threads` in
-//! `x_query_dust_par.rs`; here the `pool=` count of the `[X_STATS] QDUSTPAR` line (the DUST calls
-//! whose masks were made on the pool) shows that the pool path ran at 4 threads and not at one
-//! (QPREPPAR's reach marks also fire for the encoding and the Karlin blocks of the same searches,
-//! so they cannot tell the masks apart). That those bytes equal NCBI's is the business of the
-//! blastn fixtures.
+//! query shorter than a triplet) at 1, 4, 8 and 16 threads, the searches without the switch and
+//! with it give the same bytes, and `-dust no` makes no masks (no `[X_STATS] QDUSTPAR` line). The
+//! same holds with several query batches (`BATCH_SIZE`) and when a batch is split into query chunks
+//! (`CHUNK_SIZE`, which reaches `chunk_query_masks`). That the masks are made on the pool's threads
+//! is checked by the unit test `masks_are_made_on_the_pool_threads` in `x_query_dust_par.rs`; here
+//! the `pool=` count of the `[X_STATS] QDUSTPAR` line (the DUST calls whose masks were made on the
+//! pool) shows that the pool path ran at 4, 8 and 16 threads and not at one (QPREPPAR's reach marks
+//! also fire for the encoding and the Karlin blocks of the same searches, so they cannot tell the
+//! masks apart). That those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -169,9 +168,9 @@ fn blastn(
     (output.stdout, stderr)
 }
 
-/// For one task: the search without the switch at one thread, then off and on at 1 and 4 threads,
-/// all with the same bytes and no standard error but the stats lines; the masks are made on the
-/// pool only at 4 threads (`pool=` of the stats line).
+/// For one task: the search without the switch at one thread, then off and on at 1, 4, 8 and 16
+/// threads, all with the same bytes and no standard error but the stats lines; the masks are made
+/// on the pool only above one thread (`pool=` of the stats line).
 fn check_task(task: &str, extra: &[&str]) {
     let queries = Queries::new();
     let mut args = vec!["-task", task];
@@ -280,8 +279,8 @@ fn dust_parameters_and_lowercase_masking() {
 }
 
 // `-dust no` makes no masks: the report is the same, and no DUST mask is made (QPREPPAR's other
-// marks fire at 4 threads, so the proof is the absence of the `[X_STATS] QDUSTPAR` line, which a
-// masked batch prints; the same search with DUST on prints it).
+// marks fire at 4, 8 and 16 threads, so the proof is the absence of the `[X_STATS] QDUSTPAR` line,
+// which a masked batch prints; the same search with DUST on prints it).
 #[test]
 fn dust_no_is_not_acted_on() {
     let queries = Queries::new();

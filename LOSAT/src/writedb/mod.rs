@@ -11,16 +11,17 @@
 //! (`.pdb` / `.ndb` with the volume tables, `.ptf` / `.ntf` with the tax ids)
 //! and the tax id lookup files (`.pot` / `.not`, `.pto` / `.nto`).
 //!
-//! With `-parse_seqids` (library only until the version 5 keys are written,
-//! `MakedbArgs::parse_seqids`) and `-hash_index`, the volumes also get their ISAM
+//! With `-parse_seqids` and `-hash_index`, the volumes also get their ISAM
 //! files (`.psi`/`.psd` of the Seq-ids in version 4, `.pni`/`.pnd` of the GIs,
-//! `.phi`/`.phd` of the sequence hashes), their OID to GI file (`.pog`) and the
-//! duplicate check of their Seq-ids (`volume`, `isam`, `id_set`); `-taxid` and
-//! `-taxid_map` (library only, it requires `-parse_seqids`) put tax ids on the
-//! definition lines and into the version 5 tax id files (`taxid_set`).
+//! `.phi`/`.phd` of the sequence hashes), their OID to GI file (`.pog`), in
+//! version 5 the acc2oid keys of the Seq-ids (in `.pdb` / `.ndb`) and the OID to
+//! Seq-ids file (`.pos` / `.nos`), and the duplicate check of their Seq-ids
+//! (`volume`, `isam`, `id_set`); `-taxid` and `-taxid_map` (which requires
+//! `-parse_seqids`) put tax ids on the definition lines and into the version 5
+//! tax id files (`taxid_set`).
 //!
-//! Not written: the version 5 acc2oid keys and `.pos` of `-parse_seqids`, and
-//! mask data.
+//! Not written: mask data (`losat makeblastdb` refuses the mask options,
+//! `makeblastdb::UNSUPPORTED_OPTIONS`).
 
 pub mod bioseq;
 pub mod build_db;
@@ -33,9 +34,6 @@ pub mod format_guess;
 pub mod header;
 pub(crate) mod id_set;
 pub(crate) mod isam;
-// The LMDB files of version 5. Parts that only `-parse_seqids` and the tax id options
-// reach are not called yet.
-#[allow(dead_code)]
 pub(crate) mod lmdb;
 pub mod local_offset;
 pub mod makeblastdb;

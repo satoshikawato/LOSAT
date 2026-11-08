@@ -632,7 +632,9 @@ mod tests {
                 to: 2147483646
             }
         );
-        for text in ["", "-", "--", "-10", "10-", "10", "1--5", "1-2-3", "-5-10"] {
+        for text in [
+            "", "-", "--", "-10", "10-", "10", "1--5", "1-2-3", "-5-10", "3,4",
+        ] {
             assert_eq!(
                 message(parse(text).unwrap_err()),
                 "BLAST engine error: Invalid specification of query location (Format: start-stop)\n",

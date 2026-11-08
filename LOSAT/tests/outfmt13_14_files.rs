@@ -675,9 +675,10 @@ fn frozen_names(case: &str) -> Vec<String> {
 }
 
 /// Runs `args` (with `-num_threads`, `-outfmt` and `-out <work>/<case>.out` added) in
-/// `tests/fixtures/outfmt16` at one and four threads and checks that exactly the files of NCBI's run
-/// appear, with its bytes, with `rc` and a standard error that starts as `stderr_start` (and is
-/// empty when that is empty). Returns nothing; every run is in its own directory.
+/// `tests/fixtures/outfmt16` at one, four, eight and sixteen threads and checks that exactly the
+/// files of NCBI's run appear, with its bytes, with `rc` and a standard error that starts as
+/// `stderr_start` (and is empty when that is empty). Returns nothing; every run is in its own
+/// directory.
 fn equals_frozen_files(
     case: &str,
     format: &str,

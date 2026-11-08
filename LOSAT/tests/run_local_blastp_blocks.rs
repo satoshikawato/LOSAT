@@ -417,9 +417,9 @@ fn child_search() {
 }
 
 /// The block search of outfmt 0, 6 and 7 (ABI v2 of the Web build) and of eight formats, with the
-/// hit records and the observer, at 1 and 4 threads: the same outputs, warnings, records and
-/// ranges as the search of all queries (`LOSAT_X_BPQBLOCK=0`), and each output the CLI run of
-/// its format.
+/// hit records and the observer, at 1, 4, 8 and 16 threads: the same outputs, warnings, records and
+/// ranges as the search of all queries (`LOSAT_X_BPQBLOCK=0`), and each output the CLI run of its
+/// format.
 #[test]
 fn outputs_records_and_ranges_of_the_blocks_are_those_of_all_queries() {
     let inputs = Inputs::new();

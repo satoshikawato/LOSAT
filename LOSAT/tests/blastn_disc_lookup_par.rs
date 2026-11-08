@@ -6,14 +6,14 @@
 //! filled by one loop, or by the threads of the search pool, each owning whole blocks of cells of
 //! both templates' tables. So the property under test is that the report does not depend on it:
 //! for `-task dc-megablast` with one template and with two (`coding_and_optimal`), template
-//! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1 and 4
-//! threads, the searches with the switch off (`=0`), by default and with it set to 1 give the same
-//! bytes. `LOSAT_X_REACH` shows that the pool built the tables at 4 threads and not at 1. The same
-//! holds with `LOSAT_X_PAIRPARDISC`, with several query batches (`BATCH_SIZE`), for split query
-//! chunks (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11 -template_type ...`);
-//! megablast without a template never builds this table. One search fills its table in several
-//! chunks of the pool fill (a query of 0.66 Mb, both strands), with one template and with two.
-//! That the parts run on several workers of the pool is checked by the unit test
+//! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1, 4, 8 and
+//! 16 threads, the searches with the switch off (`=0`), by default and with it set to 1 give the
+//! same bytes. `LOSAT_X_REACH` shows that the pool built the tables at 4, 8 and 16 threads and not
+//! at 1. The same holds with `LOSAT_X_PAIRPARDISC`, with several query batches (`BATCH_SIZE`), for
+//! split query chunks (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11
+//! -template_type ...`); megablast without a template never builds this table. One search fills its
+//! table in several chunks of the pool fill (a query of 0.66 Mb, both strands), with one template
+//! and with two. That the parts run on several workers of the pool is checked by the unit test
 //! `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the business of
 //! the blastn fixtures.
 
@@ -219,8 +219,9 @@ fn blastn(
 }
 
 /// For one search (`subject` and `extra` arguments): the report with the switch off at one
-/// thread, then off, by default (on) and on (`=1`) at 1 and 4 threads, all the same bytes; the
-/// switch writes nothing, and the pool builds the tables (`LOSAT_X_REACH`) at 4 threads only.
+/// thread, then off, by default (on) and on (`=1`) at 1, 4, 8 and 16 threads, all the same bytes;
+/// the switch writes nothing, and the pool builds the tables (`LOSAT_X_REACH`) above one thread
+/// only.
 fn check(subject: &[&str], extra: &[&str], env: &[Var<'_>]) {
     let queries = queries();
     let (expected, expected_stderr) = blastn(&queries, subject, extra, 1, &joined(&[env, &[OFF]]));

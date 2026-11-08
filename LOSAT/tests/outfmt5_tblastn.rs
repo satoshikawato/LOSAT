@@ -1,7 +1,7 @@
 //! BLAST XML (outfmt 5) of TBLASTN: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
 //! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2), made before the first byte
-//! of stdout or `-out` at 1 and 4 threads, and the document across several query batches (one
-//! header, global Iteration numbers, one trailer: TBLASTN renders once per run).
+//! of stdout or `-out` at 1, 4, 8 and 16 threads, and the document across several query batches
+//! (one header, global Iteration numbers, one trailer: TBLASTN renders once per run).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
 //! ```c++

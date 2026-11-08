@@ -450,8 +450,8 @@ fn a_file_sink_holds_the_document_of_standard_output() {
 
 /// What NCBI BLAST+ 2.17.0 wrote for `blastn -query QUERY (-subject snucl.fna | -db db/snucl)
 /// EXTRA -outfmt N -num_threads 1` in `tests/fixtures/outfmt16` (`<stem>_{sub,db}_{15,16}.out`, and
-/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one and four
-/// threads writes the same stdout, stderr and exit status.
+/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one, four,
+/// eight and sixteen threads writes the same stdout, stderr and exit status.
 fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], rc: i32) {
     let dir = fixtures();
     for format in ["15", "16"] {
@@ -524,9 +524,9 @@ fn a_karlin_error_in_the_first_batch_leaves_the_prolog_alone() {
 /// and by no other: a `taxdb.bti` of the search path whose record of the database's taxid (9606)
 /// NCBI reads from unmapped memory (`btd_empty`, NCBI BLAST+ crashes) changes no byte of outfmt 8
 /// and adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13
-/// (3)) at 1 and 4 threads. BLASTN has written the outfmt 0 prolog by then, so outfmt 0 keeps those
-/// first lines (the start of the bytes without the taxonomy database, no `Query=`); the other
-/// formats write nothing.
+/// (3)) at 1, 4, 8 and 16 threads. BLASTN has written the outfmt 0 prolog by then, so outfmt 0
+/// keeps those first lines (the start of the bytes without the taxonomy database, no `Query=`);
+/// the other formats write nothing.
 #[test]
 fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));

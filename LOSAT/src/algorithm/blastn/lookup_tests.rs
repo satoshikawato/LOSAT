@@ -1,7 +1,7 @@
 //! Unit tests for blastn/lookup.rs
 
-use LOSAT::algorithm::blastn::lookup::{encode_kmer, reverse_complement};
-use LOSAT::core::blast_encoding::encode_iupac_to_blastna;
+use crate::algorithm::blastn::lookup::{encode_kmer, reverse_complement};
+use crate::core::blast_encoding::encode_iupac_to_blastna;
 
 #[test]
 fn test_encode_kmer_basic() {

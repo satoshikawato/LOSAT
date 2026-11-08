@@ -445,3 +445,7 @@ impl NucleotideDiagnosticCounters {
 
 // For backward compatibility, provide a type alias for TBLASTX
 pub type DiagnosticCounters = ProteinDiagnosticCounters;
+
+#[cfg(test)]
+#[path = "diagnostics_tests.rs"]
+mod diagnostics_tests;

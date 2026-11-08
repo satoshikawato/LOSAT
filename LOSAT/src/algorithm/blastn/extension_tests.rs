@@ -1,6 +1,6 @@
 //! Unit tests for blastn/extension.rs
 
-use LOSAT::algorithm::blastn::extension::extend_hit_ungapped;
+use crate::algorithm::blastn::extension::extend_hit_ungapped;
 
 #[test]
 fn test_extend_hit_ungapped_perfect_match() {

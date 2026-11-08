@@ -1,10 +1,10 @@
 //! Unit tests for tblastx/extension.rs
 
-use LOSAT::algorithm::tblastx::constants::{X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED};
-use LOSAT::algorithm::tblastx::extension::{
+use crate::algorithm::tblastx::constants::{X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED};
+use crate::algorithm::tblastx::extension::{
     extend_gapped_protein, extend_hit_two_hit, extend_hit_ungapped, get_score,
 };
-use LOSAT::utils::matrix::ncbistdaa;
+use crate::utils::matrix::ncbistdaa;
 
 #[test]
 fn test_get_score_basic() {

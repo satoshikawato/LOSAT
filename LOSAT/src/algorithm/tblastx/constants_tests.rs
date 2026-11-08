@@ -1,6 +1,6 @@
 //! Unit tests for tblastx/constants.rs
 
-use LOSAT::algorithm::tblastx::constants::*;
+use crate::algorithm::tblastx::constants::*;
 
 #[test]
 fn test_x_drop_constants() {

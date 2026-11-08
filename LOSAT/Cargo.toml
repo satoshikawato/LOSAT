@@ -61,10 +61,6 @@ name = "blastn_report_stream_api"
 path = "tests/blastn_report_stream_api.rs"
 
 [[test]]
-name = "unit_tests"
-path = "tests/unit_tests.rs"
-
-[[test]]
 name = "thread_memory"
 path = "tests/thread_memory.rs"
 

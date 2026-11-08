@@ -1,11 +1,11 @@
 //! Unit tests for common/diagnostics.rs
 
-use std::env;
-use std::sync::atomic::Ordering;
-use LOSAT::algorithm::common::diagnostics::{
+use crate::algorithm::common::diagnostics::{
     diagnostics_enabled, BaseDiagnosticCounters, NucleotideDiagnosticCounters,
     ProteinDiagnosticCounters,
 };
+use std::env;
+use std::sync::atomic::Ordering;
 
 #[test]
 fn test_diagnostics_enabled() {

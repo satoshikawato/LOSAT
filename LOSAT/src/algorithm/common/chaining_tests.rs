@@ -1,9 +1,9 @@
 //! Unit tests for common/chaining.rs
 
-use super::super::helpers::make_hit;
-use LOSAT::algorithm::common::chaining::{
+use crate::algorithm::common::chaining::{
     calculate_overlap, can_chain_hsps, filter_overlapping_hsps,
 };
+use crate::algorithm::common::test_helpers::make_hit;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c

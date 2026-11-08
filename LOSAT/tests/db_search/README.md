@@ -987,7 +987,7 @@ most 9 in BLOSUM62).
       makeblastdb -in "pa1 pb1 pc1 pd1" -input_type blastdb -dbtype prot -blastdb_version 4 -title "nz reppo" \
           -out $D/nz_reppo
 
-## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a)
+## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a and PS11b)
 
 - `rps_mini` (version 5), `rps_mini4` (version 4) and `rps_mini26` (version 4, a 26-column `.rps` with the 26-letter
   magic `0x1e16` in `.rps` and `.loo`, its `.freq` left at 28 columns, as NCBI's own test database `rpstest_le`):
@@ -997,6 +997,12 @@ most 9 in BLOSUM62).
   scale 100 (as CDD's). `rps/build.sh NCBI_BIN OUT_DIR` records how they were made with NCBI BLAST+ 2.17.0; makeprofiledb
   writes the date into the index files, so the committed `.gz` files are the fixtures (a rebuild differs).
   `rps_pam30.aux` is `rps_mini.aux` with `PAM30` and gap costs 9/1 (row `db.rps.rej.matrix`).
+- `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
+  `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
+  the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one
+  volume (the merge, the per-volume hit list size, outfmt 7's `# N hits found` before the cut, volume 0's K). A row
+  `rps-gz:rps_mini3v!01.freq` leaves one volume's `.freq` out (`!00.freq`: the first, which NCBI answers with its
+  warning and mode 0).
 - `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE]` with the files
   `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place), `BLASTDB` set
   to that directory and `-db "NAME NAME2"`; a row whose `covers` cell has `path: {db_dir}` keeps that directory as

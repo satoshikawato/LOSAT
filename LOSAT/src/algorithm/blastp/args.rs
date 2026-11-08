@@ -102,6 +102,13 @@ impl BlastpApp {
         }
     }
 
+    /// Whether the app's Seq-aligns come from traceback hit lists longer than `max_target_seqs`
+    /// that the formatter then cuts (`PruneSeqalign`): psiblast's larger lists, and rpsblast's
+    /// merged volumes. `# N hits found` of outfmt 7 counts before the cut.
+    pub fn prunes_after_traceback(self) -> bool {
+        matches!(self, BlastpApp::Psiblast | BlastpApp::Rpsblast)
+    }
+
     /// The name in LOSAT's rejections ("... is not supported by LOSAT's PSIBLAST").
     pub fn name(self) -> &'static str {
         match self {

@@ -1550,7 +1550,7 @@ mod tests {
     // The redo's store of SEG-masked subject ranges is the blocks' only for the subjects encoded
     // for all blocks (`x_block_seg_store`): its key is a subject's index in the redo's subjects,
     // which in another set (another encoding, a `-db` search's listed subjects, whose ranks differ
-    // between blocks) may name another subject.
+    // between blocks) may name another subject. The `-db` blocks: `tests/psiblast_taxdb_blocks.rs`.
     #[test]
     fn the_seg_store_of_the_blocks_serves_only_their_subject_encoding() {
         use super::super::encoding::encode_protein_sequence;

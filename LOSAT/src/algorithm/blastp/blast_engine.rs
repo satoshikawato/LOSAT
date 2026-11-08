@@ -7254,8 +7254,12 @@ fn x_word_blocks(
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
     )?;
-    // The letters of the lookup query (`encode_protein_query_frame_with_seg`) where SEG does
-    // not mask them; a lookup segment holds only those (`build_lookup_segments_for_context`).
+    // The words of all letters of the queries: the lookup query
+    // (`encode_protein_query_frame_with_seg`) has the same letters, and its lookup segments
+    // (`build_lookup_segments_for_context`) leave out those that SEG or `-lcase_masking` mask, so
+    // a block's table holds at most these words (all of them without masks). Counting the masked
+    // letters too only closes such a block earlier and reserves room that its table does not fill
+    // (`x_block_appends`) and never touches.
     let words = |searched: &std::ops::Range<usize>| {
         let encoded: Vec<EncodedProtein> = queries[searched.clone()]
             .iter()
@@ -11225,7 +11229,7 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
+    if super::kappa::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
     }
     if x_redo_par_run {
@@ -11335,7 +11339,8 @@ fn run_resolved_in_pool(
                                     search_spaces[q_idx].effective_space,
                                 )
                             });
-                            let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
+                            let mut kappa_subject_range_cache =
+                                BlastpKappaSubjectRangeCache::new(None);
 
                             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
                             // ```c
@@ -11519,7 +11524,7 @@ fn run_resolved_in_pool(
                         let mut kappa_gap_scratch = GapAlignScratch::new();
                         // See XSharedSubjectRanges.
                         let mut kappa_subject_range_cache =
-                            BlastpKappaSubjectRangeCache::x_with_shared(x_shared_ranges.clone());
+                            BlastpKappaSubjectRangeCache::new(x_shared_ranges.clone());
                         let mut redone_match = BlastCompoHeap::new(
                             args.traceback_hitlist_size(),
                             args.inclusion_ethresh,
@@ -11768,7 +11773,7 @@ fn run_resolved_in_pool(
         let x_block_seg_store =
             super::x_query_blocks::x_block_seg_store(blastp_parallel_pool, subjects);
         let mut kappa_subject_range_cache =
-            BlastpKappaSubjectRangeCache::x_with_shared(x_block_seg_store.clone());
+            BlastpKappaSubjectRangeCache::new(x_block_seg_store.clone());
 
         for q_idx in 0..query_ids.len() {
             let batch = kappa_query_batches[q_idx].clone();
@@ -11928,8 +11933,15 @@ fn run_resolved_in_pool(
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as
         // LOSAT_X_BPSEGWIN keeps it for the next window (`x_redo_par.rs` `x_redo`).
         if let Some(store) = &x_block_seg_store {
-            if super::x_redo_par::x_bp_seg_win().is_none_or(|min| store.x_len() >= min) {
+            let seg_win = super::kappa::x_bp_seg_win();
+            let emptied = seg_win.is_none_or(|min| store.x_len() >= min);
+            if emptied {
                 store.x_clear();
+            }
+            // The switch's own side here is a store kept for the next block (`=0` empties it after
+            // every block, as each block of the search before the store).
+            if seg_win.is_some() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", !emptied);
             }
         }
     }

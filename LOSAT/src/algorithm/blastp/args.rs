@@ -102,6 +102,13 @@ impl BlastpApp {
         }
     }
 
+    /// Whether the app's Seq-aligns come from traceback hit lists longer than `max_target_seqs`
+    /// that the formatter then cuts (`PruneSeqalign`): psiblast's larger lists, and rpsblast's
+    /// merged volumes. `# N hits found` of outfmt 7 counts before the cut.
+    pub fn prunes_after_traceback(self) -> bool {
+        matches!(self, BlastpApp::Psiblast | BlastpApp::Rpsblast)
+    }
+
     /// The name in LOSAT's rejections ("... is not supported by LOSAT's PSIBLAST").
     pub fn name(self) -> &'static str {
         match self {
@@ -261,6 +268,10 @@ pub enum BlastpLookupTableType {
 //     arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
 //     m_Args.push_back(arg);
 // ```
+/// BLASTP's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
+pub(crate) const BLASTP_TASK: TaskParser =
+    task_parser("BLASTP", &["blastp", "blastp-fast", "blastp-short"], &[]);
+
 // The values are read as NCBI's argument parser reads them (`value_parsers.rs`), with
 // NCBI's declared constraints only; the checks that NCBI makes after reading the
 // arguments are in `check_options`, in NCBI's order. The single-dash lexical translation
@@ -371,7 +382,7 @@ pub struct BlastpArgs {
     // ```
     // `blastp-short` (word size 2, PAM30 9/1, `BlastpTaskOptions::create`) runs the lookup table
     // of word size 2 (item SC3).
-    #[arg(long, default_value = "blastp", value_parser = task_parser(&["blastp", "blastp-fast", "blastp-short"], &[]))]
+    #[arg(long, default_value = "blastp", value_parser = BLASTP_TASK)]
     pub task: String,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]")]
@@ -1308,6 +1319,25 @@ impl BlastpArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:336-342 and
+    // blast_aux.cpp:662-673 (quoted at `TaskParser::check`): a task read in lower case, LOSAT's
+    // refusal for another program's NCBI task, NCBI's error for a name NCBI does not know.
+    #[test]
+    fn task_check_reads_the_name_as_ncbis_options_factory() {
+        let mut task = String::from("BLASTP-Fast");
+        BLASTP_TASK.check(&mut task).unwrap();
+        assert_eq!(task, "blastp-fast");
+        let message = |name: &str| {
+            let mut task = name.to_string();
+            BLASTP_TASK.check(&mut task).unwrap_err().to_string()
+        };
+        assert_eq!(
+            message("blastx"),
+            "the task blastx is not supported by LOSAT's BLASTP (use blastp, blastp-fast or blastp-short)"
+        );
+        assert_eq!(message("BlastQ"), "'blastq' is not a supported task");
+    }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171 (`s_TruncateSpaces`
     // with `eTrunc_Both`: `isspace` at both ends; `seqdb::db_argument_name`).

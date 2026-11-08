@@ -49,8 +49,8 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoAdjustMode, BlastCompoGappingParams,
 };
 use crate::report::{
-    write_blastp_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig,
-    OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
+    write_blastp_pairwise_report, write_blastp_pairwise_window, BlastpPairwiseQuery,
+    BlastpPairwiseReport, OutputConfig, OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
 };
 use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::search_space::SearchSpace;
@@ -2468,6 +2468,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         && args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats
         && !(args.psi_search.is_some()
             && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
+        && args.rps_search.is_none()
     {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
@@ -5035,9 +5036,6 @@ pub fn run(
             }
         },
     };
-    if archive.is_some() {
-        super::archive::check_titles(&subjects.records, "subject")?;
-    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -5463,10 +5461,16 @@ fn search_cli(
     let mut resolved = args.check_options(outputs.diagnostics)?;
     // rpsblast: NCBI's check of the database's frequency ratios comes between the options and
     // the database (`rps_hooks::check_freq_ratio_file`).
-    if let Some(rps) = resolved.rps_search.clone() {
-        rps_hooks::check_freq_ratio_file(&resolved, &rps, &settings, outputs.diagnostics)?;
+    if resolved.rps_search.is_some() {
+        rps_hooks::check_freq_ratio_file(&mut resolved, &settings, outputs.diagnostics)?;
     }
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
+    // rpsblast `-num_threads 0`: one thread for each volume of the database.
+    if let (Some(rps), Some(database)) = (resolved.rps_search.as_deref(), database.as_ref()) {
+        if rps.auto_threads {
+            resolved.num_threads = rps_hooks::volume_count(database);
+        }
+    }
     // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
     if resolved.app == BlastpApp::Psiblast && database.is_none() {
         psiblast_check_subject_letters(&subjects.records)?;
@@ -5564,12 +5568,10 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
-    // The refusal of a title the archive cannot write comes before its first byte.
-    if args.archive.is_some() {
-        super::archive::check_titles(&records, "query")?;
-    }
-    // So does the refusal of a title that psiblast's ASN.1 PSSM cannot write, and of a PSSM file
-    // that LOSAT cannot write as NCBI does (one of the report streams, a named pipe).
+    // The refusal of a title that psiblast's ASN.1 PSSM cannot write comes before the first
+    // byte, and so does that of a PSSM file that LOSAT cannot write as NCBI does (one of the
+    // report streams, a named pipe). (The titles of the archive are checked with the query
+    // batches, `search`.)
     // psiblast's rounds write the files of their PSSMs too (`PsiRoundPlan::file_request`).
     if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
         resolved
@@ -5673,13 +5675,17 @@ pub fn run_local(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTP_TASK.check(&mut args.task)?;
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
-    // cannot write, and a diagnostics stream that saves the messages.
+    // cannot write (the titles with the query batches, `search`), and a diagnostics stream that
+    // saves the messages.
     let archive_requested = outputs
         .formats
         .iter()
@@ -5687,8 +5693,6 @@ pub fn run_local(
     if archive_requested {
         args.archive = super::archive::handle_for(&args, true)?
             .map(|handle| outputs.with_archive_outfmt(handle));
-        super::archive::check_titles(query_records, "query")?;
-        super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
@@ -5791,6 +5795,9 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTP_TASK.check(&mut args.task)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -5828,9 +5835,6 @@ fn search_database(
     let mut resolved = resolve_for_formats(&args, outputs)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
-    if args.archive.is_some() {
-        super::archive::check_titles(query_records, "query")?;
-    }
     search(
         resolved,
         query_records,
@@ -6399,6 +6403,24 @@ fn search(
     // that stops at its first batch (`batches.starts` empty) gives NCBI's error.
     if !batches.starts.is_empty() {
         check_identity_compressed_lookup_of(&args)?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //     ...
+    //             if (fmt_args->ArchiveFormatRequested(args)) {
+    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
+    // ```
+    // The BLAST archive (outfmt 11) of each batch that NCBI completes holds its queries and,
+    // with `-subject`, every subject; the batch that stops the run (a reader error, `Empty
+    // CBlastQueryVector`, a batch of queries without letters) writes neither, and the error
+    // archive holds no sequence. So the refusal of a title the archive cannot write looks at
+    // the queries of the batches before the stop, and at the subjects when there is one; it
+    // comes before the first byte (the reports are written after the batches are read).
+    if args.archive.is_some() && batches.searched_done > 0 {
+        super::archive::check_titles(&searched_queries[..batches.searched_done], "query")?;
+        super::archive::check_titles(&subjects.records, "subject")?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
@@ -8848,7 +8870,8 @@ fn run_resolved_in_pool(
     let num_subjects = match database {
         None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
-        Some(database) => database.statistics_num_sequences() as usize,
+        Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
+            .unwrap_or(database.statistics_num_sequences() as usize),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
@@ -10435,6 +10458,9 @@ fn run_resolved_in_pool(
     // rpsblast: the RPS engine's whole search (`rps_hooks::rps_search`): the final hit lists,
     // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
+    // A database of several volumes: its merged lists are not sorted or cut below, and it prints
+    // no query warnings.
+    let mut rps_multi_volume = false;
     if let Some(rps) = args.rps_search.as_deref() {
         let run = rps_hooks::RpsSearchRun {
             contexts: &contexts,
@@ -10473,7 +10499,8 @@ fn run_resolved_in_pool(
                 (_, Err(other)) => other,
             }
         })?;
-        rps_gapped_k = Some(searched);
+        rps_gapped_k = Some(searched.gapped_k);
+        rps_multi_volume = searched.volumes > 1;
     } else if let Some(psi) = args.psi_search.as_deref() {
         pssm_hooks::pssm_prelim(
             psi,
@@ -10769,14 +10796,18 @@ fn run_resolved_in_pool(
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
-    for hit_list_opt in &mut preliminary_hit_lists {
-        if let Some(hit_list) = hit_list_opt.as_mut() {
+    // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order, which
+    // NCBI sorts nowhere after.)
+    if !rps_multi_volume {
+        for hit_list_opt in &mut preliminary_hit_lists {
+            if let Some(hit_list) = hit_list_opt.as_mut() {
+                hit_list.sort_by_evalue();
+            }
+        }
+        // The same sort of the compact lists.
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
             hit_list.sort_by_evalue();
         }
-    }
-    // The same sort of the compact lists.
-    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
-        hit_list.sort_by_evalue();
     }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
@@ -10816,7 +10847,8 @@ fn run_resolved_in_pool(
     // position-based redo) takes the place of both, and reads them as they are too.
     let ordinary_traceback = args.comp_based_stats.mode
         == BlastpCompositionMode::NoCompositionBasedStats
-        || args.psi_search.is_some();
+        || args.psi_search.is_some()
+        || args.rps_search.is_some();
     if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -12021,8 +12053,12 @@ fn run_resolved_in_pool(
                     hit_list.purge_empty_hsp_lists();
                 }
             }
-            hit_list.sort_by_evalue();
-            hit_list.prune_by_size(args.traceback_hitlist_size());
+            // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order
+            // and the formatter cuts them, `psiblast_hits_found` below.)
+            if !rps_multi_volume {
+                hit_list.sort_by_evalue();
+                hit_list.prune_by_size(args.traceback_hitlist_size());
+            }
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
@@ -12155,7 +12191,7 @@ fn run_resolved_in_pool(
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
-        (BlastpApp::Psiblast, Some(titles)) => {
+        (app, Some(titles)) if app.prunes_after_traceback() => {
             Some(titles.joined_cut(&hit_lists, args.max_target_seqs)?)
         }
         _ => None,
@@ -12190,7 +12226,7 @@ fn run_resolved_in_pool(
     // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
     // (`ListedTitles::prefetched_ranks`).
     let psiblast_prefetched: Option<Vec<Vec<usize>>> =
-        (args.app == BlastpApp::Psiblast && batches_prefetch).then(|| {
+        (args.app.prunes_after_traceback() && batches_prefetch).then(|| {
             hit_lists
                 .iter()
                 .map(|hit_list| {
@@ -12286,7 +12322,7 @@ fn run_resolved_in_pool(
             titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
         }
     }
-    let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
+    let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
         hit_lists
             .iter_mut()
             .enumerate()
@@ -12386,7 +12422,22 @@ fn run_resolved_in_pool(
     // (*hsp_list_out)->query_index = index;
     // --hit_list->hsplist_count;
     // ```
-    let mut pairwise_hits = if needs_pairwise_hits {
+    // rpsblast's outfmt 0 alone: the rows are made and written a window of queries at a time
+    // (`x_pairwise_par::query_windows`, as BLASTN's and TBLASTX's), not for the whole run
+    // first: the rendered rows of CDD's 165,000 HSPs held 150 MB at once.
+    let rps_streamed_rows = args.rps_search.is_some()
+        && matches!(format_plans, [BlastpReport::Text(OutputFormat::Pairwise)]);
+    // What the streamed rows do not do (hit records and an observer come only from the library
+    // API and the Web build, which refuse rpsblast; the parser refuses `-lcase_masking`; rounds
+    // are psiblast's): a future relaxation of those refusals must not bypass them silently.
+    debug_assert!(
+        !rps_streamed_rows
+            || (outputs.hits.is_none()
+                && outputs.observer.is_none()
+                && !args.lcase_masking
+                && reports.psi_round.is_none())
+    );
+    let mut pairwise_hits = if needs_pairwise_hits && !rps_streamed_rows {
         Some(build_pairwise_hits(
             collect_hits_and_methods_from_hit_lists(&hit_lists),
             &contexts,
@@ -12411,10 +12462,13 @@ fn run_resolved_in_pool(
                 .map(|searched| ranges.subject_placements.length(s_idx, searched));
         }
     }
-    for hit_list in hit_lists.iter_mut().flatten() {
-        for hsp_list in &mut hit_list.hsplist_array {
-            for hsp in &mut hsp_list.hsps {
-                shift_hsp_to_records(hsp, ranges);
+    // (The streamed rows are made from the searched coordinates, window by window.)
+    if !rps_streamed_rows {
+        for hit_list in hit_lists.iter_mut().flatten() {
+            for hsp_list in &mut hit_list.hsplist_array {
+                for hsp in &mut hsp_list.hsps {
+                    shift_hsp_to_records(hsp, ranges);
+                }
             }
         }
     }
@@ -12496,12 +12550,17 @@ fn run_resolved_in_pool(
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
-            let messages = crate::report::query_warnings::query_messages(
+            let mut messages = crate::report::query_warnings::query_messages(
                 record.seq(),
                 query_valid[q_idx],
                 reports.x_queries_before + q_idx < reports.identity_warned,
                 filtered_empty && !query_batch_skipped[q_idx],
             );
+            // rpsblast over several volumes: the merged results keep the errors of the volumes'
+            // results and no warning (`s_CombineSearchSets`, rpsblast_local.cpp:165).
+            if rps_multi_volume {
+                messages.clear();
+            }
             let mut lines = reports
                 .reader_warnings
                 .get(q_idx)
@@ -13344,6 +13403,91 @@ fn run_resolved_in_pool(
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
+                if rps_streamed_rows {
+                    // The shown subjects are those of the final lists (the rows' subjects).
+                    let shown: std::collections::BTreeSet<usize> = hit_lists
+                        .iter()
+                        .flatten()
+                        .flat_map(|hit_list| {
+                            hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
+                        })
+                        .flat_map(|hsp_list| &hsp_list.hsps)
+                        .map(|hsp| hsp.s_idx as usize)
+                        .collect();
+                    match listed_titles.as_ref() {
+                        Some(titles) => titles.check_shown_titles(
+                            database.expect("listed titles are a database's"),
+                            &shown,
+                        )?,
+                        None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
+                    }
+                    let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
+                    let estimates: Vec<usize> = (0..pairwise_queries.len())
+                        .map(|q_idx| {
+                            crate::report::x_pairwise_par::query_estimate_of(
+                                hit_lists
+                                    .get(q_idx)
+                                    .and_then(Option::as_ref)
+                                    .into_iter()
+                                    .flat_map(|hit_list| {
+                                        hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
+                                    })
+                                    .flat_map(|hsp_list| &hsp_list.hsps)
+                                    .map(|hsp| hsp.length),
+                            )
+                        })
+                        .collect();
+                    let mut windows = crate::report::x_pairwise_par::query_windows(
+                        &estimates,
+                        crate::report::x_pairwise_par::window_bytes(x_pool),
+                    );
+                    if windows.is_empty() {
+                        windows.push(0..0);
+                    }
+                    for window in windows {
+                        let end = window.end.min(hit_lists.len());
+                        let mut rows = build_pairwise_hits(
+                            collect_hits_and_methods_from_hit_lists(
+                                &hit_lists[window.start.min(end)..end],
+                            ),
+                            &contexts,
+                            subjects,
+                            args.scoring.matrix,
+                            true,
+                            query_records,
+                            shown_subjects,
+                            x_pool,
+                        )?;
+                        for hit in rows.iter_mut() {
+                            let s_idx = hit.hit.s_idx as usize;
+                            shift_to_records(&mut hit.hit, ranges);
+                            hit.subject_length = hit
+                                .subject_length
+                                .map(|searched| ranges.subject_placements.length(s_idx, searched));
+                        }
+                        let masked_rows =
+                            masked_query_rows(&rows, &query_frames, &ranges.query_input.placements);
+                        write_blastp_pairwise_window(
+                            masked_rows.as_deref().unwrap_or(&rows),
+                            window,
+                            &mut writer,
+                            &pairwise_config,
+                            &pairwise_queries,
+                            &query_titles,
+                            &subject_titles,
+                            listed_parsed,
+                            &pairwise_report,
+                            rps_gapped_k.as_deref(),
+                            pairwise_database.as_ref(),
+                            None,
+                            warnings.as_mut(),
+                            reports.x_prolog,
+                            reports.epilog,
+                            x_pool,
+                        )?;
+                    }
+                    return Ok(());
+                }
                 let pairwise_hits = pairwise_hits
                     .as_ref()
                     .expect("pairwise hits prepared for blastp outfmt 0");

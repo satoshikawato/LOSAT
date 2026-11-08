@@ -287,6 +287,22 @@ fn run_inner(
     output: &mut Option<BufWriter<Box<dyn Write>>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
 ) -> Result<()> {
+    // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+    // ```c
+    //     // Setup some debugging features from environment variables.
+    //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
+    //         SetDiagTrace(eDT_Enable, eDT_Enable);
+    //     }
+    //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+    // ```
+    // NCBI's application layer reads its environment and registry files before blastx's own
+    // code runs; LOSAT rejects the settings that change the output first, before any option or
+    // file of the run, as its other programs do in `main` (BLASTX's command line entry takes the
+    // arguments only). The registry's `BLASTDB` finds `-db`, and the data loaders decide whether
+    // the reader tries the first line of the query or the `-subject` file as a Seq-id
+    // (`FastaStream::seq_id_role`).
+    let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+        .map_err(anyhow::Error::msg)?;
     let id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>> =
         args.parse_deflines.then(Default::default);
     // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
@@ -405,21 +421,12 @@ fn run_inner(
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
     // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
     // F04 of line DI-8), and a list error leaves no `-out`, only the error archive that NCBI's
-    // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). NCBI's application layer
-    // has read its environment and registry files by then; LOSAT reads them for `-db` (the
-    // registry's `BLASTDB`), as its other programs with `-db`, and leaves `-subject`'s path as it
-    // was.
-    let db_settings = match args.database_name() {
-        Some(_) => Some(
-            crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                .map_err(anyhow::Error::msg)?,
-        ),
-        None => None,
-    };
-    let list = match &db_settings {
-        Some(settings) => args
+    // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). The registry's `BLASTDB`
+    // finds `-db` (`settings`, read at the start of the run).
+    let list = match args.database_name() {
+        Some(_) => args
             .db_filter
-            .resolve(settings, &mut stderr)
+            .resolve(&settings, &mut stderr)
             .map_err(early_archive_error)?,
         None => None,
     };
@@ -456,6 +463,7 @@ fn run_inner(
                 let mut stream = FastaStream::from_file(subject_file);
                 stream.parse_deflines = args.parse_deflines;
                 stream.id_scope = id_scope.clone();
+                stream.seq_id_role = settings.data_loaders.then_some("subject");
                 stream
             },
             true,
@@ -494,10 +502,6 @@ fn run_inner(
                 archive.is_some() || (shows_lower_case && !record.lowercase_masks.is_empty());
             record.cut_in_place(from, to_exclusive, keep_whole);
         }
-    }
-    // LOSAT's refusal of a title the archive cannot write, before its first byte.
-    if archive.is_some() {
-        archive::check_titles(&subjects, "subject")?;
     }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, x_t_read_fasta);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
@@ -613,10 +617,10 @@ fn run_inner(
     // ```
     // The database of `-db` opens after the arguments (the query and output files) and the
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
-    let database = match (args.database_name(), &db_settings) {
-        (Some(name), Some(settings)) => {
+    let database = match args.database_name() {
+        Some(name) => {
             let database =
-                BlastxDatabase::open_restricted(name, settings, list.as_ref(), &mut stderr)?
+                BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
                     .showing_gis(args.show_gis)
                     .in_id_scope(id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
@@ -630,7 +634,7 @@ fn run_inner(
             )?;
             Some(database)
         }
-        _ => None,
+        None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
     // ```c++
@@ -648,16 +652,11 @@ fn run_inner(
     // A custom tabular field list that shows a plural name of the taxonomy database asks
     // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
     // asks its database; a `-subject` search the search path of NCBI's databases (the
-    // environment and the registry, read here for it alone), as BLASTP's and BLASTN's.
+    // environment and the registry), as BLASTP's and BLASTN's.
     if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
         options.taxdb_found = match &database {
             Some(database) => database.taxdb_found(),
-            None => {
-                let settings =
-                    crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                        .map_err(anyhow::Error::msg)?;
-                crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?
-            }
+            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?,
         };
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -685,6 +684,7 @@ fn run_inner(
         parse_deflines: args.parse_deflines,
         id_scope: id_scope.clone(),
         strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
+        data_loaders: settings.data_loaders,
     };
     // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
     // an empty query), which the reads before the search take too.
@@ -822,22 +822,27 @@ fn run_inner(
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
     // is searched. (`batch_size` is read above, for the reads before the search.)
     let batch_size = batch_size?;
-    // LOSAT's refusal of a query title the archive cannot write comes before its first byte,
-    // though the query file is read batch by batch: the titles are checked by a read of the
-    // file before the search.
+    // LOSAT's refusal of a title the archive cannot write comes before its first byte, though
+    // the query file is read batch by batch: the query titles are checked by a read of the file
+    // before the search, and the `-subject` titles when NCBI writes the archive of a batch (the
+    // error archive of a run that no batch completes holds no sequence).
     if archive.is_some() {
         if !query_is_regular {
             archive::refuse_irregular_query()?;
         }
-        archive::prescan_query_titles(
+        let written = archive::prescan_query_titles(
             query_prescan
                 .as_ref()
                 .expect("the second handle of a regular query"),
             &query_settings,
             args.lcase_masking,
+            &options,
             batch_size,
             query_range.as_ref(),
         )?;
+        if written {
+            archive::check_titles(&subjects, "subject")?;
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // ```c++
@@ -1004,6 +1009,7 @@ fn run_inner(
                                 false,
                                 false,
                                 crate::report::tabular::PrintedIds::default(),
+                                false,
                                 false,
                             )
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
@@ -1282,6 +1288,7 @@ pub(super) fn reported_batch(
         asks.taxonomy,
         asks.words,
         asks.prefetched && !prefetch_off,
+        prefetch_off,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported
@@ -2761,7 +2768,7 @@ fn x_flow(
 pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
     crate::blastinput::report_counts::report_counts(
         outfmt,
-        args.max_target_seqs.map(|n| n as usize),
+        super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
     )

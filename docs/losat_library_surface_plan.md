@@ -415,7 +415,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 - ノートブックの流れ（進捗つきの `batches`、`polars` と `pandas` と `pyarrow` への受け渡し、`queries()`、`spans`、pickle）を `python/tests` と手元の script で確認した。
 - `python/tests`：5 program で、報告（outfmt 6、7、0、10、列指定）のバイトと `diagnostics` が `losat` と一致し、表の値が列と一致する。Ctrl-C、GIL、2 スレッド同時、process pool、pickle、Arrow の 3 consumer。
 - `LOSAT/tests/library_api.rs`：`qaccver`、`saccver`、`pident` の列と全 HSP で一致（§10.3 の 13 検索と `-parse_deflines`）。
-- `.github/workflows/python.yml`：`python/` と `LOSAT/src/api` の変更で走る。必須の check にはしていない。
+- `.github/workflows/python.yml`：`python/` と `LOSAT/src` の変更で走る（`pylosat/_options.pyi` は command line 全体の表から作るので、`api` 以外の引数の変更でも検査が要る。2026-11-08）。必須の check にはしていない。
 
 ### 12.4 残ること
 
@@ -511,7 +511,7 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | P-S1 | crate の外から安全に呼べる `pub fn` が範囲外を読まないようにする（`#[doc(hidden)]` は呼び出しを止めない）。可視性を狭めるのが先で、テストが呼ぶ物は検査つきの `pub` と検査なしの `pub(crate)` に分ける | すぐ |
 | P-CI1 | 公開面の差分検査を CI に（§14.1） | すぐ |
 | P-R1 | crate 名を `losat` に（LIB-3、§4.1） | P-S1 と P-CI1 の後 |
-| P-V1〜P-V5 | `#[doc(hidden)] pub` の top-level module を段ごとに `pub(crate)` にし、外の crate が名指す物は狭い隠した façade 1 つに集める（保守者の決定 2026-11-07「すべて推奨通り」、DECISIONS 13）。P-V1 = 外の利用者の無い `sequence`、`seqid`、`web_api`（ABI v1 の export は同じ） | P-S1 の後 |
+| P-V1〜P-V5 | `#[doc(hidden)] pub` の top-level module を段ごとに `pub(crate)` にし、外の crate が名指す物は狭い隠した façade 1 つに集める（保守者の決定 2026-11-07「すべて推奨通り」、DECISIONS 13）。P-V1 = 外の利用者の無い `sequence`、`seqid`、`web_api`（ABI v1 の export は同じ）。P-V2 = `tests/unit/**` を crate の中の試験へ。P-V3 = binary の本体（`main.rs`）を引数の無い関数 `main_entry`（定義は `cli/main_entry.rs`）へ移し、crate 直下で隠して再公開（`main.rs` は `LOSAT::main_entry()` を呼ぶだけで、隠した module を名指さない）。これは adapter 用の façade の外に残る隠した項目で、façade は adapter だけのもの（DECISIONS 13） | P-S1 の後 |
 
 ### 14.1 公開面の検査（P-CI1、PR `ci/lib-public-api`）
 

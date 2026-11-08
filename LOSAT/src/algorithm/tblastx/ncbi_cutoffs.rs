@@ -96,9 +96,9 @@ pub fn gap_trigger_raw_score(bit_trigger: f64, ungapped_params: &KarlinParams) -
 /// `BLAST_CalcEffLengths` and then referenced by cutoff and sum-stats logic.
 #[derive(Debug, Clone, Copy)]
 pub struct EffLengthsResult {
-    /// Length adjustment (Int4 in NCBI: query_info->contexts[ctx].length_adjustment)
+    /// Length adjustment (Int4 in NCBI: `query_info->contexts[ctx].length_adjustment`)
     pub length_adjustment: i64,
-    /// Effective search space (Int8 in NCBI: query_info->contexts[ctx].eff_searchsp)
+    /// Effective search space (Int8 in NCBI: `query_info->contexts[ctx].eff_searchsp`)
     pub eff_searchsp: i64,
 }
 

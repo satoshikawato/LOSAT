@@ -245,6 +245,19 @@ pub(crate) struct PsiRoundIo {
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 
+impl PsiRoundIo {
+    /// Whether the round makes the PSSM of the next round, or the last one that is saved
+    /// (`RoundOutcome::next`): it reads the letters of every subject of the round's Seq-aligns
+    /// before the formatter's cut, by its Seq-align id.
+    pub(crate) fn makes_next(&self) -> bool {
+        self.outcome
+            .lock()
+            .expect("the round's outcome")
+            .as_ref()
+            .is_some_and(|outcome| outcome.next.is_some())
+    }
+}
+
 /// The outcome of a round: whether it has alignments (`HasAlignments`), its inclusion set
 /// (`GetSeqIds`), and the PSSM made from its Seq-aligns where NCBI makes one (after `Advance`,
 /// `itr || save_last`), with NCBI's error of the PSSM engine, which comes after the round's

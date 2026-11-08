@@ -720,8 +720,8 @@ pub fn write_hsp_info<W: Write>(
     // NCBI: " Score = XXX bits (YYY),  Expect = Z.Ze-NN"
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
-    // psiblast's first round has blastp's methods.
-    if matches!(config.program.as_str(), "blastp" | "psiblast") {
+    // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
+    if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
         // ```c
         //             if (aln_vec_info->comp_adj_method == 1)
@@ -1427,6 +1427,9 @@ fn write_blastp_pairwise_intro<W: Write>(
     if program == "psiblast" {
         return write_psiblast_pairwise_intro(writer, version);
     }
+    if program == "rpsblast" {
+        return write_rpsblast_pairwise_intro(writer, version);
+    }
     writeln!(writer, "BLASTP {}", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -1469,6 +1472,53 @@ fn write_blastp_pairwise_intro<W: Write>(
         "composition-based statistics and other refinements\", Nucleic Acids"
     )?;
     writeln!(writer, "Res. 29:2994-3005.")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:386-405
+// ```c++
+//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
+//                                               m_Outfile);
+//     }
+//
+//     if (m_IsBl2Seq && !m_IsDbScan) {
+//         return;
+//     }
+//
+//     m_Outfile << NcbiEndl << NcbiEndl;
+//     ...
+//     else
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                                           m_Outfile);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426 (quoted below:
+// the references of compositional matrix adjustment and of composition-based statistics are
+// psiblast's, deltablast's and blastp's only)
+/// The prolog of rpsblast's pairwise report: the program line and the Gapped BLAST reference
+/// only.
+fn write_rpsblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+    writeln!(writer, "RPSBLAST {}", version)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
+    )?;
+    writeln!(
+        writer,
+        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
+    )?;
+    writeln!(
+        writer,
+        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
+    )?;
+    writeln!(
+        writer,
+        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
+    )?;
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -2141,7 +2191,9 @@ fn write_final_database_report<W: Write>(
 // ```
 /// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
 /// false for the query blocks after the first of blastp's block search, whose first block wrote
-/// it), each query's section, and the epilog when `epilog` is set.
+/// it), each query's section, and the epilog when `epilog` is set. `query_gapped_k` is
+/// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
+/// blastp and psiblast (the report's `gapped_karlin`).
 pub fn write_blastp_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -2151,6 +2203,49 @@ pub fn write_blastp_pairwise_report<W: Write>(
     subject_titles: &[Arc<[u8]>],
     parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     report: &BlastpPairwiseReport,
+    query_gapped_k: Option<&[f64]>,
+    database: Option<&PairwiseDatabase>,
+    probe: Option<&mut FormatProbe<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    prolog: bool,
+    epilog: bool,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> io::Result<()> {
+    write_blastp_pairwise_window(
+        hits,
+        0..queries.len(),
+        writer,
+        config,
+        queries,
+        query_titles,
+        subject_titles,
+        parsed_subjects,
+        report,
+        query_gapped_k,
+        database,
+        probe,
+        warnings,
+        prolog,
+        epilog,
+        x_pool,
+    )
+}
+
+/// The queries `query_range` of a BLASTP pairwise report, whose `hits` are those queries' (the
+/// rows of a caller that makes them a window of queries at a time, as BLASTN's and TBLASTX's
+/// do, `x_pairwise_par::query_windows`): the prolog with the report's first query, the epilog
+/// with its last.
+pub fn write_blastp_pairwise_window<W: Write>(
+    hits: &[PairwiseHit],
+    query_range: std::ops::Range<usize>,
+    writer: &mut W,
+    config: &PairwiseConfig,
+    queries: &[BlastpPairwiseQuery],
+    query_titles: &[Arc<[u8]>],
+    subject_titles: &[Arc<[u8]>],
+    parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    report: &BlastpPairwiseReport,
+    query_gapped_k: Option<&[f64]>,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
@@ -2161,7 +2256,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    if prolog {
+    if prolog && query_range.start == 0 {
         write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
         // The prolog ends with one blank line; each query's preamble starts with two
         // (blast_format.cpp:1491), after the query's warnings.
@@ -2183,9 +2278,12 @@ pub fn write_blastp_pairwise_report<W: Write>(
     // ```
     // Each hit keeps its index in `hits` (the final result order), which identifies it
     // to the probe.
-    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
-        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+        if let Some(bucket) = (hit.hit.q_idx as usize)
+            .checked_sub(query_range.start)
+            .and_then(|offset| hits_by_query.get_mut(offset))
+        {
             bucket.push((hsp_index, hit));
         }
     }
@@ -2198,10 +2296,11 @@ pub fn write_blastp_pairwise_report<W: Write>(
             queries,
             query_titles,
             report,
+            query_gapped_k,
             database,
             parsed_subjects,
         },
-        0,
+        query_range.start,
         &hits_by_query,
         subject_titles,
         probe,
@@ -2216,7 +2315,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     // ```
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog.
-    if !epilog {
+    if !(epilog && query_range.end == queries.len()) {
         return writer.flush();
     }
 
@@ -2236,9 +2335,25 @@ struct BlastpSections<'a> {
     queries: &'a [BlastpPairwiseQuery],
     query_titles: &'a [Arc<[u8]>],
     report: &'a BlastpPairwiseReport,
+    /// rpsblast's gapped K by query (`write_blastp_pairwise_report`).
+    query_gapped_k: Option<&'a [f64]>,
     database: Option<&'a PairwiseDatabase>,
     /// The subjects with parsed Seq-ids by subject (empty without them).
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+}
+
+impl BlastpSections<'_> {
+    /// The gapped Karlin block of query `q_idx`'s footer: the report's, with rpsblast's K of
+    /// the query (the first query of a batch has the K that the RPS traceback wrote).
+    fn gapped_karlin(&self, q_idx: usize) -> KarlinParams {
+        match self.query_gapped_k {
+            Some(gapped_k) => KarlinParams {
+                k: gapped_k[q_idx],
+                ..self.report.gapped_karlin
+            },
+            None => self.report.gapped_karlin,
+        }
+    }
 }
 
 impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
@@ -2304,7 +2419,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 write_blastp_query_footer_spacing(
                     writer,
                     query.ungapped_karlin,
-                    report.gapped_karlin,
+                    self.gapped_karlin(q_idx),
                     report.gumbel,
                     query.effective_search_space,
                     false,
@@ -2390,7 +2505,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            self.report.gapped_karlin,
+            self.gapped_karlin(q_idx),
             self.report.gumbel,
             query.effective_search_space,
             false,
@@ -6153,5 +6268,132 @@ mod tblastx_tests {
             b"Sequence with id Subject_1 no longer exists in database...alignment skipped\n\
               Sequence with id Subject_1 no longer exists in database...alignment skipped\n"
         );
+    }
+
+    /// A BLASTP pairwise report written a window of queries at a time (the rows of a caller that
+    /// makes them window by window) is the report written at once: the prolog with the first
+    /// window, the epilog with the last, the query indices global.
+    #[test]
+    fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
+        let karlin = KarlinParams {
+            lambda: 0.267,
+            k: 0.041,
+            h: 0.14,
+            ..KarlinParams::default()
+        };
+        let query = |length: usize| BlastpPairwiseQuery {
+            query_name: String::new(),
+            query_length: length,
+            ungapped_karlin: karlin,
+            effective_search_space: 1_000_000,
+            valid: true,
+            batch_skipped: false,
+        };
+        let queries = [query(30), query(40), query(50), query(60)];
+        let query_titles: Vec<Arc<[u8]>> = (0..4)
+            .map(|i| Arc::from(format!("Query_{i}").into_bytes().into_boxed_slice()))
+            .collect();
+        let subject_titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"gnl|CDD|1 profile"[..])];
+        let parsed: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>> = vec![None];
+        let hit = |q_idx: u32| {
+            let mut pairwise = PairwiseHit::from(Hit {
+                identity: 100.0,
+                length: 10,
+                mismatch: 0,
+                gapopen: 0,
+                q_start: 1,
+                q_end: 10,
+                s_start: 1,
+                s_end: 10,
+                e_value: 1e-5,
+                bit_score: 25.0,
+                num_ident: 10,
+                query_frame: 0,
+                query_length: 30,
+                q_idx,
+                s_idx: 0,
+                raw_score: 50,
+                sort_query_offset: 0,
+                sort_query_end: 0,
+                sort_subject_offset: 0,
+                sort_subject_end: 0,
+                has_sort_offsets: false,
+                gap_info: None,
+                num_positives: 10,
+            });
+            pairwise.query_seq = Some("MKVLAAGIVG".to_string());
+            pairwise.subject_seq = Some("MKVLAAGIVG".to_string());
+            pairwise.subject_length = Some(180);
+            pairwise.subject_title = Some("profile".to_string());
+            pairwise
+        };
+        // Queries 0 and 2 have no hit.
+        let hits = [hit(1), hit(3)];
+        let report = BlastpPairwiseReport {
+            version: "BLASTP 2.17.0+".to_string(),
+            database_name: "db".to_string(),
+            database_num_sequences: 1,
+            database_total_letters: 180,
+            matrix_name: "BLOSUM62".to_string(),
+            gap_open: 11,
+            gap_extend: 1,
+            word_threshold: 0.0,
+            window_size: 40,
+            gapped_karlin: karlin,
+            gumbel: None,
+            num_descriptions: 500,
+            num_alignments: 250,
+        };
+        let config = PairwiseConfig {
+            line_length: 60,
+            show_gi: false,
+            show_frame: false,
+            program: "rpsblast".to_string(),
+            protein_matrix: ScoringMatrix::Blosum62,
+        };
+        let gapped_k = [0.041, 0.047, 0.041, 0.041];
+        let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {
+            write_blastp_pairwise_window(
+                rows,
+                range,
+                out,
+                &config,
+                &queries,
+                &query_titles,
+                &subject_titles,
+                &parsed,
+                &report,
+                Some(&gapped_k),
+                None,
+                None,
+                None,
+                true,
+                true,
+                None,
+            )
+            .unwrap();
+        };
+        let mut at_once = Vec::new();
+        write(0..4, &hits, &mut at_once);
+        assert!(String::from_utf8_lossy(&at_once).contains("Query_3"));
+        for windows in [
+            vec![0..1, 1..4],
+            vec![0..2, 2..3, 3..4],
+            vec![0..1, 1..2, 2..3, 3..4],
+        ] {
+            let mut windowed = Vec::new();
+            for window in windows {
+                let rows: Vec<PairwiseHit> = hits
+                    .iter()
+                    .filter(|hit| window.contains(&(hit.hit.q_idx as usize)))
+                    .cloned()
+                    .collect();
+                write(window, &rows, &mut windowed);
+            }
+            assert_eq!(
+                String::from_utf8_lossy(&windowed),
+                String::from_utf8_lossy(&at_once)
+            );
+        }
     }
 }

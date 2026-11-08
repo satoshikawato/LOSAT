@@ -47,8 +47,8 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   in Wasm), as NCBI's C code does, so on one machine both get the same values. No build option
   changes which function is called: glibc picks its variant (for example `__log_fma` on an
   FMA-capable CPU) when it is loaded, from the CPU, not from LOSAT's target CPU. Do not
-  replace these calls by another implementation (the `libm` crate in `LOSAT/Cargo.toml` is not
-  called; the release binary holds none of its functions).
+  replace these calls by another implementation (LOSAT does not depend on the `libm` crate, and
+  `LOSAT/tests/check_fp_contract.py` rejects a call into it, `libm::<fn>`).
 - **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
   (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the
   baseline CPU of the target; the AVX2 kernels are chosen at run time
@@ -244,6 +244,25 @@ LOSAT_X_NEWTONEXACT_PROF
   for diagnostics.
 - `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` diagnostic-only sequential TBLASTX
   scan-interior chunking; this does not enable parallel scan work.
+- `LOSAT_TBLASTX_TEST_CHUNK_SIZE=<n>` (debug builds only, `cfg(debug_assertions)`) cuts TBLASTX
+  subject frames at `n` residues (at least the chunk overlap + 3) in place of NCBI's
+  `MAX_DBSEQ_LEN` (5,000,000), so that tests reach chunk boundaries with small inputs; the search
+  is then not NCBI's. `LOSAT_TBLASTX_TEST_SCAN_CHUNK_SIZE=<n>` (debug builds only) sets the size of
+  the scan pieces of `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS` (at least 1). A release build reads
+  neither (`tblastx/blast_engine/run_impl.rs`).
+- `LOSAT_WASI_THREAD_CAP=<n>` (every build) makes a `-num_threads` above `n` an error before the
+  search, as a host that runs at most `n` threads would fail (`utils/threading.rs`,
+  `validate_threads`; `LOSAT/tests/README.md`, "Threading contract gates"). A value that is not a
+  positive integer is an error.
+- `LOSAT_BLASTX_WORKER_LOG=<file>` (cargo feature `blastx-worker-probe` only) the file that the
+  probe appends its lines to (BLASTX's workers and every program's search pool); without it a run
+  with `-num_threads` above 1 panics.
+- `BLEMIR_DEBUG=1` BLASTN lookup-table sizes and engine debug lines on stderr (any value turns it
+  on; `blastn/lookup.rs`, `blastn/blast_engine/run.rs`). Like `LOSAT_DEBUG_BLASTN`, it turns off the
+  streamed reports of BLASTN (`x_debug_output`); the report bytes do not change.
+  `BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end"` adds a `Focusing on window` line under
+  `BLEMIR_DEBUG` and filters no line; set on its own, it turns off some faster BLASTN paths
+  (`LOSAT_X_QGROUPPAR`, `LOSAT_X_DIAGLV`) without changing the report bytes.
 
 ## Performance switches (on by default)
 
@@ -1587,7 +1606,10 @@ Rebuilding less:
   or any other value gives 16 (one scratch of the largest hit lists measured: 11.4 MiB, Sakai x EDL933 blastn),
   without a message. The output does not depend on it. Sakai x EDL933 blastn at 4 threads (above), per-pair against
   16: 8 x1.009 (6 of 8 pairs slower; the scratches of 9.6-11.4 MiB are mapped again at every sort), 0 x1.009-1.027,
-  for 10 MiB less max RSS (median 251 against 261 MiB); elsewhere no change in memory.
+  for 10 MiB less max RSS (median 251 against 261 MiB); elsewhere no change in memory. The idle scratches are freed
+  when a query batch's preliminary stage ends (`x_clear_idle` next to the lookup drop, `run.rs`), so the bound holds
+  only while preliminary stages run; the first large sort of the next batch maps one again. Two searches of one process
+  at once (pylosat threads) share the pool: one search's clear frees the other's idle scratch (time only).
 - `LOSAT_X_BNTBRANGE=1` (BLASTN `-db`, every task, memory and time; in the strict set from the pull request that added
   it (perf/bn-tb-range, evidence at the end of this entry): on unless it is `0`)
   the traceback of a database search (`blastn/blast_engine/database.rs` `traceback_listed`) decodes a sequence of
@@ -4334,8 +4356,8 @@ Scheduling (each value computed by one thread with the original function; order 
   the look-ahead helpers or once per query without them) and purges its list; the purged lists are concatenated in query
   order and sorted by score as before (rayon's stable `par_sort_by` on the search pool). The kept HSPs of the traceback
   are the queries' hit lists one after another, so each query's slice runs the traceback loop (`x_trace_list`, no
-  helpers and no speculative batches in a task), the passes up to the second purge (`x_post_purge`) and the score sort,
-  final tree and e-values (`x_final_list`); the final lists are concatenated in query order and sorted stably by score.
+  helpers and no speculative batches in a task), the passes up to the second purge (`traceback_post_purge`) and the score sort,
+  final tree and e-values (`traceback_final_list`); the final lists are concatenated in query order and sorted stably by score.
   The queries are handed out from an atomic counter, the query with the most HSPs first (ungapped hits per query before
   the preliminary loop, kept HSPs per query before the traceback), each thread with its own tree and alignment scratch.
   Why exact: the tree answers per context, the purges sort by context first and compare within a context (both the

@@ -35,7 +35,11 @@
   as a known difference; on 2026-11-08 line DBID pfwarn wrote NCBI's `Error pre-fetching sequence
   data` where a batch's prefetch fails at a sequence that no report reads, which lines DBID P3 and
   pfbatch refused, and took the strand of BLASTN's ungapped Seq-align of a sequence from its first
-  HSP, which line DBID pfbatch listed as a known difference)
+  HSP, which line DBID pfbatch listed as a known difference, and line DBID weakbatch refused a
+  weak match with another sequence of the database only in a batch whose prefetch
+  `PRE_FETCH_SEQS_LIMIT` turns off, which line DBID N2c listed as a known difference, and in psiblast
+  checked the sequences that each round's PSSM reads, and refused following hits that its PSSM
+  joins, where LOSAT wrote other later rounds than NCBI)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -281,10 +285,13 @@ Errors that makeblastdb does not detect, or detects elsewhere:
   opened: makeblastdb does not test its streams and ends with exit status 0 and a damaged
   or missing database. LOSAT removes the files of the build and ends with
   `Error: <path>: <system error>` and exit status 255.
-- An output directory that exists but is not writable: makeblastdb stops before its log;
-  LOSAT stops when it creates the first file, after the first lines of the log.
-- `-max_file_sz` that is no size or is 4 GiB or more: LOSAT checks it before it removes an
-  existing database or writes the log; makeblastdb after. The exit status is the same.
+- On Windows, an output directory that exists but is not writable: makeblastdb stops before
+  its log (it reads the directory's access rights); LOSAT stops when it creates the first
+  file, after the first lines of the log.
+- `-max_file_sz` that is no size or is 4 GiB or more: LOSAT checks it before it tests the
+  output directory, removes an existing database or writes the log; makeblastdb after. The
+  exit status is the same, except with an output directory makeblastdb refuses: makeblastdb
+  ends with that refusal (exit status 255).
 - Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without
   `-parse_seqids` or with `-taxid`) end with exit status 2 and the text of LOSAT's option
   parser, as in every LOSAT subcommand; makeblastdb uses 1.
@@ -614,12 +621,13 @@ a result that LOSAT does not reproduce.
 | The same record in another volume or database of an alias, or of `-db "a b"`, with other tax ids, which the lookup gives first or which also holds the Seq-align id. In the formats that show a title made from the tax ids (outfmt 0 for an empty title whose tax id the taxonomy database names or a protein title ending in `]` where a definition line has no title; the tabular formats where a printed id is the first word of the title that replaces an `lcl|Subject_N` id, for a nucleotide or a protein title ending in `]`), and in every format where the taxonomy database's texts depend on the copy: texts of opening it where only one copy has a tax id, the offset error of a tax id that a copy holds (also for the same tax ids in another volume) | 13 to 16 and the tabular `staxid`, `staxids` and name fields; for such a title the formats named; for the texts 0, 5, 6, 7, 10, 13 to 17, 20, and 8, 9, 12 with `PRE_FETCH_SEQS_LIMIT=2147483647` | Shows for both the copy that the lookup gives first: its tax ids and their names, the title made from them, and the taxonomy database's texts of the lookups that the volume of that copy makes (the offset error of `taxdb.btd` once for that volume); the other formats write the same bytes | 2 |
 | A Seq-align id whose lookup fails (an LMDB file without the accession table; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0, 5, 6, 7, 10, 13 to 17, 20 | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255) | 3 |
 | Following hits of a query whose Seq-align ids `Match` but that are not copies of one record: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj` | 0, 5, 13 to 16; tabular `qcovs` and `qcovus` | Shows them as one hit; writes the coverage of both on the first row and `N/A` on the other | 2 |
+| In `psiblast`, the same in the hit list before the cut where the run makes a PSSM (`-out_pssm`, `-out_ascii_pssm`, each round that makes the next round's PSSM), the later one with an alignment below `-inclusion_ethresh` | every format | Puts their alignments in one row of the PSSM's multiple alignment, whose rows it counts by the hit ids (`x_ExtractAlignmentData`), so the PSSM and the later rounds differ | 2 |
 | In `psiblast`, such hits that its cut of a longer list to `-max_target_seqs` counts (copies of one record count as one) | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
 | In `psiblast`, a sequence of its longer list beyond `-max_target_seqs`, which no report shows: one whose Seq-align id's lookup throws on the id (`gnl|BL_ORD_ID|0` stored with a text tag) where the report reads the sequences it shows or the run writes a PSSM; one for which the prefetch can read another sequence whose definition lines do not hold the id (`pdb|1abc|A` for `pdb|1ABC|A` in two databases of an alias; line DBID P3), or, where the taxonomy database's texts can differ between what NCBI's prefetch can read for it: another sequence that the lookup finds first with an id that compares equal, another sequence that also holds the id (as the blobs read before in the run decide), or the same record in another volume (an id found nowhere is not read, as by NCBI; a subject whose definition line the formatters do not find is read as itself) | 0, 6, 7, 10, 20 | For the failed lookup its prefetch writes "Error pre-fetching sequence data" and leaves the shown sequences it has not loaded yet to the formatter, which reads them one by one (its scope can match an id of a sequence read before weakly, as with `PRE_FETCH_SEQS_LIMIT`), and its PSSM drops that sequence's letters ("Failed to retrieve sequence"); otherwise it stops (exit 2, `oid headers do not contain target gi/seq_id`) or looks up the other sequence's tax ids | 2, 3 |
 | Where NCBI's prefetch reads a reported sequence by its Seq-align id and no report reads it (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, at which the prefetch reads every reported sequence also for them; a tabular field list that reads nothing of the sequence, below; psiblast's sequences beyond `-max_target_seqs`), in a batch whose prefetch is on (a positive `PRE_FETCH_SEQS_LIMIT` turns off the prefetch of a batch whose Seq-aligns outnumber it; each batch counts its own): another sequence that the prefetch can read for it whose definition lines do not hold the id (`pdb|1ABC|A` and `pdb|1abc|A` in two databases of an alias); where the taxonomy database's texts can differ between what the prefetch can read, as in psiblast's row above; a Seq-align id whose lookup fails on a file of the database (an LMDB page that does not read: NCBI's prefetch rethrows the `CSeqDBException`); and a Seq-align id whose lookup throws on the id in a batch whose other reported sequences' loads make the taxonomy database write a text (its texts of opening, the offset error of a tax id). Without a taxonomy database on the search path too, but for the texts | 8, 9, 12; 6, 7, 10, 20 without a field that reads the sequence | Stops (exit 2, `oid headers do not contain target gi/seq_id`, or `BLAST Database error`); looks up the other sequence's tax ids; the prefetch loads the batch's sequences in the order of its Seq-id handles (the ids its mapper packs, such as GIs and accessions, by their packed value, then the others by the address of each id's record, which LOSAT does not model) and ends at the failed lookup with "Error pre-fetching sequence data" | 2, 3 |
 | A Seq-align id that is the id of a query read with `-parse_deflines` | every format | Shows the query's title and letters for it | 2 |
 | A Seq-align id by which NCBI's scope finds a query read with `-parse_deflines` as a weak match (`x_GetSeqMatch`): `sp||NAME` for `sp|P00001.1|NAME` and the other way, `gb|X.1|` for `gb|X|`, `pir||ABCD` for `pir|ABCD|` | every format | Shows the query's title and letters for it (not `gb|X|` for `gb|X.1|`, nor `pir|ABCD|` for `pir||ABCD`) | 2 |
-| With `PRE_FETCH_SEQS_LIMIT` an integer other than 2147483647: a Seq-align id that an id of another sequence matches weakly, as in the row above, in any letter case and across the alternatives (`tpg|X.1|NAME` and `prf||NAME`). In version 4 where the lookup of the Seq-align id or of its name alone finds such a sequence; in version 5 an accession without a version where the lookup finds a version of it, and any Seq-align id with a name or of `pir` or `prf` (version 5 keys a name only in its own letter case and only without an accession, and a `pir` or `prf` id by its FASTA text) | 0, 5, 6, 7, 10, 13 to 17, 20 | With 0 or a value below the batch's number of Seq-aligns it reads the reported sequences one by one, and where it has read that other sequence first, it writes that sequence's names (in BLASTP also its identities) | 2 |
+| In a query batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off (0 or below, or a value below the batch's number of Seq-aligns): a Seq-align id that an id of another sequence matches weakly, as in the row above, in any letter case and across the alternatives (`tpg|X.1|NAME` and `prf||NAME`). In version 4 where the lookup of the Seq-align id or of its name alone finds such a sequence; in version 5 an accession without a version where the lookup finds a version of it, and any Seq-align id with a name or of `pir` or `prf` (version 5 keys a name only in its own letter case and only without an accession, and a `pir` or `prf` id by its FASTA text) | 0, 5, 6, 7, 10, 13 to 17, 20 | It reads the batch's reported sequences one by one (the prefetch of a batch loads each by its own id), and where it has read that other sequence first, it writes that sequence's names (in BLASTP also its identities; psiblast's PSSM also reads its letters) | 2 |
 | A stored title or Seq-id with a byte outside ' ' to '~' (makeblastdb stores `#` for such a byte) | every format | Prints `#` and an error message each time it reads the line, exit 0 | 2 |
 | A definition line without a Seq-id (makeblastdb writes none) | every format | Not compared | |
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
@@ -645,9 +653,11 @@ sequence's first HSP; in TBLASTX the first HSP of the sequence's alignment), LOS
 `Warning: [<program>] Error pre-fetching sequence data` once for the batch, after the taxonomy
 database's texts of its loads and before the batch's query warnings, and the rows. Its `qcovs` and `qcovus` count following hits whose
 Seq-align ids `Match` as one (the row of such hits). psiblast with a PSSM file (`-out_pssm`,
-`-out_ascii_pssm`) reads the letters of each aligned sequence by its Seq-align id for the PSSM, so such
-a run is refused as the lists that read the sequence are, also for the sequences of its longer list
-beyond `-max_target_seqs`.
+`-out_ascii_pssm`), and each of its rounds that makes the PSSM of the next round
+(`-num_iterations` other than 1), reads the letters of each aligned sequence by its Seq-align id for
+the PSSM, so such a run is refused as the lists that read the sequence are, also for the sequences of
+its longer list beyond `-max_target_seqs`: those with an alignment below `-inclusion_ethresh`, the
+only ones the PSSM reads (in a round whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off, one by one).
 
 A nucleotide title of punctuation is not refused: it stops at the end of the string, in outfmt 0 and
 in the tabular first word of an `lcl|Subject_N` id (approved exception 2 of
@@ -668,11 +678,10 @@ Known differences that remain:
     outfmt 8, 9 and 12 with `PRE_FETCH_SEQS_LIMIT=2147483647` (and in psiblast's list beyond
     `-max_target_seqs`) also where the prefetch reads the subject itself, when that sequence's
     definition lines do not hold the id.
-  - With `PRE_FETCH_SEQS_LIMIT`, a Seq-align id that an id of another sequence matches weakly is
-    refused also where NCBI writes the subject's own report: where the value is not below the
-    batch's number of Seq-aligns (NCBI prefetches; LOSAT does not count them), where that sequence
-    is not reported or not read first, and where that id is in another definition line than the one
-    NCBI reads that sequence by. In version 5 a Seq-align id with a name, or of `pir` or `prf`, is
+  - In a batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off, a Seq-align id that an id of another
+    sequence matches weakly is refused also where NCBI writes the subject's own report: where that
+    sequence is not reported or not read first, and where that id is in another definition line
+    than the one NCBI reads that sequence by. In version 5 a Seq-align id with a name, or of `pir` or `prf`, is
     refused whatever the database holds.
   - The weak matches ignore the release of an id (`sp` and `tr` ids carry `reviewed` and
     `unreviewed`; NCBI matches a name only within one release), in both refusals of a weak match.

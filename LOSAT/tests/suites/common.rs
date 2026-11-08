@@ -46,6 +46,8 @@ mod outfmt11_blastx;
 mod outfmt11_tblastn;
 #[path = "../outfmt11_tblastx.rs"]
 mod outfmt11_tblastx;
+#[path = "../outfmt11_titles.rs"]
+mod outfmt11_titles;
 #[path = "../outfmt13_14_files.rs"]
 mod outfmt13_14_files;
 #[path = "../outfmt16_blastn.rs"]
@@ -80,6 +82,8 @@ mod redo_contain_idx;
 mod report_counts_cli;
 #[path = "../search_environment.rs"]
 mod search_environment;
+#[path = "../seq_id_first_line.rs"]
+mod seq_id_first_line;
 #[path = "../seqalign_samples.rs"]
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]

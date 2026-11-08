@@ -19,3 +19,6 @@ pub(crate) mod masks;
 pub(crate) mod tabular;
 pub(crate) mod translated_chunks;
 pub(crate) mod x_db_stream;
+
+#[cfg(test)]
+mod helpers_tests;

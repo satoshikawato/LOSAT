@@ -108,7 +108,11 @@ sequence data` where it fails): `ntag_t5.*` from `nordtag.fna`, `nlook_t4.*` (ve
 tests/seqdb/taxdb/offset_last_past_end; `pfw_weak_v5.*` from `pfw_weak.faa` (`sp||NAMEY`, `sp|P00042.1|NAMEY`, which
 the query `pfw_q6.faa` matches exactly, `gb|FFF00099.1|` and `gnl|BL_ORD_ID|0` with a text tag, whose hit psiblast ranks
 last); and `pfw_bad/ntag_t5.*`, a copy of `ntag_t5` whose accession table's leaf page (page 6 of the `.ndb`) has its
-flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these.
+flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these. Line DBID
+weakbatch (psiblast's rounds read the sequences before the cut for the next PSSM): `wkb_e3_v5.*` from `wkb_e3.faa`
+(`gb|FFF00043.1|`, `gb|ZZZ00001.1|`, then `gb|FFF00043|`, which the lookup finds as the first) and `wkb_p1_v5.*` from
+`wkb_p1.faa` (the same with `gb|FFF00043|` a weak hit above -inclusion_ethresh and `gb|WWW00001.1|` before it), for the
+query `wkb_qy.faa`. `--weakbatch-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -232,6 +236,14 @@ def build_pfwarn(args: argparse.Namespace) -> None:
         (bad / path.name).write_bytes(bytes(data))
 
 
+def build_weakbatch(args: argparse.Namespace) -> None:
+    for name, fasta in (("wkb_e3_v5", "wkb_e3.faa"), ("wkb_p1_v5", "wkb_p1.faa")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", "prot", "-parse_seqids",
+             "-blastdb_version", "5", "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -268,6 +280,7 @@ def main() -> int:
     ap.add_argument("--tabfields-only", action="store_true", help="build only the database of line DBID tabfields")
     ap.add_argument("--pfbatch-only", action="store_true", help="build only the database of line DBID pfbatch")
     ap.add_argument("--pfwarn-only", action="store_true", help="build only the databases of line DBID pfwarn")
+    ap.add_argument("--weakbatch-only", action="store_true", help="build only the databases of line DBID weakbatch")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -292,6 +305,9 @@ def main() -> int:
         return 0
     if args.pfwarn_only:
         build_pfwarn(args)
+        return 0
+    if args.weakbatch_only:
+        build_weakbatch(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -410,6 +426,7 @@ def main() -> int:
     build_tabfields(args)
     build_pfbatch(args)
     build_pfwarn(args)
+    build_weakbatch(args)
     return 0
 
 

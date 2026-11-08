@@ -124,6 +124,20 @@ authoritative, current guidance for agent behavior in LOSAT.
 8. Correct timing, order, and context.
    - Call algorithms at the exact same timing and order as NCBI.
    - Input/output data must match NCBI exactly.
+   - Frozen outputs are never rewritten. The comparisons skip or replace only
+     what their tools name: the CL tag of SAM's @PG line (OWNER_DECISIONS 7,
+     `db_search_fixtures.strip_sam_cl`), the database lines of the approved
+     TBLASTX `-db_gencode` rows (`check_losat.py` `normalize_database_lines`),
+     the run directory and makeblastdb's time and path lines of the drop-in
+     corpus (`dropin_corpus.py`), the `-out` and binary paths in captured stderr
+     (`capture_outputs.py`), and one checkout-path prefix. The TBLASTN Stage G
+     cases name inputs under the developer machine's checkout
+     `/mnt/c/Users/genom/GitHub/LOSAT` (Owner 2026-11-05: replace the prefix
+     when comparing): they run with a relative run root of the same length
+     (outfmt 0 wraps the path at 68 columns), and the run root in their output
+     and stderr is replaced by that prefix before hashing
+     (`LOSAT/tests/frozen_paths.py`). That is the one replacement of a
+     checkout-path prefix.
 
 9. Algorithmic fidelity over aesthetics.
    - Do not refactor for readability if it changes logic.
@@ -374,8 +388,9 @@ cd LOSAT && cargo fmt
   Do not add integration-test files under `LOSAT/tests/` for unit tests (an integration test sees
   only `pub` items, and each file adds to its suite's build) and do not make private items `pub`
   for a test. Cases that need the object manager, sequences fetched by id (GenBank, or a BLAST
-  database as a data loader), or a program or option LOSAT refuses (RPS, PHI, ...) are `n-a`;
-  whole-search cases (bl2seq) become fixture rows, not unit tests.
+  database as a data loader), or a program LOSAT lacks or an option it refuses (deltablast,
+  rpstblastn, psiblast `-phi_pattern`, ...) are `n-a`; whole-search cases (bl2seq) become
+  fixture rows, not unit tests.
 - A new integration-test file `LOSAT/tests/<file>.rs` goes into its suite: its program's (`blastn`,
   `blastp`, `blastx`, `tblastn`, `tblastx`) or `common` (the command line, the output formats and
   shared parts): two lines in `LOSAT/tests/suites/<suite>.rs`; run it as
@@ -411,8 +426,9 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 ├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
 │   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]` or `pub(crate)`
-│   ├── main.rs            # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, makeblastdb, blastdbcmd
+│   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
+│   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd
 │   ├── common.rs          # Shared hit type, gap edit operations and the older output writers
 │   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
@@ -432,8 +448,8 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   └── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 └── tests/
     ├── suites/            # Six test targets (five programs and common); each includes its files by `#[path]`
-    ├── unit/              # Unit tests, in the `unit_tests` target
-    ├── *.rs               # Test files of the suites, and three targets of their own: `blastn_report_stream_api`, `unit_tests`, `thread_memory` (`suite_layout.rs` checks)
+    ├── unit/              # Data only: `.tsv` files read by in-crate tests, NCBI reference outputs (`helpers/`)
+    ├── *.rs               # Test files of the suites, and two targets of their own: `blastn_report_stream_api`, `thread_memory` (`suite_layout.rs` checks)
     ├── fixtures/ db_search/ blastdbcmd/ seqdb/ fasta/ ...   # Inputs and frozen NCBI outputs
     ├── *.py               # Gate scripts (fast regressions, platform checks, switch reach)
     └── *.sh               # Older comparison scripts (run_comparison.sh, run_all_tests.sh)
@@ -489,7 +505,7 @@ remains subject to all the requirements above.
 
 ## Entry Points
 
-- CLI: `LOSAT/src/main.rs`
+- CLI: `LOSAT/src/cli/main_entry.rs` (`main_entry`, which `LOSAT/src/main.rs` calls)
 - TBLASTX engine: `LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs`
 - BLASTN engine: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`
 - BLASTP engine: `LOSAT/src/algorithm/blastp/blast_engine.rs`

@@ -79,7 +79,7 @@ fn both_is_the_search_without_the_option_and_the_strands_add_up() {
             let both = run(query, subject, &[&base[..], &["-strand", "both"]].concat());
             assert_eq!(none.stdout, both.stdout, "{query} {task}");
             let none = lines(&none);
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let one_strand = |strand: &str| {
                     lines(&run(
                         query,

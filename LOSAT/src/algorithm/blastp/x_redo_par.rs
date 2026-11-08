@@ -36,7 +36,8 @@
 //!    then each match runs `postprocess_preliminary_hits` with the arguments of the one-thread loop,
 //!    with per-worker scratch (composition workspace, gapped-alignment scratch, and the
 //!    subject-range SEG cache backed by one shared store for the search; with `LOSAT_X_BPSEGWIN`
-//!    the store is emptied after a window once it holds 4,096 entries or more, `x_bp_seg_win`);
+//!    the store is emptied after a window once it holds 4,096 entries or more,
+//!    `kappa.rs` `x_bp_seg_win`);
 //! 5. the replay, per match in order: the early termination test (`BlastCompo_EarlyTermination`)
 //!    on the heaps of the query's batch; then the match's error, if it has one (the first error of
 //!    a match that the test does not end is the one the one-thread loop reports); then
@@ -175,28 +176,6 @@ pub(crate) fn x_bp_redo_par() -> bool {
 pub(crate) fn x_bp_redo_lpt() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOLPT"))
-}
-
-/// EXPERIMENT (LOSAT_X_BPSEGWIN): the built-in number of entries (about 320 bytes each) from
-/// which the store is emptied after a window.
-const X_SEG_WIN_ENTRIES: usize = 4_096;
-
-// No NCBI counterpart: reads the LOSAT_X_BPSEGWIN switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPSEGWIN): the number of entries from which the search's store of
-/// SEG-masked subject ranges (`XSharedSubjectRanges`) is emptied after a window, or `None` (off).
-/// A strict-set value switch: the integer given, 2 or more, else 4,096; `None` for `0`. Where the
-/// redo runs in windows, a store that holds that many entries once a window is computed is
-/// emptied, so it holds about the ranges of one window, not those of the whole search; a smaller
-/// store is kept for the next windows (masking its ranges again costs more time than it saves
-/// memory: bp_wssv at 8 threads, 86 entries). A later window that reaches a range again masks it
-/// again: an entry is a function of its key (the subject, the range and the SEG parameters), so
-/// it gets the same bytes and bias flag.
-pub(crate) fn x_bp_seg_win() -> Option<usize> {
-    static MIN: OnceLock<Option<usize>> = OnceLock::new();
-    *MIN.get_or_init(|| {
-        crate::utils::xswitch::value("LOSAT_X_BPSEGWIN", 2..=usize::MAX, X_SEG_WIN_ENTRIES)
-    })
 }
 
 /// Jobs per thread that a window holds at most, unless `LOSAT_X_BPREDOPARWINDOW` gives another
@@ -833,7 +812,7 @@ where
     };
     let new_scratch = || {
         XScratch::new(
-            BlastpKappaSubjectRangeCache::x_with_shared(Some(shared.clone())),
+            BlastpKappaSubjectRangeCache::new(Some(shared.clone())),
             search.matrix,
         )
     };
@@ -1179,8 +1158,13 @@ where
     // reported here, before any match, as there.
     (search.build_redo_align_params)(0)?;
     // One store of masked subject ranges for the search, as in the query-parallel redo
-    // (`XSharedSubjectRanges`).
-    let shared = Arc::new(XSharedSubjectRanges::new());
+    // (`XSharedSubjectRanges`); in a block search of the subjects encoded for all blocks the store
+    // of all blocks (`x_query_blocks::x_block_seg_store`): an entry depends on its key only (the
+    // subject's index in that encoding, the range), the same in every block.
+    let block_store = super::x_query_blocks::x_block_seg_store(search.pool, search.subjects);
+    let shared = block_store
+        .clone()
+        .unwrap_or_else(|| Arc::new(XSharedSubjectRanges::new()));
     let threads = search.threads.max(1);
     let limits = XWindowLimits {
         jobs: x_window_jobs_per_thread().saturating_mul(threads),
@@ -1190,7 +1174,7 @@ where
     let lpt = x_bp_redo_lpt();
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a store of `seg_win` entries or more after a window is
     // emptied.
-    let seg_win = x_bp_seg_win();
+    let seg_win = super::kappa::x_bp_seg_win();
     let mut seg_emptied = false;
     let mut lpt_windows = 0;
     let counts = x_redo_windows(
@@ -1212,6 +1196,12 @@ where
     );
     if seg_win.is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", seg_emptied);
+    }
+    // The block search keeps the store for the next block only as LOSAT_X_BPSEGWIN keeps it for
+    // the next window (fewer entries than its bound); without the switch a search's store ends with
+    // the search, as outside the block search.
+    if block_store.is_some() && seg_win.is_none_or(|min| shared.x_len() >= min) {
+        shared.x_clear();
     }
     let mut counts = counts?;
     counts.lpt_windows = lpt.then_some(lpt_windows);

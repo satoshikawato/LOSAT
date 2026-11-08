@@ -12,7 +12,7 @@ use super::stage_d_pipeline::{
 use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
-use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
+use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
@@ -315,9 +315,6 @@ impl TblastnArgs {
                 return Err(error);
             }
         };
-        if archive.is_some() {
-            super::archive::check_titles(&subjects, "subject")?;
-        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
         // ```c
         //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -900,6 +897,9 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -914,7 +914,6 @@ pub fn run_local(
     if archive_requested {
         args.archive = super::archive::handle_for(&args, true)?
             .map(|handle| outputs.with_archive_outfmt(handle));
-        super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
@@ -969,6 +968,9 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::TBLASTN_TASK.check(&mut args.task)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -1285,11 +1287,26 @@ fn search(
         reading,
         batch_size,
     );
-    // The refusal of a title the archive cannot write comes before its first byte: the queries
-    // of the batches NCBI completes are written (the records of the batch that a reader error
-    // interrupts are not).
-    if args.archive.is_some() {
+    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
+    // that stops at its first batch gives NCBI's error.
+    if batches.searched_done > 0 {
+        super::args::check_identity_compressed_lookup_of(&resolved)?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-295
+    // ```c++
+    //                 query =  input->GetNextSeqBatch(*scope);
+    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
+    //     ...
+    //                 if (fmt_args->ArchiveFormatRequested(args)) {
+    //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+    // ```
+    // The refusal of a title the archive cannot write comes before its first byte. The archive
+    // of each batch that NCBI completes holds its queries and, with `-subject`, every subject;
+    // the batch that stops the run (a reader error, `Empty CBlastQueryVector`, a batch of
+    // queries without letters) writes neither, and the error archive holds no sequence.
+    if args.archive.is_some() && batches.searched_done > 0 {
         super::archive::check_titles(&searched_queries[..batches.searched_done], "query")?;
+        super::archive::check_titles(subject_records, "subject")?;
     }
     if batches.searched_done == 0 && batches.stop.is_some() {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
@@ -1673,24 +1690,12 @@ fn search(
                 if !result_warnings {
                     return lines;
                 }
-                let mut messages = Vec::new();
-                messages.extend(crate::report::query_warnings::replaced_o_message(
+                let messages = crate::report::query_warnings::query_messages(
                     query.seq(),
-                ));
-                if index < identity_warned {
-                    messages.push(
-                        crate::report::query_warnings::IDENTITY_CBS_RESET_MESSAGE.to_string(),
-                    );
-                }
-                if query.seq().is_empty() {
-                    messages.push(NO_DATA_MESSAGE.to_string());
-                } else if !valid {
-                    messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
-                }
-                if filtered_empty && !query_batch_skipped[index] {
-                    messages
-                        .push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
-                }
+                    *valid,
+                    index < identity_warned,
+                    filtered_empty && !query_batch_skipped[index],
+                );
                 lines.extend(crate::report::query_warnings::query_warning(
                     "tblastn",
                     args.first_query_ordinal + query_input.ordinal(index),
@@ -2091,6 +2096,7 @@ fn parsed_shown(
                 number => number,
             },
         )) && !crate::algorithm::common::database::prefetch_always_off(),
+        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
     }
 }
 

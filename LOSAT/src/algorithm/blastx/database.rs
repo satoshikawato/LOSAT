@@ -333,6 +333,8 @@ impl ReportedSubjects {
     /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
     /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
     /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
+    /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
+    /// one by one (`shared::ParsedShown::one_by_one`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -348,6 +350,7 @@ impl ReportedSubjects {
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
         prefetched: bool,
+        one_by_one: bool,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -424,7 +427,7 @@ impl ReportedSubjects {
                 // write its Seq-align id alone.
                 if tabular_reads || pairwise || structured || taxids || taxonomy {
                     subject
-                        .fetched(taxonomy)
+                        .fetched(taxonomy, one_by_one)
                         .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
                 } else if prefetched {
                     shared::check_prefetched_parsed(&database.db, subject, ordinal, PROGRAM)?;
@@ -977,6 +980,7 @@ mod tests {
                 false,
                 crate::report::tabular::PrintedIds::default(),
                 false,
+                false,
             )
             .unwrap();
             let messages = reported.batch_prefetch(database, &batches, true);
@@ -1040,6 +1044,7 @@ mod tests {
                 false,
                 false,
                 crate::report::tabular::PrintedIds::default(),
+                false,
                 false,
             )
             .unwrap();

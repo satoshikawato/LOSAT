@@ -83,6 +83,55 @@ fn run(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:662-673 (`ThrowIfInvalidTask`,
+// quoted at `TaskParser::check`). The command line's parser refuses a task that is not TBLASTN's;
+// a caller of `run_local` (or `run_local_database`, before it opens the database) that sets one
+// itself gets NCBI's error for a name NCBI does not know, LOSAT's for another program's task,
+// instead of a search with the default task.
+#[test]
+fn a_task_that_is_not_tblastns_is_refused() {
+    let query = repository("LOSAT/tests/fasta/CoBV.faa");
+    let subject = repository("LOSAT/tests/fasta/LC738874.fasta");
+    for (task, database, message) in [
+        (
+            "tblastx",
+            false,
+            "the task tblastx is not supported by LOSAT's TBLASTN (use tblastn or tblastn-fast)",
+        ),
+        ("TBLASTZ", false, "'tblastz' is not a supported task"),
+        ("tblastz", true, "'tblastz' is not a supported task"),
+    ] {
+        let mut args = tblastn_args("q", "s", &[]);
+        args.task = task.into();
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut sink),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            if database {
+                args.db = Some("no_such_database".into());
+                LOSAT::api::local_blast::run_local_database_tblastn(
+                    args,
+                    &queries(&query),
+                    LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+                    &mut outputs,
+                )
+            } else {
+                run_local_tblastn(args, &queries(&query), &subjects(&subject), &mut outputs)
+            }
+        };
+        let error = format!("{:#}", result.expect_err(message));
+        assert!(error.contains(message), "{task}: {error}");
+        assert!(sink.is_empty() && diagnostics.is_empty());
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
@@ -102,6 +151,8 @@ fn run(
 // passed as the display names.
 #[test]
 fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
+    // Display names only (the library API reads `subject`, never these paths): the prefix is
+    // the one that LOSAT/tests/frozen_paths.py names FROZEN_PREFIX for the tools' comparisons.
     let code1 = "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna";
     let cases = [
         (
@@ -124,6 +175,7 @@ fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
             "docs/evidence/tlosan_stage_g/native_real/av_code1",
             "/tmp/tlosan-stageg-final-real-nohit-20260926/av_code1.faa",
             "LOSAT/tests/fasta/AvCLPV.fasta",
+            // A display name only, as `code1` above.
             "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta",
             ".oracle",
             None,

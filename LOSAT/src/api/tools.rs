@@ -115,7 +115,7 @@ pub fn run_makeblastdb(
         unreachable!("the first word names makeblastdb");
     };
     // NCBI's application layer reads the environment and the registry files before `Run`, and
-    // LOSAT rejects the settings that change the output (`main.rs`).
+    // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
     let settings = check_ncbi_application_settings("makeblastdb").map_err(Error::Search)?;
     makeblastdb::check_registry_settings(
         &args,

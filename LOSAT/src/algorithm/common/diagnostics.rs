@@ -10,7 +10,14 @@ use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering as AtomicOrdering};
 
 /// Check if diagnostics are enabled via environment variable
 pub fn diagnostics_enabled() -> bool {
-    std::env::var("LOSAT_DIAGNOSTICS")
+    diagnostics_flag(std::env::var("LOSAT_DIAGNOSTICS"))
+}
+
+/// No NCBI counterpart: whether a read of LOSAT_DIAGNOSTICS turns the diagnostics on ("1", or
+/// "true" in any case). Kept apart from the read, as `utils::xswitch::state` is, so that a test
+/// gives it values without changing the environment of the process the lib's tests share.
+fn diagnostics_flag(value: Result<String, std::env::VarError>) -> bool {
+    value
         .map(|v| v == "1" || v.to_lowercase() == "true")
         .unwrap_or(false)
 }
@@ -445,3 +452,7 @@ impl NucleotideDiagnosticCounters {
 
 // For backward compatibility, provide a type alias for TBLASTX
 pub type DiagnosticCounters = ProteinDiagnosticCounters;
+
+#[cfg(test)]
+#[path = "diagnostics_tests.rs"]
+mod diagnostics_tests;

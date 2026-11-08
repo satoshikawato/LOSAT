@@ -290,7 +290,7 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
     }
     std::fs::write(&psq, bytes).unwrap();
     let query = genome_slice(&dir, 30_000);
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = losat()
             .arg("blastx")
             .arg("-query")
@@ -312,7 +312,7 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
     // A refusal of the first searched batch's setup that the search raises before its first
     // read (a search space past Int8) comes after the database's error, as when the database was
     // read before the first batch.
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = losat()
             .arg("blastx")
             .arg("-query")
@@ -343,7 +343,7 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
         format!(">one\n{}\n>two\n{}\n", &genome[..15_000], &genome[15_000..]),
     )
     .unwrap();
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = losat()
             .env("BATCH_SIZE", "40000")
             .arg("blastx")
@@ -366,7 +366,7 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
     let mut both = format!(">nn all N\n{}\n", "N".repeat(10_005)).into_bytes();
     both.extend_from_slice(&std::fs::read(&query).unwrap());
     std::fs::write(&all_n, both).unwrap();
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = losat()
             .arg("blastx")
             .arg("-query")

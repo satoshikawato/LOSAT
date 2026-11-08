@@ -10,7 +10,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 //     arg.Reset(new CProgramDescriptionArgs(kProgram,
 //                                   "Translated Query-Protein Subject BLAST"));
 // ```
-use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
+use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // ```c++
@@ -44,6 +44,9 @@ const LOSAT_HELP_TEMPLATE: &str =
     "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}\n\n{after-help}";
 
 pub use crate::utils::entry_names::{entry_argv, ENTRY_NAMES};
+
+// What the `losat` binary runs; the crate's root re-exports `main_entry` for it.
+pub(crate) mod main_entry;
 
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it (`render_message` writes long options with one dash).
@@ -175,6 +178,7 @@ pub enum Commands {
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
     /// Pairwise nucleotide alignment (megablast [default], blastn)
+    #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastn(blastn::BlastnArgs),
     /// Pairwise protein alignment (blastp)
@@ -198,6 +202,15 @@ pub enum Commands {
     /// Position-Specific Iterated BLAST (psiblast; its first round)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Psiblast(psiblast::PsiblastArgs),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
+    // ```c++
+    //     static const string kProgram("rpsblast");
+    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
+    //                                           "Reverse Position Specific BLAST"));
+    // ```
+    /// Reverse Position Specific BLAST (rpsblast; without composition-based statistics)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
+    Rpsblast(rpsblast::RpsblastArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
     //     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
@@ -247,7 +260,7 @@ where
         .filter(|program| {
             matches!(
                 program.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
             )
         })
     {
@@ -313,7 +326,13 @@ where
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makeblastdb"
+                "blastn"
+                    | "blastp"
+                    | "tblastn"
+                    | "tblastx"
+                    | "psiblast"
+                    | "rpsblast"
+                    | "makeblastdb"
             )
         {
             continue;
@@ -332,7 +351,7 @@ where
         if arg.get_action().takes_values() {
             let value = match inline {
                 Some(value) if token.to_str().is_some() => OsString::from(value),
-                Some(_) => inline_value(&token, name),
+                Some(_) => inline_value(&token),
                 None => input.next().ok_or_else(|| {
                     clap::Error::raw(
                         ErrorKind::InvalidValue,
@@ -384,13 +403,17 @@ where
     }
 }
 
-/// The value of a word `-name=value` that is not UTF-8: its bytes after the `=` that
-/// follows `-name` (`try_parse_from`; `name` is an argument's ASCII name).
-fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
+/// The value of a word `-name=value` that is not UTF-8: its bytes after the first `=`
+/// (`try_parse_from`, which found the name before the first `=` of the word's lossy text; a
+/// replaced byte is never `=`, so the first `=` of the bytes is that one, whatever the name's
+/// letters are).
+fn inline_value(token: &std::ffi::OsStr) -> OsString {
     let bytes = token.as_encoded_bytes();
-    let start = 1 + name.len() + 1;
-    debug_assert_eq!(bytes.get(start - 1), Some(&b'='));
-    // SAFETY: `start` is just after an ASCII `=`, a split point that
+    let start = bytes
+        .iter()
+        .position(|&b| b == b'=')
+        .map_or(bytes.len(), |at| at + 1);
+    // SAFETY: `start` is just after an ASCII `=` or at the end, split points that
     // `OsStr::from_encoded_bytes_unchecked` allows (after a valid non-empty UTF-8 substring).
     unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&bytes[start..]) }.to_os_string()
 }
@@ -399,7 +422,7 @@ fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
 fn is_ncbi_search_program(scope: &clap::Command) -> bool {
     matches!(
         scope.get_name(),
-        "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx" | "psiblast"
+        "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
     )
 }
 
@@ -582,6 +605,33 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
     ) || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
+// `algorithm::rpsblast::args`)
+/// rpsblast's NCBI arguments that LOSAT does not run (its search reads the profile database's
+/// statistics and scale as NCBI's does; `-searchsp` switches NCBI's RPS search to the old
+/// Karlin-Altschul statistics, which item PS11c would port), the formats' options that LOSAT's
+/// reports do not have, and the query masks of the reversed scan.
+fn is_unported_rpsblast_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "entrez_query"
+            | "export_search_strategy"
+            | "html"
+            | "import_search_strategy"
+            | "lcase_masking"
+            | "line_length"
+            | "remote"
+            | "searchsp"
+            | "sorthits"
+            | "sorthsps"
+            | "sum_stats"
+            | "use_sw_tback"
+            | "xdrop_gap"
+            | "xdrop_gap_final"
+            | "xdrop_ungap"
+    )
+}
+
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
@@ -636,10 +686,18 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's PSIBLAST"),
         );
     }
-    if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx", "psiblast"]
-        .into_iter()
-        .find(|program| scope.get_name() == *program)
-        .filter(|_| is_ncbi_toolkit_arg(name))
+    if scope.get_name() == "rpsblast" && is_unported_rpsblast_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSBLAST"),
+        );
+    }
+    if let Some(program) = [
+        "blastn", "blastp", "tblastn", "tblastx", "psiblast", "rpsblast",
+    ]
+    .into_iter()
+    .find(|program| scope.get_name() == *program)
+    .filter(|_| is_ncbi_toolkit_arg(name))
     {
         return clap::Error::raw(
             ErrorKind::InvalidValue,
@@ -704,6 +762,7 @@ where
         "tblastn" => "tblastn",
         "tblastx" => "tblastx",
         "psiblast" => "psiblast",
+        "rpsblast" => "rpsblast",
         "makeblastdb" => "makeblastdb",
         _ => return None,
     };
@@ -1099,7 +1158,7 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
     }
 }
 
-/// Set by `main` (`post_errors_in_run`): the command line's run writes the text of an error that
+/// Set by `main_entry` (`post_errors_in_run`): the command line's run writes the text of an error that
 /// gets an error archive itself, before the archive (`post_native_error`). A library caller of the
 /// command line entries (`api::run_blastn` and the others) does not set it, and the text stays in
 /// the error it gets back.
@@ -1120,7 +1179,7 @@ fn posted(text: &str) -> bool {
 }
 
 /// Makes the command line's run write an error's text before its error archive
-/// (`post_native_error`); called by `main` only.
+/// (`post_native_error`); called by `main_entry` only.
 pub fn post_errors_in_run() {
     POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
 }
@@ -1292,6 +1351,32 @@ mod tests {
         ]);
         let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
         assert!(!message.contains("not UTF-8"), "{message}");
+    }
+
+    // `try_parse_from` is generic: a caller's own type can name an option with letters that are
+    // not ASCII, here U+FFFD (3 bytes), which a byte that is not UTF-8 also reads as in the
+    // word's lossy text. The value of `-name=value` starts after the first `=` of the bytes,
+    // not `name.len()` bytes on (which skipped `\xfe\xfd` and read `abc`).
+    #[test]
+    fn inline_value_starts_after_the_first_equals_sign() {
+        #[derive(clap::Parser)]
+        enum Own {
+            Blastn(OwnArgs),
+        }
+        #[derive(clap::Args)]
+        struct OwnArgs {
+            #[arg(long = "q\u{fffd}")]
+            q: Option<String>,
+        }
+        let argv = vec![
+            OsString::from("losat"),
+            OsString::from("blastn"),
+            OsString::from_vec(b"-q\xff=\xfe\xfdabc".to_vec()),
+        ];
+        let error = try_parse_from::<Own, _, _>(argv)
+            .err()
+            .expect("a value that is not UTF-8");
+        assert_eq!(error.kind(), ErrorKind::InvalidUtf8);
     }
 
     // A file name keeps its bytes in both spellings (`check_utf8_file_name` reads it).

@@ -1231,6 +1231,7 @@ fn x_try_build_flat_parallel_with(
                 tables,
                 capacity,
                 X_COUNT_CHUNK,
+                0,
             )
         },
     )
@@ -2219,6 +2220,7 @@ mod tests {
                 extra: None,
                 segments: None,
                 x_ahead: false,
+                appends: 0,
             }) else {
                 panic!("{matrix:?}: no flat table on the spare")
             };
@@ -2250,6 +2252,7 @@ mod tests {
                 extra: None,
                 segments: None,
                 x_ahead: true,
+                appends: 0,
             }) else {
                 panic!("{matrix:?}: no flat table built ahead")
             };
@@ -2272,6 +2275,7 @@ mod tests {
                         extra: None,
                         segments: None,
                         x_ahead: true,
+                        appends: 0,
                     },
                 )
                 .expect("the appends pass");
@@ -2295,6 +2299,7 @@ mod tests {
                     extra: None,
                     segments: None,
                     x_ahead: true,
+                    appends: 0,
                 })
                 .is_none(),
                 "{matrix:?}: a table built ahead without a spare"
@@ -2725,6 +2730,7 @@ mod tests {
                         extra: Some(&extra),
                         segments: None,
                         x_ahead: false,
+                        appends: 0,
                     },
                 ))
             })
@@ -2835,6 +2841,7 @@ mod tests {
                         tables,
                         capacity,
                         X_COUNT_CHUNK,
+                        0,
                     )
                 },
             )

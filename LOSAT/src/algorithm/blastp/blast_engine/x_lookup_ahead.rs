@@ -66,7 +66,7 @@
 //! `Err` is dropped), that the reference builder would make (`TooLarge`), or whose vectors lack the
 //! room (below) gives no values, and block i + 1 builds inline as without the switch, so its error
 //! is raised by the same call at the same point of its search: after block i's rows, before any of
-//! block i + 1's. In the block search such errors do not arise (`x_block_words_fit` sends a query set
+//! block i + 1's. In the block search such errors do not arise (`x_word_blocks` sends a query set
 //! whose tables could refuse to the search of all queries before any block); the rule stands
 //! regardless.
 //!
@@ -763,7 +763,10 @@ fn x_flat_ahead_appends(
         &locations,
         &ncbi_tables,
         pool,
-        x_flat.build_args(),
+        x_flat.build_args(crate::algorithm::blastp::x_query_blocks::x_block_appends(
+            pool,
+            query_records,
+        )),
     )?;
     x_flat.finish(&mut contexts);
     Some(XFlatAheadPart {
@@ -1671,6 +1674,7 @@ mod tests {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
+            rps: None,
         }
         .resolve()
         .expect("resolved arguments")
@@ -1733,6 +1737,7 @@ mod tests {
                     &lengths,
                     pool,
                     XLookupFor::Search,
+                    0,
                 )
                 .expect("the block's own build")
             }

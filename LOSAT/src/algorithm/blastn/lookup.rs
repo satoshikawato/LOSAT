@@ -79,14 +79,14 @@ pub fn x_mb_lookup_print_summary() {
 //          mb_lt->hashtable2[ecode2] = index;
 // ```
 // EXPERIMENT (LOSAT_X_DISCLUTPAR): the discontiguous megablast tables filled by the pool threads.
-// `pub` only for the summary line that `main` prints at exit.
+// `pub(crate)` for the summary line that `main` prints at exit (`cli::main_entry`).
 #[path = "x_disc_lookup_par.rs"]
-pub mod x_disc_lookup_par;
+pub(crate) mod x_disc_lookup_par;
 
 // EXPERIMENT (LOSAT_X_DCCSR): the chains of a one-template discontiguous megablast table laid out
-// as CSR. `pub` only for the summary line that `main` prints at exit.
+// as CSR. `pub(crate)` for the summary line that `main` prints at exit (`cli::main_entry`).
 #[path = "x_dc_csr.rs"]
-pub mod x_dc_csr;
+pub(crate) mod x_dc_csr;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
 // ```c
@@ -3559,3 +3559,7 @@ mod encode_kmer_bounds_tests {
         assert_eq!(encode_kmer(&[0u8, 1], 0, 2), Some(1));
     }
 }
+
+#[cfg(test)]
+#[path = "lookup_tests.rs"]
+mod lookup_tests;

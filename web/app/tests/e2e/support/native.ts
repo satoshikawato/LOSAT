@@ -172,11 +172,12 @@ export function vbrCases(): VbrCase[] {
       frozen: {},
     },
     // The defaults of every mode and task of the search form (WA-RS-03): megablast and BLASTX
-    // with their outfmt 7 rows (def7.*), dc-megablast, blastn-short, blastp-fast, tblastn-fast.
+    // with their outfmt 7 rows (def7.*), dc-megablast, blastn-short, blastp-fast, blastp-short, tblastn-fast.
     manifestCase('multi.megablast', ['multi.megablast', 'def7.multi.megablast']),
     manifestCase('dc.default', ['dc.default', 'dc.default.7']),
     manifestCase('short.default', ['short.default', 'short.default.7']),
     manifestCase('e2e.blastp.fast', ['e2e.blastp.fast']),
+    manifestCase('short.blastp.def', ['score.blastp.short.def.0', 'score.blastp.short.def.6', 'score.blastp.short.def.7']),
     manifestCase('pyl.blastx', ['pyl.blastx.0', 'pyl.blastx.6', 'def7.pyl.blastx']),
     manifestCase('tfast.e2e.def', ['tfast.e2e.def.0', 'def7.tfast.e2e']),
   ];

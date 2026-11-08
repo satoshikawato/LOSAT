@@ -92,3 +92,7 @@ pub const SENTINEL_BYTE: u8 = 0;
 /// Historical alias retained for diagnostics/documentation.
 /// NCBI blast core uses `BLAST_SCORE_MIN` for NULLB scoring, not `defscore`.
 pub const SENTINEL_PENALTY: i32 = i16::MIN as i32;
+
+#[cfg(test)]
+#[path = "constants_tests.rs"]
+mod constants_tests;

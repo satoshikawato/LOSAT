@@ -257,8 +257,8 @@ fn several_sample_pages_are_makeblastdb_s() {
 // ```
 // NCBI's cases read the database back with CSeqDB (the ISAM lookups the files allow). Here
 // the files are compared with makeblastdb's for the same two ids (s3b/probe/ncbiut, where
-// `blastdbcmd -entry '3e3q_b,pat|us|123|456'` finds OIDs 0 and 1); the ledger of NCBI unit
-// cases does not cover the seqdb_writer tests, so this is no ledger port.
+// `blastdbcmd -entry '3e3q_b,pat|us|123|456'` finds OIDs 0 and 1); it checks the files, not
+// NCBI's lookups, so the ledger rows of the two cases (module writedb) are `partial`.
 #[test]
 fn ncbi_s_pdb_lower_case_chain_and_us_patent_keys() {
     let dir = Dir::new("ncbiut");

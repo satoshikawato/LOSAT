@@ -1,0 +1,6 @@
+BLAST query/options error: Gap existence and extension values of 11 and 1 not supported for IDENTITY
+supported values are:
+32767, 32767
+15, 2
+
+Please refer to the BLAST+ user manual.

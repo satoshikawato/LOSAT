@@ -132,6 +132,34 @@ pub const INVALID_QUERY_MESSAGE: &str = "Could not calculate ungapped Karlin-Alt
 /// A batch without a valid context is not searched and does not have it.
 pub const EMPTY_DATABASE_MESSAGE: &str = "Filtering resulted in an empty database.";
 
+/// The messages of a query's result, which its warning writes to standard error
+/// (`query_warning`) and the XML reports keep with the query (BLASTP and TBLASTN): the O
+/// characters read as X (`replaced_o_message`), IDENTITY's reset of the composition mode
+/// (`IDENTITY_CBS_RESET_MESSAGE`, for the queries of the first query batch), a record without
+/// letters or else a query without a valid context (`INVALID_QUERY_MESSAGE`), and a database that
+/// a list left empty (`EMPTY_DATABASE_MESSAGE`). `query_warning` sorts them as NCBI does.
+pub fn query_messages(
+    seq: &[u8],
+    valid: bool,
+    identity_cbs_reset: bool,
+    empty_database: bool,
+) -> Vec<String> {
+    let mut messages = Vec::new();
+    messages.extend(replaced_o_message(seq));
+    if identity_cbs_reset {
+        messages.push(IDENTITY_CBS_RESET_MESSAGE.to_string());
+    }
+    if seq.is_empty() {
+        messages.push(crate::blastinput::query_batch::NO_DATA_MESSAGE.to_string());
+    } else if !valid {
+        messages.push(INVALID_QUERY_MESSAGE.to_string());
+    }
+    if empty_database {
+        messages.push(EMPTY_DATABASE_MESSAGE.to_string());
+    }
+    messages
+}
+
 /// The messages of a query in the order of its warning: sorted without repeats (see
 /// `query_warning`), `EMPTY_DATABASE_MESSAGE` last.
 pub fn sorted_query_messages(messages: &[String]) -> Vec<&String> {

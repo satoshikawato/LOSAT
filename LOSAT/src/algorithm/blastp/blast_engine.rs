@@ -16,7 +16,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
-use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
+use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
@@ -1031,16 +1031,42 @@ fn x_outlined<R>(f: impl FnOnce() -> R) -> R {
 /// The composition-based redo's workspace of another matrix than BLOSUM62 (item SC2b), put in
 /// place of `workspace` (BLOSUM62's, which its callers make as before): cold and in place, so that
 /// the callers' frames do not grow by a second workspace (SC1's `use_matrix_workspace` of
-/// TBLASTN). Every matrix BLASTP searches has NCBI's data (IDENTITY, which has none, is refused
-/// before the search: `validate_requested_blastp_support`).
+/// TBLASTN). Every matrix whose search runs the redo has NCBI's data; IDENTITY keeps BLOSUM62's
+/// workspace unused (`blastp_redo_matrix`).
 #[cold]
 #[inline(never)]
 pub(super) fn blastp_use_matrix_workspace(
     workspace: &mut BlastCompositionWorkspace,
     matrix: ScoringMatrix,
 ) {
+    if blastp_redo_matrix(matrix) == ScoringMatrix::Blosum62 {
+        return;
+    }
     *workspace = BlastCompositionWorkspace::new(matrix)
         .expect("BLASTP searches only the matrices with NCBI's composition data");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1499
+// ```c
+//     } else if (ext_params->options->compositionBasedStats > 0 ||
+//                ext_params->options->eTbackExt == eSmithWatermanTbck) {
+// ...
+//         retval =
+//                 Blast_RedoAlignmentCore_MT(program_number,
+// ...
+//     } else {
+// ```
+/// The matrix whose composition data the redo's workspace and initial matrix take: the search's,
+/// but BLOSUM62 for IDENTITY, which has none. IDENTITY is searched in mode 0 only
+/// (`ResolvedBlastpArgs::identity_cbs_reset`), whose redo has no input (the preliminary lists are
+/// taken before it, item SC4a), so those tables stay unused, as NCBI, which does not run the redo
+/// below mode 1, makes none.
+fn blastp_redo_matrix(matrix: ScoringMatrix) -> ScoringMatrix {
+    if matrix == ScoringMatrix::Identity {
+        ScoringMatrix::Blosum62
+    } else {
+        matrix
+    }
 }
 
 fn blastp_local_scaling_factor(mode: BlastpCompositionMode, matrix: ScoringMatrix) -> f64 {
@@ -2397,15 +2423,14 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // `blastp_compressed_lookup`), the ideal Karlin block (`ideal_karlin_params_of`), the
     // ungapped extensions (`x_candidate_of!`), the gapped ones (`BlastpScoreMatrix`), the
     // chaining (the typed spelling) and the composition-based redo (its matrix information and
-    // workspace). Every matrix of NCBI's tables runs with any of its rows but IDENTITY, which
-    // NCBI searches without the composition-based statistics only (`setup_factory.cpp:143-156`;
+    // workspace). Every matrix of NCBI's tables runs with any of its rows; IDENTITY, which has no
+    // composition data, in mode 0 (the options handler resets the others, `identity_cbs_reset`;
     // item SC4b). psiblast's first round is BLASTP's search; its later rounds, whose PSSM scores
     // take the matrix and the gap costs too, are not ported, and it keeps BLOSUM62 11/1.
-    if args.scoring.matrix == ScoringMatrix::Identity
-        || (args.app == BlastpApp::Psiblast
-            && (args.scoring.matrix != ScoringMatrix::Blosum62
-                || args.scoring.gap_open != 11
-                || args.scoring.gap_extend != 1))
+    if args.app == BlastpApp::Psiblast
+        && (args.scoring.matrix != ScoringMatrix::Blosum62
+            || args.scoring.gap_open != 11
+            || args.scoring.gap_extend != 1)
     {
         bail!(
             "the matrix {} with gap costs {}/{} is not supported by LOSAT's {program}",
@@ -2414,11 +2439,23 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.scoring.gap_extend
         );
     }
-    // NCBI api/blast_advprot_options.cpp:57:
-    // m_Opts->SetCompositionBasedStats(eCompositionMatrixAdjust);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:431-435
+    // ```c
+    //         if ((0 <= pvalueForThisPair) && (pvalueForThisPair <= 1)) {
+    //             s_AdjustEvaluesForComposition(hsp_list, pvalueForThisPair, seqSrc,
+    //                                           subject_length,
+    //                                           &queryInfo->contexts[context_index],
+    //                                           LambdaRatio, subject_id);
+    // ```
+    // NCBI 2.17.0's redo passes it the context of the next query (`context_index` has gone past
+    // the query's frames, blast_kappa.c:3590-3592,3680): each query's E-values take the next
+    // query's lengths and search space, and the last query's are read past the contexts, so one
+    // search gives different reports from run to run (DECISIONS 23 a of line NP; memory "No NCBI
+    // bug repro"). A search that IDENTITY resets to mode 0 has no unified P-values
+    // (`identity_cbs_reset`).
     if args.comp_based_stats.unified_p {
         bail!(
-            "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
+            "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 adjusts each query's e-values with the lengths of the next query, and reads past its data for the last one)"
         );
     }
     // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), psiblast's first round of a
@@ -2438,6 +2475,17 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// `protein_options_check::check_identity_compressed_lookup` of a BLASTP or psiblast search.
+fn check_identity_compressed_lookup_of(args: &ResolvedBlastpArgs) -> Result<()> {
+    crate::blastinput::protein_options_check::check_identity_compressed_lookup(
+        &args.matrix_name,
+        args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable,
+        args.word_size as i32,
+        args.app.ncbi_name(),
+        args.app.name(),
+    )
 }
 
 /// The report of one requested BLASTP format: one of LOSAT's text reports (outfmt 0, and the
@@ -5297,6 +5345,9 @@ pub fn check_options(args: &BlastpArgs) -> Result<()> {
     }
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
+    // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it
+    // searches its first query batch.
+    check_identity_compressed_lookup_of(&resolved)?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
 }
@@ -6362,6 +6413,11 @@ fn search(
     // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
     // (`psiblast_stop_at_invalid_pssm`).
     let batches = psiblast_stop_at_invalid_pssm(&args, batches);
+    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
+    // that stops at its first batch (`batches.starts` empty) gives NCBI's error.
+    if !batches.starts.is_empty() {
+        check_identity_compressed_lookup_of(&args)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
     // one search per round per query (`psi_round`).
@@ -6386,6 +6442,22 @@ fn search(
     // A run that stops at a query batch writes the reports of the batches before it
     // without the epilog.
     let epilog = batches.stop.is_none();
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:274
+    // ```c++
+    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+    // ```
+    // IDENTITY's reset of the composition mode (`ResolvedBlastpArgs::identity_cbs_reset`) writes
+    // through the options memento into the options that every query batch reuses: the first
+    // batch resets the mode and warns its queries, and the later batches start in mode 0 without
+    // the warning. These are the searched queries of the first batch.
+    let identity_warned = if args.identity_cbs_reset {
+        batches
+            .starts
+            .get(1)
+            .map_or(batches.searched_done, |&(_, searched)| searched)
+    } else {
+        0
+    };
     // The searches and reports of the batches up to the input record `input_done` and
     // the searched query `searched_done`.
     let search_batches_once = |args: ResolvedBlastpArgs,
@@ -6418,6 +6490,7 @@ fn search(
         };
         let reports = BlastpReports {
             reader_warnings: &batches.warnings[..searched_done],
+            identity_warned,
             epilog,
             x_prolog: true,
             x_queries_before: 0,
@@ -6745,6 +6818,7 @@ fn search(
                             },
                             &BlastpReports {
                                 reader_warnings: &reader_warnings[block.clone()],
+                                identity_warned,
                                 epilog: epilog && index + 1 == blocks.len(),
                                 x_prolog: index == 0,
                                 x_queries_before: block.start,
@@ -7505,6 +7579,10 @@ fn preliminary_search_error(
 /// with the epilog.
 struct BlastpReports<'a> {
     reader_warnings: &'a [Vec<u8>],
+    /// The searched queries of the run before this one have IDENTITY's warning
+    /// (`report::query_warnings::IDENTITY_CBS_RESET_MESSAGE`): those of the first query batch
+    /// when IDENTITY reset the composition mode, none otherwise.
+    identity_warned: usize,
     epilog: bool,
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the outfmt 0 report starts with the prolog
     /// (false for the blocks after the first of the block search, `x_query_blocks.rs`).
@@ -7702,6 +7780,7 @@ fn search_split_query_batches(
                 // first block's outfmt 0 prolog (`preliminary_search_error`).
                 &BlastpReports {
                     reader_warnings: &[],
+                    identity_warned: 0,
                     epilog: false,
                     x_prolog,
                     x_queries_before: 0,
@@ -10729,7 +10808,7 @@ fn run_resolved_in_pool(
         let matrix_info = initial_matrix_info
             .get_or_init(|| {
                 build_matrix_info(
-                    args.scoring.matrix,
+                    blastp_redo_matrix(args.scoring.matrix),
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
                     // ```c
                     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
@@ -12276,18 +12355,12 @@ fn run_resolved_in_pool(
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
-            let mut messages = Vec::new();
-            messages.extend(crate::report::query_warnings::replaced_o_message(
+            let messages = crate::report::query_warnings::query_messages(
                 record.seq(),
-            ));
-            if record.seq().is_empty() {
-                messages.push(NO_DATA_MESSAGE.to_string());
-            } else if !query_valid[q_idx] {
-                messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
-            }
-            if filtered_empty && !query_batch_skipped[q_idx] {
-                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
-            }
+                query_valid[q_idx],
+                reports.x_queries_before + q_idx < reports.identity_warned,
+                filtered_empty && !query_batch_skipped[q_idx],
+            );
             let mut lines = reports
                 .reader_warnings
                 .get(q_idx)
@@ -12829,23 +12902,12 @@ fn run_resolved_in_pool(
                     .iter()
                     .enumerate()
                     .map(|(q_idx, record)| {
-                        let mut messages = Vec::new();
-                        messages.extend(crate::report::query_warnings::replaced_o_message(
+                        crate::report::query_warnings::query_messages(
                             record.seq(),
-                        ));
-                        if record.seq().is_empty() {
-                            messages.push(NO_DATA_MESSAGE.to_string());
-                        } else if !query_valid[q_idx] {
-                            messages.push(
-                                crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string(),
-                            );
-                        }
-                        if filtered_empty && !query_batch_skipped[q_idx] {
-                            messages.push(
-                                crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string(),
-                            );
-                        }
-                        messages
+                            query_valid[q_idx],
+                            reports.x_queries_before + q_idx < reports.identity_warned,
+                            filtered_empty && !query_batch_skipped[q_idx],
+                        )
                     })
                     .collect();
                 let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
@@ -14626,12 +14688,9 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-156 (IDENTITY is
     // searched without the composition-based statistics only; item SC4b)
     #[test]
-    fn test_validate_requested_blastp_support_takes_every_matrix_but_identity() {
+    fn test_validate_requested_blastp_support_takes_every_matrix() {
         // Every row of each matrix's table (its first row 32767/32767 included), in either case.
         for matrix in ScoringMatrix::ALL {
-            if matrix == ScoringMatrix::Identity {
-                continue;
-            }
             let table = crate::stats::protein_options::scoring_matrix_table(matrix);
             for row in table.values {
                 let (gap_open, gap_extend) = (row.0[0] as i32, row.0[1] as i32);
@@ -14649,10 +14708,18 @@ mod tests {
                         .unwrap_or_else(|err| panic!("{name} {gap_open}/{gap_extend}: {err}"));
                 }
             }
-            // psiblast keeps BLOSUM62 11/1 (its later rounds are not ported).
+            // psiblast keeps BLOSUM62 11/1 (its later rounds are not ported); IDENTITY is NCBI's
+            // error there (psiblast takes the standard matrices only, blast_options.c:913-917).
             let mut args = make_blastp_args();
             args.app = BlastpApp::Psiblast;
             args.matrix = Some(matrix.ncbi_name().to_string());
+            if matrix == ScoringMatrix::Identity {
+                let err = args.resolve().expect_err("psiblast IDENTITY");
+                assert!(err
+                    .to_string()
+                    .contains("IDENTITY is not a supported matrix"));
+                continue;
+            }
             let resolved = args.resolve().expect("resolved psiblast args");
             let result = validate_requested_blastp_support(&resolved);
             if matrix == ScoringMatrix::Blosum62 {
@@ -14664,13 +14731,45 @@ mod tests {
                     .contains("not supported by LOSAT's PSIBLAST"));
             }
         }
-        let mut args = make_blastp_args();
-        args.matrix = Some("IDENTITY".to_string());
-        args.seg = Some("no".to_string());
-        let resolved = args.resolve().expect("resolved blastp args");
-        let err = validate_requested_blastp_support(&resolved).expect_err("IDENTITY");
-        assert!(err.to_string().contains("the matrix IDENTITY"));
-        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
+        // IDENTITY with the compressed lookup table (word size 5, blastp-fast's default), with
+        // which NCBI crashes: the options-only check refuses it (`search` where it searches its first
+        // query batch); the lookup table runs (blastp-fast at word size 3); 6 and 7 are NCBI's error
+        // (`validate_protein_options`).
+        for (task, word_size, runs) in [
+            ("blastp", Some(5), false),
+            ("blastp-fast", None, false),
+            ("blastp-fast", Some(3), true),
+        ] {
+            let mut args = make_blastp_args();
+            args.task = task.to_string();
+            args.matrix = Some("IDENTITY".to_string());
+            args.word_size = word_size;
+            let resolved = args.resolve().expect("resolved blastp args");
+            validate_requested_blastp_support(&resolved).expect("IDENTITY's options");
+            if runs {
+                check_options(&args).expect("IDENTITY with the lookup table");
+                continue;
+            }
+            let err = check_options(&args).expect_err("IDENTITY word 5");
+            assert!(
+                err.to_string().contains(
+                    "-matrix IDENTITY with the compressed lookup table (-word_size 5), with which NCBI BLAST+'s blastp crashes, is not supported by LOSAT's BLASTP"
+                ),
+                "{task}: {err}"
+            );
+        }
+        for word_size in [6, 7] {
+            let mut args = make_blastp_args();
+            args.matrix = Some("identity".to_string());
+            args.word_size = Some(word_size);
+            let err = args.resolve().expect_err("IDENTITY word 6 and 7");
+            assert!(
+                err.to_string().contains(
+                    "Word size larger than 5 is not supported for the identity scoring matrix"
+                ),
+                "{word_size}: {err}"
+            );
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-271 (BLOSUM62's rows)

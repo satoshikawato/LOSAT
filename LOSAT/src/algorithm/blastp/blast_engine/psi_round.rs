@@ -274,6 +274,7 @@ fn run_queries(
                 &ranges,
                 &BlastpReports {
                     reader_warnings,
+                    identity_warned: 0,
                     epilog: false,
                     x_prolog: calls == 0,
                     x_queries_before: 0,

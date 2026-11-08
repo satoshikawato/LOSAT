@@ -1296,7 +1296,8 @@ impl ListedTitles<'_> {
     /// reads the letters of each by its Seq-align id, as the formats that read the subject do
     /// (`ParsedSubject::fetched`), also for those beyond the cut that no report shows; where
     /// that read fails it drops the letters with a warning; following subjects whose Seq-align ids
-    /// match are refused (`shared::refuse_pssm_joined_hits`). `prefetch`: whether each query's
+    /// match are refused (`shared::refuse_pssm_joined_hits`). Only the subjects with a Seq-align
+    /// below `inclusion_ethresh` are read (`psi_round::included`). `prefetch`: whether each query's
     /// batch prefetches (the round's), which reads them all by their own ids before the PSSM;
     /// one whose prefetch is off reads them one by one (`ParsedSubject::fetched`'s
     /// `one_by_one`).
@@ -1304,28 +1305,45 @@ impl ListedTitles<'_> {
         &self,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
+        inclusion_ethresh: f64,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
         }
-        // The PSSM's multiple alignment joins following subjects whose Seq-align ids match.
+        let included = |hsp_list: &crate::algorithm::blastp::hsp::BlastpHspList| {
+            hsp_list
+                .hsps
+                .iter()
+                .any(|hsp| super::psi_round::included(hsp.e_value, inclusion_ethresh))
+        };
+        let mut read = std::collections::BTreeSet::new();
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
             };
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            let lists = &hit_list.hsplist_array[..count];
+            read.extend(
+                lists
+                    .iter()
+                    .filter(|hsp_list| included(hsp_list))
+                    .map(|hsp_list| hsp_list.oid as usize),
+            );
+            // The PSSM's multiple alignment joins following subjects whose Seq-align ids match.
             shared::refuse_pssm_joined_hits(
                 query,
-                hit_list.hsplist_array[..count].iter().map(|hsp_list| {
+                lists.iter().map(|hsp_list| {
                     let rank = hsp_list.oid as usize;
-                    self.parsed_subject(rank)
-                        .map(|subject| (self.listed.ordinals[rank], subject))
+                    let subject = self
+                        .parsed_subject(rank)
+                        .map(|subject| (self.listed.ordinals[rank], subject));
+                    (subject, included(hsp_list))
                 }),
                 self.program,
             )?;
         }
         let reads = Self::batch_reads(hit_lists, prefetch);
-        for rank in Self::reported(hit_lists) {
+        for rank in read {
             if let Some(subject) = self.parsed_subject(rank) {
                 subject.fetched(false, reads.one_by_one(rank as u32)).map_err(|reason| {
                     shared::parsed_refusal(

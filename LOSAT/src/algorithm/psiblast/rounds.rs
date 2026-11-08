@@ -242,11 +242,6 @@ pub(crate) struct PsiRoundIo {
     pub(crate) save_last: bool,
     /// The PSSM engine's options and the files' requests (`PsiRoundPlan::request`).
     pub(crate) request: PssmRequest,
-    /// Whether a round of the query before this one had its prefetch off
-    /// (`RoundOutcome::prefetch_off`): its formatter and PSSM read the subjects one by one, and
-    /// the scope, which the query's rounds share, keeps what they resolved, weak matches
-    /// included, for this round's prefetch (`common::database::ParsedShown::one_by_one`).
-    pub(crate) read_one_by_one_before: bool,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 
@@ -271,9 +266,6 @@ pub(crate) struct RoundOutcome {
     pub(crate) has_alignments: bool,
     pub(crate) set: InclusionSet,
     pub(crate) next: Option<Result<QueryPssm>>,
-    /// Whether `PRE_FETCH_SEQS_LIMIT` turned the round's prefetch off (its Seq-aligns before the
-    /// cut outnumber a positive limit, or the limit is 0 or below).
-    pub(crate) prefetch_off: bool,
 }
 
 /// The PSSM files of a run (`SavePssmToFile`), written between the rounds: each option's

@@ -190,8 +190,6 @@ fn run_queries(
         let mut state = IterationState::new(plan.num_iterations);
         // The PSSM that the next round searches (`pssm`, made after the round before).
         let mut pssm: Option<QueryPssm> = None;
-        // Whether a round of the query so far had its prefetch off (`PsiRoundIo::read_one_by_one_before`).
-        let mut read_one_by_one = false;
         while state.go() {
             if let Some(current) = &pssm {
                 files.write(current)?;
@@ -220,7 +218,6 @@ fn run_queries(
                 state: state.clone(),
                 save_last: plan.save_last,
                 request: plan.request.clone(),
-                read_one_by_one_before: read_one_by_one,
                 outcome: std::sync::Mutex::new(None),
             };
             // The reader's messages of the batch come with its first round.
@@ -275,7 +272,6 @@ fn run_queries(
                 .expect("the round's outcome")
                 .take()
                 .expect("every round's search reaches its outcome hook");
-            read_one_by_one |= outcome.prefetch_off;
             if !outcome.has_alignments {
                 break;
             }
@@ -454,6 +450,15 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // record that the engine purges (line DBID admits shared ids for such copies only).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509 (quoted at
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
+/// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,
+/// below `-inclusion_ethresh`, `x_ExtractAlignmentData`): the round's inclusion set and the
+/// subjects whose letters the PSSM reads (`ListedTitles::check_pssm_subjects`).
+pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
+    const BLAST_EXPECT_VALUE: f64 = 10.0;
+    crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
+        < inclusion_ethresh
+}
+
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -467,9 +472,7 @@ pub(super) fn round_outcome(
     gapped: &KarlinParams,
     listed_ordinals: Option<&[u32]>,
     parsed: &[Option<Arc<ParsedSubject>>],
-    prefetch_off: bool,
 ) -> Option<Vec<bool>> {
-    const BLAST_EXPECT_VALUE: f64 = 10.0;
     let key = |s_idx: u32| -> SetKey {
         match listed_ordinals {
             None => SetKey::Index(s_idx),
@@ -495,14 +498,9 @@ pub(super) fn round_outcome(
         })
         .unwrap_or_default();
     let has_alignments = !hsps.is_empty();
-    let lowest_evalue = |e_value: f64| e_value.min(BLAST_EXPECT_VALUE);
     let set: InclusionSet = hsps
         .iter()
-        .filter(|hsp| {
-            lowest_evalue(crate::report::serial::seqalign::seqalign_evalue(
-                hsp.e_value,
-            )) < args.inclusion_ethresh
-        })
+        .filter(|hsp| included(hsp.e_value, args.inclusion_ethresh))
         .map(|hsp| key(hsp.s_idx))
         .collect();
     let previous = io.state.previously_found();
@@ -533,7 +531,6 @@ pub(super) fn round_outcome(
         has_alignments,
         set,
         next,
-        prefetch_off,
     });
     found_before
 }

@@ -807,11 +807,11 @@ pub(crate) fn prefetch_always_off() -> bool {
 /// reports read nothing of the subjects ([`ParsedShown::prefetched`], refused by
 /// [`check_prefetched_parsed`]) and for the weak matches of NCBI's scope, which only such
 /// reads make ([`ParsedShown::one_by_one`]).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct BatchPrefetch(Batches);
 
 /// The prefetch of the batches of a call ([`BatchPrefetch`]).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 enum Batches {
     /// Every batch prefetches (no limit, `INT_MAX`, a subject set, a test).
     Every,
@@ -828,10 +828,8 @@ impl BatchPrefetch {
         Self(Batches::Every)
     }
 
-    /// No batch prefetches, as with a limit of 0 or below; also, for the weak matches, a
-    /// psiblast round after one of the query whose prefetch was off, whose resolutions the
-    /// scope keeps (`PsiRoundIo::read_one_by_one_before`).
-    pub(crate) fn none() -> Self {
+    /// No batch prefetches (a limit of 0 or below).
+    fn none() -> Self {
         Self(Batches::None)
     }
 
@@ -880,11 +878,6 @@ impl BatchPrefetch {
             }
         }
         Self(Batches::Each(on))
-    }
-
-    /// Whether the batch of the call's query `query` prefetches (a query of no batch: yes).
-    pub(crate) fn query(&self, query: usize) -> bool {
-        self.batch_of(query).unwrap_or(true)
     }
 
     /// Whether the batch of the call's query `query` prefetches; `None` for a query of no batch.
@@ -1608,21 +1601,27 @@ pub(crate) fn refuse_joined_hits<'a>(
 // ```
 /// LOSAT's refusal of two parsed subjects that follow each other in the hit list of query
 /// `query` that psiblast's PSSM reads (the round's Seq-aligns before the formatter's cut), whose
-/// Seq-align ids match (`report::db_subject::joined_in_reports`, `CSeq_id::Match`) and that are
-/// not copies of one record: NCBI puts the later one's alignments in the earlier one's row of the
-/// PSSM's multiple alignment, whose rows it counts by the hit ids, which LOSAT's PSSM keeps apart
-/// (`psiblast::pssm::input_msa`; probe of line DBID weakbatch,
-/// `blastdb-ids-20261021/R/weakbatch/pssm/`). Refused
-/// whatever their e-values (NCBI joins only where the later one is below `-inclusion_ethresh`).
-/// `subjects` as `refuse_joined_hits` takes them.
+/// Seq-align ids match (`report::db_subject::joined_in_reports`, `CSeq_id::Match`), the later one
+/// with a Seq-align below `-inclusion_ethresh`, and that are not copies of one record: NCBI puts
+/// the later one's alignments in the earlier one's row of the PSSM's multiple alignment, whose
+/// rows it counts by the hit ids, which LOSAT's PSSM keeps apart (`psiblast::pssm::input_msa`;
+/// probe of line DBID weakbatch, `blastdb-ids-20261021/R/weakbatch/pssm/`). Copies of one record
+/// are left to the PSSM, which keeps them apart too (review 2 of line DBID weakbatch, H1: NCBI
+/// puts them in one row; line DBID's next item). `subjects` gives each HSP list of the hit list
+/// as `refuse_joined_hits` takes it, with whether it has a Seq-align below the threshold.
 pub(crate) fn refuse_pssm_joined_hits<'a>(
     query: usize,
-    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    subjects: impl IntoIterator<
+        Item = (
+            Option<(u32, &'a crate::report::db_subject::ParsedSubject)>,
+            bool,
+        ),
+    >,
     program: &str,
 ) -> Result<()> {
     let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
-    for subject in subjects {
-        if let Some((before, ordinal)) = joined_apart(previous, subject) {
+    for (subject, included) in subjects {
+        if let Some((before, ordinal)) = joined_apart(previous, subject).filter(|_| included) {
             return Err(anyhow::Error::new(ParsedRefusal(format!(
                 "database sequences {before} and {ordinal} follow each other in the hits of query {} that psiblast's PSSM reads and have Seq-align ids that NCBI BLAST+ takes for one sequence (it puts their alignments in one row of the PSSM's multiple alignment) but are not copies of one record; this is not supported by LOSAT's {program}",
                 query + 1
@@ -1859,13 +1858,14 @@ pub(crate) struct ParsedShown {
 // their own ids; the data source's weak match (data_source.cpp:1439-1471) looks only among the
 // blobs that the loader gives for that id. So the weak matches of
 // `CDataSource_ScopeInfo::x_GetSeqMatch` (scope_info.cpp:865-882) come from the formatters' (and
-// psiblast's PSSM's) own reads where the batch's prefetch is off, and reach a later batch only
-// where the scope keeps them: psiblast's rounds of one query (`PsiRoundIo::read_one_by_one_before`)
-// and outfmt 5, which LOSAT's PSIBLAST refuses and whose other programs' off batches read only the
-// subjects they report. Probe w0 of line DBID weakbatch (`blastdb-ids-20261021/R/weakbatch/w0/run_w0.sh`):
-// a batch of 2 Seq-aligns under limit 2 shows each subject, the next batch of 4 shows
-// `sp|P00001.1|NAME_B` for `sp||NAME_B`; outfmt 5 with the batches before kept, and a batch of 252
-// subjects, which the prefetch resolves 100 at a time, show each subject.
+// psiblast's PSSM's) own reads where the batch's prefetch is off. A later batch can get them back
+// only where the scope is kept: psiblast's rounds of one query, and outfmt 5. Both read one by one
+// only subjects that LOSAT refuses there (a round's reports and PSSM, an off batch's reported
+// subjects), so no weak match of a run that LOSAT writes reaches a later batch. Probe w0 of line
+// DBID weakbatch (`blastdb-ids-20261021/R/weakbatch/w0/run_w0.sh`): a batch of 2 Seq-aligns under
+// limit 2 shows each subject, the next batch of 4 shows `sp|P00001.1|NAME_B` for `sp||NAME_B`;
+// outfmt 5 with the batches before kept, and a batch of 252 subjects, which the prefetch resolves
+// 100 at a time, show each subject.
 impl ParsedShown {
     /// What the reports show of a subject that the batches' prefetch reads only where `read` (a
     /// batch that reports it prefetches) and that the formatters may read one by one where
@@ -2483,8 +2483,9 @@ mod tests {
             let prefetch = BatchPrefetch::at(limit, counts.len(), first, batches, |span| {
                 counts[span].iter().sum()
             });
+            // A query of no batch (`None`, taken both ways) shows as `true`.
             (0..counts.len() + 1)
-                .map(|query| prefetch.query(query))
+                .map(|query| prefetch.batch_of(query).unwrap_or(true))
                 .collect::<Vec<_>>()
         };
         let every = vec![true; counts.len() + 1];
@@ -2495,8 +2496,8 @@ mod tests {
         for limit in [Some(0), Some(-1)] {
             assert_eq!(of(limit, 0, &[0..2, 2..5]), [false; 6], "{limit:?}");
         }
-        // Batches of 3 and 4 Seq-aligns: limit 3 turns the second off, a query beyond the call
-        // (or of no batch) keeps the prefetch.
+        // Batches of 3 and 4 Seq-aligns: limit 3 turns the second off; a query beyond the call
+        // is of no batch.
         assert_eq!(
             of(Some(3), 0, &[0..2, 2..5]),
             [true, true, false, false, false, true]
@@ -2556,6 +2557,36 @@ mod tests {
                     .unwrap()
             })
             .collect()
+    }
+
+    // Line DBID weakbatch: psiblast's PSSM puts following hits whose Seq-align ids match in one
+    // row (psi_pssm_input.cpp x_ExtractAlignmentData), where the later one is included.
+    #[test]
+    fn a_pssm_refuses_following_hits_whose_seq_align_ids_match() {
+        // tests/db_search/ids/pweak_v5: 7 `gb|FFF00043|`, 8 `gb|FFF00043.1|`, 4 `gb|FFF00041.1|`.
+        let s = parsed_subjects("pweak_v5");
+        let run = |hits: &[(Option<u32>, bool)]| {
+            refuse_pssm_joined_hits(
+                0,
+                hits.iter()
+                    .map(|&(ordinal, included)| (ordinal.map(|o| (o, &s[o as usize])), included)),
+                "PSIBLAST",
+            )
+        };
+        let error = run(&[(Some(8), true), (Some(7), true)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("database sequences 8 and 7 follow each other"),
+            "{error}"
+        );
+        assert!(run(&[(Some(7), true), (Some(8), true)]).is_err());
+        // The later one below no threshold: NCBI leaves it out of the PSSM.
+        assert!(run(&[(Some(8), true), (Some(7), false)]).is_ok());
+        // Another hit between them, a sequence without parsed Seq-ids, or ids that do not match.
+        assert!(run(&[(Some(8), true), (Some(4), true), (Some(7), true)]).is_ok());
+        assert!(run(&[(Some(8), true), (None, true), (Some(7), true)]).is_ok());
+        assert!(run(&[(Some(8), true), (Some(4), true)]).is_ok());
     }
 
     // Line DBID N3 review 1 M1: the joined copies' letters are the same because `copy_of` reads

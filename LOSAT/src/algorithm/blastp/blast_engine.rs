@@ -12014,27 +12014,24 @@ fn run_resolved_in_pool(
     // Whether each query's batch prefetches (`shared::BatchPrefetch`), by the Seq-aligns of its
     // results, one for each HSP (psiblast's before the cut, as `psiblast_hits_found` below): a
     // batch whose prefetch is off reads its subjects one by one, for the PSSM too. The rounds of
-    // one psiblast query share NCBI's scope: after a round whose prefetch was off, what it
-    // resolved one by one (weak matches included) is what the prefetch of a later round gets
-    // back (`PsiRoundIo::read_one_by_one_before`; review 1 of line DBID weakbatch, H2).
+    // one psiblast query share NCBI's scope, but every subject that a round whose prefetch is off
+    // reads one by one is refused there (its reports and its PSSM, below), so no weak match
+    // reaches a later round (review 2 of line DBID weakbatch, L1).
     let batch_ranges: Vec<std::ops::Range<usize>> = query_batches
         .iter()
         .map(|batch| batch.searched.clone())
         .collect();
-    let round_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+    let batch_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
         hit_lists.len(),
         0,
         &batch_ranges,
         |span| blastp_hit_list_hsp_count(&hit_lists[span]),
     );
-    let batch_prefetch = if reports
-        .psi_round
-        .is_some_and(|io| io.read_one_by_one_before)
-    {
-        crate::algorithm::common::database::BatchPrefetch::none()
-    } else {
-        round_prefetch.clone()
-    };
+    // `-out_pssm`'s PSSM, before it is made (a later query's PSSM error reruns the search without
+    // the files, review 2 of line DBID weakbatch H2).
+    if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
+        titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
+    }
     let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
             Some(request) => Some(psiblast_pssms(
@@ -12066,16 +12063,15 @@ fn run_resolved_in_pool(
             listed_titles
                 .as_ref()
                 .map_or(&[][..], |titles| titles.parsed.as_slice()),
-            !round_prefetch.query(0),
         ),
         None => None,
     };
-    // The PSSM of `-out_pssm` and of each round that makes the next round's PSSM (review 1 of
-    // line DBID weakbatch, H1: psiblast_app.cpp:291-309 `ComputePssmForNextIteration`) reads the
-    // letters of every subject before the cut by its Seq-align id.
-    if let Some(titles) = listed_titles.as_ref() {
-        if args.psi_pssm.is_some() || reports.psi_round.is_some_and(|io| io.makes_next()) {
-            titles.check_pssm_subjects(&hit_lists, &batch_prefetch)?;
+    // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,
+    // H1: psiblast_app.cpp:291-309 `ComputePssmForNextIteration`) reads the letters of the
+    // subjects before the cut by their Seq-align ids.
+    if let (Some(io), Some(titles)) = (reports.psi_round, listed_titles.as_ref()) {
+        if io.makes_next() {
+            titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
         }
     }
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {

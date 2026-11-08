@@ -603,7 +603,11 @@ that prefetches beside one of 3 that does not). The psiblast rows `db.id.wkb.ps.
 each round that makes the next round's PSSM reads the sequences before the cut by their Seq-align ids, so
 `pir|S12347|` beyond `-max_target_seqs 1` (`pweak_r_v5`) is refused where the round's prefetch is off, and two
 following hits whose Seq-align ids `Match` (`gb|FFF00043.1|` and `gb|FFF00043|` of `pweak_v5`), which NCBI puts in one
-row of the PSSM's multiple alignment, are refused also without the variable.
+row of the PSSM's multiple alignment, are refused also without the variable. `ids/wkb_e3_v5` (`make_ids.py
+--weakbatch-only`, from `ids/wkb_e3.faa`) holds `gb|FFF00043.1|`, `gb|ZZZ00001.1|` and then `gb|FFF00043|`, which the
+lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, refused without the variable
+(`db.id.wkb.ps.e3.i2.7.reject`); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
+`gb|WWW00001.1|`, which the PSSM does not read (`db.id.wkb.ps.p1.i2.7`, NCBI's bytes); the query is `ids/wkb_qy.faa`.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

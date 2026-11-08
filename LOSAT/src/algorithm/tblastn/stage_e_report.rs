@@ -1080,7 +1080,7 @@ fn write_pairwise(
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
     let gumbel = subject_set.gumbel_block(&spec, total_nt as u64);
-    if gumbel.is_none() && subject_set.searchsp.is_none() {
+    if gumbel.is_none() && !subject_set.old_fsc {
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }
     let report = BlastpPairwiseReport {

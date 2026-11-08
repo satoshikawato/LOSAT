@@ -109,9 +109,11 @@ pub(super) struct DatabaseNumbers {
 pub(super) struct SubjectSetNumbers {
     pub database: Option<DatabaseNumbers>,
     pub dbsize: Option<i64>,
-    /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
-    /// (`gumbel_block`).
+    /// `-searchsp`: the effective search space when above 0.
     pub searchsp: Option<i64>,
+    /// No Gumbel block (`gumbel_block`): `-searchsp` at any value, or the environment variable
+    /// `OLD_FSC` (`app::old_fsc_environment`).
+    pub old_fsc: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-136
@@ -203,13 +205,14 @@ impl SubjectSetNumbers {
     //     use_old_fsc = getenv("OLD_FSC");
     //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
     // ```
-    /// The Gumbel block of the database length `total_nt`, none with `-searchsp`.
+    /// The Gumbel block of the database length `total_nt`, none with `-searchsp` or `OLD_FSC`
+    /// (`old_fsc`).
     pub(super) fn gumbel_block(
         &self,
         spec: &ProteinScoringSpec,
         total_nt: u64,
     ) -> Option<BlastGumbelBlk> {
-        if self.searchsp.is_some() {
+        if self.old_fsc {
             return None;
         }
         lookup_protein_gumbel_params(spec, self.gumbel_db_length(total_nt))
@@ -1128,7 +1131,7 @@ fn run_local_search_with_pool(
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
     // answers 10 (`SubjectSetNumbers::min_subject_length`).
     // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
-    let min_subject_length = if profile.subject_set.searchsp.is_some() {
+    let min_subject_length = if profile.subject_set.old_fsc {
         total_nt / num_subjects.max(1)
     } else {
         profile.subject_set.min_subject_length(&subjects)
@@ -1195,8 +1198,8 @@ fn run_local_search_with_pool(
     // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
     // length is too short"; LOSAT refuses the search instead.
     ensure!(
-        profile.subject_set.searchsp.is_none() || !valid_contexts.iter().any(|&valid| valid) || min_subject_length > 0,
-        "-searchsp with subjects of an average length below one letter is not supported by LOSAT's TBLASTN"
+        !profile.subject_set.old_fsc || !valid_contexts.iter().any(|&valid| valid) || min_subject_length > 0,
+        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's TBLASTN"
     );
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),

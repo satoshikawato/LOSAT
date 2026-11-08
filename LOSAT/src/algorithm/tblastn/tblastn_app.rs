@@ -1217,7 +1217,6 @@ fn search(
         0
     };
     app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
-    app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the
@@ -1247,6 +1246,13 @@ fn search(
         database: database.map(TblastnDatabase::numbers),
         dbsize: args.dbsize,
         searchsp: args.searchsp,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+        // ```c
+        //     use_old_fsc = getenv("OLD_FSC");
+        //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+        // ```
+        // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
+        old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside

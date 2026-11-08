@@ -688,25 +688,8 @@ impl TblastnArgs {
 /// LOSAT's TBLASTN does not implement are rejected, and the others select the search.
 pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     use crate::blastinput::app::CompositionMode;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4886-4896
-    // ```c
-    //     lambda = RPSfindUngappedLambda(sbp->name);
-    // ...
-    //     std_freqs = _PSIMatrixFrequencyRatiosNew(sbp->name);
-    // ```
-    // NCBI's compressed lookup table (word sizes 5 to 7, tblastn-fast) scores its words with
-    // a matrix made from the search matrix's frequency ratios, as LOSAT's does
-    // (`tblastx/lookup/compressed.rs`, `build_compressed_score_matrix`). IDENTITY has no
-    // frequency ratios, and NCBI BLAST+ 2.17.0's tblastn dies of SIGSEGV in
-    // `s_BlastCompressedAaScanSubject` with it at word size 5 (`-task tblastn-fast` too) on every
-    // input; larger word sizes are NCBI's error (`validate_protein_options`).
-    if args.compressed_lookup && args.matrix_name.eq_ignore_ascii_case("IDENTITY") {
-        anyhow::bail!(
-            "-matrix {} with the compressed lookup table (-word_size {}), with which NCBI BLAST+'s tblastn crashes, is not supported by LOSAT's TBLASTN",
-            args.matrix_name,
-            args.word_size
-        );
-    }
+    // IDENTITY with the compressed lookup table is refused where the search reaches its first
+    // query batch (`check_identity_compressed_lookup_of`).
     if !args.gapped {
         anyhow::bail!("-ungapped (an ungapped search) is not supported by LOSAT's TBLASTN");
     }
@@ -860,7 +843,22 @@ pub fn check_options(args: &TblastnArgs) -> Result<()> {
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
-    search_settings(&args.resolve()?).map(|_| ())
+    let resolved = args.resolve()?;
+    search_settings(&resolved)?;
+    // Without the inputs: IDENTITY with the compressed lookup table, which the search refuses where
+    // it searches its first query batch.
+    check_identity_compressed_lookup_of(&resolved)
+}
+
+/// `protein_options_check::check_identity_compressed_lookup` of a TBLASTN search.
+pub(super) fn check_identity_compressed_lookup_of(args: &ResolvedTblastnArgs) -> Result<()> {
+    crate::blastinput::protein_options_check::check_identity_compressed_lookup(
+        &args.matrix_name,
+        args.compressed_lookup,
+        args.word_size,
+        "tblastn",
+        "TBLASTN",
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/api/tblastn_options.cpp:54-58

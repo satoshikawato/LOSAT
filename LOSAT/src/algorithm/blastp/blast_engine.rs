@@ -2403,29 +2403,6 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.word_size
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1790-1795
-    // ```c
-    //        if (lookup_options->word_size > 5 && is_identity) {
-    //
-    //            Blast_MessageWrite(blast_msg, eBlastSevError,
-    //                               kBlastMessageNoContext,
-    //                               "Word size larger than 5 is not supported for "
-    //                               "the identity scoring matrix");
-    // ```
-    // NCBI's compressed lookup table scores its words with a matrix made from the search
-    // matrix's frequency ratios, which IDENTITY does not have: NCBI BLAST+ 2.17.0's blastp dies of
-    // SIGSEGV in `s_BlastCompressedAaScanSubject` with it at word size 5 (`-task blastp-fast` too)
-    // on every input, as its tblastn (`tblastn::args`); larger word sizes are NCBI's error
-    // (`validate_protein_options`).
-    if args.scoring.matrix == ScoringMatrix::Identity
-        && args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
-    {
-        bail!(
-            "-matrix {} with the compressed lookup table (-word_size {}), with which NCBI BLAST+'s blastp crashes, is not supported by LOSAT's {program}",
-            args.matrix_name,
-            args.word_size
-        );
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-271
     // ```c
     // static array_of_8 blosum62_values[BLOSUM62_VALUES_MAX] = {
@@ -2495,6 +2472,17 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// `protein_options_check::check_identity_compressed_lookup` of a BLASTP or psiblast search.
+fn check_identity_compressed_lookup_of(args: &ResolvedBlastpArgs) -> Result<()> {
+    crate::blastinput::protein_options_check::check_identity_compressed_lookup(
+        &args.matrix_name,
+        args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable,
+        args.word_size as i32,
+        args.app.ncbi_name(),
+        args.app.name(),
+    )
 }
 
 /// The report of one requested BLASTP format: one of LOSAT's text reports (outfmt 0, and the
@@ -5351,6 +5339,9 @@ pub fn check_options(args: &BlastpArgs) -> Result<()> {
     }
     let resolved = args.resolve()?;
     validate_requested_blastp_support(&resolved)?;
+    // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it
+    // searches its first query batch.
+    check_identity_compressed_lookup_of(&resolved)?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
 }
@@ -6389,6 +6380,11 @@ fn search(
     // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
     // (`psiblast_stop_at_invalid_pssm`).
     let batches = psiblast_stop_at_invalid_pssm(&args, batches);
+    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
+    // that stops at its first batch (`batches.starts` empty) gives NCBI's error.
+    if !batches.starts.is_empty() {
+        check_identity_compressed_lookup_of(&args)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
     // one search per round per query (`psi_round`).
@@ -14574,15 +14570,26 @@ mod tests {
                     .contains("not supported by LOSAT's PSIBLAST"));
             }
         }
-        // IDENTITY with the compressed lookup table (word sizes 5 and blastp-fast), with which
-        // NCBI crashes; 6 and 7 are NCBI's error (`validate_protein_options`).
-        for (task, word_size) in [("blastp", Some(5)), ("blastp-fast", None)] {
+        // IDENTITY with the compressed lookup table (word size 5, blastp-fast's default), with
+        // which NCBI crashes: the options-only check refuses it (`search` where it searches its first
+        // query batch); the lookup table runs (blastp-fast at word size 3); 6 and 7 are NCBI's error
+        // (`validate_protein_options`).
+        for (task, word_size, runs) in [
+            ("blastp", Some(5), false),
+            ("blastp-fast", None, false),
+            ("blastp-fast", Some(3), true),
+        ] {
             let mut args = make_blastp_args();
             args.task = task.to_string();
             args.matrix = Some("IDENTITY".to_string());
             args.word_size = word_size;
             let resolved = args.resolve().expect("resolved blastp args");
-            let err = validate_requested_blastp_support(&resolved).expect_err("IDENTITY word 5");
+            validate_requested_blastp_support(&resolved).expect("IDENTITY's options");
+            if runs {
+                check_options(&args).expect("IDENTITY with the lookup table");
+                continue;
+            }
+            let err = check_options(&args).expect_err("IDENTITY word 5");
             assert!(
                 err.to_string().contains(
                     "-matrix IDENTITY with the compressed lookup table (-word_size 5), with which NCBI BLAST+'s blastp crashes, is not supported by LOSAT's BLASTP"

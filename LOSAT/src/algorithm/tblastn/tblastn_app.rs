@@ -1285,6 +1285,11 @@ fn search(
         reading,
         batch_size,
     );
+    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
+    // that stops at its first batch gives NCBI's error.
+    if batches.searched_done > 0 {
+        super::args::check_identity_compressed_lookup_of(&resolved)?;
+    }
     // The refusal of a title the archive cannot write comes before its first byte: the queries
     // of the batches NCBI completes are written (the records of the batch that a reader error
     // interrupts are not).

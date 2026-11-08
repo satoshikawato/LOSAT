@@ -426,7 +426,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-html`, `-line_length`, `-sorthits`, `-sorthsps`: all five programs.
 
 **Scoring and search settings**
-- `-matrix` and gap costs: `blastp` and `tblastn` accept every matrix with any gap costs of NCBI's table for the matrix, but IDENTITY not with the compressed lookup table (`-word_size 5`, and `-task blastp-fast` and `tblastn-fast`), with which NCBI crashes; `blastx` accepts only BLOSUM62 with `-gapopen 11 -gapextend 1`; `tblastx` accepts every matrix.
+- `-matrix` and gap costs: `blastp` and `tblastn` accept every matrix with any gap costs of NCBI's table for the matrix, but IDENTITY not with the compressed lookup table (word size 5, the default of `-task blastp-fast` and `tblastn-fast`), with which NCBI crashes; `blastx` accepts only BLOSUM62 with `-gapopen 11 -gapextend 1`; `tblastx` accepts every matrix.
 - `-comp_based_stats 1` and `3`: `blastp`, `blastx`, `tblastn` (`0` and `2` work; `blastp` and `tblastn` search IDENTITY in mode 0 whatever mode is given, with NCBI's warning).
 - `-word_size` 2 and 4: `blastp` (3 and 5 to 7 work). Other than 3 and 5: `blastx`. `tblastn` takes 2 to 7, `tblastx` 2 to 4.
 - `-task blastp-short`: `blastp`. `-task rmblastn`: `blastn`.

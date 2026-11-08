@@ -3786,14 +3786,24 @@ fn build_pairwise_hits(
         use rayon::prelude::*;
         let rows: Vec<Result<PairwiseHit>> =
             pool.install(|| hits.into_par_iter().map(&row).collect());
-        return rows.into_iter().collect::<Result<Vec<_>>>();
+        let mut kept = Vec::with_capacity(rows.len());
+        for row in rows {
+            kept.push(row?);
+        }
+        return Ok(kept);
     }
     #[cfg(not(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     )))]
     let _ = x_pool;
-    hits.into_iter().map(row).collect()
+    // The rows in a vector of the hits' count (a `Result` collect grows its vector from empty,
+    // copying the rows of every window at each growth), the first error in the list order.
+    let mut rows = Vec::with_capacity(hits.len());
+    for hit in hits {
+        rows.push(row(hit)?);
+    }
+    Ok(rows)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61

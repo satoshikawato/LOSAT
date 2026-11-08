@@ -147,10 +147,7 @@ impl RpsTraceback<'_> {
                 (redo.gap_open, redo.gap_extend),
                 self.x_drop_final,
                 matrix,
-                std::mem::replace(
-                    &mut scratch.gap,
-                    crate::algorithm::pssm_search::gapalign::PssmGapScratch::new(),
-                ),
+                std::mem::take(&mut scratch.gap),
             );
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redone = RedoMatch {

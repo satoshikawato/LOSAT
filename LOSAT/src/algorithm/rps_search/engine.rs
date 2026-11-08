@@ -514,10 +514,14 @@ mod tests {
         assert_eq!(k[2], 0.041);
         assert_eq!(k[3], 0.041);
         assert_eq!(k[5], RPS_K_MULT * 0.02);
-        // With composition-based statistics: the mark of the last query that has one.
+        // With composition-based statistics: the mark of the last query that has one, whatever
+        // its ordinal id.
+        let marks = [Some(5), None, Some(2), None, None, Some(1)];
         let k = batch_gapped_k(&[0..3, 3..5, 5..6], &marks, &karlin_k, 0.041, true);
         assert_eq!(k[0], RPS_K_MULT * 0.03);
         assert_eq!(k[3], 0.041);
         assert_eq!(k[5], RPS_K_MULT * 0.02);
+        let k = batch_gapped_k(&[0..3, 3..5, 5..6], &marks, &karlin_k, 0.041, false);
+        assert_eq!(k[0], RPS_K_MULT * 0.06);
     }
 }

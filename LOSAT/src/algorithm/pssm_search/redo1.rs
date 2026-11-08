@@ -552,9 +552,7 @@ impl RedoMatch<'_> {
             best_evalue = best_evalue.min(hsp.e_value);
         }
         redone.retain(|hsp| hsp.e_value <= self.expect_value);
-        let Some(first) = redone.first() else {
-            return None;
-        };
+        let first = redone.first()?;
         let best_score = first.align.score;
         // NCBI's `best_evalue <= hitParams->options->expect_value` holds: the list keeps an HSP,
         // whose e-value is at most `-evalue`, and `best_evalue` is the smallest of all.

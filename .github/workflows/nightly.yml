@@ -73,7 +73,8 @@ jobs:
     # advisory database is fetched at run time, so this job stays off pull requests: a failed fetch
     # or a new advisory does not stop unrelated work. Vulnerable, unmaintained, unsound and yanked
     # crates all fail, as cargo audit --deny warnings did here before (two lock files; python's was
-    # not audited). The other checks of deny.toml run on every pull request (ci.yml, `rust lint`).
+    # not audited). Not --locked, as in ci.yml. The other checks of deny.toml run on every pull
+    # request (ci.yml, `rust lint`).
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -89,8 +90,7 @@ jobs:
           status=0
           for manifest in LOSAT/Cargo.toml web/adapter/Cargo.toml python/Cargo.toml; do
             echo "::group::$manifest"
-            cargo deny --manifest-path "$manifest" --config deny.toml --locked \
-              check advisories || status=1
+            cargo deny --manifest-path "$manifest" --config deny.toml check advisories || status=1
             echo "::endgroup::"
           done
           exit "$status"

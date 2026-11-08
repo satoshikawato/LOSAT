@@ -1295,7 +1295,8 @@ impl ListedTitles<'_> {
     /// from the Seq-aligns of `hit_lists` before the formatter's cut to `-max_target_seqs`: NCBI
     /// reads the letters of each by its Seq-align id, as the formats that read the subject do
     /// (`ParsedSubject::fetched`), also for those beyond the cut that no report shows; where
-    /// that read fails it drops the letters with a warning. `prefetch`: whether each query's
+    /// that read fails it drops the letters with a warning; following subjects whose Seq-align ids
+    /// match are refused (`shared::refuse_pssm_joined_hits`). `prefetch`: whether each query's
     /// batch prefetches (the round's), which reads them all by their own ids before the PSSM;
     /// one whose prefetch is off reads them one by one (`ParsedSubject::fetched`'s
     /// `one_by_one`).
@@ -1304,6 +1305,25 @@ impl ListedTitles<'_> {
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
     ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        // The PSSM's multiple alignment joins following subjects whose Seq-align ids match.
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            shared::refuse_pssm_joined_hits(
+                query,
+                hit_list.hsplist_array[..count].iter().map(|hsp_list| {
+                    let rank = hsp_list.oid as usize;
+                    self.parsed_subject(rank)
+                        .map(|subject| (self.listed.ordinals[rank], subject))
+                }),
+                self.program,
+            )?;
+        }
         let reads = Self::batch_reads(hit_lists, prefetch);
         for rank in Self::reported(hit_lists) {
             if let Some(subject) = self.parsed_subject(rank) {

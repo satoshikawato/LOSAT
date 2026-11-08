@@ -5,4 +5,14 @@
   batch's sequences one by one and can show the other sequence for it, while a batch whose
   prefetch is on loads each sequence by its own id. A positive value at or above a batch's
   alignments, such as `PRE_FETCH_SEQS_LIMIT=1000`, now writes those sequences as NCBI does
-  instead of refusing the run; psiblast's PSSM follows the batch of its round.
+  instead of refusing the run. psiblast's PSSM follows the batch of its round, and after a round
+  whose prefetch is off the query's later rounds are taken as read one by one (they share NCBI's
+  scope).
+- psiblast `-db` with parsed Seq-ids and `-num_iterations` other than 1: each round that makes the
+  next round's PSSM now checks the sequences beyond `-max_target_seqs` that the PSSM reads by their
+  Seq-align ids, as `-out_pssm` already did. Before, a sequence there that NCBI BLAST+ 2.17.0 reads
+  as another one (an accession without a version that the lookup finds as a versioned sequence
+  first, or a weak match with the prefetch off) gave later rounds that differ from NCBI's.
+  Following hits whose Seq-align ids NCBI takes for one sequence (`gb|X|` and `gb|X.1|`) but that
+  are not copies of one record are now refused where psiblast makes a PSSM: NCBI puts their
+  alignments in one row of the PSSM's multiple alignment.

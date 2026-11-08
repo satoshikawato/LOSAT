@@ -140,6 +140,9 @@ pub enum WeakMatch {
     /// A Seq-align id with weak keys that a version 5 database cannot look up: one with a name,
     /// or a `pir` or `prf` one (`common::database::HeaderReader::weakly_held`).
     Unlisted,
+    /// The lookup of the sequences that could match weakly failed, with this message (LOSAT's
+    /// lookup of the name alone; NCBI's scope makes none).
+    Failed(String),
 }
 
 /// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
@@ -528,6 +531,10 @@ impl ParsedSubject {
             )),
             Some(WeakMatch::Unlisted) => Err(format!(
                 "has the Seq-align id {}, which ids of other sequences can match weakly in any letter case (a name with or without an accession, a pir or prf accession as a name) and which a version 5 database does not look up: in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
+                id()
+            )),
+            Some(WeakMatch::Failed(message)) => Err(format!(
+                "has the Seq-align id {}, for which LOSAT cannot look up the sequences that can match it weakly ({message}): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
                 id()
             )),
         }
@@ -2002,7 +2009,11 @@ mod tests {
     #[test]
     fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
         let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
-        for weak in [WeakMatch::Held(4), WeakMatch::Unlisted] {
+        for weak in [
+            WeakMatch::Held(4),
+            WeakMatch::Unlisted,
+            WeakMatch::Failed("no accession info".into()),
+        ] {
             let subject = subject.clone().weak_match(Some(weak.clone()));
             assert!(subject.fetched(true, false).is_ok(), "{weak:?}");
             let error = subject.fetched(false, true).unwrap_err();

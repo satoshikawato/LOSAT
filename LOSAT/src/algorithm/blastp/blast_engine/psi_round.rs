@@ -190,6 +190,8 @@ fn run_queries(
         let mut state = IterationState::new(plan.num_iterations);
         // The PSSM that the next round searches (`pssm`, made after the round before).
         let mut pssm: Option<QueryPssm> = None;
+        // Whether a round of the query so far had its prefetch off (`PsiRoundIo::read_one_by_one_before`).
+        let mut read_one_by_one = false;
         while state.go() {
             if let Some(current) = &pssm {
                 files.write(current)?;
@@ -218,6 +220,7 @@ fn run_queries(
                 state: state.clone(),
                 save_last: plan.save_last,
                 request: plan.request.clone(),
+                read_one_by_one_before: read_one_by_one,
                 outcome: std::sync::Mutex::new(None),
             };
             // The reader's messages of the batch come with its first round.
@@ -272,6 +275,7 @@ fn run_queries(
                 .expect("the round's outcome")
                 .take()
                 .expect("every round's search reaches its outcome hook");
+            read_one_by_one |= outcome.prefetch_off;
             if !outcome.has_alignments {
                 break;
             }
@@ -463,6 +467,7 @@ pub(super) fn round_outcome(
     gapped: &KarlinParams,
     listed_ordinals: Option<&[u32]>,
     parsed: &[Option<Arc<ParsedSubject>>],
+    prefetch_off: bool,
 ) -> Option<Vec<bool>> {
     const BLAST_EXPECT_VALUE: f64 = 10.0;
     let key = |s_idx: u32| -> SetKey {
@@ -528,6 +533,7 @@ pub(super) fn round_outcome(
         has_alignments,
         set,
         next,
+        prefetch_off,
     });
     found_before
 }

@@ -807,18 +807,19 @@ pub(crate) fn prefetch_always_off() -> bool {
 /// reports read nothing of the subjects ([`ParsedShown::prefetched`], refused by
 /// [`check_prefetched_parsed`]) and for the weak matches of NCBI's scope, which only such
 /// reads make ([`ParsedShown::one_by_one`]).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct BatchPrefetch(Batches);
 
 /// The prefetch of the batches of a call ([`BatchPrefetch`]).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Batches {
     /// Every batch prefetches (no limit, `INT_MAX`, a subject set, a test).
     Every,
     /// No batch does (0 or below).
     None,
-    /// Whether the batch of each query of the call prefetches (a positive limit).
-    Each(Vec<bool>),
+    /// Whether the batch of each query of the call prefetches (a positive limit); `None` for a
+    /// query of no batch range, which is taken both ways ([`BatchPrefetch::reads`]).
+    Each(Vec<Option<bool>>),
 }
 
 impl BatchPrefetch {
@@ -827,11 +828,19 @@ impl BatchPrefetch {
         Self(Batches::Every)
     }
 
+    /// No batch prefetches, as with a limit of 0 or below; also, for the weak matches, a
+    /// psiblast round after one of the query whose prefetch was off, whose resolutions the
+    /// scope keeps (`PsiRoundIo::read_one_by_one_before`).
+    pub(crate) fn none() -> Self {
+        Self(Batches::None)
+    }
+
     /// The batches of a call of `queries` queries (its hit lists, numbered from 0): `batches`,
     /// the ranges of the queries of each batch numbered from `first` (the call's first query;
     /// ranges before it are the batches written before), or the whole call as one batch where
     /// `batches` is empty; `seq_aligns` counts the Seq-aligns of the hit lists of a range of
-    /// the call ([`subject_seq_aligns`]). A query of no range keeps the prefetch.
+    /// the call ([`subject_seq_aligns`]). A query of no range is taken both as prefetched and as
+    /// read one by one.
     pub(crate) fn of(
         queries: usize,
         first: usize,
@@ -853,9 +862,9 @@ impl BatchPrefetch {
             return Self::every();
         }
         if prefetch_off_at(limit, 0) {
-            return Self(Batches::None);
+            return Self::none();
         }
-        let mut on = vec![true; queries];
+        let mut on = vec![None; queries];
         let whole = [first..first + queries];
         let batches = if batches.is_empty() {
             &whole[..]
@@ -865,19 +874,25 @@ impl BatchPrefetch {
         for batch in batches {
             let span = batch.start.saturating_sub(first).min(queries)
                 ..batch.end.saturating_sub(first).min(queries);
-            if !span.is_empty() && prefetch_off_at(limit, seq_aligns(span.clone())) {
-                on[span].fill(false);
+            if !span.is_empty() {
+                let prefetches = !prefetch_off_at(limit, seq_aligns(span.clone()));
+                on[span].fill(Some(prefetches));
             }
         }
         Self(Batches::Each(on))
     }
 
-    /// Whether the batch of the call's query `query` prefetches.
+    /// Whether the batch of the call's query `query` prefetches (a query of no batch: yes).
     pub(crate) fn query(&self, query: usize) -> bool {
+        self.batch_of(query).unwrap_or(true)
+    }
+
+    /// Whether the batch of the call's query `query` prefetches; `None` for a query of no batch.
+    fn batch_of(&self, query: usize) -> Option<bool> {
         match &self.0 {
-            Batches::Every => true,
-            Batches::None => false,
-            Batches::Each(on) => on.get(query).copied().unwrap_or(true),
+            Batches::Every => Some(true),
+            Batches::None => Some(false),
+            Batches::Each(on) => on.get(query).copied().flatten(),
         }
     }
 
@@ -893,9 +908,11 @@ impl BatchPrefetch {
                 let mut on = std::collections::HashSet::new();
                 let mut off = std::collections::HashSet::new();
                 for (query, ordinal) in reported {
-                    if self.query(query) {
+                    let prefetches = self.batch_of(query);
+                    if prefetches != Some(false) {
                         on.insert(ordinal);
-                    } else {
+                    }
+                    if prefetches != Some(true) {
                         off.insert(ordinal);
                     }
                 }
@@ -1179,11 +1196,15 @@ impl<'a> HeaderReader<'a> {
                 None => {}
             }
         }
+        // A failed lookup of the weak candidates (LOSAT's own, of the name alone) leaves them
+        // unknown where the batch reads one by one (review 1 of line DBID weakbatch, L1).
         let weak = if self.prefetch_off {
-            match self.weakly_held(lookup, subject, ordinal, &oids) {
-                Ok(weak) => weak,
-                Err(error) => return failed(error),
-            }
+            self.weakly_held(lookup, subject, ordinal, &oids)
+                .unwrap_or_else(|error| {
+                    Some(crate::report::db_subject::WeakMatch::Failed(
+                        error.ncbi_message().unwrap_or_else(|| error.to_string()),
+                    ))
+                })
         } else {
             None
         };
@@ -1571,6 +1592,47 @@ pub(crate) fn refuse_joined_hits<'a>(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-320
+// ```c++
+//         if (evalue < m_Opts.inclusion_ethresh) {
+//             // Increment msa_index (if appropriate) after all CDense_seg for a
+//             // given target sequence have been processed.
+//             if (last_sid && !current_sid->Match(*last_sid)) {
+//                 msa_index++;
+//             }
+//             _ASSERT(msa_index < GetNumAlignedSequences() + 1);
+//             const CDense_seg& seg = (*itr)->GetSegs().GetDenseg();
+//             x_ProcessDenseg(seg, msa_index, evalue, bit_score);
+//         }
+//         last_sid = current_sid;
+// ```
+/// LOSAT's refusal of two parsed subjects that follow each other in the hit list of query
+/// `query` that psiblast's PSSM reads (the round's Seq-aligns before the formatter's cut), whose
+/// Seq-align ids match (`report::db_subject::joined_in_reports`, `CSeq_id::Match`) and that are
+/// not copies of one record: NCBI puts the later one's alignments in the earlier one's row of the
+/// PSSM's multiple alignment, whose rows it counts by the hit ids, which LOSAT's PSSM keeps apart
+/// (`psiblast::pssm::input_msa`; probe of line DBID weakbatch,
+/// `blastdb-ids-20261021/R/weakbatch/pssm/`). Refused
+/// whatever their e-values (NCBI joins only where the later one is below `-inclusion_ethresh`).
+/// `subjects` as `refuse_joined_hits` takes them.
+pub(crate) fn refuse_pssm_joined_hits<'a>(
+    query: usize,
+    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    program: &str,
+) -> Result<()> {
+    let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
+    for subject in subjects {
+        if let Some((before, ordinal)) = joined_apart(previous, subject) {
+            return Err(anyhow::Error::new(ParsedRefusal(format!(
+                "database sequences {before} and {ordinal} follow each other in the hits of query {} that psiblast's PSSM reads and have Seq-align ids that NCBI BLAST+ takes for one sequence (it puts their alignments in one row of the PSSM's multiple alignment) but are not copies of one record; this is not supported by LOSAT's {program}",
+                query + 1
+            ))));
+        }
+        previous = subject;
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1025-1033
 // ```c++
 //         } else {
@@ -1793,12 +1855,17 @@ pub(crate) struct ParsedShown {
 //     }
 // ```
 // The prefetch (`LoadSequencesToScope`'s `GetBioseqHandles`) asks the scope only for the ids it
-// has resolved, and the data loader for the others by their own ids, so the weak matches of
-// `CDataSource_ScopeInfo::x_GetSeqMatch` (scope_info.cpp:865-882) come only from the formatters'
-// own reads where the batch's prefetch is off (probe w0 of line DBID weakbatch: a batch of 2
-// Seq-aligns under limit 2 shows each subject, the next batch of 4 shows `sp|P00001.1|NAME_B`
-// for `sp||NAME_B`; outfmt 5, whose scope keeps the batches before, and a batch of 252 subjects,
-// which the prefetch resolves 100 at a time, show each subject).
+// has resolved, which it gets back as they were resolved, and the data loader for the others by
+// their own ids; the data source's weak match (data_source.cpp:1439-1471) looks only among the
+// blobs that the loader gives for that id. So the weak matches of
+// `CDataSource_ScopeInfo::x_GetSeqMatch` (scope_info.cpp:865-882) come from the formatters' (and
+// psiblast's PSSM's) own reads where the batch's prefetch is off, and reach a later batch only
+// where the scope keeps them: psiblast's rounds of one query (`PsiRoundIo::read_one_by_one_before`)
+// and outfmt 5, which LOSAT's PSIBLAST refuses and whose other programs' off batches read only the
+// subjects they report. Probe w0 of line DBID weakbatch (`blastdb-ids-20261021/R/weakbatch/w0/run_w0.sh`):
+// a batch of 2 Seq-aligns under limit 2 shows each subject, the next batch of 4 shows
+// `sp|P00001.1|NAME_B` for `sp||NAME_B`; outfmt 5 with the batches before kept, and a batch of 252
+// subjects, which the prefetch resolves 100 at a time, show each subject.
 impl ParsedShown {
     /// What the reports show of a subject that the batches' prefetch reads only where `read` (a
     /// batch that reports it prefetches) and that the formatters may read one by one where
@@ -2463,6 +2530,9 @@ mod tests {
         assert!(every.prefetched(9) && !every.one_by_one(9));
         let none = BatchPrefetch::at(Some(0), 5, 0, &[0..2, 2..5], sum).reads([(0, 7)]);
         assert!(!none.prefetched(7) && none.one_by_one(7));
+        // Review 1 M1: a query of no batch (5, beyond the call's 5) is taken both ways.
+        let beyond = BatchPrefetch::at(Some(3), 5, 0, &[0..2, 2..5], sum).reads([(5, 6)]);
+        assert!(beyond.prefetched(6) && beyond.one_by_one(6));
         let shown = ParsedShown {
             prefetched: true,
             ..ParsedShown::default()

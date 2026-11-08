@@ -54,7 +54,7 @@ fn an_empty_query_input_writes_one_newline() {
             ["-subject", subject_path.to_str().unwrap()],
             ["-db", db_path.to_str().unwrap()],
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec![
                     program,
                     "-query",
@@ -102,7 +102,7 @@ fn an_empty_query_pipe_writes_one_newline_for_tblastn_and_tblastx() {
         ("tblastx", &[]),
     ];
     for (program, extra) in cases {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let mut args = vec![
                 program,
                 "-query",

@@ -219,6 +219,37 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4886-4896
+// ```c
+//     lambda = RPSfindUngappedLambda(sbp->name);
+// ...
+//     std_freqs = _PSIMatrixFrequencyRatiosNew(sbp->name);
+// ```
+/// LOSAT's refusal of IDENTITY with the compressed lookup table: word size 5, which `-task
+/// blastp-fast` and `tblastn-fast` set by default (larger sizes are NCBI's error,
+/// `validate_protein_options`). NCBI's compressed lookup table scores its words with a matrix
+/// made from the search matrix's frequency ratios, as LOSAT's does
+/// (`tblastx/lookup/compressed.rs`, `build_compressed_score_matrix`). IDENTITY has none, and NCBI
+/// BLAST+ 2.17.0's blastp and tblastn die of SIGSEGV (`s_BlastCompressedAaScanSubject`) when they
+/// search a query batch with it, subjects without letters too. A run that NCBI stops at its first
+/// query batch (a batch of queries without letters: NCBI's error) does not reach the search, so
+/// the programs check this where they search their first batch; the options-only check of the Web
+/// (`check_options`) checks it without the inputs.
+pub fn check_identity_compressed_lookup(
+    matrix_name: &str,
+    compressed_lookup: bool,
+    word_size: i32,
+    ncbi_program: &str,
+    program: &str,
+) -> anyhow::Result<()> {
+    if compressed_lookup && matrix_name.eq_ignore_ascii_case("IDENTITY") {
+        anyhow::bail!(
+            "-matrix {matrix_name} with the compressed lookup table (-word_size {word_size}), with which NCBI BLAST+'s {ncbi_program} crashes, is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

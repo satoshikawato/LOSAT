@@ -96,7 +96,7 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
             args.extend(subject_args);
             args.extend(["-num_threads", "1", "-outfmt", format]);
             let expected = fs::read(dir.join(format!("badbatch_{mode}_{format}.out"))).unwrap();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = args.clone();
                 let at = args.iter().position(|a| *a == "-num_threads").unwrap();
                 args[at + 1] = threads;
@@ -131,7 +131,7 @@ fn an_empty_query_pipe_writes_the_prolog_and_the_epilog() {
             ["-subject", subject.to_str().unwrap()],
             ["-db", db.to_str().unwrap()],
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastp", "-query", "-"];
                 args.extend(subject_args);
                 args.extend(["-num_threads", threads, "-outfmt", format]);
@@ -358,12 +358,13 @@ fn a_taxdb_that_names_nothing_leaves_the_id_alone() {
 
 /// The rows `db.sa.x16_taxid.*` of `db_search_manifest.tsv` (OF5a part 1b: outfmt 15 and 16 with
 /// a taxonomy database in `BLASTDB`; the rows with `warn` in their name also have a query file with
-/// a reader warning, and some a `BATCH_SIZE`), at one and four threads: the bytes of NCBI BLAST+
-/// 2.17.0 (`blastp -num_threads 1`) for stdout, stderr and the exit status; the rows of kind
-/// `losat-rejection` write nothing and name their reason. Every row with a `NAME=VALUE` token
-/// (`BLASTDB`, `BATCH_SIZE`, `CHUNK_SIZE`) runs with it in the environment, as the harness does.
+/// a reader warning, and some a `BATCH_SIZE`), at one, four, eight and sixteen threads: the bytes
+/// of NCBI BLAST+ 2.17.0 (`blastp -num_threads 1`) for stdout, stderr and the exit status; the rows
+/// of kind `losat-rejection` write nothing and name their reason. Every row with a `NAME=VALUE`
+/// token (`BLASTDB`, `BATCH_SIZE`, `CHUNK_SIZE`) runs with it in the environment, as the harness
+/// does.
 #[test]
-fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
+fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
     let mut rows = 0;
@@ -395,7 +396,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
         if env.is_empty() {
             continue;
         }
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 engine,
                 &[
@@ -442,8 +443,8 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
 
 /// What NCBI BLAST+ 2.17.0 wrote for `blastp -query QUERY (-subject sprot.faa | -db db/sprot)
 /// EXTRA -outfmt N -num_threads 1` in `tests/fixtures/outfmt16` (`<stem>_{sub,db}_{15,16}.out`, and
-/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one and four
-/// threads writes the same stdout, stderr and exit status.
+/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one, four,
+/// eight and sixteen threads writes the same stdout, stderr and exit status.
 fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], rc: i32) {
     let dir = fixtures();
     for format in ["15", "16"] {
@@ -451,7 +452,7 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
             let name = format!("{stem}_{mode}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
             let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastp", "-query", query];
                 args.extend(if mode == "sub" {
                     ["-subject", "sprot.faa"]
@@ -537,7 +538,7 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
 /// no other: a `taxdb.bti` of the search path whose record of the database's taxid (9606) NCBI
 /// reads from unmapped memory (`btd_empty`, NCBI BLAST+ crashes) changes no byte of outfmt 8 and
 /// adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13 (3))
-/// at 1 and 4 threads. BLASTP writes nothing to standard output then.
+/// at 1, 4, 8 and 16 threads. BLASTP writes nothing to standard output then.
 #[test]
 fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -548,7 +549,7 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let damaged = "tests/seqdb/taxdb/btd_empty";
     let refusal = "unsupported database: the taxonomy record of taxid 9606";
     for format in ["8", "0", "5", "6", "7"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastp",
                 "-db",

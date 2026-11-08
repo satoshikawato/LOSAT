@@ -23,7 +23,8 @@ use crate::config::ScoringMatrix;
 //     m_Args.push_back(arg);
 // ```
 /// TBLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
-pub(crate) const TBLASTN_TASK: TaskParser = task_parser(&["tblastn", "tblastn-fast"], &[]);
+pub(crate) const TBLASTN_TASK: TaskParser =
+    task_parser("TBLASTN", &["tblastn", "tblastn-fast"], &[]);
 
 // NCBI reference: c++/src/algo/blast/api/tblastn_options.cpp:54-85
 // ```c++

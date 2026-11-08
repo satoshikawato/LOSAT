@@ -34,8 +34,11 @@ const BLASTN_TASKS: &[&str] = &["megablast", "dc-megablast", "blastn", "blastn-s
 const RMBLASTN_UNSUPPORTED: &str = "the task rmblastn is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)";
 
 /// BLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
-pub(crate) const BLASTN_TASK: TaskParser =
-    task_parser(BLASTN_TASKS, &[("rmblastn", RMBLASTN_UNSUPPORTED)]);
+pub(crate) const BLASTN_TASK: TaskParser = task_parser(
+    "BLASTN",
+    BLASTN_TASKS,
+    &[("rmblastn", RMBLASTN_UNSUPPORTED)],
+);
 
 /// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
 /// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a

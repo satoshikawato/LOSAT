@@ -821,20 +821,33 @@ fn hand_set_template_lookup_and_task_are_refused() {
         &inputs.subject.0,
         ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
-    let cases: [(&[&str], &str, fn(&mut BlastnArgs)); 4] = [
+    let cases: [(&[&str], &str, fn(&mut BlastnArgs)); 6] = [
         (
             &["-task", "dc-megablast"],
             "Invalid discontiguous template parameters: template length must be 16, 18, or 21",
             |a| a.template_length = Some(17),
+        ),
+        // NCBI's options factory reads the task in lower case (blast_options_handle.cpp:341):
+        // DC-MEGABLAST is dc-megablast, whose template the next check refuses.
+        (
+            &["-task", "dc-megablast"],
+            "Invalid discontiguous template parameters: template length must be 16, 18, or 21",
+            |a| {
+                a.task = "DC-MEGABLAST".into();
+                a.template_length = Some(17)
+            },
         ),
         (
             &["-task", "blastn"],
             "The limit_lookup option can only be used with word size >= 16",
             |a| a.limit_lookup = true,
         ),
-        (&[], "'tblastn' is not a supported task", |a| {
-            a.task = "tblastn".into()
-        }),
+        (&[], "'blastz' is not a supported task", |a| a.task = "BlastZ".into()),
+        (
+            &[],
+            "the task tblastn is not supported by LOSAT's BLASTN (use megablast, dc-megablast, blastn or blastn-short)",
+            |a| a.task = "tblastn".into(),
+        ),
         (
             &[],
             "the task rmblastn is not supported by LOSAT's BLASTN",
@@ -859,8 +872,35 @@ fn hand_set_template_lookup_and_task_are_refused() {
         };
         let error = format!("{:#}", result.expect_err(message));
         assert!(error.contains(message), "{message}: {error}");
-        assert!(sink.is_empty(), "{message}");
+        assert!(sink.is_empty() && diagnostics.is_empty(), "{message}");
     }
+    // The database entry checks the task first too (before the database is opened).
+    let mut args = inputs.args(&[]);
+    args.db = Some("no_such_database".into());
+    args.task = "blastz".into();
+    let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+    let result = {
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt: "6",
+                sink: OutputSink::Writer(&mut sink),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        LOSAT::api::local_blast::run_local_database_blastn(
+            args,
+            &queries,
+            LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+            &mut outputs,
+        )
+    };
+    let error = format!("{:#}", result.expect_err("refused"));
+    assert!(
+        error.contains("'blastz' is not a supported task"),
+        "{error}"
+    );
 }
 
 /// The exit code and the message of NCBI's error that a run ended with.

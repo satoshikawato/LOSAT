@@ -8109,6 +8109,9 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    crate::algorithm::blastn::args::BLASTN_TASK.check(&mut args.task)?;
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what
     // LOSAT cannot write, and a diagnostics stream that saves the messages.
     let archive_requested = outputs.formats.iter().any(|format| {
@@ -8137,9 +8140,6 @@ fn run_local_formats(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
-    // parser has checked it, a caller of `run_local` has not.
-    crate::algorithm::blastn::args::BLASTN_TASK.check(&args.task)?;
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
@@ -8226,6 +8226,9 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    crate::algorithm::blastn::args::BLASTN_TASK.check(&mut args.task)?;
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
     QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(

@@ -84,7 +84,8 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///    }
 /// ```
 /// The template length and type are 16, 18 or 21 and 0, 1 or 2 by the argument
-/// constraints (`-template_length`, `-template_type`), so their two checks cannot fail.
+/// constraints (`-template_length`, `-template_type`); a caller of `run_local` can set another
+/// length, which the length's check refuses (the type is an enum of the three).
 /// The lookup table type of the options is the task's: megablast and dc-megablast
 /// `eMBLookupTable`, blastn and blastn-short `eNaLookupTable`
 /// (blast_nucl_options.cpp:137-150, disc_nucl_options.cpp:55-64).

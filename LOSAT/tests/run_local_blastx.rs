@@ -743,16 +743,16 @@ fn check_options_fails_as_a_run_does() {
     assert_eq!(failed, 12);
 }
 
-/// The values that the command line's parser refuses and a caller of `run_local` can set itself get
+/// Values that the command line's parser refuses and a caller of `run_local` can set itself get
 /// NCBI's errors of the options where NCBI's core checks them (blast_options.c:1312-1348 for the
-/// word size, :1510-1516 for the hit list size; blast_aux.cpp:662-673 for the task), else LOSAT's
-/// refusal of what it does not run: nothing is searched with a value the command line cannot give.
+/// word size, :1510-1516 for the hit list size; blast_aux.cpp:662-673 for a task NCBI does not
+/// know, read in lower case), else LOSAT's refusal of what it does not run, instead of a search.
 #[test]
 fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query)).unwrap();
     let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-    let cases: [(&str, fn(&mut BlastxArgs)); 9] = [
+    let cases: [(&str, fn(&mut BlastxArgs)); 10] = [
         ("Word-size must be greater than zero", |a| {
             a.word_size = Some(0)
         }),
@@ -768,8 +768,12 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
             "unsupported BLASTX composition-based statistics mode 1: use 0 or 2",
             |a| a.comp_based_stats = 1,
         ),
-        ("'blastp' is not a supported task", |a| {
-            a.task = "blastp".into()
+        (
+            "the task blastp is not supported by LOSAT's BLASTX (use blastx or blastx-fast)",
+            |a| a.task = "blastp".into(),
+        ),
+        ("'blastz' is not a supported task", |a| {
+            a.task = "BLASTZ".into()
         }),
         ("Argument \"strand\". Illegal value", |a| {
             a.strand = "up".into()
@@ -799,6 +803,33 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         assert!(error.contains(message), "{message}: {error}");
         assert!(sink.is_empty(), "{message}");
     }
+    // The database entry checks the task first too (before the database is opened).
+    let mut args = blastx_args(&inputs.query, &inputs.subject, &[]);
+    args.db = Some("no_such_database".into());
+    args.task = "blastz".into();
+    let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+    let result = {
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt: "6",
+                sink: OutputSink::Writer(&mut sink),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        LOSAT::api::local_blast::run_local_database_blastx(
+            args,
+            &queries,
+            LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+            &mut outputs,
+        )
+    };
+    let error = format!("{:#}", result.expect_err("refused"));
+    assert!(
+        error.contains("'blastz' is not a supported task"),
+        "{error}"
+    );
 }
 
 /// A query whose first batch ends on its first record only when the batch counts the whole record:

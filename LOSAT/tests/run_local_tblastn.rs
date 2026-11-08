@@ -85,33 +85,51 @@ fn run(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:662-673 (`ThrowIfInvalidTask`,
 // quoted at `TaskParser::check`). The command line's parser refuses a task that is not TBLASTN's;
-// a caller of `run_local` that sets one itself gets NCBI's error instead of a search with the
-// default task.
+// a caller of `run_local` (or `run_local_database`, before it opens the database) that sets one
+// itself gets NCBI's error for a name NCBI does not know, LOSAT's for another program's task,
+// instead of a search with the default task.
 #[test]
 fn a_task_that_is_not_tblastns_is_refused() {
     let query = repository("LOSAT/tests/fasta/CoBV.faa");
     let subject = repository("LOSAT/tests/fasta/LC738874.fasta");
-    let mut args = tblastn_args("q", "s", &[]);
-    args.task = "tblastx".into();
-    let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
-    let result = {
-        let mut outputs = ReportOutputs {
-            formats: vec![FormatOutput {
-                outfmt: "6",
-                sink: OutputSink::Writer(&mut sink),
-            }],
-            diagnostics: &mut diagnostics,
-            hits: None,
-            observer: None,
+    for (task, database, message) in [
+        (
+            "tblastx",
+            false,
+            "the task tblastx is not supported by LOSAT's TBLASTN (use tblastn or tblastn-fast)",
+        ),
+        ("TBLASTZ", false, "'tblastz' is not a supported task"),
+        ("tblastz", true, "'tblastz' is not a supported task"),
+    ] {
+        let mut args = tblastn_args("q", "s", &[]);
+        args.task = task.into();
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut sink),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            if database {
+                args.db = Some("no_such_database".into());
+                LOSAT::api::local_blast::run_local_database_tblastn(
+                    args,
+                    &queries(&query),
+                    LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+                    &mut outputs,
+                )
+            } else {
+                run_local_tblastn(args, &queries(&query), &subjects(&subject), &mut outputs)
+            }
         };
-        run_local_tblastn(args, &queries(&query), &subjects(&subject), &mut outputs)
-    };
-    let error = format!("{:#}", result.expect_err("refused"));
-    assert!(
-        error.contains("'tblastx' is not a supported task"),
-        "{error}"
-    );
-    assert!(sink.is_empty() && diagnostics.is_empty());
+        let error = format!("{:#}", result.expect_err(message));
+        assert!(error.contains(message), "{task}: {error}");
+        assert!(sink.is_empty() && diagnostics.is_empty());
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467

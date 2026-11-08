@@ -632,6 +632,11 @@ fn a_word_size_of_one_searches() {
             )
         };
         result.unwrap_or_else(|error| panic!("{extra:?}: {error:#}"));
+        // The lowercase subject repeats the query's last 500 letters: the searches find them,
+        // except where `-lcase_masking` masks that subject.
+        if extra != ["-lcase_masking"] {
+            assert!(!sink.is_empty(), "{extra:?}: no rows");
+        }
     }
 }
 

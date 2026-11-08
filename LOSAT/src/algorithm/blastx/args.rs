@@ -6,9 +6,16 @@ use anyhow::{bail, Result};
 use clap::Args;
 use std::path::PathBuf;
 
+/// `-max_target_seqs` as the hit list count of `blastinput::report_counts`: a value below 1, which a
+/// caller of `run_local` can set (the command line's is at least 1), counts 0 (NCBI's hit list size
+/// below 1, "No hits are being saved").
+pub(crate) fn max_target_seqs_count(max_target_seqs: Option<i32>) -> Option<usize> {
+    max_target_seqs.map(|n| usize::try_from(n).unwrap_or(0))
+}
+
 /// BLASTX's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
 pub(crate) const BLASTX_TASK: crate::blastinput::value_parsers::TaskParser =
-    crate::blastinput::value_parsers::task_parser(&["blastx", "blastx-fast"], &[]);
+    crate::blastinput::value_parsers::task_parser("BLASTX", &["blastx", "blastx-fast"], &[]);
 
 #[derive(Args, Debug)]
 #[command(rename_all = "snake_case")]
@@ -901,16 +908,9 @@ impl BlastxArgs {
         &self,
         choice: &crate::blastinput::app::FormatChoice,
     ) -> Result<ResolvedOptions> {
-        // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
-        // parser has checked it and the values below, a caller of `run_local` has not.
-        BLASTX_TASK.check(&self.task)?;
+        // The command line's parser has checked the values below, a caller of `run_local` has
+        // not (the task: `run_local`, first).
         crate::algorithm::blastn::args::QueryStrand::parse(&self.strand)?;
-        if !matches!(self.comp_based_stats, 0 | 2) {
-            bail!(
-                "unsupported BLASTX composition-based statistics mode {}: use 0 or 2",
-                self.comp_based_stats
-            );
-        }
         if self.seg.enabled && !(self.seg.locut.is_finite() && self.seg.hicut.is_finite()) {
             bail!("SEG requires finite cutoffs");
         }
@@ -949,6 +949,14 @@ impl BlastxArgs {
         // ```
         if self.ungapped && self.comp_based_stats != 0 {
             return Err(SemanticOptionsError("Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search").into());
+        }
+        // The command line's `composition` reads 0 or 2 only (LOSAT's limit); a caller of
+        // `run_local` sets the mode itself.
+        if !matches!(self.comp_based_stats, 0 | 2) {
+            bail!(
+                "unsupported BLASTX composition-based statistics mode {}: use 0 or 2",
+                self.comp_based_stats
+            );
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1765-1773
         // ```c++
@@ -1015,8 +1023,7 @@ impl BlastxArgs {
         // sets it; the command line's is at least 1) is NCBI's hit list size below 1.
         let counts = crate::blastinput::report_counts::report_counts(
             i32::from(outfmt),
-            self.max_target_seqs
-                .map(|n| usize::try_from(n).unwrap_or(0)),
+            max_target_seqs_count(self.max_target_seqs),
             self.num_descriptions,
             self.num_alignments,
         );

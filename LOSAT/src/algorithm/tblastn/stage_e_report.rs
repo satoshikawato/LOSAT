@@ -1401,6 +1401,7 @@ mod tests {
         run_local_for_report, LocalStageDProfile, LocalStageDScoring,
     };
     use crate::api::local_blast::{FormatOutput, OutputSink};
+    use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
     use crate::utils::seg::SegParams;
 
     // The reports that read no letters of the reported database sequences: a value read wrongly
@@ -1526,7 +1527,11 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                 },
-                mode == 2,
+                if mode == 2 {
+                    BlastCompoAdjustMode::CompositionMatrixAdjust
+                } else {
+                    BlastCompoAdjustMode::NoCompositionBasedStats
+                },
                 true,
                 LocalStageDScoring::default(),
             )

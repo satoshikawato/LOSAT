@@ -312,7 +312,7 @@ pub(super) fn run_local_for_report(
     queries: &[Vec<u8>],
     subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
-    composition_mode2: bool,
+    compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
 ) -> Result<(
@@ -325,7 +325,7 @@ pub(super) fn run_local_for_report(
         queries,
         SubjectLetters::Records(subjects),
         profile,
-        composition_mode2,
+        compo_adjust_mode,
         do_sum_stats,
         scoring,
         1,
@@ -346,7 +346,7 @@ pub(super) fn run_local_for_report_threads(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
-    composition_mode2: bool,
+    compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
     threads: usize,
@@ -362,7 +362,7 @@ pub(super) fn run_local_for_report_threads(
             queries,
             subjects,
             profile,
-            composition_mode2,
+            compo_adjust_mode,
             do_sum_stats,
             scoring,
             &mut setup,
@@ -395,7 +395,7 @@ pub(super) fn x_run_local_for_report_in_pool(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
-    composition_mode2: bool,
+    compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
     pool: &SearchPool<'_>,
@@ -405,7 +405,7 @@ pub(super) fn x_run_local_for_report_in_pool(
         queries,
         subjects,
         profile,
-        composition_mode2,
+        compo_adjust_mode,
         do_sum_stats,
         scoring,
         &mut setup,
@@ -649,7 +649,7 @@ pub(super) fn x_search_batches<'p>(
     subjects: SubjectLetters<'_>,
     ranges: Vec<std::ops::Range<usize>>,
     profile: impl Fn(std::ops::Range<usize>) -> LocalStageDProfile<'p> + Sync,
-    composition_mode2: bool,
+    compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
     threads: usize,
@@ -711,7 +711,7 @@ pub(super) fn x_search_batches<'p>(
             &queries[range.clone()],
             subjects,
             profile(range),
-            composition_mode2,
+            compo_adjust_mode,
             do_sum_stats,
             scoring,
             pool,
@@ -901,7 +901,7 @@ pub(super) fn run_local_mode2_sum_stats(
         queries,
         subjects,
         profile,
-        true,
+        BlastCompoAdjustMode::CompositionMatrixAdjust,
         true,
         LocalStageDScoring::default(),
         None,
@@ -921,7 +921,7 @@ pub(super) fn run_local_mode0_no_sum_stats(
         queries,
         subjects,
         profile,
-        false,
+        BlastCompoAdjustMode::NoCompositionBasedStats,
         false,
         LocalStageDScoring::default(),
         None,
@@ -941,7 +941,7 @@ pub(super) fn run_local_mode0_sum_stats(
         queries,
         subjects,
         profile,
-        false,
+        BlastCompoAdjustMode::NoCompositionBasedStats,
         true,
         LocalStageDScoring::default(),
         None,
@@ -961,7 +961,7 @@ pub(super) fn run_local_mode2_no_sum_stats(
         queries,
         subjects,
         profile,
-        true,
+        BlastCompoAdjustMode::CompositionMatrixAdjust,
         false,
         LocalStageDScoring::default(),
         None,
@@ -978,7 +978,15 @@ pub(super) fn run_local_mode2_sum_stats_with_scoring(
     profile: LocalStageDProfile<'_>,
     scoring: LocalStageDScoring,
 ) -> Result<Vec<KappaResultHitList>> {
-    run_local_search(queries, subjects, profile, true, true, scoring, None)
+    run_local_search(
+        queries,
+        subjects,
+        profile,
+        BlastCompoAdjustMode::CompositionMatrixAdjust,
+        true,
+        scoring,
+        None,
+    )
 }
 
 // NCBI c++/src/algo/blast/core/blast_options.c:903-936;
@@ -991,7 +999,15 @@ pub(super) fn run_local_mode0_no_sum_stats_with_scoring(
     profile: LocalStageDProfile<'_>,
     scoring: LocalStageDScoring,
 ) -> Result<Vec<KappaResultHitList>> {
-    run_local_search(queries, subjects, profile, false, false, scoring, None)
+    run_local_search(
+        queries,
+        subjects,
+        profile,
+        BlastCompoAdjustMode::NoCompositionBasedStats,
+        false,
+        scoring,
+        None,
+    )
 }
 
 // NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501:
@@ -1001,7 +1017,7 @@ fn run_local_search(
     queries: &[Vec<u8>],
     subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
-    composition_mode2: bool,
+    compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
     observer: Option<&mut StageDBoundaryTrace>,
@@ -1010,7 +1026,7 @@ fn run_local_search(
         queries,
         SubjectLetters::Records(subjects),
         profile,
-        composition_mode2,
+        compo_adjust_mode,
         do_sum_stats,
         scoring,
         &mut None,
@@ -1048,7 +1064,7 @@ fn run_local_search_with_pool(
     queries: &[Vec<u8>],
     subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
-    composition_mode2: bool,
+    compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
     setup: &mut Option<LocalBatchSetup>,
@@ -1160,7 +1176,7 @@ fn run_local_search_with_pool(
             total_nt: stats_nt,
             num_subjects,
             min_subject_length,
-            composition_mode2,
+            compo_adjust_mode,
             do_sum_stats,
         },
         options_searchsp.as_ref().map(std::slice::from_ref),
@@ -1244,7 +1260,7 @@ fn run_local_search_with_pool(
     // That close can trim the preliminary stream, so this internal path
     // rejects the environment mode until the close operation is ported.
     ensure!(
-        !composition_mode2 || std::env::var_os("ADAPTIVE_CBS").is_none(),
+        !compo_adjust_mode.is_enabled() || std::env::var_os("ADAPTIVE_CBS").is_none(),
         "the environment variable ADAPTIVE_CBS, which makes NCBI BLAST+ close its preliminary stream of composition-adjusted HSPs early, is not supported by LOSAT's TBLASTN"
     );
     // NCBI c++/src/algo/blast/core/blast_hits.c:43-70:
@@ -1255,7 +1271,7 @@ fn run_local_search_with_pool(
     // not positive (NCBI crashes) is rejected with the options (`args.rs`).
     let prelim_size = usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         profile.max_target_seqs,
-        composition_mode2,
+        compo_adjust_mode.is_enabled(),
         true,
     ))
     .ok()
@@ -1299,7 +1315,7 @@ fn run_local_search_with_pool(
                 total_nt: stats_nt,
                 num_subjects,
                 min_subject_length,
-                composition_mode2,
+                compo_adjust_mode,
                 do_sum_stats,
             },
             subjects,
@@ -1326,7 +1342,7 @@ fn run_local_search_with_pool(
     // OID, then each batch reads from the end; equal-OID query lists were
     // inserted in query order and are consumed in reverse query order.
     // Composition redo uses the score-sorted stream at lines 289-319.
-    if composition_mode2 {
+    if compo_adjust_mode.is_enabled() {
         preliminary_lists.sort_by(|(qa, oa, a), (qb, ob, b)| {
             qa.cmp(qb)
                 .then_with(|| compare_preliminary_lists_for_kappa(*oa as i32, a, *ob as i32, b))
@@ -1335,7 +1351,7 @@ fn run_local_search_with_pool(
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
     }
 
-    if !composition_mode2 {
+    if !compo_adjust_mode.is_enabled() {
         // NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501,
         // 1644-1707,1763-1776: the control path performs ordinary
         // traceback and posttraceback statistics, then result post-pipes.
@@ -1413,7 +1429,7 @@ fn run_local_search_with_pool(
         &valid_contexts,
         &parameters,
         *query_lengths.iter().max().unwrap(),
-        BlastCompoAdjustMode::CompositionMatrixAdjust,
+        compo_adjust_mode,
         false,
         profile.expect_value,
         do_sum_stats,
@@ -1676,7 +1692,7 @@ fn run_local_search_with_pool(
                     &valid_contexts,
                     &parameters,
                     *query_lengths.iter().max().unwrap(),
-                    BlastCompoAdjustMode::CompositionMatrixAdjust,
+                    compo_adjust_mode,
                     false,
                     profile.expect_value,
                     do_sum_stats,
@@ -2393,7 +2409,7 @@ struct QuerySetInputs<'a> {
     total_nt: usize,
     num_subjects: usize,
     min_subject_length: usize,
-    composition_mode2: bool,
+    compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
 }
 
@@ -2635,7 +2651,7 @@ fn query_set_setup(
         },
         LocalParameterCall::Initial {
             min_subject_length: i32::try_from(inputs.min_subject_length)?,
-            composition_based_stats: if inputs.composition_mode2 { 2 } else { 0 },
+            composition_based_stats: inputs.compo_adjust_mode.ncbi_value(),
         },
     );
     Ok(QuerySetSetup {
@@ -3504,7 +3520,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
             },
-            true,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
             LocalStageDScoring::default(),
             Some(&mut trace),
@@ -3554,7 +3570,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
             },
-            true,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
             LocalStageDScoring::default(),
             Some(&mut trace),
@@ -3844,7 +3860,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
             },
-            true,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
             LocalStageDScoring::default(),
             Some(&mut boundary),
@@ -3932,7 +3948,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
             },
-            true,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
             LocalStageDScoring::default(),
             Some(&mut boundary),
@@ -4371,7 +4387,11 @@ mod tests {
                     &query_sequences,
                     &subject_slices(&subject_sequences),
                     profile,
-                    mode == 2,
+                    if mode == 2 {
+                        BlastCompoAdjustMode::CompositionMatrixAdjust
+                    } else {
+                        BlastCompoAdjustMode::NoCompositionBasedStats
+                    },
                     mode == 2,
                     scoring,
                     Some(&mut boundary),
@@ -4598,7 +4618,11 @@ mod tests {
                     std::slice::from_ref(&query),
                     &[subject.as_slice()],
                     profile,
-                    mode == 2,
+                    if mode == 2 {
+                        BlastCompoAdjustMode::CompositionMatrixAdjust
+                    } else {
+                        BlastCompoAdjustMode::NoCompositionBasedStats
+                    },
                     mode == 2,
                     LocalStageDScoring::default(),
                     Some(&mut boundary),
@@ -4803,7 +4827,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
             },
-            false,
+            BlastCompoAdjustMode::NoCompositionBasedStats,
             false,
             LocalStageDScoring::default(),
             Some(&mut boundary),
@@ -4951,7 +4975,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
             },
-            false,
+            BlastCompoAdjustMode::NoCompositionBasedStats,
             false,
             LocalStageDScoring {
                 matrix: ScoringMatrix::Blosum45,
@@ -5125,7 +5149,11 @@ mod tests {
                 &query_sequences,
                 &subject_slices(&subject_sequences),
                 profile,
-                mode == 2,
+                if mode == 2 {
+                    BlastCompoAdjustMode::CompositionMatrixAdjust
+                } else {
+                    BlastCompoAdjustMode::NoCompositionBasedStats
+                },
                 mode == 0,
                 LocalStageDScoring::default(),
                 Some(&mut boundary),
@@ -5322,7 +5350,11 @@ mod tests {
                     &queries,
                     &subject_slices(&subjects),
                     profile,
-                    mode == 2,
+                    if mode == 2 {
+                        BlastCompoAdjustMode::CompositionMatrixAdjust
+                    } else {
+                        BlastCompoAdjustMode::NoCompositionBasedStats
+                    },
                     mode == 2,
                     LocalStageDScoring::default(),
                     Some(&mut boundary),
@@ -5477,7 +5509,7 @@ mod tests {
                         engine_positives: false,
                         culling_limit: 0,
                     },
-                    true,
+                    BlastCompoAdjustMode::CompositionMatrixAdjust,
                     true,
                     LocalStageDScoring::default(),
                     Some(&mut boundary),
@@ -6590,7 +6622,7 @@ mod tests {
                 SubjectLetters::Records(&subject_slices(&subjects)),
                 ranges.clone(),
                 profile,
-                true,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
                 true,
                 LocalStageDScoring::default(),
                 1,
@@ -6603,7 +6635,7 @@ mod tests {
                         &queries[range.clone()],
                         SubjectLetters::Records(&subject_slices(&subjects)),
                         profile(range.clone()),
-                        true,
+                        BlastCompoAdjustMode::CompositionMatrixAdjust,
                         true,
                         LocalStageDScoring::default(),
                         1,
@@ -6678,7 +6710,7 @@ mod tests {
             SubjectLetters::Records(&subject_slices(&subjects)),
             ranges.clone(),
             profile,
-            true,
+            BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
             LocalStageDScoring::default(),
             2,
@@ -6698,7 +6730,7 @@ mod tests {
                     &queries[range.clone()],
                     SubjectLetters::Records(&subject_slices(&subjects)),
                     profile(range.clone()),
-                    true,
+                    BlastCompoAdjustMode::CompositionMatrixAdjust,
                     true,
                     LocalStageDScoring::default(),
                     1,

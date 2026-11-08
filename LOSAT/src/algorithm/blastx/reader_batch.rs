@@ -3,7 +3,7 @@
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
-    parameters::{score_block, subject_parameters, ContextParameters},
+    parameters::{score_block_for, subject_parameters, ContextParameters},
     query_setup::{context_frame, prepare_queries, prepare_unit_queries, PreparedQueryBatch},
     subjects::Subjects,
 };
@@ -236,9 +236,9 @@ pub(crate) fn prepare_unit(
     subjects: Subjects<'_>,
 ) -> Result<UnitPrep> {
     let mut prepared = prepare_unit_queries(queries, Some(layout), options)?;
-    let params = score_block(&prepared);
+    let params = score_block_for(&prepared, options.scoring);
     prepared.reader_shape = Some(Arc::clone(layout));
-    let kappa = options.composition == 2 && options.gapped;
+    let kappa = options.composition != 0 && options.gapped;
     let ungapped_link = !options.gapped && options.sum_stats;
     let (mut word_cutoff_min, mut redo_cutoff_min) = (None, None);
     if (kappa || ungapped_link)
@@ -290,7 +290,7 @@ pub(crate) fn prepare_lone_unit(
     options: &ResolvedOptions,
 ) -> Result<UnitPrep> {
     let prepared = prepare_queries(queries, options)?;
-    let params = score_block(&prepared);
+    let params = score_block_for(&prepared, options.scoring);
     Ok(UnitPrep {
         prepared,
         params,
@@ -316,6 +316,11 @@ pub(crate) fn prepare_reader_batch(
 ) -> Result<Vec<UnitPrep>> {
     let x_t = super::x_timing::lap();
     let layout = Arc::new(ReaderBatchShape::layout(records, options));
+    // The matrix error of the whole query batch, after its set-up's (`query_setup.rs`
+    // `unknown_matrix_error`).
+    if options.unknown_matrix && !layout.set_up_fails() {
+        return Err(super::query_setup::unknown_matrix_error(records));
+    }
     let prepare = |range: &Range<usize>| -> Result<UnitPrep> {
         prepare_unit(&records[range.clone()], &layout, options, subjects)
     };

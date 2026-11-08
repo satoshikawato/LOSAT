@@ -10,7 +10,6 @@ use crate::algorithm::blastp::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
     BlastpGappedAlignmentMode, GapAlignScratch,
 };
-use crate::config::ScoringMatrix;
 use anyhow::Result;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-103
@@ -423,6 +422,50 @@ pub(crate) fn gapped_observed(
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
 ) -> Result<Vec<PreliminaryHsp>> {
+    gapped_observed_with(
+        super::seed::Blosum62Bx,
+        batch,
+        parameters,
+        options,
+        subject,
+        initial,
+        xdrop,
+        observe,
+    )
+}
+
+/// [`gapped_observed`] with another matrix than BLOSUM62 (item SC6 of line NP). Not inlined, so that
+/// BLOSUM62's keeps its code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gapped_observed_of(
+    scoring: super::seed::MatrixBx,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    initial: &[InitHsp],
+    xdrop: i32,
+    observe: &mut dyn FnMut(&PreliminaryHsp, bool),
+) -> Result<Vec<PreliminaryHsp>> {
+    gapped_observed_with(
+        scoring, batch, parameters, options, subject, initial, xdrop, observe,
+    )
+}
+
+/// The body of [`gapped_observed`], with the matrix of `scoring`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn gapped_observed_with<S: super::seed::BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    initial: &[InitHsp],
+    xdrop: i32,
+    observe: &mut dyn FnMut(&PreliminaryHsp, bool),
+) -> Result<Vec<PreliminaryHsp>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3707-3708
     // ```c
     //    if (init_hitlist->total == 0)
@@ -509,7 +552,7 @@ pub(crate) fn gapped_observed(
             init.length as usize,
             h.s_start as usize,
             init.length as usize,
-            ScoringMatrix::Blosum62,
+            scoring.matrix(),
         );
         h.s_gapped_start += start as i32 - h.q_gapped_start;
         h.q_gapped_start = start as i32;
@@ -518,7 +561,7 @@ pub(crate) fn gapped_observed(
             &subject[..subject.len() - 1],
             start,
             h.s_gapped_start as usize,
-            ScoringMatrix::Blosum62,
+            scoring.matrix(),
             options.gap_open,
             options.gap_extend,
             xdrop,

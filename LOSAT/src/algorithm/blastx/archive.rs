@@ -91,7 +91,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
         .max_target_seqs
         .or(args.num_alignments.map(|size| size as i32))
         .map_or(500, |size| size);
-    inputs.comp_based_stats = i32::from(args.comp_based_stats);
+    inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs
 }
 
@@ -473,7 +473,7 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
     // BLOSUM62 with 11 / 1); an ungapped search has none.
     let gapped = options.gapped.then(|| {
         crate::stats::tables::lookup_protein_params(&crate::config::ProteinScoringSpec {
-            matrix: crate::config::ScoringMatrix::Blosum62,
+            matrix: options.scoring,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,
         })

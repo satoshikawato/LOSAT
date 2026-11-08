@@ -307,6 +307,53 @@ pub(crate) fn x_word_finder_scan(
     )
 }
 
+/// `x_word_finder_scan` with another matrix than BLOSUM62 (item SC6 of line NP): the direct loop
+/// (`x_word_finder_direct_with`, the port of NCBI's loop) with the matrix's extensions
+/// (`MatrixBx`), on its tables of `Int4` hits (`Lookup::x_new_as` builds no 16-bit table for it);
+/// the fused loop (LOSAT_X_BXDIAG) and the sentinel walks (LOSAT_X_BXUNGAPSENT) are BLOSUM62's.
+/// Not inlined, so that BLOSUM62's loops keep their code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_word_finder_matrix(
+    scoring: MatrixBx,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+) -> Result<Vec<InitHsp>> {
+    let BxLookup::Wide(lookup) = lookup else {
+        anyhow::bail!("BLASTX builds no 16-bit table for another matrix than BLOSUM62");
+    };
+    let scan_byte = x_bxscan_byte();
+    let acts = x_hitbf_acts(x_bxhitbf(), options, subject, diagonals);
+    macro_rules! direct {
+        ($hit_bf:literal) => {
+            x_word_finder_direct_with::<$hit_bf, _, _>(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                scan_byte,
+                |q: &[u8], s: &[u8], s_left_off, s_right_off, q_right_off, dropoff, word| {
+                    scoring.two_hit(q, s, s_left_off, s_right_off, q_right_off, dropoff, word)
+                },
+                |q: &[u8], s: &[u8], q_off, s_off, dropoff, word| {
+                    scoring.one_hit(q, s, q_off, s_off, dropoff, word)
+                },
+            )
+        };
+    }
+    if acts {
+        direct!(true)
+    } else {
+        direct!(false)
+    }
+}
+
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
 /// EXPERIMENT (LOSAT_X_BXHITBF): whether the direct loop for `subject` is the branch-free one:
 /// `hit_bf` (the switch) and [`XHitBf::fits`] at the table's offset before the subject.
@@ -355,7 +402,7 @@ fn x_word_finder_direct(
             batch, parameters, options, subject, lookup, diagonals, scan_byte,
         );
     }
-    x_word_finder_direct_with::<false, _>(
+    x_word_finder_direct_with::<false, _, _>(
         batch,
         parameters,
         options,
@@ -364,6 +411,7 @@ fn x_word_finder_direct(
         diagonals,
         scan_byte,
         extend_two_hit_blosum62,
+        extend_one_hit_blosum62,
     )
 }
 
@@ -390,7 +438,7 @@ fn x_word_finder_direct_sent(
     }
     macro_rules! direct {
         ($hit_bf:literal, $shadow:literal) => {
-            x_word_finder_direct_with::<$hit_bf, _>(
+            x_word_finder_direct_with::<$hit_bf, _, _>(
                 batch,
                 parameters,
                 options,
@@ -401,6 +449,7 @@ fn x_word_finder_direct_sent(
                 move |_: &[u8], _: &[u8], s_left_off, s_right_off, q_right_off, dropoff, _| {
                     sent.two_hit::<$shadow>(s_left_off, s_right_off, q_right_off, dropoff)
                 },
+                extend_one_hit_blosum62,
             )
         };
     }
@@ -426,7 +475,7 @@ fn x_word_finder_direct_bf(
     diagonals: &mut Diagonals,
     scan_byte: XScanByte,
 ) -> Result<Vec<InitHsp>> {
-    x_word_finder_direct_with::<true, _>(
+    x_word_finder_direct_with::<true, _, _>(
         batch,
         parameters,
         options,
@@ -435,6 +484,7 @@ fn x_word_finder_direct_bf(
         diagonals,
         scan_byte,
         extend_two_hit_blosum62,
+        extend_one_hit_blosum62,
     )
 }
 
@@ -471,7 +521,7 @@ fn x_word_finder_direct_bf(
 // arguments and result (the sentinel walks of `x_ungap_sent.rs` in `x_word_finder_direct_sent`).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_direct_with<const HIT_BF: bool, E>(
+fn x_word_finder_direct_with<const HIT_BF: bool, E, O>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -480,9 +530,11 @@ fn x_word_finder_direct_with<const HIT_BF: bool, E>(
     diagonals: &mut Diagonals,
     scan_byte: XScanByte,
     extend: E,
+    extend_one: O,
 ) -> Result<Vec<InitHsp>>
 where
     E: Fn(&[u8], &[u8], usize, usize, usize, i32, usize) -> Option<BlastpTwoHitUngappedResult>,
+    O: Fn(&[u8], &[u8], usize, usize, i32, usize) -> Option<BlastpOneHitUngappedResult>,
 {
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
@@ -611,7 +663,7 @@ where
                     //                                               cutoffs->x_dropoff,
                     //                                               &hsp_q, &hsp_s, &hsp_len,
                     // ```
-                    let Some(result) = extend_one_hit_blosum62(
+                    let Some(result) = extend_one(
                         query,
                         subject,
                         q as usize,

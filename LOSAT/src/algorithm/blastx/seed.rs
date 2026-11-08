@@ -2,7 +2,11 @@
 use super::{
     args::ResolvedOptions, parameters::ContextParameters, query_setup::PreparedQueryBatch,
 };
-use crate::algorithm::blastp::extension::{extend_one_hit_blosum62, extend_two_hit_blosum62};
+use crate::algorithm::blastp::extension::{
+    extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
+    BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult,
+};
+use crate::config::ScoringMatrix;
 use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
 use crate::algorithm::tblastx::blast_aascan::x_blast_aa_scan_subject_cells;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
@@ -16,6 +20,147 @@ use crate::algorithm::tblastx::lookup::{
     build_ncbi_lookup_from_prepared, BackboneCell16, BlastAaLookupTable, QueryContext, XBxTable,
 };
 use anyhow::{ensure, Result};
+
+/// No NCBI counterpart: the matrix of a search's seed and gapped stages as a type (item SC6 of
+/// line NP), decided once before the search, so that BLOSUM62's instances ([`Blosum62Bx`]) call
+/// today's functions (`extend_two_hit_blosum62`, `extend_one_hit_blosum62` and the stages written
+/// for them) and keep their code, and another matrix ([`MatrixBx`]) gets instances of its own. NCBI
+/// reads the matrix through `matrix->data` in the same loops (`aa_ungapped.c`
+/// `s_BlastAaExtendTwoHit`, `s_BlastAaExtendOneHit`); the scores are the same.
+pub(crate) trait BxScoring: Copy {
+    /// Whether this is BLOSUM62's type: its stages are today's functions.
+    const BLOSUM62: bool;
+    /// The matrix.
+    fn matrix(self) -> ScoringMatrix;
+    /// `s_BlastAaExtendTwoHit` with the matrix.
+    #[allow(clippy::too_many_arguments)]
+    fn two_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<BlastpTwoHitUngappedResult>;
+    /// `s_BlastAaExtendOneHit` with the matrix.
+    fn one_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        q_off: usize,
+        s_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<BlastpOneHitUngappedResult>;
+}
+
+/// BLOSUM62's [`BxScoring`]: the default search's functions.
+#[derive(Clone, Copy)]
+pub(crate) struct Blosum62Bx;
+
+impl BxScoring for Blosum62Bx {
+    const BLOSUM62: bool = true;
+    #[inline(always)]
+    fn matrix(self) -> ScoringMatrix {
+        ScoringMatrix::Blosum62
+    }
+    #[inline(always)]
+    fn two_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<BlastpTwoHitUngappedResult> {
+        extend_two_hit_blosum62(
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    }
+    #[inline(always)]
+    fn one_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        q_off: usize,
+        s_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<BlastpOneHitUngappedResult> {
+        extend_one_hit_blosum62(query, subject, q_off, s_off, dropoff, word_size)
+    }
+}
+
+/// Another matrix's [`BxScoring`]: BLASTP's extensions of its other matrices (item SC2b), the
+/// two-hit walks on the matrix's byte table (`extend_two_hit_table`, the reference where it has
+/// none) and the reference one-hit walk (`extend_one_hit_of`).
+#[derive(Clone, Copy)]
+pub(crate) struct MatrixBx {
+    matrix: ScoringMatrix,
+    table: Option<&'static crate::algorithm::blastp::x_ungapped_fast::MatrixTable>,
+}
+
+impl MatrixBx {
+    pub(crate) fn of(matrix: ScoringMatrix) -> Self {
+        debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+        Self {
+            matrix,
+            table: crate::algorithm::blastp::x_ungapped_fast::matrix_table(matrix),
+        }
+    }
+}
+
+impl BxScoring for MatrixBx {
+    const BLOSUM62: bool = false;
+    #[inline(always)]
+    fn matrix(self) -> ScoringMatrix {
+        self.matrix
+    }
+    #[inline(always)]
+    fn two_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<BlastpTwoHitUngappedResult> {
+        extend_two_hit_table(
+            (self.matrix, self.table),
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    }
+    #[inline(always)]
+    fn one_hit(
+        self,
+        query: &[u8],
+        subject: &[u8],
+        q_off: usize,
+        s_off: usize,
+        dropoff: i32,
+        word_size: usize,
+    ) -> Option<BlastpOneHitUngappedResult> {
+        extend_one_hit_of(self.matrix, query, subject, q_off, s_off, dropoff, word_size)
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1040-1041
 // ```c
@@ -347,6 +492,11 @@ impl BxLookup {
         options: &ResolvedOptions,
         parts: usize,
     ) -> Result<Self> {
+        // The search's matrix chooses the builds once per query batch: BLOSUM62's are
+        // `x_new_as`'s, another matrix's `x_new_of`'s (tables of `Int4` hits).
+        if options.scoring != ScoringMatrix::Blosum62 {
+            return Lookup::x_new_of(batch, parameters, options).map(BxLookup::Wide);
+        }
         Lookup::x_new_as(
             batch,
             parameters,
@@ -492,6 +642,39 @@ pub(super) fn x_compressed_scan(
     }
 }
 
+/// The contexts of the lookup query of `batch` (`x_new_as`, `x_new_of`): each context's letters
+/// between sentinels, its frame and its ungapped block.
+#[inline(always)]
+fn lookup_contexts(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    query: &[u8],
+) -> Vec<QueryContext> {
+    batch
+        .contexts
+        .iter()
+        .zip(parameters)
+        .enumerate()
+        .map(|(i, (c, p))| {
+            let mut aa = vec![0];
+            aa.extend_from_slice(&query[c.offset..c.offset + c.length]);
+            aa.push(0);
+            QueryContext {
+                q_idx: c.query_index as u32,
+                f_idx: (i % 6) as u8,
+                frame: c.frame,
+                aa_seq: aa,
+                aa_seq_nomask: None,
+                aa_len: c.length,
+                orig_len: batch.original_lengths[c.query_index],
+                frame_base: c.offset as i32,
+                is_valid: p.valid,
+                karlin_params: p.ungapped,
+            }
+        })
+        .collect()
+}
+
 impl Lookup {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
     // ```c++
@@ -560,29 +743,7 @@ impl Lookup {
             options.word_size == 3,
             "unsupported BLASTX lookup word size"
         );
-        let contexts = batch
-            .contexts
-            .iter()
-            .zip(parameters)
-            .enumerate()
-            .map(|(i, (c, p))| {
-                let mut aa = vec![0];
-                aa.extend_from_slice(&query[c.offset..c.offset + c.length]);
-                aa.push(0);
-                QueryContext {
-                    q_idx: c.query_index as u32,
-                    f_idx: (i % 6) as u8,
-                    frame: c.frame,
-                    aa_seq: aa,
-                    aa_seq_nomask: None,
-                    aa_len: c.length,
-                    orig_len: batch.original_lengths[c.query_index],
-                    frame_base: c.offset as i32,
-                    is_valid: p.valid,
-                    karlin_params: p.ungapped,
-                }
-            })
-            .collect();
+        let contexts = lookup_contexts(batch, parameters, &query);
         // Dispatch point (LOSAT_X_BXPOOLN1, in the strict set): a search on one thread builds its
         // tables without the pool (tblastx/lookup/x_lut_direct.rs). No NCBI counterpart.
         let pooled = crate::algorithm::tblastx::lookup::x_bx_pooled_for(
@@ -605,6 +766,62 @@ impl Lookup {
                 XBxTable::Narrow(table) => BxLookup::Narrow(NarrowLookup { table, kept }),
             },
         )
+    }
+    /// [`Lookup::x_new_as`] with another matrix than BLOSUM62 (item SC6 of line NP): the compressed
+    /// table of `-word_size 5` with the matrix's scores (`x_tbn_build_compressed_lookup_of`, as
+    /// TBLASTN's), the standard one with them (`build_ncbi_lookup_from_prepared_of`), both of `Int4`
+    /// hits and without the pool of kept vectors. Not inlined, so that BLOSUM62's builds keep their
+    /// code.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn x_new_of(
+        batch: &PreparedQueryBatch,
+        parameters: &[ContextParameters],
+        options: &ResolvedOptions,
+    ) -> Result<Self> {
+        use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+            x_tbn_build_compressed_lookup_of, XCompressedLookup,
+        };
+        let matrix = options.scoring;
+        let query = batch.sequence_start[1..].to_vec();
+        if options.word_size == 5 {
+            let segments = &batch.lookup_segments;
+            return x_tbn_build_compressed_lookup_of(
+                matrix,
+                5,
+                x_compressed_scaled_threshold(options.threshold),
+                &query,
+                segments,
+                &[0..segments.len()],
+            )
+            .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
+            .map(|table| {
+                Lookup::Compressed(match table {
+                    XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
+                    XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
+                })
+            })
+            .map_err(|()| {
+                anyhow::anyhow!(
+                    "-threshold {} with the compressed lookup table of -word_size 5 is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+                    options.threshold
+                )
+            });
+        }
+        ensure!(
+            options.word_size == 3,
+            "unsupported BLASTX lookup word size"
+        );
+        let contexts = lookup_contexts(batch, parameters, &query);
+        let table = crate::algorithm::tblastx::lookup::build_ncbi_lookup_from_prepared_of(
+            matrix,
+            query,
+            batch.lookup_segments.clone(),
+            contexts,
+            // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), as `x_new_as`.
+            crate::core::blast_util::ncbi_int4_from_double(options.threshold),
+        );
+        Ok(Self::Standard(table, x_seed_scan::XKeptPresence::x_built(false)))
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c++
@@ -922,6 +1139,7 @@ pub(crate) fn word_finder(
     trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
     word_finder_over(
+        Blosum62Bx,
         batch,
         parameters,
         options,
@@ -940,6 +1158,42 @@ pub(crate) fn word_finder(
 }
 
 /// [`word_finder`] for a lookup table of either width ([`BxLookup`]).
+/// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`): its tables are the standard
+/// ones of `Int4` hits (`Lookup::x_new_as` builds no 16-bit table for it).
+#[cold]
+#[inline(never)]
+pub(super) fn word_finder_bx_of(
+    scoring: MatrixBx,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    trace: impl FnMut(&[(i32, i32)]),
+) -> Result<Vec<InitHsp>> {
+    let BxLookup::Wide(lookup) = lookup else {
+        anyhow::bail!("BLASTX builds no 16-bit table for another matrix than BLOSUM62");
+    };
+    word_finder_over(
+        scoring,
+        batch,
+        parameters,
+        options,
+        subject,
+        |each| {
+            lookup.scan(
+                subject,
+                subject.len().saturating_sub(1),
+                options.window_size,
+                each,
+            )
+        },
+        diagonals,
+        trace,
+    )
+}
+
 pub(super) fn word_finder_bx(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -970,6 +1224,7 @@ pub(super) fn word_finder_narrow(
     trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
     word_finder_over(
+        Blosum62Bx,
         batch,
         parameters,
         options,
@@ -991,7 +1246,8 @@ pub(super) fn word_finder_narrow(
 /// [`word_finder`] with the scan of the subject given as `scan`, which calls its argument with each
 /// batch of the scanner's pairs: the whole subject (`Lookup::scan`), or the scan ranges of a
 /// `-subject` with lower-case letters (`-lcase_masking`, `x_soft_subject.rs`).
-pub(super) fn word_finder_over(
+pub(super) fn word_finder_over<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -1038,7 +1294,7 @@ pub(super) fn word_finder_over(
                 }
                 context = context_of(q);
                 let p = &parameters[context];
-                let Some(result) = extend_one_hit_blosum62(
+                let Some(result) = scoring.one_hit(
                     query,
                     subject,
                     q as usize,
@@ -1073,7 +1329,7 @@ pub(super) fn word_finder_over(
                     entry.set_last_hit(s.wrapping_add(diagonals.offset));
                     continue;
                 }
-                let Some(result) = extend_two_hit_blosum62(
+                let Some(result) = scoring.two_hit(
                     query,
                     subject,
                     (previous + word) as usize,

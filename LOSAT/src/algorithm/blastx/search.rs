@@ -3,7 +3,7 @@ use super::{
     args::ResolvedOptions,
     input::FastaRecord,
     parameters::{
-        effective_lengths, ka_once_on, score_block, subject_parameters, ContextParameters,
+        effective_lengths, ka_once_on, score_block_for, subject_parameters, ContextParameters,
     },
     preliminary::{purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
@@ -883,7 +883,7 @@ fn x_search_core(
                 let x_make =
                     |c: usize, x_parts: usize| -> Result<Option<x_subject_flow::XChunkSetup>> {
                         let batch = &x_chunks[c].prepared;
-                        let mut params = score_block(batch);
+                        let mut params = score_block_for(batch, options.scoring);
                         if !params.iter().any(|p| p.valid) {
                             return Ok(None);
                         }
@@ -968,7 +968,7 @@ fn x_search_core(
                     if other.is_some() {
                         crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", false);
                     }
-                    score_block(batch)
+                    score_block_for(batch, options.scoring)
                 }
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:277-288
@@ -1210,7 +1210,7 @@ fn x_search_core(
                                                             + x_slot * x_k
                                                             + x_within
                                                     );
-                                                    compute_subject(
+                                                    compute_subject_any(
                                                         x_wave_subjects,
                                                         batch,
                                                         &params,
@@ -1252,7 +1252,7 @@ fn x_search_core(
                         } else {
                             x_pass.view(oid)?
                         };
-                        let computed = compute_subject(
+                        let computed = compute_subject_any(
                             x_subjects,
                             batch,
                             &params,
@@ -1495,7 +1495,7 @@ fn x_compute_chunk(
     x_parts: usize,
 ) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
-    let mut params = score_block(batch);
+    let mut params = score_block_for(batch, options.scoring);
     if !params.iter().any(|p| p.valid) {
         return Ok(None);
     }
@@ -1542,7 +1542,7 @@ fn x_compute_chunk(
     // The blocks of the chunk's pass.
     let mut x_pass = subjects.x_pass();
     for oid in 0..subjects.len() {
-        let mut computed = compute_subject(
+        let mut computed = compute_subject_any(
             x_pass.view(oid)?,
             batch,
             &params,
@@ -1614,6 +1614,121 @@ impl SubjectComputation {
 // utils::threading owns pool lifetime; all sink state is replayed by input OID.
 #[allow(clippy::too_many_arguments)]
 fn compute_subject(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    diagnostics: bool,
+    db_length: i64,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    compute_subject_with(
+        super::seed::Blosum62Bx,
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        diagnostics,
+        db_length,
+        oid,
+        x_containment,
+    )
+}
+
+/// [`compute_subject`] of a search with another matrix than BLOSUM62 (item SC6 of line NP), its
+/// own instance of the stages; the callers choose it once per subject by the search's matrix. Not
+/// inlined, so that BLOSUM62's keeps its code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_of(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    diagnostics: bool,
+    db_length: i64,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    compute_subject_with(
+        super::seed::MatrixBx::of(options.scoring),
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        diagnostics,
+        db_length,
+        oid,
+        x_containment,
+    )
+}
+
+/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_any(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    diagnostics: bool,
+    db_length: i64,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+        compute_subject(
+            subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        diagnostics,
+        db_length,
+        oid,
+        x_containment,
+        )
+    } else {
+        compute_subject_of(
+            subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        diagnostics,
+        db_length,
+        oid,
+        x_containment,
+        )
+    }
+}
+
+/// The body of [`compute_subject`] with the matrix of `scoring`: BLOSUM62's stages are today's
+/// functions (`BxScoring::BLOSUM62`), another matrix's their instances for it.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_with<S: super::seed::BxScoring>(
+    scoring: S,
     subjects: Subjects<'_>,
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
@@ -1717,6 +1832,7 @@ fn compute_subject(
     let initial = if let Some(ranges) = super::x_soft_subject::x_subject_scan_ranges(subjects, oid)
     {
         super::x_soft_subject::x_word_finder(
+            scoring,
             batch,
             params,
             options,
@@ -1732,8 +1848,31 @@ fn compute_subject(
         } else {
             None
         };
-        super::seed::x_seed_scan::x_word_finder_scan(
-            batch, params, options, encoded, lookup, diagonals, x_sent,
+        if S::BLOSUM62 {
+            super::seed::x_seed_scan::x_word_finder_scan(
+                batch, params, options, encoded, lookup, diagonals, x_sent,
+            )?
+        } else {
+            super::seed::x_seed_scan::x_word_finder_matrix(
+                super::seed::MatrixBx::of(options.scoring),
+                batch,
+                params,
+                options,
+                encoded,
+                lookup,
+                diagonals,
+            )?
+        }
+    } else if !S::BLOSUM62 {
+        super::seed::word_finder_bx_of(
+            super::seed::MatrixBx::of(options.scoring),
+            batch,
+            params,
+            options,
+            encoded,
+            lookup,
+            diagonals,
+            |pairs| seeds.extend_from_slice(pairs),
         )?
     } else {
         word_finder_bx(
@@ -1766,21 +1905,35 @@ fn compute_subject(
         //       {
         //          BlastHSP* new_hsp;
         // ```
-        super::preliminary::gapped_observed(
-            batch,
-            params,
-            options,
-            encoded,
-            &initial,
-            xdrop,
-            &mut |h, contained| {
-                // No NCBI counterpart: the copy is skipped when nothing reads it; it does not
-                // change any value NCBI computes.
-                if x_containment {
-                    containment.push((h.clone(), contained))
-                }
-            },
-        )?
+        let mut observe = |h: &super::preliminary::PreliminaryHsp, contained: bool| {
+            // No NCBI counterpart: the copy is skipped when nothing reads it; it does not
+            // change any value NCBI computes.
+            if x_containment {
+                containment.push((h.clone(), contained))
+            }
+        };
+        if S::BLOSUM62 {
+            super::preliminary::gapped_observed(
+                batch,
+                params,
+                options,
+                encoded,
+                &initial,
+                xdrop,
+                &mut observe,
+            )?
+        } else {
+            super::preliminary::gapped_observed_of(
+                super::seed::MatrixBx::of(options.scoring),
+                batch,
+                params,
+                options,
+                encoded,
+                &initial,
+                xdrop,
+                &mut observe,
+            )?
+        }
     } else {
         ungapped(batch, &initial)
     };

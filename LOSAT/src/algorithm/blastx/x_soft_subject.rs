@@ -72,7 +72,8 @@ fn scan_ranges(record: &FastaRecord) -> Vec<(i32, i32)> {
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub(super) fn x_word_finder(
+pub(super) fn x_word_finder<S: super::seed::BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -83,6 +84,7 @@ pub(super) fn x_word_finder(
     mut seeds: Option<&mut Vec<(i32, i32)>>,
 ) -> Result<Vec<InitHsp>> {
     word_finder_over(
+        scoring,
         batch,
         parameters,
         options,

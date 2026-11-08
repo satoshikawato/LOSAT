@@ -7,11 +7,11 @@
 //! on the pool, and the buffers written in order. So the property under test is that the report
 //! does not depend on it: for megablast and blastn with 60 queries (pieces of LC738874) against
 //! LC738874, with outfmt 6 and 7 (whose header lines and last line come from the same writer) at
-//! 1 and 4 threads, the default and `LOSAT_X_BNTABPAR=0` give the same bytes. `LOSAT_X_REACH`
-//! shows that the default took the pool's path at 4 threads and the serial one at 1 thread (no
-//! pool). That the rows equal NCBI's is the business of the blastn fixtures; the unit tests in
-//! `x_tab_par.rs` compare the two writers on random hit lists, with warnings and windows of every
-//! size.
+//! 1, 4, 8 and 16 threads, the default and `LOSAT_X_BNTABPAR=0` give the same bytes.
+//! `LOSAT_X_REACH` shows that the default took the pool's path at 4, 8 and 16 threads and the
+//! serial one at 1 thread (no pool). That the rows equal NCBI's is the business of the blastn
+//! fixtures; the unit tests in `x_tab_par.rs` compare the two writers on random hit lists, with
+//! warnings and windows of every size.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -123,7 +123,7 @@ fn tabular_rows_do_not_depend_on_the_switch() {
     let queries = Queries::new();
     for task in ["megablast", "blastn"] {
         for outfmt in ["6", "7"] {
-            for threads in [1u32, 4] {
+            for threads in [1u32, 4, 8, 16] {
                 let reach =
                     reach_support::Reach::new(&format!("bntabpar-{task}-{outfmt}-{threads}"));
                 let default = blastn(&queries, task, outfmt, threads, &[reach.var()]);

@@ -740,7 +740,7 @@ fn defaults_and_task_overrides_remain_distinct() {
             assert!(!text.contains("-short"), "{text}");
         }
     }
-    // blast_args.cpp:3158-3163 (CArgAllowStringSet): the task names are case-sensitive.
+    // blast_args.cpp:105 (CArgAllowStringSet): the task names are case-sensitive.
     assert!(parse("blastp", &["-task", "BLASTP"]).is_err());
     // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0, which BLASTN and TBLASTX
     // implement.

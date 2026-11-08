@@ -47,8 +47,8 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   in Wasm), as NCBI's C code does, so on one machine both get the same values. No build option
   changes which function is called: glibc picks its variant (for example `__log_fma` on an
   FMA-capable CPU) when it is loaded, from the CPU, not from LOSAT's target CPU. Do not
-  replace these calls by another implementation (the `libm` crate in `LOSAT/Cargo.toml` is not
-  called; the release binary holds none of its functions).
+  replace these calls by another implementation (LOSAT does not depend on the `libm` crate, and
+  `LOSAT/tests/check_fp_contract.py` rejects a call into it, `libm::<fn>`).
 - **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
   (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the
   baseline CPU of the target; the AVX2 kernels are chosen at run time
@@ -1587,7 +1587,10 @@ Rebuilding less:
   or any other value gives 16 (one scratch of the largest hit lists measured: 11.4 MiB, Sakai x EDL933 blastn),
   without a message. The output does not depend on it. Sakai x EDL933 blastn at 4 threads (above), per-pair against
   16: 8 x1.009 (6 of 8 pairs slower; the scratches of 9.6-11.4 MiB are mapped again at every sort), 0 x1.009-1.027,
-  for 10 MiB less max RSS (median 251 against 261 MiB); elsewhere no change in memory.
+  for 10 MiB less max RSS (median 251 against 261 MiB); elsewhere no change in memory. The idle scratches are freed
+  when a query batch's preliminary stage ends (`x_clear_idle` next to the lookup drop, `run.rs`), so the bound holds
+  only while preliminary stages run; the first large sort of the next batch maps one again. Two searches of one process
+  at once (pylosat threads) share the pool: one search's clear frees the other's idle scratch (time only).
 - `LOSAT_X_BNTBRANGE=1` (BLASTN `-db`, every task, memory and time; in the strict set from the pull request that added
   it (perf/bn-tb-range, evidence at the end of this entry): on unless it is `0`)
   the traceback of a database search (`blastn/blast_engine/database.rs` `traceback_listed`) decodes a sequence of

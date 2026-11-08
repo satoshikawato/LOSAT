@@ -1,7 +1,7 @@
 //! BLAST XML (outfmt 5) of TBLASTN: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
 //! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2), made before the first byte
-//! of stdout or `-out` at 1 and 4 threads, and the document across several query batches (one
-//! header, global Iteration numbers, one trailer: TBLASTN renders once per run).
+//! of stdout or `-out` at 1, 4, 8 and 16 threads, and the document across several query batches
+//! (one header, global Iteration numbers, one trailer: TBLASTN renders once per run).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
 //! ```c++
@@ -118,7 +118,7 @@ fn a_query_title_outside_us_ascii_is_refused() {
             records[position] = (title, PROTEIN.as_bytes());
             fasta(&query, &records);
             fasta(&subject, &[(b"s1 subject", nucleotide.as_bytes())]);
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let out = dir.join("out.xml");
                 let output = run_str(&[
                     "tblastn",
@@ -177,7 +177,7 @@ fn a_subject_title_outside_us_ascii_is_refused_where_it_is_written() {
             ("s2 caf\u{e9}".as_bytes(), nucleotide.as_bytes()),
         ],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let args = [
             "tblastn",
             "-query",
@@ -231,7 +231,7 @@ fn a_database_name_outside_us_ascii_is_refused() {
         )
         .expect("copy database");
     }
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "tblastn",
             "-query",
@@ -295,7 +295,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "tblastn",
             "-query",
@@ -335,7 +335,7 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "tblastn",
             "-query",
@@ -363,7 +363,7 @@ fn an_empty_seekable_query_input_writes_nothing() {
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LOSAT_") {

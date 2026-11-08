@@ -580,7 +580,12 @@ impl RpsVolumeFiles {
         let Some(freq) = self.freq.as_ref() else {
             return Ok(());
         };
-        bytes.resize(count * self.alphabet * 4, 0);
+        // (`bytes` only grows: a list's rows are not zeroed again for the next one.)
+        let wanted = count * self.alphabet * 4;
+        if bytes.len() < wanted {
+            bytes.resize(wanted, 0);
+        }
+        let bytes = &mut bytes[..wanted];
         freq.read_at(
             bytes,
             (self.rows_start() + start * self.alphabet * 4) as u64,

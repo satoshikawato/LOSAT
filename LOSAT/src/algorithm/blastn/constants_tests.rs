@@ -1,0 +1,56 @@
+//! Unit tests for blastn/constants.rs
+
+use crate::algorithm::blastn::constants::*;
+
+#[test]
+fn test_x_drop_constants() {
+    // X-drop values should match NCBI BLAST defaults
+    assert_eq!(X_DROP_UNGAPPED, 20);
+    assert_eq!(X_DROP_GAPPED_FINAL, 100);
+}
+
+#[test]
+fn test_min_ungapped_score_thresholds() {
+    // Thresholds should be positive and reasonable
+    const { assert!(MIN_UNGAPPED_SCORE_MEGABLAST > 0) };
+    const { assert!(MIN_UNGAPPED_SCORE_BLASTN > 0) };
+
+    // blastn threshold should be higher (more filtering needed for smaller word size)
+    const { assert!(MIN_UNGAPPED_SCORE_BLASTN >= MIN_UNGAPPED_SCORE_MEGABLAST) };
+
+    assert_eq!(MIN_UNGAPPED_SCORE_MEGABLAST, 20);
+    assert_eq!(MIN_UNGAPPED_SCORE_BLASTN, 50);
+}
+
+#[test]
+fn test_max_direct_lookup_word_size() {
+    // MAX_DIRECT_LOOKUP_WORD_SIZE should be reasonable to avoid excessive memory
+    // 4^13 = 67M entries, which is manageable
+    const { assert!(MAX_DIRECT_LOOKUP_WORD_SIZE <= 13) };
+    assert_eq!(MAX_DIRECT_LOOKUP_WORD_SIZE, 13);
+}
+
+#[test]
+fn test_greedy_alignment_constants() {
+    // GREEDY_MAX_COST should be positive
+    const { assert!(GREEDY_MAX_COST > 0) };
+    assert_eq!(GREEDY_MAX_COST, 1000);
+
+    // GREEDY_MAX_COST_FRACTION should be positive
+    const { assert!(GREEDY_MAX_COST_FRACTION > 0) };
+    assert_eq!(GREEDY_MAX_COST_FRACTION, 2);
+}
+
+#[test]
+fn test_invalid_offset() {
+    // INVALID_OFFSET should be a negative value that's unlikely to occur naturally
+    const { assert!(INVALID_OFFSET < 0) };
+    assert_eq!(INVALID_OFFSET, -2);
+}
+
+#[test]
+fn test_invalid_diag() {
+    // INVALID_DIAG should be a very large value
+    const { assert!(INVALID_DIAG > 0) };
+    assert_eq!(INVALID_DIAG, 100_000_000);
+}

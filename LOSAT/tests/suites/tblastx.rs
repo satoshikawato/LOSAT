@@ -41,6 +41,8 @@ mod tblastx_ref_lut;
 mod tblastx_report_par;
 #[path = "../tblastx_resolve.rs"]
 mod tblastx_resolve;
+#[path = "../tblastx_run_engine.rs"]
+mod tblastx_run_engine;
 #[path = "../tblastx_search_timing.rs"]
 mod tblastx_search_timing;
 #[path = "../tblastx_seed_bucket.rs"]

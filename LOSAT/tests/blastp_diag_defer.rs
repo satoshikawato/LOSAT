@@ -334,7 +334,7 @@ fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
     let short = query.with_file_name("short.faa");
     std::fs::write(&short, format!(">short\n{}\n", &first[..60])).expect("write FASTA");
     const FORCED: &[(&str, &str)] = &[("LOSAT_X_BPMASKEDMIN", "0")];
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let what = format!("short query threads {threads}");
         let (reference, _, _) = blastp(&short, &subject, threads, REFERENCE, &["-outfmt", "6"]);
         assert!(

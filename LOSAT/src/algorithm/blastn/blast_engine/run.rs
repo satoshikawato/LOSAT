@@ -3273,7 +3273,9 @@ pub(super) fn x_bn_mapped_reach(bytes: usize) {
 /// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
 /// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
 /// `-subject` blastn, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time
-/// with the switch off).
+/// with the switch off). The idle buffers are freed when a query batch's preliminary stage ends
+/// (`x_clear_idle` next to `x_lut_drop::after_prelim`); two searches of one process at once share
+/// the pool, so one's clear may free the other's idle buffer (time only).
 static X_SORT: crate::utils::x_mapped::XPool<UngappedHit> =
     crate::utils::x_mapped::XPool::new(x_sort_idle_bytes);
 
@@ -5545,6 +5547,18 @@ impl SubjectHits {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// No NCBI counterpart (memory placement only): each list keeps only its length. A list
+    /// leaves the traceback with its preliminary count as its capacity, and the purges, the final
+    /// tree and the e-value reap drop HSPs from it; a list kept past its subject holds its count.
+    /// A shrinking `realloc` (glibc shrinks the block in place; another allocator may copy the
+    /// kept HSPs).
+    fn fit(&mut self) {
+        match self {
+            SubjectHits::Mixed(hits) => hits.shrink_to_fit(),
+            SubjectHits::ByQuery(lists) => lists.iter_mut().for_each(Vec::shrink_to_fit),
+        }
+    }
 }
 
 fn update_hitlists_with_subject_hits(
@@ -5564,8 +5578,8 @@ fn update_hitlists_with_subject_hits(
                 if q_idx >= hit_lists.len() {
                     continue;
                 }
-                // The kept list holds its exact count, as the `Mixed` path below gives it (the
-                // final tree and the e-value reap drop HSPs after `x_final_list` sized it).
+                // The kept list holds its exact count (the final tree and the e-value reap drop
+                // HSPs from the preliminary count the list was given).
                 hsps.shrink_to_fit();
                 sort_hsps_by_score(&mut hsps);
                 let hsp_list = BlastnHspList {
@@ -18859,8 +18873,11 @@ fn search_query_batch<const UNGAPPED: bool>(
             // Since the list is sorted by score already, any HSP
             // contained by a previous HSP is guaranteed to have a
             // lower score, and may be purged.
-            let mut final_hits = Vec::with_capacity(local_hits.len());
-            for hit in local_hits {
+            // No NCBI counterpart (memory placement only): the kept HSPs move to the front of the
+            // same list, in order (`kept`), instead of into a second list of its length.
+            let mut kept = 0usize;
+            for read in 0..local_hits.len() {
+                let hit = &local_hits[read];
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
                 // ```c
                 // query_start = query_context_offset;
@@ -18971,12 +18988,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                             final_tree_add_start,
                         );
                     }
-                    final_hits.push(hit);
+                    local_hits.swap(kept, read);
+                    kept += 1;
                 } else if let Some(timing) = timing_ref {
                     BlastnTiming::record_count(&timing.traceback_removed_final_tree_hsps, 1);
                 }
                 // else: HSP is contained within another, skip (implicit delete)
             }
+            local_hits.truncate(kept);
+            let mut final_hits = local_hits;
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
             // ```c
@@ -19038,7 +19058,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                     before_evalue_reap.saturating_sub(final_hits.len()) as u64,
                 );
             }
-
             (final_hits, final_tree_hit_count)
         };
         // Dispatch point of LOSAT_X_QGROUPPAR for the traceback: the kept HSPs are the queries'
@@ -19075,7 +19094,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                         let query = query as usize;
                         let mut edit_lengths = Vec::new();
                         let mut alignment_lengths = Vec::new();
-                        let mut hits = Vec::new();
+                        // (the list holds the query's preliminary count, as NCBI's traced list does:
+                        // the subject path below)
+                        let mut hits = Vec::with_capacity(x_starts[query + 1] - x_starts[query]);
                         x_trace_list(
                             &x_kept[x_starts[query]..x_starts[query + 1]],
                             tree,
@@ -19111,6 +19132,20 @@ fn search_query_batch<const UNGAPPED: bool>(
                 }
                 (SubjectHits::ByQuery(lists), steps)
             } else {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:296,312,375-376
+                // ```c
+                //    Int4 num_initial_hsps = hsp_list->hspcnt;
+                // ...
+                //    hsp_array = hsp_list->hsp_array;
+                // ...
+                //    for (index=0; index < num_initial_hsps; index++) {
+                //       hsp = hsp_array[index];
+                // ```
+                // NCBI traces the preliminary list in its own array, so the traced list never
+                // holds more than the preliminary count. No NCBI counterpart (memory placement
+                // only): the list here gets that count once, instead of growing by doubling (up to
+                // twice the traced count) and being copied or shrunk afterwards.
+                hits.reserve_exact(prelim_hits.len());
                 x_trace_list(
                     prelim_hits,
                     interval_tree,
@@ -19122,11 +19157,11 @@ fn search_query_batch<const UNGAPPED: bool>(
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,
                 );
-                #[expect(
-                    clippy::drain_collect,
-                    reason = "the subject scratch keeps its buffer for the next subject; mem::take would hand the buffer away and allocate again"
-                )]
-                let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
+                // No NCBI counterpart (memory placement only): the list goes to the purges as it is
+                // (they work in its allocation, `x_in_handle_order`) and leaves as the subject's
+                // result, instead of a copy while the scratch keeps the buffer at its largest size;
+                // the next subject's list gets that subject's preliminary count (above).
+                let (list, s1, s2, s3, s4) = x_post_purge(std::mem::take(hits));
                 let (list, s5) = x_final_list(list, interval_tree);
                 (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])
             };
@@ -19650,6 +19685,21 @@ fn search_query_batch<const UNGAPPED: bool>(
     // so the tables are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211)
     // (`x_lut_drop.rs`).
     x_lut_drop::after_prelim(lookup_tables);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:111-114,1605
+    // ```c
+    // s_BlastCoreAuxStructFree(BlastCoreAuxStruct* aux_struct)
+    // {
+    //     BlastExtendWordFree(aux_struct->ewp);
+    //     BLAST_InitHitListFree(aux_struct->init_hitlist);
+    // ...
+    //     s_BlastCoreAuxStructFree(aux_struct);
+    // ```
+    // NCBI frees the initial (ungapped) hit list at the end of its preliminary search. No NCBI
+    // counterpart (memory placement only): the idle scratch of the ungapped hits' sort (`X_SORT`)
+    // serves the preliminary stage only, so it is freed here and the traceback runs without its
+    // touched pages (Sakai x EDL933 `-subject` blastn: 11.4 MiB); the next batch's first sort maps
+    // one again.
+    X_SORT.x_clear_idle();
     let hit_lists = match subjects {
         SubjectSource::Prepared(_) => {
             let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
@@ -19687,6 +19737,13 @@ fn search_query_batch<const UNGAPPED: bool>(
                         &mut subject_hits,
                         &mut prelim_hits,
                     );
+                    // Every listed sequence's lists are kept until the last one is traced
+                    // (`found` below), so each keeps only its length (`SubjectHits::fit`). A
+                    // subject set's lists go to the hit lists at once (`search_subjects` above),
+                    // whose copies and `update_hitlists_with_subject_hits` hold their counts.
+                    if let Some(hits) = subject_hits.as_mut() {
+                        hits.fit();
+                    }
                     subject_hits
                 },
                 &|kept: &Vec<PrelimHit>| {
@@ -20808,7 +20865,7 @@ mod tests {
             "/tests/unit/helpers/ncbi_reference_data/blastn_word7_subject_set.out"
         ));
         let threads: &[usize] = if cfg!(feature = "parallel") {
-            &[1, 4]
+            &[1, 4, 8, 16]
         } else {
             &[1]
         };

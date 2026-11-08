@@ -729,7 +729,13 @@ pub struct ResolvedBlastpArgs {
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
     pub matrix_name: String,
     pub scoring: ProteinScoringSpec,
+    /// The composition mode that the search runs: the `-comp_based_stats` value, or mode 0 when
+    /// IDENTITY resets it (`identity_cbs_reset`; the archive records the value as given).
     pub comp_based_stats: BlastpCompBasedStats,
+    /// Whether IDENTITY reset a composition mode above 0 to 0 (NCBI's `CreateScoreBlock`): the
+    /// queries of the first query batch then have NCBI's warning
+    /// (`report::query_warnings::IDENTITY_CBS_RESET_MESSAGE`).
+    pub identity_cbs_reset: bool,
     pub seg: BlastpSegSpec,
     /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table
     /// but the searched query keeps its letters (`encoding.rs` `encode_query_frame`).
@@ -1119,6 +1125,36 @@ impl BlastpArgs {
         } else {
             mode
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155
+        // ```c++
+        //     if (opts_memento->m_ScoringOpts->matrix &&
+        //         strcasecmp("identity", opts_memento->m_ScoringOpts->matrix) == 0 &&
+        //         opts_memento->m_ExtnOpts->compositionBasedStats > 0) {
+        //
+        //         opts_memento->m_ExtnOpts->compositionBasedStats = 0;
+        // ...
+        //         search_messages.AddMessageAllQueries(eBlastSevWarning, 0, os.str());
+        //     }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3043
+        // ```c
+        //     int compositionTestIndex = extendParams->options->unifiedP;
+        // ```
+        // IDENTITY has no composition data: NCBI searches it in mode 0 whatever mode was asked,
+        // with a warning for each query of the first query batch (`identity_cbs_reset`; the reset
+        // stays in the options of the later batches, `blastp_app.cpp:274`), as TBLASTN
+        // (`tblastn::args`). The reset is made with the score block, before the HSP writer takes
+        // the preliminary hit list size (`blast_aux_priv.cpp:175-229`), so that size is mode 0's
+        // too; the unified P-values are read by the composition-based redo only, so a reset
+        // search has none. The BLAST archive records the mode as given (`archive.rs` reads
+        // `-comp_based_stats`).
+        let identity_cbs_reset = options.matrix_name.eq_ignore_ascii_case("identity")
+            && mode != CompositionMode::NoCompositionBasedStats;
+        let (mode, unified_p) = if identity_cbs_reset {
+            (CompositionMode::NoCompositionBasedStats, false)
+        } else {
+            (mode, unified_p)
+        };
         // NCBI's `Validate` (`BLAST_ValidateOptions`), shared with TBLASTN.
         validate_protein_options(&ProteinOptionsCheck {
             gapped: !self.ungapped,
@@ -1232,6 +1268,7 @@ impl BlastpArgs {
                 },
                 unified_p,
             },
+            identity_cbs_reset,
             seg: options.seg,
             soft_masking,
             lcase_masking: self.lcase_masking,
@@ -1356,6 +1393,61 @@ mod tests {
         assert!(!resolved.chaining);
         assert!(!resolved.soft_masking);
         assert_eq!(resolved.outfmt, "0");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155 (IDENTITY's
+    // search runs mode 0 whatever mode was asked; NCBI 2.17.0's footers and reports of
+    // `-matrix IDENTITY` with modes 1, 2, 3, T and 2u equal those of mode 0, item SC4b)
+    #[test]
+    fn identity_resets_the_composition_mode_to_0() {
+        let no_cbs = BlastpCompBasedStats {
+            mode: BlastpCompositionMode::NoCompositionBasedStats,
+            unified_p: false,
+        };
+        for (matrix, cbs, reset) in [
+            ("IDENTITY", "2", true),
+            ("identity", "1", true),
+            ("Identity", "3", true),
+            ("IDENTITY", "T", true),
+            ("IDENTITY", "2u", true),
+            ("IDENTITY", "0", false),
+            ("IDENTITY", "F", false),
+            ("IDENTITY", "0u", false),
+        ] {
+            let cli = parse_cli([
+                "losat",
+                "blastp",
+                "-query",
+                "q.faa",
+                "-subject",
+                "s.faa",
+                "-matrix",
+                matrix,
+                "-comp_based_stats",
+                cbs,
+            ]);
+            let TestCommand::Blastp(args) = cli.command;
+            let resolved = args.resolve().expect("resolved blastp args");
+            assert_eq!(resolved.comp_based_stats, no_cbs, "{matrix} {cbs}");
+            assert_eq!(resolved.identity_cbs_reset, reset, "{matrix} {cbs}");
+            assert_eq!(resolved.scoring.matrix, ScoringMatrix::Identity);
+            assert_eq!(
+                (resolved.scoring.gap_open, resolved.scoring.gap_extend),
+                (15, 2)
+            );
+            assert_eq!((resolved.threshold, resolved.window_size), (27.0, 40));
+        }
+        // The other matrices keep their mode.
+        let cli = parse_cli([
+            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-matrix", "PAM30",
+        ]);
+        let TestCommand::Blastp(args) = cli.command;
+        let resolved = args.resolve().expect("resolved blastp args");
+        assert!(!resolved.identity_cbs_reset);
+        assert_eq!(
+            resolved.comp_based_stats.mode,
+            BlastpCompositionMode::CompositionMatrixAdjust
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391

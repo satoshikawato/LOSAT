@@ -124,6 +124,20 @@ authoritative, current guidance for agent behavior in LOSAT.
 8. Correct timing, order, and context.
    - Call algorithms at the exact same timing and order as NCBI.
    - Input/output data must match NCBI exactly.
+   - Frozen outputs are never rewritten. The comparisons skip or replace only
+     what their tools name: the CL tag of SAM's @PG line (OWNER_DECISIONS 7,
+     `db_search_fixtures.strip_sam_cl`), the database lines of the approved
+     TBLASTX `-db_gencode` rows (`check_losat.py` `normalize_database_lines`),
+     the run directory and makeblastdb's time and path lines of the drop-in
+     corpus (`dropin_corpus.py`), the `-out` and binary paths in captured stderr
+     (`capture_outputs.py`), and one checkout-path prefix. The TBLASTN Stage G
+     cases name inputs under the developer machine's checkout
+     `/mnt/c/Users/genom/GitHub/LOSAT` (Owner 2026-11-05: replace the prefix
+     when comparing): they run with a relative run root of the same length
+     (outfmt 0 wraps the path at 68 columns), and the run root in their output
+     and stderr is replaced by that prefix before hashing
+     (`LOSAT/tests/frozen_paths.py`). That is the one replacement of a
+     checkout-path prefix.
 
 9. Algorithmic fidelity over aesthetics.
    - Do not refactor for readability if it changes logic.
@@ -433,8 +447,8 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   └── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 └── tests/
     ├── suites/            # Six test targets (five programs and common); each includes its files by `#[path]`
-    ├── unit/              # Unit tests, in the `unit_tests` target
-    ├── *.rs               # Test files of the suites, and three targets of their own: `blastn_report_stream_api`, `unit_tests`, `thread_memory` (`suite_layout.rs` checks)
+    ├── unit/              # Data only: `.tsv` files read by in-crate tests, NCBI reference outputs (`helpers/`)
+    ├── *.rs               # Test files of the suites, and two targets of their own: `blastn_report_stream_api`, `thread_memory` (`suite_layout.rs` checks)
     ├── fixtures/ db_search/ blastdbcmd/ seqdb/ fasta/ ...   # Inputs and frozen NCBI outputs
     ├── *.py               # Gate scripts (fast regressions, platform checks, switch reach)
     └── *.sh               # Older comparison scripts (run_comparison.sh, run_all_tests.sh)

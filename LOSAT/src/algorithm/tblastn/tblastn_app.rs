@@ -12,7 +12,7 @@ use super::stage_d_pipeline::{
 use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
-use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
+use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
@@ -1281,6 +1281,11 @@ fn search(
         reading,
         batch_size,
     );
+    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
+    // that stops at its first batch gives NCBI's error.
+    if batches.searched_done > 0 {
+        super::args::check_identity_compressed_lookup_of(&resolved)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-295
     // ```c++
     //                 query =  input->GetNextSeqBatch(*scope);
@@ -1679,24 +1684,12 @@ fn search(
                 if !result_warnings {
                     return lines;
                 }
-                let mut messages = Vec::new();
-                messages.extend(crate::report::query_warnings::replaced_o_message(
+                let messages = crate::report::query_warnings::query_messages(
                     query.seq(),
-                ));
-                if index < identity_warned {
-                    messages.push(
-                        crate::report::query_warnings::IDENTITY_CBS_RESET_MESSAGE.to_string(),
-                    );
-                }
-                if query.seq().is_empty() {
-                    messages.push(NO_DATA_MESSAGE.to_string());
-                } else if !valid {
-                    messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
-                }
-                if filtered_empty && !query_batch_skipped[index] {
-                    messages
-                        .push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
-                }
+                    *valid,
+                    index < identity_warned,
+                    filtered_empty && !query_batch_skipped[index],
+                );
                 lines.extend(crate::report::query_warnings::query_warning(
                     "tblastn",
                     args.first_query_ordinal + query_input.ordinal(index),

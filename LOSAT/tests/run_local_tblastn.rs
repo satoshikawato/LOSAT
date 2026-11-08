@@ -102,6 +102,8 @@ fn run(
 // passed as the display names.
 #[test]
 fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
+    // Display names only (the library API reads `subject`, never these paths): the prefix is
+    // the one that LOSAT/tests/frozen_paths.py names FROZEN_PREFIX for the tools' comparisons.
     let code1 = "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna";
     let cases = [
         (
@@ -124,6 +126,7 @@ fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
             "docs/evidence/tlosan_stage_g/native_real/av_code1",
             "/tmp/tlosan-stageg-final-real-nohit-20260926/av_code1.faa",
             "LOSAT/tests/fasta/AvCLPV.fasta",
+            // A display name only, as `code1` above.
             "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta",
             ".oracle",
             None,

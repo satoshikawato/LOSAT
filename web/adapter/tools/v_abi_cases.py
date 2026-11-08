@@ -17,7 +17,10 @@ joined with `,`).
 - full: the regression cases of docs/evidence/losat_web_e1a/capture_outputs.py (Gate A,
   the Stage G matrix, the BLASTP manifest in outfmt 0/6/7), grouped into searches.
   Their inputs use the recorded path spellings, so this needs the Gate A lexical root
-  that capture_outputs.py documents. It adds the outfmt 0 and 7 fixtures of
+  that capture_outputs.py documents; the Stage G searches run as capture_outputs.py runs
+  them, with LOSAT/tests/frozen_paths.py's run root in place of the recorded prefix, and
+  carry `"frozen_prefix"` (`frozen_paths.case_table_entry`): v_abi.js puts the prefix back
+  into an output before comparing it with a frozen hash. It adds the outfmt 0 and 7 fixtures of
   LOSAT/tests/outfmt0_manifest.tsv, whose frozen hashes are NCBI's.
   The rows with -num_descriptions / -num_alignments run as searches of one or two hit list
   sizes (abi_v2.md §7). The group `fasta_input` (session SFc, S10) adds SF fixture inputs of
@@ -52,6 +55,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "docs/evidence/losat_web_e1a"))
 import capture_outputs as capture  # noqa: E402  (the verified case builders)
+import frozen_paths  # noqa: E402  (on the path through capture_outputs)
 
 FORMATS = {"blastp": ["0", "6", "7"], "tblastn": ["0", "6", "7"], "blastn": ["0", "6", "7"], "tblastx": ["0", "6", "7"],
            "blastx": ["0", "6", "7"]}
@@ -99,13 +103,16 @@ def group(cases: list[capture.Case], frozen: bool) -> list[dict]:
     for case in cases:
         if case.program not in FORMATS:
             continue
-        outfmt, argv = split(case.command)
+        command = [frozen_paths.to_run(arg) for arg in case.command]
+        outfmt, argv = split(command)
         outfmt = outfmt or "0"
         if outfmt not in FORMATS[case.program]:
             continue  # the other formats and the field lists: the NCBI-frozen rows (outfmt0_fixtures)
         key = (case.program, tuple(argv), str(case.cwd))
         search = searches.setdefault(key, {"program": case.program, "argv": argv, "cwd": str(case.cwd),
                                            "cases": [], "frozen": {}})
+        if command != case.command:
+            search["frozen_prefix"] = frozen_paths.case_table_entry()
         search["cases"].append(case.case_id)
         if frozen and case.expected_sha256:
             previous = search["frozen"].setdefault(outfmt, case.expected_sha256)
@@ -262,7 +269,7 @@ def quick() -> list[dict]:
         cases.append(capture.Case("tblastx", case.case_id, capture.strip_binary(losat), REPO))
     # BLASTX (session SX): the smaller pair of capture_outputs.py's BLASTX_CASES.
     cases += [case for case in capture.blastx_cases() if case.case_id.startswith("small_vs_paja.")]
-    prefix = "/mnt/c/Users/genom/GitHub/LOSAT/"
+    prefix = frozen_paths.FROZEN_PREFIX + "/"
     with open(REPO / "docs/evidence/tlosan_stage_g/matrix_162.jsonl") as handle:
         for line in handle:
             row = json.loads(line)

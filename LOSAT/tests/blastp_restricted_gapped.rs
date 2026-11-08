@@ -211,7 +211,7 @@ fn vector_kernel_runs() -> bool {
 
 #[test]
 fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         for variables in [
             &[][..],
             &[("LOSAT_X_BPGAP", "0")][..],

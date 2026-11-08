@@ -606,3 +606,7 @@ mod tests {
         assert_eq!(frame_stop.aa_seq[1], ncbistdaa::STOP);
     }
 }
+
+#[cfg(test)]
+#[path = "translation_tests.rs"]
+mod translation_tests;

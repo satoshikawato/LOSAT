@@ -739,7 +739,7 @@ def handoff_markdown(
     lines += [
         f"- Toolchain: Rust `{toolchain['rust']}`, Cargo `{toolchain['cargo']}`, "
         f"Node `{toolchain['node']}`, profile `{toolchain['profile']}`, `--locked`",
-        "- Signing/notarization: not performed",
+        "- Code signing/notarization: not performed",
         "- No tag / release / upload performed (tag, GitHub Release, registry, Bioconda)",
         "",
         "## Platform claims",
@@ -754,7 +754,9 @@ def handoff_markdown(
         )
     lines += [
         "",
-        "Artifact hashes are in `SHA256SUMS`; complete machine-readable provenance is in `RC-HANDOFF.json`.",
+        "Artifact hashes are in `SHA256SUMS`; the machine-readable record of this handoff is in `RC-HANDOFF.json`.",
+        "The workflow's job `handoff` then adds `LOSAT-0.2.0.cdx.json` (CycloneDX SBOM) and GitHub artifact "
+        "attestations (build provenance, SBOM): `gh attestation verify <file> --repo satoshikawato/LOSAT`.",
         "",
     ]
     return "\n".join(lines)

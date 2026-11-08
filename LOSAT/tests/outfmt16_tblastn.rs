@@ -106,8 +106,8 @@ fn frozen(name: &str) -> String {
 
 /// What NCBI BLAST+ 2.17.0 wrote for `tblastn -query QUERY (-subject snucl.fna | -db db/snucl)
 /// EXTRA -outfmt N -num_threads 1` in `tests/fixtures/outfmt16` (`<stem>_{sub,db}_{15,16}.out`, and
-/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one and four
-/// threads writes the same stdout, stderr and exit status.
+/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one, four,
+/// eight and sixteen threads writes the same stdout, stderr and exit status.
 fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], rc: i32) {
     let dir = fixtures();
     for format in ["15", "16"] {
@@ -115,7 +115,7 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
             let name = format!("{stem}_{mode}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
             let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = args(query, mode, threads, format);
                 args.extend(extra);
                 let output = run_in(&dir, &args, env);
@@ -146,7 +146,7 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("badbatch_tblastn_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = run_in(
                     &dir,
                     &args("qprot_bad.faa", mode, threads, format),
@@ -294,7 +294,7 @@ fn an_empty_query_pipe_writes_the_prolog_and_the_epilog() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("emptypipe_tblastn_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let (subject, db) = (
                     dir.join(SUBJECT).to_str().unwrap().to_string(),
                     dir.join(DB).to_str().unwrap().to_string(),
@@ -372,14 +372,14 @@ fn refused(output: &Output, what: &str) {
 
 /// Q2: a byte >= 0x80 in a title or the `-db` name is refused for 15 and 16 as for 5, before the
 /// first byte (NCBI cuts the 16 document at the byte, and writes the 15 one in UTF-8 after
-/// guessing the encoding), at one and four threads.
+/// guessing the encoding), at one, four, eight and sixteen threads.
 #[test]
 fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
     let dir = temp_dir("q2");
     let sn1 = nucleotide();
     let (query, subject) = (dir.join("q.faa"), dir.join("s.fna"));
     for format in ["15", "16"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             for title in ["caf\u{e9} ".as_bytes(), b"caf\xe9"] {
                 for position in 0..2 {
                     let mut records: Vec<(&[u8], &[u8])> =
@@ -443,7 +443,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
         .expect("copy database");
     }
     for format in ["15", "16"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 &dir,
                 &[
@@ -480,7 +480,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
                 .join(format!("sa.x16.tblastn.sloc.{format}.out")),
         )
         .unwrap();
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let scratch = temp_dir("file_sink");
             let out = scratch.join("report.out");
             let output = run_in(
@@ -516,12 +516,13 @@ fn a_file_sink_holds_the_document_of_standard_output() {
 
 /// The rows `db.sa.x16_ttaxid.*` of `db_search_manifest.tsv` (OF5b part 2: outfmt 15 and 16 with
 /// a taxonomy database in `BLASTDB`; the rows with `warn` in their name also have a query file with
-/// a reader warning, and some a `BATCH_SIZE`), at one and four threads: the bytes of NCBI BLAST+
-/// 2.17.0 (`tblastn -num_threads 1`) for stdout, stderr and the exit status; the rows of kind
-/// `losat-rejection` write nothing and name their reason. Every row with a `NAME=VALUE` token
-/// (`BLASTDB`, `BATCH_SIZE`, `CHUNK_SIZE`) runs with it in the environment, as the harness does.
+/// a reader warning, and some a `BATCH_SIZE`), at one, four, eight and sixteen threads: the bytes
+/// of NCBI BLAST+ 2.17.0 (`tblastn -num_threads 1`) for stdout, stderr and the exit status; the
+/// rows of kind `losat-rejection` write nothing and name their reason. Every row with a
+/// `NAME=VALUE` token (`BLASTDB`, `BATCH_SIZE`, `CHUNK_SIZE`) runs with it in the environment, as
+/// the harness does.
 #[test]
-fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
+fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
     let mut rows = 0;
@@ -550,7 +551,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
             );
             env.push((name, value));
         }
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 engine,
                 &[
@@ -600,7 +601,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
 /// no other: a `taxdb.bti` of the search path whose record of the database's taxid (9606) NCBI
 /// reads from unmapped memory (`btd_empty`, NCBI BLAST+ crashes) changes no byte of outfmt 8 and
 /// adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13 (3))
-/// at 1 and 4 threads. TBLASTN writes nothing to standard output then.
+/// at 1, 4, 8 and 16 threads. TBLASTN writes nothing to standard output then.
 #[test]
 fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -611,7 +612,7 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let damaged = "tests/seqdb/taxdb/btd_empty";
     let refusal = "unsupported database: the taxonomy record of taxid 9606";
     for format in ["8", "0", "5", "6", "7"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "tblastn",
                 "-db",

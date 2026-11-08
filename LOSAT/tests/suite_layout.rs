@@ -1,6 +1,6 @@
 //! Checks how the files of `LOSAT/tests/` are built into test binaries. `Cargo.toml` turns
-//! automatic test discovery off and lists nine binaries: six suites (`tests/suites/<name>.rs`,
-//! one `#[path]` module per file) and three files that change the process environment or
+//! automatic test discovery off and lists eight binaries: six suites (`tests/suites/<name>.rs`,
+//! one `#[path]` module per file) and two files that change the process environment or
 //! process-wide state and so stay alone. A file that no binary lists would silently not build, a
 //! file in two binaries would run twice, and a suite member that changes the process environment
 //! or process-wide state (the panic hook, rayon's global pool, the global allocator) would disturb
@@ -723,9 +723,9 @@ fn suite_members_do_not_change_the_process_environment() {
     assert!(problems.is_empty(), "\n{}\n", lines(&problems));
 }
 
-/// The walk must see the environment changes of the lone files, the one of `unit_tests` through
-/// `tests/unit/common/diagnostics.rs` inside `mod unit { pub mod common; }`. When this stops being
-/// true, the file no longer needs its own binary and can join a suite.
+/// The walk must see the environment changes of the lone files, also through an inline block
+/// `mod a { pub mod x; }`. When a lone file's change is gone, the file no longer needs its own
+/// binary and can join a suite.
 #[test]
 fn walk_finds_the_lone_files_changes() {
     let (_, targets, _) = cargo_targets();
@@ -743,19 +743,40 @@ fn walk_finds_the_lone_files_changes() {
             ));
         }
     }
-    // The inline-module handling, checked on the file whose change sits inside `mod unit { ... }`,
-    // whether or not the file still has a binary of its own.
-    let unit_walk = walk_from(&manifest_dir().join("tests/unit_tests.rs"));
-    if !unit_walk
-        .changes
-        .iter()
-        .any(|(file, _)| shown(file) == "tests/unit/common/diagnostics.rs")
-    {
-        problems.push(
-            "the walk of tests/unit_tests.rs does not reach tests/unit/common/diagnostics.rs through \
-             `mod unit { pub mod common; }`: fix the inline-module handling of the walk"
-                .to_string(),
-        );
+    // The inline-module handling, checked on files written for it (no test file depends on it
+    // since `tests/unit_tests.rs` moved into the crate): inside `mod outer { ... }` of the root file,
+    // `mod inner;` resolves to `outer/inner.rs` and `mod nested;` to `outer/nested/mod.rs`, and each
+    // holds a change.
+    let dir =
+        std::env::temp_dir().join(format!("losat-suite-layout-inline-{}", std::process::id()));
+    fs::create_dir_all(dir.join("outer").join("nested")).expect("create the fixture directory");
+    let root = dir.join("root.rs");
+    let inner = dir.join("outer").join("inner.rs");
+    let nested = dir.join("outer").join("nested").join("mod.rs");
+    let change = "pub fn change() {\n    std::env::set_var(\"A\", \"1\");\n}\n";
+    fs::write(
+        &root,
+        "mod outer {\n    pub mod inner;\n    pub mod nested;\n}\n",
+    )
+    .expect("write the fixture root");
+    fs::write(&inner, change).expect("write the fixture file module");
+    fs::write(&nested, change).expect("write the fixture mod.rs module");
+    let inline_walk = walk_from(&root);
+    let _ = fs::remove_dir_all(&dir);
+    for (member, shape) in [(&inner, "outer/inner.rs"), (&nested, "outer/nested/mod.rs")] {
+        if !inline_walk.changes.iter().any(|(file, _)| file == member) {
+            problems.push(format!(
+                "the walk of a root file with `mod outer {{ pub mod inner; pub mod nested; }}` does not \
+                 reach {shape} ({}): fix the inline-module handling of the walk",
+                inline_walk.unresolved.join("; ")
+            ));
+        }
+    }
+    if !inline_walk.unresolved.is_empty() {
+        problems.push(format!(
+            "the walk of the inline-module fixture leaves declarations unresolved: {}",
+            inline_walk.unresolved.join("; ")
+        ));
     }
     assert!(problems.is_empty(), "\n{}\n", lines(&problems));
 }

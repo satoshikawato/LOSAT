@@ -1,0 +1,11 @@
+Warning: [blastp] Query_1 s1 one residue, r.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_2 s2 two residues, .. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_3 s5 five residues,.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_4 s9 nine residues,.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_5 s15 fifteen resid.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_6 s22 22 residues, .. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_7 s30 30 residues o.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_8 sx X in the middl.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_9 slc lower case fi.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_10 sodd B Z U O J a.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 One or more O characters replaced by X for alignment score calculations at positions 3 
+Warning: [blastp] Query_11 snohit no hits: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 

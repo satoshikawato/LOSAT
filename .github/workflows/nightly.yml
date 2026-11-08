@@ -2,8 +2,8 @@ name: Nightly
 
 # Heavy checks kept off pull requests: every capture case (including the long
 # TBLASTX manifest cases) against the S02 baseline and the frozen hashes, the
-# WASI command/reactor matrix with the NCBI comparison oracle, cargo audit, and the coverage of
-# the cargo test set (a report).
+# WASI command/reactor matrix with the NCBI comparison oracle, the RustSec advisories of the
+# dependencies (cargo deny), and the coverage of the cargo test set (a report).
 #
 # GitHub starts a schedule only on the default branch, main, which moves only when dev is
 # promoted: on 2026-10-25 seven scheduled runs in a row had tested one main commit while dev,
@@ -64,10 +64,13 @@ jobs:
           retention-days: 30
 
   audit:
-    name: cargo audit
-    # RustSec advisories of both lock files. The advisory database is fetched at run time, so this
-    # job stays off pull requests: a failed fetch or a new advisory does not stop unrelated work.
-    # --deny warnings also fails on unmaintained, unsound and yanked crates.
+    name: cargo deny advisories
+    # RustSec advisories of the three lock files (LOSAT, web/adapter, python; deny.toml). The
+    # advisory database is fetched at run time, so this job stays off pull requests: a failed fetch
+    # or a new advisory does not stop unrelated work. Vulnerable, unmaintained, unsound and yanked
+    # crates all fail, as cargo audit --deny warnings did here before (two lock files; python's was
+    # not audited). Not --locked, as in ci.yml. The other checks of deny.toml run on every pull
+    # request (ci.yml, `rust lint`).
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -77,13 +80,16 @@ jobs:
           toolchain: 1.92.0
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
-          tool: cargo-audit@0.22.2
-      - name: cargo audit (LOSAT/Cargo.lock, web/adapter/Cargo.lock)
-        working-directory: LOSAT
+          tool: cargo-deny@0.20.2
+      - name: cargo deny check advisories (LOSAT, web/adapter, python)
         run: |
-          set -euo pipefail
-          cargo audit --deny warnings
-          cargo audit --deny warnings --file ../web/adapter/Cargo.lock
+          status=0
+          for manifest in LOSAT/Cargo.toml web/adapter/Cargo.toml python/Cargo.toml; do
+            echo "::group::$manifest"
+            cargo deny --manifest-path "$manifest" --config deny.toml check advisories || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
   # No NCBI counterpart. A report, not a gate (SWEBOK 2026-11-04 audit, KA5 T12: no coverage
   # measurement): the line and function coverage of LOSAT's sources under the test set of ci.yml's

@@ -131,6 +131,24 @@ jobs:
         run: python3 scripts/line_ids.py check
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --locked --all-targets --all-features -- -D warnings
+      # No NCBI counterpart: supply-chain checks of the dependencies (SWEBOK 2026-11-04 audit,
+      # KA13/KA15). The licenses, sources and bans of deny.toml over the three lock files, whose
+      # result changes only with the lock files. Not --locked: whether python/Cargo.lock is current
+      # is python.yml's check, which is not required; after clippy, so the `cargo metadata` of this
+      # step cannot rewrite a stale LOSAT/Cargo.lock before clippy --locked reads it. The
+      # advisories run in nightly.yml (job `audit`).
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-deny@0.20.2
+      - name: cargo deny (bans, licenses, sources)
+        run: |
+          status=0
+          for manifest in LOSAT/Cargo.toml web/adapter/Cargo.toml python/Cargo.toml; do
+            echo "::group::$manifest"
+            cargo deny --manifest-path "$manifest" --config deny.toml check bans licenses sources || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
 
   # cargo test --all-features in two shards on two runners (cargo-nextest, `--partition count:k/2`:
   # each test binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores

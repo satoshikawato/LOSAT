@@ -113,8 +113,9 @@ const X_WIDE_RANGE_WORK_PER_CELL: u64 = 1;
 /// length; the pool's threads claim the ranges in turn).
 const X_WIDE_LIST_PARTS_PER_THREAD: usize = 4;
 
-/// No NCBI counterpart: the bit of a range's position that says the position is in the overflow
-/// array; without it the position is `(cell slot << 2) | entry`.
+/// No NCBI counterpart: the bit of a range's position that says the position is in the cell's run
+/// of the overflow array, from the cell's cursor (a position below the cell's count, which counts
+/// query offsets, so below 2^31); without it the position is `(cell slot << 2) | entry`.
 const X_WIDE_IN_OVERFLOW: u32 = 1 << 31;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:103-105 (ComputeTableIndex,
@@ -502,14 +503,16 @@ impl XWideOut {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76 (an append at the
     // chain's end, cited in the module comment); the copy of BlastAaLookupFinalize
     // (blast_aalookup.c:351-359, cited at `x_build_group`) to the cell's entries or the overflow.
-    /// Writes `src` at position `at`: with `X_WIDE_IN_OVERFLOW` the overflow from `at`'s other
-    /// bits, else the entries of the cell in slot `at >> 2` from entry `at & 3`.
+    /// Writes `src` at position `at`: with `X_WIDE_IN_OVERFLOW` the run of the cell in slot
+    /// `overflow_slot()` from its cursor plus `at`'s other bits, else the entries of the cell in
+    /// slot `at >> 2` from entry `at & 3`.
     ///
     /// # Safety
-    /// The positions `at..at + src.len()` lie in one cell's entries or in the overflow, and no other
-    /// thread reads or writes them while this runs.
+    /// The positions `at..at + src.len()` lie in one cell's entries or in the run of the overflow
+    /// of the cell in slot `overflow_slot()`, no other thread reads or writes them while this runs,
+    /// and nothing writes that cell meanwhile.
     #[inline(always)]
-    unsafe fn put(&self, at: u32, src: &[i32]) {
+    unsafe fn put(&self, at: u32, overflow_slot: impl FnOnce() -> usize, src: &[i32]) {
         let dst: *mut i32 = if at & X_WIDE_IN_OVERFLOW == 0 {
             let (slot, entry) = ((at >> 2) as usize, (at & 3) as usize);
             #[cfg(debug_assertions)]
@@ -519,7 +522,13 @@ impl XWideOut {
                 .cast::<i32>()
                 .wrapping_add(entry)
         } else {
-            let at = (at & !X_WIDE_IN_OVERFLOW) as usize;
+            let slot = overflow_slot();
+            #[cfg(debug_assertions)]
+            debug_assert!(slot < self.lens.0);
+            // SAFETY: (caller) the slot is a cell of the backbone that nothing writes meanwhile;
+            // no reference to it is made.
+            let cursor = unsafe { BackboneCell::x_cursor_at(self.backbone.add(slot)) };
+            let at = cursor + (at & !X_WIDE_IN_OVERFLOW) as usize;
             #[cfg(debug_assertions)]
             debug_assert!(at + src.len() <= self.lens.1);
             self.overflow.wrapping_add(at)
@@ -743,10 +752,6 @@ impl XPairLutQuery {
         let used: usize = summed.iter().map(|s| s.used).sum();
         let longest_chain = i32::try_from(summed.iter().map(|s| s.longest).max().unwrap_or(0))
             .expect("NCBI BLAST lookup chain hit count must fit Int4");
-        assert!(
-            overflow_size < X_WIDE_IN_OVERFLOW as usize,
-            "NCBI BLAST lookup overflow cursor must fit Int4"
-        );
 
         // (c) The layout: BlastAaLookupFinalize's rule, compacted where the branch-free scan takes
         // the table (`x_scan_bf_takes`, as `x_build_group` decides).
@@ -831,10 +836,11 @@ impl XPairLutQuery {
                         num_used: count as i32,
                         ..BackboneCell::default()
                     };
+                    debug_assert!(count < X_WIDE_IN_OVERFLOW);
                     let mut at = if count as usize > AA_HITS_PER_CELL {
-                        cell.entries[0] = cursor as i32;
+                        cell.set_cursor(cursor);
                         cursor += count as usize;
-                        (cursor - count as usize) as u32 | X_WIDE_IN_OVERFLOW
+                        X_WIDE_IN_OVERFLOW
                     } else {
                         (slot as u32) << 2
                     };
@@ -861,7 +867,23 @@ impl XPairLutQuery {
             overflow.set_len(overflow_size);
         }
 
-        // (d) The appends.
+        // (d) The appends. A cell of the overflow is found as the scan finds it: cell w, or,
+        // compacted, the cells with entries before it (`x_scan_bf::x_rank`).
+        let rank = if compact {
+            crate::algorithm::tblastx::x_scan_bf::x_rank(&pv)
+        } else {
+            Vec::new()
+        };
+        let slot_of = |w: usize| -> usize {
+            if compact {
+                let word = w >> PV_ARRAY_BTS;
+                let below = pv[word]
+                    & ((1u32 << (w & crate::algorithm::tblastx::lookup::PV_ARRAY_MASK)) - 1);
+                rank[word] as usize + below.count_ones() as usize
+            } else {
+                w
+            }
+        };
         let out = XWideOut {
             backbone: backbone.as_mut_ptr(),
             overflow: overflow.as_mut_ptr(),
@@ -881,19 +903,16 @@ impl XPairLutQuery {
                         // part of the overflow, after the ranges before p and before the ranges
                         // after p; the cells' parts of the overflow are disjoint. So no two tasks
                         // write a position, and the vectors are read or written by nothing else
-                        // until the tasks end.
-                        unsafe { out.put(at[w], src) };
+                        // until the tasks end, except the entries of cells of at most
+                        // AA_HITS_PER_CELL hits, which only the appends write; an overflow cell
+                        // (`slot_of(w)`, the slot (c) gave it) is read only.
+                        unsafe { out.put(at[w], || slot_of(w), src) };
                         at[w] += src.len() as u32;
                     }
                 }
             },
         );
 
-        let rank = if compact {
-            crate::algorithm::tblastx::x_scan_bf::x_rank(&pv)
-        } else {
-            Vec::new()
-        };
         XPairLutGroup {
             q_min: if longest_chain > 0 { q_min } else { 0 },
             q_max,
@@ -961,7 +980,7 @@ mod tests {
             if chain.len() <= AA_HITS_PER_CELL {
                 table.backbone[idx].entries[..chain.len()].copy_from_slice(&chain);
             } else {
-                table.backbone[idx].entries[0] = table.overflow.len() as i32;
+                table.backbone[idx].set_cursor(table.overflow.len());
                 table.overflow.extend_from_slice(&chain);
             }
             table.longest_chain = table.longest_chain.max(chain.len() as i32);

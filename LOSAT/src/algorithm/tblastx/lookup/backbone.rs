@@ -114,7 +114,31 @@ pub(crate) fn ideal_karlin_params_of(matrix: ScoringMatrix) -> KarlinParams {
     ideal_karlin_params_for_matrix(matrix, bounds)
 }
 
-/// NCBI AaLookupBackboneCell - EXACT port
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:53-64
+// ```c
+// typedef struct AaLookupBackboneCell {
+//     Int4 num_used;       /**< number of hits stored for this cell */
+//
+//     union {
+//       Int4 overflow_cursor; /**< integer offset into the overflow array
+//                               where the list of hits for this cell begins */
+//       Int4 entries[AA_HITS_PER_CELL];  /**< if the number of hits for this
+//                                             cell is AA_HITS_PER_CELL or less,
+//                                             the hits are all stored directly in
+//                                             the cell */
+//     } payload;  /**< union that specifies either entries stored right on
+//                      the backbone if fewer than AA_HITS_PER_CELL are
+//                      present or a pointer to where the hits are stored
+//                      (off-backbone). */
+// } AaLookupBackboneCell;
+// ```
+/// NCBI AaLookupBackboneCell. A cell of more than `AA_HITS_PER_CELL` hits keeps the cursor of its
+/// run in the overflow array in `entries[0]` (low 32 bits) and `entries[1]` (high 32 bits), read
+/// and written only by [`BackboneCell::cursor`] and [`BackboneCell::set_cursor`]. NCBI's cursor is
+/// an `Int4`, so a table of 2^31 overflow entries or more overflows it (signed overflow, then reads
+/// before the array: an 8 GiB overflow array, for example `-threshold 3e9`, whose `Int4`
+/// `INT_MIN` makes every word a neighbour of every position); LOSAT's holds any position of the
+/// array, in the cell's 16 bytes as before.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BackboneCell {
@@ -128,6 +152,27 @@ impl Default for BackboneCell {
             num_used: 0,
             entries: [0; AA_HITS_PER_CELL],
         }
+    }
+}
+
+// A position of the overflow array (a `usize`) fits the 64 bits of a cell's cursor.
+const _: () = assert!(usize::BITS <= 64);
+
+impl BackboneCell {
+    /// The cursor of a cell of more than `AA_HITS_PER_CELL` hits: where its run starts in the
+    /// overflow array.
+    #[inline(always)]
+    pub fn cursor(&self) -> usize {
+        (u64::from(self.entries[0] as u32) | u64::from(self.entries[1] as u32) << 32) as usize
+    }
+
+    /// Sets the cursor of a cell of more than `AA_HITS_PER_CELL` hits (`entries[0]` and
+    /// `entries[1]`; a cursor below 2^31 writes `entries[0]` as NCBI's `Int4` and 0).
+    #[inline(always)]
+    pub fn set_cursor(&mut self, cursor: usize) {
+        let cursor = cursor as u64;
+        self.entries[0] = cursor as u32 as i32;
+        self.entries[1] = (cursor >> 32) as u32 as i32;
     }
 }
 
@@ -343,6 +388,16 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
     /// Sets the cursor of a cell with more than `AA_HITS_PER_CELL` hits.
     fn set_cursor(&mut self, cursor: usize);
 
+    /// The cursor of a cell with more than `AA_HITS_PER_CELL` hits (`set_cursor`).
+    fn cursor(&self) -> usize;
+
+    /// The cursor of the cell at `cell`, read without making a reference to the cell (the
+    /// partitioned build's tasks write other cells' entries meanwhile).
+    ///
+    /// # Safety
+    /// `cell` must point to a cell of a backbone that nothing writes meanwhile.
+    unsafe fn x_cursor_at(cell: *const Self) -> usize;
+
     /// The cell's own entries (a cell with at most `AA_HITS_PER_CELL` hits is written here).
     fn entries_mut(&mut self) -> &mut [Self::Hit];
 
@@ -383,7 +438,7 @@ impl XCell for BackboneCell {
         if numhits <= AA_HITS_PER_CELL {
             &self.entries[..numhits]
         } else {
-            let cursor = self.entries[0] as usize;
+            let cursor = self.cursor();
             &overflow[cursor..cursor + numhits]
         }
     }
@@ -395,7 +450,19 @@ impl XCell for BackboneCell {
 
     #[inline(always)]
     fn set_cursor(&mut self, cursor: usize) {
-        self.entries[0] = cursor as i32;
+        BackboneCell::set_cursor(self, cursor);
+    }
+
+    #[inline(always)]
+    fn cursor(&self) -> usize {
+        BackboneCell::cursor(self)
+    }
+
+    #[inline(always)]
+    unsafe fn x_cursor_at(cell: *const Self) -> usize {
+        // SAFETY: (caller) `cell` points to a cell that nothing writes meanwhile.
+        let [low, high, _] = unsafe { std::ptr::addr_of!((*cell).entries).read() };
+        (u64::from(low as u32) | u64::from(high as u32) << 32) as usize
     }
 
     #[inline(always)]
@@ -447,9 +514,21 @@ impl XCell for BackboneCell16 {
         if numhits <= AA_HITS_PER_CELL {
             &self.entries[..numhits]
         } else {
-            let cursor = usize::from(self.entries[0]) | usize::from(self.entries[1]) << 16;
+            let cursor = self.cursor();
             &overflow[cursor..cursor + numhits]
         }
+    }
+
+    #[inline(always)]
+    fn cursor(&self) -> usize {
+        usize::from(self.entries[0]) | usize::from(self.entries[1]) << 16
+    }
+
+    #[inline(always)]
+    unsafe fn x_cursor_at(cell: *const Self) -> usize {
+        // SAFETY: (caller) `cell` points to a cell that nothing writes meanwhile.
+        let [low, high, _] = unsafe { std::ptr::addr_of!((*cell).entries).read() };
+        usize::from(low) | usize::from(high) << 16
     }
 
     #[inline(always)]
@@ -2687,7 +2766,7 @@ fn build_lookup_from_prepared(
                 backbone[idx].entries[i] = off;
             }
         } else {
-            backbone[idx].entries[0] = overflow_cursor as i32;
+            backbone[idx].set_cursor(overflow_cursor);
             for &off in entries {
                 overflow[overflow_cursor] = off;
                 overflow_cursor += 1;
@@ -3346,6 +3425,45 @@ mod tests {
         assert_eq!(lookup.get_hits(aaa_index), &[0]);
     }
 
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:57 (`Int4
+    // overflow_cursor`, quoted at `BackboneCell`). A cursor below 2^31 is NCBI's `Int4` in
+    // `entries[0]` (and 0 in `entries[1]`); a cursor of 2^31 or more, which NCBI's `Int4` cannot
+    // hold (`-threshold 3e9`: 21,952 hits per word position, 97,826 positions), reads back whole,
+    // as every scanner reads it (`cursor`, `x_cursor_at`), where `entries[0] as usize` gave
+    // 0xffff_ffff_8000_0000.
+    #[test]
+    fn cursor_holds_positions_past_int4() {
+        let mut cursors = vec![0usize, 7, (1 << 31) - 1, 1 << 31, (1 << 32) - 1];
+        if usize::BITS == 64 {
+            cursors.extend([1usize << 32, (1usize << 32) + 5, usize::MAX >> 2]);
+        }
+        for cursor in cursors {
+            let mut cell = BackboneCell::default();
+            cell.set_count(AA_HITS_PER_CELL + 1);
+            XCell::set_cursor(&mut cell, cursor);
+            assert_eq!(cell.cursor(), cursor, "{cursor:#x}");
+            assert_eq!(XCell::cursor(&cell), cursor, "{cursor:#x}");
+            // SAFETY: `cell` is a cell that nothing writes.
+            assert_eq!(
+                unsafe { BackboneCell::x_cursor_at(&cell) },
+                cursor,
+                "{cursor:#x}"
+            );
+            if cursor < 1 << 31 {
+                assert_eq!(cell.entries, [cursor as i32, 0, 0]);
+            }
+        }
+        let mut narrow = BackboneCell16::default();
+        narrow.set_count(AA_HITS_PER_CELL + 1);
+        narrow.set_cursor((1 << 31) + 3);
+        assert_eq!(narrow.cursor(), (1 << 31) + 3);
+        // SAFETY: `narrow` is a cell that nothing writes.
+        assert_eq!(
+            unsafe { BackboneCell16::x_cursor_at(&narrow) },
+            (1 << 31) + 3
+        );
+    }
+
     // No NCBI counterpart: `get_hits` is a safe function of a table whose fields are `pub`, so an
     // index past the backbone, or a cell whose run does not fit `overflow`, panics instead of
     // reading outside the table (it read with `get_unchecked` until the SWEBOK 2026-11-04 audit,
@@ -3366,7 +3484,7 @@ mod tests {
         assert!(read(&lookup, past).is_err());
         let mut broken = lookup;
         broken.backbone[0].num_used = AA_HITS_PER_CELL as i32 + 1;
-        broken.backbone[0].entries[0] = broken.overflow.len() as i32;
+        broken.backbone[0].set_cursor(broken.overflow.len());
         assert!(read(&broken, 0).is_err());
         broken.backbone[0].num_used = -1;
         assert!(read(&broken, 0).is_err());

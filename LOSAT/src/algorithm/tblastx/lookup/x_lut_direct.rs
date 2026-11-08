@@ -229,7 +229,6 @@ struct XBuildTemps {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     ranges: Vec<u32>,
-    base: Vec<u32>,
     fill: Vec<u32>,
     chains: Option<LookupBackboneChains>,
     #[cfg(all(
@@ -1859,11 +1858,6 @@ fn x_laid_out<C: XVec>(
         ),
         Some(room) => room.x_take_zeroed::<C>(backbone_size, pv_size, overflow_size)?,
     };
-    let mut base: Vec<u32> = if pooled {
-        x_zeroed(std::mem::take(&mut temps.base), backbone_size, false)
-    } else {
-        vec![0; backbone_size]
-    };
     let mut overflow_cursor = 0usize;
     for (idx, &count) in counts.iter().enumerate() {
         if count == 0 {
@@ -1873,7 +1867,6 @@ fn x_laid_out<C: XVec>(
         backbone[idx].set_count(count as usize);
         if count as usize > AA_HITS_PER_CELL {
             backbone[idx].set_cursor(overflow_cursor);
-            base[idx] = overflow_cursor as u32;
             overflow_cursor += count as usize;
         }
     }
@@ -1900,7 +1893,7 @@ fn x_laid_out<C: XVec>(
                     offsets,
                 );
             } else {
-                let start = base[w] as usize + at;
+                let start = backbone[w].cursor() + at;
                 C::Hit::x_store(&mut overflow[start..start + offsets.len()], offsets);
             }
             fill[w] += offsets.len() as u32;
@@ -1909,7 +1902,6 @@ fn x_laid_out<C: XVec>(
 
     if pooled {
         temps.counts = counts;
-        temps.base = base;
         temps.fill = fill;
         temps.chains = Some(exact_backbone);
         x_pool_lock(&X_BX_TEMPS).push(temps);
@@ -2168,12 +2160,11 @@ pub(super) fn x_build_lean_in(
         pv_set(&mut pv, idx);
         backbone[idx].num_used = count as i32;
         if count > AA_HITS_PER_CELL {
-            backbone[idx].entries[0] = overflow_cursor as i32;
-            *slot = overflow_cursor as u32;
+            backbone[idx].set_cursor(overflow_cursor);
             overflow_cursor += count;
-        } else {
-            *slot = 0;
         }
+        // The fill's position in the cell's entries or its run of the overflow.
+        *slot = 0;
     }
 
     // Fill pass: the reference's appends, in the reference's order.
@@ -2187,6 +2178,7 @@ pub(super) fn x_build_lean_in(
             if backbone[w].num_used as usize <= AA_HITS_PER_CELL {
                 backbone[w].entries[at..at + source.len()].copy_from_slice(source);
             } else {
+                let at = backbone[w].cursor() + at;
                 overflow[at..at + source.len()].copy_from_slice(source);
             }
             counts[w] += source.len() as u32;
@@ -2318,8 +2310,10 @@ const X_MOST_PARTS: usize = 8;
 ))]
 const X_UNLISTED_LENGTH: usize = 24;
 
-/// No NCBI counterpart: the bit of a range's position that says the position is in the overflow
-/// (a cell of more than AA_HITS_PER_CELL entries), not in the cell's own entries.
+/// No NCBI counterpart: the bit of a range's position that says the position is in the cell's run
+/// of the overflow (a cell of more than AA_HITS_PER_CELL entries), from the cell's cursor, not in
+/// the cell's own entries. A position is below the cell's count, which counts query offsets (at most
+/// one hit per offset), so below 2^31.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2356,12 +2350,14 @@ impl<C: XCell> XDisjointOut<C> {
     // chain's end, cited in the module comment); the copy of BlastAaLookupFinalize (blast_aalookup.c
     // 746-747, cited at `x_build_direct`) to the cell's entries or the overflow.
     /// Writes `src` at `at` of cell `w`: the cell's entries from `at`, or with `X_IN_OVERFLOW` set
-    /// the overflow from `at`'s other bits. Copies of one to four offsets are made element by element
-    /// (no call of the C library's memmove for the short lists of most cells and sources).
+    /// the cell's run of the overflow from its cursor plus `at`'s other bits. Copies of one to four
+    /// offsets are made element by element (no call of the C library's memmove for the short lists
+    /// of most cells and sources).
     ///
     /// # Safety
     /// `w` is a cell of the backbone, the positions `at..at + src.len()` lie in the cell's entries or
-    /// in the overflow, and no other thread reads or writes them while this runs.
+    /// in its run of the overflow, no other thread reads or writes them while this runs, and nothing
+    /// writes the cell itself while a cell of the overflow is written.
     #[inline(always)]
     unsafe fn put(&self, w: usize, at: u32, src: &[i32]) {
         let dst = if at & X_IN_OVERFLOW == 0 {
@@ -2370,7 +2366,10 @@ impl<C: XCell> XDisjointOut<C> {
             // SAFETY: (caller) `w` is a cell of the backbone; no reference to the cell is made.
             unsafe { C::x_entries_ptr(self.backbone.add(w)) }.wrapping_add(at as usize)
         } else {
-            let at = (at & !X_IN_OVERFLOW) as usize;
+            // SAFETY: (caller) `w` is a cell of the backbone that nothing writes meanwhile; no
+            // reference to the cell is made.
+            let at =
+                unsafe { C::x_cursor_at(self.backbone.add(w)) } + (at & !X_IN_OVERFLOW) as usize;
             #[cfg(debug_assertions)]
             debug_assert!(at + src.len() <= self.lens.1);
             self.overflow.wrapping_add(at)
@@ -2647,10 +2646,6 @@ fn x_partitioned_passes(
     let longest_chain = summed.iter().map(|part| part.1).max().unwrap_or(0);
     let hits: u64 = summed.iter().map(|part| part.2).sum();
     let used: u64 = summed.iter().map(|part| part.3).sum();
-    assert!(
-        overflow_size < X_IN_OVERFLOW as usize,
-        "BLASTX lookup overflow cursor must fit in Int4"
-    );
     let laid: Vec<usize> = summed.iter().map(|part| part.0).collect();
     let sizes = (backbone_size, pv_size, overflow_size, longest_chain);
     let ranges = &bounds[..=parts];
@@ -2769,10 +2764,13 @@ where
             // pv_set at the stripe's first cell + local, a multiple of 32.
             pv[local >> PV_ARRAY_BTS] |= 1u32 << (local & PV_ARRAY_MASK);
             cell.set_count(count as usize);
+            // The ranges' first positions: in the cell's entries, or in its run of the overflow
+            // from its cursor (`XDisjointOut::put`).
+            debug_assert!(count < X_IN_OVERFLOW);
             let mut at = if count as usize > AA_HITS_PER_CELL {
                 cell.set_cursor(cursor);
                 cursor += count as usize;
-                (cursor - count as usize) as u32 | X_IN_OVERFLOW
+                X_IN_OVERFLOW
             } else {
                 0
             };
@@ -2813,12 +2811,14 @@ where
                     // ranges before p and before the ranges after p; an overflow cell's count lies
                     // in the overflow from its cursor and the cursors give the cells disjoint parts.
                     // So no two tasks write a position, and the backbone and the overflow are read
-                    // or written by nothing else until the tasks end. A narrow table's offsets are
+                    // or written by nothing else until the tasks end, except the entries of cells
+                    // of at most AA_HITS_PER_CELL hits, which only the appends write; an overflow
+                    // cell's cursor, written in (c), is read only. A narrow table's offsets are
                     // below its lookup query's length, at most 65,535 (`x_is_narrow`).
                     // SAFETY: `put`'s contract: `w < backbone_size` (`at[w]`, bounds-checked on
                     // a chunk of `backbone_size` counts), `at[w] .. at[w] + offsets.len()` inside
-                    // cell `w`'s entries or its overflow part, and positions no other task writes
-                    // (the last two: paragraph above).
+                    // cell `w`'s entries or its overflow part, positions no other task writes, and
+                    // an overflow cell that nothing writes (the last three: paragraph above).
                     unsafe { out.put(w, at[w], offsets) };
                     at[w] += offsets.len() as u32;
                 }
@@ -3669,7 +3669,7 @@ mod tests {
             if n <= AA_HITS_PER_CELL {
                 &cell.entries[..n]
             } else {
-                let cursor = cell.entries[0] as usize;
+                let cursor = cell.cursor();
                 &table.overflow[cursor..cursor + n]
             }
         })

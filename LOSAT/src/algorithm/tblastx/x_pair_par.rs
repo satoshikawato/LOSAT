@@ -1548,7 +1548,7 @@ impl XGroup {
         if num <= AA_HITS_PER_CELL {
             &cell.entries[..num]
         } else {
-            let cursor = cell.entries[0] as usize;
+            let cursor = cell.cursor();
             &self.lookup.overflow[cursor..cursor + num]
         }
     }
@@ -3621,7 +3621,7 @@ fn build_tables(lookup: &BlastAaLookupTable, bounds: &[i32]) -> Vec<XGroup> {
             if count <= AA_HITS_PER_CELL {
                 cell.entries[..count].copy_from_slice(&b.chain);
             } else {
-                cell.entries[0] = b.overflow.len() as i32;
+                cell.set_cursor(b.overflow.len());
                 b.overflow.extend_from_slice(&b.chain);
             }
             b.longest_chain = b.longest_chain.max(count as i32);

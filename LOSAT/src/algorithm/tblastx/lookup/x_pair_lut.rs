@@ -512,8 +512,8 @@ impl XPairLutQuery {
             let mut overflow: Vec<i32> =
                 Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
             overflow.resize(overflow_size, 0);
-            // Where the fill pass writes each cell's next offset: 0 in the cell, the start of its
-            // run in the overflow array.
+            // Where the fill pass writes each cell's next offset: in the cell's entries, or in its
+            // run of the overflow array from the cell's cursor.
             let mut next: Vec<u32> = x_group_zeroed(backbone_size, mapped);
             let mut overflow_cursor = 0usize;
             let mut kept = 0usize;
@@ -531,8 +531,7 @@ impl XPairLutQuery {
                 };
                 backbone[at].num_used = count as i32;
                 if count as usize > AA_HITS_PER_CELL {
-                    backbone[at].entries[0] = overflow_cursor as i32;
-                    next[idx] = overflow_cursor as u32;
+                    backbone[at].set_cursor(overflow_cursor);
                     overflow_cursor += count as usize;
                 }
             }
@@ -548,10 +547,11 @@ impl XPairLutQuery {
                 for &w in list {
                     let w = w as usize;
                     let at = next[w] as usize;
+                    let cell = if compact { slot[w] as usize } else { w };
                     if counts[w] as usize <= AA_HITS_PER_CELL {
-                        let cell = if compact { slot[w] as usize } else { w };
                         backbone[cell].entries[at..at + offsets.len()].copy_from_slice(offsets);
                     } else {
+                        let at = backbone[cell].cursor() + at;
                         overflow[at..at + offsets.len()].copy_from_slice(offsets);
                     }
                     next[w] += offsets.len() as u32;
@@ -929,7 +929,7 @@ mod tests {
             if chain.len() <= AA_HITS_PER_CELL {
                 table.backbone[idx].entries[..chain.len()].copy_from_slice(&chain);
             } else {
-                table.backbone[idx].entries[0] = table.overflow.len() as i32;
+                table.backbone[idx].set_cursor(table.overflow.len());
                 table.overflow.extend_from_slice(&chain);
             }
             table.longest_chain = table.longest_chain.max(chain.len() as i32);

@@ -820,7 +820,7 @@ unsafe fn write<const AVX2: bool>(
                 .write_unaligned(pair_bits((*cell).entries[j] as u32, s_off));
         }
     } else {
-        let cursor = (*cell).entries[0] as usize;
+        let cursor = (*cell).cursor();
         let src = table.overflow.add(cursor);
         let whole = chain_whole(table, cursor, numhits);
         // SAFETY: the first `whole` query offsets are inside the overflow array (`chain_whole`) and
@@ -888,7 +888,7 @@ unsafe fn write_avx2(
         let v = _mm256_blend_epi32::<0xAA>(_mm256_permutevar8x32_epi32(c, order), s);
         _mm256_storeu_si256(d as *mut __m256i, v);
     } else {
-        let cursor = (*cell).entries[0] as usize;
+        let cursor = (*cell).cursor();
         let src = table.overflow.add(cursor);
         let high = _mm256_set1_epi64x((s_off as i64) << 32);
         let whole = chain_whole(table, cursor, numhits);
@@ -1223,12 +1223,12 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter(|(_, cell)| cell.num_used as usize > AA_HITS_PER_CELL)
-                .max_by_key(|(_, cell)| cell.entries[0])
+                .max_by_key(|(_, cell)| cell.cursor())
             else {
                 continue;
             };
             let hits = cell.num_used as usize;
-            let cursor = cell.entries[0] as usize;
+            let cursor = cell.cursor();
             if cursor + hits != lookup.overflow.len() || hits.is_multiple_of(4) {
                 continue;
             }

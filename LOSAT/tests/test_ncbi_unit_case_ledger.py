@@ -97,6 +97,19 @@ DECLARE_TEST(Disco_Coding_16_,
 DECLARE_TEST(Dead, 8);
 #endif
 
+#ifdef KAPPA_PRINT_DIAGNOSTICS
+BOOST_AUTO_TEST_CASE(KappaDiagnosticsCase) {
+}
+#endif
+
+#ifndef KAPPA_PRINT_DIAGNOSTICS
+BOOST_AUTO_TEST_CASE(NoKappaDiagnosticsCase) {
+}
+#else
+BOOST_AUTO_TEST_CASE(KappaDiagnosticsElseCase) {
+}
+#endif
+
 BOOST_AUTO_TEST_SUITE_END()
 """
 
@@ -156,11 +169,14 @@ class ExtractTests(unittest.TestCase):
                 "IfOneElseCase": "DISABLED",
                 "ThreadsCase": "AUTO",
                 "DECLARE_TEST": "MACRO",
+                "KappaDiagnosticsCase": "DISABLED",
+                "NoKappaDiagnosticsCase": "AUTO",
+                "KappaDiagnosticsElseCase": "DISABLED",
             },
         )
         # The timeout line is not a case; the macro is one row as written, from
         # the #define to its last invocation, with the runtime count in the note.
-        self.assertEqual(len(cases), 9)
+        self.assertEqual(len(cases), 12)
         spans = {case.case: (case.line_start, case.line_end) for case in cases}
         notes = {case.case: case.note for case in cases}
         self.assertEqual(spans["DECLARE_TEST"], (50, 59))
@@ -199,14 +215,17 @@ class ExtractTests(unittest.TestCase):
         expected = {
             "optionshandle": 75, "blastfilter": 67, "bl2seq": 98, "blastinput": 96,
             "blasthits": 25, "blastsetup": 59, "split_query": 33, "pssmcreate": 17,
+            "seqdb": 119, "writedb": 97, "seqsrc": 39, "psiblast": 18, "seq_formatter": 12,
         }
         for module, count in expected.items():
             self.assertEqual(total[module], count, module)
         self.assertEqual(total["blast_format"] + total["align_format"], 38)
         self.assertEqual(disabled["blastfilter"], 1)
         self.assertEqual(disabled["bl2seq"], 3)
+        self.assertEqual(disabled["writedb"], 12)
+        self.assertEqual(disabled["seqsrc"], 32)  # 30 in `#if 0`, 2 under KAPPA_PRINT_DIAGNOSTICS
         self.assertEqual(fixture["optionshandle"], 61)
-        self.assertEqual(len(cases.cases), 696)
+        self.assertEqual(len(cases.cases), 1101)
         self.assertEqual(total["ntscan"], 2)  # DiscontigTwoSubjects + the DECLARE_TEST macro
         macro = cases.by_module_case[("ntscan", "DECLARE_TEST")]
         self.assertEqual((macro.line_start, macro.line_end, macro.kind), (846, 905, "MACRO"))

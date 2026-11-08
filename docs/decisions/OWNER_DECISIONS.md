@@ -234,10 +234,10 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | 9 | 2026-10-29 | Owner-delegated |  | S1 ports mdb.c at the buffer level; paths survey A found unreachable are internal errors; NCBI's LMDB environment variables are read as makeblastdb does. | makeblastdb LMDB writer | `LOSAT/src/writedb/mdb/mod.rs:12` |
 | 10 | 2026-10-29 | Owner-delegated |  | NCBI v5 abort cases (gi-only record before another; duplicate in the first record) are refused with rc 1 naming the record, not reproduced. | makeblastdb v5 aborts | `LOSAT/src/writedb/tests.rs:1541`, `LOSAT/src/writedb/writer.rs:1007` and 1 more |
 | 11 | 2026-10-29 | Owner-delegated |  | Error paths match makeblastdb in exit status and final message, without byte parity for leftover files or exception texts containing NCBI build paths. | makeblastdb error paths | `LOSAT/src/writedb/tests.rs:1406`, `LOSAT/src/seqid/parse.rs:54` |
-| 12 | 2026-10-29 | Owner-delegated |  | .ncbirc LONG_SEQID and MAX_SEQID_LENGTH and the makeblastdb scan-bioseq variable are unsupported: an explicit error when set. | makeblastdb registry settings | `LOSAT/src/writedb/makeblastdb.rs:475`, `LOSAT/src/writedb/makeblastdb.rs:1683` and 2 more |
+| 12 | 2026-10-29 | Owner-delegated |  | .ncbirc LONG_SEQID and MAX_SEQID_LENGTH and the makeblastdb scan-bioseq variable are unsupported: an explicit error when set. | makeblastdb registry settings | `LOSAT/src/writedb/makeblastdb.rs:476`, `LOSAT/src/writedb/makeblastdb.rs:1684` and 2 more |
 | 20 | 2026-10-29 | Owner-delegated |  | With several -in files, an unreadable file is an error (exit 255) that removes what earlier files added; -in "" is refused. | makeblastdb -in files | `LOSAT/src/writedb/tests.rs:1235` |
 | 28 | 2026-10-30 | Owner-delegated |  | A FASTA id token ends at a byte >= 0x80 as with x86-64 signed char, on every platform. | makeblastdb FASTA id parsing | `LOSAT/src/writedb/lmdb.rs:635` |
-| 29 | 2026-10-30 | Owner-delegated |  | CSeqIdException reports name the official Linux release build tree like LOSAT's other NCBI exception reports; the test gate masks the tree. | makeblastdb exception text | `LOSAT/src/writedb/makeblastdb.rs:635`, `LOSAT/src/writedb/tests.rs:1385` |
+| 29 | 2026-10-30 | Owner-delegated |  | CSeqIdException reports name the official Linux release build tree like LOSAT's other NCBI exception reports; the test gate masks the tree. | makeblastdb exception text | `LOSAT/src/writedb/makeblastdb.rs:636`, `LOSAT/src/writedb/tests.rs:1385` |
 
 ### `ncbi-parity-20261019`: line NP
 
@@ -380,4 +380,4 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
 | 7 | 2026-11-02 | Owner | 「SXd を始める」 「Certified profile っていう表現やめた方がいいと思う。Certify って別に公式じゃないじゃん。使えます、だけでいいじゃん」 「既存の不具合 2 つ：なおしましょう」 | Owner starts SXd (BLASTX -query_loc / -subject_loc), drops "certified/certification" from the verification badge, and asks that two existing defects (a screens spec wait, an operator-precedence bug in v_abi_cases.py quick()) be fixed. | Web SXd, wording, two bug fixes | `web/adapter/tools/v_abi_cases.py:286` |
-| 10 | 2026-11-03 | Owner-delegated |  | SXd1 shape for BLASTX ranges: NCBI behaviour for empty ranges, UTF-8 option text as other programs, formats 0/6/7/10 only, outfmt 0 lowercase quirk reproduced, error order per NCBI. | BLASTX -query_loc/-subject_loc (SXd1) | `LOSAT/src/cli.rs:1188` |
+| 10 | 2026-11-03 | Owner-delegated |  | SXd1 shape for BLASTX ranges: NCBI behaviour for empty ranges, UTF-8 option text as other programs, formats 0/6/7/10 only, outfmt 0 lowercase quirk reproduced, error order per NCBI. | BLASTX -query_loc/-subject_loc (SXd1) | `LOSAT/src/cli.rs:1280` |

@@ -174,7 +174,8 @@ pub enum Commands {
     /// Translated nucleotide query vs protein subject (local blastx)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
-    /// Pairwise nucleotide alignment (megablast \[default\], blastn)
+    /// Pairwise nucleotide alignment (megablast [default], blastn)
+    #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastn(blastn::BlastnArgs),
     /// Pairwise protein alignment (blastp)

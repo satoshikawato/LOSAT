@@ -131,6 +131,14 @@ jobs:
         run: python3 scripts/line_ids.py check
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --locked --all-targets --all-features -- -D warnings
+      # No NCBI counterpart: the crate's rustdoc builds without a warning (SWEBOK 2026-11-04 audit,
+      # KA2/KA11; the 47 broken links and HTML tags were fixed on 2026-11-08). Every feature, so no
+      # module goes unchecked. A doc comment that clap prints as help keeps its text and allows the
+      # one rustdoc lint on that item instead.
+      - name: rustdoc (no warnings)
+        run: cd LOSAT && cargo doc --locked --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
       # No NCBI counterpart: supply-chain checks of the dependencies (SWEBOK 2026-11-04 audit,
       # KA13/KA15). The licenses, sources and bans of deny.toml over the three lock files, whose
       # result changes only with the lock files. Not --locked: whether python/Cargo.lock is current

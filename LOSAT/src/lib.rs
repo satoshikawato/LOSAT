@@ -54,3 +54,8 @@ pub mod cli;
 
 // The type of `api::FastaRecord`: private, so that rustdoc inlines its re-exports (record.rs).
 mod record;
+
+// The engine items that LOSAT Web's adapter (`web/adapter`) names: one hidden façade, outside the
+// public API (web_adapter.rs).
+#[doc(hidden)]
+pub mod web_adapter;

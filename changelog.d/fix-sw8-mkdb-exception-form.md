@@ -25,7 +25,7 @@
   makeblastdb does, and builds the database; it used to stop with `Is a directory` (exit status
   255) or to leave the directory beside the new database.
 - Fixed: the `-taxids` and `-taxidlist` lists of the search programs read an entry with a
-  vertical tab, a carriage return or a NUL byte as NCBI BLAST+ does; 9 of 20 such lists tried
+  vertical tab or a NUL byte as NCBI BLAST+ does; 9 of 20 such lists tried
   used to stop with `Invalid taxidlist file` where NCBI BLAST+ searches.
 - Fixed: `losat makeblastdb -parse_seqids` stores a GI id with a NUL byte in it as makeblastdb
   does (`>gi|12<NUL>x t1` is GI 12 titled `t1`); it used to warn `Bad char [0x0]` and write the

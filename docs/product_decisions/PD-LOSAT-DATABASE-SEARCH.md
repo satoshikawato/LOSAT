@@ -258,14 +258,15 @@ Removal of an existing database and the paths of the output:
   (`.pdb`, `.pos`, `.pot`, `.ptf`, `.pto`, and logs "Deleted existing ..."), keeps its volume
   files, writes the new files over or beside them and ends with exit status 2 when it opens
   the result. LOSAT
-  takes the path as one name, removes the whole database, replaces it and ends with 0; a build
+  takes the path as one name, removes the whole database (a directory at one of its names with
+  its contents), replaces it and ends with 0; a build
   that fails after the removal (a `-max_file_sz` that is no size) leaves none of the old
   database, where makeblastdb leaves its volume files. (`-out` itself may not contain a space,
   in both programs.)
 - An existing `sub/db.pal` while the current directory holds volumes of the same names
   (`./db.00.*`). NCBI looks for a volume in the current directory first, so makeblastdb
   removes the files of the current directory. LOSAT removes the volumes beside the alias
-  file. Other behaviour of makeblastdb is kept: the existing database is removed before the
+  file (a directory at one of those names with its contents). Other behaviour of makeblastdb is kept: the existing database is removed before the
   input is read, so a failing build also removes it; a directory at one of the names removed
   is removed with its contents, read-only parts included, and a symbolic link is removed, not
   followed (`CDirEntry::Remove`); a volume file's final name is cleared the same way before
@@ -288,7 +289,8 @@ Version 5 and the options added to the writer:
   that removes what the earlier files added; makeblastdb skips it without a word.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
   of a database; one left at the path is removed, makeblastdb's final state after a build; a
-  build that fails after LMDB has opened leaves them in makeblastdb, not in LOSAT). On Unix a
+  build that fails after LMDB has created its lock file leaves them in makeblastdb, not in
+  LOSAT). On Unix a
   lock file that LMDB cannot create stops LOSAT where it stops makeblastdb: an
   output name of 247 bytes or more, whose `NAME.pdb-lock` passes the file-name limit of 255
   bytes, ends with "BLAST Database error: LMDB runtime error: mdb_env_open: File name too
@@ -301,10 +303,15 @@ Version 5 and the options added to the writer:
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
-- A file that cannot be created, written or renamed, and an input file that cannot be
+- A file that cannot be created or written, and an input file that cannot be
   opened: makeblastdb does not test its streams and ends with exit status 0 and a damaged
   or missing database. LOSAT removes the files of the build and ends with
   `Error: <path>: <system error>` and exit status 255.
+- A volume whose final name is a directory that the removal cannot delete (it holds a
+  directory that cannot be read): makeblastdb's rename fails without a word, the volume stays
+  under its numbered name (`NAME.00.pin`) and makeblastdb ends with `No alias or index file
+  found ...` (exit status 2); LOSAT ends with `Error: <volume> -> <name>: Is a directory`
+  (exit status 255) and leaves `NAME.ptf` (probe of 2026-11-08).
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights); LOSAT stops when it creates the first
   file, after the first lines of the log.

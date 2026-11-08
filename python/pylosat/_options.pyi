@@ -136,14 +136,15 @@ class BlastpOptions(TypedDict, total=False):
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
-    task: Literal['blastp', 'blastp-fast']
+    task: Literal['blastp', 'blastp-fast', 'blastp-short']
     evalue: float
-    """Expectation value (E) threshold for saving hits [default: 10]"""
+    """Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]"""
     threshold: float
     """Minimum word score such that the word is added to the BLAST lookup table [default: 11, or
-    the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast]"""
+    the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast; 16
+    (PAM30's) for blastp-short]"""
     word_size: int
-    """Word size for wordfinder algorithm [default: 3; 5 for blastp-fast]"""
+    """Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]"""
     num_threads: int
     mt_mode: int
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
@@ -164,11 +165,11 @@ class BlastpOptions(TypedDict, total=False):
     ungapped: Literal['true', 'false']
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
-    suggestion]"""
+    suggestion; 15 (PAM30's) for blastp-short]"""
     matrix: str
-    """Scoring matrix name [default: BLOSUM62]"""
+    """Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]"""
     gapopen: int
-    """Cost to open a gap [default: 11, or the matrix's best value]"""
+    """Cost to open a gap [default: 11, or the matrix's best value; 9 for blastp-short]"""
     gapextend: int
     """Cost to extend a gap [default: 1, or the matrix's best value]"""
     comp_based_stats: str

@@ -519,6 +519,54 @@ fn hsp_for_handle(hsp_storage: &[Option<BlastnHsp>], handle: HspHandle) -> Optio
     })
 }
 
+/// No NCBI counterpart (memory placement only): the HSPs of the live handles of `hsp_array`, in
+/// its order, built in the allocation of `storage` (the input list's, through `map(Some)`):
+/// slot `k` takes the HSP of the `k`-th live handle by swaps, with the position of each slot's HSP
+/// tracked, and the slots past the live ones are dropped. `Option<BlastnHsp>` has the size of
+/// `BlastnHsp` (asserted below), so the `map` and `collect` at both ends keep the allocation too,
+/// and the endpoint purge holds one array of HSPs instead of the input and a copy of its survivors
+/// (Sakai x EDL933 `-subject` blastn: 38,696 HSPs, 7 MiB). A missing or repeated handle is an
+/// error, as in the copy it replaces.
+fn x_in_handle_order(
+    mut storage: Vec<Option<BlastnHsp>>,
+    hsp_array: &[HspHandle],
+) -> Vec<BlastnHsp> {
+    let n = storage.len();
+    // pos_of[s]: where the HSP of slot s is now; slot_at[p]: the slot whose HSP is at p
+    let mut pos_of: Vec<usize> = (0..n).collect();
+    let mut slot_at: Vec<usize> = (0..n).collect();
+    let mut k = 0usize;
+    for handle in hsp_array.iter().flatten() {
+        let s = handle.get() - 1;
+        let p = pos_of[s];
+        assert!(
+            p >= k && storage[p].is_some(),
+            "live output handle requires a unique HSP"
+        );
+        if p != k {
+            storage.swap(k, p);
+            let t = slot_at[k];
+            slot_at[p] = t;
+            pos_of[t] = p;
+            slot_at[k] = s;
+            pos_of[s] = k;
+        }
+        k += 1;
+    }
+    storage.truncate(k);
+    storage
+        .into_iter()
+        .map(|hsp| hsp.expect("live output handle requires a unique HSP"))
+        .collect()
+}
+
+// No NCBI counterpart: `x_in_handle_order` keeps the allocation only when the two element types have
+// one layout (the niche of `BlastnHsp`'s fields gives `Option` no extra tag).
+const _: () = assert!(
+    std::mem::size_of::<Option<BlastnHsp>>() == std::mem::size_of::<BlastnHsp>()
+        && std::mem::align_of::<Option<BlastnHsp>>() == std::mem::align_of::<BlastnHsp>()
+);
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2457,2478
 // ```c
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(EBlastProgramType program,
@@ -844,17 +892,11 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // blast_traceback.c:647-665 to re-evaluate, while NULL tail entries are
     // skipped. Store the same live order and return the active-prefix boundary.
     let extra_start = hsp_count;
-    let mut hits = Vec::with_capacity(initial_count);
-    for handle in hsp_array.into_iter().flatten() {
-        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2530-2535
-        // Blast_HSPListPurgeNullHSPs(hsp_list); return hsp_count;
-        // Materialize the live handle order once; missing/duplicate slots are errors.
-        hits.push(
-            hsp_storage[handle.get() - 1]
-                .take()
-                .expect("live output handle requires a unique HSP"),
-        );
-    }
+    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2530-2535
+    // Blast_HSPListPurgeNullHSPs(hsp_list); return hsp_count;
+    // No NCBI counterpart (memory placement only): the live handle order is applied to the storage
+    // in place, so the list is never copied into a second array (`x_in_handle_order`).
+    let hits = x_in_handle_order(hsp_storage, &hsp_array);
 
     // Debug output for purge statistics
     if crate::utils::xenv::debug_blastn_is_ok() {
@@ -1990,6 +2032,94 @@ mod tests {
             std::mem::size_of::<HspHandle>(),
             std::mem::size_of::<usize>()
         );
+    }
+
+    // No NCBI counterpart: `x_in_handle_order` gives the HSPs of the live handles in their order,
+    // for every order and number of live handles of a short list, in the input's allocation.
+    #[test]
+    fn handle_order_is_applied_in_the_input_allocation() {
+        let (a, _) = opaque_equal_endpoint_hsps();
+        let n = 5usize;
+        let mut perms: Vec<Vec<usize>> = vec![Vec::new()];
+        for _ in 0..n {
+            let mut next = Vec::new();
+            for p in &perms {
+                for s in (0..n).filter(|s| !p.contains(s)) {
+                    let mut q = p.clone();
+                    q.push(s);
+                    next.push(q);
+                }
+            }
+            perms = next;
+        }
+        assert_eq!(perms.len(), 120);
+        for perm in &perms {
+            for live in 0..=n {
+                let hsps: Vec<BlastnHsp> = (0..n)
+                    .map(|i| {
+                        let mut h = a.clone();
+                        h.raw_score = i as i32;
+                        h
+                    })
+                    .collect();
+                let address = hsps.as_ptr() as usize;
+                let storage: Vec<Option<BlastnHsp>> = hsps.into_iter().map(Some).collect();
+                assert_eq!(storage.as_ptr() as usize, address);
+                // the live handles, with a removed (None) entry after the first one
+                let mut handles: Vec<HspHandle> = perm[..live]
+                    .iter()
+                    .map(|&s| NonZeroUsize::new(s + 1))
+                    .collect();
+                handles.insert(live.min(1), None);
+                let out = x_in_handle_order(storage, &handles);
+                let scores: Vec<usize> = out.iter().map(|h| h.raw_score as usize).collect();
+                assert_eq!(scores, perm[..live].to_vec());
+                if live > 0 {
+                    assert_eq!(out.as_ptr() as usize, address);
+                }
+            }
+        }
+    }
+
+    // No NCBI counterpart: a deleted HSP's empty slot (`None`, as the purge leaves it) that a swap
+    // moves forward is dropped with the slots past the live ones.
+    #[test]
+    fn handle_order_drops_an_empty_slot_moved_forward() {
+        let (a, _) = opaque_equal_endpoint_hsps();
+        let with_score = |score: i32| {
+            let mut h = a.clone();
+            h.raw_score = score;
+            Some(h)
+        };
+        let storage = vec![None, with_score(1), with_score(2)];
+        let handles = vec![NonZeroUsize::new(3), None, NonZeroUsize::new(2)];
+        let out = x_in_handle_order(storage, &handles);
+        assert_eq!(
+            out.iter().map(|h| h.raw_score).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+    }
+
+    // No NCBI counterpart: a live handle to an emptied slot is an error, as in the copy
+    // `x_in_handle_order` replaced (`take` of an empty slot).
+    #[test]
+    #[should_panic(expected = "live output handle requires a unique HSP")]
+    fn handle_order_rejects_a_handle_to_an_empty_slot() {
+        let (_, b) = opaque_equal_endpoint_hsps();
+        let storage = vec![None, Some(b)];
+        let handles = vec![NonZeroUsize::new(1)];
+        let _ = x_in_handle_order(storage, &handles);
+    }
+
+    // No NCBI counterpart: a repeated live handle is an error, as in the copy `x_in_handle_order`
+    // replaced (`take` of an empty slot).
+    #[test]
+    #[should_panic(expected = "live output handle requires a unique HSP")]
+    fn handle_order_rejects_a_repeated_handle() {
+        let (a, b) = opaque_equal_endpoint_hsps();
+        let storage = vec![Some(a), Some(b)];
+        let handles = vec![NonZeroUsize::new(2), NonZeroUsize::new(2)];
+        let _ = x_in_handle_order(storage, &handles);
     }
 
     // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2490-2499,2516-2525

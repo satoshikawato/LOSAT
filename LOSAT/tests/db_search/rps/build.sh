@@ -1,0 +1,92 @@
+#!/bin/bash
+# Builds the RPS-BLAST fixture databases of LOSAT/tests/db_search/rps/ with NCBI BLAST+ 2.17.0
+# (comparison-only tooling, as the fixtures' NCBI outputs; LOSAT never runs NCBI):
+#   rps_mini   version 5, three profiles of WSSV protein fragments (the frequency ratios of two
+#              psiblast rounds against tests/db_search/paja), Seq-ids gnl|CDD|101..103, scores at
+#              makeprofiledb's default scale 100 (as CDD's)
+#   rps_mini4  the same profiles, version 4
+#   rps_mini26 version 4 with a 26-column .rps (magic 0x1e16 in .rps and .loo, rows cut to their
+#              first 26 columns), its .freq left at 28 columns: the layout of NCBI's own test
+#              database rpstest_le
+# makeprofiledb writes the build date into the index files, so a rebuild differs from the
+# committed files: the committed .gz files are the fixtures, this script records how they were made.
+#
+# Usage: build.sh NCBI_BIN OUT_DIR    (then: gzip -9 -n OUT_DIR/rps_mini*.* and copy the .gz files here)
+set -euo pipefail
+N=$1
+O=$2
+HERE=$(cd "$(dirname "$0")" && pwd)
+LOSAT=$(cd "$HERE/../../.." && pwd)
+mkdir -p "$O"
+W=$(mktemp -d)
+trap 'rm -rf "$W"' EXIT
+cd "$W"
+# The fragments: (CDD tag, WSSV record, first residue, last residue), 1-based.
+cat > fragments.tsv <<'TSV'
+101	YP_009220601.1	1	190
+102	YP_009220529.1	301	480
+103	YP_009220649.1	1101	1290
+TSV
+python3 - "$LOSAT/tests/fasta/WSSV.faa" <<'PY'
+import sys
+records, name = {}, None
+for line in open(sys.argv[1]):
+    line = line.rstrip("\n")
+    if line.startswith(">"):
+        name = line[1:].split()[0]
+        records[name] = [line[1:], ""]
+    else:
+        records[name][1] += line
+for row in open("fragments.tsv"):
+    tag, acc, first, last = row.split()
+    title, seq = records[acc]
+    with open(f"f{tag}.faa", "w") as out:
+        out.write(f">f{tag} {title.split(' ', 1)[1]} residues {first}-{last}\n{seq[int(first) - 1:int(last)]}\n")
+PY
+for tag in 101 102 103; do
+  "$N/psiblast" -query f$tag.faa -db "$LOSAT/tests/db_search/paja" -num_iterations 2 \
+    -out_pssm f$tag.smp -save_pssm_after_last_round -num_threads 1 > /dev/null
+  # The PSSM's query id becomes gnl|CDD|<tag> (CDD's ids), its title stays the fragment's; its
+  # scores (`finalData`) are dropped, so that makeprofiledb computes them from the frequency
+  # ratios at its -scale (default 100), as for CDD's profiles (a PSSM with scores keeps its own
+  # scaling factor, 1 for psiblast's: makeprofiledb.cpp x_RPSAddFirstSequence).
+  python3 - f$tag.smp $tag <<'PY'
+import re, sys
+path, tag = sys.argv[1], sys.argv[2]
+text = open(path).read()
+new, count = re.subn(r'id \{\s*local str "[^"]*"\s*\}',
+                     'id {\n        general {\n          db "CDD",\n          tag id ' + tag + '\n        }\n      }',
+                     text, count=1)
+assert count == 1, path
+start = new.index(",\n    finalData {")
+end = new.index("\n    }", start) + len("\n    }")
+new = new[:start] + new[end:]
+open(path, "w").write(new)
+PY
+  echo f$tag.smp >> list.txt
+done
+"$N/makeprofiledb" -in list.txt -out "$O/rps_mini" -title rps_mini -dbtype rps
+"$N/makeprofiledb" -in list.txt -out "$O/rps_mini4" -title rps_mini4 -dbtype rps -blastdb_version 4
+"$N/makeprofiledb" -in list.txt -out "$O/rps_mini26" -title rps_mini26 -dbtype rps -blastdb_version 4
+# rps_mini26: the .rps rows cut to 26 columns and the 26-letter magic in .rps and .loo.
+python3 - "$O/rps_mini26" <<'PY'
+import struct, sys
+base = sys.argv[1]
+rps = open(base + ".rps", "rb").read()
+magic, n = struct.unpack("<2i", rps[:8])
+assert magic == 0x1e17
+offsets = struct.unpack(f"<{n + 1}i", rps[8:8 + 4 * (n + 1)])
+start = 8 + 4 * (n + 1)
+rows = offsets[n]
+assert len(rps) == start + rows * 28 * 4
+out = bytearray(struct.pack("<2i", 0x1e16, n)) + rps[8:start]
+for i in range(rows):
+    row = start + i * 28 * 4
+    out += rps[row:row + 26 * 4]
+open(base + ".rps", "wb").write(bytes(out))
+loo = bytearray(open(base + ".loo", "rb").read())
+assert struct.unpack("<i", loo[:4])[0] == 0x1e17
+loo[:4] = struct.pack("<i", 0x1e16)
+open(base + ".loo", "wb").write(bytes(loo))
+PY
+ls -l "$O"

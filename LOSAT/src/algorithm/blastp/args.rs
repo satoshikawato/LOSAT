@@ -79,14 +79,22 @@ pub enum BlastpCompositionMode {
 //         SetDiagPostPrefix("psiblast");
 //         SetDiagHandler(&m_bah, false);
 // ```
-/// The NCBI application whose search the blastp engine runs: blastp, or the first round of
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:117-119
+// ```c++
+//         SetDiagPostLevel(eDiag_Warning);
+//         SetDiagPostPrefix("rpsblast");
+//         SetDiagHandler(&bah, false);
+// ```
+/// The NCBI application whose search the blastp engine runs: blastp, the first round of
 /// psiblast (`algorithm/psiblast`), whose program is `ePSIBlast` (`eBlastTypePsiBlast` in the
-/// core) with the same search as blastp until a PSSM exists.
+/// core) with the same search as blastp until a PSSM exists, or rpsblast (`algorithm/rpsblast`),
+/// whose search blastp's driver hands to the RPS engine (`algorithm::rps_search`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlastpApp {
     #[default]
     Blastp,
     Psiblast,
+    Rpsblast,
 }
 
 impl BlastpApp {
@@ -96,6 +104,7 @@ impl BlastpApp {
         match self {
             BlastpApp::Blastp => "blastp",
             BlastpApp::Psiblast => "psiblast",
+            BlastpApp::Rpsblast => "rpsblast",
         }
     }
 
@@ -104,6 +113,7 @@ impl BlastpApp {
         match self {
             BlastpApp::Blastp => "BLASTP",
             BlastpApp::Psiblast => "PSIBLAST",
+            BlastpApp::Rpsblast => "RPSBLAST",
         }
     }
 }
@@ -551,6 +561,10 @@ pub struct BlastpArgs {
     /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
     #[arg(skip)]
     pub psiblast_pssm: Option<crate::algorithm::psiblast::pssm::PsiblastPssmOptions>,
+    /// rpsblast's options that its RPS engine applies (`algorithm::rps_search`); `None` for
+    /// blastp and psiblast.
+    #[arg(skip)]
+    pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
@@ -748,6 +762,9 @@ pub struct ResolvedBlastpArgs {
     /// (`algorithm::psiblast::in_pssm`); the search then runs the PSSM's stages
     /// (`algorithm::pssm_search`).
     pub psi_search: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// rpsblast: the RPS engine's options (`BlastpArgs::rps`); the search then runs the RPS
+    /// engine (`algorithm::rps_search`) in place of blastp's stages.
+    pub rps_search: Option<std::sync::Arc<crate::algorithm::rps_search::engine::RpsSearch>>,
     /// psiblast `-num_iterations` other than 1 for FASTA queries: the rounds that the round
     /// driver runs (`algorithm::psiblast::rounds`), with the PSSM files it writes.
     pub psi_rounds: Option<std::sync::Arc<crate::algorithm::psiblast::rounds::PsiRoundPlan>>,
@@ -792,7 +809,9 @@ impl ResolvedBlastpArgs {
 
     fn compute_traceback_hitlist_size(&self) -> usize {
         match self.app {
-            BlastpApp::Blastp => self.max_target_seqs,
+            // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,
+            // `Blast_HSPResultsInsertHSPList(results, hsp_list, hitlist_size)`).
+            BlastpApp::Blastp | BlastpApp::Rpsblast => self.max_target_seqs,
             BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
@@ -820,6 +839,15 @@ impl ResolvedBlastpArgs {
         match self.app {
             BlastpApp::Blastp => crate::blastinput::app::query_batch_size("BLASTP", 10000),
             BlastpApp::Psiblast => Ok(1),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
+            // ```c++
+            // CRPSBlastAppArgs::GetQueryBatchSize() const
+            // {
+            //     bool is_remote = (m_RemoteArgs.NotEmpty() && m_RemoteArgs->ExecuteRemotely());
+            //     return blast::GetQueryBatchSize(eRPSBlast, m_IsUngapped, is_remote);
+            // ```
+            // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
+            BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size("RPSBLAST", 10000),
         }
     }
 }
@@ -1219,6 +1247,7 @@ impl BlastpArgs {
             first_query_ordinal: self.first_query_ordinal,
             psi_pssm,
             psi_search,
+            rps_search: self.rps.clone().map(std::sync::Arc::new),
             psi_rounds,
             app: self.app,
             inclusion_ethresh: self
@@ -1227,6 +1256,17 @@ impl BlastpArgs {
             traceback_hitlist: 0,
             subject_taxdb_found: false,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-66 (no word
+        // threshold for RPS-BLAST: the reports print none, blast_format.cpp:2281-2284)
+        // ```c++
+        //     m_Opts->SetLookupTableType(eRPSLookupTable);
+        //     // N.B.: the word threshold is not set because for RPS-BLAST it CANNOT be
+        //     // done, i.e.: the RPS-BLAST databases already have this value encoded in
+        //     // them and therefore this value cannot be changed on an RPS-BLAST run
+        // ```
+        if resolved.rps_search.is_some() {
+            resolved.threshold = 0.0;
+        }
         resolved.traceback_hitlist = resolved.compute_traceback_hitlist_size();
         Ok(resolved)
     }

@@ -1,4 +1,5 @@
-//! The search programs (blastn, blastp, blastx, psiblast, pssm_search, tblastn, tblastx) and
+//! The search programs (blastn, blastp, blastx, psiblast, pssm_search, rps_search, rpsblast,
+//! tblastn, tblastx) and
 //! `common`, the code they share.
 //!
 //! The programs are layered, bottom to top:
@@ -32,6 +33,18 @@ pub mod psiblast;
 // ```
 // The search of a query given as a PSSM (psiblast `-in_pssm`): its kernels and stages.
 pub mod pssm_search;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:73-74
+// ```c
+// Boolean Blast_ProgramIsRpsBlast(EBlastProgramType p)
+// { return SAFE_CAST_INT_TO_BOOLEAN(p & PSSM_SUBJECT_MASK); }
+// ```
+// The search of a profile database (rpsblast): its scan, word finders, stages and engine.
+pub mod rps_search;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
+// ```c++
+//     static const string kProgram("rpsblast");
+// ```
+pub mod rpsblast;
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-62
 // static const string kProgram("tblastn");
 // static const char kDefaultTask[] = "tblastn";

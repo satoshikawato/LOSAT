@@ -1665,6 +1665,7 @@ mod tests {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
+            rps: None,
         }
         .resolve()
         .expect("resolved arguments")

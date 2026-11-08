@@ -152,9 +152,10 @@ fn check_stats(stderr: &str, what: &str) -> (u64, u64) {
 // The default search: the report is NCBI's and the subject's two linking calls each sort their
 // output order once. One thread runs the reference frame loop, four, eight and sixteen threads the
 // unit path (the `[X_STATS] PAIRPAR` line tells which). The counters also count the index sorts of
-// the seed stage's merge: with `LOSAT_X_TBXKMERGE=0` the unit path (four threads) makes the sorts
-// of the reference frame loop (one thread) and the counts are equal; with that switch on (the
-// default) its merge replaces some of them, so four threads make no more than one.
+// the seed stage's merge: with `LOSAT_X_TBXKMERGE=0` the unit path (every thread count above one)
+// makes the sorts of the reference frame loop (one thread) and the counts are equal; with that
+// switch on (the default) its merge replaces some of them, so no run above one thread makes more
+// than the run at one thread.
 #[test]
 fn the_default_search_gives_ncbis_report_with_one_final_sort_per_linking_call() {
     let expected = ncbi_report();
@@ -171,11 +172,16 @@ fn the_default_search_gives_ncbis_report_with_one_final_sort_per_linking_call() 
         }
         if merge.is_empty() {
             assert!(
-                seen[1].0 <= seen[0].0 && seen[1].1 <= seen[0].1,
+                seen[1..]
+                    .iter()
+                    .all(|&(sorts, indices)| sorts <= seen[0].0 && indices <= seen[0].1),
                 "the merge adds no sort: {seen:?}"
             );
         } else {
-            assert_eq!(seen[0], seen[1], "the sorts do not depend on the threads");
+            assert!(
+                seen.iter().all(|counts| *counts == seen[0]),
+                "the sorts do not depend on the threads: {seen:?}"
+            );
         }
     }
 }

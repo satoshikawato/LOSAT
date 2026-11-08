@@ -14,10 +14,10 @@
 //! (`LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, whose gate sends every batch to the frame loop at any
 //! threshold and thread count) and compare the report with the switch (the default), whose in-place
 //! build the run's reach file shows (`LOSAT_X_REACH`, `tests/reach_support`), against the report
-//! with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf` (NCBI's INT_MIN:
-//! every word enters every cell it can), at one, four, eight and sixteen threads; and on the
-//! default path, where the unit path builds its own tables and the switch acts only on a batch the
-//! guard or `LOSAT_X_PAIRPARGATE` sends back.
+//! with `LOSAT_X_TBXLUT=0`, at the default threshold (13) and at 11 at one, four, eight and sixteen
+//! threads, and at `+inf` (NCBI's INT_MIN: every word enters every cell it can) at one thread; and
+//! on the default path, where the unit path builds its own tables and the switch acts only on a
+//! batch the guard or `LOSAT_X_PAIRPARGATE` sends back.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

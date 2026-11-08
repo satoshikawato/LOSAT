@@ -118,26 +118,39 @@ fn dropping_results_not_taken_keeps_the_report() {
     }
 }
 
-/// The default's report is `LOSAT_X_NEWTONBATCH=0`'s at one and four threads, with the same results
-/// computed ahead, taken and dropped; only the default keeps batches.
+/// The default's report is `LOSAT_X_NEWTONBATCH=0`'s at one, four, eight and sixteen threads, with
+/// the same results computed ahead and taken; only the default keeps batches. The results dropped
+/// are the same at one thread. On a pool a thread counts the results it drops at its next prefetch,
+/// so those left after each thread's last prefetch are not counted, and which matches a thread
+/// walks last depends on the schedule: there each arm drops no more than it left untaken.
 #[test]
 fn keeping_the_batch_keeps_the_report() {
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (batch, batch_err) = tblastn(threads, &[]);
         let (store, store_err) = tblastn(threads, &[("LOSAT_X_NEWTONBATCH", "0")]);
         assert!(!batch.is_empty(), "the search finds hits");
         assert_eq!(batch, store, "{threads} threads: the reports differ");
         let lanes = ["prefetched", "hits", "misses", "unused"];
+        let batch_lanes = counts(&batch_err, "[X_STATS] NEWTONLANES ", lanes);
         assert_eq!(
-            counts(&batch_err, "[X_STATS] NEWTONLANES ", lanes),
+            batch_lanes,
             counts(&store_err, "[X_STATS] NEWTONLANES ", lanes),
             "{threads} threads: the results computed ahead and taken differ"
         );
-        assert_eq!(
-            counts(&batch_err, "[X_STATS] NEWTONDROP ", ["dropped"]),
-            counts(&store_err, "[X_STATS] NEWTONDROP ", ["dropped"]),
-            "{threads} threads: the results dropped differ"
-        );
+        let [batch_dropped] = counts(&batch_err, "[X_STATS] NEWTONDROP ", ["dropped"]);
+        let [store_dropped] = counts(&store_err, "[X_STATS] NEWTONDROP ", ["dropped"]);
+        if threads == 1 {
+            assert_eq!(
+                batch_dropped, store_dropped,
+                "one thread: the results dropped differ"
+            );
+        } else {
+            let unused = batch_lanes[3];
+            assert!(
+                batch_dropped <= unused && store_dropped <= unused,
+                "{threads} threads: dropped {batch_dropped} and {store_dropped} of {unused}"
+            );
+        }
         let [kept] = counts(&batch_err, "[X_STATS] NEWTONBATCH ", ["kept"]);
         assert!(kept > 0, "{threads} threads: the default keeps batches");
         assert_eq!(

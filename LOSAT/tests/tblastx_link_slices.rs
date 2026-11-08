@@ -160,7 +160,7 @@ fn check_stats(stderr: &str, threads: u32, what: &str) -> (u64, u64) {
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // The default search: the report is NCBI's, both linking calls link their groups as slices, and
-// the numbers are the same with one thread and four.
+// the numbers are the same at every thread count.
 #[test]
 fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
     let expected = ncbi_report();
@@ -173,7 +173,10 @@ fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
         assert!(in_place_stats(&stderr).is_some(), "{what}:\n{stderr}");
         seen.push(groups);
     }
-    assert_eq!(seen[0], seen[1], "the groups do not depend on the threads");
+    assert!(
+        seen.iter().all(|groups| *groups == seen[0]),
+        "the groups do not depend on the threads: {seen:?}"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,483-486

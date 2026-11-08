@@ -20,7 +20,7 @@
 //! `-parse_seqids`) put tax ids on the definition lines and into the version 5
 //! tax id files (`taxid_set`).
 //!
-//! Not written: mask data (`losat makeblastdb` refuses the mask options,
+//! Not written: mask data and OID masks (`losat makeblastdb` refuses their options,
 //! `makeblastdb::UNSUPPORTED_OPTIONS`).
 
 pub mod bioseq;

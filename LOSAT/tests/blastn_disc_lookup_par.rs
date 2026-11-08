@@ -9,13 +9,13 @@
 //! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1, 4, 8 and
 //! 16 threads, the searches with the switch off (`=0`), by default and with it set to 1 give the
 //! same bytes. `LOSAT_X_REACH` shows that the pool built the tables at 4, 8 and 16 threads and not
-//! at 1. The same holds with `LOSAT_X_PAIRPARDISC`, with several query batches (`BATCH_SIZE`), for
-//! split query chunks (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11
-//! -template_type ...`); megablast without a template never builds this table. One search fills its
-//! table in several chunks of the pool fill (a query of 0.66 Mb, both strands), with one template
-//! and with two. That the parts run on several workers of the pool is checked by the unit test
-//! `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the business of
-//! the blastn fixtures.
+//! at 1. The same holds with `LOSAT_X_PAIRPARDISC`, at 4 threads with several query batches
+//! (`BATCH_SIZE`) and for split query chunks (`CHUNK_SIZE`), and for megablast with a template
+//! (`-word_size 11 -template_type ...`); megablast without a template never builds this table. One
+//! search fills its table in several chunks of the pool fill (a query of 0.66 Mb, both strands),
+//! with one template and with two. That the parts run on several workers of the pool is checked by
+//! the unit test `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the
+//! business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

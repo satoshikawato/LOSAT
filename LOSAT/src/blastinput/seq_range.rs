@@ -618,6 +618,12 @@ mod tests {
         format!("{error:#}")
     }
 
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2760-2763 ParseSequenceRange_EmptyRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2767-2770 ParseSequenceRange_0BasedRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2774-2777 ParseSequenceRange_InvalidDelimiter
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2781-2788 ParseSequenceRange_IncompleteRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2792-2798 ParseSequenceRange_InvalidRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2802-2805 ParseSequenceRange_1BasedRange
     #[test]
     fn spellings_follow_ncbis_parser() {
         let parse = |text: &str| parse_sequence_range(text, RangeRole::Query, "BLASTN");

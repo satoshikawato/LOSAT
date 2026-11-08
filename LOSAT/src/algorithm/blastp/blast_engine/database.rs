@@ -1316,32 +1316,21 @@ impl ListedTitles<'_> {
                 .iter()
                 .any(|hsp| super::psi_round::included(hsp.e_value, inclusion_ethresh))
         };
-        let mut read = std::collections::BTreeSet::new();
-        for (query, hit_list) in hit_lists.iter().enumerate() {
-            let Some(hit_list) = hit_list else {
-                continue;
-            };
-            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-            let lists = &hit_list.hsplist_array[..count];
-            read.extend(
-                lists
-                    .iter()
-                    .filter(|hsp_list| included(hsp_list))
-                    .map(|hsp_list| hsp_list.oid as usize),
-            );
-            // The PSSM's multiple alignment joins following subjects whose Seq-align ids match.
-            shared::refuse_pssm_joined_hits(
-                query,
-                lists.iter().map(|hsp_list| {
-                    let rank = hsp_list.oid as usize;
-                    let subject = self
-                        .parsed_subject(rank)
-                        .map(|subject| (self.listed.ordinals[rank], subject));
-                    (subject, included(hsp_list))
-                }),
-                self.program,
-            )?;
-        }
+        let queries = || {
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(query, hit_list)| {
+                    let hit_list = hit_list.as_ref()?;
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    Some((query, &hit_list.hsplist_array[..count]))
+                })
+        };
+        let read: std::collections::BTreeSet<usize> = queries()
+            .flat_map(|(_, lists)| lists.iter())
+            .filter(|hsp_list| included(hsp_list))
+            .map(|hsp_list| hsp_list.oid as usize)
+            .collect();
         let reads = Self::batch_reads(hit_lists, prefetch);
         for rank in read {
             if let Some(subject) = self.parsed_subject(rank) {
@@ -1353,6 +1342,22 @@ impl ListedTitles<'_> {
                     )
                 })?;
             }
+        }
+        // The PSSM's multiple alignment joins following subjects whose Seq-align ids match. The
+        // reads above come first: a subject whose letters NCBI reads from another sequence is
+        // refused for that, also where it joins its neighbour.
+        for (query, lists) in queries() {
+            shared::refuse_pssm_joined_hits(
+                query,
+                lists.iter().map(|hsp_list| {
+                    let rank = hsp_list.oid as usize;
+                    let subject = self
+                        .parsed_subject(rank)
+                        .map(|subject| (self.listed.ordinals[rank], subject));
+                    (subject, included(hsp_list))
+                }),
+                self.program,
+            )?;
         }
         Ok(())
     }

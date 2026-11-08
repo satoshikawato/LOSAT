@@ -1427,6 +1427,9 @@ fn write_blastp_pairwise_intro<W: Write>(
     if program == "psiblast" {
         return write_psiblast_pairwise_intro(writer, version);
     }
+    if program == "rpsblast" {
+        return write_rpsblast_pairwise_intro(writer, version);
+    }
     writeln!(writer, "BLASTP {}", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -1469,6 +1472,53 @@ fn write_blastp_pairwise_intro<W: Write>(
         "composition-based statistics and other refinements\", Nucleic Acids"
     )?;
     writeln!(writer, "Res. 29:2994-3005.")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:386-405
+// ```c++
+//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
+//                                               m_Outfile);
+//     }
+//
+//     if (m_IsBl2Seq && !m_IsDbScan) {
+//         return;
+//     }
+//
+//     m_Outfile << NcbiEndl << NcbiEndl;
+//     ...
+//     else
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                                           m_Outfile);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426 (quoted below:
+// the references of compositional matrix adjustment and of composition-based statistics are
+// psiblast's, deltablast's and blastp's only)
+/// The prolog of rpsblast's pairwise report: the program line and the Gapped BLAST reference
+/// only.
+fn write_rpsblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+    writeln!(writer, "RPSBLAST {}", version)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
+    )?;
+    writeln!(
+        writer,
+        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
+    )?;
+    writeln!(
+        writer,
+        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
+    )?;
+    writeln!(
+        writer,
+        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
+    )?;
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -2141,7 +2191,9 @@ fn write_final_database_report<W: Write>(
 // ```
 /// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
 /// false for the query blocks after the first of blastp's block search, whose first block wrote
-/// it), each query's section, and the epilog when `epilog` is set.
+/// it), each query's section, and the epilog when `epilog` is set. `query_gapped_k` is
+/// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
+/// blastp and psiblast (the report's `gapped_karlin`).
 pub fn write_blastp_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -2151,6 +2203,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     subject_titles: &[Arc<[u8]>],
     parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     report: &BlastpPairwiseReport,
+    query_gapped_k: Option<&[f64]>,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
@@ -2198,6 +2251,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
             queries,
             query_titles,
             report,
+            query_gapped_k,
             database,
             parsed_subjects,
         },
@@ -2236,9 +2290,25 @@ struct BlastpSections<'a> {
     queries: &'a [BlastpPairwiseQuery],
     query_titles: &'a [Arc<[u8]>],
     report: &'a BlastpPairwiseReport,
+    /// rpsblast's gapped K by query (`write_blastp_pairwise_report`).
+    query_gapped_k: Option<&'a [f64]>,
     database: Option<&'a PairwiseDatabase>,
     /// The subjects with parsed Seq-ids by subject (empty without them).
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+}
+
+impl BlastpSections<'_> {
+    /// The gapped Karlin block of query `q_idx`'s footer: the report's, with rpsblast's K of
+    /// the query (the first query of a batch has the K that the RPS traceback wrote).
+    fn gapped_karlin(&self, q_idx: usize) -> KarlinParams {
+        match self.query_gapped_k {
+            Some(gapped_k) => KarlinParams {
+                k: gapped_k[q_idx],
+                ..self.report.gapped_karlin
+            },
+            None => self.report.gapped_karlin,
+        }
+    }
 }
 
 impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
@@ -2304,7 +2374,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 write_blastp_query_footer_spacing(
                     writer,
                     query.ungapped_karlin,
-                    report.gapped_karlin,
+                    self.gapped_karlin(q_idx),
                     report.gumbel,
                     query.effective_search_space,
                     false,
@@ -2390,7 +2460,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            self.report.gapped_karlin,
+            self.gapped_karlin(q_idx),
             self.report.gumbel,
             query.effective_search_space,
             false,

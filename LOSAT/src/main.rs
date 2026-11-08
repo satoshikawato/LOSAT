@@ -297,6 +297,24 @@ fn main() -> Result<()> {
                 return Err(error);
             }
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:324-328
+        // ```c++
+        // int main(int argc, const char* argv[] /*, const char* envp[]*/)
+        // {
+        // 	int status = CRPSBlastApp().AppMain(argc, argv);
+        // ```
+        Commands::Rpsblast(args) => {
+            // rpsblast is an NCBI application as blastp: its application layer reads its
+            // environment and registry files (`rpsblast.ini`, then `.ncbirc`) before its own
+            // code runs; LOSAT rejects the settings that change the output.
+            let settings =
+                LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("rpsblast")
+                    .map_err(anyhow::Error::msg)?;
+            if let Err(error) = LOSAT::algorithm::rpsblast::run(args, settings) {
+                LOSAT::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
+        }
         Commands::Tblastn(args) => {
             // NCBI's application layer reads its environment and registry files before
             // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change

@@ -192,6 +192,11 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.evalue, Some(0.001));
                 assert_eq!(a.max_target_seqs, Some(9));
             }
+            Commands::Rpsblast(a) => {
+                assert_eq!(a.num_threads, 4);
+                assert_eq!(a.evalue, Some(0.001));
+                assert_eq!(a.max_target_seqs, Some(9));
+            }
             Commands::Makedb(_) => unreachable!("{program} is a search program"),
         }
     }
@@ -630,33 +635,53 @@ fn defaults_and_task_overrides_remain_distinct() {
         panic!()
     };
     assert_eq!(a.resolve().unwrap().evalue, 42.0);
-    // NCBI api/blast_options_handle.cpp:381-402: blastp-fast (word size 5, threshold 20)
-    // runs; blastp-short (word size 2, PAM30) is rejected when the arguments are parsed.
+    // NCBI api/blast_options_handle.cpp:381-402: blastp-fast (word size 5, threshold 20) and
+    // blastp-short (word size 2, PAM30 9/1 with its threshold 16 and window 15, e-value 20000)
+    // run, and so does -word_size 2 of each task (item SC3).
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-fast"]).unwrap().command else {
         panic!()
     };
     let resolved = a.resolve().unwrap();
     assert_eq!((resolved.word_size, resolved.threshold), (5, 20.0));
     LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
-    let error = parse("blastp", &["-task", "blastp-short"]).unwrap_err();
-    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
-    assert_eq!(error.exit_code(), 2);
-    let text = LOSAT::cli::render_message(&error);
-    assert!(
-        text.contains("invalid value 'blastp-short' for '-task <TASK>'")
-            && text.contains("-word_size 2 (the lookup table) is not supported by LOSAT's BLASTP"),
-        "{text}"
-    );
-    // The search entrance still refuses the task (a defensive check) when it is set by hand.
-    let Commands::Blastp(mut a) = parse("blastp", &[]).unwrap().command else {
+    let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-short"]).unwrap().command else {
         panic!()
     };
-    a.task = "blastp-short".into();
-    assert_eq!(a.resolve().unwrap().evalue, 20000.0);
+    let resolved = a.resolve().unwrap();
+    assert_eq!(
+        (
+            resolved.word_size,
+            resolved.threshold,
+            resolved.window_size,
+            resolved.evalue,
+            (resolved.scoring.gap_open, resolved.scoring.gap_extend)
+        ),
+        (2, 16.0, 15, 20000.0, (9, 1))
+    );
+    LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    for (task, threshold) in [("blastp", 11.0), ("blastp-fast", 20.0)] {
+        let Commands::Blastp(a) = parse("blastp", &["-task", task, "-word_size", "2"])
+            .unwrap()
+            .command
+        else {
+            panic!()
+        };
+        let resolved = a.resolve().unwrap();
+        assert_eq!(
+            (resolved.word_size, resolved.threshold),
+            (2, threshold),
+            "{task}"
+        );
+        LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    }
+    // Word size 4 keeps the lookup table, which LOSAT's BLASTP implements at 2 and 3.
+    let Commands::Blastp(a) = parse("blastp", &["-word_size", "4"]).unwrap().command else {
+        panic!()
+    };
     assert!(LOSAT::algorithm::blastp::blast_engine::check_options(&a)
         .unwrap_err()
         .to_string()
-        .contains("not supported by LOSAT's BLASTP"));
+        .contains("-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"));
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
@@ -702,16 +727,18 @@ fn defaults_and_task_overrides_remain_distinct() {
     }
     // A task that is not an NCBI task keeps clap's list of the accepted names.
     for (program, other, listed) in [
-        ("blastp", "blastp-x", "blastp-fast"),
-        ("blastx", "blastx-x", "blastx-fast"),
-        ("tblastn", "tblastn-x", "tblastn-fast"),
+        ("blastp", "blastp-x", &["blastp-fast", "blastp-short"][..]),
+        ("blastx", "blastx-x", &["blastx-fast"][..]),
+        ("tblastn", "tblastn-x", &["tblastn-fast"][..]),
     ] {
         let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
         assert!(
-            text.contains("possible values") && text.contains(listed),
+            text.contains("possible values") && listed.iter().all(|task| text.contains(task)),
             "{text}"
         );
-        assert!(!text.contains("-short"), "{text}");
+        if program != "blastp" {
+            assert!(!text.contains("-short"), "{text}");
+        }
     }
     // blast_args.cpp:3158-3163 (CArgAllowStringSet): the task names are case-sensitive.
     assert!(parse("blastp", &["-task", "BLASTP"]).is_err());
@@ -1430,10 +1457,9 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
             assert!(!text.contains("seg_window") && !text.contains("dust_window"));
             // NCBI's BLASTP tasks and flags are options (blast_args.cpp:803-806,3158-3163).
             if program == "blastp" {
-                for option in ["blastp-fast", "-use_sw_tback"] {
+                for option in ["blastp-fast", "blastp-short", "-use_sw_tback"] {
                     assert!(text.contains(option), "{text}");
                 }
-                assert!(!text.contains("blastp-short"), "{text}");
             }
         }
     }

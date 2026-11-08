@@ -768,8 +768,10 @@ where
             "--" => return None,
             "-version" => {
                 return Some(format!(
-                    "{name}: 2.17.0+\n Package: LOSAT {}, output compatible with blast 2.17.0\n",
-                    env!("CARGO_PKG_VERSION")
+                    "{name}: {}\n Package: LOSAT {}, output compatible with blast {}\n",
+                    crate::NCBI_BLAST_VERSION,
+                    env!("CARGO_PKG_VERSION"),
+                    crate::NCBI_BLAST_RELEASE
                 ));
             }
             _ => {}

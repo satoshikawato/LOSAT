@@ -389,11 +389,7 @@ impl Drop for Stream {
 /// The SAM document of an outfmt 17 report with `spec`: `args` give the command line that its
 /// `@PG` line shows (`BlastnArgs::command_line`).
 pub(super) fn sam_document(args: &BlastnArgs, spec: crate::report::sam::SamSpec) -> SamDocument {
-    SamDocument::new(
-        spec,
-        crate::algorithm::blastn::hsp::NCBI_BLASTN_VERSION,
-        args.command_line.clone(),
-    )
+    SamDocument::new(spec, crate::NCBI_BLAST_VERSION, args.command_line.clone())
 }
 
 /// The query input of the searched queries `searched` (a batch's), numbered from 0 as the batch's

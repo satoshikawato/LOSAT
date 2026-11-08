@@ -581,12 +581,10 @@ fn composition_tokens_follow_ncbis_first_character_rule() {
         else {
             unreachable!("blastp")
         };
-        // LOSAT's BLASTP runs mode 2 without unified P-values and mode 0 (the ordinary
-        // traceback), and rejects the others.
+        // LOSAT's BLASTP runs every mode (modes 1 and 3 since series SC, SC5) and rejects
+        // unified P-values (DECISIONS 23 a of line NP).
         let checked = LOSAT::algorithm::blastp::blast_engine::check_options(&args);
-        if (mode == CompositionMode::CompositionMatrixAdjust && !unified)
-            || mode == CompositionMode::NoCompositionBasedStats
-        {
+        if !unified {
             checked.unwrap();
         } else {
             assert!(

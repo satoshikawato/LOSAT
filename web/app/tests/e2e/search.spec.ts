@@ -1232,8 +1232,13 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   // The select shows the engine's default as its value, as NCBI's does.
   const cbs = page.getByTestId('param-comp_based_stats');
   await expect(cbs).toHaveValue('2');
-  // LOSAT's BLASTP adjusts with modes 0 and 2 (WA-FM-02).
-  await expect(cbs.locator('option')).toHaveText(['0: No adjustment', '2: Conditional compositional score matrix adjustment']);
+  // LOSAT's BLASTP adjusts with NCBI's four modes (WA-FM-02; series SC, SC5).
+  await expect(cbs.locator('option')).toHaveText([
+    '0: No adjustment',
+    '1: Composition-based statistics',
+    '2: Conditional compositional score matrix adjustment',
+    '3: Universal compositional score matrix adjustment',
+  ]);
   await expect(page.getByTestId('param-seg-field')).toContainText('Low complexity regions');
   await expect(page.getByTestId('param-seg')).not.toBeChecked();
   await expect(page.getByTestId('param-seg-value')).toHaveCount(0);

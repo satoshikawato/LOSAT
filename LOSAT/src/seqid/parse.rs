@@ -15,12 +15,12 @@ use super::model::{
     Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId, PdbSeqId,
     TextseqId, SEQ_ID_ALTERNATIVES,
 };
-use crate::utils::winmask::NCBI_BUILD_ROOT;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 /// A `CSeqIdException` (`eFormat`): where NCBI throws it and its message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeqIdError {
-    /// The source file below `c++/src/objects/seqloc/`.
+    /// The source file in NCBI's build tree (`__FILE__`: `src/objects/seq/../seqloc/Seq_id.cpp`).
     pub file: &'static str,
     /// The line of the `NCBI_THROW`.
     pub line: u32,
@@ -29,29 +29,11 @@ pub struct SeqIdError {
     pub message: String,
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:370-384
-// ```c
-// string CException::ReportAll(TDiagPostFlags flags) const
-// {
-//     // invert the order
-//     stack<const CException*> pile;
-//     const CException* pex;
-//     for (pex = this; pex; pex = pex->GetPredecessor()) {
-//         pile.push(pex);
-//     }
-//     CNcbiOstrstream os;
-//     os << "NCBI C++ Exception:" << '\n';
-//     for (; !pile.empty(); pile.pop()) {
-//         //indentation
-//         os << "    ";
-//         os << pile.top()->ReportThis(flags) << '\n';
-//     }
-// ```
 // makeblastdb 2.17.0 (conda build) printed, for `>xyz|ABC|DEF`:
 // `T0 "/opt/conda/conda-bld/blast_1754905306566/work/c++/src/objects/seq/../seqloc/Seq_id.cpp",
 // line 2663: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::ParseIDs() - Unsupported
 // ID type xyz`. LOSAT names the build tree of the official Linux x64 release
-// (`NCBI_BUILD_ROOT`); the path is not compared (makedb-v5 DECISIONS 11).
+// (`ncbi_exception::NCBI_BUILD_ROOT`); the path is not compared (makedb-v5 DECISIONS 11).
 impl SeqIdError {
     fn new(file: &'static str, line: u32, function: &'static str, message: String) -> Self {
         SeqIdError {
@@ -62,17 +44,25 @@ impl SeqIdError {
         }
     }
 
+    /// The exception NCBI throws (`NCBI_THROW(CSeqIdException, eFormat, message)`).
+    pub fn exception(&self) -> NcbiException {
+        let site = ThrowSite {
+            file: self.file,
+            line: self.line,
+            kind: "CSeqIdException::eFormat",
+            function: Some(self.function),
+        };
+        NcbiException::new(site, self.message.as_str())
+    }
+
     /// `CException::what()`: the report of the exception, ending with a newline.
     pub fn what(&self) -> String {
-        format!(
-            "NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqloc/{}\", line {}: Error: (CSeqIdException::eFormat) {}() - {}\n",
-            self.file, self.line, self.function, self.message
-        )
+        self.exception().what()
     }
 }
 
-const SEQ_ID_CPP: &str = "Seq_id.cpp";
-const TEXTSEQ_ID_CPP: &str = "Textseq_id.cpp";
+const SEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Seq_id.cpp";
+const TEXTSEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Textseq_id.cpp";
 
 /// `isspace` in the C locale.
 pub fn is_space(c: u8) -> bool {

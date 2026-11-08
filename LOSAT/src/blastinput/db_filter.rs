@@ -17,6 +17,7 @@ use clap::Args;
 use crate::blastinput::app::options_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
 use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
@@ -496,17 +497,23 @@ impl DbFilterArgs {
 // "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/corelib/ncbifile.cpp", line 5754:
 // Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory
 // mapped the file must exist: ''\n\n` (dropin-survey-20261029/DI8 probe S22); LOSAT names the
-// build tree of the official Linux x64 release (`NCBI_BUILD_ROOT`), as the Seq-id parser's
-// exceptions do.
+// build tree of the official Linux x64 release (`ncbi_exception::NCBI_BUILD_ROOT`), as the
+// Seq-id parser's exceptions do.
+const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
+    file: "src/corelib/ncbifile.cpp",
+    line: 5754,
+    kind: "CFileException::eMemoryMap",
+    function: Some("ncbi::CMemoryFileMap::CMemoryFileMap"),
+};
+
 /// `e.what()` of the exception of a seqid list file that is not on the search path (the
 /// resolved name is empty): the report of the `CFileException`.
 fn missing_seqidlist_what() -> String {
-    format!(
-        "NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbifile.cpp\", line 5754: Error: \
-         (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory \
-         mapped the file must exist: ''\n",
-        crate::utils::winmask::NCBI_BUILD_ROOT
+    NcbiException::new(
+        MEMORY_MAP_MISSING,
+        "To be memory mapped the file must exist: ''",
     )
+    .what()
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:152-172

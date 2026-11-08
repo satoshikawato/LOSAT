@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{
-    lmdb_file_name, max_entry_per_txn, string_to_int, string_to_uint, string_to_uint8, txn_batches,
-    LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
+    lmdb_file_name, max_entry_per_txn, txn_batches, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
 use crate::writedb::platform::{LmdbPlatform, Platform};
 
@@ -617,26 +616,7 @@ fn large_trees_and_overflow_freelist_records() {
 
 #[test]
 fn environment_values_are_parsed_as_ncbi_parses_them() {
-    // NStr::StringToInt / StringToUInt / StringToUInt8 with default flags (makeblastdb
-    // 2.17.0: MAX_LMDB_TXN_ENTRY="+3" is 3, " 3" and "abc" stop it, "3000000000" overflows
-    // int, BLASTDB_LMDB_MAP_SIZE="-5" stops it).
-    assert_eq!(string_to_int("+3"), Ok(3));
-    assert_eq!(string_to_int("-1"), Ok(-1));
-    assert!(string_to_int(" 3").is_err());
-    assert!(string_to_int("3 ").is_err());
-    assert!(string_to_int("abc").is_err());
-    assert!(string_to_int("").is_err());
-    assert!(string_to_int("3000000000")
-        .unwrap_err()
-        .ends_with("to int, overflow"));
-    assert_eq!(string_to_uint("4294967295"), Ok(u32::MAX));
-    assert!(string_to_uint("4294967296")
-        .unwrap_err()
-        .ends_with("to unsigned int, overflow"));
-    assert!(string_to_uint8("-5").is_err());
-    assert_eq!(string_to_uint8("+40960"), Ok(40960));
-    assert_eq!(string_to_uint8("18446744073709551615"), Ok(u64::MAX));
-    assert!(string_to_uint8("18446744073709551616").is_err());
+    // NStr::StringToInt with the default flags (its cases: `ncbi_str`'s tests).
     // m_MaxEntryPerTxn is unsigned: -1 is 4294967295.
     let s = |v: &str| LmdbEnvSettings {
         max_lmdb_txn_entry: Some(v.to_string()),
@@ -647,7 +627,18 @@ fn environment_values_are_parsed_as_ncbi_parses_them() {
         Some(40_000)
     );
     assert_eq!(max_entry_per_txn(&s("-1")).ok(), Some(u32::MAX));
-    assert!(max_entry_per_txn(&s("7x")).is_err());
+    assert_eq!(max_entry_per_txn(&s("+3")).ok(), Some(3));
+    // The errors are NCBI's exceptions (makeblastdb 2.17.0 with two sequences: "Error: NCBI C++
+    // Exception:", probe of 2026-11-08).
+    match max_entry_per_txn(&s("7x")) {
+        Err(crate::writedb::WriteDbError::Exception(e)) => {
+            assert_eq!(
+                (e.get_msg(), e.site().line),
+                ("Cannot convert string '7x' to Int8", 870)
+            )
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

@@ -244,7 +244,10 @@ impl MakedbError {
     pub fn exit_code(&self) -> i32 {
         match self {
             MakedbError::Build(
-                WriteDbError::Other(_) | WriteDbError::Io { .. } | WriteDbError::Rename { .. },
+                WriteDbError::Exception(_)
+                | WriteDbError::Other(_)
+                | WriteDbError::Io { .. }
+                | WriteDbError::Rename { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
             MakedbError::Database(_) => 2,
@@ -718,7 +721,7 @@ fn read_taxids(
             super::fasta_source::defline_ids::post_seq_id_warning(warning, &mut warn)
         })
         .map_err(|error| match error {
-            TaxIdMapError::Exception(report) => MakedbError::Build(WriteDbError::Other(report)),
+            TaxIdMapError::Exception(e) => MakedbError::Build(WriteDbError::Exception(e)),
             TaxIdMapError::BlankLine(line) => unsupported(format!(
                 "line {line} of the -taxid_map file {name} holds only white space, which \
                  makeblastdb 2.17.0 cannot read (it crashes)"
@@ -727,7 +730,9 @@ fn read_taxids(
     Ok((Some(taxids), (name == "-").then_some(failed)))
 }
 
-/// The value of `-max_file_sz`, read before the build touches a file.
+/// The value of `-max_file_sz`, read where makeblastdb reads it: after the constructor of
+/// `CBuildDatabase` (the head of the log, the removal of an existing database of the same name,
+/// the checks of the output directory), before the log line "Maximum file size".
 fn max_file_size(args: &MakedbArgs) -> Result<u64, MakedbError> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1267-1272
     // ```c++
@@ -738,21 +743,11 @@ fn max_file_size(args: &MakedbArgs) -> Result<u64, MakedbError> {
     //                 "max_file_sz must be < 4 GiB");
     //     }
     // ```
-    // makeblastdb reads the value after it has written the head of the log
-    // and removed an existing database of the same name; LOSAT reads it
-    // before (after the checks of the names, the title and `-logfile`), so
-    // that a wrong value costs nothing. A value NCBI cannot convert
-    // throws a `CStringException`, which `CATCH_ALL` reports through its
-    // `CException` clause (`MakedbError::exit_code`): "Error: NCBI C++
-    // Exception:" and a line with the source path of NCBI's build, the
-    // exception's class and its sentence, exit status 255. LOSAT prints the
-    // sentence after "Error: -max_file_sz: ", with the same status.
-    let bytes = string_to_uint8_data_size(&args.max_file_sz).map_err(|error| {
-        MakedbError::Build(WriteDbError::Other(format!(
-            "-max_file_sz: {}",
-            error.message
-        )))
-    })?;
+    // A value NCBI cannot convert throws a `CStringException`, which `CATCH_ALL` reports
+    // through its `CException` clause (`MakedbError::exit_code`): "Error: " and the
+    // exception's report, exit status 255.
+    let bytes = string_to_uint8_data_size(&args.max_file_sz)
+        .map_err(|error| MakedbError::Build(WriteDbError::Exception(error.exception())))?;
     if bytes >= 0x1_0000_0000 {
         return Err(options_error("max_file_sz must be < 4 GiB"));
     }
@@ -1065,7 +1060,6 @@ fn build_database_with_log(
     if let Some(error) = logfile_error {
         return Err(error);
     }
-    let max_file_size = max_file_size(args)?;
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1016-1028
     // ```c++
@@ -1081,14 +1075,10 @@ fn build_database_with_log(
     //         }
     // ```
     // A first name `-` reads the standard input and nothing else. With no name at
-    // all (`-in ""`) NCBI reads `names[0]` of an empty vector; LOSAT refuses that.
+    // all (`-in ""`) NCBI reads `names[0]` of an empty vector (makeblastdb 2.17.0: a
+    // segmentation fault after the log line "Maximum file size"); LOSAT refuses that where
+    // NCBI reads it, after `-max_file_sz` and `-taxid_map`, whose errors come first.
     let names = split_quoted(&args.input);
-    if names.is_empty() {
-        return Err(unsupported(
-            "-in names no input file; losat makeblastdb reads FASTA files or the standard input",
-        ));
-    }
-    let from_stdin = names[0] == "-";
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1050
     // ```c++
     // 		if( (is_gz  = NStr::EndsWith( seq_file, ".gz", NStr::eNocase)) ||
@@ -1122,6 +1112,7 @@ fn build_database_with_log(
             hash: args.hash_index,
         },
     )?;
+    let max_file_size = max_file_size(args)?;
     let _ = writeln!(
         db.log(),
         "Maximum file size: {}",
@@ -1132,6 +1123,12 @@ fn build_database_with_log(
     if let Some(taxids) = taxids {
         db.set_taxids(taxids);
     }
+    if names.is_empty() {
+        return Err(unsupported(
+            "-in names no input file; losat makeblastdb reads FASTA files or the standard input",
+        ));
+    }
+    let from_stdin = names[0] == "-";
     let result = add_input_and_close(
         &mut db,
         &names,
@@ -1800,6 +1797,25 @@ mod tests {
                 MakedbError::Build(WriteDbError::OutOfMemory),
                 4,
                 "BLAST ran out of memory",
+            ),
+            (
+                MakedbError::Build(WriteDbError::Exception(
+                    crate::ncbi_exception::NcbiException::new(
+                        crate::ncbi_exception::ThrowSite {
+                            file: "src/f.cpp",
+                            line: 7,
+                            kind: "CException::eUnknown",
+                            function: None,
+                        },
+                        "m",
+                    ),
+                )),
+                255,
+                &*format!(
+                    "Error: NCBI C++ Exception:\n    T0 \"{}/src/f.cpp\", line 7: Error: \
+                     (CException::eUnknown) m\n",
+                    crate::ncbi_exception::NCBI_BUILD_ROOT
+                ),
             ),
             (
                 MakedbError::Build(WriteDbError::Other("x".into())),

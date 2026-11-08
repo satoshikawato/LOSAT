@@ -10,15 +10,35 @@
 //!
 //! C `isdigit`, `isprint` and `toupper` are the ones of the "C" locale (ASCII only); the C++ works on bytes, so this port works on the bytes of the `&str`.
 
+use crate::ncbi_exception::{NcbiException, ThrowSite};
+
 /// The `CStringException` (`eConvert`) NCBI throws from `StringToUInt8_DataSize`.
 ///
-/// `message` is the text NCBI builds (`CS2N_Guard::Message`), without the
-/// `ncbi::NStr::StringToUInt8_DataSize() - ` prefix and without the ` (m_Pos = N)` suffix
-/// that the exception printer adds. `pos` is the position given to `NCBI_THROW2`.
+/// `site` is where it is thrown, `message` the text NCBI builds (`CS2N_Guard::Message`, the
+/// exception's `GetMsg()`), `pos` the position given to `NCBI_THROW2`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataSizeError {
+    pub site: ThrowSite,
     pub message: String,
     pub pos: usize,
+}
+
+impl DataSizeError {
+    /// The exception: makeblastdb reports it through its general handler (`Error: ` and
+    /// `what()`, exit status 255).
+    pub fn exception(&self) -> NcbiException {
+        NcbiException::with_pos(self.site, self.message.as_str(), self.pos)
+    }
+}
+
+/// A throw of `S2N_CONVERT_ERROR(Uint8, ...)` at `line` of `NStr::StringToUInt8_DataSize`.
+const fn data_size_site(line: u32) -> ThrowSite {
+    ThrowSite {
+        file: "src/corelib/ncbistr.cpp",
+        line,
+        kind: "CStringException::eConvert",
+        function: Some("ncbi::NStr::StringToUInt8_DataSize"),
+    }
 }
 
 /// `NStr::PrintableString(str)` with its default mode `fNewLine_Quote | fNonAscii_Passthru` (both 0) and language C,
@@ -231,9 +251,10 @@ pub(crate) fn printable_string(str_: &[u8]) -> String {
     }
 }
 
-/// `err_guard.Message(str, "Uint8", kEmptyStr)` as thrown by `S2N_CONVERT_ERROR(Uint8, kEmptyStr, errcode, pos)`:
-/// a `CStringException` with this message and position `pos` (the `msg` argument is always empty in the ported paths).
-fn convert_error(str_: &[u8], pos: usize) -> DataSizeError {
+/// `err_guard.Message(str, "Uint8", kEmptyStr)` as thrown by `S2N_CONVERT_ERROR(Uint8, kEmptyStr, errcode, pos)`
+/// at `site`: a `CStringException` with this message and position `pos` (the `msg` argument is always empty in the
+/// ported paths).
+fn convert_error(str_: &[u8], site: ThrowSite, pos: usize) -> DataSizeError {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:488-558
     // ```c++
     // {
@@ -265,14 +286,18 @@ fn convert_error(str_: &[u8], pos: usize) -> DataSizeError {
     //             NCBI_THROW2(CStringException, eConvert,                   \
     //                         err_guard.Message(str, #to_type, msg), pos);  \
     // ```
-    DataSizeError { message: s, pos }
+    DataSizeError {
+        site,
+        message: s,
+        pos,
+    }
 }
 
 /// `NStr::StringToUInt8_DataSize(text)` with default flags (0).
 pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     let str_ = text.as_bytes();
     let str_end = str_.len();
-    let err = |pos: usize| convert_error(str_, pos);
+    let err = |site: ThrowSite, pos: usize| convert_error(str_, site, pos);
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1552-1553
     // ```c++
@@ -291,11 +316,12 @@ pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     //         S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, str_ptr - str.data());
     //     }
     // ```
+    const SIGN: ThrowSite = data_size_site(1578);
     if str_ptr < str_end && str_[str_ptr] == b'+' {
         str_ptr += 1;
     } else if str_ptr < str_end && str_[str_ptr] == b'-' {
         // (flags & fMandatorySign) is 0
-        return Err(err(str_ptr));
+        return Err(err(SIGN, str_ptr));
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1581-1585
@@ -383,9 +409,10 @@ pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     //     if (str_ptr < str_end)
     //         suff_c = (char)toupper(*str_ptr);
     // ```
+    const NO_DIGIT: ThrowSite = data_size_site(1622);
     let num_end = str_ptr;
     if num_start == num_end {
-        return Err(err(str_ptr));
+        return Err(err(NO_DIGIT, str_ptr));
     }
     // fDS_ProhibitSpaceBeforeSuffix is 0
     if str_ptr < str_end && str_[str_ptr] == b' ' {
@@ -475,8 +502,9 @@ pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     //         S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, str_ptr - str.data());
     //     }
     // ```
+    const TRAILING: ThrowSite = data_size_site(1674);
     if str_ptr != str_end {
-        return Err(err(str_ptr));
+        return Err(err(TRAILING, str_ptr));
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1677-1688
@@ -649,11 +677,12 @@ pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     // ```
     const LIMDIV: u64 = u64::MAX / 10;
     const LIMOFF: i32 = (u64::MAX % 10) as i32;
+    const OVERFLOW: ThrowSite = data_size_site(1750);
     let mut n: u64 = 0;
     for i in 0..digs_to_conv {
         let d: u8 = num_to_conv[i as usize];
         if n >= LIMDIV && (n > LIMDIV || d as i32 > LIMOFF) {
-            return Err(err(i as usize));
+            return Err(err(OVERFLOW, i as usize));
         }
         n *= 10;
         n += d as u64;
@@ -669,9 +698,10 @@ pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     //     return n;
     // }
     // ```
+    const ROUNDING_OVERFLOW: ThrowSite = data_size_site(1757);
     if digs_post_dot != 0 && num_to_conv[digs_to_conv as usize] >= 5 {
         if n == u64::MAX {
-            return Err(err(digs_to_conv as usize));
+            return Err(err(ROUNDING_OVERFLOW, digs_to_conv as usize));
         }
         n += 1;
     }
@@ -894,129 +924,172 @@ mod tests {
     ];
 
     /// Inputs for which makeblastdb 2.17.0 ended with the `CStringException` of `StringToUInt8_DataSize`:
-    /// (input, text after "StringToUInt8_DataSize() - " and before " (m_Pos = ", the m_Pos).
-    const ORACLE_ERRORS: &[(&str, &str, usize)] = &[
-        ("-5", "Cannot convert string '-5' to Uint8", 0),
-        ("abc", "Cannot convert string 'abc' to Uint8", 0),
-        ("", "Cannot convert string '' to Uint8", 0),
-        ("+", "Cannot convert string '+' to Uint8", 1),
-        ("-", "Cannot convert string '-' to Uint8", 0),
-        ("+-5", "Cannot convert string '+-5' to Uint8", 1),
-        ("++5", "Cannot convert string '++5' to Uint8", 1),
-        (".5", "Cannot convert string '.5' to Uint8", 0),
-        ("5.", "Cannot convert string '5.' to Uint8", 1),
-        (" 1", "Cannot convert string ' 1' to Uint8", 0),
-        (" 1KB", "Cannot convert string ' 1KB' to Uint8", 0),
-        ("1 ", "Cannot convert string '1 ' to Uint8", 1),
-        ("1KB ", "Cannot convert string '1KB ' to Uint8", 3),
-        ("1  KB", "Cannot convert string '1  KB' to Uint8", 1),
-        ("1 K B", "Cannot convert string '1 K B' to Uint8", 3),
-        ("1K B", "Cannot convert string '1K B' to Uint8", 2),
-        ("1KBB", "Cannot convert string '1KBB' to Uint8", 3),
-        ("1KiBB", "Cannot convert string '1KiBB' to Uint8", 4),
-        ("1KiB ", "Cannot convert string '1KiB ' to Uint8", 4),
-        ("1iB", "Cannot convert string '1iB' to Uint8", 1),
-        ("1B ", "Cannot convert string '1B ' to Uint8", 2),
-        ("1BK", "Cannot convert string '1BK' to Uint8", 2),
-        ("1 BK", "Cannot convert string '1 BK' to Uint8", 3),
-        ("5Gi", "Cannot convert string '5Gi' to Uint8", 2),
-        ("1Z", "Cannot convert string '1Z' to Uint8", 1),
-        ("1Y", "Cannot convert string '1Y' to Uint8", 1),
+    /// (input, text after "StringToUInt8_DataSize() - " and before " (m_Pos = ", the m_Pos, the line of
+    /// ncbistr.cpp that its report names: probe of 2026-11-08, the official Linux x64 release).
+    const ORACLE_ERRORS: &[(&str, &str, usize, u32)] = &[
+        ("-5", "Cannot convert string '-5' to Uint8", 0, 1578),
+        ("abc", "Cannot convert string 'abc' to Uint8", 0, 1622),
+        ("", "Cannot convert string '' to Uint8", 0, 1622),
+        ("+", "Cannot convert string '+' to Uint8", 1, 1622),
+        ("-", "Cannot convert string '-' to Uint8", 0, 1578),
+        ("+-5", "Cannot convert string '+-5' to Uint8", 1, 1622),
+        ("++5", "Cannot convert string '++5' to Uint8", 1, 1622),
+        (".5", "Cannot convert string '.5' to Uint8", 0, 1622),
+        ("5.", "Cannot convert string '5.' to Uint8", 1, 1674),
+        (" 1", "Cannot convert string ' 1' to Uint8", 0, 1622),
+        (" 1KB", "Cannot convert string ' 1KB' to Uint8", 0, 1622),
+        ("1 ", "Cannot convert string '1 ' to Uint8", 1, 1674),
+        ("1KB ", "Cannot convert string '1KB ' to Uint8", 3, 1674),
+        ("1  KB", "Cannot convert string '1  KB' to Uint8", 1, 1674),
+        ("1 K B", "Cannot convert string '1 K B' to Uint8", 3, 1674),
+        ("1K B", "Cannot convert string '1K B' to Uint8", 2, 1674),
+        ("1KBB", "Cannot convert string '1KBB' to Uint8", 3, 1674),
+        ("1KiBB", "Cannot convert string '1KiBB' to Uint8", 4, 1674),
+        ("1KiB ", "Cannot convert string '1KiB ' to Uint8", 4, 1674),
+        ("1iB", "Cannot convert string '1iB' to Uint8", 1, 1674),
+        ("1B ", "Cannot convert string '1B ' to Uint8", 2, 1674),
+        ("1BK", "Cannot convert string '1BK' to Uint8", 2, 1674),
+        ("1 BK", "Cannot convert string '1 BK' to Uint8", 3, 1674),
+        ("5Gi", "Cannot convert string '5Gi' to Uint8", 2, 1674),
+        ("1Z", "Cannot convert string '1Z' to Uint8", 1, 1674),
+        ("1Y", "Cannot convert string '1Y' to Uint8", 1, 1674),
         (
             "18446744073709551616",
             "Cannot convert string '18446744073709551616' to Uint8",
             19,
+            1750,
         ),
         (
             "18446744073709551615.5",
             "Cannot convert string '18446744073709551615.5' to Uint8",
             20,
+            1757,
         ),
         (
             "18446744073709551616.5",
             "Cannot convert string '18446744073709551616.5' to Uint8",
             19,
+            1750,
         ),
         (
             "99999999999999999999",
             "Cannot convert string '99999999999999999999' to Uint8",
             19,
+            1750,
         ),
         (
             "184467440737095516150",
             "Cannot convert string '184467440737095516150' to Uint8",
             20,
+            1750,
         ),
         (
             "18446744073709552K",
             "Cannot convert string '18446744073709552K' to Uint8",
             19,
+            1750,
         ),
         (
             "18446744073709551.616K",
             "Cannot convert string '18446744073709551.616K' to Uint8",
             19,
+            1750,
         ),
         (
             "18446744073709551.6155K",
             "Cannot convert string '18446744073709551.6155K' to Uint8",
             20,
+            1757,
         ),
         (
             "18446744073709551615KiB",
             "Cannot convert string '18446744073709551615KiB' to Uint8",
             19,
+            1750,
         ),
         (
             "17179869184GiB",
             "Cannot convert string '17179869184GiB' to Uint8",
             19,
+            1750,
         ),
-        ("16EiB", "Cannot convert string '16EiB' to Uint8", 19),
+        ("16EiB", "Cannot convert string '16EiB' to Uint8", 19, 1750),
         (
             "18446744073709551616E",
             "Cannot convert string '18446744073709551616E' to Uint8",
             19,
+            1750,
         ),
-        ("1.2.3", "Cannot convert string '1.2.3' to Uint8", 3),
-        ("1..2", "Cannot convert string '1..2' to Uint8", 1),
-        ("1.K", "Cannot convert string '1.K' to Uint8", 1),
-        ("1.KiB", "Cannot convert string '1.KiB' to Uint8", 1),
-        ("1. K", "Cannot convert string '1. K' to Uint8", 1),
-        ("1 .5", "Cannot convert string '1 .5' to Uint8", 1),
-        (".K", "Cannot convert string '.K' to Uint8", 0),
-        (".", "Cannot convert string '.' to Uint8", 0),
-        ("0x10", "Cannot convert string '0x10' to Uint8", 1),
-        ("1e3", "Cannot convert string '1e3' to Uint8", 2),
-        ("1,000", "Cannot convert string '1,000' to Uint8", 1),
-        ("1_000", "Cannot convert string '1_000' to Uint8", 1),
-        ("1KiBs", "Cannot convert string '1KiBs' to Uint8", 4),
-        ("1\u{9}KB", "Cannot convert string '1\\tKB' to Uint8", 1),
-        ("\u{9}1", "Cannot convert string '\\t1' to Uint8", 0),
-        ("1\u{a}", "Cannot convert string '1\\n' to Uint8", 1),
-        ("1\u{a}2", "Cannot convert string '1\\n2' to Uint8", 1),
-        ("1?", "Cannot convert string '1?' to Uint8", 1),
-        ("1??", "Cannot convert string '1\\?\\?' to Uint8", 1),
-        ("1???", "Cannot convert string '1\\?\\?\\?' to Uint8", 1),
-        ("?1", "Cannot convert string '?1' to Uint8", 0),
-        ("??", "Cannot convert string '\\?\\?' to Uint8", 0),
-        ("a&b", "Cannot convert string 'a&b' to Uint8", 0),
-        ("1&", "Cannot convert string '1&' to Uint8", 1),
-        ("\u{e9}1", "Cannot convert string '\\303\\2511' to Uint8", 0),
-        ("1\u{e9}", "Cannot convert string '1\\303\\251' to Uint8", 1),
-        ("1\"2", "Cannot convert string '1\\\"2' to Uint8", 1),
-        ("1'2", "Cannot convert string '1\\'2' to Uint8", 1),
-        ("1\\2", "Cannot convert string '1\\\\2' to Uint8", 1),
-        ("1\u{7}", "Cannot convert string '1\\a' to Uint8", 1),
-        ("1\u{1}", "Cannot convert string '1\\1' to Uint8", 1),
-        ("1\u{7f}", "Cannot convert string '1\\177' to Uint8", 1),
-        ("1\u{1}2", "Cannot convert string '1\\0012' to Uint8", 1),
-        ("1KiB1", "Cannot convert string '1KiB1' to Uint8", 4),
-        ("1 KiB ", "Cannot convert string '1 KiB ' to Uint8", 5),
+        ("1.2.3", "Cannot convert string '1.2.3' to Uint8", 3, 1674),
+        ("1..2", "Cannot convert string '1..2' to Uint8", 1, 1674),
+        ("1.K", "Cannot convert string '1.K' to Uint8", 1, 1674),
+        ("1.KiB", "Cannot convert string '1.KiB' to Uint8", 1, 1674),
+        ("1. K", "Cannot convert string '1. K' to Uint8", 1, 1674),
+        ("1 .5", "Cannot convert string '1 .5' to Uint8", 1, 1674),
+        (".K", "Cannot convert string '.K' to Uint8", 0, 1622),
+        (".", "Cannot convert string '.' to Uint8", 0, 1622),
+        ("0x10", "Cannot convert string '0x10' to Uint8", 1, 1674),
+        ("1e3", "Cannot convert string '1e3' to Uint8", 2, 1674),
+        ("1,000", "Cannot convert string '1,000' to Uint8", 1, 1674),
+        ("1_000", "Cannot convert string '1_000' to Uint8", 1, 1674),
+        ("1KiBs", "Cannot convert string '1KiBs' to Uint8", 4, 1674),
+        (
+            "1\u{9}KB",
+            "Cannot convert string '1\\tKB' to Uint8",
+            1,
+            1674,
+        ),
+        ("\u{9}1", "Cannot convert string '\\t1' to Uint8", 0, 1622),
+        ("1\u{a}", "Cannot convert string '1\\n' to Uint8", 1, 1674),
+        ("1\u{a}2", "Cannot convert string '1\\n2' to Uint8", 1, 1674),
+        ("1?", "Cannot convert string '1?' to Uint8", 1, 1674),
+        ("1??", "Cannot convert string '1\\?\\?' to Uint8", 1, 1674),
+        (
+            "1???",
+            "Cannot convert string '1\\?\\?\\?' to Uint8",
+            1,
+            1674,
+        ),
+        ("?1", "Cannot convert string '?1' to Uint8", 0, 1622),
+        ("??", "Cannot convert string '\\?\\?' to Uint8", 0, 1622),
+        ("a&b", "Cannot convert string 'a&b' to Uint8", 0, 1622),
+        ("1&", "Cannot convert string '1&' to Uint8", 1, 1674),
+        (
+            "\u{e9}1",
+            "Cannot convert string '\\303\\2511' to Uint8",
+            0,
+            1622,
+        ),
+        (
+            "1\u{e9}",
+            "Cannot convert string '1\\303\\251' to Uint8",
+            1,
+            1674,
+        ),
+        ("1\"2", "Cannot convert string '1\\\"2' to Uint8", 1, 1674),
+        ("1'2", "Cannot convert string '1\\'2' to Uint8", 1, 1674),
+        ("1\\2", "Cannot convert string '1\\\\2' to Uint8", 1, 1674),
+        ("1\u{7}", "Cannot convert string '1\\a' to Uint8", 1, 1674),
+        ("1\u{1}", "Cannot convert string '1\\1' to Uint8", 1, 1674),
+        (
+            "1\u{7f}",
+            "Cannot convert string '1\\177' to Uint8",
+            1,
+            1674,
+        ),
+        (
+            "1\u{1}2",
+            "Cannot convert string '1\\0012' to Uint8",
+            1,
+            1674,
+        ),
+        ("1KiB1", "Cannot convert string '1KiB1' to Uint8", 4, 1674),
+        ("1 KiB ", "Cannot convert string '1 KiB ' to Uint8", 5, 1674),
         (
             "4294967295 ",
             "Cannot convert string '4294967295 ' to Uint8",
             10,
+            1674,
         ),
     ];
 
@@ -1042,10 +1115,11 @@ mod tests {
 
     #[test]
     fn oracle_errors() {
-        for (input, message, pos) in ORACLE_ERRORS {
+        for (input, message, pos, line) in ORACLE_ERRORS {
             let e = string_to_uint8_data_size(input).unwrap_err();
             assert_eq!(&e.message, message, "input {:?}", input);
             assert_eq!(e.pos, *pos, "input {:?}", input);
+            assert_eq!(e.site.line, *line, "input {:?}", input);
         }
     }
 

@@ -14,6 +14,7 @@ use super::taxid_set::TaxIdSet;
 use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::{SeqDbError, SeqType};
 
 /// `CBuildDatabase` for a FASTA input without parsed Seq-ids.
@@ -433,6 +434,34 @@ fn create_path(dir: &str) -> bool {
 // path that does not resolve, and for a directory it cannot write to it goes on, writes
 // the log header and fails when it creates the first file of the first volume, with the
 // system's message for that file and the same exit status 255.
+// The library is built with `-DNCBI_MODULE=BLASTDB` (Makefile.writedb.lib:15), so the
+// report names the function `BLASTDB::ncbi::CBuildDatabase::CreateDirectories`; the error code
+// `eOutputFileError` has no name of its own (`CMultisourceException::GetErrCodeString` names
+// `eArg` only, multisource_util.hpp:66-72) and prints as `eInvalid`.
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/multisource_util.hpp:65-72
+// ```c++
+//     /// Get a message describing the exception.
+//     virtual const char* GetErrCodeString() const override
+//     {
+//         switch ( GetErrCode() ) {
+//         case eArg: return "eArgErr";
+//         default:   return CException::GetErrCodeString();
+//         }
+//     }
+// ```
+const CREATE_PATH_FAILED: ThrowSite = create_directories_site(1063);
+const NO_WRITE_ACCESS: ThrowSite = create_directories_site(1069);
+
+/// A throw of `CMultisourceException` (`eOutputFileError`) at `line` of build_db.cpp.
+const fn create_directories_site(line: u32) -> ThrowSite {
+    ThrowSite {
+        file: "src/objtools/blast/seqdb_writer/build_db.cpp",
+        line,
+        kind: "CMultisourceException::eInvalid",
+        function: Some("BLASTDB::ncbi::CBuildDatabase::CreateDirectories"),
+    }
+}
+
 /// `CBuildDatabase::CreateDirectories`.
 fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
@@ -442,13 +471,15 @@ fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let d = dir_entry_path(&dir_entry[..=at]);
     let name = d.rfind(is_any_separator).map_or(d, |at| &d[at + 1..]);
     if !Path::new(d).is_dir() && !create_path(d) {
-        return Err(WriteDbError::Other(format!(
-            "Failed to create directory '{name}'"
+        return Err(WriteDbError::Exception(NcbiException::new(
+            CREATE_PATH_FAILED,
+            format!("Failed to create directory '{name}'"),
         )));
     }
     if !check_access_write(d) {
-        return Err(WriteDbError::Other(format!(
-            "You do not have write permissions on '{name}'"
+        return Err(WriteDbError::Exception(NcbiException::new(
+            NO_WRITE_ACCESS,
+            format!("You do not have write permissions on '{name}'"),
         )));
     }
     Ok(())
@@ -1121,12 +1152,17 @@ impl<'a> BuildDatabase<'a> {
             }
         }
         let _ = writeln!(self.log);
+        // `NCBI_RETHROW(*close_exception, CWriteDBException, eArgErr, close_exception->GetMsg())`:
+        // an exception of the close becomes a creation error with its message only (no report).
         match close_error {
             Some(
                 WriteDbError::Creation(message)
                 | WriteDbError::Options(message)
                 | WriteDbError::Other(message),
             ) => Err(WriteDbError::Creation(message)),
+            Some(WriteDbError::Exception(e)) => {
+                Err(WriteDbError::Creation(e.get_msg().to_string()))
+            }
             // LOSAT's own errors (a file that could not be written or
             // renamed) and a failed allocation keep their kind.
             Some(error) => Err(error),

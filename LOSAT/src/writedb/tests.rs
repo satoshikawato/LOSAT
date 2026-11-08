@@ -892,44 +892,110 @@ fn a_late_error_removes_the_volumes_already_written() {
     assert_eq!(files_named(&tmp.0, "db."), [] as [&str; 0]);
 }
 
-/// The errors makeblastdb reports through its last `catch` clauses end with
-/// exit status 255 and "Error: ": a `-max_file_sz` that is no size (LOSAT
-/// tests it before it touches a file), and a directory that cannot be used.
+/// `Error: ` and the exception's report, as makeblastdb's general handler prints it: the build
+/// tree of the official Linux x64 release of 2.17.0 and the file below it.
+fn ncbi_report(file: &str, rest: &str) -> String {
+    format!(
+        "Error: NCBI C++ Exception:\n    T0 \"{}/src/{file}\", line {rest}\n\n",
+        crate::ncbi_exception::NCBI_BUILD_ROOT
+    )
+}
+
+/// The report of `CBuildDatabase::CreateDirectories`' exception at `line` with `message`.
+fn create_directories_report(line: u32, message: &str) -> String {
+    ncbi_report(
+        "objtools/blast/seqdb_writer/build_db.cpp",
+        &format!(
+            "{line}: Error: (CMultisourceException::eInvalid) \
+             BLASTDB::ncbi::CBuildDatabase::CreateDirectories() - {message}"
+        ),
+    )
+}
+
+/// The head of the log that `CBuildDatabase`'s constructor writes (time and name masked).
+const LOG_HEAD: &str =
+    "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <OUT>\nNew DB title:  \
+                        t\nSequence type: Protein\nKeep MBits: T\n";
+
+/// The errors makeblastdb reports through the `CException` clause of its general handler end
+/// with exit status 255, "Error: " and the exception's report (makeblastdb 2.17.0, the official
+/// Linux x64 release, probe of 2026-11-08): a `-max_file_sz` that is no size, read after the head of the
+/// log, and a directory that cannot be used, before it.
 #[test]
 fn other_errors_end_with_status_255() {
     let fasta = prot_fasta();
     let tmp = TempDir::new("other");
-    for value in [
-        "abc",
-        "",
-        "-1",
-        "1e3",
-        " 1KB",
-        "1Ki",
-        "18446744073709551616",
+    for (value, line, pos) in [
+        ("abc", 1622, 0),
+        ("", 1622, 0),
+        ("-1", 1578, 0),
+        ("1e3", 1674, 2),
+        (" 1KB", 1622, 0),
+        ("1Ki", 1674, 2),
+        ("18446744073709551616", 1750, 19),
+        ("18446744073709551615.5", 1757, 20),
     ] {
         let (status, log, messages) = makedb(&fasta, &tmp.base("db"), value, b"");
         assert_eq!(status, 255, "{value:?}");
         assert_eq!(
             messages,
-            format!("Error: -max_file_sz: Cannot convert string '{value}' to Uint8\n")
+            ncbi_report(
+                "corelib/ncbistr.cpp",
+                &format!(
+                    "{line}: Error: (CStringException::eConvert) \
+                     ncbi::NStr::StringToUInt8_DataSize() - Cannot convert string '{value}' to \
+                     Uint8 (m_Pos = {pos})"
+                )
+            ),
+            "{value:?}"
         );
-        assert_eq!(log, "", "{value:?}");
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            LOG_HEAD,
+            "{value:?}"
+        );
+        assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0], "{value:?}");
     }
-    // A value that is a size, but too large, is an error of the options.
-    let (status, _, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
+    // A value that is a size, but too large, is an error of the options, after the head too.
+    let (status, log, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
     assert_eq!(
         (status, messages.as_str()),
         (1, "BLAST options error: max_file_sz must be < 4 GiB\n")
     );
-    // The parent of the database is a file.
+    assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
+    // An existing database of the same name is removed before the value is read, as
+    // makeblastdb removes it.
+    let (status, _, _) = makedb(&fasta, &tmp.base("db"), "3GB", b"");
+    assert_eq!(status, 0);
+    assert!(!files_named(&tmp.0, "db.").is_empty());
+    let (status, log, _) = makedb(&fasta, &tmp.base("db"), "abc", b"");
+    assert_eq!(status, 255);
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        LOG_HEAD.replace(
+            "Keep MBits",
+            &format!(
+                "Deleted existing Protein BLAST database named {}\nKeep MBits",
+                logged_db_name(&log)
+            )
+        )
+    );
+    assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0]);
+    // The parent of the database is a file: the directory's error comes first.
     std::fs::write(tmp.0.join("f"), b"").unwrap();
     let out = tmp.0.join("f").join("db").to_string_lossy().into_owned();
-    let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
-    assert_eq!(
-        (status, log.as_str(), messages.as_str()),
-        (255, "", "Error: Failed to create directory 'f'\n")
-    );
+    for value in ["3GB", "abc", "4GiB"] {
+        let (status, log, messages) = makedb(&fasta, &out, value, b"");
+        assert_eq!(
+            (status, log.as_str(), messages),
+            (
+                255,
+                "",
+                create_directories_report(1063, "Failed to create directory 'f'")
+            ),
+            "{value}"
+        );
+    }
     assert_eq!(
         files_named(&tmp.0, ""),
         ["f"],
@@ -987,7 +1053,10 @@ fn directories_of_the_output_name() {
                 (
                     255,
                     "",
-                    format!("Error: You do not have write permissions on '{name}'\n")
+                    create_directories_report(
+                        1069,
+                        &format!("You do not have write permissions on '{name}'")
+                    )
                 ),
                 "{given}"
             );
@@ -1030,7 +1099,10 @@ fn an_existing_directory_without_write_permission_stops_the_build_before_the_log
             (
                 255,
                 "",
-                format!("Error: You do not have write permissions on '{name}'\n")
+                create_directories_report(
+                    1069,
+                    &format!("You do not have write permissions on '{name}'")
+                )
             ),
             "{out}"
         );

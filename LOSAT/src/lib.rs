@@ -44,6 +44,11 @@ pub mod writedb;
 // NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
 #[doc(hidden)]
 pub mod blastdbcmd;
+// NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
+#[doc(hidden)]
+pub mod ncbi_exception;
+// NCBI corelib/ncbistr.cpp: the number conversions of `NStr`.
+pub(crate) mod ncbi_str;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_api;

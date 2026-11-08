@@ -39,7 +39,10 @@
   weak match with another sequence of the database only in a batch whose prefetch
   `PRE_FETCH_SEQS_LIMIT` turns off, which line DBID N2c listed as a known difference, and in psiblast
   checked the sequences that each round's PSSM reads, and refused following hits that its PSSM
-  joins, where LOSAT wrote other later rounds than NCBI)
+  joins, where LOSAT wrote other later rounds than NCBI; the same day `losat makeblastdb` wrote
+  makeblastdb's exception reports (`Error: NCBI C++ Exception:`) for the errors of its general
+  handler and read `-max_file_sz` where makeblastdb reads it, after the head of the log, which
+  version 1.0 listed as known differences)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -231,7 +234,11 @@ Linux and macOS, 4 on Windows), which moves the padding of the date and the cut 
 under `-max_file_sz`. The Web app's builds (wasm32) write what makeblastdb writes on Linux
 x86-64. The output on Windows and macOS has not been compared with a makeblastdb run on those
 platforms; the tests there check LOSAT's platform choice and, on the Linux x86-64 settings,
-the same bytes as on Linux.
+the same bytes as on Linux. Errors that makeblastdb reports through its general handler
+(`Error: NCBI C++ Exception:` and one line per exception, `T0 "<file>", line <n>: Error:
+(<class>::<code>) <function>() - <message>`) name the source files in the build tree of the
+official Linux x64 release of makeblastdb 2.17.0, on every platform, as LOSAT's other NCBI
+exception reports do; a makeblastdb built elsewhere (bioconda, macOS, Windows) names its own tree.
 
 | Not written or rejected | Why |
 | --- | --- |
@@ -271,7 +278,8 @@ Version 5 and the options added to the writer:
   (makeblastdb's corelib also finds it as the value of another option).
 - Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
   that removes what the earlier files added; makeblastdb skips it without a word. `-in ""`
-  (no name) is refused; makeblastdb reads an empty list.
+  (no name) is refused where makeblastdb reads the list, after the log line "Maximum file
+  size" and `-taxid_map`; makeblastdb reads an empty list and crashes.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
   of a database; one left at the path is removed, makeblastdb's final state). So an output
   name of 247 to 251 bytes, whose `NAME.pdb-lock` passes the file-name limit of 255 bytes,
@@ -288,15 +296,9 @@ Errors that makeblastdb does not detect, or detects elsewhere:
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights); LOSAT stops when it creates the first
   file, after the first lines of the log.
-- `-max_file_sz` that is no size or is 4 GiB or more: LOSAT checks it before it tests the
-  output directory, removes an existing database or writes the log; makeblastdb after. The
-  exit status is the same, except with an output directory makeblastdb refuses: makeblastdb
-  ends with that refusal (exit status 255).
 - Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without
   `-parse_seqids` or with `-taxid`) end with exit status 2 and the text of LOSAT's option
   parser, as in every LOSAT subcommand; makeblastdb uses 1.
-- Errors of makeblastdb's general handler carry the source path of its binary
-  (`Error: NCBI C++ Exception: ...`); LOSAT prints `Error:` and the sentence.
 - With more volumes than the process may hold open files, makeblastdb writes the database
   and ends with exit status 2 ("Too many open files"). LOSAT resolves the finished
   database without opening its volumes and ends with 0.
@@ -319,6 +321,10 @@ Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1
 - Version 4 with `-parse_seqids`: a string-index key longer than 256 bytes (makeblastdb stops
   with "buffer overflow detected").
 - A `-taxid_map` line of white space only (makeblastdb crashes).
+- Version 5 with `-parse_seqids`: `LMDB_SPLIT_CHUNK_SIZE` or `LMDB_MIN_SPLIT_SIZE` that is not
+  a number of the range of `unsigned int` (makeblastdb aborts in its LMDB writer, after the
+  volumes are written); LOSAT stops with `BLAST Database creation error: Cannot convert string
+  '<value>' to ...` (exit status 1).
 
 Reproduced although it looks wrong (deterministic NCBI behaviour): with `-hash_index`, no
 `-parse_seqids` and several volumes, the first sequence of a later volume is indexed under the

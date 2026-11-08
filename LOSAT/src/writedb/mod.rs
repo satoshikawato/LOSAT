@@ -51,6 +51,8 @@ mod tests;
 
 use std::path::PathBuf;
 
+use crate::ncbi_exception::NcbiException;
+
 pub use platform::Platform;
 pub use writer::WriteDb;
 
@@ -66,8 +68,13 @@ pub enum WriteDbError {
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
-    /// Another NCBI exception that ends makeblastdb: the text it prints after
-    /// "Error: ".
+    /// An exception of NCBI's C++ Toolkit that makeblastdb reports through the `CException`
+    /// clause of its general handler: "Error: " and the exception's report
+    /// (`CException::what()`), exit status 255.
+    Exception(NcbiException),
+    /// What makeblastdb's general handler prints after "Error: " without an exception report:
+    /// LOSAT's own refusals (an input on which makeblastdb crashes, does not end or cannot be
+    /// followed) and the `std::exception`s of the LMDB layer (`lmdb::error`), exit status 255.
     Other(String),
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".
@@ -120,6 +127,9 @@ impl std::fmt::Display for WriteDbError {
                 String::from_utf8_lossy(message)
             ),
             WriteDbError::Options(message) => write!(f, "BLAST options error: {message}"),
+            // `what()` ends with a line feed and the message gets one more: the report ends
+            // with an empty line.
+            WriteDbError::Exception(e) => write!(f, "Error: {}", e.what()),
             WriteDbError::Other(message) => write!(f, "Error: {message}"),
             WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),
             WriteDbError::Io { path, source } => {

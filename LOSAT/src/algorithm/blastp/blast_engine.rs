@@ -12262,7 +12262,10 @@ fn run_resolved_in_pool(
     // The rendered rows of the HSPs of the queries `window` (`PairwiseHit`, in the order of the
     // lists): each row is read from the searched letters, so its hit moves back from the records
     // by the intervals' starts, and the row then prints record coordinates and lengths
-    // (`shift_to_records`). Every report that shows the alignment takes its rows from here.
+    // (`shift_to_records`). Every report that shows the alignment takes its rows from here. The
+    // rows' errors are LOSAT's internal invariants (`build_pairwise_hits`: an HSP whose alignment
+    // cannot be rendered), so making them while the reports are written changes no run's output,
+    // as BLASTN's (`blastn::blast_engine::run`).
     let x_rows_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
     let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
         let end = window.end.min(hit_lists.len());

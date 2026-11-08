@@ -6,11 +6,14 @@
 //! observer of outfmt 0; every other call makes them per window (`query_rows::row_windows`, one
 //! thread's window budget of 1 MiB of estimated report, two threads' 2 MiB). The input here holds
 //! 12 queries that each hit 180 subjects of about 450 letters, about 5 MB of estimated report, so
-//! a search makes four windows at one thread and two at two threads. The same `run_local_blastp`
-//! call with the hit records (rows up front), with the observer alone, and with neither, and the CLI
-//! run of each format, write the same bytes. Two queries hold a low-complexity run that SEG masks
-//! (`-seg yes`: the lowercase query rows of outfmt 0), and some subjects hold lower-case letters
-//! (`-lcase_masking`: the lowercase subject rows).
+//! a search makes four windows at one thread and two at two threads; three more queries (the
+//! letters reversed) have no hits, one of them the last. The same `run_local_blastp` call with the
+//! hit records (rows up front), with the observer alone (with and without outfmt 0, which makes the
+//! rows up front), and with neither, and the CLI run of each format write the same bytes; so do the
+//! CLI's search in blocks of one query batch each (`LOSAT_X_BPQBLOCK`) and its search of all queries
+//! with the same batches. Two queries hold a low-complexity run that
+//! SEG masks (`-seg yes`: the lowercase query rows of outfmt 0), and some subjects hold lower-case
+//! letters (`-lcase_masking`: the lowercase subject rows).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
 //! ```c++
@@ -29,7 +32,7 @@ use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
-const FORMATS: [&str; 4] = ["0", "5", CUSTOM, "6"];
+const FORMATS: [&str; 5] = ["0", "5", CUSTOM, "6", "16"];
 
 /// The window budget of `x_pairwise_par::window_bytes` at `threads` threads.
 fn window_budget(threads: usize) -> usize {
@@ -77,12 +80,16 @@ impl Inputs {
                 (format!("subj{k}"), letters)
             })
             .collect();
-        let queries: Vec<(String, Vec<u8>)> = (0..12)
+        let queries: Vec<(String, Vec<u8>)> = (0..15)
             .map(|k| {
                 let mut letters = with_letter(&base, 11 * k + 5, b'C');
                 // Two queries hold a run that SEG masks (`-seg yes`).
                 if k == 4 || k == 9 {
                     letters[200..230].fill(b'Q');
+                }
+                // Three queries without hits (`NO_HITS`).
+                if NO_HITS.contains(&k) {
+                    letters.reverse();
                 }
                 (format!("query{k} copy {k}"), letters)
             })
@@ -103,12 +110,17 @@ impl Inputs {
     }
 }
 
+/// The queries whose letters are reversed: no hits at `-evalue 1e-10`.
+const NO_HITS: [usize; 3] = [3, 8, 14];
+
 /// The options of every run besides the input files and the format.
 fn options(threads: usize) -> Vec<String> {
     [
         "-seg",
         "yes",
         "-lcase_masking",
+        "-evalue",
+        "1e-10",
         "-num_threads",
         &threads.to_string(),
     ]
@@ -122,8 +134,8 @@ fn records(path: &Path, config: ReaderConfig) -> Vec<FastaRecord> {
     run_local_support::reader_records(path, config)
 }
 
-/// The CLI run of `outfmt`: its output file.
-fn cli(inputs: &Inputs, outfmt: &str, threads: usize) -> Vec<u8> {
+/// The CLI run of `outfmt` with the variables `vars`: its output file.
+fn cli(inputs: &Inputs, outfmt: &str, threads: usize, vars: &[(&str, &str)]) -> Vec<u8> {
     let out = temp_path(&format!("rowwin_cli_{}_{threads}.out", outfmt.len()));
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
@@ -134,6 +146,7 @@ fn cli(inputs: &Inputs, outfmt: &str, threads: usize) -> Vec<u8> {
             command.env_remove(name);
         }
     }
+    command.envs(vars.iter().copied());
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -202,8 +215,13 @@ fn rows_made_per_window_write_the_bytes_of_rows_made_up_front() {
         );
         let text = String::from_utf8_lossy(&up_front.outputs[0]).into_owned();
         assert!(
-            text.contains("Query= query11 copy 11"),
+            text.contains("Query= query14 copy 14"),
             "n{threads}: outfmt 0 reaches the last query"
+        );
+        assert_eq!(
+            text.matches("***** No hits found *****").count(),
+            NO_HITS.len(),
+            "n{threads}: the queries without hits"
         );
         // The letters of the alignment rows that start with `label`.
         let row_letters = |label: &str| -> Vec<String> {
@@ -236,10 +254,30 @@ fn rows_made_per_window_write_the_bytes_of_rows_made_up_front() {
             }
             assert_eq!(other.diagnostics, up_front.diagnostics, "n{threads} {name}");
         }
+        // An observer without outfmt 0: the rows of the other formats per window, the observer's
+        // HSP numbers over the whole report.
+        let observed = run_formats_with(&FORMATS[1..], true, false, |outputs| {
+            run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+        });
+        for (index, outfmt) in FORMATS[1..].iter().enumerate() {
+            assert!(
+                observed.outputs[index] == up_front.outputs[index + 1],
+                "n{threads} observer without outfmt 0: outfmt {outfmt:?} differs"
+            );
+        }
         for (index, outfmt) in FORMATS.iter().enumerate() {
             assert!(
-                cli(&inputs, outfmt, threads) == up_front.outputs[index],
+                cli(&inputs, outfmt, threads, &[]) == up_front.outputs[index],
                 "n{threads} CLI: outfmt {outfmt:?} differs from the rows made up front"
+            );
+            // In blocks of one query batch each (three queries of about 450 letters to a batch of
+            // 1,500; the composition-based redo reads its batch's queries, so the search of all
+            // queries at once with the same batches is the reference).
+            let batch = ("BATCH_SIZE", "1500");
+            assert!(
+                cli(&inputs, outfmt, threads, &[("LOSAT_X_BPQBLOCK", "1"), batch])
+                    == cli(&inputs, outfmt, threads, &[("LOSAT_X_BPQBLOCK", "0"), batch]),
+                "n{threads} CLI in blocks: outfmt {outfmt:?} differs from the search of all queries"
             );
         }
     }

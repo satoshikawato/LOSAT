@@ -141,6 +141,12 @@ impl TblastxDatabase {
         self.taxdb.open_for_rows(&self.db, PROGRAM)
     }
 
+    /// Whether the database has parsed Seq-ids, whose subjects NCBI's prefetch can fail at
+    /// (`batch_prefetch`).
+    pub(crate) fn parsed_seqids(&self) -> bool {
+        self.parsed
+    }
+
     /// Whether the database has parsed Seq-ids and more than `max_sequences` sequences in its
     /// volumes (`SeqDb::printed_num_seqs`, also under a taxid list: the range walks of
     /// `reports_may_refuse` decode a list's excluded sequences of every range they read): the
@@ -416,6 +422,36 @@ pub(crate) fn prefetch_messages<'h>(
     shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
 }
 
+/// NCBI's prefetch of the query batch whose reported hits are `ordered` (in report order, by
+/// ordinal id) on standard error (`shared::batch_prefetch`): the taxonomy texts of
+/// [`prefetch_messages`], then the warning where the prefetch fails, at a subject whose lookup
+/// fails or one without a Bioseq with a Seq-align whose first Std-seg has a minus query frame
+/// and a plus subject frame (`CSeq_align::GetSeqStrand` reads the first segment): `ordered`
+/// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`).
+pub(crate) fn batch_prefetch(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+) -> Result<Vec<u8>> {
+    let mut previous = None;
+    let subjects = ordered.iter().map(|hsp| {
+        let ordinal = hsp.hit.s_idx;
+        let parsed = match titles.get(&ordinal) {
+            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+            _ => None,
+        };
+        let run = (hsp.hit.q_idx, ordinal);
+        let first = previous.replace(run) != Some(run);
+        let flipped = first && hsp.hit.query_frame < 0 && hsp.subject_frame > 0;
+        shared::PrefetchSubject {
+            ordinal,
+            parsed,
+            flipped,
+        }
+    });
+    shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
+}
+
 /// The database sequences that the reports show, by rank (`reported_subjects`).
 pub(crate) struct ReportedSubjects {
     /// The ordinal id of each rank.
@@ -433,6 +469,23 @@ pub(crate) struct ReportedSubjects {
     pub(crate) parsed: Vec<Option<Arc<ParsedSubject>>>,
 }
 
+/// The Seq-aligns of the hits `ordered` (in report order) that NCBI's prefetch counts against
+/// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each subject of each query (TBLASTX's
+/// search is ungapped), whose HSPs follow each other.
+pub(crate) fn seq_aligns_of(ordered: &[TblastxHsp]) -> usize {
+    ordered
+        .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx && a.hit.s_idx == b.hit.s_idx)
+        .map(|hsps| shared::subject_seq_aligns(hsps.len(), false))
+        .sum()
+}
+
+/// The hits of `ordered` (in report order, by query) of the queries `queries`.
+pub(crate) fn query_hits(ordered: &[TblastxHsp], queries: std::ops::Range<usize>) -> &[TblastxHsp] {
+    let from = ordered.partition_point(|hsp| (hsp.hit.q_idx as usize) < queries.start);
+    let to = ordered.partition_point(|hsp| (hsp.hit.q_idx as usize) < queries.end);
+    &ordered[from..to.max(from)]
+}
+
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
 /// report order, subjects named by ordinal id): the hits name them by rank from here on (the
 /// rank grows with the ordinal id, so every comparison that breaks a tie by the subject index
@@ -441,7 +494,8 @@ pub(crate) struct ReportedSubjects {
 /// `lengths`, `read_reported_lengths`) are kept for the reports. A reported sequence whose stored title LOSAT does not
 /// report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
-/// `shown.joined` `refuse_joined_hits`).
+/// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
+/// prefetch is on reports it, `prefetch` by the hits' query index).
 pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
     titles: &DatabaseTitles,
@@ -449,29 +503,29 @@ pub(crate) fn reported_subjects(
     stores: Option<&ReportedStores>,
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
+    prefetch: &shared::BatchPrefetch,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
     ordinals.dedup();
-    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those with a
-    // Seq-align whose first Std-seg has a minus query frame and a plus subject frame
-    // (`shared::check_prefetched_strands`; `CSeq_align::GetSeqStrand` reads the first segment):
-    // `ordered` holds each query's HSPs of a subject in one run, in the order of the Std-segs
-    // (`seqalign`).
-    let flipped: std::collections::HashSet<u32> = if shown.prefetched {
+    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
+    // batch whose prefetch is on reports (`prefetch`: a batch whose Seq-aligns outnumber a
+    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them); where the prefetch fails, the
+    // batch writes NCBI's warning (`batch_prefetch`).
+    // `prefetched` is `None` where every batch prefetches.
+    let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
+    if shown.prefetched && prefetched.is_some() {
         let mut previous = None;
-        ordered
-            .iter()
-            .filter(|hsp| {
-                let run = (hsp.hit.q_idx, hsp.hit.s_idx);
-                previous.replace(run) != Some(run)
-            })
-            .filter(|hsp| hsp.hit.query_frame < 0 && hsp.subject_frame > 0)
-            .map(|hsp| hsp.hit.s_idx)
-            .collect()
-    } else {
-        Default::default()
-    };
+        for hsp in ordered.iter() {
+            let run = (hsp.hit.q_idx, hsp.hit.s_idx);
+            if previous.replace(run) == Some(run) || !prefetch.query(hsp.hit.q_idx as usize) {
+                continue;
+            }
+            if let Some(prefetched) = &mut prefetched {
+                prefetched.insert(hsp.hit.s_idx);
+            }
+        }
+    }
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)
@@ -501,16 +555,13 @@ pub(crate) fn reported_subjects(
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
-                    shown,
+                    shown.prefetched_if(
+                        prefetched
+                            .as_ref()
+                            .is_none_or(|prefetched| prefetched.contains(&ordinal)),
+                    ),
                     false,
                     taxdb,
-                    ordinal,
-                    PROGRAM,
-                )?;
-                shared::check_prefetched_strands(
-                    &database.db,
-                    subject,
-                    flipped.contains(&ordinal),
                     ordinal,
                     PROGRAM,
                 )?;

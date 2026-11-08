@@ -111,16 +111,24 @@ async function checkReactor(artifact, fixtures, output) {
           assert.ok(events.filter(e => e.event === "exited").every(e => e.code === 0));
         }
       }
-      const invalid = runPair(host, c.program, ["blastx", "tblastn"].includes(c.program) ? "@@@@\n" : "invalid FASTA", c.subject ?? c.seq, "6", [...c.args, "-num_threads", "1"]);
-      assert.equal(invalid.status, -1); assert.equal(invalid.result.length, 0);
-      // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1379-1382
+      // A query line that every program's reader refuses. "invalid FASTA" is not one: NCBI
+      // BLAST+ 2.17.0 reads it as a nucleotide query with a warning ("Ignoring invalid
+      // residues at position(s): On line 1: 1, 5-6, 9") or as a protein, and exits 0, as
+      // the shared reader now does.
+      // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:751-758
       // ```c++
-      //         if ( ! badIndexes.empty() ) {
-      //             NCBI_THROW2(CBadResiduesException, eBadResidues,
-      //                 "CFastaReader: Invalid " + x_NucOrProt() + "residue(s) in input sequence",
-      //                 CBadResiduesException::SBadResiduePositions( m_BestID, badIndexes, LineNumber() ) );
+      //     if (bad >= good / 3  &&
+      //         (len_to_check > 3  ||  good == 0  ||  bad > good))
+      //     {
+      //         FASTA_ERROR( LineNumber(),
+      //             "CFastaReader: Near line " << LineNumber()
+      //             << ", there's a line that doesn't look like plausible data, "
+      //             "but it's not marked as defline or comment.",
+      //             CObjReaderParseException::eFormat);
       // ```
-      assert.match(invalid.error, /fasta/i);
+      const invalid = runPair(host, c.program, "@@@@\n", c.subject ?? c.seq, "6", [...c.args, "-num_threads", "1"]);
+      assert.equal(invalid.status, -1); assert.equal(invalid.result.length, 0);
+      assert.match(invalid.error, /doesn't look like plausible data/);
       save(`${c.id}-invalid-input`, invalid, []);
     }
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188

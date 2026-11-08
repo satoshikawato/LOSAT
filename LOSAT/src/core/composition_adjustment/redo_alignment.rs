@@ -12,8 +12,8 @@ use std::ptr::NonNull;
 
 use super::x_align_index::{x_add_distinct, x_contains, x_finish, XAlignIndexes};
 use crate::common::GapEditOp;
-use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 use crate::sequence::packed_subject::SubjectNt;
+use crate::stats::compute_lambda_from_score_probs;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
 use crate::utils::seg::{SegMasker, SegParams};

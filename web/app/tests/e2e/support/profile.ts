@@ -68,6 +68,16 @@ export function killRenderers(profile: Profile): number {
     }
   }
   const renderers = all.filter((p) => family.has(p.pid) && p.command.includes('--type=renderer'));
-  for (const renderer of renderers) process.kill(renderer.pid, 'SIGKILL');
-  return renderers.length;
+  let killed = 0;
+  for (const renderer of renderers) {
+    try {
+      process.kill(renderer.pid, 'SIGKILL');
+      killed += 1;
+    } catch (error) {
+      // The renderer ended after the list was read (a tab closed just before ends its
+      // renderer a moment later): it is already gone.
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  }
+  return killed;
 }

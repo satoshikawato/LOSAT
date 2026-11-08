@@ -126,6 +126,11 @@
 
 use super::*;
 
+// SC10b PR-3: the group tables of words whose backbone index does not fit 16 bits (`-word_size 4`),
+// built for all groups at once with 32-bit indices on the search pool (`x_build_tables_wide`).
+#[path = "x_pair_lut_wide.rs"]
+pub(crate) mod x_pair_lut_wide;
+
 /// The prepared query of one batch (the reference `prepare_lookup_query`) with the settings of
 /// its lookup table.
 pub(crate) struct XPairLutQuery {
@@ -189,15 +194,25 @@ fn x_group_zeroed(elements: usize, mapped: bool) -> Vec<u32> {
 // The precondition of the direct builders (`x_build_direct`, `x_build_group`): their neighbour
 // lists hold backbone indices in 16 bits (`x_target_list`), so the index of a word, `word_length`
 // letters of `charsize` bits (5 for the 28 letters), must fit 16 bits: words of 2 and 3 letters
-// (10 and 15 bits), not of 4 (20 bits). The unit path takes a search only where this holds
-// (`blast_engine/run_impl.rs`, its `debugging` gate), so that its group tables are built here and
-// never filtered out of a full table (`build_groups`).
+// (10 and 15 bits), not of 4 (20 bits). Words of 4 letters take the joint builder of 32-bit
+// indices instead (`x_pair_lut_wide.rs`, `x_tables_cover`), so that the unit path's group tables
+// are built from the query and not filtered out of a full table (`build_groups`).
 /// Whether the direct builder takes a table of `word_length`-letter words: their backbone index
 /// fits 16 bits.
 #[inline(always)]
 pub(crate) const fn x_direct_covers(word_length: usize) -> bool {
     let charsize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
     word_length * charsize <= 16 && word_length <= 32
+}
+
+// No NCBI counterpart: which builder makes the unit path's group tables (the tables are the same
+// either way, module comment).
+/// Whether the unit path builds the group tables of `word_length`-letter words from the query:
+/// the 16-bit direct builder (`x_direct_covers`: 2 and 3 letters) or the joint builder of 32-bit
+/// indices (`x_pair_lut_wide::x_wide_covers`: 4 letters).
+#[inline(always)]
+pub(crate) const fn x_tables_cover(word_length: usize) -> bool {
+    x_direct_covers(word_length) || x_pair_lut_wide::x_wide_covers(word_length)
 }
 
 impl XPairLutQuery {
@@ -232,7 +247,7 @@ impl XPairLutQuery {
     /// `x_prepare` with the scores of `matrix` (`-matrix`) and words of `word_length` letters
     /// (`-word_size`): the query preparation of `build_ncbi_lookup_for_profile(queries, threshold,
     /// _, check_ideal, matrix, word_length)`. `None` also for a word length whose backbone index
-    /// the direct builder does not cover (`x_direct_covers`).
+    /// neither builder covers (`x_tables_cover`).
     #[inline(always)]
     pub(crate) fn x_prepare_for(
         queries: &[Vec<QueryFrame>],
@@ -242,7 +257,7 @@ impl XPairLutQuery {
         word_length: usize,
     ) -> Option<Self> {
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
-        if diagnostics_enabled() || !x_direct_covers(word_length) {
+        if diagnostics_enabled() || !x_tables_cover(word_length) {
             return None;
         }
         // Same expressions as build_ncbi_lookup_for_profile.

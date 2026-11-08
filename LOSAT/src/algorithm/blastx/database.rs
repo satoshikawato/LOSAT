@@ -138,7 +138,7 @@ impl BlastxDatabase {
 
     /// Whether `taxdb.bti` resolves on NCBI's search path, so that the XML2 and JSON formats
     /// write the scientific name of a taxid (`SeqDb::taxdb_found`) and the batches' prefetch
-    /// reads the taxonomy database (`ReportedSubjects::prefetch_messages`); asked once for the
+    /// reads the taxonomy database (`ReportedSubjects::batch_prefetch`); asked once for the
     /// run (`shared::TaxdbRun::found`).
     pub(crate) fn taxdb_found(&self) -> bool {
         self.taxdb.found(&self.db)
@@ -330,8 +330,9 @@ impl ReportedSubjects {
     /// ids. `structured`: outfmt 5 or 13 to 16, which read the Bioseq. `taxonomy`: whether the
     /// report writes the sequences' taxids or their names (13 to 16, a table of taxonomy fields;
     /// `ParsedSubject::fetched`). `prefetched`: whether the batch's prefetch reads the subjects
-    /// (`shared::prefetches_subjects`), which where no report reads their Bioseqs refuses what it
-    /// cannot read as NCBI does (`shared::check_prefetched_parsed`).
+    /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
+    /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
+    /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -542,14 +543,16 @@ impl ReportedSubjects {
         Ok(reported)
     }
 
-    /// NCBI's messages about the taxonomy database when the query batch whose hit lists are
-    /// `batches` (renamed to ranks by `for_batch`) prefetches the subjects it reports
-    /// (`shared::prefetch_messages`): the sequences of the lists that the reports show
+    /// NCBI's prefetch of the query batch whose hit lists are `batches` (renamed to ranks by
+    /// `for_batch`) on standard error (`shared::batch_prefetch`): the messages about the
+    /// taxonomy database of the sequences of the lists that the reports show
     /// (`report::reported`), the ones whose titles `for_batch` reads, with the definition lines
-    /// of those with parsed Seq-ids. Empty, and nothing read, without `taxdb.bti` on the search
-    /// path. A taxonomy database that LOSAT cannot read as NCBI does is refused
-    /// (`shared::TaxonomyRefusal`); a header whose taxid does not decode is the reader's error.
-    pub(crate) fn prefetch_messages(
+    /// of those with parsed Seq-ids, then the warning where the prefetch fails at a subject whose
+    /// lookup fails (the protein subject has no strand). Without `taxdb.bti` on the search path
+    /// no text, and nothing read. A taxonomy database that LOSAT cannot read as NCBI does is
+    /// refused (`shared::TaxonomyRefusal`); a header whose taxid does not decode is the reader's
+    /// error.
+    pub(crate) fn batch_prefetch(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
@@ -559,8 +562,13 @@ impl ReportedSubjects {
             .iter()
             .flat_map(|batch| batch.queries.iter().flatten())
             .filter(|list| super::report::reported(list, gapped))
-            .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
-        shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+            .map(|list| {
+                shared::PrefetchSubject::unflipped(
+                    self.ordinals[list.oid],
+                    self.parsed_subject(list.oid),
+                )
+            });
+        shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
     }
 
     /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
@@ -568,7 +576,7 @@ impl ReportedSubjects {
     /// each query's report fetches the sequences it shows, where the first format's rows read
     /// their Bioseqs (`rows`, `TabularSpec::subject_fetch`, by the engine's identities of each
     /// shown HSP), after the query's own warnings. The messages are kept by query for the
-    /// writers (`query_fetches`). Refusals as `prefetch_messages`; a batch that fetches nothing
+    /// writers (`query_fetches`). Refusals as `batch_prefetch`; a batch that fetches nothing
     /// still asks for the run's refusal of NCBI's taxonomy cache, unless no batch of the run
     /// prefetches (`shared::prefetch_always_off`) and no row reads a subject. Rows that read a
     /// subject only for its identities ask in every batch: BLASTX writes each batch's reports
@@ -971,7 +979,7 @@ mod tests {
                 false,
             )
             .unwrap();
-            let messages = reported.prefetch_messages(database, &batches, true);
+            let messages = reported.batch_prefetch(database, &batches, true);
             String::from_utf8(messages.unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);

@@ -35,6 +35,11 @@ use crate::utils::matrix::protein_display_score;
 use std::io::{self, Write};
 use std::sync::Arc;
 
+// psiblast's report of one round (line PS, PS5a): a child of this module, which writes through
+// its parts.
+#[path = "psiblast_round.rs"]
+pub(crate) mod psiblast_round;
+
 // =============================================================================
 // NCBI Pairwise Output Format (outfmt 0)
 // =============================================================================

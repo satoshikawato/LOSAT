@@ -50,6 +50,9 @@ pub(super) struct TblastnDatabase {
     /// The taxonomy database of the run, opened by the XML2 and JSON formats and by the
     /// batches' prefetch of outfmt 0, 5, 6 and 7 (`prefetch_messages`).
     taxdb: shared::TaxdbRun,
+    /// Whether the database has parsed Seq-ids (`shared::check_seqids`), whose subjects NCBI's
+    /// prefetch can fail at (`batch_prefetch`).
+    parsed_seqids: bool,
 }
 
 impl TblastnDatabase {
@@ -97,7 +100,7 @@ impl TblastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
-        shared::check_seqids(&db, settings, PROGRAM)?;
+        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
@@ -112,7 +115,14 @@ impl TblastnDatabase {
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids,
         })
+    }
+
+    /// Whether NCBI's prefetch of a batch can fail at a subject (a database with parsed
+    /// Seq-ids, `batch_prefetch`).
+    pub(super) fn parsed_seqids(&self) -> bool {
+        self.parsed_seqids
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -263,6 +273,29 @@ impl TblastnDatabase {
         shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
+    /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
+    /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
+    /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
+    /// subject whose lookup fails (the protein query has no strand).
+    pub(super) fn batch_prefetch(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> Result<Vec<u8>> {
+        let subjects = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| reads_subject(list, SubjectFetch::Every))
+            .map(|list| {
+                let rank = list.oid as usize;
+                shared::PrefetchSubject::unflipped(
+                    reported.ordinals[rank],
+                    reported.parsed_subject(rank),
+                )
+            });
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
+    }
+
     /// The database read where it is searched by `threads` threads, after the checks of
     /// `common::database::x_check_nucleotide_stores` (`common/x_db_stream.rs`).
     pub(super) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
@@ -392,6 +425,17 @@ impl ReportedSubjects {
     }
 }
 
+/// The Seq-aligns of the results `hitlists` that NCBI's prefetch counts against
+/// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP (TBLASTN's search is gapped;
+/// LOSAT refuses `-ungapped`, whose Seq-aligns are one per subject).
+pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList]) -> usize {
+    hitlists
+        .iter()
+        .flat_map(KappaResultHitList::lists)
+        .map(|list| list.hsps.hsps.len())
+        .sum()
+}
+
 /// The reported database sequences of `hitlists` (the final hit lists of all query batches,
 /// subjects named by ordinal id; their HSPs of score 0 are dropped first, as the report
 /// drops them): the hit lists name them by rank from here on (the rank grows with the
@@ -402,8 +446,10 @@ impl ReportedSubjects {
 /// A reported sequence whose stored title LOSAT does not report as
 /// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `shown` do
 /// not write as NCBI (`common::database::check_reported_parsed`, and with `shown.joined`
-/// `refuse_joined_hits`). The packed subjects are read
-/// from the database (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
+/// `refuse_joined_hits`; where only the prefetch reads a subject, a batch of `batches`, the
+/// query ranges of the batches of `hitlists`, whose prefetch is on reports it). The packed
+/// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
+/// cloned from the copy.
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
     titles: &DatabaseTitles,
@@ -411,6 +457,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     shown: ParsedShown,
+    batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
     for hitlist in hitlists.iter_mut() {
@@ -419,6 +466,25 @@ pub(super) fn reported_subjects(
     let mut ordinals = Vec::new();
     for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
         ordinals.push(u32::try_from(list.oid).context("negative TBLASTN subject OID")?);
+    }
+    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
+    // batch whose prefetch is on reports (a batch whose Seq-aligns outnumber a positive
+    // `PRE_FETCH_SEQS_LIMIT` reads nothing of them, `shared::BatchPrefetch`).
+    // `None` where every batch prefetches.
+    let mut prefetched = None;
+    if shown.prefetched {
+        let prefetch = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
+            seq_aligns_of(&hitlists[span])
+        });
+        if prefetch.counts() {
+            let mut read = std::collections::HashSet::new();
+            for (query, hitlist) in hitlists.iter().enumerate() {
+                if prefetch.query(query) {
+                    read.extend(hitlist.lists().iter().map(|list| list.oid as u32));
+                }
+            }
+            prefetched = Some(read);
+        }
     }
     ordinals.sort_unstable();
     ordinals.dedup();
@@ -455,7 +521,11 @@ pub(super) fn reported_subjects(
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
-                    shown,
+                    shown.prefetched_if(
+                        prefetched
+                            .as_ref()
+                            .is_none_or(|prefetched| prefetched.contains(&ordinal)),
+                    ),
                     false,
                     taxdb,
                     ordinal,
@@ -595,6 +665,7 @@ mod tests {
             },
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids: true,
         }
     }
 
@@ -659,6 +730,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 letters,
                 ParsedShown::default(),
+                &[],
             )
             .unwrap()
         };
@@ -713,6 +785,7 @@ mod tests {
                 SubjectLetters::Stream(&stream),
                 true,
                 ParsedShown::default(),
+                &[],
             )
             .unwrap();
             let messages = database.prefetch_messages(&reported, &hitlists, SubjectFetch::Every);

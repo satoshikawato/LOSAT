@@ -21,6 +21,18 @@
 //!   same bytes as the reference (a sentinel among them stops both, as in `x_ungapped_fast.rs`).
 //! * The word loop is unrolled for three letters (the same statements and order) and the walks
 //!   take two steps per loop.
+//! * The score and the step are one `i64` key (item SC2e): after step `i` (from 0) of a walk the
+//!   key is `score << 32 - (i + 1)`, before the first step `maxscore << 32`, and a step adds the
+//!   matrix's key `(t << 32) - 1` ([`KeyTable`]). With `0 < i + 1 < 2^32` (a walk ends at a
+//!   sentinel of a buffer of fewer than `i32::MAX` bytes): `key > best` exactly when the score
+//!   passes the best score (on a tie the best stays at the first step, the reference's `>`);
+//!   `best - key >= dropoff << 32` exactly when `best_score - score >= dropoff` (the step part of
+//!   the difference is in `0..2^32`); `key <= 0` exactly when `score <= 0`; and the best's length
+//!   is `-best & 0xffff_ffff` (`i + 1` for a best at step `i`, 0 for none), its score
+//!   `(best + length) >> 32`. The walk keeps no offset of the best beside the key. The word loop
+//!   is three such steps from 0 without a stop (its `right_d` is the length of its best).
+//! * blastp's query block is kept as `u16` codes shifted by 5 (`q << 5`, [`XQueryCode`]), so that a
+//!   step's index into the keys is one OR with the subject's code; BLASTX's buffers stay bytes.
 //! * No score wraps (a wrapped score could step over a sentinel without stopping): a block on the
 //!   path has at most `i32::MAX / 16` letters, the word and the two walks of one extension read
 //!   distinct query positions at +11 a step at most, so a score stays below `11 * (len + 3)`, and
@@ -30,13 +42,96 @@
 //! BLASTX's seed loops call the same extension, [`two_hit_in`] with `TAIL` 1, on buffers laid out
 //! differently (`blastx/x_ungap_sent.rs`, whose header gives the argument for them).
 //!
+//! A matrix other than BLOSUM62 (item SC2c, [`XSentQuery::new_of`]) takes the same walks with its
+//! byte table (`x_ungapped_fast::matrix_table`). The argument holds with the matrix's largest score
+//! `M` for 11 and the table's -128 for the sentinel: the path takes a matrix whose table gives the
+//! sentinel -128 against every code and whose `M` is at most 31, and a block of at most
+//! `i32::MAX / 32` letters, so a score stays below `31 * (len + 3)`.
+//!
 //! In a replay of the closure on 4.3 million captured candidates of an OrthoFinder job (line F,
 //! `v4-F/results/s1/p2`, arm V6) every result equalled the reference's, at 204.7 instead of 264.7
-//! cycles per candidate.
+//! cycles per candidate. The key walks (item SC2e, arm K16) replayed on that capture and on the
+//! candidates of BLOSUM45, BLOSUM50, BLOSUM90 and PAM250 (39 million in all) gave every result of
+//! the reference at 0.89 to 0.93 of the time of the walks before them (178 instead of 199 cycles
+//! per BLOSUM50 candidate, 472 instead of 648 instructions).
 
 use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
-use super::x_ungapped_fast::{build_table, Table};
+use super::x_ungapped_fast::Table;
 use std::sync::OnceLock;
+
+/// The key of a step for every pair of codes below 32 (`q << 5 | s`): `(t << 32) - 1`, `t` the
+/// byte table's score (-128 for the sentinel). The walks add it (module comment).
+pub(crate) type KeyTable = [i64; KEY_TABLE_LEN];
+const KEY_TABLE_LEN: usize = (CODES as usize) * (CODES as usize);
+
+/// The keys of the byte table `table` (its first 32 x 32 codes).
+// No NCBI counterpart: the reference's scores in LOSAT's form (module comment).
+pub(crate) fn key_table(table: &Table) -> Box<KeyTable> {
+    let mut keys = Box::new([0i64; KEY_TABLE_LEN]);
+    for (k, &t) in keys.iter_mut().zip(table.iter()) {
+        *k = ((t as i64) << 32) - 1;
+    }
+    keys
+}
+
+/// BLOSUM62's keys, from its scores as `x_ungapped_fast::build_table` takes them (-128 for
+/// `BLAST_SCORE_MIN`), built in place (no byte table beside them); `None` if a score does not fit
+/// a byte.
+// NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]` (the scores the reference walks add).
+pub(crate) fn blosum62_keys() -> Option<Box<KeyTable>> {
+    let mut keys = Box::new([0i64; KEY_TABLE_LEN]);
+    for q in 0..CODES {
+        for c in 0..CODES {
+            let v = crate::utils::matrix::blosum62_score_ncbistdaa_direct(q, c);
+            let t = if v == crate::utils::matrix::BLAST_SCORE_MIN {
+                -128
+            } else if (-127..=127).contains(&v) {
+                v
+            } else {
+                return None;
+            };
+            keys[(q as usize) << 5 | c as usize] = ((t as i64) << 32) - 1;
+        }
+    }
+    Some(keys)
+}
+
+/// The score and the length of a best key (module comment).
+#[inline(always)]
+fn best_of(best: i64) -> (i32, i32) {
+    let len = (best.wrapping_neg() as u64 & 0xffff_ffff) as i64;
+    (((best + len) >> 32) as i32, len as i32)
+}
+
+/// A query code as the walks read it: the row of the keys (`code << 5`). blastp's block is kept
+/// shifted (`u16`), BLASTX's buffers are bytes.
+pub(crate) trait XQueryCode: Copy {
+    /// `code << 5`.
+    fn row(self) -> usize;
+}
+
+impl XQueryCode for u8 {
+    #[inline(always)]
+    fn row(self) -> usize {
+        (self as usize) << 5
+    }
+}
+
+impl XQueryCode for u16 {
+    #[inline(always)]
+    fn row(self) -> usize {
+        self as usize
+    }
+}
+
+/// `[0, query.., 0]` with each code shifted by 5 (module comment).
+fn padded_rows(query: &[u8]) -> Vec<u16> {
+    let mut padded = Vec::with_capacity(query.len() + 2);
+    padded.push(0);
+    padded.extend(query.iter().map(|&c| u16::from(c) << 5));
+    padded.push(0);
+    padded
+}
 
 /// Codes below this index the table (`q << 5 | s`).
 const CODES: u8 = 32;
@@ -47,11 +142,16 @@ const MAX_DROPOFF: i32 = 127;
 /// Longest query block on the path: no score of a walk wraps (see the module comment).
 const MAX_BLOCK_LEN: usize = (i32::MAX / 16) as usize;
 const _: () = assert!(11 * (MAX_BLOCK_LEN as i64 + 3) < i32::MAX as i64);
+/// Longest query block on the path for a matrix other than BLOSUM62, whose largest score is at
+/// most 31 (`MatrixTable::sent_table`): no score of a walk wraps.
+const MAX_BLOCK_LEN_OF: usize = (i32::MAX / 32) as usize;
+const _: () = assert!(31 * (MAX_BLOCK_LEN_OF as i64 + 3) < i32::MAX as i64);
 
 struct State {
     /// `LOSAT_X_BPUNGAPSENT`.
     on: bool,
-    table: Option<Box<Table>>,
+    /// BLOSUM62's keys.
+    keys: Option<Box<KeyTable>>,
 }
 
 fn state() -> &'static State {
@@ -59,7 +159,7 @@ fn state() -> &'static State {
     STATE.get_or_init(|| State {
         // `LOSAT_X_BPUNGAPSENT` is a strict-set switch.
         on: crate::utils::xswitch::on("LOSAT_X_BPUNGAPSENT"),
-        table: build_table(),
+        keys: blosum62_keys(),
     })
 }
 
@@ -71,9 +171,9 @@ pub(crate) fn on() -> bool {
 
 /// A query block made ready for [`two_hit`]: a copy with a sentinel added at each end.
 pub(crate) struct XSentQuery {
-    /// `[0, query.., 0]`.
-    padded: Vec<u8>,
-    table: &'static Table,
+    /// `[0, query.., 0]`, each code shifted by 5 ([`XQueryCode`]).
+    padded: Vec<u16>,
+    keys: &'static KeyTable,
 }
 
 impl XSentQuery {
@@ -92,7 +192,7 @@ impl XSentQuery {
         if !state.on {
             return None;
         }
-        let table = state.table.as_deref()?;
+        let keys = state.keys.as_deref()?;
         let fits = lookup_word_size == WORD_SIZE as i32
             && extension_word_size == WORD_SIZE
             && x_drops.iter().all(|d| (1..=MAX_DROPOFF).contains(d))
@@ -101,12 +201,76 @@ impl XSentQuery {
         if !fits {
             return None;
         }
-        let mut padded = Vec::with_capacity(query.len() + 2);
-        padded.push(0);
-        padded.extend_from_slice(query);
-        padded.push(0);
-        Some(Self { padded, table })
+        Some(Self {
+            padded: padded_rows(query),
+            keys,
+        })
     }
+}
+
+impl XSentQuery {
+    /// [`XSentQuery::new`] for a matrix other than BLOSUM62 (item SC2c): the walks score with the
+    /// matrix's byte table (`x_ungapped_fast::matrix_table`), on the path only where that table
+    /// gives the sentinel -128 against every code and the matrix's largest score is at most 31
+    /// (`MatrixTable::sent_table`), with the same checks and at most `i32::MAX / 32` letters (no
+    /// score wraps: the module comment with 31 for 11).
+    // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+    pub(crate) fn new_of(
+        matrix: crate::config::ScoringMatrix,
+        query: &[u8],
+        x_drops: &[i32],
+        lookup_word_size: i32,
+        extension_word_size: usize,
+    ) -> Option<Self> {
+        if !state().on {
+            return None;
+        }
+        let keys = keys_of(matrix)?;
+        if !fits_of(
+            query,
+            x_drops,
+            lookup_word_size,
+            extension_word_size,
+            MAX_BLOCK_LEN_OF,
+        ) {
+            return None;
+        }
+        Some(Self {
+            padded: padded_rows(query),
+            keys,
+        })
+    }
+}
+
+/// The keys of another matrix's table for the walks (`MatrixTable::sent_table`), built at the first
+/// call for the matrix; `None` where that table is not on the path.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+fn keys_of(matrix: crate::config::ScoringMatrix) -> Option<&'static KeyTable> {
+    static KEYS: [OnceLock<Option<Box<KeyTable>>>; crate::config::ScoringMatrix::ALL.len()] =
+        [const { OnceLock::new() }; crate::config::ScoringMatrix::ALL.len()];
+    KEYS[matrix as usize]
+        .get_or_init(|| {
+            super::x_ungapped_fast::matrix_table(matrix)
+                .and_then(|table| table.sent_table())
+                .map(key_table)
+        })
+        .as_deref()
+}
+
+/// The checks of [`XSentQuery::new_of`] on a block of at most `max_len` letters.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+fn fits_of(
+    query: &[u8],
+    x_drops: &[i32],
+    lookup_word_size: i32,
+    extension_word_size: usize,
+    max_len: usize,
+) -> bool {
+    lookup_word_size == WORD_SIZE as i32
+        && extension_word_size == WORD_SIZE
+        && x_drops.iter().all(|d| (1..=MAX_DROPOFF).contains(d))
+        && query.len() <= max_len
+        && query.iter().fold(0u8, |a, &c| a | c) < CODES
 }
 
 /// A subject made ready for [`two_hit`]: its buffer with the sentinels, checked.
@@ -138,40 +302,38 @@ impl<'a> XSentSubject<'a> {
 }
 
 /// One walk of `s_BlastAaExtendRight` (`RIGHT`) or `s_BlastAaExtendLeft` from `qp`, `sp`, until
-/// the X-drop test (or, right, `score <= 0`) holds: (best, length, steps before the stop).
+/// the X-drop test (or, right, `score <= 0`) holds: (best, length, steps before the stop), on the
+/// keys of the module comment.
 ///
 /// SAFETY: walking from `qp`, `sp` in the direction, both sequences reach a sentinel (code 0)
-/// with every position up to it readable, all codes up to it are below 32, `tab` is the byte
-/// table and `1 <= dropoff <= 127`.
+/// with every position up to it readable and fewer than `2^32 - 1` positions before it, all codes
+/// up to it are below 32, `keys` is the table's keys and `1 <= dropoff <= 127`.
 // NCBI reference: aa_ungapped.c:804-883 (see the module comment).
 #[inline(always)]
-unsafe fn walk<const RIGHT: bool>(
-    tab: *const i8,
-    qp: *const u8,
+unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
+    keys: *const i64,
+    qp: *const Q,
     sp: *const u8,
     dropoff: i32,
     maxscore: i32,
 ) -> (i32, i32, usize) {
-    let mut score = maxscore;
-    let mut best = maxscore;
-    // the offset of the best step; the start value means "no best yet" (length 0)
-    let none: isize = if RIGHT { -1 } else { 1 };
-    let mut best_off = none;
+    let mut key = (maxscore as i64) << 32;
+    let mut best = key;
+    let drop = (dropoff as i64) << 32;
     let mut off: isize = 0;
     let dir: isize = if RIGHT { 1 } else { -1 };
     macro_rules! step {
         ($l:lifetime) => {{
-            let qc = *qp.offset(off) as usize;
+            let row = (*qp.offset(off)).row();
             let sc = *sp.offset(off) as usize;
-            score += *tab.add(qc << 5 | sc) as i32;
-            if score > best {
-                best = score;
-                best_off = off;
+            key += *keys.add(row | sc);
+            if key > best {
+                best = key;
             }
             let stop = if RIGHT {
-                score <= 0 || (best - score) >= dropoff
+                key <= 0 || key + drop <= best
             } else {
-                (best - score) >= dropoff
+                key + drop <= best
             };
             if stop {
                 break $l;
@@ -183,11 +345,7 @@ unsafe fn walk<const RIGHT: bool>(
         step!('w);
         step!('w);
     }
-    let len = if best_off == none {
-        0
-    } else {
-        (best_off.unsigned_abs() + 1) as i32
-    };
+    let (best, len) = best_of(best);
     (best, len, off.unsigned_abs())
 }
 
@@ -195,7 +353,8 @@ unsafe fn walk<const RIGHT: bool>(
 /// offsets, as `extend_two_hit_blosum62` takes them): the reference's result, `None` for its
 /// early return (a word that does not fit).
 ///
-/// SAFETY: `1 <= dropoff <= 127` (an X-drop that [`XSentQuery::new`] checked).
+/// SAFETY: `1 <= dropoff <= 127` (an X-drop that [`XSentQuery::new`] or
+/// [`XSentQuery::new_of`] checked).
 // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn two_hit(
@@ -206,8 +365,8 @@ pub(crate) unsafe fn two_hit(
     q_right_off: usize,
     dropoff: i32,
 ) -> Option<BlastpTwoHitUngappedResult> {
-    two_hit_in::<2>(
-        query.table,
+    two_hit_in::<2, u16>(
+        query.keys,
         &query.padded,
         subject.aa_seq,
         s_left_off,
@@ -223,13 +382,15 @@ pub(crate) unsafe fn two_hit(
 /// subject, which keep it). A const per caller keeps each caller's instance its own.
 ///
 /// SAFETY: `1 <= dropoff <= 127`; both buffers have a sentinel (code 0) at index 0 and at their
-/// last index, at most `i32::MAX / 16` letters in `query`, fewer than `i32::MAX` bytes in
-/// `subject`, and `TAIL` is 1 or 2.
+/// last index; `table` scores the sentinel -128 against every code, both ways, and with its
+/// largest score `M`, `M * (len + 3) < i32::MAX` for the `len` letters of `query` (BLOSUM62's 11
+/// and at most `i32::MAX / 16` letters, or `M <= 31` and at most `i32::MAX / 32`: module
+/// comment); fewer than `i32::MAX` bytes in `subject`; and `TAIL` is 1 or 2.
 // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
-pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
-    table: &Table,
-    query: &[u8],
+pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode>(
+    keys: &KeyTable,
+    query: &[Q],
     subject: &[u8],
     s_left_off: usize,
     s_right_off: usize,
@@ -244,7 +405,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
     if q_right_off + WORD_SIZE > qlen || s_right_off + WORD_SIZE > slen {
         return None;
     }
-    let tab = table.as_ptr();
+    let tab = keys.as_ptr();
     // offset 0 of the reference's sequences; one sentinel before each
     let qb = query.as_ptr().add(1);
     let sb = subject.as_ptr().add(1);
@@ -252,19 +413,19 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
     let s_left_off = s_left_off as i32;
     let mut s_right_off = s_right_off as i32;
 
-    // the word loop of three letters (inside both sequences: checked above)
-    let mut right_d = 0i32;
-    let mut left_score = 0i32;
-    let mut score = 0i32;
+    // the word loop of three letters (inside both sequences: checked above), on keys from 0: its
+    // best is `left_score` and the best's length `right_d` (module comment)
+    let mut key = 0i64;
+    let mut best = 0i64;
     let qw = qb.add(q_right_off as usize);
     let sw = sb.add(s_right_off as usize);
     for i in 0..WORD_SIZE {
-        score += *tab.add((*qw.add(i) as usize) << 5 | *sw.add(i) as usize) as i32;
-        if score > left_score {
-            left_score = score;
-            right_d = i as i32 + 1;
+        key += *tab.add((*qw.add(i)).row() | *sw.add(i) as usize);
+        if key > best {
+            best = key;
         }
     }
+    let (_, right_d) = best_of(best);
     q_right_off += right_d;
     s_right_off += right_d;
 
@@ -273,7 +434,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
         (0, 0)
     } else {
         // SAFETY: the query block and the subject have a sentinel before offset 0.
-        let (best, len, _) = walk::<false>(
+        let (best, len, _) = walk::<false, Q>(
             tab,
             qb.offset(q_right_off as isize - 1),
             sb.offset(s_right_off as isize - 1),
@@ -293,8 +454,9 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
         // sentinel at offset qlen / slen. With TAIL 1 the last sentinel is at offset qlen - 1 /
         // slen - 1, and the walk starts at or before it: the word ends at that offset at most, and
         // a word whose last letter is a sentinel has right_d < 3 (that letter scores -128, the
-        // other two 11 each at most), so the start is past it only when it is not in the word.
-        let (best, len, end) = walk::<true>(
+        // other two 11 each at most: BLASTX, the one caller with TAIL 1, scores with BLOSUM62),
+        // so the start is past it only when it is not in the word.
+        let (best, len, end) = walk::<true, Q>(
             tab,
             qb.add(q_right_off as usize),
             sb.add(s_right_off as usize),
@@ -318,6 +480,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::x_ungapped_fast::build_table;
     use super::*;
     use crate::algorithm::blastp::extension::extend_two_hit;
     use crate::config::ScoringMatrix;
@@ -359,20 +522,33 @@ mod tests {
             .collect()
     }
 
-    /// The path on its own (independent of the switch): the query block as blastp builds it,
-    /// without its leading sentinel.
-    fn query(block: &[u8], x_drops: &[i32]) -> Option<XSentQuery> {
+    /// Another matrix's byte table for the walks (`MatrixTable::sent_table`, item SC2c).
+    fn table_of(matrix: ScoringMatrix) -> &'static Table {
+        super::super::x_ungapped_fast::matrix_table(matrix)
+            .and_then(|table| table.sent_table())
+            .expect("the matrix's table is on the path")
+    }
+
+    /// The keys the walks take for `matrix`: BLOSUM62's, or another matrix's (item SC2c).
+    fn keys_for(matrix: ScoringMatrix) -> &'static KeyTable {
+        if matrix == ScoringMatrix::Blosum62 {
+            state().keys.as_deref().expect("BLOSUM62 fits bytes")
+        } else {
+            keys_of(matrix).expect("the matrix's table is on the path")
+        }
+    }
+
+    /// The path on its own (independent of the switch) with the table of `matrix`: the query
+    /// block as blastp builds it, without its leading sentinel.
+    fn query_of(matrix: ScoringMatrix, block: &[u8], x_drops: &[i32]) -> Option<XSentQuery> {
         if x_drops.iter().any(|d| !(1..=MAX_DROPOFF).contains(d))
             || block.iter().fold(0u8, |a, &c| a | c) >= CODES
         {
             return None;
         }
-        let mut padded = vec![0u8];
-        padded.extend_from_slice(block);
-        padded.push(0);
         Some(XSentQuery {
-            padded,
-            table: state().table.as_deref().expect("BLOSUM62 fits bytes"),
+            padded: padded_rows(block),
+            keys: keys_for(matrix),
         })
     }
 
@@ -380,17 +556,45 @@ mod tests {
     /// touches). `block` is the query block (blastp's `concatenated_query`, which has no leading
     /// sentinel), `subject` a subject buffer with both sentinels.
     fn check_call(block: &[u8], subject: &[u8], sl: usize, sr: usize, qr: usize, d: i32) {
-        let q = query(block, &[d]).expect("block on the path");
+        check_call_of(ScoringMatrix::Blosum62, block, subject, sl, sr, qr, d);
+    }
+
+    /// [`check_call`] with the table of `matrix` against the reference of `matrix`.
+    fn check_call_of(
+        matrix: ScoringMatrix,
+        block: &[u8],
+        subject: &[u8],
+        sl: usize,
+        sr: usize,
+        qr: usize,
+        d: i32,
+    ) {
+        let q = query_of(matrix, block, &[d]).expect("block on the path");
         let s = XSentSubject::new(subject).expect("subject on the path");
         let raw = &subject[1..subject.len() - 1];
-        let expect = extend_two_hit(ScoringMatrix::Blosum62, block, raw, sl, sr, qr, d, 3);
-        // SAFETY: d is in 1..=127 (checked by `query`).
+        let expect = extend_two_hit(matrix, block, raw, sl, sr, qr, d, 3);
+        // SAFETY: d is in 1..=127 (checked by `query_of`).
         let got = unsafe { two_hit(&q, s, sl, sr, qr, d) };
-        assert_eq!(got, expect, "two_hit sl={sl} sr={sr} qr={qr} d={d}");
+        assert_eq!(
+            got, expect,
+            "{matrix:?} two_hit sl={sl} sr={sr} qr={qr} d={d}"
+        );
     }
 
     /// Random calls on one pair; `block` and `subject` as in [`check_call`].
     fn check_pair(block: &[u8], subject: &[u8], rng: &mut Rng, calls: usize, dmax: i32) -> u64 {
+        check_pair_of(ScoringMatrix::Blosum62, block, subject, rng, calls, dmax)
+    }
+
+    /// [`check_pair`] with the table of `matrix`.
+    fn check_pair_of(
+        matrix: ScoringMatrix,
+        block: &[u8],
+        subject: &[u8],
+        rng: &mut Rng,
+        calls: usize,
+        dmax: i32,
+    ) -> u64 {
         let slen = subject.len() - 2;
         for _ in 0..calls {
             let d = 1 + rng.below(dmax as u64) as i32;
@@ -402,7 +606,7 @@ mod tests {
             } else {
                 0
             };
-            check_call(block, subject, sl, sr, qr, d);
+            check_call_of(matrix, block, subject, sl, sr, qr, d);
         }
         calls as u64
     }
@@ -576,6 +780,57 @@ mod tests {
         }
     }
 
+    /// The keys of the module comment: a best key decodes to its score and length, a tie keeps the
+    /// first step, and the keys of a matrix are `(t << 32) - 1`.
+    #[test]
+    fn keys_decode_and_order_as_the_reference_compares() {
+        // no best yet: the length is 0
+        for maxscore in [0i32, 1, 77, 1 << 20] {
+            assert_eq!(best_of((maxscore as i64) << 32), (maxscore, 0));
+        }
+        // a best at step i: (score << 32) - (i + 1)
+        for (score, i) in [
+            (0i32, 0i64),
+            (5, 0),
+            (-3, 7),
+            (100_000, 9000),
+            (11, (1 << 31) - 2),
+        ] {
+            let key = ((score as i64) << 32) - (i + 1);
+            assert_eq!(
+                best_of(key),
+                (score, (i + 1) as i32),
+                "score {score} step {i}"
+            );
+        }
+        // the same score later is not above the first (the reference's `>`), a higher one is
+        let first = (40i64 << 32) - 3;
+        assert!(((40i64 << 32) - 9) < first);
+        assert!(((41i64 << 32) - 9_000_000) > first);
+        // the X-drop test: best - key >= dropoff << 32 exactly when best - score >= dropoff
+        for (best, bi, score, si, d) in [
+            (30i64, 2i64, 14i64, 9i64, 16i64),
+            (30, 2, 15, 9, 16),
+            (30, 2, 15, 3, 15),
+        ] {
+            let bk = (best << 32) - (bi + 1);
+            let k = (score << 32) - (si + 1);
+            assert_eq!(k + (d << 32) <= bk, best - score >= d, "{best} {score} {d}");
+        }
+        let table = build_table().expect("BLOSUM62 fits bytes");
+        let keys = key_table(&table);
+        assert_eq!(blosum62_keys().as_deref(), Some(&*keys));
+        for q in 0..CODES as usize {
+            for c in 0..CODES as usize {
+                assert_eq!(keys[q << 5 | c], ((table[q << 5 | c] as i64) << 32) - 1);
+            }
+        }
+        assert_eq!(
+            padded_rows(&[1, 20, 31]),
+            vec![0, 1 << 5, 20 << 5, 31 << 5, 0]
+        );
+    }
+
     /// The checks keep everything the sentinel stop is not exact for on the reference closure.
     #[test]
     fn checks_refuse_inputs_outside_the_path() {
@@ -614,5 +869,81 @@ mod tests {
         check_call(&block, &s, 0, 18, 3, 16);
         check_call(&block, &s, 0, 3, 19, 16);
         check_call(&block, &s, 0, 20, 21, 16);
+    }
+
+    /// The matrices other than BLOSUM62 that BLASTP reads (item SC2c).
+    const OTHER_MATRICES: [ScoringMatrix; 7] = [
+        ScoringMatrix::Blosum45,
+        ScoringMatrix::Blosum50,
+        ScoringMatrix::Blosum80,
+        ScoringMatrix::Blosum90,
+        ScoringMatrix::Pam30,
+        ScoringMatrix::Pam70,
+        ScoringMatrix::Pam250,
+    ];
+
+    /// Every other matrix that BLASTP reads takes the sentinel walks: its table gives the sentinel
+    /// -128 both ways and its largest score is at most 31, and `new_of` takes a block on the path
+    /// (with the switch on) and refuses the inputs that `new` refuses.
+    #[test]
+    fn other_matrices_take_the_sentinel_walks() {
+        let block: Vec<u8> = (1..=20).chain([0]).collect();
+        let x_drops = [16, 127, 1];
+        for matrix in OTHER_MATRICES {
+            let table = table_of(matrix);
+            for c in 0..CODES as usize {
+                assert_eq!(table[c], -128, "{matrix:?} sentinel against {c}");
+                assert_eq!(table[c << 5], -128, "{matrix:?} {c} against the sentinel");
+            }
+            if state().on {
+                assert!(XSentQuery::new_of(matrix, &block, &x_drops, 3, 3).is_some());
+            }
+            for d in [0, 128] {
+                assert!(XSentQuery::new_of(matrix, &block, &[16, d], 3, 3).is_none());
+            }
+            for (lw, ew) in [(2, 3), (3, 2), (5, 5), (6, 6)] {
+                assert!(XSentQuery::new_of(matrix, &block, &x_drops, lw, ew).is_none());
+            }
+            let mut wide = block.clone();
+            wide[7] = 32;
+            assert!(XSentQuery::new_of(matrix, &wide, &x_drops, 3, 3).is_none());
+        }
+        // The length bound (`MAX_BLOCK_LEN_OF` in `new_of`), here on a small bound.
+        assert!(fits_of(&block, &x_drops, 3, 3, block.len()));
+        assert!(!fits_of(&block, &x_drops, 3, 3, block.len() - 1));
+    }
+
+    /// The other matrices' tables on random, related and boundary inputs, as for BLOSUM62.
+    #[test]
+    fn sentinel_extension_of_other_matrices_equals_the_reference() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let mut compared = 0u64;
+        for matrix in OTHER_MATRICES {
+            for round in 0..80 {
+                let len = match round % 4 {
+                    0 => 1 + rng.below(40) as usize,
+                    1 => 20 + rng.below(120) as usize,
+                    2 => 100 + rng.below(600) as usize,
+                    _ => 600 + rng.below(2000) as usize,
+                };
+                let dmax = [4, 16, 40, 127][round / 4 % 4];
+                let q = random_seq(&mut rng, len, 1, 28);
+                let rate = 2 + rng.below(12);
+                let s_related = mutate(&mut rng, &q, rate);
+                let extra = rng.below(30) as usize;
+                let s_random = random_seq(&mut rng, len + extra, 1, 28);
+                compared += check_pair_of(matrix, &q[1..], &s_related, &mut rng, 40, dmax);
+                compared += check_pair_of(matrix, &q[1..], &s_random, &mut rng, 40, dmax);
+                compared +=
+                    check_pair_of(matrix, &q[1..q.len() - 1], &s_related, &mut rng, 20, dmax);
+                let mut block = q[1..].to_vec();
+                block.extend(block_of(&mut rng, 1 + round % 3, len));
+                compared += check_pair_of(matrix, &block, &s_related, &mut rng, 40, dmax);
+                let mut inner = s_related.clone();
+                inner[1 + rng.below(len as u64) as usize] = 0;
+                compared += check_pair_of(matrix, &q[1..], &inner, &mut rng, 20, dmax);
+            }
+        }
+        assert!(compared >= 7 * 80 * 160);
     }
 }

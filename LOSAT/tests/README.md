@@ -418,6 +418,7 @@ The frozen runner uses a 3600-second per-search deadline, configurable with a
 positive `--timeout-seconds`; long genome cases can exceed a 900-second limit.
 A deadline failure remains a failed attempt, even if a later retry succeeds.
 These runs are correctness checks and must not be used for speed comparisons.
+
 Native Gate A's frozen LOSAT hashes are not rewritten: an approved new output
 goes into a new manifest version (`platform_native_v011_canonical.tsv` = v0.1.0's
 43 hashes with the approved Sakai.MG1655.megablast output, PD 1.3; the driver
@@ -472,3 +473,28 @@ checks that every file is in exactly one binary. Plain `cargo test` runs a suite
 the CPU count at once; pass `-- --test-threads N` on a busy machine.
 A helper directory module (`run_local_support/`, `reach_support/`) is compiled once per file that
 declares it, so a `static` in it is per copy, and a name it makes needs `module_path!()`.
+
+Coverage: Nightly's `coverage (k/4)` jobs run the test set of ci.yml's `rust-tests`
+(`cargo llvm-cov nextest --all-features --partition count:k/4`), and `coverage report` adds the shards'
+lcov files (`coverage_summary.py`, tested by `test_coverage_summary.py`) into the line and function
+coverage of LOSAT's sources. The job summary has the totals and a table by module; the artifact
+`coverage` has the merged lcov file and a table per file. The jobs run in the nightly run of dev and in
+dispatched runs of other branches, not on `main`; they have no threshold and do not change the run's
+result. cargo-llvm-cov leaves out the test files (`tests/`, `examples/`, `tests.rs`, `*_tests.rs`), but
+inline `#[cfg(test)]` modules of `src` files are counted (about a third of the functions, 2026-11-07).
+Locally, `cargo llvm-cov nextest --all-features` (cargo-llvm-cov 0.9.1 and the `llvm-tools-preview`
+component) ran the tests 6.3 times as long as `cargo nextest run` (2026-11-07, 8 test threads on a loaded
+32-core machine); set `LLVM_PROFILE_FILE_NAME=LOSAT-%8m.profraw` as the jobs do, or its default writes
+one profile file per process (29 GB for the whole test set). Profile files of an earlier run stay in the
+target directory and are counted again; `cargo llvm-cov clean --profraw-only` removes them.
+
+## Python tool tests
+
+The `test_*.py` files here test the Python tools beside them (regression drivers, certification
+audits, ratchets, release tooling) with small files and stand-in programs. ci.yml's `rust lint` and the
+other workflows run each file by name. `check_python_tests_in_ci.py` (tested by
+`test_check_python_tests_in_ci.py`) fails `rust lint` when a `test_*.py` file of the repository is named
+in the `run:` commands of no workflow that runs on push, pull request or schedule (or of a workflow one
+of them calls); a release workflow that runs only when dispatched does not count. `python/tests/`,
+pylosat's pytest suite, runs as a directory in `python.yml`. Add the step that runs a new test file in
+the same pull request, and delete a test together with the tool it tests.

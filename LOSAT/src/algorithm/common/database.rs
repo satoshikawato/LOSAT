@@ -760,7 +760,12 @@ fn prefetch_may_be_off() -> bool {
 /// Its formatters then fetch the sequences that each query's report shows, after the query's
 /// own warnings, where the report reads them (`TabularSpec::subject_fetch`).
 pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
-    prefetch_seqs_limit().is_some_and(|limit| {
+    prefetch_off_at(prefetch_seqs_limit(), seq_aligns)
+}
+
+/// [`prefetch_off`] with the limit `limit` (`prefetch_seqs_limit`).
+fn prefetch_off_at(limit: Option<i32>, seq_aligns: usize) -> bool {
+    limit.is_some_and(|limit| {
         limit != i32::MAX
             && (limit == 0 || i64::try_from(seq_aligns).unwrap_or(i64::MAX) > i64::from(limit))
     })
@@ -790,6 +795,78 @@ pub(crate) fn subject_seq_aligns(hsps: usize, gapped: bool) -> usize {
 /// subject looks no taxid up, so it has no refusal of NCBI's taxonomy cache to ask for.
 pub(crate) fn prefetch_always_off() -> bool {
     prefetch_off(0)
+}
+
+/// Whether the prefetch of each query's batch reads the batch's reported subjects, for a call
+/// whose reports read nothing of them (`ParsedShown::prefetched`, refused by
+/// [`check_prefetched_parsed`]): NCBI counts each batch's
+/// Seq-aligns against a positive `PRE_FETCH_SEQS_LIMIT` ([`prefetch_off`]), so a batch above it
+/// reads nothing of its subjects.
+#[derive(Debug)]
+pub(crate) struct BatchPrefetch(Option<Vec<bool>>);
+
+impl BatchPrefetch {
+    /// Every batch prefetches (no limit that counts, a subject set, a test).
+    pub(crate) fn every() -> Self {
+        Self(None)
+    }
+
+    /// The batches of a call of `queries` queries (its hit lists, numbered from 0): `batches`,
+    /// the ranges of the queries of each batch numbered from `first` (the call's first query;
+    /// ranges before it are the batches written before), or the whole call as one batch where
+    /// `batches` is empty; `seq_aligns` counts the Seq-aligns of the hit lists of a range of
+    /// the call ([`subject_seq_aligns`]). A query of no range keeps the prefetch.
+    pub(crate) fn of(
+        queries: usize,
+        first: usize,
+        batches: &[std::ops::Range<usize>],
+        seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
+    ) -> Self {
+        Self::at(prefetch_seqs_limit(), queries, first, batches, seq_aligns)
+    }
+
+    /// [`BatchPrefetch::of`] with the limit `limit` (`prefetch_seqs_limit`).
+    fn at(
+        limit: Option<i32>,
+        queries: usize,
+        first: usize,
+        batches: &[std::ops::Range<usize>],
+        seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
+    ) -> Self {
+        if limit.is_none_or(|limit| limit == i32::MAX) || prefetch_off_at(limit, 0) {
+            // No batch is above the limit, or none prefetches: the reports' `prefetched` says
+            // it for every batch.
+            return Self::every();
+        }
+        let mut on = vec![true; queries];
+        let whole = [first..first + queries];
+        let batches = if batches.is_empty() {
+            &whole[..]
+        } else {
+            batches
+        };
+        for batch in batches {
+            let span = batch.start.saturating_sub(first).min(queries)
+                ..batch.end.saturating_sub(first).min(queries);
+            if !span.is_empty() && prefetch_off_at(limit, seq_aligns(span.clone())) {
+                on[span].fill(false);
+            }
+        }
+        Self(Some(on))
+    }
+
+    /// Whether the prefetch of some batch of the call is off by its count (else every batch
+    /// prefetches, and no subject needs to be told apart).
+    pub(crate) fn counts(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Whether the batch of the call's query `query` prefetches.
+    pub(crate) fn query(&self, query: usize) -> bool {
+        self.0
+            .as_ref()
+            .is_none_or(|on| on.get(query).copied().unwrap_or(true))
+    }
 }
 
 /// `PRE_FETCH_SEQS_LIMIT` as `NStr::StringToInt` reads it; `None` when it is not set or is no
@@ -950,7 +1027,12 @@ impl<'a> HeaderReader<'a> {
         let id = subject.alignment_id();
         let oids = match lookup.seqid_to_oids(id, true) {
             Ok(oids) => oids,
-            Err(error) => return failed(error),
+            Err(error) => {
+                return match lookup.throws_on_id(id) {
+                    Some(message) => Some(FoundInstead::ThrowsOnId(message)),
+                    None => failed(error),
+                }
+            }
         };
         let own = self.db.oid(ordinal);
         let Some(&first) = oids.first() else {
@@ -1578,12 +1660,22 @@ pub(crate) struct ParsedShown {
     /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
     /// off for every batch ([`prefetch_always_off`]). Where no report reads their Bioseqs (the
     /// Seq-annots, a table of fields that read nothing of the subject), what the prefetch
-    /// cannot read as NCBI does is refused (`check_prefetched_parsed`), also in a batch whose
-    /// Seq-aligns outnumber a positive limit (the refusal is the run's).
+    /// cannot read as NCBI does is refused (`check_prefetched_parsed`) for a subject that a
+    /// batch whose prefetch is on reports ([`ParsedShown::prefetched_if`], [`BatchPrefetch`]:
+    /// a batch whose Seq-aligns outnumber a positive limit reads nothing).
     pub(crate) prefetched: bool,
 }
 
 impl ParsedShown {
+    /// What the reports show of a subject that the batches' prefetch reads only where `read`:
+    /// a batch that reports it prefetches ([`BatchPrefetch`]).
+    pub(crate) fn prefetched_if(self, read: bool) -> Self {
+        Self {
+            prefetched: self.prefetched && read,
+            ..self
+        }
+    }
+
     /// Whether a report reads the subject's Bioseq, which NCBI's formatters find by its
     /// Seq-align id (`ParsedSubject::fetched`); the Seq-annots, the archive and the tables of
     /// fields that read nothing of the subject write the Seq-align id or nothing of it.
@@ -2178,6 +2270,51 @@ pub(crate) fn x_check_protein_stores(
 mod tests {
     use super::*;
     use crate::utils::matrix::BLASTAA_SIZE;
+
+    // Line DBID pfbatch: each batch's prefetch counts its own Seq-aligns against a positive
+    // `PRE_FETCH_SEQS_LIMIT` (`s_PreFetchSeqs`, quoted at `prefetch_may_be_off`).
+    #[test]
+    fn each_batch_prefetches_by_its_own_seq_aligns() {
+        // Seq-aligns of the queries 0 to 4 of a call.
+        let counts = [2, 1, 0, 3, 1];
+        let of = |limit, first, batches: &[std::ops::Range<usize>]| {
+            let prefetch = BatchPrefetch::at(limit, counts.len(), first, batches, |span| {
+                counts[span].iter().sum()
+            });
+            (0..counts.len() + 1)
+                .map(|query| prefetch.query(query))
+                .collect::<Vec<_>>()
+        };
+        let every = vec![true; counts.len() + 1];
+        assert!(!BatchPrefetch::every().counts());
+        assert!(BatchPrefetch::at(Some(3), 2, 0, &[], |_| 1).counts());
+        // No limit, `INT_MAX` (every batch prefetches) and 0 or below (none does: the reports'
+        // `prefetched` is false) count nothing.
+        for limit in [None, Some(i32::MAX), Some(0), Some(-1)] {
+            assert_eq!(of(limit, 0, &[0..2, 2..5]), every, "{limit:?}");
+        }
+        // Batches of 3 and 4 Seq-aligns: limit 3 turns the second off, a query beyond the call
+        // (or of no batch) keeps the prefetch.
+        assert_eq!(
+            of(Some(3), 0, &[0..2, 2..5]),
+            [true, true, false, false, false, true]
+        );
+        assert_eq!(of(Some(4), 0, &[0..2, 2..5]), every);
+        // No batches: the call is one batch of 7 Seq-aligns.
+        assert_eq!(
+            of(Some(6), 0, &[]),
+            [false, false, false, false, false, true]
+        );
+        assert_eq!(of(Some(7), 0, &[]), every);
+        // Ranges numbered from the call's first query 10; a batch before it is not this call's.
+        assert_eq!(
+            of(Some(1), 10, &[3..10, 10..11, 11..13, 13..15]),
+            [false, true, true, false, false, true]
+        );
+        assert!(prefetch_off_at(Some(1), 2) && !prefetch_off_at(Some(2), 2));
+        assert!(prefetch_off_at(Some(0), 0) && !prefetch_off_at(Some(i32::MAX), usize::MAX));
+        assert!(!prefetch_off_at(None, usize::MAX));
+    }
 
     /// The subjects of the database `name` of `tests/db_search/ids` by ordinal id.
     fn parsed_subjects(name: &str) -> Vec<crate::report::db_subject::ParsedSubject> {
@@ -2961,6 +3098,149 @@ pub(crate) fn prefetch_messages<'s>(
     Ok(text.into_bytes())
 }
 
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3304-3320
+// ```c++
+//     for ( size_t i = from; i < from + count; ++i ) {
+//         ret[i] = GetBioseqHandle(ids[i], CScope::eGetBioseq_Resolved);
+//         if ( !ret[i] ) {
+//             match_map[ids[i]];
+//         }
+//     }
+//     ...
+//     for (CPriority_I it(m_setDataSrc); it; ++it) {
+//         it->GetBlobs(match_map);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/data_loader.cpp:764-769
+// ```c++
+// void CDataLoader::GetBlobs(TTSE_LockSets& tse_sets)
+// {
+//     NON_CONST_ITERATE(TTSE_LockSets, tse_set, tse_sets) {
+//         tse_set->second = GetRecords(tse_set->first, eBlob);
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-208
+// ```c++
+//     bool operator<  (const CSeq_id_Handle& handle) const
+//         {
+//             // Packed (m_Packed != 0) first:
+//             // zeroes are converted to a highest unsigned value by decrement.
+//             TUintId p1 = INT_ID_TO(TUintId, m_Packed-1);
+//             TUintId p2 = INT_ID_TO(TUintId, handle.m_Packed-1);
+//             return p1 < p2 || (p1 == p2 && m_Info < handle.m_Info);
+//         }
+// ```
+// `LoadSequencesToScope` (quoted at `check_prefetched_parsed`) first loads the blob of every
+// subject of the batch (`GetBioseqHandles`), in the order of a map of Seq-id handles: the ids
+// that NCBI's Seq-id mapper packs (GIs, accessions of a prefix and digits, the text tag's
+// `gnl|BL_ORD_ID|0`) by their packed value, then the others by the address of each id's
+// `CSeq_id_Info` (review 1 of line DBID pfwarn, M1: `gb|FFF00093.1|` loads before the text tag,
+// `lcl|zzz` never), which LOSAT does not model. A lookup that throws on its id there ends the
+// loads, so which subjects were loaded before it is not known here; the throw is caught with
+// `Error pre-fetching sequence data` (`ERR_POST`, on standard error, after the texts of the
+// loads before). A lookup that fails on a file is a `CSeqDBException`, which the prefetch
+// rethrows (`FoundInstead::Failed`, refused where it is read). A minus-strand Seq-align of a subject
+// without a Bioseq throws after every blob was loaded (`prefetch_gets_no_bioseq`): the texts of
+// the whole batch, then the warning. Either way the prefetch reads no sequence data, which no
+// text comes with (probe of line DBID pfwarn, `R/pfwarn/w0`).
+/// One reported sequence of a query batch whose prefetch is on ([`batch_prefetch`]).
+#[derive(Clone, Copy)]
+pub(crate) struct PrefetchSubject<'s> {
+    /// The ordinal id.
+    pub(crate) ordinal: u32,
+    /// The definition lines of a sequence with parsed Seq-ids.
+    pub(crate) parsed: Option<&'s crate::report::db_subject::ParsedSubject>,
+    /// Whether the batch has a Seq-align of it on the query's minus strand and the subject's plus
+    /// strand, whose length NCBI's prefetch asks for.
+    pub(crate) flipped: bool,
+}
+
+impl<'s> PrefetchSubject<'s> {
+    /// A sequence without a minus-strand Seq-align (a protein subject or query).
+    pub(crate) fn unflipped(
+        ordinal: u32,
+        parsed: Option<&'s crate::report::db_subject::ParsedSubject>,
+    ) -> Self {
+        Self {
+            ordinal,
+            parsed,
+            flipped: false,
+        }
+    }
+}
+
+/// NCBI's prefetch of one query batch's reported subjects on standard error, for a first format
+/// that prefetches ([`prefetches_subjects`]) and a batch whose prefetch is on: the taxonomy
+/// database's texts of the loads ([`prefetch_messages`], empty without `taxdb.bti` on the search
+/// path), then `Warning: [<program>] Error pre-fetching sequence data` where the prefetch fails.
+/// `subjects` are the batch's reported sequences ([`PrefetchSubject`]), in any order. The
+/// prefetch fails at a subject whose lookup throws on its id (`ParsedSubject::prefetch_fails`),
+/// which loads nothing, and at a flipped Seq-align of a subject without a Bioseq
+/// ([`prefetch_gets_no_bioseq`]). A batch with a failed lookup whose other subjects' loads write
+/// a text is refused: LOSAT does not model which of them NCBI loads before the failure. The caller
+/// writes the text where the batch's prefetch messages go, after the reader's messages of the
+/// batch and before the warnings of its first query.
+pub(crate) fn batch_prefetch<'s>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
+    program: &str,
+) -> Result<Vec<u8>> {
+    let mut failed_lookup: Option<(u32, String)> = None;
+    let mut fails = false;
+    let mut asked: std::collections::HashSet<u32> = Default::default();
+    let mut loaded = Vec::new();
+    for PrefetchSubject {
+        ordinal,
+        parsed,
+        flipped,
+    } in subjects
+    {
+        if let Some(subject) = parsed {
+            if subject.prefetch_fails() {
+                failed_lookup.get_or_insert_with(|| {
+                    (
+                        ordinal,
+                        String::from_utf8_lossy(&subject.alignment_fasta()).into_owned(),
+                    )
+                });
+                continue;
+            }
+            if flipped
+                && !fails
+                && asked.insert(ordinal)
+                && prefetch_gets_no_bioseq(db, subject, program)?
+            {
+                fails = true;
+            }
+        }
+        loaded.push((ordinal, parsed));
+    }
+    let mut text = prefetch_messages(db, run, loaded, program)?;
+    if let Some((ordinal, id)) = &failed_lookup {
+        if !text.is_empty() {
+            return Err(parsed_refusal(
+                *ordinal,
+                &format!(
+                    "has the Seq-align id {id}, whose lookup in the database fails where NCBI BLAST+ 2.17.0's prefetch loads the batch's subjects, in an order that LOSAT does not reproduce: the taxonomy database's texts of the other subjects of the batch, which the prefetch may load before or not at all, are not known"
+                ),
+                program,
+            ));
+        }
+    }
+    if failed_lookup.is_some() || fails {
+        text.extend_from_slice(
+            format!(
+                "Warning: [{}] Error pre-fetching sequence data\n",
+                program.to_ascii_lowercase()
+            )
+            .as_bytes(),
+        );
+    }
+    Ok(text)
+}
+
 /// The volume of `db` that holds the taxid `last` and another positive taxid of the same slot of
 /// NCBI's taxonomy cache of a volume (`taxid & 255`, `TaxdbRun::cache_collision`), with that
 /// taxid; `None` when no volume does. Every definition line's taxid of every sequence, parsed
@@ -3031,7 +3311,8 @@ const PREFETCH_READS_IT: &str = "and NCBI BLAST+ 2.17.0's prefetch reads it by t
 /// `ParsedSubject::prefetched`):
 /// `Ok(true)` the subject itself (`ParsedSubject::volume_taxids`), `Ok(false)` nothing whose
 /// lookups write a text, and `Err` with the reason of LOSAT's refusal: a lookup that fails (NCBI's
-/// prefetch writes `Error pre-fetching sequence data` and reads no other subject of the batch),
+/// prefetch writes `Error pre-fetching sequence data`, [`batch_prefetch`]; the reports that read
+/// it stop),
 /// another sequence that NCBI's data loader can take for it whose definition lines hold no id that
 /// `s_SeqDB_SeqIdIn` takes for the Seq-align id (`DeflineSet::bioseq_defline`: `GetBioseq`
 /// throws and NCBI stops), and with `texts` (`taxdb.bti` on the search path) another sequence
@@ -3098,15 +3379,19 @@ pub(crate) fn prefetch_reads_itself(
 
 /// LOSAT's refusal of the reported sequence `ordinal` with parsed Seq-ids `subject` where the
 /// batches' prefetch reads it though no report reads its Bioseq (`ParsedShown::prefetched`), with
-/// or without `taxdb.bti` on the search path: a lookup that fails and another sequence whose
-/// definition lines do not hold its Seq-align id ([`prefetch_reads_itself`] without texts; the
-/// texts are `prefetch_messages`'s).
+/// or without `taxdb.bti` on the search path: another sequence whose definition lines do not
+/// hold its Seq-align id, which NCBI reads for it and stops ([`prefetch_reads_itself`] without
+/// texts; the texts are `prefetch_messages`'s). A lookup that fails is not refused: the batch's
+/// prefetch writes its warning ([`batch_prefetch`]).
 pub(crate) fn check_prefetched_parsed(
     db: &SeqDb,
     subject: &crate::report::db_subject::ParsedSubject,
     ordinal: u32,
     program: &str,
 ) -> Result<()> {
+    if subject.prefetch_fails() {
+        return Ok(());
+    }
     match prefetch_reads_itself(db, subject, false, program)? {
         Ok(_) => Ok(()),
         Err(reason) => Err(parsed_refusal(
@@ -3148,8 +3433,8 @@ pub(crate) fn check_prefetched_parsed(
 /// formatters do not find (`ParsedSubject::unfetchable`; its blob is read, with its taxids), one
 /// that the lookup finds nowhere, and one that it finds as another sequence that `x_GetOid` does
 /// not keep (none of its ids compares equal to the Seq-align id). Where the batch has a Seq-align
-/// of it on the query's minus strand and the subject's plus strand, NCBI's prefetch fails:
-/// [`check_prefetched_strands`].
+/// of it on the query's minus strand and the subject's plus strand, NCBI's prefetch fails
+/// ([`batch_prefetch`]).
 fn prefetch_gets_no_bioseq(
     db: &SeqDb,
     subject: &crate::report::db_subject::ParsedSubject,
@@ -3184,31 +3469,6 @@ fn loader_keeps(
             crate::seqid::defline_set::compare(id, subject.alignment_id())
                 == crate::seqid::defline_set::Sic::Yes
         })
-}
-
-/// LOSAT's refusal of the reported sequence `ordinal` with parsed Seq-ids `subject` where the
-/// batches' prefetch reads it though no report reads its Bioseq (`ParsedShown::prefetched`) and
-/// `flipped`: the batch has a Seq-align of it on the query's minus strand and the subject's plus
-/// strand, whose length NCBI's prefetch asks for. Where it gets no Bioseq of the subject
-/// (`prefetch_gets_no_bioseq`), NCBI writes `Error pre-fetching sequence data`.
-pub(crate) fn check_prefetched_strands(
-    db: &SeqDb,
-    subject: &crate::report::db_subject::ParsedSubject,
-    flipped: bool,
-    ordinal: u32,
-    program: &str,
-) -> Result<()> {
-    if flipped && prefetch_gets_no_bioseq(db, subject, program)? {
-        return Err(parsed_refusal(
-            ordinal,
-            &format!(
-                "has the Seq-align id {}, of which NCBI BLAST+ 2.17.0's prefetch gets no sequence, and a Seq-align on the minus strand of the query and the plus strand of the subject, whose length the prefetch then fails to read (Error pre-fetching sequence data), {PREFETCH_READS_IT}",
-                String::from_utf8_lossy(&subject.alignment_fasta())
-            ),
-            program,
-        ));
-    }
-    Ok(())
 }
 
 /// Whether the batches of a `-db` search prefetch their reported subjects though the first format
@@ -3843,8 +4103,18 @@ mod taxdb_prepass_tests {
                 }
                 (got, _) => panic!("{name} {ordinal}: {got:?}"),
             }
+            // A lookup that fails is the batch's warning (`batch_prefetch`), not a refusal.
             let check = check_prefetched_parsed(&db, &subject, ordinal, "BLASTP");
-            assert_eq!(check.is_err(), want.is_err(), "{name} {ordinal}");
+            assert_eq!(
+                check.is_err(),
+                want.is_err() && !subject.prefetch_fails(),
+                "{name} {ordinal}"
+            );
+            assert_eq!(
+                subject.prefetch_fails(),
+                want == Err("whose lookup in the database fails"),
+                "{name} {ordinal}"
+            );
         }
         // `lcl|777` before `gi|777`: the formatters do not find the Bioseq, which the prefetch
         // reads as itself; it fails where it asks for the length (a minus-strand alignment).
@@ -3861,14 +4131,168 @@ mod taxdb_prepass_tests {
             prefetch_reads_itself(&db, &subject, true, "TBLASTX").unwrap(),
             Ok(true)
         );
-        assert!(check_prefetched_strands(&db, &subject, false, 0, "TBLASTX").is_ok());
-        let refused = check_prefetched_strands(&db, &subject, true, 0, "TBLASTX")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            refused.contains("whose length the prefetch then fails to read"),
-            "{refused}"
+        let run = TaxdbRun::default();
+        let warning = b"Warning: [tblastx] Error pre-fetching sequence data\n".to_vec();
+        let prefetch = |flipped: bool| {
+            let subject = PrefetchSubject {
+                ordinal: 0,
+                parsed: Some(&*subject),
+                flipped,
+            };
+            batch_prefetch(&db, &run, [subject], "TBLASTX").unwrap()
+        };
+        assert_eq!(prefetch(false), b"");
+        assert_eq!(prefetch(true), warning);
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
+        // tests/db_search/ids/make_ids.py (line DBID pfwarn): `ntag_t5` 0 `gnl|BL_ORD_ID|0`
+        // stored with a text tag (its lookup fails), 1 `gb|FFF00092.1|`; `nlook_t4` 1 `bbs|123`,
+        // which a version 4 database does not look up (no Bioseq), 0 `gb|AF000070.1|`; every
+        // sequence with taxid 99990, whose lookup in `offset_last_past_end` writes the offset
+        // error.
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-batch-prefetch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let taxdb = root().join("seqdb/taxdb/offset_last_past_end");
+        let open = |name: &str, taxdb: Option<&Path>| {
+            let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+            let path = root().join("db_search/ids").join(name);
+            SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap()
+        };
+        let offset = "Error: [blastn] Error: Offset error at end of taxdb file.\n";
+        let warning = "Warning: [blastn] Error pre-fetching sequence data\n";
+        let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
+        for taxdb in [None, Some(taxdb.as_path())] {
+            let db = open("ntag_t5", taxdb);
+            let headers = HeaderReader::new(&db);
+            let parsed = |ordinal: u32| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
+                ReportedHeader::Parsed(subject) => subject,
+                _ => panic!("ntag_t5 {ordinal}: a sequence with parsed Seq-ids"),
+            };
+            let (failed, other) = (parsed(0), parsed(1));
+            assert!(failed.prefetch_fails() && !other.prefetch_fails());
+            let run = TaxdbRun::default();
+            let alone = batch_prefetch(
+                &db,
+                &run,
+                [PrefetchSubject {
+                    ordinal: 0,
+                    parsed: Some(&*failed),
+                    flipped: false,
+                }],
+                "BLASTN",
+            );
+            assert_eq!(text(alone.unwrap()), warning);
+            // With the other subject, whose load writes the offset error before the failed
+            // lookup or not at all: refused where the taxonomy database writes it.
+            let both = batch_prefetch(
+                &db,
+                &run,
+                [
+                    PrefetchSubject {
+                        ordinal: 0,
+                        parsed: Some(&*failed),
+                        flipped: false,
+                    },
+                    PrefetchSubject {
+                        ordinal: 1,
+                        parsed: Some(&*other),
+                        flipped: false,
+                    },
+                ],
+                "BLASTN",
+            );
+            match taxdb {
+                None => assert_eq!(text(both.unwrap()), warning),
+                Some(_) => {
+                    let refused = both.unwrap_err().to_string();
+                    assert!(
+                        refused.contains("in an order that LOSAT does not reproduce"),
+                        "{refused}"
+                    );
+                }
+            }
+            // A later batch of the run, whose lookup of the other subject wrote its text before:
+            // nothing to place.
+            if taxdb.is_some() {
+                let run = TaxdbRun::default();
+                let first = batch_prefetch(
+                    &db,
+                    &run,
+                    [PrefetchSubject {
+                        ordinal: 1,
+                        parsed: Some(&*other),
+                        flipped: false,
+                    }],
+                    "BLASTN",
+                );
+                assert_eq!(text(first.unwrap()), offset);
+                let later = batch_prefetch(
+                    &db,
+                    &run,
+                    [
+                        PrefetchSubject {
+                            ordinal: 1,
+                            parsed: Some(&*other),
+                            flipped: false,
+                        },
+                        PrefetchSubject {
+                            ordinal: 0,
+                            parsed: Some(&*failed),
+                            flipped: false,
+                        },
+                    ],
+                    "BLASTN",
+                );
+                assert_eq!(text(later.unwrap()), warning);
+            }
+        }
+        // A minus-strand Seq-align of a subject without a Bioseq fails after every load: the
+        // texts of the batch, then the warning.
+        let db = open("nlook_t4", Some(&taxdb));
+        let headers = HeaderReader::new(&db);
+        let parsed = |ordinal: u32| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
+            ReportedHeader::Parsed(subject) => subject,
+            _ => panic!("nlook_t4 {ordinal}: a sequence with parsed Seq-ids"),
+        };
+        let (control, bbs) = (parsed(0), parsed(1));
+        let run = TaxdbRun::default();
+        let prefetch = batch_prefetch(
+            &db,
+            &run,
+            [
+                PrefetchSubject {
+                    ordinal: 1,
+                    parsed: Some(&*bbs),
+                    flipped: true,
+                },
+                PrefetchSubject {
+                    ordinal: 0,
+                    parsed: Some(&*control),
+                    flipped: false,
+                },
+            ],
+            "BLASTN",
         );
+        assert_eq!(text(prefetch.unwrap()), format!("{offset}{warning}"));
+        let run = TaxdbRun::default();
+        let plus = batch_prefetch(
+            &db,
+            &run,
+            [PrefetchSubject {
+                ordinal: 1,
+                parsed: Some(&*bbs),
+                flipped: false,
+            }],
+            "BLASTN",
+        );
+        assert_eq!(text(plus.unwrap()), "");
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 

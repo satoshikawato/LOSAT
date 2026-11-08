@@ -373,8 +373,9 @@ cd LOSAT && cargo fmt
   partial, e2e, to-port, n-a, superseded; `python3 LOSAT/tests/ncbi_unit_case_ledger.py`).
   Do not add integration-test files under `LOSAT/tests/` for unit tests (an integration test sees
   only `pub` items, and each file adds to its suite's build) and do not make private items `pub`
-  for a test. Cases that need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are
-  `n-a`; whole-search cases (bl2seq) become fixture rows, not unit tests.
+  for a test. Cases that need the object manager, sequences fetched by id (GenBank, or a BLAST
+  database as a data loader), or a program or option LOSAT refuses (RPS, PHI, ...) are `n-a`;
+  whole-search cases (bl2seq) become fixture rows, not unit tests.
 - A new integration-test file `LOSAT/tests/<file>.rs` goes into its suite: its program's (`blastn`,
   `blastp`, `blastx`, `tblastn`, `tblastx`) or `common` (the command line, the output formats and
   shared parts): two lines in `LOSAT/tests/suites/<suite>.rs`; run it as
@@ -409,7 +410,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 ├── Cargo.toml             # Test targets are listed by hand (`autotests = false`)
 ├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
-│   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]`
+│   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]` or `pub(crate)`
 │   ├── main.rs            # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, makeblastdb, blastdbcmd
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
 │   ├── common.rs          # Shared hit type, gap edit operations and the older output writers
@@ -417,8 +418,8 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
 │   ├── blastinput/        # Application layer, FASTA and compressed input, shared value parsers;
 │   │                      # per-program args in `algorithm/<program>/args.rs`
-│   ├── core/              # NCBI core/ ports shared by several programs (encoding, HSP lists, SEG, blast_stat, composition adjustment)
-│   ├── stats/             # Karlin-Altschul, Spouge, length adjustment and sum statistics
+│   ├── core/              # NCBI core/ ports shared by several programs (encoding, HSP lists, SEG, composition adjustment)
+│   ├── stats/             # Karlin-Altschul (incl. composition lambda), Spouge, length adjustment and sum statistics
 │   ├── report/            # Output formats: pairwise, tabular, XML, XML2, JSON, ASN.1 archive, SAM
 │   ├── seqdb/             # Reader of BLAST database volumes (NCBI CSeqDB), for `-db`
 │   ├── seqid/             # Seq-ids of database sequences (CSeq_id, deflines, id formatting)

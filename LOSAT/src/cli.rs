@@ -43,51 +43,7 @@ const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\
 const LOSAT_HELP_TEMPLATE: &str =
     "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}\n\n{after-help}";
 
-/// The names that run a program without its subcommand word (`entry_argv`), as `losat
-/// --install-shims` links them. No NCBI counterpart: NCBI has one executable per program.
-pub const ENTRY_NAMES: [&str; 8] = [
-    "blastn",
-    "blastp",
-    "blastx",
-    "tblastn",
-    "tblastx",
-    "psiblast",
-    "makeblastdb",
-    "blastdbcmd",
-];
-
-/// The program of an executable called `argv0`: its file name without `.exe`, when that is one
-/// of `ENTRY_NAMES`.
-fn entry_program(argv0: &std::ffi::OsStr) -> Option<&'static str> {
-    let path = std::path::Path::new(argv0);
-    if !path
-        .extension()
-        .is_none_or(|extension| extension.eq_ignore_ascii_case("exe"))
-    {
-        return None;
-    }
-    let stem = path.file_stem()?.to_str()?;
-    // Windows finds `blastn.exe` for the word `BLASTN`, which is then `argv[0]`.
-    #[cfg(windows)]
-    let stem = stem.to_ascii_lowercase();
-    ENTRY_NAMES.into_iter().find(|name| *name == stem)
-}
-
-/// The words of the command line as `losat PROGRAM ...` reads them: an executable called by the
-/// name of a program (`ENTRY_NAMES`) runs that program, with the texts of `losat PROGRAM`. Any
-/// other name is `losat`, and its words stay as they are.
-pub fn entry_argv<I, S>(argv: I) -> Vec<OsString>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<OsString>,
-{
-    let mut words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    if let Some(program) = words.first().and_then(|argv0| entry_program(argv0)) {
-        words[0] = format!("losat{}", std::env::consts::EXE_SUFFIX).into();
-        words.insert(1, program.into());
-    }
-    words
-}
+pub use crate::utils::entry_names::{entry_argv, ENTRY_NAMES};
 
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it (`render_message` writes long options with one dash).
@@ -1129,13 +1085,81 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
 //     m_Ostream.flush();
 // }
 // ```
+/// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
+/// that the run already wrote (`post_native_error`) is not written again.
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
-        eprint!("{}", e.message);
+        if !posted(&e.message) {
+            eprint!("{}", e.message);
+        }
         if e.exit < 0 {
             std::process::abort();
         }
         std::process::exit(e.exit);
+    }
+}
+
+/// Set by `main` (`post_errors_in_run`): the command line's run writes the text of an error that
+/// gets an error archive itself, before the archive (`post_native_error`). A library caller of the
+/// command line entries (`api::run_blastn` and the others) does not set it, and the text stays in
+/// the error it gets back.
+static POST_ERRORS_IN_RUN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The text that the run wrote (`post_native_error`), which `exit_on_native_error` does not write
+/// again.
+static POSTED_TEXT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Whether the run already wrote `text` (`post_native_error`).
+fn posted(text: &str) -> bool {
+    POSTED_TEXT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_deref()
+        == Some(text)
+}
+
+/// Makes the command line's run write an error's text before its error archive
+/// (`post_native_error`); called by `main` only.
+pub fn post_errors_in_run() {
+    POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
+// ```c++
+//     } CATCH_ALL(status)
+//
+//     if(!m_Bah.GetMessages().empty()) {
+//     	const CArgs & a = GetArgs();
+//     	PrintErrorArchive(a, m_Bah.GetMessages());
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
+// ```c++
+// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
+// {
+// 	if(m_handler != NULL) {
+// 		m_handler->Post(mess);
+// 	}
+// 	if(m_save) {
+// ```
+/// Writes the text of `error` (a `NativeError`) to standard error now. NCBI's `CATCH_ALL` posts
+/// the error inside `Run` (its handler writes the post at once and saves it for the archive)
+/// before `PrintErrorArchive` writes the error archive; LOSAT's `main` writes the text after the
+/// run returns (`exit_on_native_error`). A command line run that writes an error archive calls this
+/// first (`report::archive::write_error_archive_after_post`) and returns that error, whose text
+/// `exit_on_native_error` then does not write again. Only when `main` asked for it
+/// (`post_errors_in_run`). A standard error that cannot be written loses the text, not the archive
+/// after it.
+pub fn post_native_error(error: &anyhow::Error) {
+    if !POST_ERRORS_IN_RUN.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    if let Some(native) = error.downcast_ref::<NativeError>() {
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), native.message.as_bytes());
+        *POSTED_TEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());
     }
 }
 
@@ -1155,6 +1179,21 @@ mod tests {
         ];
         argv.extend(words);
         argv
+    }
+
+    // Without `main`'s `post_errors_in_run` (a library caller of the command line entries such as
+    // `api::run_blastn`), the run writes no error text of its own: the text stays in the error.
+    // No unit test calls `post_errors_in_run`.
+    #[test]
+    fn a_run_outside_main_posts_no_error_text() {
+        let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
+        let error: anyhow::Error = NativeError {
+            exit: 1,
+            message: text.to_string(),
+        }
+        .into();
+        post_native_error(&error);
+        assert!(!posted(text));
     }
 
     // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT

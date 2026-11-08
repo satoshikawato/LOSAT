@@ -58,9 +58,8 @@ fn ideal_block_computed(std: &[f64; crate::utils::matrix::BLASTAA_SIZE]) -> Karl
 }
 
 /// No NCBI counterpart (`LOSAT_X_BXKAONCE`): the ideal block is a constant of the program (no
-/// input), so it is computed on first use and shared; the value `ideal_block_computed` gives. It
-/// is a constant because BLASTX accepts only BLOSUM62 (`args.rs`, "unsupported BLASTX matrix"); a
-/// port of another BLASTX `-matrix` must key the `OnceLock` by the matrix.
+/// input), so it is computed on first use and shared; the value `ideal_block_computed` gives.
+/// BLOSUM62's only: another matrix's searches compute theirs in `score_block_of`.
 fn ideal_block() -> KarlinParams {
     static IDEAL: std::sync::OnceLock<KarlinParams> = std::sync::OnceLock::new();
     *IDEAL.get_or_init(|| ideal_block_computed(&compute_std_aa_composition()))
@@ -97,7 +96,10 @@ fn ideal_block() -> KarlinParams {
 // ```
 /// `score_block` with the search's matrix: BLOSUM62's is `score_block`, another matrix's
 /// `score_block_of`.
-pub fn score_block_for(batch: &PreparedQueryBatch, matrix: ScoringMatrix) -> Vec<ContextParameters> {
+pub fn score_block_for(
+    batch: &PreparedQueryBatch,
+    matrix: ScoringMatrix,
+) -> Vec<ContextParameters> {
     if matrix == ScoringMatrix::Blosum62 {
         score_block(batch)
     } else {

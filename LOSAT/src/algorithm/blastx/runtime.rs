@@ -1151,7 +1151,8 @@ impl PreliminarySink for Runtime<'_> {
                         composition_method: 0,
                         identity_matrix: None,
                     };
-                    let (identity, positive) = identity_and_positive(&redone, batch, &encoded, self.options.scoring);
+                    let (identity, positive) =
+                        identity_and_positive(&redone, batch, &encoded, self.options.scoring);
                     Hsp {
                         hsp: h.hsp,
                         num: h.num,

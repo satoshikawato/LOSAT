@@ -34,6 +34,10 @@ pub(crate) struct ReaderBatchShape {
     pub(crate) word_cutoff_min: Option<i32>,
     /// `hit_params->cutoff_score_min` of the batch (the composition redo).
     pub(crate) redo_cutoff_min: Option<i32>,
+    /// NCBI's error of the batch's set-up when the score block cannot load the `-matrix` of an
+    /// ungapped search: the message of each query of the batch (`query_setup::unknown_matrix_message`),
+    /// which every unit's preparation raises (`query_setup::prepare_unit_queries`).
+    pub(crate) matrix_error: Option<Arc<str>>,
 }
 
 /// One unit of a reader batch, prepared in phase 1: its queries, translated and filtered, and
@@ -151,6 +155,9 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            matrix_error: options
+                .unknown_matrix
+                .then(|| super::query_setup::unknown_matrix_message(records).into()),
         }
     }
 
@@ -175,6 +182,7 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            matrix_error: layout.matrix_error.clone(),
         };
         for unit in units {
             for p in unit.params.iter().filter(|p| p.valid) {
@@ -316,11 +324,6 @@ pub(crate) fn prepare_reader_batch(
 ) -> Result<Vec<UnitPrep>> {
     let x_t = super::x_timing::lap();
     let layout = Arc::new(ReaderBatchShape::layout(records, options));
-    // The matrix error of the whole query batch, after its set-up's (`query_setup.rs`
-    // `unknown_matrix_error`).
-    if options.unknown_matrix && !layout.set_up_fails() {
-        return Err(super::query_setup::unknown_matrix_error(records));
-    }
     let prepare = |range: &Range<usize>| -> Result<UnitPrep> {
         prepare_unit(&records[range.clone()], &layout, options, subjects)
     };
@@ -475,6 +478,7 @@ mod tests {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            matrix_error: None,
         }));
         assert_eq!(
             split_queries(&records, &full, &options, DEFAULT_SIZES)

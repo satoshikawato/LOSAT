@@ -663,10 +663,7 @@ pub(crate) fn alignment(
         if qc == sc {
             identity += 1;
             positive += 1;
-        } else if qc != b'-'
-            && sc != b'-'
-            && protein_display_score(matrix, qc, sc) > 0
-        {
+        } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
             positive += 1;
         }
     }

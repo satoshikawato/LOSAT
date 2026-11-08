@@ -1020,10 +1020,11 @@ impl BlastxArgs {
             match karlin_blk_gapped_load_from_tables(gap_open, gap_extend, &matrix_name, true) {
                 Ok(_) => {}
                 Err(TableStatus::UnknownMatrix) => {
-                    return Err(
-                        SemanticOptionsError::from(print_matrix_message(&matrix_name, true))
-                            .into(),
-                    )
+                    return Err(SemanticOptionsError::from(print_matrix_message(
+                        &matrix_name,
+                        true,
+                    ))
+                    .into())
                 }
                 Err(TableStatus::UnknownGapCosts) => {
                     return Err(SemanticOptionsError::from(print_allowed_values(

@@ -293,7 +293,7 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
 /// without letters keeps its `Sequence contains no data` (blast_setup_cxx.cpp:631-638) after the
 /// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
 /// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
-pub(crate) fn unknown_matrix_error(records: &[FastaRecord]) -> anyhow::Error {
+pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
     let mut message = String::new();
     for record in records {
         message.push_str("Error: Unknown error code -1 ");
@@ -301,7 +301,7 @@ pub(crate) fn unknown_matrix_error(records: &[FastaRecord]) -> anyhow::Error {
             message.push_str("Warning: Sequence contains no data ");
         }
     }
-    anyhow::anyhow!("{message}")
+    message
 }
 
 pub fn prepare_queries(
@@ -417,10 +417,17 @@ pub(crate) fn prepare_unit_queries(
     if fails {
         anyhow::bail!("{}", "Warning: Sequence contains no data ".repeat(empty));
     }
-    // A query batch searched as one unit (a reader batch's units are checked together,
-    // `reader_batch.rs` `prepare_reader_batch`).
-    if options.unknown_matrix && batch.is_none() {
-        return Err(unknown_matrix_error(records));
+    // The matrix error comes after the set-up's errors above, with the messages of the whole
+    // query batch: a unit of a reader batch raises its batch's (`ReaderBatchShape::matrix_error`).
+    if options.unknown_matrix {
+        let message = match batch {
+            Some(batch) => batch.matrix_error.as_deref().map(str::to_string),
+            None => None,
+        };
+        anyhow::bail!(
+            "{}",
+            message.unwrap_or_else(|| unknown_matrix_message(records))
+        );
     }
     let nomask = buffer.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1144-1158

@@ -198,7 +198,9 @@ pub(crate) fn ordinary_traceback_observed(
         //          /* compute the cutoff score to use */
         // ```
         if h.q_gapped_start == 0 && h.s_gapped_start == 0 {
-            let Some((q, s)) = get_offsets_for_gapped_alignment(query, subject, &h, options.scoring) else {
+            let Some((q, s)) =
+                get_offsets_for_gapped_alignment(query, subject, &h, options.scoring)
+            else {
                 continue;
             };
             h.q_gapped_start = q;

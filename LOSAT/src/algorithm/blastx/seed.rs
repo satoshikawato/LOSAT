@@ -6,7 +6,6 @@ use crate::algorithm::blastp::extension::{
     extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
     BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult,
 };
-use crate::config::ScoringMatrix;
 use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
 use crate::algorithm::tblastx::blast_aascan::x_blast_aa_scan_subject_cells;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
@@ -19,6 +18,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_compressed_scaled_threshold
 use crate::algorithm::tblastx::lookup::{
     build_ncbi_lookup_from_prepared, BackboneCell16, BlastAaLookupTable, QueryContext, XBxTable,
 };
+use crate::config::ScoringMatrix;
 use anyhow::{ensure, Result};
 
 /// No NCBI counterpart: the matrix of a search's seed and gapped stages as a type (item SC6 of
@@ -158,7 +158,15 @@ impl BxScoring for MatrixBx {
         dropoff: i32,
         word_size: usize,
     ) -> Option<BlastpOneHitUngappedResult> {
-        extend_one_hit_of(self.matrix, query, subject, q_off, s_off, dropoff, word_size)
+        extend_one_hit_of(
+            self.matrix,
+            query,
+            subject,
+            q_off,
+            s_off,
+            dropoff,
+            word_size,
+        )
     }
 }
 
@@ -821,7 +829,10 @@ impl Lookup {
             // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), as `x_new_as`.
             crate::core::blast_util::ncbi_int4_from_double(options.threshold),
         );
-        Ok(Self::Standard(table, x_seed_scan::XKeptPresence::x_built(false)))
+        Ok(Self::Standard(
+            table,
+            x_seed_scan::XKeptPresence::x_built(false),
+        ))
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c++

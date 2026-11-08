@@ -194,7 +194,7 @@ pub struct QueryContext {
     // } BlastContextInfo;
     // ```
     pub is_valid: bool,
-    /// NCBI: kbp[context] - Karlin parameters for this context
+    /// NCBI: `kbp[context]` - Karlin parameters for this context
     /// Reference: link_hsps.c line 750-752, 866-867
     pub karlin_params: KarlinParams,
 }

@@ -1099,7 +1099,7 @@ pub(super) fn x_partial_ranges(
     x_partial_ranges_padded(spans, length, x_tb_range_pad())
 }
 
-/// EXPERIMENT (LOSAT_X_BNTBRANGEPAD=<bases>, a test knob): NCBI's 1024 of `x_partial_ranges`
+/// EXPERIMENT (`LOSAT_X_BNTBRANGEPAD=<bases>`, a test knob): NCBI's 1024 of `x_partial_ranges`
 /// (both the widening and the gap), 16 to 1,048,576; a small one makes the traceback meet
 /// fences, so that the tests reach the whole sequence's second traceback. Not below 16: the
 /// start of a gapped alignment is found by reading up to 12 bases on each side of the seed

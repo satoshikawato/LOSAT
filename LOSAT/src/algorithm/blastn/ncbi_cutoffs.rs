@@ -220,7 +220,7 @@ pub fn compute_eff_lengths_subject_mode_blastn(
 /// * `ungapped_params` - UNGAPPED Karlin-Altschul parameters (kbp_std)
 /// * `scale_factor` - Scale factor (typically 1.0 for standard scoring)
 /// * `gap_decay_rate` - Gap decay rate (typically 0.0 for ungapped)
-/// * `cutoff_score_max` - Maximum cutoff score from E-value (from hit_params->cutoffs[context].cutoff_score_max)
+/// * `cutoff_score_max` - Maximum cutoff score from E-value (from `hit_params->cutoffs[context].cutoff_score_max`)
 ///
 /// # Returns
 /// Cutoff score for ungapped extension (raw score)
@@ -316,7 +316,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
 /// ```
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:926
-/// searchsp = query_info->contexts[context].eff_searchsp;  // length adjustment included
+/// `searchsp = query_info->contexts[context].eff_searchsp;`  // length adjustment included
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:348-369
 /// ```c

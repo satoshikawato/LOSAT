@@ -1107,9 +1107,9 @@ pub fn extend_gapped_heuristic_with_scratch(
 /// - Row i corresponds to query position i
 /// - Band index k represents diagonal offset: j = i + (k - W) where W is half-bandwidth
 /// - Three matrices track different alignment states:
-///   - M[i,j]: best score ending with a match/mismatch at (i,j)
-///   - Ix[i,j]: best score ending with a gap in subject (deletion from query)
-///   - Iy[i,j]: best score ending with a gap in query (insertion in query)
+///   - `M[i,j]`: best score ending with a match/mismatch at (i,j)
+///   - `Ix[i,j]`: best score ending with a gap in subject (deletion from query)
+///   - `Iy[i,j]`: best score ending with a gap in query (insertion in query)
 ///
 /// Returns: (q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters)
 /// Extend alignment in one direction using NCBI-style semi-gapped DP with affine gap penalties.
@@ -2179,7 +2179,7 @@ pub(crate) fn stats_from_edit_ops(
 /// Unlike the score-only version, this function:
 /// 1. Stores edit_script for each DP cell (1 byte per cell)
 /// 2. After DP, reconstructs the traceback path from best position to origin
-/// 3. Returns the edit script as a Vec<GapEditOp> with run-length encoding
+/// 3. Returns the edit script as a `Vec<GapEditOp>` with run-length encoding
 ///
 /// Returns: (q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters, edit_ops)
 pub fn extend_gapped_one_direction_with_traceback(

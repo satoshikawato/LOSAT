@@ -49,6 +49,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::report::serial::pssm::{ObjectId, PssmSeqId, PssmWithParameters, SeqData};
 
+use super::in_pssm_files::InPssmFile;
+
 /// NCBISTDAA's letters (`NCBISTDAA_TO_AMINOACID`, blast_encoding.c:115-118).
 const NCBISTDAA_LETTERS: [u8; BLASTAA_SIZE] = *b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 
@@ -223,8 +225,10 @@ fn refuse(what: impl std::fmt::Display) -> anyhow::Error {
 }
 
 /// Reads `-in_pssm path`: NCBI's errors for a file it cannot read or guess, LOSAT's refusals of
-/// what it does not read, then the PSSM search's query, rows and values.
-pub(crate) fn read_in_pssm(path: &Path) -> Result<PsiSearch> {
+/// what it does not read, then the PSSM search's query, rows and values, and the PSSM as NCBI's
+/// object holds it when the search starts (`in_pssm_files::InPssmFile`, which psiblast's rounds
+/// and PSSM files write back).
+pub(crate) fn read_in_pssm(path: &Path) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
     // ```c++
     // void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
@@ -264,28 +268,31 @@ pub(crate) fn read_in_pssm(path: &Path) -> Result<PsiSearch> {
             )))
         }
     }
-    let pssm = match crate::blastinput::pssm_text::read_pssm_with_parameters(&bytes) {
-        Ok(pssm) => pssm,
-        // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type,
-        // REAL numbers NCBI computes with undefined behaviour or in `long double`): LOSAT's
-        // refusal, where NCBI reads the file.
-        Err(error) if error.message.contains("is not supported by LOSAT") => {
-            return Err(refuse(format!(
-                "a PSSM that LOSAT's reader does not read ({}, line {}: {})",
-                path.display(),
-                error.line,
-                error.message
-            )))
-        }
-        // NCBI's `CSerialException`.
-        Err(_) => {
-            return Err(crate::blastinput::app::options_error(&format!(
-                "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
-                path.display()
-            )))
-        }
-    };
-    psi_search_of(pssm)
+    let (pssm, skipped) =
+        match crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes) {
+            Ok(read) => read,
+            // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type,
+            // REAL numbers NCBI computes with undefined behaviour or in `long double`): LOSAT's
+            // refusal, where NCBI reads the file.
+            Err(error) if error.message.contains("is not supported by LOSAT") => {
+                return Err(refuse(format!(
+                    "a PSSM that LOSAT's reader does not read ({}, line {}: {})",
+                    path.display(),
+                    error.line,
+                    error.message
+                )))
+            }
+            // NCBI's `CSerialException`.
+            Err(_) => {
+                return Err(crate::blastinput::app::options_error(&format!(
+                    "Unrecognized format for PSSM in {} (must be PssmWithParameters)",
+                    path.display()
+                )))
+            }
+        };
+    let (search, mut file) = psi_search_and_object(pssm)?;
+    file.skipped = skipped;
+    Ok((search, file))
 }
 
 /// `CPsiBlastValidate::Pssm`'s error for `pssm`, which NCBI raises (`CBlastException`, "BLAST
@@ -370,7 +377,15 @@ fn visible(bytes: &[u8]) -> bool {
 }
 
 /// The PSSM search of `pssm`: its query record, rows and values, or LOSAT's refusal.
+#[cfg(test)]
 pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
+    psi_search_and_object(pssm).map(|(search, _)| search)
+}
+
+/// The PSSM search of `pssm` and the PSSM as NCBI's `CPsiBlastImpl` leaves it before the first
+/// round: a PSSM of frequency ratios only gets the scores and gapped values that the PSSM engine
+/// computes for it (`in_pssm_files::with_computed_scores`).
+pub(crate) fn psi_search_and_object(pssm: PssmWithParameters) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-539
     // ```c++
     // 		_ASSERT(pssm->HasQuery());
@@ -430,6 +445,20 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
         }
     };
     let titles: &[Vec<u8>] = query.titles.as_deref().unwrap_or(&[]);
+    // NCBI's reader writes an error for each such byte of every VisibleString it keeps: the titles,
+    // the row labels, the PSSM's identifier and the matrix name of its parameters too (NCBI
+    // 2.17.0, a UTF-8 identifier or matrix name: `Error: (803.7) [psiblast]
+    // PssmWithParameters.pssm.identifier.str` / `...params.rpsdbparams.matrixName`, then the
+    // search; PS5b).
+    let identifier = match &pssm.pssm.identifier {
+        Some(ObjectId::Str(identifier)) => identifier.as_slice(),
+        _ => &[],
+    };
+    let matrix_name = pssm
+        .params
+        .as_ref()
+        .and_then(|params| params.rpsdbparams.as_ref())
+        .map_or(&[][..], |rps| rps.matrix_name.as_slice());
     if titles.iter().any(|title| !visible(title))
         || pssm
             .pssm
@@ -437,6 +466,8 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
             .iter()
             .flatten()
             .any(|label| !visible(label))
+        || !visible(identifier)
+        || !visible(matrix_name)
     {
         return Err(refuse(
             "a PSSM whose strings hold a byte outside the visible ASCII range (NCBI reads it as '#' with an error message)",
@@ -606,21 +637,34 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
         kappa: stat(final_data.map(|data| data.kappa)),
         h: stat(final_data.map(|data| data.h)),
     };
+    let mut computed = None;
     if ratios_only {
         let (scores, gapped) = scores_from_freq_ratios(&letters, &freq_ratios)?;
         rows = scores;
         stats.lambda = stat(Some(gapped.lambda));
         stats.kappa = stat(Some(gapped.k));
         stats.h = stat(Some(gapped.h));
+        computed = Some(gapped);
     }
-    Ok(PsiSearch {
+    let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,
         stats,
         query: FastaRecord::new(local_id, title, &letters),
         validation_error,
         setup_messages: Vec::new(),
-    })
+    };
+    let mut pssm = pssm;
+    if let Some(gapped) = computed {
+        super::in_pssm_files::with_computed_scores(&mut pssm, &search.pssm.rows, gapped);
+    }
+    let file = InPssmFile {
+        object: pssm,
+        skipped: Vec::new(),
+        computed: computed.is_some(),
+        valid: search.validation_error.is_none(),
+    };
+    Ok((search, file))
 }
 
 /// The scores of a PSSM of frequency ratios only, and the gapped values of its scaling:
@@ -718,7 +762,7 @@ fn scores_from_freq_ratios(
 ///             }
 ///         }
 /// ```
-fn convert_2_matrix<T: Copy>(
+pub(super) fn convert_2_matrix<T: Copy>(
     values: &[T],
     num_rows: usize,
     num_columns: usize,
@@ -811,32 +855,6 @@ pub(crate) fn position_based_mode(mode: CompositionMode) -> CompositionMode {
         }
         other => other,
     }
-}
-
-/// The refusal of psiblast's PSSM file options with `-in_pssm` (item PS5), made when the PSSM has
-/// been read.
-///
-/// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248
-/// ```c++
-///             while (itr) {
-///
-///                 SavePssmToFile(pssm, &itr);
-/// ```
-/// With `-in_pssm` NCBI writes the input PSSM before the first round (`-out_pssm` alone too,
-/// `-save_each_pssm` as `F.1`), and the rounds' PSSMs after it.
-pub(crate) fn check_pssm_file_options(
-    options: &crate::algorithm::psiblast::pssm::PsiblastPssmOptions,
-) -> Result<()> {
-    if options.out_pssm.is_some()
-        || options.out_ascii_pssm.is_some()
-        || options.save_each_pssm
-        || options.save_pssm_after_last_round
-    {
-        bail!(
-            "the PSSM files (-out_pssm, -out_ascii_pssm, -save_each_pssm, -save_pssm_after_last_round) with -in_pssm are not supported by LOSAT's PSIBLAST yet"
-        );
-    }
-    Ok(())
 }
 
 /// LOSAT's refusals of a psiblast `-in_pssm` search that the PSSM search does not run yet

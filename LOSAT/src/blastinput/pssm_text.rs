@@ -22,9 +22,11 @@
 //! across lines. The members and variants that LOSAT does not keep are skipped as values
 //! (`skip_value`): the descriptors of the query other than its titles, its `annot`, the members
 //! of its `Seq-inst` other than `repr`, `mol`, `length` and `seq-data`, and the `constraints` and
-//! `annotatedSites` of the parameters. A string keeps its bytes as read (NCBI replaces a byte
-//! outside the visible range by `#` with an error message; a PSSM that LOSAT writes has none,
-//! `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
+//! `annotatedSites` of the parameters; `read_pssm_with_parameters_and_skips` names them, since NCBI
+//! writes them back where it writes the PSSM it read (psiblast `-in_pssm` with `-out_pssm`, item
+//! PS5b). An empty `descr` is NCBI's error (`CSeq_descr::PostRead`). A string keeps its bytes as
+//! read (NCBI replaces a byte outside the visible range by `#` with an error message; a PSSM that
+//! LOSAT writes has none, `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
 //! naming its line: a query `Seq-entry` that is a `set`, a `Seq-id` other than `local`, `gi`,
 //! `general` and the `Textseq-id` ones, `Seq-data` other than `iupacaa`, `ncbieaa` and
 //! `ncbistdaa`, and a REAL mantissa of more than 18 digits.
@@ -72,10 +74,20 @@ type Result<T> = std::result::Result<T, PssmTextError>;
 // }
 // ```
 pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
+    read_pssm_with_parameters_and_skips(text).map(|(pssm, _)| pssm)
+}
+
+/// `read_pssm_with_parameters`, with the names of the members that the reader skipped (in the
+/// order read, `"Seqdesc"` for a descriptor of the query other than a title), which NCBI's object
+/// keeps and writes back.
+pub fn read_pssm_with_parameters_and_skips(
+    text: &[u8],
+) -> Result<(PssmWithParameters, Vec<&'static str>)> {
     let mut reader = Reader {
         text,
         pos: 0,
         line: 1,
+        skipped: Vec::new(),
     };
     let c = reader.skip_white_space()?;
     let id = reader.scan_end_of_id(is_first_id_char(c));
@@ -90,7 +102,8 @@ pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
         return Err(reader.error("'::=' expected"));
     }
     reader.pos += 3;
-    reader.pssm_with_parameters()
+    let pssm = reader.pssm_with_parameters()?;
+    Ok((pssm, reader.skipped))
 }
 
 /// `FirstIdChar` (objistrasn.cpp:118-121).
@@ -119,6 +132,8 @@ struct Reader<'a> {
     pos: usize,
     /// `CIStreamBuffer::m_Line`.
     line: usize,
+    /// The members skipped as values (`skip_value`), by name.
+    skipped: Vec<&'static str>,
 }
 
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
@@ -814,6 +829,12 @@ impl<'a> Reader<'a> {
         Ok(if is_negative { -result } else { result })
     }
 
+    /// `skip_value` of the member `name`, noted in `skipped`.
+    fn skip_member(&mut self, name: &'static str) -> Result<()> {
+        self.skipped.push(name);
+        self.skip_value()
+    }
+
     /// Skips one value of any type: a block with what it holds, a string, an OCTET STRING or
     /// BIT STRING, or the words and numbers up to the `,` or `}` that ends it (a CHOICE is its
     /// variant's name and value).
@@ -949,15 +970,25 @@ impl<'a> Reader<'a> {
             match index {
                 0 => ids = Some(self.list(Self::seq_id)?),
                 1 => {
-                    let found: Vec<Vec<u8>> = self
-                        .list(Self::seqdesc_title)?
-                        .into_iter()
-                        .flatten()
-                        .collect();
+                    // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:62-68
+                    // ```c++
+                    // void CSeq_descr::PostRead(void) const
+                    // {
+                    //     if ( !s_SeqDescrAllowEmpty->Get() && Get().empty() ) {
+                    //         NCBI_THROW(CSerialException, eInvalidData,
+                    //                    "empty Seq-descr is not allowed");
+                    // ```
+                    // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless set in NCBI's environment or
+                    // configuration file, which LOSAT does not read.)
+                    let descriptors = self.list(Self::seqdesc_title)?;
+                    if descriptors.is_empty() {
+                        return Err(self.error("empty Seq-descr is not allowed"));
+                    }
+                    let found: Vec<Vec<u8>> = descriptors.into_iter().flatten().collect();
                     titles = (!found.is_empty()).then_some(found);
                 }
                 2 => inst = Some(self.seq_inst()?),
-                _ => self.skip_value()?,
+                _ => self.skip_member("annot")?,
             }
         }
         Ok(PssmQuery {
@@ -976,7 +1007,7 @@ impl<'a> Reader<'a> {
         if variant == b"title" {
             return Ok(Some(self.string()?));
         }
-        self.skip_value()?;
+        self.skip_member("Seqdesc")?;
         Ok(None)
     }
 
@@ -1042,7 +1073,7 @@ impl<'a> Reader<'a> {
                 1 => mol = Some(self.enumerated(&SEQ_INST_MOL)?),
                 2 => length = Some(self.int4()?),
                 6 => seq_data = Some(self.seq_data()?),
-                _ => self.skip_value()?,
+                other => self.skip_member(NAMES[other])?,
             }
         }
         Ok(SeqInst {
@@ -1160,7 +1191,7 @@ impl<'a> Reader<'a> {
                 1 => params.rpsdbparams = Some(self.rpsdbparams()?),
                 3 => params.bit_score_thresh = Some(self.real()?),
                 4 => params.bit_score_reporting_thresh = Some(self.real()?),
-                _ => self.skip_value()?,
+                other => self.skip_member(NAMES[other])?,
             }
         }
         Ok(params)

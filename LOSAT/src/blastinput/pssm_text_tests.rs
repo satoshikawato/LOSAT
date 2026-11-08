@@ -311,6 +311,40 @@ fn errors_name_their_line() {
         .contains("not supported by LOSAT's PSSM reader"));
 }
 
+// The members the reader skips are named (NCBI's object keeps them and writes them back: psiblast
+// `-in_pssm` with `-out_pssm`, NCBI 2.17.0 probes of PS5b), and an empty `descr` is NCBI's error
+// (`CSeq_descr::PostRead`, quoted at `Reader::seq_entry`; NCBI: "Unrecognized format for PSSM").
+#[test]
+fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
+    let skips = |text: &str| {
+        read_pssm_with_parameters_and_skips(text.as_bytes())
+            .unwrap()
+            .1
+    };
+    assert!(skips(SMALL_PSSM).is_empty());
+    let edited = SMALL_PSSM
+        .replace(
+            "title \"a \"\"quoted\"\" title\"",
+            "title \"a \"\"quoted\"\" title\",\n        comment \"a note\"",
+        )
+        .replace("length 1,", "length 1,\n        topology linear,")
+        .replace(
+            "      gapExtend 1\n    }\n  }",
+            "      gapExtend 1\n    },\n    constraints {\n      nblocks 0,\n      blocks {\n      },\n      loops {\n      }\n    }\n  }",
+        );
+    let (value, skipped) = read_pssm_with_parameters_and_skips(edited.as_bytes()).unwrap();
+    assert_eq!(skipped, ["Seqdesc", "topology", "constraints"]);
+    assert_eq!(value, small_pssm(b"a \"quoted\" title"));
+    let annot = SMALL_PSSM.replace(
+        "        seq-data ncbistdaa '0C'H\n      }\n",
+        "        seq-data ncbistdaa '0C'H\n      },\n      annot {\n        {\n          data ftable {\n          }\n        }\n      }\n",
+    );
+    assert_eq!(skips(&annot), ["annot"]);
+    let empty = SMALL_PSSM.replace("        title \"a \"\"quoted\"\" title\"\n", "");
+    let error = read_pssm_with_parameters(empty.as_bytes()).unwrap_err();
+    assert_eq!(error.message, "empty Seq-descr is not allowed");
+}
+
 // NCBI's unit-test data c++/src/algo/blast/unit_tests/api/data/pssm_freq_ratios.asn (read by
 // psiblast_unit_test.cpp:105): a query with a gi and a swissprot id and descriptors besides its
 // title, frequency ratios of 26 rows, the parameters without gap costs.

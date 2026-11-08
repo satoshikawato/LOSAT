@@ -282,3 +282,49 @@ fn an_unwritable_pssm_file_stops_the_rounds_after_the_round_before() {
     assert!(ignored.stdout.ends_with(b"\nSearch has CONVERGED!\n"));
     assert!(names(&dir).is_empty());
 }
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
+// `algorithm::psiblast::in_pssm_files`): with `-in_pssm` the first `SavePssmToFile` writes the
+// input PSSM before round 1, after the prolog (NCBI 2.17.0, `-in_pssm tk.asn -num_iterations 2
+// -out_pssm nodir/f.asn -outfmt 0`: the prolog, then its serial-stream write error, status 0).
+// LOSAT writes the same prolog and refuses there (DECISIONS 10 of line PS); an `-out_ascii_pssm`
+// file that cannot be opened is ignored.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_unwritable_pssm_file_of_in_pssm_stops_before_round_1() {
+    let (dir, home) = scratch("in_pssm_rounds");
+    let run = |outfmt: &str, args: &[&str]| {
+        let mut command = losat_psiblast(&home);
+        command
+            .args(["-db", "tests/db_search/paja"])
+            .args(["-in_pssm", "tests/fixtures/db_search/db.ps.asn.rnd.6.asn"])
+            .args(["-num_threads", "1", "-num_iterations", "2", "-outfmt", outfmt])
+            .args(args);
+        command.output().expect("run LOSAT CLI")
+    };
+    let full = run("0", &[]);
+    assert_eq!(full.status.code(), Some(0));
+    let stopped = run("0", &["-out_pssm", "/dev/full"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    let prolog_end = full
+        .stdout
+        .windows(6)
+        .position(|window| window == b"Query=")
+        .expect("a Query= line");
+    let prolog = full.stdout[..prolog_end]
+        .split(|&byte| byte == b'\n')
+        .take_while(|line| !line.starts_with(b"Results from round"))
+        .map(|line| line.len() + 1)
+        .sum::<usize>();
+    assert_eq!(stopped.stdout, full.stdout[..prolog]);
+    assert!(String::from_utf8_lossy(&stopped.stderr)
+        .contains("a -out_pssm file that cannot be written (/dev/full: "));
+    let tabular = run("6", &["-out_pssm", "/dev/full"]);
+    assert_eq!(tabular.status.code(), Some(1));
+    assert!(tabular.stdout.is_empty());
+    let missing = dir.join("nodir").join("f.txt");
+    let ignored = run("6", &["-out_ascii_pssm", path(&missing)]);
+    assert_eq!(ignored.status.code(), Some(0));
+    assert_eq!(ignored.stdout, run("6", &[]).stdout);
+    assert!(names(&dir).is_empty());
+}

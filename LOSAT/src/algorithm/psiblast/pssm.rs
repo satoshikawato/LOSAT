@@ -31,8 +31,9 @@ pub struct PsiblastPssmOptions {
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
-    /// `-num_iterations` when it is not 1 (0: until convergence): the rounds of a FASTA query
-    /// (`algorithm::psiblast::rounds`); `None` for one round.
+    /// The rounds that the round driver runs (`algorithm::psiblast::rounds`): `-num_iterations`
+    /// when it is not 1 (0: until convergence), or 1 with `-in_pssm` and a PSSM file (the input
+    /// PSSM is written before round 1); `None` for the one search of today's call.
     pub rounds: Option<u32>,
 }
 
@@ -210,11 +211,12 @@ pub(crate) struct PssmAncillary {
     pub(crate) psi_gapped: KarlinBlk,
 }
 
-/// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id
-/// (`Query_<n>`) and its title.
+/// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id (the
+/// local id `Query_<n>` of a FASTA query, or that of the PSSM query of `-in_pssm`, a string or an
+/// integer) and its title.
 pub(crate) struct PssmQueryRecord<'a> {
     pub(crate) letters: &'a [u8],
-    pub(crate) id: &'a str,
+    pub(crate) id: &'a ObjectId,
     pub(crate) title: &'a [u8],
 }
 
@@ -573,9 +575,7 @@ fn pssm_with_parameters(
             row_labels: None,
             by_row: Some(false),
             query: Some(PssmQuery {
-                ids: vec![PssmSeqId::Local(ObjectId::Str(
-                    query.id.as_bytes().to_vec(),
-                ))],
+                ids: vec![PssmSeqId::Local(query.id.clone())],
                 titles: Some(vec![query.title.to_vec()]),
                 inst: SeqInst {
                     repr: ("raw", 2),
@@ -1189,23 +1189,69 @@ fn fixed(value: f64, precision: usize) -> String {
 // of the record prints as X and takes the X branch of the gapless weight. The diagnostics it
 // reads are those that `-out_ascii_pssm` asks for (`PssmRequest::diagnostics`).
 pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAncillary) -> Vec<u8> {
-    use std::fmt::Write as _;
     const REQUESTED: &str = "a diagnostic that -out_ascii_pssm requests";
     let diagnostics = &pssm.diagnostics;
-    let weighted_residue_freqs = diagnostics
-        .weighted_residue_freqs
+    // `vector<int>` of `GetNumMatchingSeqs`: the engine's `Uint4` counts as `int`.
+    let num_matching_seqs: Vec<i32> = diagnostics
+        .num_matching_seqs
         .as_ref()
-        .expect(REQUESTED);
-    let information_content = diagnostics.information_content.as_ref().expect(REQUESTED);
-    let num_matching_seqs = diagnostics.num_matching_seqs.as_ref().expect(REQUESTED);
-    let gapless_column_weights = diagnostics
-        .gapless_column_weights
-        .as_ref()
-        .expect(REQUESTED);
+        .expect(REQUESTED)
+        .iter()
+        .map(|&count| count as i32)
+        .collect();
+    write_ascii_pssm(
+        &pssm.scores,
+        query,
+        Some(AsciiPssmDiagnostics {
+            weighted_residue_freqs: diagnostics
+                .weighted_residue_freqs
+                .as_ref()
+                .expect(REQUESTED),
+            information_content: diagnostics.information_content.as_ref().expect(REQUESTED),
+            num_matching_seqs: &num_matching_seqs,
+            gapless_column_weights: diagnostics
+                .gapless_column_weights
+                .as_ref()
+                .expect(REQUESTED),
+        }),
+        &[
+            ("Standard Ungapped    ", ancillary.ungapped),
+            ("Standard Gapped      ", ancillary.gapped),
+            ("PSI Ungapped         ", ancillary.psi_ungapped),
+            ("PSI Gapped           ", ancillary.psi_gapped),
+        ],
+    )
+}
+
+/// The columns that the long form of `PrintAsciiPssm` prints (a PSSM with its information
+/// content): `[position][residue]` weighted residue frequencies, the information content, the
+/// numbers of matching sequences and the gapless column weights of each position.
+pub(crate) struct AsciiPssmDiagnostics<'a> {
+    pub(crate) weighted_residue_freqs: &'a [[f64; BLASTAA_SIZE]],
+    pub(crate) information_content: &'a [f64],
+    pub(crate) num_matching_seqs: &'a [i32],
+    pub(crate) gapless_column_weights: &'a [f64],
+}
+
+/// `CBlastFormatUtil::PrintAsciiPssm` (quoted at `print_ascii_pssm`) of the scores
+/// `scores[position][residue]` of the query `query` (NCBIstdaa codes): the long form with
+/// `long`, the short one (`Last position-specific scoring matrix computed` and the scores alone)
+/// without, then the Karlin-Altschul blocks of the ancillary data that it has, in its order.
+pub(crate) fn write_ascii_pssm(
+    scores: &[[i32; BLASTAA_SIZE]],
+    query: &[u8],
+    long: Option<AsciiPssmDiagnostics<'_>>,
+    blocks: &[(&str, KarlinBlk)],
+) -> Vec<u8> {
+    use std::fmt::Write as _;
     let mut out = String::new();
-    out.push_str("\nLast position-specific scoring matrix computed, weighted observed percentages rounded down, information per position, and relative weight of gapless real matches to pseudocounts\n");
+    if long.is_some() {
+        out.push_str("\nLast position-specific scoring matrix computed, weighted observed percentages rounded down, information per position, and relative weight of gapless real matches to pseudocounts\n");
+    } else {
+        out.push_str("\nLast position-specific scoring matrix computed\n");
+    }
     let mut max_score: i32 = 0;
-    for &score in pssm.scores.iter().flatten() {
+    for &score in scores.iter().flatten() {
         if score <= BLAST_SCORE_MIN {
             continue;
         }
@@ -1226,11 +1272,13 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
     for &c in &RESIDUE_ORDER {
         let _ = write!(out, "{:>width$}", NCBISTDAA_TO_AMINOACID[c] as char);
     }
-    for &c in &RESIDUE_ORDER {
-        let _ = write!(out, "   {}", NCBISTDAA_TO_AMINOACID[c] as char);
+    if long.is_some() {
+        for &c in &RESIDUE_ORDER {
+            let _ = write!(out, "   {}", NCBISTDAA_TO_AMINOACID[c] as char);
+        }
     }
     for (i, &residue) in query.iter().enumerate() {
-        let scores = &pssm.scores[i];
+        let row = &scores[i];
         let _ = write!(
             out,
             "\n{:>5} {}  ",
@@ -1238,36 +1286,34 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
             NCBISTDAA_TO_AMINOACID[residue as usize] as char
         );
         for &c in &RESIDUE_ORDER {
-            if scores[c] == BLAST_SCORE_MIN {
+            if row[c] == BLAST_SCORE_MIN {
                 out.push_str("-I ");
             } else {
-                let _ = write!(out, "{:>width$}", scores[c]);
+                let _ = write!(out, "{:>width$}", row[c]);
             }
         }
         out.push(' ');
+        let Some(long) = &long else {
+            continue;
+        };
         for &c in &RESIDUE_ORDER {
-            if scores[c] != BLAST_SCORE_MIN {
+            if row[c] != BLAST_SCORE_MIN {
                 let mut value = 100.0;
-                value *= weighted_residue_freqs[i][c];
+                value *= long.weighted_residue_freqs[i][c];
                 value = (value + if value > 0.0 { 0.5 } else { -0.5 }) as i32 as f64;
                 let _ = write!(out, "{:>4}", value as i32);
             }
         }
-        let _ = write!(out, "  {} ", fixed(information_content[i], 2));
-        if num_matching_seqs[i] > 1 && residue != ncbistdaa::X {
-            out.push_str(&fixed(gapless_column_weights[i], 2));
+        let _ = write!(out, "  {} ", fixed(long.information_content[i], 2));
+        if long.num_matching_seqs[i] > 1 && residue != ncbistdaa::X {
+            out.push_str(&fixed(long.gapless_column_weights[i], 2));
         } else {
             out.push_str("    0.00");
         }
     }
     out.push_str("\n\n");
     out.push_str("                      K         Lambda\n");
-    for (label, block) in [
-        ("Standard Ungapped    ", ancillary.ungapped),
-        ("Standard Gapped      ", ancillary.gapped),
-        ("PSI Ungapped         ", ancillary.psi_ungapped),
-        ("PSI Gapped           ", ancillary.psi_gapped),
-    ] {
+    for (label, block) in blocks {
         let _ = writeln!(
             out,
             "{label}{}     {}",

@@ -20,16 +20,13 @@ use crate::core::composition_adjustment::adjust_scores::{
 };
 use crate::core::composition_adjustment::redo_alignment::{
     blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries_and_matrix,
-    build_query_word_hashes, preliminary_test_near_identical, test_near_identical,
-    windows_from_protein_aligns, x_whole_subject_composition, BlastCompoAlignment,
-    BlastCompoAlignmentContext, BlastCompoMatchingSequence, BlastCompoQueryInfo,
-    BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult,
-    EMatrixAdjustRule, XSubjectComposition,
+    build_query_word_hashes, preliminary_test_near_identical, redo_calc_lambda,
+    test_near_identical, windows_from_protein_aligns, x_whole_subject_composition,
+    BlastCompoAlignment, BlastCompoAlignmentContext, BlastCompoMatchingSequence,
+    BlastCompoQueryInfo, BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks,
+    BlastRedoRangeResult, EMatrixAdjustRule, XSubjectComposition,
 };
-use crate::stats::{
-    blast_spouge_stoe, compute_lambda_from_score_probs, e_to_p, p_to_e, BlastGumbelBlk,
-    KarlinParams,
-};
+use crate::stats::{blast_spouge_stoe, e_to_p, p_to_e, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
 use super::gapalign::{
@@ -848,23 +845,8 @@ fn blastp_redo_one_alignment_callback(
 //     s_NewAlignmentUsingXdrop, s_FreeEditScript
 // };
 // ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-570
-// ```c
-// static double
-// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-// {
-//     ...
-//     return Blast_KarlinLambdaNR(&freq, lambda0);
-// }
-// ```
-fn blastp_calc_lambda(probs: &[f64], min_score: i32, max_score: i32, lambda0: f64) -> Result<f64> {
-    compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
-        .map_err(anyhow::Error::msg)
-}
-
 const BLASTP_REDO_ALIGN_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
-    calc_lambda: Some(blastp_calc_lambda),
+    calc_lambda: Some(redo_calc_lambda),
     get_range: blastp_get_range_callback,
     redo_one_alignment: blastp_redo_one_alignment_callback,
     new_xdrop_align: None,

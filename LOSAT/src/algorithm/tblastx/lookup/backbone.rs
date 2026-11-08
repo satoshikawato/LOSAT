@@ -163,7 +163,30 @@ impl BackboneCell {
     /// overflow array.
     #[inline(always)]
     pub fn cursor(&self) -> usize {
-        (u64::from(self.entries[0] as u32) | u64::from(self.entries[1] as u32) << 32) as usize
+        // SAFETY: `self` is a cell.
+        unsafe { Self::x_cursor_of(self) }
+    }
+
+    /// The cursor of the cell at `cell` (`cursor`), as one 8-byte load of `entries[0..2]`: the
+    /// scans read it once per cell of more than `AA_HITS_PER_CELL` hits, where two loads and
+    /// their merge cost 3 % of TBLASTX's subject scan (callgrind).
+    ///
+    /// # Safety
+    /// `cell` must point to a cell that nothing writes meanwhile.
+    #[inline(always)]
+    unsafe fn x_cursor_of(cell: *const Self) -> usize {
+        // SAFETY: (caller) `entries[0..2]` are 8 bytes of the cell; the read is unaligned.
+        let both = unsafe {
+            std::ptr::addr_of!((*cell).entries)
+                .cast::<u64>()
+                .read_unaligned()
+        };
+        // `entries[0]` is the low half on a little-endian target, the high half otherwise.
+        (if cfg!(target_endian = "little") {
+            both
+        } else {
+            both.rotate_left(32)
+        }) as usize
     }
 
     /// Sets the cursor of a cell of more than `AA_HITS_PER_CELL` hits (`entries[0]` and
@@ -461,8 +484,7 @@ impl XCell for BackboneCell {
     #[inline(always)]
     unsafe fn x_cursor_at(cell: *const Self) -> usize {
         // SAFETY: (caller) `cell` points to a cell that nothing writes meanwhile.
-        let [low, high, _] = unsafe { std::ptr::addr_of!((*cell).entries).read() };
-        (u64::from(low as u32) | u64::from(high as u32) << 32) as usize
+        unsafe { BackboneCell::x_cursor_of(cell) }
     }
 
     #[inline(always)]

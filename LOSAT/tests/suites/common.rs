@@ -80,6 +80,8 @@ mod redo_contain_idx;
 mod report_counts_cli;
 #[path = "../search_environment.rs"]
 mod search_environment;
+#[path = "../seq_id_first_line.rs"]
+mod seq_id_first_line;
 #[path = "../seqalign_samples.rs"]
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]

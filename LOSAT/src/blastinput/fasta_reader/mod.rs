@@ -57,7 +57,7 @@
 
 pub mod believed;
 pub(crate) mod reader;
-mod seq_id;
+pub(crate) mod seq_id;
 pub(crate) mod stream;
 #[cfg(test)]
 mod tests;

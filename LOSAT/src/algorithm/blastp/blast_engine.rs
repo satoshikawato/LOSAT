@@ -2370,8 +2370,8 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // ```
     // The compressed lookup table runs at each of its word sizes, 5 to 7
     // (`validate_protein_options` has refused the others); of the lookup table's sizes, LOSAT's
-    // BLASTP implements 3 only.
-    if args.word_size != 3
+    // BLASTP implements 2 (blastp-short, item SC3) and 3.
+    if !matches!(args.word_size, 2 | 3)
         && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
         && args.psi_search.is_none()
     {
@@ -7838,12 +7838,14 @@ fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:237,245
 // ```c
+//     lookup->word_length = opt->word_size;
 //     lookup->threshold = (Int4)opt->threshold;
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
-/// the lookup region of `run_resolved_in_pool` builds them. The threshold takes the x86-64
+/// the lookup region of `run_resolved_in_pool` builds them, of the search's word size (3, or 2:
+/// blastp-short and `-word_size 2`, item SC3). The threshold takes the x86-64
 /// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). The table is filled in place,
 /// without the reference builder's chains (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
 /// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`, `blastp_aa_lookup_ahead`) takes the same threshold and
@@ -7861,18 +7863,22 @@ fn blastp_aa_lookup(
             false,
             x_bplk16_for(args, x_chunk),
             args.scoring.matrix,
+            args.word_size,
         );
         return (x_bp_runtime_lookup(built), contexts);
     }
-    // Another matrix than BLOSUM62: the same table of the matrix's words (`x_bp_build_ncbi_lookup`
-    // builds BLOSUM62's).
-    if args.scoring.matrix != ScoringMatrix::Blosum62 {
+    // Another matrix than BLOSUM62, or `-word_size 2` (item SC3): the same table of the matrix's
+    // words of that size (`x_bp_build_ncbi_lookup` builds BLOSUM62's words of 3).
+    if args.scoring.matrix != ScoringMatrix::Blosum62
+        || args.word_size != crate::algorithm::tblastx::lookup::LOOKUP_WORD_LENGTH
+    {
         return match x_bp_build_ncbi_lookup_as(
             query_frames,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
             false,
             false,
             args.scoring.matrix,
+            args.word_size,
         ) {
             (XBpLookup::Wide(lookup), contexts) => (BlastpRuntimeLookup::Aa(lookup), contexts),
             (XBpLookup::Narrow(_), _) => unreachable!("a build without `narrow` has Int4 hits"),
@@ -7904,8 +7910,13 @@ fn blastp_aa_lookup_ahead(
     if x_bplk16() {
         let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
         if x_bplk16_for(args, false) {
-            let (built, contexts) =
-                spares.x_build_ahead16(query_frames, threshold, false, args.scoring.matrix)?;
+            let (built, contexts) = spares.x_build_ahead16(
+                query_frames,
+                threshold,
+                false,
+                args.scoring.matrix,
+                args.word_size,
+            )?;
             return Some((x_bp_runtime_lookup(built), contexts));
         }
         let (lookup, contexts) = spares.x_build_ahead(
@@ -7914,6 +7925,7 @@ fn blastp_aa_lookup_ahead(
             &lookup_protein_params_ungapped(args.scoring.matrix),
             false,
             args.scoring.matrix,
+            args.word_size,
         )?;
         return Some((x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts));
     }
@@ -7923,6 +7935,7 @@ fn blastp_aa_lookup_ahead(
         &lookup_protein_params_ungapped(args.scoring.matrix),
         false,
         args.scoring.matrix,
+        args.word_size,
     )?;
     Some((BlastpRuntimeLookup::Aa(lookup), contexts))
 }
@@ -7944,8 +7957,13 @@ fn blastp_aa_lookup_on_block_spare(
     if x_bplk16() {
         let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
         if x_bplk16_for(args, x_chunk) {
-            let (built, contexts) =
-                spare.x_build_on_block_spare16(query_frames, threshold, false, args.scoring.matrix);
+            let (built, contexts) = spare.x_build_on_block_spare16(
+                query_frames,
+                threshold,
+                false,
+                args.scoring.matrix,
+                args.word_size,
+            );
             return (x_bp_runtime_lookup(built), contexts);
         }
         let (lookup, contexts) = spare.x_build_on_block_spare(
@@ -7954,6 +7972,7 @@ fn blastp_aa_lookup_on_block_spare(
             &lookup_protein_params_ungapped(args.scoring.matrix),
             false,
             args.scoring.matrix,
+            args.word_size,
         );
         return (x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts);
     }
@@ -7963,6 +7982,7 @@ fn blastp_aa_lookup_on_block_spare(
         &lookup_protein_params_ungapped(args.scoring.matrix),
         false,
         args.scoring.matrix,
+        args.word_size,
     );
     (BlastpRuntimeLookup::Aa(lookup), contexts)
 }
@@ -14549,7 +14569,8 @@ mod tests {
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:1163-1169
-    // (above): word size 4 keeps the lookup table, of which LOSAT's BLASTP implements word size 3.
+    // (above): word size 4 keeps the lookup table, of which LOSAT's BLASTP implements word sizes 2
+    // and 3.
     #[test]
     fn test_validate_requested_blastp_support_rejects_lookup_table_word_size_four() {
         let mut args = make_blastp_args();
@@ -14560,6 +14581,32 @@ mod tests {
             err.to_string(),
             "-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"
         );
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1163-1169 (above): word size 2 keeps
+    // the lookup table (blastp-fast's compressed one too, `SetWordSize`). Item SC3: blastp-short's
+    // word size and `-word_size 2` of every task run it.
+    #[test]
+    fn test_validate_requested_blastp_support_accepts_word_size_two() {
+        for task in ["blastp", "blastp-fast", "blastp-short"] {
+            for word_size in [None, Some(2)] {
+                let mut args = make_blastp_args();
+                args.task = task.into();
+                args.word_size = word_size;
+                let resolved = args.resolve().expect("resolved blastp args");
+                if task != "blastp-short" && word_size.is_none() {
+                    continue;
+                }
+                assert_eq!(resolved.word_size, 2, "{task}");
+                assert_eq!(
+                    resolved.lookup_table_type,
+                    BlastpLookupTableType::AaLookupTable,
+                    "{task}"
+                );
+                validate_requested_blastp_support(&resolved)
+                    .unwrap_or_else(|err| panic!("{task} {word_size:?}: {err}"));
+            }
+        }
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3036-3062

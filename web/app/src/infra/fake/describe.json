@@ -470,22 +470,23 @@
     "default": "blastp",
     "choices": [
      "blastp",
-     "blastp-fast"
+     "blastp-fast",
+     "blastp-short"
     ]
    },
    {
     "flag": "-evalue",
-    "help": "Expectation value (E) threshold for saving hits [default: 10]",
+    "help": "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]",
     "takes_value": true
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast; 16 (PAM30's) for blastp-short]",
     "takes_value": true
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast]",
+    "help": "Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]",
     "takes_value": true
    },
    {
@@ -529,17 +530,17 @@
    },
    {
     "flag": "-window_size",
-    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion; 15 (PAM30's) for blastp-short]",
     "takes_value": true
    },
    {
     "flag": "-matrix",
-    "help": "Scoring matrix name [default: BLOSUM62]",
+    "help": "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]",
     "takes_value": true
    },
    {
     "flag": "-gapopen",
-    "help": "Cost to open a gap [default: 11, or the matrix's best value]",
+    "help": "Cost to open a gap [default: 11, or the matrix's best value; 9 for blastp-short]",
     "takes_value": true
    },
    {
@@ -623,6 +624,21 @@
      "-threshold": "20",
      "-window_size": "40",
      "-word_size": "5"
+    },
+    "blastp-short": {
+     "-culling_limit": "0",
+     "-evalue": "20000",
+     "-gapextend": "1",
+     "-gapopen": "9",
+     "-matrix": "PAM30",
+     "-max_target_seqs": "500",
+     "-num_alignments": "250",
+     "-num_descriptions": "500",
+     "-seg": "no",
+     "-soft_masking": "false",
+     "-threshold": "16",
+     "-window_size": "15",
+     "-word_size": "2"
     }
    },
    "by": {
@@ -639,6 +655,12 @@
        "-gapopen": "14",
        "-threshold": "20",
        "-window_size": "60"
+      },
+      "blastp-short": {
+       "-gapextend": "2",
+       "-gapopen": "14",
+       "-threshold": "14",
+       "-window_size": "60"
       }
      },
      "BLOSUM50": {
@@ -652,6 +674,12 @@
        "-gapextend": "2",
        "-gapopen": "13",
        "-threshold": "20",
+       "-window_size": "40"
+      },
+      "blastp-short": {
+       "-gapextend": "2",
+       "-gapopen": "13",
+       "-threshold": "11",
        "-window_size": "40"
       }
      },
@@ -667,6 +695,12 @@
        "-gapopen": "11",
        "-threshold": "20",
        "-window_size": "40"
+      },
+      "blastp-short": {
+       "-gapextend": "1",
+       "-gapopen": "11",
+       "-threshold": "11",
+       "-window_size": "40"
       }
      },
      "BLOSUM80": {
@@ -680,6 +714,12 @@
        "-gapextend": "1",
        "-gapopen": "10",
        "-threshold": "20",
+       "-window_size": "25"
+      },
+      "blastp-short": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "12",
        "-window_size": "25"
       }
      },
@@ -695,6 +735,12 @@
        "-gapopen": "10",
        "-threshold": "20",
        "-window_size": "40"
+      },
+      "blastp-short": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "11",
+       "-window_size": "40"
       }
      },
      "IDENTITY": {
@@ -708,6 +754,12 @@
        "-gapextend": "2",
        "-gapopen": "15",
        "-threshold": "20",
+       "-window_size": "40"
+      },
+      "blastp-short": {
+       "-gapextend": "2",
+       "-gapopen": "15",
+       "-threshold": "27",
        "-window_size": "40"
       }
      },
@@ -723,6 +775,12 @@
        "-gapopen": "15",
        "-threshold": "20",
        "-window_size": "40"
+      },
+      "blastp-short": {
+       "-gapextend": "2",
+       "-gapopen": "15",
+       "-threshold": "11",
+       "-window_size": "40"
       }
      },
      "PAM30": {
@@ -736,6 +794,12 @@
        "-gapextend": "1",
        "-gapopen": "9",
        "-threshold": "20",
+       "-window_size": "15"
+      },
+      "blastp-short": {
+       "-gapextend": "1",
+       "-gapopen": "9",
+       "-threshold": "16",
        "-window_size": "15"
       }
      },
@@ -751,6 +815,12 @@
        "-gapopen": "10",
        "-threshold": "20",
        "-window_size": "20"
+      },
+      "blastp-short": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "14",
+       "-window_size": "20"
       }
      }
     },
@@ -761,6 +831,9 @@
       },
       "blastp-fast": {
        "-threshold": "20"
+      },
+      "blastp-short": {
+       "-threshold": "16"
       }
      },
      "3": {
@@ -769,6 +842,9 @@
       },
       "blastp-fast": {
        "-threshold": "20"
+      },
+      "blastp-short": {
+       "-threshold": "16"
       }
      },
      "4": {
@@ -777,6 +853,9 @@
       },
       "blastp-fast": {
        "-threshold": "20"
+      },
+      "blastp-short": {
+       "-threshold": "16"
       }
      },
      "5": {
@@ -784,6 +863,9 @@
        "-threshold": "19.3"
       },
       "blastp-fast": {
+       "-threshold": "19.3"
+      },
+      "blastp-short": {
        "-threshold": "19.3"
       }
      },
@@ -793,6 +875,9 @@
       },
       "blastp-fast": {
        "-threshold": "21"
+      },
+      "blastp-short": {
+       "-threshold": "21"
       }
      },
      "7": {
@@ -800,6 +885,9 @@
        "-threshold": "20.25"
       },
       "blastp-fast": {
+       "-threshold": "20.25"
+      },
+      "blastp-short": {
        "-threshold": "20.25"
       }
      }
@@ -820,15 +908,18 @@
    "given": {
     "-max_target_seqs": [
      "blastp",
-     "blastp-fast"
+     "blastp-fast",
+     "blastp-short"
     ],
     "-num_alignments": [
      "blastp",
-     "blastp-fast"
+     "blastp-fast",
+     "blastp-short"
     ],
     "-num_descriptions": [
      "blastp",
-     "blastp-fast"
+     "blastp-fast",
+     "blastp-short"
     ],
     "-word_size": [
      "blastp-fast"

@@ -2768,7 +2768,7 @@ fn x_flow(
 pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
     crate::blastinput::report_counts::report_counts(
         outfmt,
-        args.max_target_seqs.map(|n| n as usize),
+        super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
     )

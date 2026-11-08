@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::sync::{Mutex, PoisonError};
 
 use clap::CommandFactory;
-use LOSAT::cli::Cli;
+use LOSAT::web_adapter::Cli;
 
 use crate::json;
 use crate::run::Program;

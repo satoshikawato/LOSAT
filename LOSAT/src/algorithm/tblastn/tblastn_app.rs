@@ -897,6 +897,9 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -965,6 +968,9 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::TBLASTN_TASK.check(&mut args.task)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -1181,7 +1187,7 @@ fn search(
         ),
     };
     let SearchSettings {
-        composition_mode2,
+        compo_adjust_mode,
         identity_cbs_reset,
         scoring,
     } = search_settings(&resolved)?;
@@ -1453,7 +1459,7 @@ fn search(
                 engine_positives,
                 culling_limit: resolved.culling_limit,
             },
-            composition_mode2,
+            compo_adjust_mode,
             resolved.sum_stats,
             scoring,
             resolved.num_threads,
@@ -1499,7 +1505,7 @@ fn search(
                             engine_positives,
                             culling_limit: resolved.culling_limit,
                         },
-                        composition_mode2,
+                        compo_adjust_mode,
                         resolved.sum_stats,
                         scoring,
                         resolved.num_threads,

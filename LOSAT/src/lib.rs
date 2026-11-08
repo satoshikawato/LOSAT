@@ -8,7 +8,8 @@
 //! Every other module is the command line or the engine: NCBI's algorithms, ported function by
 //! function. They are `pub(crate)`, or `pub` but hidden from this documentation and outside the
 //! compatibility promise of the version number: their items change as the port advances. The
-//! `losat` binary calls one hidden function, `main_entry`, and names no module.
+//! `losat` binary calls one hidden function, `main_entry`, and names no module. LOSAT Web's
+//! adapter names the engine through `api` and one hidden module, `web_adapter`.
 
 #[doc(hidden)]
 pub mod algorithm;
@@ -57,3 +58,8 @@ pub use cli::main_entry::main_entry;
 
 // The type of `api::FastaRecord`: private, so that rustdoc inlines its re-exports (record.rs).
 mod record;
+
+// The engine items that LOSAT Web's adapter (`web/adapter`) names: one hidden façade, outside the
+// public API (web_adapter.rs).
+#[doc(hidden)]
+pub mod web_adapter;

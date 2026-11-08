@@ -137,6 +137,25 @@ class TestsInCiTests(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn("files=1\tnot_run=0", out)
 
+    def test_the_file_name_must_be_a_whole_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, "LOSAT/tests/test_x.py")
+            write(root, "LOSAT/tests/test_x.js")
+            for text in ("      - run: cat LOSAT/tests/test_x.json LOSAT/tests/test_x.pyc\n",
+                         "      - run: cat LOSAT/tests/my-test_x.py LOSAT/tests/test_x.js.map\n"):
+                write(root, ".github/workflows/ci.yml", CI.replace("      - name: Tool tests\n", "")
+                      .split("        run:")[0] + text)
+                code, out = run(root)
+                self.assertEqual(code, 1, out)
+                self.assertIn("NOT RUN\tLOSAT/tests/test_x.py\t", out)
+                self.assertIn("NOT RUN\tLOSAT/tests/test_x.js\t", out)
+            write(root, ".github/workflows/ci.yml", CI.split("      - name: Tool tests")[0]
+                  + "      - run: python3 -m unittest discover -s LOSAT/tests -p 'test_x.py'\n"
+                  "      - run: node LOSAT/tests/test_x.js a.wasm\n")
+            code, out = run(root)
+            self.assertEqual(code, 0, out)
+
     def test_a_name_outside_a_run_command_does_not_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

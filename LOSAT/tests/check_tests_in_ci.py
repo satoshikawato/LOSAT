@@ -7,22 +7,22 @@ The SWEBOK audit of 2026-11-04 (KA5) found five `test_*.py` files with 35 tests
 that no workflow ran (`test_audit_blastp_v010.py`, `test_audit_tblastx_v010.py`,
 `test_benchmark_wasm_threading.py`, `test_certify_blastn_v010.py`,
 `test_compare_blastn_parity.py`), so a change to the tools they test could break
-them unseen. On 2026-11-08 the same audit found `LOSAT/tests/test_benchmark_wasi_reuse.js`
-(the test of the Wasm benchmark runner) unrun; `wasm-threading.yml`, which the nightly
-workflow calls, now runs it, and this check reads `test_*.js` files too. The workflows name
-the test files they run one by one (`unittest discover -s LOSAT/tests -p 'test_x.py'`,
-`unittest LOSAT/tests/test_x.py`, `node LOSAT/tests/test_x.js`), so this check fails when
-the file name of a `test_*.py` or `test_*.js` file appears in the
-`run:` commands of no workflow that runs without a person: one started by
+them unseen. The review of this check on 2026-11-07 found
+`LOSAT/tests/test_benchmark_wasi_reuse.js` (the test of the Wasm benchmark runner) unrun;
+`wasm-threading.yml`, which the nightly workflow calls, has run it since 2026-11-08, and
+this check reads `test_*.js` files too. The workflows name the test files they run one by
+one (`unittest discover -s LOSAT/tests -p 'test_x.py'`, `unittest LOSAT/tests/test_x.py`,
+`node LOSAT/tests/test_x.js`), so this check fails when the file name of a `test_*.py` or
+`test_*.js` file appears in the `run:` commands of no workflow that runs without a person: one started by
 push, pull_request(_target), merge_group or schedule, or one such a workflow
 calls (`uses: ./.github/workflows/<file>`). A name only in a `paths:` filter, in
 a comment, or in a workflow that runs only when dispatched (release readiness,
 platform certification) does not count. A file name shared by two directories
 counts as named for both.
 
-Only files named `test_*.py` and `test_*.js` are test files here. web/app's vitest files
-(`*.test.ts`) are run by web.yml as one suite and are out of scope, as is any other
-`*.test.js` file.
+Only files named `test_*.py` and `test_*.js` are test files here. web/app's vitest and
+Playwright files (`*.test.ts`, `*.spec.ts`) are run by web.yml as suites and are out of
+scope, as is any other `*.test.js` file.
 
 `python/tests/` is pylosat's pytest suite, which `python.yml` runs as a directory
 (`pytest tests`, working directory `python`): its files are run while that
@@ -37,7 +37,7 @@ parser), with these limits:
   `if:` is not read: a job that runs only when dispatched, in a workflow that
   push or pull_request starts, counts.
 The first two can only report a file as not run. The search walks the
-directory, so a local untracked `test_*.py` file is reported too; CI checks a
+directory, so a local untracked `test_*.py` or `test_*.js` file is reported too; CI checks a
 clean checkout.
 
 Usage: python3 LOSAT/tests/check_tests_in_ci.py --root .
@@ -148,7 +148,8 @@ def is_run(path: str, workflows: dict[str, str]) -> bool:
         if path.startswith(directory + "/") and command.search(workflows.get(workflow, "")):
             return True
     name = path.rsplit("/", 1)[-1]
-    return any(name in text for text in workflows.values())
+    token = re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w.])")
+    return any(token.search(text) for text in workflows.values())
 
 
 def not_run(root: Path) -> tuple[list[str], list[str]]:

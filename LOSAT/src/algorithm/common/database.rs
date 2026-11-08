@@ -2512,23 +2512,6 @@ mod tests {
             .collect()
     }
 
-    // Line DBID pssmrows (weakbatch DECISIONS 43 (4)): psiblast's PSSM puts following hits whose
-    // Seq-align ids `Match` in one row and counts its rows by their handles (psi_pssm_input.cpp
-    // x_CountAndSelectQualifyingAlignments and x_ExtractAlignmentData, quoted at
-    // `psiblast::pssm::input_msa`).
-    #[test]
-    fn a_pssm_row_joins_following_hits_whose_seq_align_ids_match() {
-        use crate::algorithm::psiblast::rounds::SetKey;
-        // tests/db_search/ids/pweak_v5: 7 `gb|FFF00043|`, 8 `gb|FFF00043.1|`, 4 `gb|FFF00041.1|`.
-        let s = parsed_subjects("pweak_v5");
-        let key = |ordinal: usize| SetKey::Id(s[ordinal].alignment_id().clone());
-        // Two handles whose ids `Match`: two keys, one row where they follow each other.
-        assert_ne!(key(8), key(7));
-        assert!(key(8).matches(&key(7)) && key(7).matches(&key(8)));
-        assert!(!key(8).matches(&key(4)));
-        SetKey::check_handles(&[key(8), key(7), key(4)]).unwrap();
-    }
-
     // Line DBID N3 review 1 M1: the joined copies' letters are the same because `copy_of` reads
     // them: the definition lines of r1 and r3 with other letters (pjoin_x: four substitutions, ten
     // more letters) are no copies, those with other taxids (pjoin_abt) are.

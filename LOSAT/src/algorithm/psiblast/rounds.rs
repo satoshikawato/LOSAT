@@ -554,6 +554,31 @@ mod tests {
         assert!(!ids.contains(&id("lcl|3")));
     }
 
+    // Line DBID pssmrows (weakbatch DECISIONS 43 (4)): the keys of a database's subjects are their
+    // Seq-align ids as `ParsedSubject` reads them; psiblast's PSSM puts following hits whose ids
+    // `Match` in one row and counts its rows by their handles (psi_pssm_input.cpp
+    // x_CountAndSelectQualifyingAlignments and x_ExtractAlignmentData, quoted at
+    // `pssm::input_msa`).
+    #[test]
+    fn a_pssm_row_joins_following_hits_whose_seq_align_ids_match() {
+        use crate::seqdb::{SeqDb, SeqType};
+        // tests/db_search/ids/pweak_v5: 7 `gb|FFF00043|`, 8 `gb|FFF00043.1|`, 4 `gb|FFF00041.1|`.
+        let base =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids/pweak_v5");
+        let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+        let key = |ordinal: u32| {
+            let subject =
+                crate::report::db_subject::ParsedSubject::new(db.defline_set(ordinal).unwrap())
+                    .unwrap();
+            SetKey::Id(subject.alignment_id().clone())
+        };
+        // Two handles whose ids `Match`: two keys, one row where they follow each other.
+        assert_ne!(key(8), key(7));
+        assert!(key(8).matches(&key(7)) && key(7).matches(&key(8)));
+        assert!(!key(8).matches(&key(4)));
+        SetKey::check_handles(&[key(8), key(7), key(4)]).unwrap();
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-320 (quoted at
     // `pssm::input_msa`): following Seq-aligns whose ids `Match` share a row.
     #[test]

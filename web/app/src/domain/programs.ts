@@ -175,7 +175,7 @@ const NUCLEOTIDE_GAP_COSTS: PairSelect = {
 };
 // NCBI's gap costs of BLOSUM62, all of which LOSAT's BLASTP and TBLASTN read.
 const BLOSUM62_GAP_COSTS = ['11 2', '10 2', '9 2', '8 2', '7 2', '6 2', '13 1', '12 1', '11 1', '10 1', '9 1'];
-// NCBI's lists of the protein programs' pages (the same on BLASTP's, TBLASTN's and TBLASTX's), by matrix.
+// NCBI's lists of the protein programs' pages (the same on BLASTP's, BLASTX's, TBLASTN's and TBLASTX's), by matrix.
 export const PROTEIN_GAP_COSTS: PairSelect = {
   id: 'gapcosts',
   separator: ' ',
@@ -203,15 +203,10 @@ export const PROTEIN_GAP_COSTS: PairSelect = {
   labels: gapCostsLabel,
 };
 const PROTEIN_SCORING: Pick<ParameterSection, 'pairs'> = { pairs: { 'Gap Costs': PROTEIN_GAP_COSTS } };
-// LOSAT's BLASTP scores with NCBI's matrices and the gap costs of their lists (and with IDENTITY,
-// which NCBI's page does not list: "Other") and adjusts with every mode (IDENTITY's reset to 0 with
-// NCBI's warning); LOSAT's BLASTX with BLOSUM62 and gap costs 11/1 only, and modes 0 and 2: its
-// lists keep these of NCBI's values ("Other" still takes any matrix and costs, which the engine
-// refuses with its message; Compositional adjustments has no "Other"). A series that makes the
-// engine read more widens them (the engine's e2e of the selects fails until then).
-const BLOSUM62_ONLY: Pick<ParameterSection, 'pairs'> = {
-  pairs: { 'Gap Costs': { id: 'gapcosts', separator: ' ', lists: { '': ['11 1'] }, labels: gapCostsLabel } },
-};
+// LOSAT's BLASTP and BLASTX score with NCBI's matrices and the gap costs of their lists and adjust
+// with every mode. BLASTP also takes IDENTITY, which NCBI's page does not list ("Other"; its modes
+// reset to 0 with NCBI's warning); BLASTX's gapped search stops at IDENTITY with NCBI BLAST+'s own
+// error, as NCBI's does (the engine's e2e of the selects checks both sides).
 // `describe` explains the values of -comp_based_stats only in its help text; the names are NCBI's.
 const compBasedStats: ParameterField = {
   flag: '-comp_based_stats',
@@ -401,8 +396,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'Scoring Parameters',
         placement: 'algorithm',
-        fields: [{ ...matrix, list: ['BLOSUM62'] }, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
-        ...BLOSUM62_ONLY,
+        fields: [matrix, gapOpen, gapExtend, compBasedStats],
+        ...PROTEIN_SCORING,
       },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       {

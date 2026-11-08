@@ -339,10 +339,19 @@ pub(crate) fn x_word_finder_matrix(
                 diagonals,
                 scan_byte,
                 |q: &[u8], s: &[u8], s_left_off, s_right_off, q_right_off, dropoff, word| {
-                    scoring.two_hit(q, s, s_left_off, s_right_off, q_right_off, dropoff, word)
+                    bx_two_hit(
+                        scoring,
+                        q,
+                        s,
+                        s_left_off,
+                        s_right_off,
+                        q_right_off,
+                        dropoff,
+                        word,
+                    )
                 },
                 |q: &[u8], s: &[u8], q_off, s_off, dropoff, word| {
-                    scoring.one_hit(q, s, q_off, s_off, dropoff, word)
+                    bx_one_hit(scoring, q, s, q_off, s_off, dropoff, word)
                 },
             )
         };

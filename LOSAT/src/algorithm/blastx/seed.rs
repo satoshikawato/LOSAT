@@ -32,28 +32,8 @@ pub(crate) trait BxScoring: Copy {
     const BLOSUM62: bool;
     /// The matrix.
     fn matrix(self) -> ScoringMatrix;
-    /// `s_BlastAaExtendTwoHit` with the matrix.
-    #[allow(clippy::too_many_arguments)]
-    fn two_hit(
-        self,
-        query: &[u8],
-        subject: &[u8],
-        s_left_off: usize,
-        s_right_off: usize,
-        q_right_off: usize,
-        dropoff: i32,
-        word_size: usize,
-    ) -> Option<BlastpTwoHitUngappedResult>;
-    /// `s_BlastAaExtendOneHit` with the matrix.
-    fn one_hit(
-        self,
-        query: &[u8],
-        subject: &[u8],
-        q_off: usize,
-        s_off: usize,
-        dropoff: i32,
-        word_size: usize,
-    ) -> Option<BlastpOneHitUngappedResult>;
+    /// The matrix's byte table of the two-hit walks (`x_ungapped_fast::matrix_table`), if any.
+    fn table(self) -> Option<&'static crate::algorithm::blastp::x_ungapped_fast::MatrixTable>;
 }
 
 /// BLOSUM62's [`BxScoring`]: the default search's functions.
@@ -67,37 +47,8 @@ impl BxScoring for Blosum62Bx {
         ScoringMatrix::Blosum62
     }
     #[inline(always)]
-    fn two_hit(
-        self,
-        query: &[u8],
-        subject: &[u8],
-        s_left_off: usize,
-        s_right_off: usize,
-        q_right_off: usize,
-        dropoff: i32,
-        word_size: usize,
-    ) -> Option<BlastpTwoHitUngappedResult> {
-        extend_two_hit_blosum62(
-            query,
-            subject,
-            s_left_off,
-            s_right_off,
-            q_right_off,
-            dropoff,
-            word_size,
-        )
-    }
-    #[inline(always)]
-    fn one_hit(
-        self,
-        query: &[u8],
-        subject: &[u8],
-        q_off: usize,
-        s_off: usize,
-        dropoff: i32,
-        word_size: usize,
-    ) -> Option<BlastpOneHitUngappedResult> {
-        extend_one_hit_blosum62(query, subject, q_off, s_off, dropoff, word_size)
+    fn table(self) -> Option<&'static crate::algorithm::blastp::x_ungapped_fast::MatrixTable> {
+        None
     }
 }
 
@@ -127,18 +78,42 @@ impl BxScoring for MatrixBx {
         self.matrix
     }
     #[inline(always)]
-    fn two_hit(
-        self,
-        query: &[u8],
-        subject: &[u8],
-        s_left_off: usize,
-        s_right_off: usize,
-        q_right_off: usize,
-        dropoff: i32,
-        word_size: usize,
-    ) -> Option<BlastpTwoHitUngappedResult> {
+    fn table(self) -> Option<&'static crate::algorithm::blastp::x_ungapped_fast::MatrixTable> {
+        self.table
+    }
+}
+
+// The extensions are free functions, not the trait's methods: rustc counts the inline methods of
+// a trait impl as reachable from other crates (it cannot tell which impls generic code uses) and
+// exports what they call, which would call BLOSUM62's `x_ungapped_fast::one_hit` through the GOT
+// in today's loops.
+/// `s_BlastAaExtendTwoHit` with the matrix of `scoring`: BLOSUM62's `extend_two_hit_blosum62`, or
+/// the matrix's byte-table walks (`extend_two_hit_table`).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn bx_two_hit<S: BxScoring>(
+    scoring: S,
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpTwoHitUngappedResult> {
+    if S::BLOSUM62 {
+        extend_two_hit_blosum62(
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    } else {
         extend_two_hit_table(
-            (self.matrix, self.table),
+            (scoring.matrix(), scoring.table()),
             query,
             subject,
             s_left_off,
@@ -148,18 +123,25 @@ impl BxScoring for MatrixBx {
             word_size,
         )
     }
-    #[inline(always)]
-    fn one_hit(
-        self,
-        query: &[u8],
-        subject: &[u8],
-        q_off: usize,
-        s_off: usize,
-        dropoff: i32,
-        word_size: usize,
-    ) -> Option<BlastpOneHitUngappedResult> {
+}
+
+/// `s_BlastAaExtendOneHit` with the matrix of `scoring`: BLOSUM62's `extend_one_hit_blosum62`, or
+/// the reference walk of the matrix (`extend_one_hit_of`).
+#[inline(always)]
+pub(super) fn bx_one_hit<S: BxScoring>(
+    scoring: S,
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    if S::BLOSUM62 {
+        extend_one_hit_blosum62(query, subject, q_off, s_off, dropoff, word_size)
+    } else {
         extend_one_hit_of(
-            self.matrix,
+            scoring.matrix(),
             query,
             subject,
             q_off,
@@ -1305,7 +1287,8 @@ pub(super) fn word_finder_over<S: BxScoring>(
                 }
                 context = context_of(q);
                 let p = &parameters[context];
-                let Some(result) = scoring.one_hit(
+                let Some(result) = bx_one_hit(
+                    scoring,
                     query,
                     subject,
                     q as usize,
@@ -1340,7 +1323,8 @@ pub(super) fn word_finder_over<S: BxScoring>(
                     entry.set_last_hit(s.wrapping_add(diagonals.offset));
                     continue;
                 }
-                let Some(result) = scoring.two_hit(
+                let Some(result) = bx_two_hit(
+                    scoring,
                     query,
                     subject,
                     (previous + word) as usize,

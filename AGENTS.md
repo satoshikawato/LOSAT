@@ -446,7 +446,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)
 │   ├── web_api.rs         # wasm32 only: Wasm ABI v1 exports and their dispatch to the programs
 │   ├── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
-│   └── web_adapter.rs     # Hidden façade: the engine items that web/adapter names, each on its own line
+│   └── web_adapter.rs     # Hidden façade: the engine items that web/adapter names, each named on its own
 └── tests/
     ├── suites/            # Six test targets (five programs and common); each includes its files by `#[path]`
     ├── unit/              # Data only: `.tsv` files read by in-crate tests, NCBI reference outputs (`helpers/`)

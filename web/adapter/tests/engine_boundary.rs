@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 /// The engine crate's name, kept out of a literal path so that this file passes its own scan.
 const ENGINE: &str = "LOSAT";
 const FACADE: &str = "web_adapter";
+/// The hidden child of `api` (the façade's `run_local_*` and outputs), written in two pieces for
+/// the same reason.
+const HIDDEN_CHILD: &str = concat!("local", "_blast");
 
 fn adapter_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -51,7 +54,8 @@ fn facade_source() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
-/// `text` without its `//` comments (the sources here hold `//` in no string).
+/// `text` without its `//` comments. A `//` inside a string cuts its line too; in these sources
+/// no engine path follows one.
 fn code(text: &str) -> String {
     text.lines()
         .map(|line| line.find("//").map_or(line, |at| &line[..at]))
@@ -137,7 +141,7 @@ fn the_adapter_names_the_engine_through_the_api_and_the_facade_only() {
                 let module = ident(path_rest);
                 let ok = match module {
                     // The public surface; its hidden child `local_blast` is the façade's.
-                    "api" => !path_rest.starts_with("api::local_blast"),
+                    "api" => !path_rest.starts_with(&format!("api::{HIDDEN_CHILD}")),
                     FACADE => {
                         // One item after the façade; a further `::` only for an associated item
                         // of a type (`ScoringMatrix::ALL`), not for a module re-exported whole.
@@ -158,6 +162,14 @@ fn the_adapter_names_the_engine_through_the_api_and_the_facade_only() {
                     wrong.push(format!("{}:{}: {line}", path.display(), line_number + 1));
                 }
             }
+        }
+    }
+    // `api`'s hidden child by any other route: a group (`api::{local_blast::X}`) or an alias of
+    // `api`. The adapter has no other reason to write the name.
+    for (path, text) in adapter_sources() {
+        let code = code(&text);
+        if word_starts(&code, HIDDEN_CHILD).next().is_some() {
+            wrong.push(format!("{}: {HIDDEN_CHILD}", path.display()));
         }
     }
     assert!(
@@ -231,6 +243,33 @@ fn used_names() -> BTreeSet<String> {
         }
     }
     names
+}
+
+#[test]
+fn no_name_of_the_facade_is_used_as_a_module() {
+    // The façade's lower-case names are functions: after one, `::` comes only in a turbofish
+    // (`name::<T>`). Any other `name::` is a module re-exported whole (a glob by another name).
+    let names = facade_names();
+    let mut wrong = Vec::new();
+    for (path, text) in adapter_sources() {
+        let code = code(&text);
+        for name in names
+            .iter()
+            .filter(|name| name.starts_with(|c: char| c.is_ascii_lowercase()))
+        {
+            for at in word_starts(&code, name) {
+                let after = &code[at + name.len()..];
+                if after.starts_with("::") && !after.starts_with("::<") {
+                    wrong.push(format!("{}: {name}::", path.display()));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a façade name used as a module:\n{}",
+        wrong.join("\n")
+    );
 }
 
 #[test]

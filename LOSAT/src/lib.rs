@@ -8,7 +8,8 @@
 //! Every other module is the command line or the engine: NCBI's algorithms, ported function by
 //! function. They are `pub(crate)`, or `pub` but hidden from this documentation and outside the
 //! compatibility promise of the version number: their items change as the port advances. The
-//! `losat` binary calls one hidden function, `main_entry`, and names no module.
+//! `losat` binary calls one hidden function, `main_entry`, and names no module. LOSAT Web's
+//! adapter names the engine through `api` and one hidden module, `web_adapter`.
 
 #[doc(hidden)]
 pub mod algorithm;

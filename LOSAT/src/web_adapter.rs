@@ -6,14 +6,16 @@
 //! as the hidden modules are; `api` is the public surface. An item here can move to `api` later,
 //! one at a time.
 //!
-//! Rules (checked by `web/adapter/tests/engine_boundary.rs`):
+//! Rules:
 //! - The adapter names the engine through `LOSAT::api` (public items) and this module only.
-//! - Each item is named on its own (no glob), so a new item is a line of this file in the pull
-//!   request's diff, and every item here is one the adapter uses.
+//! - Each item is named on its own (no glob, no module), so a new item shows in the pull
+//!   request's diff of this file, and every item here is one the adapter uses.
 //! - The adapter is code outside the crate: a function here must be sound for every value a
 //!   safe caller can pass (no out-of-range read or write behind `unsafe`, whatever the input).
 //!   A function whose soundness needs a narrower input gets a wrapper that fixes it
 //!   ([`try_parse_cli`]).
+//!
+//! `web/adapter/tests/engine_boundary.rs` checks the first two rules; the third is the review's.
 
 use std::ffi::OsString;
 
@@ -24,9 +26,8 @@ pub use crate::cli::{render_message, Cli, Commands, NativeError};
 /// `cli::try_parse_from` for the command line's own arguments (`Cli`): the argv read as the
 /// command line reads it, NCBI's single-dash options included.
 ///
-/// The parser reads a `-name=value` word whose value is not UTF-8 by splitting its bytes after
-/// `-name=` (`cli.rs` `inline_value`), which holds when `name` is ASCII. Every long name of
-/// `Cli` is; a caller's own clap type need not be, so only `Cli` is offered here.
+/// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
+/// other clap type.
 pub fn try_parse_cli<I, S>(argv: I) -> Result<Cli, clap::Error>
 where
     I: IntoIterator<Item = S>,

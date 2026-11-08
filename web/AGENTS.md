@@ -46,9 +46,9 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
 9. Keep application commits separate from engine (`LOSAT/`) commits.
 10. The adapter (`web/adapter`) names the engine through `LOSAT::api` and the hidden
     façade `LOSAT::web_adapter` (`LOSAT/src/web_adapter.rs`) only. An engine item that the
-    adapter needs gets one line there, named on its own, and must be sound for every input
-    a safe caller can give; the façade keeps only items that the adapter uses.
-    `web/adapter/tests/engine_boundary.rs` checks these rules.
+    adapter needs is named there on its own (no glob, no module), and the façade keeps only
+    items that the adapter uses; `web/adapter/tests/engine_boundary.rs` checks this. A
+    function there must also be sound for every input a safe caller can give (review).
 
 ## Commands
 

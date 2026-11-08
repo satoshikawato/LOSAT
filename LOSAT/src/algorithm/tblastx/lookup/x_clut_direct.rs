@@ -379,11 +379,11 @@ impl XFlatSpare {
 // changes no value NCBI computes.
 /// Item SC2d-2: segments of packed appends (`x_clut_par.rs` `XSegmentOut`) kept by the block search
 /// (`blastp/x_query_blocks.rs` `XBlockSubjects`) from one build's stripes pass to the next build's
-/// appends pass, at most one per thread of the build, so that the next build writes their pages,
-/// which the last build touched, instead of faulting the pages of fresh mappings. A kept segment's
-/// values are not read: a piece writes every entry of its range before any is read. What a smaller
-/// next build leaves of them is at most the last build's appends (as many as the hits of the table
-/// that build made).
+/// appends pass, at most one per thread of the build, each cut to the entries that build wrote (the
+/// pages past them returned), so that the next build writes their pages, which the last build
+/// touched, instead of faulting the pages of fresh mappings. A kept segment's values are not read: a
+/// piece writes every entry of its range before any is read. What the pool holds is at most the last
+/// build's appends (as many as the hits of the table that build made).
 #[derive(Default)]
 pub(crate) struct XSegmentPool(Mutex<Vec<Vec<u32>>>);
 
@@ -420,7 +420,12 @@ impl XSegmentPool {
             segments
                 .into_iter()
                 .filter(|segment| !segment.is_empty())
-                .take(room),
+                .take(room)
+                .map(|mut segment| {
+                    // The capacity past the entries written is returned (their pages too).
+                    segment.shrink_to_fit();
+                    segment
+                }),
         );
     }
 }

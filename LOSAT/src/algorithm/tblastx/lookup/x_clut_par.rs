@@ -162,6 +162,10 @@ const X_APPENDS_SEGMENT: usize = 10 << 20;
 /// The fewest query offsets of a chunk (about 65 appends each with blastp-fast's threshold; about
 /// 12,800 with BLOSUM45 at word size 7).
 const X_MIN_CHUNK_OFFSETS: usize = 256;
+/// The most query offsets of a guided chunk (item SC2d-2): a task's scratch holds at most the appends
+/// of this many offsets or a piece (`X_PIECE_APPENDS`), whichever is fewer (about 66,000 appends,
+/// 260 KiB, with blastp-fast's threshold).
+const X_MAX_GUIDED_OFFSETS: usize = 4 * X_MIN_CHUNK_OFFSETS;
 // No NCBI counterpart: how a task's scratch is bounded (item SC2d-2). Memory only.
 /// The appends of a piece (`x_chunk_appends`): a chunk's appends are sorted into the task's segment
 /// in pieces of this many (the last one fewer), so that a task's scratch holds at most a piece (4 MiB
@@ -274,9 +278,11 @@ impl<'r> XSegmentOut<'r> {
         (self.index, at, &mut self.segment[at..at + n])
     }
 
-    /// Moves the segment to its slot.
+    /// Moves the segment to its slot, cut to the entries the chunks took (item SC2d-2: a kept
+    /// segment holds no more than they wrote, `XSegmentPool::keep`).
     fn finish(&mut self) {
         if self.index != usize::MAX {
+            self.segment.truncate(self.used);
             self.registry.lock().unwrap_or_else(PoisonError::into_inner)[self.index] =
                 std::mem::take(&mut self.segment);
         }
@@ -752,7 +758,7 @@ enum XChunkSizes<'a> {
     /// Chunk i takes `sizes[i % sizes.len()]` (the tests' cuts).
     List(&'a [usize]),
     /// Guided (item SC2d-2): a chunk takes the offsets not yet in a chunk (of `offsets`) over
-    /// `X_GUIDED_SHARE * threads`, at least `X_MIN_CHUNK_OFFSETS`.
+    /// `X_GUIDED_SHARE * threads`, from `X_MIN_CHUNK_OFFSETS` to `X_MAX_GUIDED_OFFSETS`.
     Guided { threads: usize, offsets: usize },
 }
 
@@ -763,7 +769,7 @@ impl XChunkSizes<'_> {
             Self::List(sizes) => sizes[chunk % sizes.len()].max(1),
             Self::Guided { threads, offsets } => (offsets.saturating_sub(placed)
                 / (X_GUIDED_SHARE * threads.max(1)))
-            .max(X_MIN_CHUNK_OFFSETS),
+            .clamp(X_MIN_CHUNK_OFFSETS, X_MAX_GUIDED_OFFSETS),
         }
     }
 }

@@ -8,12 +8,12 @@
 //! megablast, blastn, dc-megablast and blastn-short (at `-evalue 10`) with several queries
 //! (pieces of LC738874 with microsatellites, runs of `N`, lower case letters, a poly-A query, a
 //! query shorter than a triplet, one of 20 letters and one of 300 `N` followed by 400 letters) at
-//! 1 and 4 threads, the searches without the switch and with it give the same bytes. The same
-//! holds with several query batches (`BATCH_SIZE`) and when a batch is split into query chunks
-//! (`CHUNK_SIZE`). That the steps run on the pool's
-//! threads is checked by the unit test `steps_run_on_the_pool_threads` in `x_query_prep_par.rs`;
-//! here the sides of the switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4
-//! threads and not at one. That those bytes equal NCBI's is the business of the blastn fixtures.
+//! 1 and 4 threads (`-dust no` and other scores: also 8 and 16), the searches without the switch
+//! and with it give the same bytes. The same holds with several query batches (`BATCH_SIZE`) and
+//! when a batch is split into query chunks (`CHUNK_SIZE`). That the steps run on the pool's threads
+//! is checked by the unit test `steps_run_on_the_pool_threads` in `x_query_prep_par.rs`; here the
+//! sides of the switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4 threads and
+//! not at one. That those bytes equal NCBI's is the business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -265,10 +265,11 @@ fn lowercase_masking_and_dust_parameters() {
     check_task("megablast", &["-dust", "10 32 2", "-lcase_masking"]);
 }
 
-// `-dust no` and other scores (other ungapped Karlin blocks): the same bytes with the switch, whose
-// own path runs at 4 threads only. (There is no single-strand case: `-strand plus` and `minus`
-// build their buffer serially, `build_strand_query_blastna_buffer`, whatever the switch says; its
-// unit tests are in `blast_engine/run.rs`, the whole searches in `tests/blastn_strand.rs`.)
+// `-dust no` and other scores (other ungapped Karlin blocks): the same bytes with the switch at 1,
+// 4, 8 and 16 threads, whose own path runs above one thread only. (There is no single-strand case:
+// `-strand plus` and `minus` build their buffer serially, `build_strand_query_blastna_buffer`,
+// whatever the switch says; its unit tests are in `blast_engine/run.rs`, the whole searches in
+// `tests/blastn_strand.rs`.)
 #[test]
 fn dust_no_and_other_scores() {
     let queries = Queries::new();
@@ -300,7 +301,7 @@ fn dust_no_and_other_scores() {
         ][..],
     ] {
         let (expected, _) = blastn(&queries, args, 1, &[]);
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let reach = reach_support::Reach::new("qpreppar-scores");
             let (report, _) = blastn(&queries, args, threads, &[SWITCH, reach.var()]);
             assert!(report == expected, "{args:?} threads {threads}: on differs");

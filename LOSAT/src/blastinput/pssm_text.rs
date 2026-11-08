@@ -980,11 +980,11 @@ impl<'a> Reader<'a> {
                     // ```
                     // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless set in NCBI's environment or
                     // configuration file, which LOSAT does not read.)
-                    let descriptors = self.list(Self::seqdesc_title)?;
-                    if descriptors.is_empty() {
+                    let descriptors = self.list(Self::seqdesc_title)?.into_iter();
+                    if descriptors.len() == 0 {
                         return Err(self.error("empty Seq-descr is not allowed"));
                     }
-                    let found: Vec<Vec<u8>> = descriptors.into_iter().flatten().collect();
+                    let found: Vec<Vec<u8>> = descriptors.flatten().collect();
                     titles = (!found.is_empty()).then_some(found);
                 }
                 2 => inst = Some(self.seq_inst()?),

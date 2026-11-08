@@ -89,6 +89,8 @@ mod rps_hooks;
 // psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
 // `search`, and the round's outcome hook of `run_resolved_in_pool`.
 mod psi_round;
+// The rendered rows of the final hits a window of queries at a time, as the reports read them.
+pub(super) mod query_rows;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -3077,69 +3079,52 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 //                     }
 // ```
-/// The outfmt 0 copies of the hits whose query rows a SEG mask covers, with the masked
-/// columns in lowercase (`None` when no query is masked). A mask that covers the whole
-/// query is not shown; a mask position outside the aligned range is the first or last
-/// column (`GetAlnPosFromSeqPos` with `try_reverse_dir`).
-///
-/// With `-query_loc`, `Map` moves the masks of the searched letters into the query's
-/// record by the start of its interval (`offsets`), as the hits' coordinates.
-fn masked_query_rows(
-    hits: &[PairwiseHit],
-    query_frames: &[Vec<QueryFrame>],
-    offsets: &seq_range::Placements,
-) -> Option<Vec<PairwiseHit>> {
-    let masks = query_record_masks(query_frames, offsets);
-    if masks.iter().all(Vec::is_empty) {
-        return None;
-    }
-    Some(
-        hits.iter()
-            .map(|hit| {
-                let mut hit = hit.clone();
-                let query_masks = &masks[hit.hit.q_idx as usize];
-                if let Some(row) = hit.query_seq.as_mut().filter(|_| !query_masks.is_empty()) {
-                    let mut bytes = std::mem::take(row).into_bytes();
-                    // The 0-based query position of each column that holds a residue.
-                    let first = hit.hit.q_start as i32 - 1;
-                    let last = hit.hit.q_end as i32 - 1;
-                    let mut columns = Vec::with_capacity(bytes.len());
-                    for (column, &residue) in bytes.iter().enumerate() {
-                        if residue != b'-' {
-                            columns.push(column);
-                        }
-                    }
-                    let width = bytes.len();
-                    let column_of = |position: i32| -> usize {
-                        if position < first {
-                            0
-                        } else if position > last {
-                            width - 1
-                        } else {
-                            columns[(position - first) as usize]
-                        }
-                    };
-                    for &(from, to) in query_masks {
-                        if to < first || from > last {
-                            continue;
-                        }
-                        let (start, stop) = (column_of(from), column_of(to));
-                        for residue in &mut bytes[start..=stop] {
-                            *residue = residue.to_ascii_lowercase();
-                        }
-                    }
-                    *row = String::from_utf8(bytes).expect("ASCII alignment row");
+/// The outfmt 0 rows `hits` with the columns of their query rows that a SEG mask of
+/// `masks` (`query_record_masks`) covers in lowercase. A mask that covers the whole query is
+/// not shown; a mask position outside the aligned range is the first or last column
+/// (`GetAlnPosFromSeqPos` with `try_reverse_dir`).
+fn mask_query_rows(hits: &mut [PairwiseHit], masks: &[Vec<(i32, i32)>]) {
+    for hit in hits {
+        let query_masks = &masks[hit.hit.q_idx as usize];
+        if let Some(row) = hit.query_seq.as_mut().filter(|_| !query_masks.is_empty()) {
+            let mut bytes = std::mem::take(row).into_bytes();
+            // The 0-based query position of each column that holds a residue.
+            let first = hit.hit.q_start as i32 - 1;
+            let last = hit.hit.q_end as i32 - 1;
+            let mut columns = Vec::with_capacity(bytes.len());
+            for (column, &residue) in bytes.iter().enumerate() {
+                if residue != b'-' {
+                    columns.push(column);
                 }
-                hit
-            })
-            .collect(),
-    )
+            }
+            let width = bytes.len();
+            let column_of = |position: i32| -> usize {
+                if position < first {
+                    0
+                } else if position > last {
+                    width - 1
+                } else {
+                    columns[(position - first) as usize]
+                }
+            };
+            for &(from, to) in query_masks {
+                if to < first || from > last {
+                    continue;
+                }
+                let (start, stop) = (column_of(from), column_of(to));
+                for residue in &mut bytes[start..=stop] {
+                    *residue = residue.to_ascii_lowercase();
+                }
+            }
+            *row = String::from_utf8(bytes).expect("ASCII alignment row");
+        }
+    }
 }
 
 /// The masked regions of each query as NCBI's `TMaskedQueryRegions` holds them (`Map`,
 /// api/blast_aux.cpp:825-842): the SEG masks merged, a mask that covers the whole query
-/// dropped, and the rest moved into the query's record by the start of its interval; inclusive
-/// 0-based positions.
+/// dropped, and the rest moved into the query's record by the start of its interval
+/// (`offsets`, with `-query_loc`, as the hits' coordinates); inclusive 0-based positions.
 fn query_record_masks(
     query_frames: &[Vec<QueryFrame>],
     offsets: &seq_range::Placements,
@@ -12259,71 +12244,78 @@ fn run_resolved_in_pool(
     // ```c++
     // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
     // ```
-    // Rendered hits are needed by outfmt 0, by tabular fields that need the alignment
-    // (`TabularNeeds::rows`), and by the caller's hit records. Every consumer needs the
-    // alignment rendered, so they are built once from the final hit list.
-    let needs_pairwise_hits = outputs.hits.is_some()
-        || format_plans.iter().any(|outfmt| match outfmt {
-            BlastpReport::Text(OutputFormat::Pairwise) => true,
-            BlastpReport::CustomTabular(spec) => spec.needs().rows,
-            _ => false,
-        });
+    // The final hits in record coordinates and lengths, which the reports print
+    // (`shift_hsp_to_records`); the rows are made from them (`rows_of`).
+    for hit_list in hit_lists.iter_mut().flatten() {
+        for hsp_list in &mut hit_list.hsplist_array {
+            for hsp in &mut hsp_list.hsps {
+                shift_hsp_to_records(hsp, ranges);
+            }
+        }
+    }
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
     // ```c
     // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
     // (*hsp_list_out)->query_index = index;
     // --hit_list->hsplist_count;
     // ```
-    // rpsblast's outfmt 0 alone: the rows are made and written a window of queries at a time
-    // (`x_pairwise_par::query_windows`, as BLASTN's and TBLASTX's), not for the whole run
-    // first: the rendered rows of CDD's 165,000 HSPs held 150 MB at once.
-    let rps_streamed_rows = args.rps_search.is_some()
-        && matches!(format_plans, [BlastpReport::Text(OutputFormat::Pairwise)]);
-    // What the streamed rows do not do (hit records and an observer come only from the library
-    // API and the Web build, which refuse rpsblast; the parser refuses `-lcase_masking`; rounds
-    // are psiblast's): a future relaxation of those refusals must not bypass them silently.
-    debug_assert!(
-        !rps_streamed_rows
-            || (outputs.hits.is_none()
-                && outputs.observer.is_none()
-                && !args.lcase_masking
-                && reports.psi_round.is_none())
-    );
-    let mut pairwise_hits = if needs_pairwise_hits && !rps_streamed_rows {
-        Some(build_pairwise_hits(
-            collect_hits_and_methods_from_hit_lists(&hit_lists),
+    // The rendered rows of the HSPs of the queries `window` (`PairwiseHit`, in the order of the
+    // lists): each row is read from the searched letters, so its hit moves back from the records
+    // by the intervals' starts, and the row then prints record coordinates and lengths
+    // (`shift_to_records`). Every report that shows the alignment takes its rows from here.
+    let x_rows_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
+    let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
+        let end = window.end.min(hit_lists.len());
+        let mut hits =
+            collect_hits_and_methods_from_hit_lists(&hit_lists[window.start.min(end)..end]);
+        for (hit, _) in hits.iter_mut() {
+            let q_shift = ranges.query_input.placements.offset(hit.q_idx as usize);
+            let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
+            hit.q_start -= q_shift;
+            hit.q_end -= q_shift;
+            hit.s_start -= s_shift;
+            hit.s_end -= s_shift;
+        }
+        let mut rows = build_pairwise_hits(
+            hits,
             &contexts,
             subjects,
             args.scoring.matrix,
             true,
             query_records,
             shown_subjects,
-            crate::report::x_pairwise_par::pool(blastp_parallel_pool),
-        )?)
-    } else {
-        None
-    };
-    // The rows are read from the searched letters; the reports print record coordinates
-    // and lengths (`shift_to_records`).
-    if let Some(hits) = pairwise_hits.as_mut() {
-        for hit in hits.iter_mut() {
-            let s_idx = hit.hit.s_idx as usize;
-            shift_to_records(&mut hit.hit, ranges);
-            hit.subject_length = hit
+            x_rows_pool,
+        )?;
+        for row in rows.iter_mut() {
+            let s_idx = row.hit.s_idx as usize;
+            shift_to_records(&mut row.hit, ranges);
+            row.subject_length = row
                 .subject_length
                 .map(|searched| ranges.subject_placements.length(s_idx, searched));
         }
-    }
-    // (The streamed rows are made from the searched coordinates, window by window.)
-    if !rps_streamed_rows {
-        for hit_list in hit_lists.iter_mut().flatten() {
-            for hsp_list in &mut hit_list.hsplist_array {
-                for hsp in &mut hsp_list.hsps {
-                    shift_hsp_to_records(hsp, ranges);
-                }
-            }
-        }
-    }
+        Ok(rows)
+    };
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411-1585
+    // ```c++
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ...
+    //     display.DisplaySeqalign(m_Outfile);
+    // ```
+    // NCBI makes and prints the alignments of one query's result set at a time: the reports
+    // make the rows of a window of queries and drop them before the next window's
+    // (`query_rows`: outfmt 0, BLAST XML and the tabular fields that show the alignment,
+    // `TabularNeeds::rows`), as BLASTN's and TBLASTX's outfmt 0. The rows of every query are
+    // made once, before any format is written, only where a consumer reads them all: the
+    // caller's hit records, and a format observer of outfmt 0, whose HSP numbers count over the
+    // whole report.
+    let rows_up_front = outputs.hits.is_some()
+        || (outputs.observer.is_some()
+            && format_plans.contains(&BlastpReport::Text(OutputFormat::Pairwise)));
+    let pairwise_hits = if rows_up_front {
+        Some(rows_of(0..hit_lists.len())?)
+    } else {
+        None
+    };
 
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
@@ -13076,32 +13068,13 @@ fn run_resolved_in_pool(
                     program: "BLASTP",
                     epilog: reports.epilog,
                 };
-                // The rows of a query's HSPs are made from the searched letters: the final
-                // hits move back from the records by the intervals' starts, as they moved.
-                let mut xml_rows = |q_idx: usize| -> Result<Vec<PairwiseHit>> {
-                    let mut hits =
-                        crate::algorithm::blastp::hsp::collect_hits_and_methods_from_hit_lists(
-                            std::slice::from_ref(&hit_lists[q_idx]),
-                        );
-                    let q_shift = ranges.query_input.placements.offset(q_idx);
-                    for (hit, _) in hits.iter_mut() {
-                        let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
-                        hit.q_start -= q_shift;
-                        hit.q_end -= q_shift;
-                        hit.s_start -= s_shift;
-                        hit.s_end -= s_shift;
-                    }
-                    build_pairwise_hits(
-                        hits,
-                        &contexts,
-                        subjects,
-                        args.scoring.matrix,
-                        true,
-                        query_records,
-                        shown_subjects,
-                        crate::report::x_pairwise_par::pool(blastp_parallel_pool),
-                    )
-                };
+                // The rows of the queries' HSPs, a window at a time (`query_rows`); the document
+                // reads their letters.
+                let mut xml_rows = query_rows::QueryRows::new(
+                    query_rows::row_windows(&hit_lists, hit_lists.len(), x_rows_pool),
+                    pairwise_hits.as_deref().map(Vec::as_slice),
+                    &rows_of,
+                );
                 match xml2_kind {
                     None => super::blast_xml::write_blastp_xml(
                         &xml,
@@ -13255,100 +13228,16 @@ fn run_resolved_in_pool(
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
-                if rps_streamed_rows {
-                    // The shown subjects are those of the final lists (the rows' subjects).
-                    let shown: std::collections::BTreeSet<usize> = hit_lists
-                        .iter()
-                        .flatten()
-                        .flat_map(|hit_list| {
-                            hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
-                        })
-                        .flat_map(|hsp_list| &hsp_list.hsps)
-                        .map(|hsp| hsp.s_idx as usize)
-                        .collect();
-                    match listed_titles.as_ref() {
-                        Some(titles) => titles.check_shown_titles(
-                            database.expect("listed titles are a database's"),
-                            &shown,
-                        )?,
-                        None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
-                    }
-                    let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
-                    let estimates: Vec<usize> = (0..pairwise_queries.len())
-                        .map(|q_idx| {
-                            crate::report::x_pairwise_par::query_estimate_of(
-                                hit_lists
-                                    .get(q_idx)
-                                    .and_then(Option::as_ref)
-                                    .into_iter()
-                                    .flat_map(|hit_list| {
-                                        hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
-                                    })
-                                    .flat_map(|hsp_list| &hsp_list.hsps)
-                                    .map(|hsp| hsp.length),
-                            )
-                        })
-                        .collect();
-                    let mut windows = crate::report::x_pairwise_par::query_windows(
-                        &estimates,
-                        crate::report::x_pairwise_par::window_bytes(x_pool),
-                    );
-                    if windows.is_empty() {
-                        windows.push(0..0);
-                    }
-                    for window in windows {
-                        let end = window.end.min(hit_lists.len());
-                        let mut rows = build_pairwise_hits(
-                            collect_hits_and_methods_from_hit_lists(
-                                &hit_lists[window.start.min(end)..end],
-                            ),
-                            &contexts,
-                            subjects,
-                            args.scoring.matrix,
-                            true,
-                            query_records,
-                            shown_subjects,
-                            x_pool,
-                        )?;
-                        for hit in rows.iter_mut() {
-                            let s_idx = hit.hit.s_idx as usize;
-                            shift_to_records(&mut hit.hit, ranges);
-                            hit.subject_length = hit
-                                .subject_length
-                                .map(|searched| ranges.subject_placements.length(s_idx, searched));
-                        }
-                        let masked_rows =
-                            masked_query_rows(&rows, &query_frames, &ranges.query_input.placements);
-                        write_blastp_pairwise_window(
-                            masked_rows.as_deref().unwrap_or(&rows),
-                            window,
-                            &mut writer,
-                            &pairwise_config,
-                            &pairwise_queries,
-                            &query_titles,
-                            &subject_titles,
-                            listed_parsed,
-                            &pairwise_report,
-                            rps_gapped_k.as_deref(),
-                            pairwise_database.as_ref(),
-                            None,
-                            warnings.as_mut(),
-                            reports.x_prolog,
-                            reports.epilog,
-                            x_pool,
-                        )?;
-                    }
-                    return Ok(());
-                }
-                let pairwise_hits = pairwise_hits
-                    .as_ref()
-                    .expect("pairwise hits prepared for blastp outfmt 0");
                 // NCBI makes the titles of the subjects that the report shows, those with
                 // hits (blast_format.cpp:1540); LOSAT rejects the titles that it does not
-                // write as NCBI (`check_shown_subject_titles`).
-                let shown: std::collections::BTreeSet<usize> = pairwise_hits
+                // write as NCBI (`check_shown_subject_titles`), before the report's first byte.
+                // The shown subjects are those of the final lists (the rows' subjects).
+                let shown: std::collections::BTreeSet<usize> = hit_lists
                     .iter()
-                    .map(|hit| hit.hit.s_idx as usize)
+                    .flatten()
+                    .flat_map(|hit_list| hit_list.hsplist_array.iter().take(hit_list.hsplist_count))
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| hsp.s_idx as usize)
                     .collect();
                 match listed_titles.as_ref() {
                     Some(titles) => titles.check_shown_titles(
@@ -13365,69 +13254,93 @@ fn run_resolved_in_pool(
                 // blastp's results carry the query masks; psiblast's `CPsiBlastImpl::Run` returns
                 // the traceback's results without them (psiblast_impl.cpp:150), so its rows show
                 // no lowercase masking.
-                let masked_hits = match args.app {
-                    BlastpApp::Blastp | BlastpApp::Rpsblast => masked_query_rows(
-                        pairwise_hits,
-                        &query_frames,
-                        &ranges.query_input.placements,
-                    ),
+                let query_masks = match args.app {
+                    BlastpApp::Blastp | BlastpApp::Rpsblast => {
+                        let masks =
+                            query_record_masks(&query_frames, &ranges.query_input.placements);
+                        (!masks.iter().all(Vec::is_empty)).then_some(masks)
+                    }
                     BlastpApp::Psiblast => None,
                 };
-                // `-lcase_masking`: the subject rows show their records' lower case too.
-                let x_subject_rows = args.lcase_masking.then(|| {
-                    x_soft_subject::x_masked_subject_rows(
-                        masked_hits.as_deref().unwrap_or(pairwise_hits),
-                        subject_records,
-                        ranges.subject_placements,
-                    )
-                });
-                let shown_rows = x_subject_rows
-                    .as_deref()
-                    .or(masked_hits.as_deref())
-                    .unwrap_or(pairwise_hits);
-                // psiblast's rounds: the round's report (`psiblast_round`), without the epilog.
-                if let Some(io) = reports.psi_round {
-                    crate::report::pairwise::psiblast_round::write_psiblast_round_report(
-                        shown_rows,
-                        &mut *writer,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
+                // ```c++
+                // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+                // ```
+                // The windows of queries whose rows are made and written together
+                // (`query_rows::row_windows`); one window of every query when the rows were
+                // made up front (`rows_up_front`). Without a query, the prolog and the epilog.
+                // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the queries' parts formatted on the
+                // search's pool after the search (`report::x_pairwise_par`); with
+                // LOSAT_X_BPLKPAHEAD the next block's lookup build may still run on it.
+                let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
+                let mut windows = match pairwise_hits {
+                    Some(_) => vec![0..pairwise_queries.len()],
+                    None => query_rows::row_windows(&hit_lists, pairwise_queries.len(), x_pool),
+                };
+                if windows.is_empty() {
+                    windows.push(0..0);
+                }
+                for window in windows {
+                    let mut rows: std::borrow::Cow<'_, [PairwiseHit]> =
+                        match pairwise_hits.as_deref() {
+                            Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
+                            None => std::borrow::Cow::Owned(rows_of(window.clone())?),
+                        };
+                    if let Some(masks) = query_masks.as_deref() {
+                        mask_query_rows(rows.to_mut(), masks);
+                    }
+                    // `-lcase_masking`: the subject rows show their records' lower case too.
+                    if args.lcase_masking {
+                        rows = std::borrow::Cow::Owned(x_soft_subject::x_masked_subject_rows(
+                            &rows,
+                            subject_records,
+                            ranges.subject_placements,
+                        ));
+                    }
+                    // psiblast's rounds: the round's report (`psiblast_round`), without the
+                    // epilog.
+                    if let Some(io) = reports.psi_round {
+                        crate::report::pairwise::psiblast_round::write_psiblast_round_report(
+                            &rows,
+                            window,
+                            &mut *writer,
+                            &pairwise_config,
+                            &pairwise_queries,
+                            &query_titles,
+                            &subject_titles,
+                            listed_parsed,
+                            &pairwise_report,
+                            pairwise_database.as_ref(),
+                            probe.as_mut(),
+                            warnings.as_mut(),
+                            reports.x_prolog,
+                            crate::report::pairwise::psiblast_round::ReportRound {
+                                number: io.state.number(),
+                                found_before: psi_found_before.as_deref(),
+                            },
+                        )?;
+                        continue;
+                    }
+                    write_blastp_pairwise_window(
+                        &rows,
+                        window,
+                        &mut writer,
                         &pairwise_config,
                         &pairwise_queries,
                         &query_titles,
                         &subject_titles,
                         listed_parsed,
                         &pairwise_report,
+                        // rpsblast: the gapped K of the RPS traceback (`rps_hooks::rps_search`).
+                        rps_gapped_k.as_deref(),
                         pairwise_database.as_ref(),
                         probe.as_mut(),
                         warnings.as_mut(),
                         reports.x_prolog,
-                        crate::report::pairwise::psiblast_round::ReportRound {
-                            number: io.state.number(),
-                            found_before: psi_found_before.as_deref(),
-                        },
+                        reports.epilog,
+                        x_pool,
                     )?;
-                    return Ok(());
                 }
-                write_blastp_pairwise_report(
-                    shown_rows,
-                    &mut writer,
-                    &pairwise_config,
-                    &pairwise_queries,
-                    &query_titles,
-                    &subject_titles,
-                    listed_parsed,
-                    &pairwise_report,
-                    // rpsblast: the gapped K of the RPS traceback (`rps_hooks::rps_search`).
-                    rps_gapped_k.as_deref(),
-                    pairwise_database.as_ref(),
-                    probe.as_mut(),
-                    warnings.as_mut(),
-                    reports.x_prolog,
-                    reports.epilog,
-                    // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the queries' parts formatted on the
-                    // search's pool after the search (`report::x_pairwise_par`); with
-                    // LOSAT_X_BPLKPAHEAD the next block's lookup build may still run on it.
-                    crate::report::x_pairwise_par::pool(blastp_parallel_pool),
-                )?;
                 Ok(())
             })(),
             BlastpReport::CustomTabular(spec) => (|| -> Result<()> {
@@ -13510,10 +13423,6 @@ fn run_resolved_in_pool(
                     subjects: tabular_subjects,
                     unsearched: &query_batch_skipped,
                     hits_found: psiblast_hits_found.as_deref(),
-                    rows: needs
-                        .rows
-                        .then_some(pairwise_hits.as_deref().map(Vec::as_slice))
-                        .flatten(),
                     prolog: reports.x_prolog,
                     epilog: reports
                         .epilog
@@ -13524,12 +13433,22 @@ fn run_resolved_in_pool(
                     },
                     names: names.as_ref(),
                 };
+                // The rows of the queries' HSPs when a field shows them, a window at a time
+                // (`query_rows`).
+                let mut rows = needs.rows.then(|| {
+                    query_rows::QueryRows::new(
+                        query_rows::row_windows(&hit_lists, hit_lists.len(), x_rows_pool),
+                        pairwise_hits.as_deref().map(Vec::as_slice),
+                        &rows_of,
+                    )
+                });
                 super::tabular::write_blastp_tabular(
                     &tab,
                     &hit_lists,
                     &mut writer,
                     warnings.as_mut(),
                     probe.as_mut(),
+                    rows.as_mut(),
                 )?;
                 // Flushed when written, as the default tabular report is (below).
                 writer.flush()?;

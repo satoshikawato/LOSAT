@@ -6272,7 +6272,8 @@ mod tblastx_tests {
 
     /// A BLASTP pairwise report written a window of queries at a time (the rows of a caller that
     /// makes them window by window) is the report written at once: the prolog with the first
-    /// window, the epilog with the last, the query indices global.
+    /// window, the epilog with the last, the query indices global. So is a psiblast round's report
+    /// (`psiblast_round`, the prolog with the first window, no epilog), also in two parts.
     #[test]
     fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         let karlin = KarlinParams {
@@ -6394,6 +6395,50 @@ mod tblastx_tests {
                 String::from_utf8_lossy(&windowed),
                 String::from_utf8_lossy(&at_once)
             );
+        }
+        let round_config = PairwiseConfig {
+            program: "psiblast".to_string(),
+            ..config.clone()
+        };
+        for found_before in [None, Some(&[true][..])] {
+            let round = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {
+                psiblast_round::write_psiblast_round_report(
+                    rows,
+                    range,
+                    out,
+                    &round_config,
+                    &queries,
+                    &query_titles,
+                    &subject_titles,
+                    &parsed,
+                    &report,
+                    None,
+                    None,
+                    None,
+                    true,
+                    psiblast_round::ReportRound {
+                        number: 2,
+                        found_before,
+                    },
+                )
+                .unwrap();
+            };
+            let mut at_once = Vec::new();
+            round(0..4, &hits, &mut at_once);
+            let text = String::from_utf8_lossy(&at_once).into_owned();
+            assert!(text.contains("Results from round 2") && text.contains("Query_3"));
+            for windows in [vec![0..1, 1..4], vec![0..2, 2..3, 3..4]] {
+                let mut windowed = Vec::new();
+                for window in windows {
+                    let rows: Vec<PairwiseHit> = hits
+                        .iter()
+                        .filter(|hit| window.contains(&(hit.hit.q_idx as usize)))
+                        .cloned()
+                        .collect();
+                    round(window, &rows, &mut windowed);
+                }
+                assert_eq!(String::from_utf8_lossy(&windowed), text);
+            }
         }
     }
 }

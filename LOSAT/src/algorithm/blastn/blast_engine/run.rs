@@ -18994,6 +18994,18 @@ fn search_query_chunks(
     // and stop with a CCoreException that names its build's files. LOSAT searches each chunk
     // once, as NCBI does for every overlap that does not split a chunk again (approved
     // exception 1 of PD-LOSAT-NCBI-DEFECTS).
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+    // ```c
+    //     _ASSERT(setup_data->m_QuerySplitter->IsQuerySplit() == false);
+    // ```
+    // (each chunk's setup builds its own query splitter; only a debug build asserts.)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
+    // ```c
+    //     // 5. Create the lookup table
+    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+    //         LookupTableWrap* lut =
+    // ```
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.count());
     merged.resize_with(queries.count(), || None);
     // No NCBI counterpart (memory placement only, `x_query_sentinels`): the chunks' query buffer,

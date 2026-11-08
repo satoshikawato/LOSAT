@@ -185,8 +185,8 @@ formatter, and the api tests of PSI-BLAST, the PSSM engine, RPS-BLAST, the seque
 preliminary search, the setup factory, uniform search and the version and reference strings:
 405 cases (`NCBI_CASES.tsv` 696 -> 1,101), 62 of which NCBI compiles out. Each compiled case was
 graded against the NCBI case and the LOSAT code, and a second reader checked every row above
-`n-a`. The new rows: 56 `ported`, 75 `partial`, 13 `e2e`, 16 `to-port`, 16 `superseded` and
-229 `n-a` (the 62 compiled out; the others need GI or alias-file lists, the object manager,
+`n-a`. The new rows: 55 `ported`, 80 `partial`, 12 `e2e`, 15 `to-port`, 15 `superseded` and
+228 `n-a` (the 62 compiled out; the others need GI or alias-file lists, the object manager,
 sequences fetched by id, an option or program LOSAT refuses such as `-in_msa`, deltablast or
 rpsblast, or are C++ API plumbing with no LOSAT counterpart). Notes that cite LOSAT lines start
 with `evidence (a20ad436):`.

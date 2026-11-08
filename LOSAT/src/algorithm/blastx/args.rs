@@ -1105,10 +1105,12 @@ impl BlastxArgs {
         // `run_local` sets the field itself: NCBI's errors, then LOSAT's limit.
         if let Some(word) = self.word_size {
             if word <= 0 {
-                return Err(SemanticOptionsError("Word-size must be greater than zero").into());
+                return Err(
+                    SemanticOptionsError::from("Word-size must be greater than zero").into(),
+                );
             }
             if word > 7 {
-                return Err(SemanticOptionsError(
+                return Err(SemanticOptionsError::from(
                     "Word-size must be less than 8 for a tblastn, blastp or blastx search",
                 )
                 .into());

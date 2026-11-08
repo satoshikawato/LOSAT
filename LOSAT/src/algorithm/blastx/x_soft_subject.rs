@@ -497,6 +497,7 @@ mod tests {
                 .unwrap();
                 let mut seeds = Vec::new();
                 let hits = x_word_finder(
+                    super::super::seed::Blosum62Bx,
                     &batch,
                     &params,
                     &options,

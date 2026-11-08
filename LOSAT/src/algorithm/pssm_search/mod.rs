@@ -77,6 +77,10 @@ pub struct PsiSearch {
     /// all zero, the composition-based statistics reset to mode 1), which the query's warning
     /// line carries (`algorithm::psiblast::in_pssm::setup_messages`).
     pub(crate) setup_messages: Vec<String>,
+    /// The title of the query's warning label when it is not the record's: a PSSM query's
+    /// (`CBlastQuerySourceBioseqSet::GetTitle`, `algorithm::psiblast::in_pssm`); `None` for a FASTA
+    /// query's later rounds, whose label keeps the record's title.
+    pub(crate) warning_title: Option<Vec<u8>>,
 }
 
 impl PsiSearch {
@@ -204,6 +208,7 @@ impl PsiSearch {
             query,
             validation_error: None,
             setup_messages,
+            warning_title: None,
         }
     }
 }

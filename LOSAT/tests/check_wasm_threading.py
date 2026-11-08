@@ -228,6 +228,29 @@ def main():
                 if kind not in prefixes: continue
                 data, log = execute(f"dev-null/{program}-{kind}-n{n}", [*prefixes[kind], *empty_args, "-num_threads", str(n)])
                 assert data == empty and log == empty_log, f"output or messages differ: dev-null/{program}-{kind}-n{n}"
+            # No NCBI counterpart (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 8): a -query or
+            # -subject named .gz, .bz2 or .zst is inflated beside the input before it is read
+            # (LOSAT/src/blastinput/input_files.rs), so the report is the plain file's. Rust's
+            # temp_dir() panics on the WASI targets; the commands must not reach it.
+            import bz2, gzip
+            packed_dir = out / "compressed-inputs"
+            packed_dir.mkdir(parents=True, exist_ok=True)
+            plain = Path(inputs[query]).read_bytes()
+            packed = {".gz": gzip.compress(plain), ".bz2": bz2.compress(plain),
+                      ".zst": subprocess.run(["zstd", "-q", "-c"], input=plain, capture_output=True, check=True).stdout}
+            plain_args = [program, "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
+            reference, _ = execute(f"compressed/{program}-native-plain", [*prefixes["native"], *plain_args, "-query", inputs[query]])
+            for suffix, data in packed.items():
+                name = packed_dir / f"{query}.fasta{suffix}"
+                name.write_bytes(data)
+                for kind, n in [("native", 1), ("serial", 1), ("threaded", 1), ("threaded", 4)]:
+                    if kind not in prefixes: continue
+                    for role in ["query", "subject"]:
+                        roles = {"query": inputs[query], "subject": inputs[query], role: name}
+                        result, _ = execute(f"compressed/{program}-{kind}-n{n}-{role}{suffix}",
+                                            [*prefixes[kind], program, "-query", roles["query"], "-subject", roles["subject"],
+                                             "-outfmt", "6", "-out", "{out}", "-num_threads", str(n)])
+                        assert result == reference, f"raw output differs: compressed/{program}-{kind}-n{n}-{role}{suffix}"
     # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
     # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
     # Unported format routes must reject explicitly before starting any worker

@@ -66,7 +66,7 @@ use crate::utils::genetic_code::GeneticCode;
 
 const PROGRAM: &str = "TBLASTX";
 /// The `# TBLASTX 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
-const PROGRAM_VERSION: &str = "TBLASTX 2.17.0+";
+const PROGRAM_VERSION: &str = concat!("TBLASTX ", crate::ncbi_blast_version!());
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:970-986
 // ```c++

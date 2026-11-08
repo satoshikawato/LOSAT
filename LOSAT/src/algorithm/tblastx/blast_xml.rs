@@ -234,7 +234,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     );
     let xml_run = XmlRun {
         program: "tblastx",
-        version: "TBLASTX 2.17.0+",
+        version: concat!("TBLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name: db_name.as_bytes(),
         matrix: Some(matrix),

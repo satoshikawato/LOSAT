@@ -474,7 +474,7 @@ fn run_query_pssm(
         inclusion_ethresh,
         PssmQueryRecord {
             letters,
-            id: "Query_1",
+            id: &crate::report::serial::pssm::ObjectId::Str(b"Query_1".to_vec()),
             title: b"a title",
         },
         alignments,

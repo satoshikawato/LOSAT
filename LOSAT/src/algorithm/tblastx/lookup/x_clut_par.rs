@@ -131,8 +131,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 // No NCBI counterpart: how the build is divided among the pool's threads. Scheduling only.
-/// The fewest stripes per thread.
-const X_PARTS_PER_THREAD: usize = 8;
+/// The fewest stripes per thread: many small stripes, so that the tasks of the stripes pass end
+/// together and the stripe fill's copy (`x_stripe_fill`: a task's copy of one stripe's appends)
+/// stays small; the copies of all tasks hold about `1 / X_PARTS_PER_THREAD` of the table's hits
+/// (item SC2d-2).
+const X_PARTS_PER_THREAD: usize = 64;
 /// Chunks per thread: many small chunks, so that the tasks of the appends pass end together and each
 /// task's scratch (`XAppendsScratch`) stays small.
 const X_CHUNKS_PER_THREAD: usize = 64;

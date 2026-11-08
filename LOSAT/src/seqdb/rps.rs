@@ -165,6 +165,77 @@ pub(crate) fn canonical_volume_path(base: &Path) -> String {
         .into_owned()
 }
 
+/// A `.freq` file read at offsets: the file itself where the platform has positioned reads, else
+/// (WASI, which refuses rpsblast anyway) its bytes in the heap.
+enum FreqSource {
+    #[cfg(any(unix, windows))]
+    File(std::fs::File),
+    #[cfg(not(any(unix, windows)))]
+    Heap(Vec<u8>),
+}
+
+impl FreqSource {
+    fn open(path: &Path) -> std::io::Result<Self> {
+        #[cfg(any(unix, windows))]
+        {
+            std::fs::File::open(path).map(FreqSource::File)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            std::fs::read(path).map(FreqSource::Heap)
+        }
+    }
+
+    fn len(&self) -> std::io::Result<usize> {
+        #[cfg(any(unix, windows))]
+        {
+            let FreqSource::File(file) = self;
+            Ok(usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let FreqSource::Heap(bytes) = self;
+            Ok(bytes.len())
+        }
+    }
+
+    /// Fills `buf` from the bytes at `offset`.
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            let FreqSource::File(file) = self;
+            file.read_exact_at(buf, offset)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileExt;
+            let FreqSource::File(file) = self;
+            let mut done = 0;
+            while done < buf.len() {
+                let n = file.seek_read(&mut buf[done..], offset + done as u64)?;
+                if n == 0 {
+                    return Err(std::io::ErrorKind::UnexpectedEof.into());
+                }
+                done += n;
+            }
+            Ok(())
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let FreqSource::Heap(bytes) = self;
+            let start = usize::try_from(offset).unwrap_or(usize::MAX);
+            let end = start.saturating_add(buf.len());
+            buf.copy_from_slice(
+                bytes
+                    .get(start..end)
+                    .ok_or(std::io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+    }
+}
+
 /// One volume's `.aux`, `.loo` and `.rps`, checked against the volume's sequences.
 pub(crate) struct RpsVolumeFiles {
     pub(crate) aux: RpsAux,
@@ -183,8 +254,10 @@ pub(crate) struct RpsVolumeFiles {
     narrow: Option<Vec<[i32; 28]>>,
     /// The presence bits of the backbone's cells (`lookup->pv`).
     pv: Vec<u64>,
-    /// The mapped `.freq` file (frequency ratios), opened by [`Self::open_freq`].
-    freq: Option<MappedFile>,
+    /// The `.freq` file (frequency ratios), opened by [`Self::open_freq`]: read by `pread`, not
+    /// mapped, so that its pages never count in the resident set (a CDD volume's is 81 MB; the
+    /// redo of a search touches almost all of it).
+    freq: Option<FreqSource>,
 }
 
 impl RpsVolumeFiles {
@@ -416,11 +489,10 @@ impl RpsVolumeFiles {
         };
         let mut path = base.as_os_str().to_os_string();
         path.push(".freq");
-        let freq = MappedFile::open(&PathBuf::from(path)).map_err(|_| missing())?;
-        let magic = freq
-            .i32s(0, 1)
-            .and_then(|magic| magic.first().copied())
-            .ok_or_else(missing)?;
+        let freq = FreqSource::open(&PathBuf::from(path)).map_err(|_| missing())?;
+        let mut magic = [0u8; 4];
+        freq.read_at(&mut magic, 0).map_err(|_| missing())?;
+        let magic = i32::from_le_bytes(magic);
         if magic != RPS_MAGIC_NUM && magic != RPS_MAGIC_NUM_28 {
             return Err(missing());
         }
@@ -428,7 +500,7 @@ impl RpsVolumeFiles {
         let needed = num_rows
             .checked_mul(self.alphabet * 4)
             .and_then(|bytes| bytes.checked_add(self.rows_start()));
-        if needed.is_none_or(|needed| freq.len() < needed) {
+        if needed.is_none_or(|needed| freq.len().map_or(true, |len| len < needed)) {
             return Err(RpsOpenError::Refused(
                 "a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's RPSBLAST".to_string(),
             ));
@@ -497,24 +569,31 @@ impl RpsVolumeFiles {
     /// ```c
     /// #define FREQ_RATIO_SCALE 1000000000
     /// ```
-    pub(crate) fn freq_ratios(&self, start: usize, count: usize, out: &mut Vec<[f64; 28]>) {
+    pub(crate) fn freq_ratios(
+        &self,
+        start: usize,
+        count: usize,
+        bytes: &mut Vec<u8>,
+        out: &mut Vec<[f64; 28]>,
+    ) -> std::io::Result<()> {
         out.clear();
         let Some(freq) = self.freq.as_ref() else {
-            return;
+            return Ok(());
         };
-        let flat = freq
-            .i32s(
-                self.rows_start() + start * self.alphabet * 4,
-                count * self.alphabet,
-            )
-            .expect("checked by `open_freq`");
-        out.extend(flat.chunks_exact(self.alphabet).map(|row| {
+        bytes.resize(count * self.alphabet * 4, 0);
+        freq.read_at(
+            bytes,
+            (self.rows_start() + start * self.alphabet * 4) as u64,
+        )?;
+        out.extend(bytes.chunks_exact(self.alphabet * 4).map(|row| {
             let mut ratios = [0.0f64; 28];
-            for (ratio, &value) in ratios.iter_mut().zip(row) {
-                *ratio = f64::from(value) / 1_000_000_000.0;
+            for (ratio, value) in ratios.iter_mut().zip(row.chunks_exact(4)) {
+                *ratio = f64::from(i32::from_le_bytes([value[0], value[1], value[2], value[3]]))
+                    / 1_000_000_000.0;
             }
             ratios
         }));
+        Ok(())
     }
 
     /// Every hit of the table names a position whose word lies in the concatenated rows
@@ -749,12 +828,13 @@ mod tests {
     fn the_freq_rows_have_the_rps_alphabets_stride() {
         let dir = scratch("freq");
         let mut ratios = Vec::new();
+        let mut bytes = Vec::new();
         // 28 columns on both sides: rows as written, ÷ 10^9.
         let base = write_volume(&dir, 28, AUX);
         write_freq(&base, 28);
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
         files.open_freq(&base).unwrap();
-        files.freq_ratios(4, 2, &mut ratios);
+        files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
         assert_eq!(ratios.len(), 2);
         assert_eq!(ratios[0][0], 4000.0 / 1e9);
         assert_eq!(ratios[1][27], 5027.0 / 1e9);
@@ -764,7 +844,7 @@ mod tests {
         write_freq(&base, 28);
         let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
         files.open_freq(&base).unwrap();
-        files.freq_ratios(2, 1, &mut ratios);
+        files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
         let flat: Vec<i32> = (0..7)
             .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
             .collect();

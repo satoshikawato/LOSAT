@@ -52,6 +52,8 @@ pub(crate) struct RpsTraceScratch {
     pub(super) pssm: QueryPssm,
     /// The frequency ratios of the profile being redone.
     pub(super) ratios: Vec<[f64; 28]>,
+    /// The bytes of those rows as the `.freq` file holds them.
+    pub(super) freq_bytes: Vec<u8>,
 }
 
 impl RpsTraceScratch {
@@ -60,6 +62,7 @@ impl RpsTraceScratch {
             gap: PssmGapScratch::new(),
             pssm: QueryPssm { rows: Vec::new() },
             ratios: Vec::new(),
+            freq_bytes: Vec::new(),
         }
     }
 }

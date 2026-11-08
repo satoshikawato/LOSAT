@@ -577,6 +577,13 @@ pub(super) fn rps_search(
             options: rps,
         };
         let traced = engine.search_volume(&files, &consensus, pool)?;
+        // The volume's mappings and per-volume data go before the next volume is opened (and
+        // before its lists are merged): at most one volume's pages are resident.
+        drop(engine);
+        drop(masked);
+        drop(consensus);
+        let aux_karlin_k = files.aux.karlin_k.clone();
+        drop(files);
         // The volume's local ordinal ids become the database's.
         let start = starts[index];
         let mut lists: Vec<Option<BlastpHitList>> = Vec::with_capacity(traced.len());
@@ -597,7 +604,7 @@ pub(super) fn rps_search(
             gapped_k = batch_gapped_k(
                 &run.batches,
                 &k_marks,
-                &files.aux.karlin_k,
+                &aux_karlin_k,
                 run.gapped_params.k,
                 cbs > 0,
             );

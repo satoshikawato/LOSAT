@@ -104,7 +104,11 @@ impl RpsTraceback<'_> {
                 continue;
             }
             let consensus = &self.consensus[start..start + length];
-            redo.files.freq_ratios(start, length, &mut scratch.ratios);
+            redo.files
+                .freq_ratios(start, length, &mut scratch.freq_bytes, &mut scratch.ratios)
+                .map_err(|error| {
+                    anyhow::anyhow!("a profile database whose .freq file cannot be read ({error}) is not supported by LOSAT's RPSBLAST")
+                })?;
             let Some(info) = PosMatrixInfo::new(
                 consensus,
                 &scratch.ratios,

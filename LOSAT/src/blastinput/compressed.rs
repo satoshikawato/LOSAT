@@ -1,8 +1,8 @@
 //! Compressed FASTA inputs: a file whose name ends in `.gz`, `.bz2` or `.zst` (in any case) is
 //! read through the matching decoder, the rule by which NCBI's makeblastdb reads its `-in` files
-//! (line GZ, DECISIONS 1, 2, 4, 8 and 9). The decoders are pure Rust (flate2's miniz_oxide
-//! backend for deflate, bzip2's libbz2-rs-sys backend, ruzstd), as the pure-Rust runtime boundary
-//! requires.
+//! (line GZ, DECISIONS 1, 2, 4, 8 and 9). The decoders are pure Rust (flate2's zlib-rs backend,
+//! a port of zlib's inflate, for deflate; bzip2's libbz2-rs-sys backend; ruzstd), as the pure-Rust
+//! runtime boundary requires.
 //!
 //! A `.gz` file is read as makeblastdb's `CDecompressIStream(f, eGZipFile)` reads it
 //! (`GzipMembers`, a port of `CZipDecompressor` with the flags `fGZip`): each member's header is
@@ -128,7 +128,7 @@ impl<R: Read> Read for NonEmptySource<R> {
 /// ```
 const MAX_HEADER_SIZE: usize = 1024 * 4;
 
-/// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:135-145
+/// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:137-146
 /// ```c++
 /// // gzip magic header
 /// const unsigned char gz_magic[2] = {0x1f, 0x8b};
@@ -156,7 +156,7 @@ const Z_DEFLATED: u8 = 8;
 /// the header CRC, which is not checked. A name or comment without its NUL ends at the end of
 /// `buf` (so a name longer than `buf` makes a header of all of `buf`).
 ///
-/// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:148-209
+/// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:151-209
 /// ```c++
 /// static
 /// size_t s_CheckGZipHeader(const void* src_buf, size_t src_len,
@@ -272,10 +272,13 @@ enum GzipState {
 }
 
 /// The inflated bytes of a `.gz` file, read as makeblastdb reads them: a port of NCBI's
-/// `CZipDecompressor` with the flags of `CDecompressIStream::eGZipFile` (`fGZip`:
-/// `fCheckFileHeader`, `fAllowConcatenatedGZip`; not `fAllowTransparentRead` nor
-/// `fAllowEmptyData`), as `CCompressionStreambuf` drives it. What makeblastdb reads, this reads
-/// (the same bytes); where makeblastdb's stream fails, the read fails, with LOSAT's message.
+/// `CZipDecompressor` with the flags of `CDecompressIStream::eGZipFile` (`fGZip` =
+/// `fCheckFileHeader | fWriteGZipFormat | fAllowConcatenatedGZip`, of which `fWriteGZipFormat`
+/// concerns only the compressor; not `fAllowTransparentRead` nor `fAllowEmptyData`), as
+/// `CCompressionStreambuf` drives it. Where makeblastdb's stream gives bytes, this gives the same
+/// bytes; where it fails, the read fails, with LOSAT's message (line GZ, DECISIONS 5, narrowed for
+/// `.gz` by swebok-improve SW8 DECISIONS 38 and 41: a damaged or cut-short `.gz` is refused where
+/// makeblastdb's decompressor fails).
 ///
 /// The rules, at each header check (the start of the file and the end of each member's data):
 /// - the header is looked for in the next `MAX_HEADER_SIZE` bytes (`check_gzip_header`); where
@@ -291,11 +294,15 @@ enum GzipState {
 ///   was then kept for the check, and makeblastdb inflates it in `Finish`) and inflated to no
 ///   bytes at all: the reading then ends there without an error.
 ///
-/// The deflate data is inflated by flate2 (miniz_oxide) where makeblastdb calls zlib's
-/// `inflate()`: the same bytes, the same consumed input at a stream's end. Where the bytes are
-/// not deflate data at all (garbage after the last member), miniz_oxide may find the fault at
-/// another byte than zlib or accept a damaged Huffman table that zlib refuses; both then fail or
-/// accept as their inflaters do.
+/// The deflate and zlib data is inflated by flate2's zlib-rs backend, a Rust port of zlib's
+/// `inflate.c` and `inftrees.c`, where makeblastdb calls the system's zlib `inflate()` (the
+/// official Linux build links `libz.so.1`) with `Z_SYNC_FLUSH`, window bits 15 (raw: -15), and
+/// a new stream for each member (`inflateEnd` + `inflateInit2_`, so no match reaches into an
+/// earlier member): the same checks (a distance past the start of the window, a missing
+/// end-of-block code, incomplete or over-subscribed code sets), the same input consumed when the
+/// data runs out. flate2's default backend, miniz_oxide, reads some data that zlib refuses and
+/// refuses some that zlib waits on. A host whose `libz.so.1` is another inflater (zlib-ng in its
+/// zlib-compatible build) could in principle differ from zlib where the data is damaged.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/stream_util.cpp:47, 166-177
 /// ```c++
@@ -315,7 +322,7 @@ enum GzipState {
 ///             processor = new CZipStreamDecompressor(flags);
 ///         }
 /// ```
-/// c++/include/util/compress/zlib.hpp:103-104, 117-120
+/// c++/include/util/compress/zlib.hpp:103-104, 118-120
 /// ```c++
 ///         /// Check (and skip) gzip file header on decompression stage
 ///         fCheckFileHeader       = (1<<2),
@@ -398,7 +405,9 @@ impl<R: BufRead> GzipMembers<R> {
     /// ```
     /// The cache is filled from the input until it holds `kMaxHeaderSize` bytes; with fewer
     /// bytes left in the file, the input ends first and the check is made in `Finish`, on the rest
-    /// of the file (`rest_in_cache`). The window bits are `MAX_WBITS` (15), flate2's.
+    /// of the file (`rest_in_cache`). The window bits are `MAX_WBITS` (15), flate2's. `reset`
+    /// starts a new stream with an empty window, as `inflateEnd` + `inflateInit2_` do: a match of
+    /// a later member cannot reach back into the member before.
     fn check_header(&mut self) -> io::Result<()> {
         self.cache.drain(..self.cache_at);
         self.cache_at = 0;
@@ -589,7 +598,7 @@ impl<R: BufRead> Read for GzipMembers<R> {
                         (self.inflater.total_in(), self.inflater.total_out());
                     let status =
                         self.inflater
-                            .decompress(input, buf, flate2::FlushDecompress::None);
+                            .decompress(input, buf, flate2::FlushDecompress::Sync);
                     let consumed = (self.inflater.total_in() - read_before) as usize;
                     let produced = (self.inflater.total_out() - given_before) as usize;
                     if from_cache {
@@ -1060,7 +1069,7 @@ mod tests {
             }
         }
 
-        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:148-209
+        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:151-209
         // (`s_CheckGZipHeader`). Oracle cases fhcrc_bad, fhcrc_ok, fextra, fname, fcomment, fall,
         // ftext, fname4000 (built); res20, res40, res80, cm7, fname5000, fextra5000, tiny2
         // (data error), hdr_only, hdr_plus2 (buffer error); hdr_plus1 ("No sequences added").
@@ -1127,7 +1136,7 @@ mod tests {
             );
         }
 
-        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:148-209: the header
+        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:151-209: the header
         // parser's lengths, at the edges of its window.
         #[test]
         fn the_header_parser_stops_at_the_end_of_its_window() {
@@ -1335,6 +1344,73 @@ mod tests {
             assert_eq!(refused("notgz", SMALL), "invalid gzip header");
             ok("onebyte", b"x", b"");
             ok("zlib_hdr_only", &[0x78, 0x9c], b"");
+        }
+
+        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1443-1447 and 1489
+        // ```c++
+        //                 Z(inflateEnd)(STREAM);
+        //                 int errcode = Z(inflateInit2_)(
+        //                                 STREAM, m_IsGZ ? -GetWindowBits() : GetWindowBits(),
+        //                                 ZLIB_VERSION, (int)sizeof(z_stream));
+        // ...
+        //         int errcode = Z(inflate)(STREAM, Z_SYNC_FLUSH);
+        // ```
+        // makeblastdb inflates with zlib, a new stream for each member: zlib's checks decide what
+        // is read (zlib-rs makes them as zlib does; miniz_oxide, flate2's default, did not). Oracle
+        // cases of the review of 2026-11-08 (swebok-improve SW8 DECISIONS 41): far_title (a
+        // distance past the bytes written so far), far_m2 (a second member's match reaching back
+        // into the first member), tail_noeob_aligned (a dynamic table without an end-of-block
+        // code), tail_sym16_full (code-length symbol 16 with no length before it): data error;
+        // tail_hclen_empty (a code-length code without lengths, the file ending before the code
+        // lengths) and tail_sym16_cut (symbol 16, the file ending before its 2 extra bits):
+        // built, the first member's record.
+        #[test]
+        fn zlib_checks_decide_what_is_read() {
+            let far_title = [
+                0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xb3, 0x2b, 0x34, 0x54,
+                0xa8, 0x00, 0xea, 0xe0, 0x72, 0x74, 0x76, 0x0f, 0x71, 0x74, 0x76, 0x0f, 0x71, 0x74,
+                0x76, 0x0f, 0x09, 0x09, 0x71, 0x77, 0x74, 0x76, 0x76, 0x74, 0x0f, 0x71, 0x74, 0x76,
+                0x77, 0x0c, 0x71, 0x76, 0xe7, 0x02, 0x00, 0xa7, 0x7d, 0x49, 0x5f, 0x26, 0x00, 0x00,
+                0x00,
+            ];
+            assert_eq!(refused("far_title", &far_title), "corrupt deflate stream");
+            // ">q2 y\n", then a match of 10 bytes at distance 40 (past the 6 bytes of this member),
+            // then text; the trailer is zero.
+            let m2_deflate = [
+                0xb3, 0x2b, 0x34, 0x52, 0xa8, 0xe4, 0x42, 0xa8, 0x73, 0x74, 0x76, 0x0f, 0x71, 0x74,
+                0x76, 0x0f, 0x71, 0x74, 0x76, 0x0f, 0x09, 0x09, 0x71, 0x77, 0x74, 0x76, 0x76, 0x74,
+                0x0f, 0x71, 0x74, 0x76, 0x77, 0x0c, 0x71, 0x76, 0xe7, 0x02, 0x00,
+            ];
+            let far_m2 = [
+                &small()[..],
+                &header(0, 8, None, None),
+                &m2_deflate,
+                &[0; 8],
+            ]
+            .concat();
+            assert_eq!(refused("far_m2", &far_m2), "corrupt deflate stream");
+            // Three empty fixed blocks, then a dynamic block whose table has the letters A and C
+            // and no end-of-block code.
+            let noeob = [
+                &[
+                    0x02, 0x08, 0x20, 0x40, 0x01, 0x78, 0x00, 0x24, 0x49, 0x92, 0x24, 0x49, 0x92,
+                ][..],
+                &[0; 32],
+                &[0x80, 0x80],
+                &[0; 95],
+            ]
+            .concat();
+            let after = |tail: &[u8]| [&small()[..], tail].concat();
+            assert_eq!(
+                refused("tail_noeob_aligned", &after(&noeob)),
+                "corrupt deflate stream"
+            );
+            ok("tail_hclen_empty", &after(&[0x04, 0x00, 0x00, 0x00]), SMALL);
+            ok("tail_sym16_cut", &after(&[0x04, 0x00, 0x24, 0x24]), SMALL);
+            assert_eq!(
+                refused("tail_sym16_full", &after(&[0x04, 0x00, 0x24, 0x24, 0x00])),
+                "corrupt deflate stream"
+            );
         }
     }
 }

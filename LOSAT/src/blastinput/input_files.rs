@@ -69,7 +69,7 @@ pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<s
 /// are read whole, and a `.gz` file as makeblastdb reads it (`compressed::GzipMembers`: a member's
 /// trailer is not checked). A file that is not what its name says, or is cut short (for `.gz`:
 /// where makeblastdb's decompressor fails), is refused here, before the search (line GZ,
-/// DECISIONS 3, 5 and 9).
+/// DECISIONS 3, 5 and 9; for `.gz` narrowed by swebok-improve SW8 DECISIONS 38 and 41).
 ///
 /// No NCBI counterpart: the NCBI search programs read such a file as text and stop at its first
 /// line (`CFastaReader: Near line 1, there's a line that doesn't look like plausible data`);
@@ -554,8 +554,8 @@ mod tests {
     }
 
     // No NCBI counterpart (line GZ, DECISIONS 5): a compressed name whose bytes are not that
-    // format, or are cut short, is refused with the file's name and the format; a file that does
-    // not open keeps NCBI's error.
+    // format, or are cut short (for `.gz`: where makeblastdb's decompressor fails), is refused
+    // with the file's name and the format; a file that does not open keeps NCBI's error.
     #[test]
     fn a_compressed_name_without_that_data_is_refused() {
         for compression in Compression::ALL {

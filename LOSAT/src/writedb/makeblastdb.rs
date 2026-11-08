@@ -850,7 +850,8 @@ impl Read for CompressedInput<'_> {
 }
 
 /// The sentence of a `-in` name ending in `.gz`, `.bz2` or `.zst` whose bytes are not that
-/// format, or are cut short (line GZ, DECISIONS 5): exit status 1, the files of the build removed.
+/// format, or are cut short (line GZ, DECISIONS 5; for `.gz`: where makeblastdb's decompressor
+/// fails, `compressed::GzipMembers`): exit status 1, the files of the build removed.
 fn compressed_fault_error(name: &str, compression: Compression, fault: &str) -> MakedbError {
     unsupported(format!(
         "-in: '{name}' is named {suffix} but is not {format} data ({fault}); LOSAT reads a file named {suffix} through {format}",

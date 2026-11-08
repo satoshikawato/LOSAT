@@ -136,8 +136,8 @@ As of dev 6ecdb2bf2 (2026-11-06).
 ## Decisions cited by log entry
 
 The heading names the log (the work line's folder name, as the repository cites it); Entry is the
-entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
-99 Owner-delegated, 6 records.
+entry's number in that log. 125 entries: 15 Owner, 3 Owner in part,
+101 Owner-delegated, 6 records.
 
 ### `blastdb-ids-20261021`: line DBID
 
@@ -217,14 +217,14 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2026-11-03 | Owner-delegated |  | A compressed input is recognised by a name ending in .gz (case-insensitive), as NCBI makeblastdb does, not by gzip magic; - is never decompressed. | gzip input recognition | `LOSAT/src/blastinput/compressed.rs:3`, `docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md:113` and 1 more |
+| 1 | 2026-11-03 | Owner-delegated |  | A compressed input is recognised by a name ending in .gz (case-insensitive), as NCBI makeblastdb does, not by gzip magic; - is never decompressed. | gzip input recognition | `LOSAT/src/blastinput/compressed.rs:3`, `docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md:114` and 1 more |
 | 2 | 2026-11-03 | Owner-delegated |  | Only gzip is read; .bz2 and .zst stay refused naming gzip as the supported format. | compressed inputs (superseded by 8) | `LOSAT/src/blastinput/compressed.rs:3` |
-| 3 | 2026-11-03 | Owner-delegated |  | Search programs inflate a .gz query or subject into an unnamed temporary file first and read it as a plain file; a damaged gzip is refused before the search. | gzip input mechanism | `LOSAT/src/blastinput/input_files.rs:70`, `LOSAT/src/blastinput/input_files.rs:444` and 2 more |
-| 4 | 2026-11-03 | Owner-delegated |  | Concatenated gzip members (bgzip) are read whole, as NCBI makeblastdb does. | gzip members | `LOSAT/src/blastinput/compressed.rs:3`, `LOSAT/src/blastinput/compressed.rs:286` and 2 more |
-| 5 | 2026-11-03 | Owner-delegated |  | A .gz that is not gzip or is cut short stops before any output with an explicit sentence, exit 1; NCBI's exit 6 text is not reproduced. | compressed input errors, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES | `LOSAT/src/blastinput/compressed.rs:310`, `LOSAT/src/blastinput/input_files.rs:70` and 5 more |
-| 8 | 2026-11-04 | Owner, in part | (no words recorded) | .bz2 and .zst join .gz for search inputs and makeblastdb (supersedes 2), using the pure-Rust bzip2 (libbz2-rs-sys) and ruzstd crates. | bz2 and zst inputs | `LOSAT/src/blastinput/compressed.rs:3`, `docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md:113` and 1 more |
-| 9 | 2026-11-04 | Owner-delegated |  | Concatenated bzip2 streams and zstd frames are all read; NCBI reads only the first and drops the rest silently, which LOSAT does not reproduce. | bz2/zst multi-stream, PD-LOSAT-NCBI-DEFECTS | `LOSAT/src/blastinput/compressed.rs:3`, `LOSAT/src/blastinput/compressed.rs:286` and 6 more |
-| 12 | 2026-11-04 | Owner | 「3もやろうよ」 | The inflated copy of a compressed -query / -subject is written beside the input file, falling back to TMPDIR, so a large query does not use RAM-backed /tmp. | gzip temporary copy location | `LOSAT/src/blastinput/input_files.rs:84`, `LOSAT/src/blastinput/input_files.rs:489` and 1 more |
+| 3 | 2026-11-03 | Owner-delegated |  | Search programs inflate a .gz query or subject into an unnamed temporary file first and read it as a plain file; a damaged gzip is refused before the search. Narrowed 2026-11-08 by swebok-improve SW8 DECISIONS 38 (D1) and 41 (Owner-delegated): for .gz, damaged or cut short = where makeblastdb's decompressor fails. | gzip input mechanism | `LOSAT/src/blastinput/input_files.rs:72`, `LOSAT/src/blastinput/input_files.rs:447` and 2 more |
+| 4 | 2026-11-03 | Owner-delegated |  | Concatenated gzip members (bgzip) are read whole, as NCBI makeblastdb does. | gzip members | `LOSAT/src/blastinput/compressed.rs:3`, `LOSAT/src/blastinput/compressed.rs:848` and 2 more |
+| 5 | 2026-11-03 | Owner-delegated |  | A .gz that is not gzip or is cut short stops before any output with an explicit sentence, exit 1; NCBI's exit 6 text is not reproduced. Narrowed 2026-11-08 by swebok-improve SW8 DECISIONS 38 (D1) and 41 (Owner-delegated): for .gz, damaged or cut short = where makeblastdb's decompressor fails. | compressed input errors, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES | `LOSAT/src/blastinput/compressed.rs:279`, `LOSAT/src/blastinput/input_files.rs:72` and 5 more |
+| 8 | 2026-11-04 | Owner, in part | (no words recorded) | .bz2 and .zst join .gz for search inputs and makeblastdb (supersedes 2), using the pure-Rust bzip2 (libbz2-rs-sys) and ruzstd crates. | bz2 and zst inputs | `LOSAT/src/blastinput/compressed.rs:3`, `docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md:114` and 1 more |
+| 9 | 2026-11-04 | Owner-delegated |  | Concatenated bzip2 streams and zstd frames are all read; NCBI reads only the first and drops the rest silently, which LOSAT does not reproduce. | bz2/zst multi-stream, PD-LOSAT-NCBI-DEFECTS | `LOSAT/src/blastinput/compressed.rs:3`, `LOSAT/src/blastinput/compressed.rs:848` and 6 more |
+| 12 | 2026-11-04 | Owner | 「3もやろうよ」 | The inflated copy of a compressed -query / -subject is written beside the input file, falling back to TMPDIR, so a large query does not use RAM-backed /tmp. | gzip temporary copy location | `LOSAT/src/blastinput/input_files.rs:86`, `LOSAT/src/blastinput/input_files.rs:492` and 1 more |
 
 ### `makedb-v5-20261029`: `losat makeblastdb` version 5 databases
 
@@ -313,6 +313,13 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-10-08 ABI v1 | 2026-10-08 | Owner-delegated |  | ABI v1 keeps the bio reader and its checks and enters run_local through FastaRecord::from_bio, so v1 outputs and messages do not change (planner Q1). | Web ABI v1 input reading | related entry (not cited) |
+
+### `swebok-improve-20261105/sw8`: line SW, stage SW8
+
+| Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
+| --- | --- | --- | --- | --- | --- | --- |
+| 38 | 2026-11-08 | Owner-delegated |  | D1: NCBI's makeblastdb reads a .gz file whose gzip trailer (CRC-32, ISIZE) is wrong or cut short and LOSAT refused it, a difference no product decision lists; LOSAT reads .gz as makeblastdb's CZipStreamDecompressor reads it (the header by makeblastdb's own parser, the trailer skipped unchecked), for makeblastdb -in and, by the same rule, -query and -subject (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 8). | .gz input | `LOSAT/src/blastinput/compressed.rs:280`, `LOSAT/src/blastinput/input_files.rs:72` |
+| 41 | 2026-11-08 | Owner-delegated |  | flate2's backend is zlib-rs, a pure-Rust port of zlib's inflate, not miniz_oxide: makeblastdb inflates with the system's zlib, and miniz_oxide reads data that zlib refuses (a distance past the start of the window, a block without its end code) and refuses data that zlib waits on. Not taken: listing these as known differences, or keeping the CRC check (makeblastdb does not check it). | flate2 backend, .gz input | `LOSAT/src/blastinput/compressed.rs:280`, `LOSAT/src/blastinput/compressed.rs:1360` and 1 more |
 
 ### `v4-A`: plan v4 line A
 

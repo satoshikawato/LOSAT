@@ -131,7 +131,8 @@ BLAST+.
    .gz through gzip` (`.bz2` / bzip2, `.zst` / zstd alike; exit code 1; outfmt 11 writes the
    error archive it writes for a file that does not open). A plain file, or a compressed file
    read through `-query -`, is unchanged, so no search result that NCBI can produce differs.
-   The decoders are pure Rust (flate2's miniz_oxide, bzip2's libbz2-rs-sys, ruzstd). Tests:
+   The decoders are pure Rust (flate2's zlib-rs, a port of zlib's inflate, bzip2's
+   libbz2-rs-sys, ruzstd). Tests:
    `LOSAT/tests/cli_smoke.rs` (`compressed_query_and_subject_read_as_the_plain_files` and the
    tests after it), `LOSAT/src/blastinput/compressed.rs` and
    `LOSAT/src/blastinput/input_files.rs`.

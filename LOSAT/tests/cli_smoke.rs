@@ -454,7 +454,8 @@ fn concatenated_parts_are_read_whole_with_the_plain_line_numbers() {
 }
 
 // No NCBI counterpart (line GZ, DECISIONS 5): a compressed name whose bytes are not that format
-// is refused before the search, with exit status 1, and `-` is read as it comes (never inflated).
+// (for `.gz`: that makeblastdb's decompressor fails on) is refused before the search, with exit
+// status 1, and `-` is read as it comes (never inflated).
 #[test]
 fn a_compressed_name_without_that_data_is_refused_before_the_search() {
     let subject = temp_path("text_subject", "fa");

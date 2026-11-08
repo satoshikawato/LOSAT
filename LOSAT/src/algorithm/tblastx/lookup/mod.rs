@@ -270,3 +270,6 @@ pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 //                                       query, location);
 // ```
 pub(crate) use backbone::x_pair_lut;
+
+#[cfg(test)]
+mod lookup_tests;

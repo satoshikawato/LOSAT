@@ -29,8 +29,9 @@ name = "losat"
 path = "src/main.rs"
 
 # The files of tests/ are modules of six suite binaries (tests/suites/<name>.rs, one `#[path]` module per
-# file) instead of one binary each; the three files that change the process environment or
-# process-wide state (the counting global allocator of thread_memory) stay alone.
+# file) instead of one binary each; the two files that change the process environment or
+# process-wide state (the counting global allocator of thread_memory) stay alone. Unit tests live in
+# the crate, next to the code they test (`#[cfg(test)]`).
 # tests/suite_layout.rs checks that every file is in exactly one test binary.
 [[test]]
 name = "blastn"
@@ -61,10 +62,6 @@ name = "blastn_report_stream_api"
 path = "tests/blastn_report_stream_api.rs"
 
 [[test]]
-name = "unit_tests"
-path = "tests/unit_tests.rs"
-
-[[test]]
 name = "thread_memory"
 path = "tests/thread_memory.rs"
 
@@ -72,7 +69,6 @@ path = "tests/thread_memory.rs"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 rayon = { version = "1.11", optional = true }
-libm = "0.2.15"
 indicatif = "0.18"
 rustc-hash = "2.1"
 # Compressed input (`-query`, `-subject`, `makeblastdb -in` named `.gz`, `.bz2` or `.zst`), with
@@ -105,16 +101,21 @@ ruzstd = "0.9"
 # of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
 # (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's
 # alignment through `mmap` and `mprotect` on Linux, which needs neither /proc nor
-# the C library). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# the C library), and the read-only mappings of the RPS-BLAST profile files
+# (`utils::mapped_file`, as NCBI's `CMemoryFile`). No BLAST behavior, foreign algorithm, NCBI runtime/build
 # dependency or libc-auxv feature (the pure-Rust runtime boundary,
-# tests/check_pure_rust_runtime_boundary.py, allows no direct libc call).
+# tests/check_pure_rust_runtime_boundary.py, allows no direct libc call). A caret requirement
+# like every other dependency: Cargo.lock fixes the exact version for every build from this
+# repository (CI and the release with --locked), and Dependabot moves it.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "=1.1.6", default-features = false, features = ["std", "param", "mm"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
-# `IsIStreamEmpty` (`input_files::has_stream_position`); only the three features those need.
+# `IsIStreamEmpty` (`input_files::has_stream_position`), and the read-only file mappings of the
+# RPS-BLAST profile files (`utils::mapped_file`: `CreateFileMappingW`, whose signature names
+# `SECURITY_ATTRIBUTES`, and `MapViewOfFile`); only the features those need.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemInformation"] }
 
 [features]
 default = ["parallel"]

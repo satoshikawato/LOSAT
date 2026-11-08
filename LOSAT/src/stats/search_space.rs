@@ -211,3 +211,7 @@ mod tests {
         assert!(ss.length_adjustment >= 0);
     }
 }
+
+#[cfg(test)]
+#[path = "search_space_ncbi_tests.rs"]
+mod search_space_ncbi_tests;

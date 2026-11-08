@@ -1,0 +1,2 @@
+BLAST query/options error: Word size larger than 5 is not supported for the identity scoring matrix
+Please refer to the BLAST+ user manual.

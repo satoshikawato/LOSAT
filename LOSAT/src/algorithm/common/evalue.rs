@@ -121,3 +121,11 @@ pub fn calculate_evalue_ncbi_style(
 pub fn bit_score(score: i32, params: &KarlinParams) -> f64 {
     calc_bit_score(score, params)
 }
+
+#[cfg(test)]
+#[path = "evalue_tests.rs"]
+mod evalue_tests;
+
+#[cfg(test)]
+#[path = "evalue_ncbi_tests.rs"]
+mod evalue_ncbi_tests;

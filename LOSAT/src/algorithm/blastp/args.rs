@@ -9,12 +9,6 @@ use crate::config::{ProteinScoringSpec, ScoringMatrix};
 pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
 use crate::blastinput::value_parsers::*;
 
-/// The message for `-task blastp-short`, which the search entrance printed for the task's
-/// word size (`blast_engine::check_options`) and which is now printed when the arguments
-/// are parsed.
-const BLASTP_SHORT_UNSUPPORTED: &str =
-    "-word_size 2 (the lookup table) is not supported by LOSAT's BLASTP";
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-876
 // ```c
 // switch (comp_stat_string[0]) {
@@ -79,14 +73,22 @@ pub enum BlastpCompositionMode {
 //         SetDiagPostPrefix("psiblast");
 //         SetDiagHandler(&m_bah, false);
 // ```
-/// The NCBI application whose search the blastp engine runs: blastp, or the first round of
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:117-119
+// ```c++
+//         SetDiagPostLevel(eDiag_Warning);
+//         SetDiagPostPrefix("rpsblast");
+//         SetDiagHandler(&bah, false);
+// ```
+/// The NCBI application whose search the blastp engine runs: blastp, the first round of
 /// psiblast (`algorithm/psiblast`), whose program is `ePSIBlast` (`eBlastTypePsiBlast` in the
-/// core) with the same search as blastp until a PSSM exists.
+/// core) with the same search as blastp until a PSSM exists, or rpsblast (`algorithm/rpsblast`),
+/// whose search blastp's driver hands to the RPS engine (`algorithm::rps_search`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlastpApp {
     #[default]
     Blastp,
     Psiblast,
+    Rpsblast,
 }
 
 impl BlastpApp {
@@ -96,6 +98,7 @@ impl BlastpApp {
         match self {
             BlastpApp::Blastp => "blastp",
             BlastpApp::Psiblast => "psiblast",
+            BlastpApp::Rpsblast => "rpsblast",
         }
     }
 
@@ -104,6 +107,7 @@ impl BlastpApp {
         match self {
             BlastpApp::Blastp => "BLASTP",
             BlastpApp::Psiblast => "PSIBLAST",
+            BlastpApp::Rpsblast => "RPSBLAST",
         }
     }
 }
@@ -365,17 +369,16 @@ pub struct BlastpArgs {
     //         retval.insert("blastp-short");
     //         retval.insert("blastp-fast");
     // ```
-    // `blastp-short` (word size 2, PAM30 9/1) is an NCBI task that LOSAT's BLASTP does not
-    // implement: it fails when the arguments are parsed, as the search entrance did
-    // (`blast_engine::check_options`).
-    #[arg(long, default_value = "blastp", value_parser = task_parser(&["blastp", "blastp-fast"], &[("blastp-short", BLASTP_SHORT_UNSUPPORTED)]))]
+    // `blastp-short` (word size 2, PAM30 9/1, `BlastpTaskOptions::create`) runs the lookup table
+    // of word size 2 (item SC3).
+    #[arg(long, default_value = "blastp", value_parser = task_parser(&["blastp", "blastp-fast", "blastp-short"], &[]))]
     pub task: String,
     // An omitted value keeps the default of the task (10).
-    #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
+    #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]")]
     pub evalue: Option<f64>,
-    #[arg(long, value_parser = blastp_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast]")]
+    #[arg(long, value_parser = blastp_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast; 16 (PAM30's) for blastp-short]")]
     pub threshold: Option<f64>,
-    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast]")]
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]")]
     pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
@@ -436,11 +439,14 @@ pub struct BlastpArgs {
     pub culling_limit: Option<i32>,
     #[arg(long)]
     pub ungapped: bool,
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion; 15 (PAM30's) for blastp-short]")]
     pub window_size: Option<i32>,
-    #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
+    #[arg(
+        long,
+        help = "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]"
+    )]
     pub matrix: Option<String>,
-    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11, or the matrix's best value]")]
+    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11, or the matrix's best value; 9 for blastp-short]")]
     pub gap_open: Option<i32>,
     #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1, or the matrix's best value]")]
     pub gap_extend: Option<i32>,
@@ -551,6 +557,10 @@ pub struct BlastpArgs {
     /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
     #[arg(skip)]
     pub psiblast_pssm: Option<crate::algorithm::psiblast::pssm::PsiblastPssmOptions>,
+    /// rpsblast's options that its RPS engine applies (`algorithm::rps_search`); `None` for
+    /// blastp and psiblast.
+    #[arg(skip)]
+    pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
@@ -649,7 +659,7 @@ impl BlastpTaskOptions {
                 options.lookup_table_type = BlastpLookupTableType::CompressedAaLookupTable;
                 options.chaining = true;
             }
-            _ => bail!("unsupported blastp task '{task}': expected one of blastp, blastp-fast"),
+            _ => bail!("unsupported blastp task '{task}': expected one of blastp, blastp-fast, blastp-short"),
         }
         Ok(options)
     }
@@ -719,7 +729,13 @@ pub struct ResolvedBlastpArgs {
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
     pub matrix_name: String,
     pub scoring: ProteinScoringSpec,
+    /// The composition mode that the search runs: the `-comp_based_stats` value, or mode 0 when
+    /// IDENTITY resets it (`identity_cbs_reset`; the archive records the value as given).
     pub comp_based_stats: BlastpCompBasedStats,
+    /// Whether IDENTITY reset a composition mode above 0 to 0 (NCBI's `CreateScoreBlock`): the
+    /// queries of the first query batch then have NCBI's warning
+    /// (`report::query_warnings::IDENTITY_CBS_RESET_MESSAGE`).
+    pub identity_cbs_reset: bool,
     pub seg: BlastpSegSpec,
     /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table
     /// but the searched query keeps its letters (`encoding.rs` `encode_query_frame`).
@@ -748,6 +764,9 @@ pub struct ResolvedBlastpArgs {
     /// (`algorithm::psiblast::in_pssm`); the search then runs the PSSM's stages
     /// (`algorithm::pssm_search`).
     pub psi_search: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// rpsblast: the RPS engine's options (`BlastpArgs::rps`); the search then runs the RPS
+    /// engine (`algorithm::rps_search`) in place of blastp's stages.
+    pub rps_search: Option<std::sync::Arc<crate::algorithm::rps_search::engine::RpsSearch>>,
     /// psiblast `-num_iterations` other than 1 for FASTA queries: the rounds that the round
     /// driver runs (`algorithm::psiblast::rounds`), with the PSSM files it writes.
     pub psi_rounds: Option<std::sync::Arc<crate::algorithm::psiblast::rounds::PsiRoundPlan>>,
@@ -792,7 +811,9 @@ impl ResolvedBlastpArgs {
 
     fn compute_traceback_hitlist_size(&self) -> usize {
         match self.app {
-            BlastpApp::Blastp => self.max_target_seqs,
+            // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,
+            // `Blast_HSPResultsInsertHSPList(results, hsp_list, hitlist_size)`).
+            BlastpApp::Blastp | BlastpApp::Rpsblast => self.max_target_seqs,
             BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
@@ -820,6 +841,15 @@ impl ResolvedBlastpArgs {
         match self.app {
             BlastpApp::Blastp => crate::blastinput::app::query_batch_size("BLASTP", 10000),
             BlastpApp::Psiblast => Ok(1),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
+            // ```c++
+            // CRPSBlastAppArgs::GetQueryBatchSize() const
+            // {
+            //     bool is_remote = (m_RemoteArgs.NotEmpty() && m_RemoteArgs->ExecuteRemotely());
+            //     return blast::GetQueryBatchSize(eRPSBlast, m_IsUngapped, is_remote);
+            // ```
+            // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
+            BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size("RPSBLAST", 10000),
         }
     }
 }
@@ -1095,6 +1125,36 @@ impl BlastpArgs {
         } else {
             mode
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155
+        // ```c++
+        //     if (opts_memento->m_ScoringOpts->matrix &&
+        //         strcasecmp("identity", opts_memento->m_ScoringOpts->matrix) == 0 &&
+        //         opts_memento->m_ExtnOpts->compositionBasedStats > 0) {
+        //
+        //         opts_memento->m_ExtnOpts->compositionBasedStats = 0;
+        // ...
+        //         search_messages.AddMessageAllQueries(eBlastSevWarning, 0, os.str());
+        //     }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3043
+        // ```c
+        //     int compositionTestIndex = extendParams->options->unifiedP;
+        // ```
+        // IDENTITY has no composition data: NCBI searches it in mode 0 whatever mode was asked,
+        // with a warning for each query of the first query batch (`identity_cbs_reset`; the reset
+        // stays in the options of the later batches, `blastp_app.cpp:274`), as TBLASTN
+        // (`tblastn::args`). The reset is made with the score block, before the HSP writer takes
+        // the preliminary hit list size (`blast_aux_priv.cpp:175-229`), so that size is mode 0's
+        // too; the unified P-values are read by the composition-based redo only, so a reset
+        // search has none. The BLAST archive records the mode as given (`archive.rs` reads
+        // `-comp_based_stats`).
+        let identity_cbs_reset = options.matrix_name.eq_ignore_ascii_case("identity")
+            && mode != CompositionMode::NoCompositionBasedStats;
+        let (mode, unified_p) = if identity_cbs_reset {
+            (CompositionMode::NoCompositionBasedStats, false)
+        } else {
+            (mode, unified_p)
+        };
         // NCBI's `Validate` (`BLAST_ValidateOptions`), shared with TBLASTN.
         validate_protein_options(&ProteinOptionsCheck {
             gapped: !self.ungapped,
@@ -1208,6 +1268,7 @@ impl BlastpArgs {
                 },
                 unified_p,
             },
+            identity_cbs_reset,
             seg: options.seg,
             soft_masking,
             lcase_masking: self.lcase_masking,
@@ -1219,6 +1280,7 @@ impl BlastpArgs {
             first_query_ordinal: self.first_query_ordinal,
             psi_pssm,
             psi_search,
+            rps_search: self.rps.clone().map(std::sync::Arc::new),
             psi_rounds,
             app: self.app,
             inclusion_ethresh: self
@@ -1227,6 +1289,17 @@ impl BlastpArgs {
             traceback_hitlist: 0,
             subject_taxdb_found: false,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-66 (no word
+        // threshold for RPS-BLAST: the reports print none, blast_format.cpp:2281-2284)
+        // ```c++
+        //     m_Opts->SetLookupTableType(eRPSLookupTable);
+        //     // N.B.: the word threshold is not set because for RPS-BLAST it CANNOT be
+        //     // done, i.e.: the RPS-BLAST databases already have this value encoded in
+        //     // them and therefore this value cannot be changed on an RPS-BLAST run
+        // ```
+        if resolved.rps_search.is_some() {
+            resolved.threshold = 0.0;
+        }
         resolved.traceback_hitlist = resolved.compute_traceback_hitlist_size();
         Ok(resolved)
     }
@@ -1322,6 +1395,61 @@ mod tests {
         assert_eq!(resolved.outfmt, "0");
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155 (IDENTITY's
+    // search runs mode 0 whatever mode was asked; NCBI 2.17.0's footers and reports of
+    // `-matrix IDENTITY` with modes 1, 2, 3, T and 2u equal those of mode 0, item SC4b)
+    #[test]
+    fn identity_resets_the_composition_mode_to_0() {
+        let no_cbs = BlastpCompBasedStats {
+            mode: BlastpCompositionMode::NoCompositionBasedStats,
+            unified_p: false,
+        };
+        for (matrix, cbs, reset) in [
+            ("IDENTITY", "2", true),
+            ("identity", "1", true),
+            ("Identity", "3", true),
+            ("IDENTITY", "T", true),
+            ("IDENTITY", "2u", true),
+            ("IDENTITY", "0", false),
+            ("IDENTITY", "F", false),
+            ("IDENTITY", "0u", false),
+        ] {
+            let cli = parse_cli([
+                "losat",
+                "blastp",
+                "-query",
+                "q.faa",
+                "-subject",
+                "s.faa",
+                "-matrix",
+                matrix,
+                "-comp_based_stats",
+                cbs,
+            ]);
+            let TestCommand::Blastp(args) = cli.command;
+            let resolved = args.resolve().expect("resolved blastp args");
+            assert_eq!(resolved.comp_based_stats, no_cbs, "{matrix} {cbs}");
+            assert_eq!(resolved.identity_cbs_reset, reset, "{matrix} {cbs}");
+            assert_eq!(resolved.scoring.matrix, ScoringMatrix::Identity);
+            assert_eq!(
+                (resolved.scoring.gap_open, resolved.scoring.gap_extend),
+                (15, 2)
+            );
+            assert_eq!((resolved.threshold, resolved.window_size), (27.0, 40));
+        }
+        // The other matrices keep their mode.
+        let cli = parse_cli([
+            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-matrix", "PAM30",
+        ]);
+        let TestCommand::Blastp(args) = cli.command;
+        let resolved = args.resolve().expect("resolved blastp args");
+        assert!(!resolved.identity_cbs_reset);
+        assert_eq!(
+            resolved.comp_based_stats.mode,
+            BlastpCompositionMode::CompositionMatrixAdjust
+        );
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // ```c++
     //     if (args[kArgLookupTableMaskingOnly]) {
@@ -1344,20 +1472,7 @@ mod tests {
         for value in ["false", "F", "0", "no", "off"] {
             assert!(!resolve(&["-soft_masking", value]), "{value}");
         }
-        // `-task blastp-short` stops at the command line, so the task is set by hand.
-        let TestCommand::Blastp(mut args) = parse_cli([
-            "losat",
-            "blastp",
-            "-query",
-            "q.faa",
-            "-subject",
-            "s.faa",
-            "-soft_masking",
-            "true",
-        ])
-        .command;
-        args.task = "blastp-short".into();
-        assert!(args.resolve().expect("resolved blastp args").soft_masking);
+        assert!(resolve(&["-task", "blastp-short", "-soft_masking", "true"]));
         assert!(resolve(&[
             "-task",
             "blastp-fast",
@@ -1414,9 +1529,17 @@ mod tests {
         // NCBI api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
         // compressed lookup and BLAST_WORD_THRESHOLD_BLASTP_FAST (20), which is kept
         // because (int)20 is not BLASTP's default threshold (blast_args.cpp:586-600).
-        let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
+        let cli = parse_cli([
+            "losat",
+            "blastp",
+            "-query",
+            "q.faa",
+            "-subject",
+            "s.faa",
+            "-task",
+            "blastp-short",
+        ]);
         let TestCommand::Blastp(mut args) = cli.command;
-        args.task = "blastp-short".into();
         let resolved = args.resolve().expect("resolved blastp-short args");
         assert_eq!(resolved.task, "blastp-short");
         assert_eq!(resolved.evalue, 20000.0);

@@ -449,14 +449,18 @@ test("the engine's refusals of option values are shown as the engine writes them
     "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
   );
   await expect(page.getByTestId('run-1-option')).toHaveCount(0);
-  // A value that LOSAT does not support (typed after "Other": IDENTITY, which NCBI's page does
-  // not list, with its gap costs 15/2), and one that NCBI refuses.
+  // IDENTITY (typed after "Other": NCBI's page does not list it) runs with its gap costs 15/2; a
+  // value that LOSAT does not support (IDENTITY with the compressed lookup table of word size 5,
+  // with which NCBI crashes), and one that NCBI refuses.
   await program(page, 'blastp');
   await page.getByTestId('param-matrix').selectOption('other');
   await page.getByTestId('param-matrix-other').fill('IDENTITY');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await page.getByTestId('param-word_size').selectOption('5');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "the matrix IDENTITY with gap costs 15/2 is not supported by LOSAT's BLASTP",
+    "-matrix IDENTITY with the compressed lookup table (-word_size 5), with which NCBI BLAST+'s blastp crashes, is not supported by LOSAT's BLASTP",
   );
+  await page.getByTestId('param-word_size').selectOption('3');
   await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
   await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
@@ -527,7 +531,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       await expect(validation).toHaveAttribute('data-state', 'ok');
     }
   };
-  for (const [id, tasks] of [['blastp', ['blastp', 'blastp-fast']], ['blastx', ['blastx', 'blastx-fast']]] as const) {
+  for (const [id, tasks] of [['blastp', ['blastp', 'blastp-fast', 'blastp-short']], ['blastx', ['blastx', 'blastx-fast']]] as const) {
     await program(page, id);
     for (const name of tasks) {
       await task(page, name);
@@ -1210,6 +1214,9 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   );
   await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp-fast') })).toHaveText(
     'Quick BLASTP (blastp-fast)',
+  );
+  await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp-short') })).toHaveText(
+    'Short sequences (blastp-short)',
   );
   await expect(line).toHaveText('Search protein subjects with BLASTP, task blastp (protein-protein BLAST).');
   await expect(form.locator('.section-legend')).toHaveText(['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters']);

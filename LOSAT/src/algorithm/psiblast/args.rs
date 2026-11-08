@@ -461,6 +461,7 @@ impl PsiblastArgs {
                 rounds: (self.num_iterations != 1)
                     .then(|| u32::try_from(self.num_iterations).unwrap_or(0)),
             }),
+            rps: None,
         })
     }
 

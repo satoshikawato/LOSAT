@@ -58,3 +58,6 @@ pub(crate) mod x_work_board;
 
 pub use args::TblastxArgs;
 pub use blast_engine::run;
+
+#[cfg(test)]
+mod run_engine_tests;

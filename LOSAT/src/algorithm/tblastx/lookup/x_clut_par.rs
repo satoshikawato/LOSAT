@@ -336,9 +336,11 @@ pub(super) fn x_try_build_flat_in_pool(
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (item
-/// SC2b): the passes of rayon on fresh vectors (no spare vectors, extra tasks or build ahead, which
-/// are BLOSUM62's); `pool` has more than one thread.
+/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (items
+/// SC2b, SC2d-2): the same passes, spare vectors and build ahead (`x_flat_args`; another matrix's
+/// build has no extra tasks, its contexts' Karlin blocks are computed before it); `pool` has more
+/// than one thread.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn x_try_build_flat_in_pool_of(
     matrix: ScoringMatrix,
     word_size: usize,
@@ -347,29 +349,49 @@ pub(super) fn x_try_build_flat_in_pool_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    pool.install(|| {
-        x_try_build_flat_parallel_of(
-            matrix,
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            XParallelCuts {
-                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
-                max_appends: None,
-                threads,
-                chunk_sizes: &[],
-                stripe_shift: None,
-                passes: XPasses::Rayon,
-                spare: None,
-                x_ahead: false,
-                stripe_fill: false,
-            },
-        )
-    })
+    let build = |passes, spare, x_ahead, stripe_fill| {
+        pool.install(|| {
+            x_try_build_flat_parallel_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                XParallelCuts {
+                    overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                    max_appends: None,
+                    threads,
+                    chunk_sizes: &[],
+                    stripe_shift: None,
+                    passes,
+                    spare,
+                    x_ahead,
+                    stripe_fill,
+                },
+            )
+        })
+    };
+    if x_flat_args.mode == XLkpFlat::Off {
+        // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes only the switch's passes.
+        if x_flat_args.x_ahead {
+            return None;
+        }
+        return build(XPasses::Rayon, None, false, false);
+    }
+    let built = build(
+        XPasses::OneLatch(x_flat_args.extra),
+        x_flat_args.spare,
+        x_flat_args.x_ahead,
+        x_bpstripefill_on(),
+    );
+    if matches!(built, Some(XFlatBuild::Table(_))) {
+        X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
+    }
+    built
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
@@ -379,14 +401,17 @@ pub(super) fn x_try_build_flat_in_pool_of(
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_try_build_flat_in_pool` for a build ahead of
-/// its block (`x_flat_args.x_ahead`, the switch's mode on): the one-latch appends pass with the
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_try_build_flat_in_pool` (of
+/// `x_try_build_flat_in_pool_of` for another search matrix `matrix`, item SC2d-2) for a build ahead
+/// of its block (`x_flat_args.x_ahead`, the switch's mode on): the one-latch appends pass with the
 /// extra tasks, on `pool`'s threads; the second part (`x_flat_ahead_stripes_in_pool`) runs once the
 /// block search's thread has made the table's vectors ready (module header). `None` where the build
 /// ends at the appends pass (`TooLarge`, or a backbone past the stripes, whose serial builder a build
 /// ahead does not run: it would allocate the table on a pool thread) or the mode is `Off`: the block
 /// then builds its table itself. `pool` has more than one thread.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn x_flat_ahead_appends_in_pool(
+    matrix: ScoringMatrix,
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
@@ -398,29 +423,42 @@ pub(super) fn x_flat_ahead_appends_in_pool(
     if x_flat_args.mode == XLkpFlat::Off || !x_flat_args.x_ahead {
         return None;
     }
-    let threads = pool.threads();
+    let cuts = XParallelCuts {
+        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+        max_appends: None,
+        threads: pool.threads(),
+        chunk_sizes: &[],
+        stripe_shift: None,
+        passes: XPasses::OneLatch(x_flat_args.extra),
+        // The spare's vectors are the second part's.
+        spare: None,
+        x_ahead: true,
+        stripe_fill: x_bpstripefill_on(),
+    };
     let stage = pool.install(|| {
-        x_flat_appends_on(
-            Blosum62Compressed,
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            XParallelCuts {
-                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
-                max_appends: None,
-                threads,
-                chunk_sizes: &[],
-                stripe_shift: None,
-                passes: XPasses::OneLatch(x_flat_args.extra),
-                // The spare's vectors are the second part's.
-                spare: None,
-                x_ahead: true,
-                stripe_fill: x_bpstripefill_on(),
-            },
-            |_| None,
-        )
+        if matrix == ScoringMatrix::Blosum62 {
+            x_flat_appends_on(
+                Blosum62Compressed,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                cuts,
+                |_| None,
+            )
+        } else {
+            x_flat_appends_on(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                cuts,
+                |_| None,
+            )
+        }
     });
     match stage {
         XFlatStage::Appends(appends) => Some(appends),
@@ -434,10 +472,11 @@ pub(super) fn x_flat_ahead_appends_in_pool(
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): the second part of a build ahead of its block, after
-/// `x_flat_ahead_appends_in_pool` gave `appends` (of `query` and `locations`): the stripes pass on
-/// `pool`'s threads, on the vectors that `spare` holds, all of them (without their room no table is
-/// made and the spare keeps them, `XFlatArgs::x_ahead`).
+/// `x_flat_ahead_appends_in_pool` gave `appends` (of `matrix`, `query` and `locations`): the stripes
+/// pass on `pool`'s threads, on the vectors that `spare` holds, all of them (without their room no
+/// table is made and the spare keeps them, `XFlatArgs::x_ahead`).
 pub(super) fn x_flat_ahead_stripes_in_pool(
+    matrix: ScoringMatrix,
     appends: XFlatAppends,
     query: &[u8],
     locations: &[(i32, i32)],
@@ -445,14 +484,18 @@ pub(super) fn x_flat_ahead_stripes_in_pool(
     spare: &XFlatSpare,
 ) -> Option<XFlatBuild> {
     let built = pool.install(|| {
-        x_flat_stripes_on(
-            Blosum62Compressed,
-            appends,
-            query,
-            locations,
-            Some(spare),
-            true,
-        )
+        if matrix == ScoringMatrix::Blosum62 {
+            x_flat_stripes_on(
+                Blosum62Compressed,
+                appends,
+                query,
+                locations,
+                Some(spare),
+                true,
+            )
+        } else {
+            x_flat_stripes_on(matrix, appends, query, locations, Some(spare), true)
+        }
     });
     if matches!(built, Some(XFlatBuild::Table(_))) {
         X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
@@ -1960,8 +2003,14 @@ mod tests {
     //                                     query, locations);
     //     s_CompressedLookupFinalize(lookup);
     // ```
-    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, item SC2b): the
-    // serial builders at one thread and the pool's build at 3 threads give the matrix's serial table.
+    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, items SC2b,
+    // SC2d-2): the serial builders at one thread and the pool's build at 3 threads give the matrix's
+    // serial table, with rayon's passes and with the one-latch passes (LOSAT_X_BPLKPFLAT) on a spare
+    // of garbage, with the stripe fill's switch as it is set; a build ahead of its block
+    // (LOSAT_X_BPLKPAHEAD) gives it at once and in its two parts (`x_bp_flat_ahead_appends`,
+    // `x_bp_flat_ahead_table`) on the vectors `x_make_room` made ready, holding them, and gives
+    // nothing without a spare. The two passes apart refuse with the matrix's words as the build at
+    // once does (a capacity of one cell).
     #[test]
     fn the_entry_of_another_matrix_builds_its_serial_table_at_any_thread_count() {
         let mut rng = XorShift(0x6a09_e667_f3bc_c908);
@@ -1984,7 +2033,14 @@ mod tests {
             for threads in [1, 3] {
                 let built = crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                     Ok(super::super::x_bp_build_compressed_lookup_of(
-                        matrix, 5, 1100, &query, &locations, &tables, pool,
+                        matrix,
+                        5,
+                        1100,
+                        &query,
+                        &locations,
+                        &tables,
+                        pool,
+                        XFlatArgs::default(),
                     ))
                 })
                 .expect("pool");
@@ -1992,6 +2048,149 @@ mod tests {
                     panic!("{matrix:?} n{threads}: no flat table")
                 };
                 x_assert_same_flat_tables(&built, &serial);
+            }
+            let backbone_size = serial.starts.len() - 1;
+            let total = serial.hits.len();
+            let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+            let build = |args: XFlatArgs<'_>| {
+                crate::utils::threading::with_search_pool(3, "blastp", |pool| {
+                    Ok(super::super::x_bp_build_compressed_lookup_of(
+                        matrix, 5, 1100, &query, &locations, &tables, pool, args,
+                    ))
+                })
+                .expect("pool")
+            };
+            // The one-latch passes on a spare of garbage.
+            let spare = garbage_spare(&mut rng);
+            let Some(Ok(XCompressedLookup::Flat(built))) = build(XFlatArgs {
+                mode: XLkpFlat::On,
+                spare: Some(&spare),
+                extra: None,
+                x_ahead: false,
+            }) else {
+                panic!("{matrix:?}: no flat table on the spare")
+            };
+            x_assert_same_flat_tables(&built, &serial);
+            // A build ahead of its block, at once and in its two parts: every vector from the spare
+            // made ready.
+            let ready = |rng: &mut XorShift| {
+                let spare = XFlatSpare::default();
+                let mut hits = Vec::with_capacity(total + 5);
+                hits.extend((0..total / 2).map(|_| rng.below(1 << 20) as i32));
+                *spare.0.lock().unwrap() = (vec![u32::MAX - 3; backbone_size + 1], hits);
+                *spare.1.lock().unwrap() = vec![u32::MAX; pv_words];
+                let block = XFlatSpare::default();
+                assert_eq!(spare.x_make_room(&block, backbone_size, total, total), 0);
+                spare
+            };
+            let held = |built: &XFlatCompressedLookup| {
+                [
+                    built.starts.as_ptr() as usize,
+                    built.hits.as_ptr() as usize,
+                    built.pv.as_ptr() as usize,
+                ]
+            };
+            let spare = ready(&mut rng);
+            let given = spare_addresses(&spare);
+            let Some(Ok(XCompressedLookup::Flat(built))) = build(XFlatArgs {
+                mode: XLkpFlat::On,
+                spare: Some(&spare),
+                extra: None,
+                x_ahead: true,
+            }) else {
+                panic!("{matrix:?}: no flat table built ahead")
+            };
+            x_assert_same_flat_tables(&built, &serial);
+            assert_eq!(held(&built), given, "{matrix:?}: the spare's vectors");
+            let spare = ready(&mut rng);
+            let given = spare_addresses(&spare);
+            let built = crate::utils::threading::with_search_pool(3, "blastp", |pool| {
+                let appends = super::super::x_bp_flat_ahead_appends(
+                    matrix,
+                    5,
+                    1100,
+                    &query,
+                    &locations,
+                    &tables,
+                    pool,
+                    XFlatArgs {
+                        mode: XLkpFlat::On,
+                        spare: None,
+                        extra: None,
+                        x_ahead: true,
+                    },
+                )
+                .expect("the appends pass");
+                Ok(super::super::x_bp_flat_ahead_table(
+                    matrix, appends, &query, &locations, pool, &spare,
+                ))
+            })
+            .expect("pool")
+            .expect("a table built ahead in two parts");
+            x_assert_same_flat_tables(&built, &serial);
+            assert_eq!(
+                held(&built),
+                given,
+                "{matrix:?}: the spare's vectors, two parts"
+            );
+            // Without a spare a build ahead makes no table.
+            assert!(
+                build(XFlatArgs {
+                    mode: XLkpFlat::On,
+                    spare: None,
+                    extra: None,
+                    x_ahead: true,
+                })
+                .is_none(),
+                "{matrix:?}: a table built ahead without a spare"
+            );
+            // The two passes apart at a capacity of one cell: the matrix's words make the same
+            // outcome as its serial builder (the capacity test makes them again).
+            let serial_one = x_try_build_flat_of(
+                matrix,
+                5,
+                1100,
+                &query,
+                &locations,
+                &tables,
+                1,
+                X_COUNT_CHUNK,
+            );
+            let cuts = |threads| XParallelCuts {
+                overflow_cell_capacity: 1,
+                max_appends: None,
+                threads,
+                chunk_sizes: &[],
+                stripe_shift: None,
+                passes: XPasses::OneLatch(None),
+                spare: None,
+                x_ahead: false,
+                stripe_fill: true,
+            };
+            let stage = in_pool(3, || {
+                x_flat_appends_on(
+                    matrix,
+                    5,
+                    1100,
+                    &query,
+                    &locations,
+                    &tables,
+                    cuts(3),
+                    |_| None,
+                )
+            });
+            let XFlatStage::Appends(appends) = stage else {
+                panic!("{matrix:?}: the appends pass ended the build")
+            };
+            let apart = in_pool(2, || {
+                x_flat_stripes_on(matrix, appends, &query, &locations, None, false)
+            });
+            match (&serial_one, &apart) {
+                (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused)) => {}
+                (Some(XFlatBuild::Table(want)), Some(XFlatBuild::Table(got))) => {
+                    x_assert_same_flat_tables(got, want)
+                }
+                _ => panic!("{matrix:?}: capacity 1, the outcomes differ"),
             }
         }
     }

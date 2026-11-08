@@ -398,6 +398,7 @@ use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatObserver, HspIndex, OutputSink};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
+use crate::config::ScoringMatrix;
 use crate::utils::threading::SearchPool;
 #[cfg(all(
     feature = "parallel",
@@ -875,8 +876,8 @@ pub(crate) enum XLookupFor {
 
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): the lookup query of blastp-fast's compressed table and what the
 /// pool's build of its flat table gets with the switch (`lookup/x_clut_par.rs`): the block search's
-/// spare vectors, and with `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks as extra tasks of the
-/// build's appends pass, in place of their own pass on the pool (`x_bp_lookup_query`).
+/// spare vectors, and for BLOSUM62 with `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks as extra tasks
+/// of the build's appends pass, in place of their own pass on the pool (`x_bp_lookup_query`).
 pub(crate) struct XLookupFlat<'a> {
     mode: XLkpFlat,
     spare: Option<&'a XFlatSpare>,
@@ -895,15 +896,20 @@ impl<'a> XLookupFlat<'a> {
     // ```c
     //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
     // ```
-    /// The values of `x_bp_lookup_query(query_frames, word_size, pool)`; where the switch acts with
-    /// `LOSAT_X_BPQBLOCK`, the contexts come without their Karlin blocks, which `finish` sets after
-    /// the build (`XKarlinTasks`). A query chunk of a split batch (`XLookupFor::QueryChunk`, a search
-    /// that ends after its preliminary stage, inside its block's search, and drops its table there)
-    /// takes no spare vectors: the block's table keeps them. The build of the next block's table
-    /// ahead of it (`XLookupFor::Ahead`, LOSAT_X_BPLKPAHEAD) takes the second spare's.
+    /// The values of `x_bp_lookup_query(query_frames, word_size, pool)` for BLOSUM62, and of
+    /// `prepare_matrix_lookup_query_for_word_size` (the contexts' Karlin blocks on `pool` where it
+    /// has more than one thread) for another search matrix `matrix` (item SC2b). For BLOSUM62, where
+    /// the switch acts with `LOSAT_X_BPQBLOCK`, the contexts come without their Karlin blocks, which
+    /// `finish` sets after the build (`XKarlinTasks`); another matrix's come with theirs, before the
+    /// build (no extra tasks). The spare vectors are the same for every matrix (item SC2d-2): a query
+    /// chunk of a split batch (`XLookupFor::QueryChunk`, a search that ends after its preliminary
+    /// stage, inside its block's search, and drops its table there) takes none: the block's table
+    /// keeps them. The build of the next block's table ahead of it (`XLookupFor::Ahead`,
+    /// LOSAT_X_BPLKPAHEAD) takes the second spare's.
     pub(crate) fn lookup_query<'p: 'a>(
         query_frames: &'a [Vec<QueryFrame>],
         word_size: usize,
+        matrix: ScoringMatrix,
         pool: &SearchPool<'p>,
         x_for: XLookupFor,
     ) -> (Self, Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
@@ -917,6 +923,27 @@ impl<'a> XLookupFlat<'a> {
             XLookupFor::Ahead => x_bp_lookup_spares(pool).map(|(_, ahead)| ahead),
         };
         let x_ahead = x_for == XLookupFor::Ahead;
+        if matrix != ScoringMatrix::Blosum62 {
+            let (query, locations, contexts) =
+                crate::algorithm::tblastx::lookup::prepare_matrix_lookup_query_for_word_size(
+                    query_frames,
+                    word_size,
+                    false,
+                    matrix,
+                    Some(pool),
+                );
+            let flat = Self {
+                mode,
+                spare,
+                x_ahead,
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                karlin: None,
+            };
+            return (flat, query, locations, contexts);
+        }
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")

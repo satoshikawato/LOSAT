@@ -694,6 +694,8 @@ fn x_build_ahead(
 ))]
 struct XFlatAheadPart {
     key: (usize, usize),
+    /// The search matrix, whose words part 2 makes again only for a table's capacity test.
+    matrix: crate::config::ScoringMatrix,
     query_frames: Vec<Vec<QueryFrame>>,
     contexts: Vec<QueryContext>,
     /// The lookup query and its segments, which part 2 reads only for a table's capacity test.
@@ -709,10 +711,12 @@ struct XFlatAheadPart {
 //                                              sbp, lookup_segments_wrap,
 // ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): part 1 of the build ahead of a block of `query_records` for
-/// blastp-fast (BLOSUM62's flat table), on a pool task once the block before it has its table: the
-/// calls of `blastp_compressed_lookup` with the same inputs (`batch_size` is the search's query
-/// batch size; `XLookupFor::Ahead`) up to the flat build's appends pass (`x_bp_flat_ahead_appends`,
-/// with the contexts' Karlin blocks as its extra tasks), then the contexts' Karlin blocks set
+/// blastp-fast (the flat table of any search matrix, item SC2d-2), on a pool task once the block
+/// before it has its table: the calls of `blastp_compressed_lookup` (of
+/// `blastp_matrix_compressed_lookup` for a matrix other than BLOSUM62) with the same inputs
+/// (`batch_size` is the search's query batch size; `XLookupFor::Ahead`) up to the flat build's
+/// appends pass (`x_bp_flat_ahead_appends`, BLOSUM62's with the contexts' Karlin blocks as its extra
+/// tasks; another matrix's contexts have theirs before it), then the contexts' Karlin blocks set
 /// (`XLookupFlat::finish`). `None` where the search's build would fail or the build ends at its
 /// appends pass (module header).
 #[cfg(all(
@@ -725,11 +729,10 @@ fn x_flat_ahead_appends(
     batch_size: u32,
     pool: &SearchPool<'_>,
 ) -> Option<XFlatAheadPart> {
-    if args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
-        || args.scoring.matrix != crate::config::ScoringMatrix::Blosum62
-    {
+    if args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable {
         return None;
     }
+    let matrix = args.scoring.matrix;
     let query_frames = blastp_query_frames(args, query_records);
     let query_lengths: Vec<usize> = query_records
         .iter()
@@ -740,6 +743,7 @@ fn x_flat_ahead_appends(
         crate::algorithm::blastp::x_query_blocks::XLookupFlat::lookup_query(
             &query_frames,
             args.word_size,
+            matrix,
             pool,
             XLookupFor::Ahead,
         );
@@ -752,6 +756,7 @@ fn x_flat_ahead_appends(
     )
     .ok()?;
     let appends = x_bp_flat_ahead_appends(
+        matrix,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
         &query,
@@ -763,6 +768,7 @@ fn x_flat_ahead_appends(
     x_flat.finish(&mut contexts);
     Some(XFlatAheadPart {
         key: x_key(query_records),
+        matrix,
         query_frames,
         contexts,
         query,
@@ -789,13 +795,14 @@ fn x_flat_ahead_table(part: XFlatAheadPart, pool: &SearchPool<'_>) -> Option<XAh
     let (_, spare) = x_bp_lookup_spares(pool)?;
     let XFlatAheadPart {
         key,
+        matrix,
         query_frames,
         contexts,
         query,
         locations,
         appends,
     } = part;
-    let table = x_bp_flat_ahead_table(appends, &query, &locations, pool, spare)?;
+    let table = x_bp_flat_ahead_table(matrix, appends, &query, &locations, pool, spare)?;
     crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", true);
     Some(XAheadLookup {
         key,
@@ -852,12 +859,9 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )) && x_bp_lkp_ahead()
             && match args.lookup_table_type {
-                // The flat table's (BLOSUM62's; another matrix's flat builders take no spare
-                // vectors: item SC2b).
+                // The flat table's, of any search matrix (item SC2d-2).
                 BlastpLookupTableType::CompressedAaLookupTable => {
-                    x_bpclut_on()
-                        && args.scoring.matrix == crate::config::ScoringMatrix::Blosum62
-                        && x_bp_lookup_spares(pool).is_some()
+                    x_bpclut_on() && x_bp_lookup_spares(pool).is_some()
                 }
                 BlastpLookupTableType::AaLookupTable => x_bp_aa_spares(pool).is_some(),
             };
@@ -1618,12 +1622,13 @@ mod tests {
         assert!(x_frames_difference(&[vec![frame]], &[]).is_some());
     }
 
-    /// The arguments of `losat blastp -task <task>` (SEG on) as the search resolves them.
+    /// The arguments of `losat blastp -task <task>` (SEG on) with the search matrix `matrix`
+    /// (`-matrix`; `None`: the default, BLOSUM62) as the search resolves them.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    fn test_args(task: &str) -> ResolvedBlastpArgs {
+    fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
         BlastpArgs {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
@@ -1649,7 +1654,7 @@ mod tests {
             culling_limit: None,
             ungapped: false,
             window_size: None,
-            matrix: None,
+            matrix: matrix.map(str::to_string),
             gap_open: None,
             gap_extend: None,
             comp_based_stats: "2".to_string(),
@@ -1740,7 +1745,9 @@ mod tests {
     // blastp-fast (item SC2d): part 1 (`x_flat_ahead_appends`) and part 2 (`x_flat_ahead_table`) on
     // the vectors of the first block's table, given to the second spare as after its preliminary
     // stage (`x_make_room_flat`; the table holds its `starts` buffer): part 1 before the vectors,
-    // the vectors before part 1, and both through `x_run_with_split_build_ahead`.
+    // the vectors before part 1, and both through `x_run_with_split_build_ahead`; for BLOSUM62 and
+    // (item SC2d-2) for other search matrices, whose contexts have their Karlin blocks before the
+    // build.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1748,13 +1755,17 @@ mod tests {
     #[test]
     fn values_built_ahead_are_the_values_the_block_builds_itself() {
         let batch_size = 3000;
-        for (task, order) in [
-            ("blastp-fast", 0),
-            ("blastp-fast", 1),
-            ("blastp-fast", 2),
-            ("blastp", 0),
+        for (task, matrix, order) in [
+            ("blastp-fast", None, 0),
+            ("blastp-fast", None, 1),
+            ("blastp-fast", None, 2),
+            ("blastp-fast", Some("BLOSUM45"), 0),
+            ("blastp-fast", Some("BLOSUM45"), 1),
+            ("blastp-fast", Some("PAM250"), 2),
+            ("blastp", None, 0),
         ] {
-            let args = test_args(task);
+            let args = test_args_of(task, matrix);
+            let task = format!("{task} {matrix:?}");
             let first = protein_records(0x9e37_79b9_7f4a_7c15, 24);
             let next = protein_records(0xd1b5_4a32_d192_ed03, 30);
             crate::utils::threading::with_search_pool(3, "blastp", |pool| {

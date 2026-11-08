@@ -7952,6 +7952,7 @@ fn blastp_compressed_lookup(
     let (x_flat, query, locations, mut contexts) = super::x_query_blocks::XLookupFlat::lookup_query(
         query_frames,
         args.word_size,
+        ScoringMatrix::Blosum62,
         blastp_parallel_pool,
         x_for,
     );
@@ -8019,13 +8020,14 @@ fn blastp_compressed_lookup(
 //                                 lookup->compressed_alphabet_size,
 //                                 kMatrixScale);
 // ```
-/// [`blastp_compressed_lookup`] of a matrix other than BLOSUM62 (item SC2b): the contexts with the
-/// Karlin blocks of the matrix's scores (`prepare_matrix_lookup_query_for_word_size`, on the
-/// search's pool where it has more than one thread), NCBI's tables of the query batches
-/// (`ncbi_compressed_lookup_tables`) and the compressed table of the matrix's words
-/// (`x_bp_build_compressed_lookup_of`: the flat table, by the search's pool where it has more than
-/// one thread, the reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`; it
-/// takes no spare vectors), with the refusals of the BLOSUM62 table.
+/// [`blastp_compressed_lookup`] of a matrix other than BLOSUM62 (items SC2b, SC2d-2): the contexts
+/// with the Karlin blocks of the matrix's scores (`XLookupFlat::lookup_query`:
+/// `prepare_matrix_lookup_query_for_word_size`, on the search's pool where it has more than one
+/// thread), NCBI's tables of the query batches (`ncbi_compressed_lookup_tables`) and the compressed
+/// table of the matrix's words (`x_bp_build_compressed_lookup_of`: the flat table, by the search's
+/// pool where it has more than one thread, on the spare vectors of `x_for` as BLOSUM62's; the
+/// reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`), with the refusals of
+/// the BLOSUM62 table.
 #[inline(never)]
 fn blastp_matrix_compressed_lookup(
     args: &ResolvedBlastpArgs,
@@ -8036,14 +8038,13 @@ fn blastp_matrix_compressed_lookup(
     x_for: super::x_query_blocks::XLookupFor,
 ) -> Result<(BlastpRuntimeLookup, Vec<QueryContext>)> {
     let query_chunk = x_for == super::x_query_blocks::XLookupFor::QueryChunk;
-    let (query, locations, contexts) =
-        crate::algorithm::tblastx::lookup::prepare_matrix_lookup_query_for_word_size(
-            query_frames,
-            args.word_size,
-            false,
-            args.scoring.matrix,
-            Some(blastp_parallel_pool),
-        );
+    let (x_flat, query, locations, mut contexts) = super::x_query_blocks::XLookupFlat::lookup_query(
+        query_frames,
+        args.word_size,
+        args.scoring.matrix,
+        blastp_parallel_pool,
+        x_for,
+    );
     let ncbi_tables = ncbi_compressed_lookup_tables(
         query_batches,
         query_lengths,
@@ -8059,6 +8060,7 @@ fn blastp_matrix_compressed_lookup(
         &locations,
         &ncbi_tables,
         blastp_parallel_pool,
+        x_flat.build_args(),
     )
     .ok_or_else(|| {
         anyhow::anyhow!(
@@ -8086,6 +8088,7 @@ fn blastp_matrix_compressed_lookup(
             BlastpRuntimeLookup::CompressedFlat(lookup)
         }
     };
+    x_flat.finish(&mut contexts);
     Ok((lookup, contexts))
 }
 
@@ -8100,7 +8103,6 @@ fn blastp_matrix_compressed_lookup(
 /// (`XAheadBlock::after_prelim`; `None`).
 fn x_lookup_after_prelim(
     lookup: BlastpRuntimeLookup,
-    matrix: ScoringMatrix,
     pool: &crate::utils::threading::SearchPool<'_>,
     ahead: &x_lookup_ahead::XAheadBlock<'_>,
 ) -> Option<BlastpRuntimeLookup> {
@@ -8111,11 +8113,8 @@ fn x_lookup_after_prelim(
     }
     let taken_later = ahead.x_table_taken_later()
         && match &lookup {
-            // Only BLOSUM62's build takes the flat table's vectors (another matrix's flat builders
-            // take none: `blastp_matrix_compressed_lookup`).
             BlastpRuntimeLookup::CompressedFlat(_) => {
-                matrix == ScoringMatrix::Blosum62
-                    && super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
+                super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
             BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {
                 super::x_query_blocks::x_bp_aa_spares(pool).is_some()
@@ -10546,7 +10545,7 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
     // Item SC2d: a flat table's vectors go to the next block's build here.
-    let lookup = x_lookup_after_prelim(lookup, args.scoring.matrix, blastp_parallel_pool, &x_ahead);
+    let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
@@ -13312,10 +13311,7 @@ fn run_resolved_in_pool(
     // build (`x_query_blocks::x_bp_aa_block_spare`). EXPERIMENT (LOSAT_X_BPLKDROP): `None` when the
     // table was dropped before the redo.
     match lookup {
-        // Another matrix's flat table is not taken by a later build (`x_lookup_after_prelim`).
-        Some(BlastpRuntimeLookup::CompressedFlat(table))
-            if args.scoring.matrix == ScoringMatrix::Blosum62 =>
-        {
+        Some(BlastpRuntimeLookup::CompressedFlat(table)) => {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
                 spare.give(table);
             }
@@ -13336,8 +13332,7 @@ fn run_resolved_in_pool(
                 spares.give16(table);
             }
         }
-        Some(BlastpRuntimeLookup::Compressed(_) | BlastpRuntimeLookup::CompressedFlat(_))
-        | None => {}
+        Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
     }
 
     if let Some(timing) = timing.as_ref() {

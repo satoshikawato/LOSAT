@@ -150,7 +150,7 @@ pub(crate) fn s_blast_aa_scan_subject(
                     } else {
                         // NCBI: copy hits from overflow list.
                         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-115
-                        let cursor = cell.entries[0] as usize;
+                        let cursor = cell.cursor();
                         unsafe {
                             let src = overflow.add(cursor);
                             let dest = offset_pairs.as_mut_ptr().add(dest_base);
@@ -364,7 +364,7 @@ pub(crate) fn s_blast_aa_scan_subject_one_range(
                     //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
                     // }
                     // ```
-                    let cursor = cell.entries[0] as usize;
+                    let cursor = cell.cursor();
                     unsafe {
                         // SAFETY: For overflow cells, NCBI lookup construction
                         // stores a cursor to `numhits` contiguous query offsets;

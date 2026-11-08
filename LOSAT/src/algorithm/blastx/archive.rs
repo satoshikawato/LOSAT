@@ -129,7 +129,7 @@ pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// A title the archive cannot write, found by `prescan_query_titles` (`check_titles`); a typed
+/// A title the archive cannot write, found by `check_batch_titles` (`check_titles`); a typed
 /// error, so that it is told apart from the reader's own errors, which end the scan.
 #[derive(Debug)]
 struct TitleRefusal(String);
@@ -157,11 +157,13 @@ pub(crate) fn refuse_irregular_query() -> Result<()> {
 
 /// Reads the query file once before the search, batch by batch as the search reads it
 /// (`batch_size` letters, the run's), and refuses the first record whose title the archive
-/// cannot write (`check_titles`), so that no refusal can follow a written byte. A reader error
-/// ends the scan: the run reads the file again and fails there as it always did, after the
-/// archives of the batches before it (NCBI writes them), so the titles of the batches the reader
-/// completed before the error are checked; the records of the batch the error interrupts are
-/// never written and need no check. The file must be a regular file (`query_is_regular`). It is
+/// cannot write (`check_titles`), so that no refusal can follow a written byte. Returns whether
+/// NCBI writes the archive of a batch (`written_batch`), whose Bioseqs hold the `-subject`
+/// records too. The scan ends at the batch that stops the run, as the search does: a reader
+/// error (the run reads the file again and fails there as it always did, after the archives of
+/// the batches before it, which NCBI writes), and a batch that NCBI fails (`written_batch`); so
+/// the titles of the batches before it are checked, and the records of that batch, never
+/// written, are not. The file must be a regular file (`query_is_regular`). It is
 /// read as the search reads it (`settings`: under `-parse_deflines`, a first line that is not a
 /// defline is the reader error), and the records are cut to `range` as the search cuts them: a
 /// record the range skips is never written and is not checked. It keeps no defline, so LOSAT's
@@ -169,40 +171,88 @@ pub(crate) fn refuse_irregular_query() -> Result<()> {
 /// archive makes) does not stop it, and a later title may be refused first: both refusals come
 /// before any byte, and keeping the deflines would keep whole records under `-query_loc`. A
 /// batch size of 0 reads no query (NCBI's first batch is empty and the search stops at it):
-/// nothing is checked.
+/// nothing is checked and no batch is written.
 pub(crate) fn prescan_query_titles(
     file: &std::fs::File,
     settings: &super::input::QueryStreamSettings,
     lowercase: bool,
+    options: &ResolvedOptions,
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
-) -> Result<()> {
+) -> Result<bool> {
     use std::io::Seek;
     if batch_size == 0 {
-        return Ok(());
+        return Ok(false);
     }
     // A second handle on the open file (a `.gz` query is an unnamed inflated file that no path
     // reaches, `input_files::open_file_input`); the handles share one position, put back below.
     let start = (&*file).stream_position()?;
     let mut stream = settings.stream_before_search(file.try_clone()?);
-    let scanned = super::input::parse_fasta_stream_keeping(
-        &mut stream,
-        false,
-        lowercase,
-        batch_size,
-        false,
-        range,
-        &mut |batch| {
-            check_titles(batch, "query").map_err(|refusal| TitleRefusal(refusal.to_string()).into())
-        },
-        &mut |_| Ok(()),
-    );
+    let written = check_batch_titles(options, &mut |deliver| {
+        super::input::parse_fasta_stream_keeping(
+            &mut stream,
+            false,
+            lowercase,
+            batch_size,
+            false,
+            range,
+            deliver,
+            &mut |_| Ok(()),
+        )
+        .map(drop)
+    });
     drop(stream);
     (&*file).seek(std::io::SeekFrom::Start(start))?;
+    written
+}
+
+/// Checks the query titles of the reader batches that `read` gives its argument, in order, up to
+/// the batch that stops the run: the end of `read` (a reader error, or another error of LOSAT's
+/// reading, which the search meets in its place) or a batch that NCBI fails (`written_batch`).
+/// Refuses the first title that the archive cannot write (`check_titles`), and returns whether
+/// NCBI writes the archive of a batch (`prescan_query_titles`, `local::search_records`).
+pub(crate) fn check_batch_titles(
+    options: &ResolvedOptions,
+    read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
+) -> Result<bool> {
+    let mut written = false;
+    let scanned = read(&mut |batch| {
+        if !written_batch(batch, options) {
+            // The batches end here (an error that is not a refusal).
+            anyhow::bail!("NCBI stops the run at this batch");
+        }
+        written = true;
+        check_titles(batch, "query").map_err(|refusal| TitleRefusal(refusal.to_string()).into())
+    });
     match scanned {
         Err(error) if error.is::<TitleRefusal>() => Err(error),
-        _ => Ok(()),
+        _ => Ok(written),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+// ```c++
+// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+//     : m_QueryVector(& queries)
+// {
+//     if (queries.Empty()) {
+//         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-652
+// ```c++
+//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+//     }
+// ```
+/// Whether NCBI searches the reader batch `batch` and writes its archive: a batch without a
+/// query (every record skipped by `-query_loc`) is `Empty CBlastQueryVector`, and one without a
+/// valid context and with a query without letters fails its set-up
+/// (`ReaderBatchShape::set_up_fails`), which stops the run there as the search does
+/// (`native::run_inner`, `query_setup::prepare_unit_queries`).
+pub(crate) fn written_batch(batch: &[FastaRecord], options: &ResolvedOptions) -> bool {
+    !batch.is_empty()
+        && !super::reader_batch::ReaderBatchShape::layout(batch, options).set_up_fails()
 }
 
 /// What the archive of one query batch needs.

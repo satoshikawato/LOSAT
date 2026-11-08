@@ -5035,9 +5035,6 @@ pub fn run(
             }
         },
     };
-    if archive.is_some() {
-        super::archive::check_titles(&subjects.records, "subject")?;
-    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -5564,12 +5561,10 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
-    // The refusal of a title the archive cannot write comes before its first byte.
-    if args.archive.is_some() {
-        super::archive::check_titles(&records, "query")?;
-    }
-    // So does the refusal of a title that psiblast's ASN.1 PSSM cannot write, and of a PSSM file
-    // that LOSAT cannot write as NCBI does (one of the report streams, a named pipe).
+    // The refusal of a title that psiblast's ASN.1 PSSM cannot write comes before the first
+    // byte, and so does that of a PSSM file that LOSAT cannot write as NCBI does (one of the
+    // report streams, a named pipe). (The titles of the archive are checked with the query
+    // batches, `search`.)
     // psiblast's rounds write the files of their PSSMs too (`PsiRoundPlan::file_request`).
     if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
         resolved
@@ -5679,7 +5674,8 @@ pub fn run_local(
         bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
-    // cannot write, and a diagnostics stream that saves the messages.
+    // cannot write (the titles with the query batches, `search`), and a diagnostics stream that
+    // saves the messages.
     let archive_requested = outputs
         .formats
         .iter()
@@ -5687,8 +5683,6 @@ pub fn run_local(
     if archive_requested {
         args.archive = super::archive::handle_for(&args, true)?
             .map(|handle| outputs.with_archive_outfmt(handle));
-        super::archive::check_titles(query_records, "query")?;
-        super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
@@ -5828,9 +5822,6 @@ fn search_database(
     let mut resolved = resolve_for_formats(&args, outputs)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
-    if args.archive.is_some() {
-        super::archive::check_titles(query_records, "query")?;
-    }
     search(
         resolved,
         query_records,
@@ -6399,6 +6390,24 @@ fn search(
     // that stops at its first batch (`batches.starts` empty) gives NCBI's error.
     if !batches.starts.is_empty() {
         check_identity_compressed_lookup_of(&args)?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //     ...
+    //             if (fmt_args->ArchiveFormatRequested(args)) {
+    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
+    // ```
+    // The BLAST archive (outfmt 11) of each batch that NCBI completes holds its queries and,
+    // with `-subject`, every subject; the batch that stops the run (a reader error, `Empty
+    // CBlastQueryVector`, a batch of queries without letters) writes neither, and the error
+    // archive holds no sequence. So the refusal of a title the archive cannot write looks at
+    // the queries of the batches before the stop, and at the subjects when there is one; it
+    // comes before the first byte (the reports are written after the batches are read).
+    if args.archive.is_some() && batches.searched_done > 0 {
+        super::archive::check_titles(&searched_queries[..batches.searched_done], "query")?;
+        super::archive::check_titles(&subjects.records, "subject")?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,

@@ -743,9 +743,13 @@ impl XPairLutQuery {
         let used: usize = summed.iter().map(|s| s.used).sum();
         let longest_chain = i32::try_from(summed.iter().map(|s| s.longest).max().unwrap_or(0))
             .expect("NCBI BLAST lookup chain hit count must fit Int4");
+        // The ranges' positions are absolute `u32`s beside the flag, so the joint builder takes
+        // fewer than 2^31 overflow entries. Positions within each cell's run (the other builders'
+        // form) cost this build 2 % more instructions and 10-17 % more time at word size 4
+        // (P-S2, LIB DECISIONS 21); NCBI's `Int4` cursor overflows at the same size.
         assert!(
             overflow_size < X_WIDE_IN_OVERFLOW as usize,
-            "NCBI BLAST lookup overflow cursor must fit Int4"
+            "TBLASTX's lookup table of 4-letter words is limited to 2^31 - 1 overflow entries"
         );
 
         // (c) The layout: BlastAaLookupFinalize's rule, compacted where the branch-free scan takes
@@ -832,7 +836,7 @@ impl XPairLutQuery {
                         ..BackboneCell::default()
                     };
                     let mut at = if count as usize > AA_HITS_PER_CELL {
-                        cell.entries[0] = cursor as i32;
+                        cell.set_cursor(cursor);
                         cursor += count as usize;
                         (cursor - count as usize) as u32 | X_WIDE_IN_OVERFLOW
                     } else {
@@ -961,7 +965,7 @@ mod tests {
             if chain.len() <= AA_HITS_PER_CELL {
                 table.backbone[idx].entries[..chain.len()].copy_from_slice(&chain);
             } else {
-                table.backbone[idx].entries[0] = table.overflow.len() as i32;
+                table.backbone[idx].set_cursor(table.overflow.len());
                 table.overflow.extend_from_slice(&chain);
             }
             table.longest_chain = table.longest_chain.max(chain.len() as i32);

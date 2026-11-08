@@ -134,11 +134,12 @@ pub(crate) fn ideal_karlin_params_of(matrix: ScoringMatrix) -> KarlinParams {
 // ```
 /// NCBI AaLookupBackboneCell. A cell of more than `AA_HITS_PER_CELL` hits keeps the cursor of its
 /// run in the overflow array in `entries[0]` (low 32 bits) and `entries[1]` (high 32 bits), read
-/// and written only by [`BackboneCell::cursor`] and [`BackboneCell::set_cursor`]. NCBI's cursor is
-/// an `Int4`, so a table of 2^31 overflow entries or more overflows it (signed overflow, then reads
-/// before the array: an 8 GiB overflow array, for example `-threshold 3e9`, whose `Int4`
-/// `INT_MIN` makes every word a neighbour of every position); LOSAT's holds any position of the
-/// array, in the cell's 16 bytes as before.
+/// and written only by [`BackboneCell::cursor`], [`BackboneCell::set_cursor`] and
+/// [`XCell::x_cursor_at`]. NCBI's cursor and its count of overflow entries are `Int4`, which a
+/// table of 2^31 overflow entries or more overflows (signed overflow; NCBI BLAST+ 2.17.0 crashes):
+/// an 8 GiB overflow array, for example `-threshold 3e9`, whose `Int4` `INT_MIN` makes every word
+/// a neighbour of every position. LOSAT's cursor holds any position of the array, in the cell's
+/// 16 bytes as before.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BackboneCell {
@@ -203,8 +204,9 @@ impl BackboneCell {
 // A blastp block's lookup query is at most about 50,000 letters (LOSAT_X_BPQBLOCK), so a query
 // offset and a cell's hit count fit 16 bits and the cell takes 8 bytes instead of 16. The trait
 // `XCell` is what the table's builder (x_lut_direct.rs) and the scan of the fused loop
-// (blastp/x_seed_fused.rs) need of a cell; `BackboneCell` implements it with exactly the reads the
-// code had before, so the tables of every other program stay what they were.
+// (blastp/x_seed_fused.rs) need of a cell; `BackboneCell` implements it with the reads of
+// `BackboneCell` itself (its cursor over two entries, P-S2), so the tables of every other program
+// stay what they were.
 /// EXPERIMENT (LOSAT_X_BPLK16): a hit (a query offset) stored in a lookup cell or in the overflow
 /// array: `i32` as NCBI's `Int4`, or `u16`.
 pub trait XHit: Copy + Default + Send + Sync + 'static {
@@ -3450,15 +3452,15 @@ mod tests {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:57 (`Int4
     // overflow_cursor`, quoted at `BackboneCell`). A cursor below 2^31 is NCBI's `Int4` in
     // `entries[0]` (and 0 in `entries[1]`); a cursor of 2^31 or more, which NCBI's `Int4` cannot
-    // hold (`-threshold 3e9`: 21,952 hits per word position, 97,826 positions), reads back whole,
-    // as every scanner reads it (`cursor`, `x_cursor_at`), where `entries[0] as usize` gave
-    // 0xffff_ffff_8000_0000.
+    // hold (`-threshold 3e9`: 21,952 entries per word position, so 97,827 positions fill 2^31),
+    // reads back whole, as every scanner reads it (`cursor`, `x_cursor_at`), where
+    // `entries[0] as usize` gave 0xffff_ffff_8000_0000.
     #[test]
     fn cursor_holds_positions_past_int4() {
-        let mut cursors = vec![0usize, 7, (1 << 31) - 1, 1 << 31, (1 << 32) - 1];
-        if usize::BITS == 64 {
-            cursors.extend([1usize << 32, (1usize << 32) + 5, usize::MAX >> 2]);
-        }
+        #[allow(unused_mut)]
+        let mut cursors = vec![0usize, 7, (1 << 31) - 1, 1 << 31, u32::MAX as usize];
+        #[cfg(target_pointer_width = "64")]
+        cursors.extend([1usize << 32, (1usize << 32) + 5, usize::MAX >> 2]);
         for cursor in cursors {
             let mut cell = BackboneCell::default();
             cell.set_count(AA_HITS_PER_CELL + 1);

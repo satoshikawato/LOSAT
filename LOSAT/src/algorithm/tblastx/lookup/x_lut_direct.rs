@@ -218,7 +218,7 @@ impl XLists<'_> {
 /// No NCBI counterpart: a build's temporary vectors, kept between pooled builds (`cells`, `starts`
 /// and `offsets`: the present source cells of a partitioned build, `x_counted_sources`, which keeps
 /// its cursors in `ranges` before the vector holds the build's ranges' counts,
-/// `x_partitioned_passes`; `counts`, `base` and `fill` are a build's on one thread). Each use has a
+/// `x_partitioned_passes`; `counts` and `fill` are a build's on one thread). Each use has a
 /// vector of its own, so that a set taken by builds of both kinds is not shrunk and grown again
 /// (`x_fit`).
 #[derive(Default)]
@@ -1926,9 +1926,9 @@ fn x_laid_out<C: XVec>(
 // `x_counted_sources`: the sources in ascending cell order,
 // each one's offsets in chain order), the lists T(s) of the present sources are made once, in
 // source order, into one vector (no memo outlives the build), the count pass runs as each list is
-// made, and the counts become the cells' fill cursors once the layout has read them (a cell of
-// more than AA_HITS_PER_CELL entries starts at its overflow cursor, any other at 0 in its own
-// entries; `num_used` tells the two apart). The table's backbone and overflow are mapped on
+// made, and the counts become the cells' fill positions once the layout has read them (0 in the
+// cell's own entries, or in its run of the overflow from the cell's cursor; `num_used` tells the
+// two apart). The table's backbone and overflow are mapped on
 // 64-bit glibc (`x_unthresholded_capacity`), so that a batch's table goes back when its search
 // ends. The appends are those of `x_build_direct_in`, in the same order (the module comment's
 // identity argument), so the table is the reference table.
@@ -2333,8 +2333,9 @@ struct XDisjointOut<C: XCell> {
     lens: (usize, usize),
 }
 
-// SAFETY: the tasks of the fill write through the pointers only, each at positions no other task
-// writes (`XDisjointOut::put`), while nothing else reads or writes the vectors.
+// SAFETY: the tasks of the fill write through the pointers, each at positions no other task
+// writes, and read the cursors of overflow cells, which no task writes (`XDisjointOut::put`), while
+// nothing else reads or writes the vectors.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2540,8 +2541,8 @@ fn x_counted_sources(
 // (c) Each stripe, after the overflow of the stripes before it (their sizes summed in stripe order:
 //     BlastAaLookupFinalize assigns the overflow cursors in ascending cell order), writes its cells
 //     (num_used, the pv bit and, for an overflow cell, the cursor) and turns c_p[w] into the
-//     position of range p's first append to w: the cell's start (0 in its own entries, or its
-//     cursor in the overflow) plus the sum of c_q[w] over q < p.
+//     position of range p's first append to w: the sum of c_q[w] over q < p, in its own entries,
+//     or with `X_IN_OVERFLOW` in its run of the overflow (from the cell's cursor).
 // (d) Each range makes its appends, s ascending and w in T(s) in list order, at its position for w,
 //     advanced by the offsets written.
 // Every append to a cell from a range before p comes before range p's appends to it, and within a

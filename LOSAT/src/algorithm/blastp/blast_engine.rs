@@ -7571,7 +7571,7 @@ fn write_reports_without_queries(
                     word_threshold: args.threshold,
                     window_size: args.window_size as i32,
                     gapped_karlin: lookup_protein_params(&args.scoring),
-                    gumbel: if args.searchsp.is_none() {
+                    gumbel: if !args.old_fsc {
                         Some(
                             lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
                                 .context(
@@ -7710,7 +7710,8 @@ struct BlastpReports<'a> {
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
 /// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`), `OLD_FSC` and query split values that NCBI cannot convert. Other
+/// archive (`archive`), `OLD_FSC` in PSIBLAST and RPSBLAST (BLASTP reads it) and query split
+/// values that NCBI cannot convert. Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
 /// `kappa_query_batches`) and the query split (`search_split_query_batches`).
@@ -7724,7 +7725,10 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
         fasta_subjects,
         archive && app == BlastpApp::Blastp,
     )?;
-    app::check_old_fsc(app_name)?;
+    // BLASTP reads OLD_FSC as `-searchsp` (`ResolvedBlastpArgs::old_fsc`).
+    if app != BlastpApp::Blastp {
+        app::check_old_fsc(app_name)?;
+    }
     app::check_query_split_environment(app_name, false)??;
     Ok(())
 }
@@ -8834,7 +8838,7 @@ fn run_resolved_in_pool(
     } else {
         total_db_len as i64
     };
-    let gapped_gumbel = if args.searchsp.is_none() {
+    let gapped_gumbel = if !args.old_fsc {
         Some(
             lookup_protein_gumbel_params(&args.scoring, gumbel_db_length)
                 .context("missing NCBI gumbel parameters for supported blastp scoring")?,
@@ -8905,15 +8909,24 @@ fn run_resolved_in_pool(
     // ```
     // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
     // length is too short"; LOSAT refuses the search instead.
-    if args.searchsp.is_some()
+    if args.old_fsc
         && contexts.iter().any(|ctx| ctx.is_valid)
         && total_db_len / num_subjects.max(1) == 0
     {
         anyhow::bail!(
-            "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTP"
+            "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTP"
         );
     }
-    let exact_search_space = database.is_some() || args.dbsize > 0 || args.searchsp.is_some();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-945
+    // ```c
+    //          } else {
+    //              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+    //          }
+    // ```
+    // Without the Gumbel block (`old_fsc`: `-searchsp` or `OLD_FSC`) the hit cutoffs read
+    // each context's search space, which the exact computation hands them
+    // (`exact_search_spaces`; `blastp_cutoff_score_max`).
+    let exact_search_space = database.is_some() || args.dbsize > 0 || args.old_fsc;
     let options_searchsp = args.searchsp.unwrap_or(0);
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
     // ```c

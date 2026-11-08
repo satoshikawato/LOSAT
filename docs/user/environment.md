@@ -58,17 +58,15 @@ These change the output as they change NCBI BLAST+'s output. They are not needed
 | `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` | The length of the pieces a long query is split into, and their overlap. An empty value counts as unset; a value that is not an integer stops the run, and a non-integer `OVERLAP_CHUNK_SIZE` also stops `rpsblast`, where NCBI BLAST+ does not read it. With a translated query (`blastx`, `tblastx`) a chunk size that is not a multiple of 3 is NCBI's error `Split query chunk size must be divisible by 3` (exit status 3). Splitting values that NCBI BLAST+ does not search correctly are refused: a negative chunk size above a negative overlap, an overlap so close to the chunk size that NCBI splits a chunk again, and in blastx an overlap that is not a multiple of 3. |
 | `ARCHIVE_FORMAT` | The encoding of `-outfmt 11`: unset or empty for text ASN.1, a value starting with `bin` (any case) for binary ASN.1, `xml` (any case) for XML; any other value writes no archive, as in NCBI BLAST+. |
 | `CTOOLKIT_COMPATIBLE` | Any value: `-outfmt 0` writes `(bits)` in place of `(Bits)` above the hit list. |
+| `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx` and `tblastn` compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. `psiblast` and `rpsblast` refuse it (see [Variables that LOSAT refuses](#variables-that-losat-refuses)). |
 | `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not an integer stops the run (NCBI BLAST+ stops before its report), except when every format is `-outfmt 11`, which `psiblast` and `rpsblast` do not write. |
 
-Two variables are not yet read as NCBI BLAST+ reads them in every program; do not set them:
+One variable is not yet read as NCBI BLAST+ reads it in every program; do not set it:
 
 - `ADAPTIVE_CBS`: with composition-based statistics and a `-max_target_seqs` below 1000, NCBI
   BLAST+ keeps a larger preliminary hit list and then trims it by E-value (except in psiblast).
   `blastp` and `psiblast` keep the larger list, but `blastp` does not trim it; `blastx` does not
   read the variable; `tblastn` with `-comp_based_stats 2` refuses it.
-- `OLD_FSC`: `blastx` does not read it; `blastp`, `tblastn`, `psiblast` and `rpsblast` refuse it
-  (see [Variables that LOSAT refuses](#variables-that-losat-refuses)); in `blastn` and `tblastx` it
-  changes nothing in NCBI BLAST+, and LOSAT does not read it.
 
 ## makeblastdb
 
@@ -92,7 +90,7 @@ giving a different output.
 | Variable | Where | What it does in NCBI BLAST+ |
 | :--- | :--- | :--- |
 | `BL2SEQ_LEGACY` | a search with `-subject` | Searches each subject on its own and writes the legacy bl2seq report. |
-| `OLD_FSC` | `blastp`, `tblastn`, `psiblast`, `rpsblast` | Computes E-values without the finite-size correction. |
+| `OLD_FSC` | `psiblast`, `rpsblast` | Computes E-values without the finite-size correction. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` | the search programs, with a `-db` built with `-parse_seqids` | Changes which id of a sequence is shown. |
 | `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` (a non-empty value) | makeblastdb | Stores other titles for some FASTA definition lines (with a tab, a Ctrl-A, or white space at their ends). |
 | `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`, `[BLAST] MAX_SEQID_LENGTH` (a value other than 0 that NCBI converts) | `makeblastdb -parse_seqids` | Sets the longest Seq-id that makeblastdb parses. |

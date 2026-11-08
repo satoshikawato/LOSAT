@@ -711,6 +711,10 @@ pub struct ResolvedBlastpArgs {
     /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
     /// (blast_args.cpp:303-307, blast_stat.c:921-923).
     pub searchsp: Option<i64>,
+    /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP with the
+    /// environment variable `OLD_FSC` (`app::old_fsc_environment`; PSIBLAST and RPSBLAST
+    /// refuse it, `app::check_old_fsc`).
+    pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
     pub threshold: f64,
@@ -1236,6 +1240,14 @@ impl BlastpArgs {
             // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
             dbsize: self.dbsize.unwrap_or(0),
             searchsp: self.searchsp,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+            // ```c
+            //     use_old_fsc = getenv("OLD_FSC");
+            //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+            // ```
+            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
+            old_fsc: self.searchsp.is_some()
+                || (self.app == BlastpApp::Blastp && crate::blastinput::app::old_fsc_environment()),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,

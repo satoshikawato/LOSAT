@@ -102,7 +102,13 @@ own Seq-aligns against a positive PRE_FETCH_SEQS_LIMIT): `nordtag_v5.*` from `no
 another sequence; the queries `nordtag_q.fna` and `nordtag_q.faa` hit one each (`pfb_aba.faa`, `pfb_aab.faa`,
 `pfb_aab.fna` and `pfb_s.fna` place it in other batches, see tests/db_search/README.md; `pfb_rc_nambig.fna` and
 `pfb_rc_ids_q.fna` are the reverse complements of `nambig.fna` and `ids_q.fna`, for the minus-strand alignments of
-`nrefuse_v5`). `--pfbatch-only` builds only these.
+`nrefuse_v5`). `--pfbatch-only` builds only these. Line DBID pfwarn (NCBI's prefetch writes `Error pre-fetching
+sequence data` where it fails): `ntag_t5.*` from `nordtag.fna`, `nlook_t4.*` (version 4) from `nlook.fna` and
+`pshare_t5.*` from `pshare.faa`, every sequence with taxid 99990, whose lookup writes the offset error of
+tests/seqdb/taxdb/offset_last_past_end; `pfw_weak_v5.*` from `pfw_weak.faa` (`sp||NAMEY`, `sp|P00042.1|NAMEY`, which
+the query `pfw_q6.faa` matches exactly, `gb|FFF00099.1|` and `gnl|BL_ORD_ID|0` with a text tag, whose hit psiblast ranks
+last); and `pfw_bad/ntag_t5.*`, a copy of `ntag_t5` whose accession table's leaf page (page 6 of the `.ndb`) has its
+flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -202,6 +208,30 @@ def build_pfbatch(args: argparse.Namespace) -> None:
         check=True, stdout=subprocess.DEVNULL)
 
 
+def build_pfwarn(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype, version in (("ntag_t5", "nordtag.fna", "nucl", "5"), ("nlook_t4", "nlook.fna", "nucl", "4"),
+                                         ("pshare_t5", "pshare.faa", "prot", "5")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+             "-blastdb_version", version, "-taxid", "99990", "-title", f"{name} (parsed Seq-ids, taxid 99990)",
+             "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(
+        [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "pfw_weak.faa"), "-dbtype", "prot", "-parse_seqids",
+         "-blastdb_version", "5", "-title", "pfw_weak_v5 (parsed Seq-ids)", "-out", str(args.out / "pfw_weak_v5")],
+        check=True, stdout=subprocess.DEVNULL)
+    bad = args.out / "pfw_bad"
+    bad.mkdir(exist_ok=True)
+    for path in sorted(args.out.glob("ntag_t5.*")):
+        data = bytearray(path.read_bytes())
+        if path.suffix == ".ndb":
+            # The flags of an LMDB page header (8-byte number, 2 bytes of padding, 2 of flags).
+            flags = 6 * 4096 + 10
+            assert data[flags] != 0, "page 6 of ntag_t5.ndb is no longer the accession table's leaf"
+            data[flags] = 0
+        (bad / path.name).write_bytes(bytes(data))
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -237,6 +267,7 @@ def main() -> int:
     ap.add_argument("--emptytitle-only", action="store_true", help="build only the databases of line DBID H3")
     ap.add_argument("--tabfields-only", action="store_true", help="build only the database of line DBID tabfields")
     ap.add_argument("--pfbatch-only", action="store_true", help="build only the database of line DBID pfbatch")
+    ap.add_argument("--pfwarn-only", action="store_true", help="build only the databases of line DBID pfwarn")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -258,6 +289,9 @@ def main() -> int:
         return 0
     if args.pfbatch_only:
         build_pfbatch(args)
+        return 0
+    if args.pfwarn_only:
+        build_pfwarn(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -375,6 +409,7 @@ def main() -> int:
     build_emptytitle(args)
     build_tabfields(args)
     build_pfbatch(args)
+    build_pfwarn(args)
     return 0
 
 

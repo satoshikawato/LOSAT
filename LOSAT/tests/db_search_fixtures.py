@@ -50,7 +50,8 @@ failure's exit status counts as any other failure's, a row whose query the reade
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist), and the rows that
 write PSSM files (the PSSM kinds) or pass a PSSM file option are `library-skip`: the library API
-writes no PSSM file and refuses those options (`LIBRARY_REFUSED`).
+writes no PSSM file and refuses those options (`LIBRARY_REFUSED`); so are psiblast's rounds (`-num_iterations`
+other than 1), whose results the library API does not have (`library_refused_rounds`).
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -356,11 +357,18 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
 LIBRARY_REFUSED = {"-out_pssm", "-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm", "-in_pssm"}
 
 
+def library_refused_rounds(argv: list[str]) -> bool:
+    """Whether the argv runs psiblast's rounds (`-num_iterations` other than 1), which the library API refuses
+    (`api::search::parse`: its results have one round)."""
+    return any(word == "-num_iterations" and value != "1" for word, value in zip(argv, argv[1:]))
+
+
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
     # The library API refuses rpsblast (`api::Program::parse`, line PS item PS11a).
-    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row)) or row["program"] == "rpsblast"):
+    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row)) or library_refused_rounds(search_argv(row))
+                    or row["program"] == "rpsblast"):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None

@@ -154,4 +154,56 @@ impl PsiSearch {
     pub fn query(&self) -> &FastaRecord {
         &self.query
     }
+
+    /// The PSSM search of a later round of the FASTA query `query` (psiblast's rounds,
+    /// `algorithm::psiblast::rounds`): the engine's PSSM of the round before, in full precision
+    /// (NCBI's `CPssmWithParameters` in memory, never read back from text): its scores, its
+    /// frequency ratios and the six statistical values of `x_PSIMatrix2Asn1`, each `None` where
+    /// it is 0.0 (`CPssm::kInvalidStat`), as `psi_search_of` reads a file's; and the warnings of
+    /// `PsiBlastSetupScoreBlock` for the round's options (`setup_messages`). The query stays the
+    /// FASTA query: `CPsiBlastImpl::SetPssm` replaces only the PSSM.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:173-181
+    /// ```c++
+    /// CPsiBlastImpl::SetPssm(CConstRef<objects::CPssmWithParameters> pssm)
+    /// {
+    ///     if (pssm.Empty()) {
+    ///         NCBI_THROW(CBlastException, eInvalidArgument,
+    ///                    "Setting empty reference for pssm");
+    ///     }
+    ///     CPsiBlastValidate::Pssm(*pssm, true);
+    ///     m_Pssm.Reset(const_cast<CPssmWithParameters*>(&*pssm));
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:648-660 (quoted at
+    /// `algorithm::psiblast::pssm::pssm_with_parameters`: the scores and values that the next
+    /// round's `PsiBlastSetupScoreBlock` reads)
+    pub(crate) fn from_engine(
+        pssm: &crate::core::psi::PsiPssm,
+        query: FastaRecord,
+        setup_messages: Vec<String>,
+    ) -> Self {
+        let stat = |value: f64| (value != 0.0).then_some(value);
+        Self {
+            pssm: rows::QueryPssm {
+                rows: pssm.scores.clone(),
+            },
+            freq_ratios: pssm
+                .diagnostics
+                .frequency_ratios
+                .clone()
+                .unwrap_or_default(),
+            stats: PssmStats {
+                lambda_ungapped: stat(pssm.ungapped.lambda),
+                kappa_ungapped: stat(pssm.ungapped.k),
+                h_ungapped: stat(pssm.ungapped.h),
+                lambda: stat(pssm.gapped.lambda),
+                kappa: stat(pssm.gapped.k),
+                h: stat(pssm.gapped.h),
+            },
+            query,
+            validation_error: None,
+            setup_messages,
+        }
+    }
 }

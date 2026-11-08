@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pfw_weak_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pfw_weak_v5 (parsed Seq-ids)",
+  "number-of-letters": 880,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-08T00:58:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50793,
+  "bytes-to-cache": 1029,
+  "files": [
+    "pfw_weak_v5.pdb",
+    "pfw_weak_v5.phr",
+    "pfw_weak_v5.pin",
+    "pfw_weak_v5.pog",
+    "pfw_weak_v5.pos",
+    "pfw_weak_v5.pot",
+    "pfw_weak_v5.psq",
+    "pfw_weak_v5.ptf",
+    "pfw_weak_v5.pto"
+  ]
+}

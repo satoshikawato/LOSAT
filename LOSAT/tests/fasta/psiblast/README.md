@@ -38,3 +38,12 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   of `tests/fixtures/pssm/ps4_stale_q` is three TK stretches with 40-letter `DE` runs between them), for NCBI's adjusted PSSM kept across matches: `s_good`
   is redone first, then `s_bz`'s first HSP is not redone (its adjustment fails) and its later HSPs are redone on the
   PSSM `s_good` left.
+- `ps5_*.faa` (PS5a, psiblast's rounds; the queries of the step-1 cases, `PS/scripts/ncbi_ps5_check.py`):
+  `ps5_pk.faa` YP_009220615.1 (putative protein kinase; with `-inclusion_ethresh 5` five rounds without
+  convergence, a sixth that converges), `ps5_rr1.faa` YP_009220529.1, `ps5_exhaust.faa` YP_009220499.1 and
+  `ps5_conv6.faa` YP_009220492.1 (with `-inclusion_ethresh 10`: six rounds without convergence, and convergence on
+  the sixth), `ps5_nohit2.faa` YP_009220505.1 and `ps5_nohit2b.faa` YP_009220545.1 (round 1's hits are all above
+  0.002: round 2 searches the PSSM of the query alone and has no hits), all of `tests/fasta/WSSV.faa`;
+  `ps5_three.faa`: `tk.faa`, `ps5_nohit2.faa`, `qnone` (36 G, no hits) and `rnd.faa` (the rounds start again for
+  each query; outfmt 7 counts the rounds); `ps5_subj_one.faa` (BDT63550.1) and `ps5_subj_two.faa` (BDT63550.1 and
+  BDT63556.1) of `tests/fasta/PajaWSV.faa`, subject sets of one and two records (the two-part table with `-subject`).

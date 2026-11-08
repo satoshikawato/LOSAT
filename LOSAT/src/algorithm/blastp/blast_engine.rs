@@ -83,6 +83,9 @@ mod traceback;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_resolved_in_pool`.
 mod pssm_hooks;
+// rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
+// hooks of `search_cli` and `run_resolved_in_pool`.
+mod rps_hooks;
 // psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
 // `search`, and the round's outcome hook of `run_resolved_in_pool`.
 mod psi_round;
@@ -2367,8 +2370,8 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // ```
     // The compressed lookup table runs at each of its word sizes, 5 to 7
     // (`validate_protein_options` has refused the others); of the lookup table's sizes, LOSAT's
-    // BLASTP implements 3 only.
-    if args.word_size != 3
+    // BLASTP implements 2 (blastp-short, item SC3) and 3.
+    if !matches!(args.word_size, 2 | 3)
         && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
         && args.psi_search.is_none()
     {
@@ -5407,6 +5410,11 @@ fn search_cli(
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
     let mut resolved = args.check_options(outputs.diagnostics)?;
+    // rpsblast: NCBI's check of the database's frequency ratios comes between the options and
+    // the database (`rps_hooks::check_freq_ratio_file`).
+    if let Some(rps) = resolved.rps_search.clone() {
+        rps_hooks::check_freq_ratio_file(&resolved, &rps, &settings, outputs.diagnostics)?;
+    }
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
     // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
     if resolved.app == BlastpApp::Psiblast && database.is_none() {
@@ -6308,13 +6316,20 @@ fn search(
         observer.queries_begin();
     }
     let batches = match args.app {
-        BlastpApp::Blastp => crate::blastinput::query_batch::read_query_batches(
-            query_records,
-            &searched_queries,
-            &query_input,
-            reading,
-            batch_size,
-        ),
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
+        // ```c++
+        //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+        //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
+        // ```
+        BlastpApp::Blastp | BlastpApp::Rpsblast => {
+            crate::blastinput::query_batch::read_query_batches(
+                query_records,
+                &searched_queries,
+                &query_input,
+                reading,
+                batch_size,
+            )
+        }
         BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
             &args,
             &searched_queries,
@@ -6901,6 +6916,7 @@ fn x_query_block_plan(
     if args.query_range.is_some()
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
+        || args.rps_search.is_some()
         || outputs.formats.is_empty()
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
@@ -7182,7 +7198,13 @@ fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> Strin
 /// argument; psiblast makes its formatter without one (the default `kEmptyStr`).
 fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
     match args.app {
-        BlastpApp::Psiblast => String::new(),
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:182-184
+        // ```c++
+        //                                fmt_args->GetCustomOutputFormatSpec(),
+        //                                false, false, NULL, NULL,
+        //                                GetCmdlineArgs(GetArguments()));
+        // ```
+        BlastpApp::Psiblast | BlastpApp::Rpsblast => String::new(),
         BlastpApp::Blastp if subject_label.is_empty() => args.subject.display().to_string(),
         BlastpApp::Blastp => subject_label.to_string(),
     }
@@ -7378,6 +7400,7 @@ fn write_reports_without_queries(
                     &[],
                     &[],
                     &report,
+                    None,
                     pairwise_database.as_ref(),
                     None,
                     None,
@@ -7566,6 +7589,21 @@ fn search_split_query_batches(
     use crate::algorithm::blastp::protein_query_split::{
         protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
+    // ```c++
+    //         // do not split RPS-BLAST
+    //     if (Blast_SubjectIsPssm(program) ||
+    //         // the current implementation does NOT support splitting for multiple
+    //         // blastx queries, loop over queries individually here...
+    //         (program == eBlastTypeBlastx && num_queries > 1) ||
+    //         Blast_ProgramIsPhiBlast(program)) {
+    //         retval = false;
+    //     }
+    // ```
+    // An RPS-BLAST query batch is never split.
+    if args.rps_search.is_some() {
+        return Ok(());
+    }
     let sizes = protein_query_split_sizes(args.app.name(), 10000)?;
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
@@ -7782,12 +7820,14 @@ fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:237,245
 // ```c
+//     lookup->word_length = opt->word_size;
 //     lookup->threshold = (Int4)opt->threshold;
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
-/// the lookup region of `run_resolved_in_pool` builds them. The threshold takes the x86-64
+/// the lookup region of `run_resolved_in_pool` builds them, of the search's word size (3, or 2:
+/// blastp-short and `-word_size 2`, item SC3). The threshold takes the x86-64
 /// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). The table is filled in place,
 /// without the reference builder's chains (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
 /// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`, `blastp_aa_lookup_ahead`) takes the same threshold and
@@ -7805,18 +7845,22 @@ fn blastp_aa_lookup(
             false,
             x_bplk16_for(args, x_chunk),
             args.scoring.matrix,
+            args.word_size,
         );
         return (x_bp_runtime_lookup(built), contexts);
     }
-    // Another matrix than BLOSUM62: the same table of the matrix's words (`x_bp_build_ncbi_lookup`
-    // builds BLOSUM62's).
-    if args.scoring.matrix != ScoringMatrix::Blosum62 {
+    // Another matrix than BLOSUM62, or `-word_size 2` (item SC3): the same table of the matrix's
+    // words of that size (`x_bp_build_ncbi_lookup` builds BLOSUM62's words of 3).
+    if args.scoring.matrix != ScoringMatrix::Blosum62
+        || args.word_size != crate::algorithm::tblastx::lookup::LOOKUP_WORD_LENGTH
+    {
         return match x_bp_build_ncbi_lookup_as(
             query_frames,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
             false,
             false,
             args.scoring.matrix,
+            args.word_size,
         ) {
             (XBpLookup::Wide(lookup), contexts) => (BlastpRuntimeLookup::Aa(lookup), contexts),
             (XBpLookup::Narrow(_), _) => unreachable!("a build without `narrow` has Int4 hits"),
@@ -7848,8 +7892,13 @@ fn blastp_aa_lookup_ahead(
     if x_bplk16() {
         let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
         if x_bplk16_for(args, false) {
-            let (built, contexts) =
-                spares.x_build_ahead16(query_frames, threshold, false, args.scoring.matrix)?;
+            let (built, contexts) = spares.x_build_ahead16(
+                query_frames,
+                threshold,
+                false,
+                args.scoring.matrix,
+                args.word_size,
+            )?;
             return Some((x_bp_runtime_lookup(built), contexts));
         }
         let (lookup, contexts) = spares.x_build_ahead(
@@ -7858,6 +7907,7 @@ fn blastp_aa_lookup_ahead(
             &lookup_protein_params_ungapped(args.scoring.matrix),
             false,
             args.scoring.matrix,
+            args.word_size,
         )?;
         return Some((x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts));
     }
@@ -7867,6 +7917,7 @@ fn blastp_aa_lookup_ahead(
         &lookup_protein_params_ungapped(args.scoring.matrix),
         false,
         args.scoring.matrix,
+        args.word_size,
     )?;
     Some((BlastpRuntimeLookup::Aa(lookup), contexts))
 }
@@ -7888,8 +7939,13 @@ fn blastp_aa_lookup_on_block_spare(
     if x_bplk16() {
         let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
         if x_bplk16_for(args, x_chunk) {
-            let (built, contexts) =
-                spare.x_build_on_block_spare16(query_frames, threshold, false, args.scoring.matrix);
+            let (built, contexts) = spare.x_build_on_block_spare16(
+                query_frames,
+                threshold,
+                false,
+                args.scoring.matrix,
+                args.word_size,
+            );
             return (x_bp_runtime_lookup(built), contexts);
         }
         let (lookup, contexts) = spare.x_build_on_block_spare(
@@ -7898,6 +7954,7 @@ fn blastp_aa_lookup_on_block_spare(
             &lookup_protein_params_ungapped(args.scoring.matrix),
             false,
             args.scoring.matrix,
+            args.word_size,
         );
         return (x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts);
     }
@@ -7907,6 +7964,7 @@ fn blastp_aa_lookup_on_block_spare(
         &lookup_protein_params_ungapped(args.scoring.matrix),
         false,
         args.scoring.matrix,
+        args.word_size,
     );
     (BlastpRuntimeLookup::Aa(lookup), contexts)
 }
@@ -8381,6 +8439,9 @@ fn run_resolved_in_pool(
         crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
     }
     let (lookup, mut contexts) = match args.lookup_table_type {
+        // rpsblast: the queries' contexts; the search scans with the database's prebuilt table
+        // (`rps_hooks::rps_contexts`).
+        _ if args.rps_search.is_some() => rps_hooks::rps_contexts(&args, &query_frames),
         // psiblast `-in_pssm`: the lookup table of the PSSM (`pssm_hooks::pssm_lookup`).
         _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(&args, &query_frames),
         // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
@@ -10180,9 +10241,49 @@ fn run_resolved_in_pool(
     ))]
     let use_parallel = false;
 
-    // psiblast `-in_pssm`: the PSSM's preliminary search (`pssm_hooks::pssm_prelim`), into the
-    // same hit lists.
-    if let Some(psi) = args.psi_search.as_deref() {
+    // rpsblast: the RPS engine's whole search (`rps_hooks::rps_search`): the final hit lists,
+    // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
+    let mut rps_gapped_k: Option<Vec<f64>> = None;
+    if let Some(rps) = args.rps_search.as_deref() {
+        let run = rps_hooks::RpsSearchRun {
+            contexts: &contexts,
+            gapped_params: &gapped_params,
+            gumbel: gapped_gumbel.as_ref(),
+            cutoff_subject_length,
+            prelim_hitlist_size,
+            batches: query_batches
+                .iter()
+                .map(|batch| batch.searched.clone())
+                .collect(),
+        };
+        let searched = rps_hooks::rps_search(
+            rps,
+            &args,
+            &run,
+            database,
+            blastp_parallel_pool,
+            &mut preliminary_hit_lists,
+        )
+        .map_err(|error| {
+            match (database, error.downcast::<rps_hooks::RpsEngineError>()) {
+                // NCBI's errors of the RPS files come from the first batch's search, after the
+                // outfmt 0 prolog.
+                (Some(database), Ok(engine_error)) => preliminary_search_error(
+                    &args,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    reports,
+                    query_batch_skipped.first() == Some(&false),
+                    database.name(),
+                    &engine_error.0,
+                ),
+                (_, Ok(engine_error)) => anyhow::Error::new(engine_error),
+                (_, Err(other)) => other,
+            }
+        })?;
+        rps_gapped_k = Some(searched);
+    } else if let Some(psi) = args.psi_search.as_deref() {
         pssm_hooks::pssm_prelim(
             psi,
             &args,
@@ -10551,7 +10652,10 @@ fn run_resolved_in_pool(
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
-    let ordinary_hit_lists = if ordinary_traceback && args.psi_search.is_some() {
+    let ordinary_hit_lists = if args.rps_search.is_some() {
+        // rpsblast: the RPS engine's final hit lists (`rps_hooks::rps_search`).
+        Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
+    } else if ordinary_traceback && args.psi_search.is_some() {
         // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
         // the position-based redo of modes 1 to 3).
         Some(pssm_hooks::pssm_traceback(
@@ -11740,6 +11844,7 @@ fn run_resolved_in_pool(
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
             && args.psi_pssm.is_none()
+            && args.rps_search.is_none()
             && reports.psi_round.is_none()
             && requested_formats.iter().all(|outfmt| {
                 matches!(
@@ -13043,7 +13148,7 @@ fn run_resolved_in_pool(
                 // the traceback's results without them (psiblast_impl.cpp:150), so its rows show
                 // no lowercase masking.
                 let masked_hits = match args.app {
-                    BlastpApp::Blastp => masked_query_rows(
+                    BlastpApp::Blastp | BlastpApp::Rpsblast => masked_query_rows(
                         pairwise_hits,
                         &query_frames,
                         &ranges.query_input.placements,
@@ -13093,6 +13198,8 @@ fn run_resolved_in_pool(
                     &subject_titles,
                     listed_parsed,
                     &pairwise_report,
+                    // rpsblast: the gapped K of the RPS traceback (`rps_hooks::rps_search`).
+                    rps_gapped_k.as_deref(),
                     pairwise_database.as_ref(),
                     probe.as_mut(),
                     warnings.as_mut(),
@@ -13567,6 +13674,7 @@ mod tests {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
+            rps: None,
         }
     }
 
@@ -14443,7 +14551,8 @@ mod tests {
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:1163-1169
-    // (above): word size 4 keeps the lookup table, of which LOSAT's BLASTP implements word size 3.
+    // (above): word size 4 keeps the lookup table, of which LOSAT's BLASTP implements word sizes 2
+    // and 3.
     #[test]
     fn test_validate_requested_blastp_support_rejects_lookup_table_word_size_four() {
         let mut args = make_blastp_args();
@@ -14454,6 +14563,32 @@ mod tests {
             err.to_string(),
             "-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"
         );
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1163-1169 (above): word size 2 keeps
+    // the lookup table (blastp-fast's compressed one too, `SetWordSize`). Item SC3: blastp-short's
+    // word size and `-word_size 2` of every task run it.
+    #[test]
+    fn test_validate_requested_blastp_support_accepts_word_size_two() {
+        for task in ["blastp", "blastp-fast", "blastp-short"] {
+            for word_size in [None, Some(2)] {
+                let mut args = make_blastp_args();
+                args.task = task.into();
+                args.word_size = word_size;
+                let resolved = args.resolve().expect("resolved blastp args");
+                if task != "blastp-short" && word_size.is_none() {
+                    continue;
+                }
+                assert_eq!(resolved.word_size, 2, "{task}");
+                assert_eq!(
+                    resolved.lookup_table_type,
+                    BlastpLookupTableType::AaLookupTable,
+                    "{task}"
+                );
+                validate_requested_blastp_support(&resolved)
+                    .unwrap_or_else(|err| panic!("{task} {word_size:?}: {err}"));
+            }
+        }
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3036-3062

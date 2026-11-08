@@ -49,8 +49,13 @@ DEFAULT_CASES = Path("docs/evidence/ncbi_unit_cases/NCBI_CASES.tsv")
 DEFAULT_LEDGER = Path("docs/evidence/ncbi_unit_cases/LEDGER.tsv")
 SCAN_DIRS = (Path("LOSAT/src"), Path("LOSAT/tests"))
 
-# NCBI unit tests in scope (PLAN 2026-10-10 §2.3): the api modules that cover
-# algo/blast/core and the input/format layers of the five LOSAT programs.
+# NCBI unit tests in scope (PLAN 2026-10-10 §2.3, widened 2026-11-08 by SW8 DECISIONS 28): the
+# api modules that cover algo/blast/core, the input/format layers, PSI-BLAST, RPS-BLAST and the
+# sequence sources, and the BLAST database reader, writer and formatter tests. Left out: tests of
+# programs and services LOSAT does not have (phiblast, delta, magicblast, rmblast_*,
+# remote_blast, search_strategy, proteinkmer, blast_services), of NCBI's test mocks
+# (mockseqsrc1, mockseqsrc2) and of the object manager's BLAST database loader (bdbloader,
+# blast_scope_src).
 API_MODULES = (
     "aalookup", "aascan", "blast", "blastdiag", "blastengine", "blastextend",
     "blastfilter", "blasthits", "blastoptions", "blastsetup", "gapinfo",
@@ -58,20 +63,33 @@ API_MODULES = (
     "linkhsp", "ntlookup", "ntscan", "nuclwordfinder", "optionshandle",
     "pssmcreate", "querydata", "queryinfo", "redoalignment", "scoreblk", "split_query",
     "stat", "subj_ranges", "traceback", "tracebacksearch", "bl2seq",
+    "msa2pssm", "prelimsearch", "psibl2seq", "psiblast", "psiblast_iteration",
+    "pssmcreate_cdd", "pssmenginefreqratios", "rps", "seqinfosrc", "seqsrc",
+    "setupfactory", "uniform_search", "version_reference",
 )
-# (module, directory under c++/src, file glob). An api file is its own module;
+# BLAST database tests: (directory under c++/src, modules); each `<m>_unit_test.cpp` is a module.
+DATABASE_MODULES = (
+    ("algo/blast/unit_tests/seqdb_reader", ("seqdb", "seqdb_lmdb", "seqdb_tax4blast")),
+    ("objtools/blast/seqdb_writer/unit_test", ("writedb", "writedb_lmdb", "criteria")),
+    ("objtools/blast/blastdb_format/unit_test", ("seq_formatter", "seq_writer")),
+)
+# (module, directory under c++/src, file glob). An api or database file is its own module;
 # the other directories are one module each.
 SOURCES = tuple(
     (name, "algo/blast/unit_tests/api", f"{name}_unit_test.cpp") for name in API_MODULES
+) + tuple(
+    (name, directory, f"{name}_unit_test.cpp") for directory, names in DATABASE_MODULES for name in names
 ) + (
     ("blast_format", "algo/blast/unit_tests/blast_format", "*.cpp"),
     ("blast_mt", "algo/blast/unit_tests/blast_mt", "*.cpp"),
     ("blastinput", "algo/blast/blastinput/unit_test", "blastinput_unit_test.cpp"),
     ("align_format", "objtools/align_format/unit_test", "*.cpp"),
 )
-# `#if` conditions that are false in NCBI's build: dead code, and
-# SEQLOC_MIX_QUERY_OK, which no build defines.
-FALSE_CONDITIONS = frozenset({"0", "SEQLOC_MIX_QUERY_OK"})
+# Macros that no NCBI build defines: SEQLOC_MIX_QUERY_OK, and KAPPA_PRINT_DIAGNOSTICS, whose only
+# `#define` (include/algo/blast/core/blast_def.h:125-130) is inside `#if 0`. `#if` conditions that
+# are false in NCBI's build: dead code and these macros.
+UNDEFINED_MACROS = frozenset({"SEQLOC_MIX_QUERY_OK", "KAPPA_PRINT_DIAGNOSTICS"})
+FALSE_CONDITIONS = frozenset({"0"}) | UNDEFINED_MACROS
 TRUE_CONDITIONS = frozenset({"1"})
 
 CASE_RE = re.compile(r"\bBOOST_(AUTO|FIXTURE)_TEST_CASE\s*\(\s*([A-Za-z_]\w*)")
@@ -206,7 +224,7 @@ def blank_cpp_comments_and_literals(text: str) -> str:
 
 
 def _disabled_lines(lines: Sequence[str]) -> list[bool]:
-    """Mark the lines that NCBI's build compiles out (`#if 0`, SEQLOC_MIX_QUERY_OK)."""
+    """Mark the lines that NCBI's build compiles out (`#if 0`, UNDEFINED_MACROS)."""
 
     # Each frame is "off", "on" or "unknown"; a line is disabled under any "off".
     stack: list[str] = []
@@ -219,7 +237,10 @@ def _disabled_lines(lines: Sequence[str]) -> list[bool]:
                 state = "off" if rest in FALSE_CONDITIONS else "on" if rest in TRUE_CONDITIONS else "unknown"
                 stack.append(state)
             elif directive in ("ifdef", "ifndef"):
-                stack.append("unknown")
+                if rest in UNDEFINED_MACROS:
+                    stack.append("off" if directive == "ifdef" else "on")
+                else:
+                    stack.append("unknown")
             elif directive == "elif" and stack:
                 stack[-1] = "off" if stack[-1] == "on" else "unknown"
             elif directive == "else" and stack:

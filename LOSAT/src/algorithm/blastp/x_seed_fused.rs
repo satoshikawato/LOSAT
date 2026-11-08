@@ -4189,6 +4189,7 @@ mod tests {
             false,
             true,
             crate::config::ScoringMatrix::Blosum62,
+            crate::algorithm::tblastx::lookup::LOOKUP_WORD_LENGTH,
         ) else {
             panic!("the query set fits 16 bits");
         };

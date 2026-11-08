@@ -1,1 +1,3 @@
-- Internal: the NCBI BLAST+ version that LOSAT writes into its reports, archives and `-version` text ("2.17.0+") is defined once, at the crate root, instead of in about 25 places; the output is unchanged (SW8).
+- Engine: the NCBI BLAST+ version that LOSAT writes into its reports, archives, SAM `@PG` line and
+  `-version` text ("2.17.0+") is defined once, at the crate root, instead of in about 25 places.
+  No output changes.

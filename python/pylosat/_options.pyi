@@ -261,7 +261,10 @@ class BlastxOptions(TypedDict, total=False):
     mt_mode: int
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
-    comp_based_stats: int
+    comp_based_stats: str
+    """Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d,
+    T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score
+    matrix adjustment"""
 
 class TblastnOptions(TypedDict, total=False):
     seqidlist: str

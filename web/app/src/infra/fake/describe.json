@@ -1165,7 +1165,7 @@
    },
    {
     "flag": "-comp_based_stats",
-    "help": "",
+    "help": "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment",
     "takes_value": true,
     "default": "2"
    }
@@ -1232,6 +1232,120 @@
     }
    },
    "by": {
+    "-matrix": {
+     "BLOSUM45": {
+      "blastx": {
+       "-gapextend": "2",
+       "-gapopen": "14",
+       "-threshold": "15",
+       "-window_size": "60"
+      },
+      "blastx-fast": {
+       "-gapextend": "2",
+       "-gapopen": "14",
+       "-threshold": "20",
+       "-window_size": "60"
+      }
+     },
+     "BLOSUM50": {
+      "blastx": {
+       "-gapextend": "2",
+       "-gapopen": "13",
+       "-threshold": "12",
+       "-window_size": "40"
+      },
+      "blastx-fast": {
+       "-gapextend": "2",
+       "-gapopen": "13",
+       "-threshold": "20",
+       "-window_size": "40"
+      }
+     },
+     "BLOSUM62": {
+      "blastx": {
+       "-gapextend": "1",
+       "-gapopen": "11",
+       "-threshold": "12",
+       "-window_size": "40"
+      },
+      "blastx-fast": {
+       "-gapextend": "1",
+       "-gapopen": "11",
+       "-threshold": "20",
+       "-window_size": "40"
+      }
+     },
+     "BLOSUM80": {
+      "blastx": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "13",
+       "-window_size": "25"
+      },
+      "blastx-fast": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "20",
+       "-window_size": "25"
+      }
+     },
+     "BLOSUM90": {
+      "blastx": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "12",
+       "-window_size": "40"
+      },
+      "blastx-fast": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "20",
+       "-window_size": "40"
+      }
+     },
+     "PAM250": {
+      "blastx": {
+       "-gapextend": "2",
+       "-gapopen": "15",
+       "-threshold": "12",
+       "-window_size": "40"
+      },
+      "blastx-fast": {
+       "-gapextend": "2",
+       "-gapopen": "15",
+       "-threshold": "20",
+       "-window_size": "40"
+      }
+     },
+     "PAM30": {
+      "blastx": {
+       "-gapextend": "1",
+       "-gapopen": "9",
+       "-threshold": "17",
+       "-window_size": "15"
+      },
+      "blastx-fast": {
+       "-gapextend": "1",
+       "-gapopen": "9",
+       "-threshold": "20",
+       "-window_size": "15"
+      }
+     },
+     "PAM70": {
+      "blastx": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "15",
+       "-window_size": "20"
+      },
+      "blastx-fast": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "20",
+       "-window_size": "20"
+      }
+     }
+    },
     "-word_size": {
      "3": {
       "blastx": {

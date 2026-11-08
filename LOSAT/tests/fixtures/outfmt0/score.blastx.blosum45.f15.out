@@ -1,0 +1,911 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM45",
+        "expect": 10,
+        "gap_open": 14,
+        "gap_extend": 2,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "m_fam MelaMJNV 26001-31000",
+            "query_len": 5000,
+            "query_masking": [
+              {
+                "from": 39,
+                "to": 69
+              },
+              {
+                "from": 129,
+                "to": 153
+              },
+              {
+                "from": 270,
+                "to": 300
+              },
+              {
+                "from": 1044,
+                "to": 1086
+              },
+              {
+                "from": 1275,
+                "to": 1332
+              },
+              {
+                "from": 2949,
+                "to": 2973
+              },
+              {
+                "from": 3135,
+                "to": 3207
+              },
+              {
+                "from": 3363,
+                "to": 3420
+              },
+              {
+                "from": 3435,
+                "to": 3474
+              },
+              {
+                "from": 3486,
+                "to": 3522
+              },
+              {
+                "from": 3735,
+                "to": 3795
+              },
+              {
+                "from": 4428,
+                "to": 4470
+              },
+              {
+                "from": 4647,
+                "to": 4692
+              },
+              {
+                "from": 343,
+                "to": 388
+              },
+              {
+                "from": 952,
+                "to": 973
+              },
+              {
+                "from": 1147,
+                "to": 1180
+              },
+              {
+                "from": 1987,
+                "to": 2029
+              },
+              {
+                "from": 3127,
+                "to": 3190
+              },
+              {
+                "from": 3214,
+                "to": 3250
+              },
+              {
+                "from": 3412,
+                "to": 3445
+              },
+              {
+                "from": 3733,
+                "to": 3766
+              },
+              {
+                "from": 3787,
+                "to": 3844
+              },
+              {
+                "from": 3886,
+                "to": 3931
+              },
+              {
+                "from": 4312,
+                "to": 4360
+              },
+              {
+                "from": 4654,
+                "to": 4693
+              },
+              {
+                "from": 4903,
+                "to": 4945
+              },
+              {
+                "from": 164,
+                "to": 197
+              },
+              {
+                "from": 299,
+                "to": 344
+              },
+              {
+                "from": 998,
+                "to": 1082
+              },
+              {
+                "from": 1250,
+                "to": 1319
+              },
+              {
+                "from": 1739,
+                "to": 1790
+              },
+              {
+                "from": 1916,
+                "to": 1961
+              },
+              {
+                "from": 2714,
+                "to": 2732
+              },
+              {
+                "from": 3152,
+                "to": 3179
+              },
+              {
+                "from": 3422,
+                "to": 3449
+              },
+              {
+                "from": 3464,
+                "to": 3500
+              },
+              {
+                "from": 3734,
+                "to": 3806
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT61961.1",
+                    "title": "BDT61961.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 207,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 252.251,
+                    "score": 879,
+                    "evalue": 4.67391e-80,
+                    "identity": 147,
+                    "positive": 172,
+                    "query_from": 377,
+                    "query_to": 985,
+                    "query_frame": -2,
+                    "hit_from": 1,
+                    "hit_to": 207,
+                    "align_len": 207,
+                    "gaps": 4,
+                    "qseq": "MREYGNIYYSSMGGLLNALTEAGYSISKNDLSKRDNIESSYGDNGVILSHASEEalcltlycalglLIEKGITVNLSKSN-ADYLLNFPAVRIEIRPNRENNTIVRGRVYKKDN-ITIGDY-VNVNDIHNGGKEYPYPSKTQYSYGD-TLRSIIIESKGRGLKAHDILSTVLYIDSYDRSRLSDIIADIANYPLKFFRAIILRGKRL",
+                    "hseq": "MREYGKIYYSSMVGLLNALTEAGYPISIHDLSDRDGIKSSYRDDGVIITHASEEALCLTLYCALGLLMEKGITVNLKRSNAAEYLLHFPTVKVEVRPNCETNTIVRGRIQRNDDRVAIGEEPVNTSDIYNGGKAYVYQNKALYSHSSGHLKTVIIESKGRGHTANDTLSTVLYIDSYDRSRLPDIIEDIAKYPLKFFRAIILRGKLL",
+                    "midline": "MREYG IYYSSM GLLNALTEAGY IS +DLS RD I+SSY D+GVI++HASEEALCLTLYCALGLL+EKGITVNL +SN A+YLL+FP V++E+RPN E NTIVRGR+ + D+ + IG+  VN +DI+NGGK Y Y +K  YS+    L+++IIESKGRG  A+D LSTVLYIDSYDRSRL DII DIA YPLKFFRAIILRGK L"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 23.5333,
+                    "score": 66,
+                    "evalue": 1.26128,
+                    "identity": 10,
+                    "positive": 11,
+                    "query_from": 289,
+                    "query_to": 324,
+                    "query_frame": -3,
+                    "hit_from": 196,
+                    "hit_to": 207,
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "FLRAIILRGKRL",
+                    "hseq": "FFRAIILRGKLL",
+                    "midline": "F+RAIILRGK L"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 22.1266,
+                    "score": 61,
+                    "evalue": 3.14101,
+                    "identity": 10,
+                    "positive": 11,
+                    "query_from": 333,
+                    "query_to": 368,
+                    "query_frame": -1,
+                    "hit_from": 196,
+                    "hit_to": 207,
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "FLRAIILRGKRL",
+                    "hseq": "FFRAIILRGKLL",
+                    "midline": "F+RAIILRGK L"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT61962.1",
+                    "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 577,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 224.962,
+                    "score": 782,
+                    "evalue": 5.42105e-67,
+                    "identity": 129,
+                    "positive": 194,
+                    "query_from": 1799,
+                    "query_to": 2707,
+                    "query_frame": -2,
+                    "hit_from": 4,
+                    "hit_to": 357,
+                    "align_len": 358,
+                    "gaps": 59,
+                    "qseq": "SSPGCMFAQNLYSLEDLNKYCKPP----QIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKL-----------SHEYKP--------------PKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASF-KDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQ------LKISENTLYESFD-------------------EMDLLMELDIVRCIVSIGYSINDAKCILKKHVTETGWPYLSIEPYVLDI",
+                    "hseq": "SHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSP--DETGLYQHS-GPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDV",
+                    "midline": "S P   + Q  Y L  ++++   P    ++++     + D L YE+ RL TF DWPH+++ P ELAADGFY+L+K DH  C+FC GI+G +E  D  R +H+  FP C F+RG  T N+P V+ NI+ +L           S   +               P+   SP  D  G+++++    R    T++ RL S+ + WP  L    +DLAEAGF+YCGLSDHV CF+C  G+ NW  +DIPW EHA++YP C ++ L KG+++I+ +Q       + +  T+Y   D                   E+DLLM LD+V+C++ +GY     +  LK  V +TG PY+ IEP + D+"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 140.002,
+                    "score": 480,
+                    "evalue": 5.47109e-38,
+                    "identity": 74,
+                    "positive": 108,
+                    "query_from": 4450,
+                    "query_to": 4992,
+                    "query_frame": -3,
+                    "hit_from": 168,
+                    "hit_to": 357,
+                    "align_len": 191,
+                    "gaps": 11,
+                    "qseq": "RITNNNYGILEHHTSKHEHYLDIEKRLESF-KGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFIYRNNQE--TYEKN-SEKLYHTWQGINSNVSHMSTLILT------EFLMDLDIVKCVVSMGYPISIAKVSLVMHVEEKGWPFLRIDEYIDDM",
+                    "hseq": "RGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDV",
+                    "midline": "R + +  G+ +H   K   +  ++ RL+S+ +GWP  L    +DLAEAGFFY G +D VRCFHC   + NW   DIPW  HA+W+P C +VLL KG D+I    QE   Y +  S  +Y       S  S+  T + +      ++LM LD+VKCV+ MGYP  I +  L   VE+ G P++ I+  ++D+"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 82.049,
+                    "score": 274,
+                    "evalue": 7.68224e-19,
+                    "identity": 33,
+                    "positive": 48,
+                    "query_from": 1325,
+                    "query_to": 1531,
+                    "query_frame": -2,
+                    "hit_from": 509,
+                    "hit_to": 577,
+                    "align_len": 69,
+                    "gaps": 0,
+                    "qseq": "KNAETSTSLKQSHEHMYEDRICKVCMSNEARVVYFPCTHMIACEDCTLALESCPICRKDINYVVRPIIS",
+                    "hseq": "KSRQSYEQLKEELERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIVS",
+                    "midline": "K+ ++   LK+  E M EDR CKVCM +E  +V++PC+HM+ C  C ++L  CPICR+DI +V R I+S"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 63.2002,
+                    "score": 207,
+                    "evalue": 8.47746e-13,
+                    "identity": 29,
+                    "positive": 38,
+                    "query_from": 4723,
+                    "query_to": 4923,
+                    "query_frame": -3,
+                    "hit_from": 49,
+                    "hit_to": 114,
+                    "align_len": 68,
+                    "gaps": 3,
+                    "qseq": "EKRLESFKGWPH-WLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYV",
+                    "hseq": "EKRLGTFIDWPHEWL--KPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFI",
+                    "midline": "EKRL +F  WPH WL  KP +LA  GF+Y   +D   C  C G +  WEK D P   H +  P+C ++"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 40.1315,
+                    "score": 125,
+                    "evalue": 1.39411e-05,
+                    "identity": 15,
+                    "positive": 24,
+                    "query_from": 4075,
+                    "query_to": 4188,
+                    "query_frame": -3,
+                    "hit_from": 530,
+                    "hit_to": 568,
+                    "align_len": 39,
+                    "gaps": 1,
+                    "qseq": "CKKCMITDALVAVFPCRH-VLCEACALVSKDCPKCKKWI",
+                    "hseq": "CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDI",
+                    "midline": "CK CM ++  +  +PC H V C +CA+  + CP C++ I"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 32.5357,
+                    "score": 98,
+                    "evalue": 0.00262079,
+                    "identity": 35,
+                    "positive": 56,
+                    "query_from": 2462,
+                    "query_to": 2848,
+                    "query_frame": -2,
+                    "hit_from": 204,
+                    "hit_to": 326,
+                    "align_len": 131,
+                    "gaps": 10,
+                    "qseq": "LPIHYRLLAKAGFFYMK-KDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARDTLIYEQHRLET-FADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVG",
+                    "hseq": "LGLHARDLAEAGFFYCGLSDHVRCFHCGKGL--RNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEV---QQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELD---LLMSLDVVKCVLEMG",
+                    "midline": "L +H R LA+AGFFY    D + CF C   +  +   +SD     H +  P C F       + +N+     Q H  + + A  T+     +  +  ++ P +  S  E   D   +L   D V CV+ +G"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 28.3158,
+                    "score": 83,
+                    "evalue": 0.0530223,
+                    "identity": 23,
+                    "positive": 37,
+                    "query_from": 2678,
+                    "query_to": 2914,
+                    "query_frame": -2,
+                    "hit_from": 45,
+                    "hit_to": 116,
+                    "align_len": 80,
+                    "gaps": 9,
+                    "qseq": "IHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDV-IACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQN",
+                    "hseq": "LRYEEKRLGTFIDWPHEWLKPSE------LAADGFYYLRKDDHCACIFCRGI--VGAWEKTDTPRGEHERHFPHCPFIRG",
+                    "midline": "+  E++R+ TFI+   E +  S       LA  GF+Y++KD   AC  C+    V     +D     H++  P C F + "
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT61964.1",
+                    "title": "BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 719,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 185.858,
+                    "score": 643,
+                    "evalue": 1.31219e-52,
+                    "identity": 118,
+                    "positive": 184,
+                    "query_from": 1829,
+                    "query_to": 2851,
+                    "query_frame": -2,
+                    "hit_from": 37,
+                    "hit_to": 396,
+                    "align_len": 371,
+                    "gaps": 41,
+                    "qseq": "SLPIHYRLLAKAGFF---YMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARD-------TLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGL-FEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGIFEY-NISSVRFKR--------DTFEKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQLKISENTLYE---------SFDEMDLLMELDIV-RCIVSIGYSINDAKCILKKHVTETGWPY",
+                    "hseq": "SYVINPKILAKAGFMRCGLSSKQYIVCVDCHLYIDIDTIMPWDDIVKIHKDKNPLCLLARNL-----------PPLPRSKIFENRFDPATGLPADLRYEIKRLETFIDWPNKVVQAKDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIRMSNILNSIVNQKRVAVTSATATATATATVDQEDLIKTRYEYAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPF",
+                    "midline": "S  I+ ++LAKAGF       K  I C  C L ID+ T+   DDI+ IHK  +P C++A+NL           PP       +   D        L YE  RLETF DWP+  V   +LAA GF++ +     +C  C   + + ++   ++R+ H    P C F +G    NIP    NI+  + ++ +    + +         +  ++   R++          T + RL SF +WP    QK + L EAGFYY G+SDHV CF+C   + NWE +D PW  HA++YP C Y+ LKKGK FID ++L++S   ++          S  + ++L+ LD   R I+  G+ +   +  L +++ +TG P+"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 115.527,
+                    "score": 393,
+                    "evalue": 2.79122e-29,
+                    "identity": 59,
+                    "positive": 86,
+                    "query_from": 4474,
+                    "query_to": 4944,
+                    "query_frame": -3,
+                    "hit_from": 248,
+                    "hit_to": 398,
+                    "align_len": 158,
+                    "gaps": 8,
+                    "qseq": "HEHYLDIEKRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFIYRNNQETYEKNSEKLYHTWQGINSNVSHMSTLILTEFLMDLDIVK-CVVSMGYPISIAKVSLVMHVEEKGWPFLR",
+                    "hseq": "HDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSR------IPMWRHSSSTSQDTSEHDWN-ILLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPFSR",
+                    "midline": "H++Y   + RLESF  WPH   QK + L EAGF+Y G +D V+CFHC   + NWE++D PW +HA+W+P C YV LKKG +FI +   E            W+  +S     S       L+ LD  K  ++  G+P+   + +L  ++ + G PF R"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 54.7604,
+                    "score": 177,
+                    "evalue": 4.33778e-10,
+                    "identity": 30,
+                    "positive": 42,
+                    "query_from": 4690,
+                    "query_to": 4920,
+                    "query_frame": -3,
+                    "hit_from": 126,
+                    "hit_to": 202,
+                    "align_len": 78,
+                    "gaps": 2,
+                    "qseq": "KRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNI-FNWEKEDIPWNMHAKWHPNCTYVLLKKGADFIYR",
+                    "hseq": "KRLETFIDWPNKVVQA-KDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIR",
+                    "midline": "KRLE+F  WP+ +VQ  +DLA AGFFY        CF C   + F+++K  +  +MH K  PNC +   K   +   R"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 92,
+              "eff_space": 17583154,
+              "kappa": 0.032,
+              "lambda": 0.195,
+              "entropy": 0.1
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM45",
+        "expect": 10,
+        "gap_open": 14,
+        "gap_extend": 2,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "m_mix MelaMJNV 56001-61600",
+            "query_len": 5600,
+            "query_masking": [
+              {
+                "from": 57,
+                "to": 102
+              },
+              {
+                "from": 162,
+                "to": 201
+              },
+              {
+                "from": 258,
+                "to": 315
+              },
+              {
+                "from": 564,
+                "to": 633
+              },
+              {
+                "from": 831,
+                "to": 906
+              },
+              {
+                "from": 909,
+                "to": 942
+              },
+              {
+                "from": 1026,
+                "to": 1065
+              },
+              {
+                "from": 1074,
+                "to": 1116
+              },
+              {
+                "from": 1149,
+                "to": 1203
+              },
+              {
+                "from": 2274,
+                "to": 2322
+              },
+              {
+                "from": 3054,
+                "to": 3102
+              },
+              {
+                "from": 3144,
+                "to": 3168
+              },
+              {
+                "from": 3183,
+                "to": 3210
+              },
+              {
+                "from": 3219,
+                "to": 3264
+              },
+              {
+                "from": 3318,
+                "to": 3381
+              },
+              {
+                "from": 3480,
+                "to": 3516
+              },
+              {
+                "from": 3567,
+                "to": 3633
+              },
+              {
+                "from": 3762,
+                "to": 3816
+              },
+              {
+                "from": 4005,
+                "to": 4056
+              },
+              {
+                "from": 4158,
+                "to": 4197
+              },
+              {
+                "from": 4773,
+                "to": 4803
+              },
+              {
+                "from": 4911,
+                "to": 4965
+              },
+              {
+                "from": 5007,
+                "to": 5055
+              },
+              {
+                "from": 5364,
+                "to": 5445
+              },
+              {
+                "from": 5553,
+                "to": 5595
+              },
+              {
+                "from": 31,
+                "to": 91
+              },
+              {
+                "from": 133,
+                "to": 187
+              },
+              {
+                "from": 229,
+                "to": 283
+              },
+              {
+                "from": 319,
+                "to": 358
+              },
+              {
+                "from": 517,
+                "to": 562
+              },
+              {
+                "from": 589,
+                "to": 634
+              },
+              {
+                "from": 1024,
+                "to": 1060
+              },
+              {
+                "from": 1084,
+                "to": 1120
+              },
+              {
+                "from": 1162,
+                "to": 1216
+              },
+              {
+                "from": 2290,
+                "to": 2323
+              },
+              {
+                "from": 3061,
+                "to": 3076
+              },
+              {
+                "from": 3769,
+                "to": 3817
+              },
+              {
+                "from": 4105,
+                "to": 4156
+              },
+              {
+                "from": 5197,
+                "to": 5215
+              },
+              {
+                "from": 5464,
+                "to": 5527
+              },
+              {
+                "from": 56,
+                "to": 98
+              },
+              {
+                "from": 143,
+                "to": 194
+              },
+              {
+                "from": 239,
+                "to": 290
+              },
+              {
+                "from": 434,
+                "to": 467
+              },
+              {
+                "from": 515,
+                "to": 557
+              },
+              {
+                "from": 590,
+                "to": 635
+              },
+              {
+                "from": 1028,
+                "to": 1118
+              },
+              {
+                "from": 1889,
+                "to": 1928
+              },
+              {
+                "from": 1964,
+                "to": 2009
+              },
+              {
+                "from": 2123,
+                "to": 2153
+              },
+              {
+                "from": 2687,
+                "to": 2726
+              },
+              {
+                "from": 3062,
+                "to": 3080
+              },
+              {
+                "from": 3122,
+                "to": 3170
+              },
+              {
+                "from": 3452,
+                "to": 3518
+              },
+              {
+                "from": 3617,
+                "to": 3665
+              },
+              {
+                "from": 3773,
+                "to": 3809
+              },
+              {
+                "from": 3974,
+                "to": 4010
+              },
+              {
+                "from": 4124,
+                "to": 4166
+              },
+              {
+                "from": 4976,
+                "to": 4991
+              },
+              {
+                "from": 5072,
+                "to": 5120
+              },
+              {
+                "from": 5147,
+                "to": 5177
+              },
+              {
+                "from": 5351,
+                "to": 5420
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT61866.1",
+                    "title": "BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 731,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 753.292,
+                    "score": 2660,
+                    "evalue": 0,
+                    "identity": 427,
+                    "positive": 548,
+                    "query_from": 3411,
+                    "query_to": 5525,
+                    "query_frame": -1,
+                    "hit_from": 19,
+                    "hit_to": 725,
+                    "align_len": 712,
+                    "gaps": 12,
+                    "qseq": "SISVFEEAVKNISIYLLEEAERGSWGDEQSVESKNGLNERPKASDREKDMENKNLGLYVPAEINLDAWRVGDPLQIFKDAYTARLIVNITFHHNKIAEIIYMLISELLLILRTNINE-GKKQLQEYGRVEPMSINEIVKSLEGIIKEKKIEVDLQRFREIINQLETELINYDRESRLSDYFLDNIQKSYSTNLSYNSDTTKLIPNDGCLHIIDDDIPFSIETISSIFPSTRRKRPLKNIIGnppdkndkddPWVKEREQTGYSIDSFHSIWMSEFADYPINLVNKIIEDILSKYIIPLKDVFHICLHIKAHLKCARSIKSTWYDNVTCVYELPPIYSMQDTWLELENILNIYAYVAKVFLNIYELFSSSNK--LQDDWTHTKEIYINTMELLESIPVFLFDTKWMDEHIYSWPYTKRLIHQLPIKDYLSENYLLKTALIVPPNTLNPITEIESKDGIIIRLKIKAIERIIQLRTTIHDIFDDGFVTVVNDTHKttrtsctsdstTKHDTDVndldiniliDGPLKNNPYIVHPLYNLKVIHQ-DNLSTPGLASLEEWDARYYLSSENGVLsssvt-nknvnnnnnnnnntnSHSPWFWRsl-plfkpsllknsssslpcKFWETALCQICNSQ-YDYNQRSYSKNTEILENMIMKIESTESLKEQNKIKDIETIVIQDKQLESYEKQEERRSRNVERSIFITILCKNLLTTL",
+                    "hseq": "SIAAFEEAVKNISIYLLEEAERGSWGDDQN-KLKDLYDGKSEADGLEEDTENKNLGLYVPAGIDMRAWRAGDALGDYKNAYAARLIVNITFHHNKIAEILYTLIAELLLLLEDNINDDGKTQLQEYGRLKPASVNETVKSLENVIREKNIEVDLKRFREIVLRLENDSRNFDRESRLSDWLLDNIQERYPAGGG--TTTTTTTSNNEYLCTIDDTTPLSTDTILSTLPSARRERPVRNIVGESSSAPPDRP-WEDEREQTGYSIFSFRSVWMSEYGDYPINLVNAIIERLLLRYVVPLRDVFHVCFHLKAHLTCARNVNATWYENATFAYGLPPVYSMRDTWLELENLLNVYACVAKLFLNMYDLLSSSSHGFHQSDLTRTKEAYINTIELLECMPMYLFDSKWMDENFYSWPYTRRGVRQLPVRNYLSENYLLRTVLVIPPNGIHPITKRKNNSGILMRLKVKAVEYITHLRTDMREIFDDGFVTIVKDNLQ-KTTNTTPRSDSRNINGMNDFEARILCDSTFENNPYVVHPLYHLKIAHRPSNWSGKGLASIEEWDARYHLASESGTLSSSVTNKNNNNNNNNNNNNNNNRSSWFWRSLPLFKPSLLKDSSSDSLPYKFWEAALRHIHSHQEFDRPMMNYSKNTEALEIMIKMVEVTEASTEKKKKSDIEDILVQDKQLESYEKQEERRLRNVERSIFLTILCKNMLTTL",
+                    "midline": "SI+ FEEAVKNISIYLLEEAERGSWGD+Q+ + K+  + + +A   E+D ENKNLGLYVPA I++ AWR GD L  +K+AY ARLIVNITFHHNKIAEI+Y LI+ELLL+L  NIN+ GK QLQEYGR++P S+NE VKSLE +I+EK IEVDL+RFREI+ +LE +  N+DRESRLSD++LDNIQ+ Y       + TT    N+  L  IDD  P+S +TI S +PS RR+RP++NI+G           W  EREQTGYSI SF S+WMSE+ DYPINLVN IIE +L +Y++PL+DVFH+C+H+KAHL CAR++ +TWY+N T  Y LPP+YSM+DTWLELEN+LN+YA VAK+FLN+Y+L+SSS+    Q D T TKE YINT+ELLE +P++LFD+KWMDE+ YSWPYT+R + QLP+++YLSENYLL+T L++PPN ++PIT+ ++  GI++RLK+KA+E I +LRT + +IFDDGFVT+V D  +   T+ T  S +++   +ND++  IL D  ++NNPY+VHPLY+LK+ H+  N S  GLAS+EEWDARY+L+SE+G LSSSVT   N NNNNNNNNN N+ S WFWRSL  +    L  +SS SLP KFWE AL +I + Q +D    +YSKNTE LE MI  +E TE+  E+ K  DIE I++QDKQLESYEKQEERR RNVERSIF+TILCKN+LTTL"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT61861.1",
+                    "title": "BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 234,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 189.515,
+                    "score": 656,
+                    "evalue": 9.76052e-58,
+                    "identity": 92,
+                    "positive": 122,
+                    "query_from": 1370,
+                    "query_to": 1879,
+                    "query_frame": 2,
+                    "hit_from": 20,
+                    "hit_to": 194,
+                    "align_len": 176,
+                    "gaps": 7,
+                    "qseq": "YQLIDGDIFDLTFRKPNVCICQQCNCVALKTHGLSKDIADMFGLYANSYARRKGKHTNI--ADPQSRGVPGSLEFCKGTPCVANLFSQYMYGKPG--QYNVSVK--DDDLMKGITLDTYDTREEYMRTCLDNLLEILANNHADIDTVVFPYKIGCGLAGGNWTRYVEMINNFADKF",
+                    "hseq": "YHIIEGDIFADRFRKKNICICQQCNCITLKPHGLSADIVKHFGEYANSYGRRRAKPNTINTATLETRAEPGTVDFCEGTPCVANLFAQFFYGSSSNVQY-LSRKYLDPHIRKGVDNDTAEKRLMYFRSCLNNLMFDLRNKYTYIDTVVFPHRIGCGMAGGSWADYQNVLLQFADRL",
+                    "midline": "Y++I+GDIF   FRK N+CICQQCNC+ LK HGLS DI   FG YANSY RR+ K   I  A  ++R  PG+++FC+GTPCVANLF+Q+ YG     QY +S K  D  + KG+  DT + R  Y R+CL+NL+  L N +  IDTVVFP++IGCG+AGG+W  Y  ++  FAD++"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT61877.1",
+                    "title": "BDT61877.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 162,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 25.5025,
+                    "score": 73,
+                    "evalue": 0.239557,
+                    "identity": 8,
+                    "positive": 10,
+                    "query_from": 5277,
+                    "query_to": 5333,
+                    "query_frame": -1,
+                    "hit_from": 38,
+                    "hit_to": 56,
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "LDAWRVGDPLQIFKDAYTA",
+                    "hseq": "LDGWKTGGPLNRFRRKNTG",
+                    "midline": "LD W+ G PL  F+   T "
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 94,
+              "eff_space": 19670972,
+              "kappa": 0.032,
+              "lambda": 0.195,
+              "entropy": 0.1
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

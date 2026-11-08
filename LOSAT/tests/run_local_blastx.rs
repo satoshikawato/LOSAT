@@ -707,7 +707,8 @@ fn check_options_fails_as_a_run_does() {
         // NCBI's formatting handler: a custom delimiter that a field uses (W10).
         (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
         (&["6"][..], &["-parse_deflines"][..]),
-        (&FORMATS[..], &["-matrix", "PAM30"][..]),
+        // NCBI's error of a matrix BLASTX does not take (IDENTITY, `std_matrix_only`).
+        (&FORMATS[..], &["-matrix", "IDENTITY"][..]),
         (&FORMATS[..], &["-evalue", "0"][..]),
         (&FORMATS[..], &["-ungapped"][..]),
         (&["6", "7"][..], &["-num_alignments", "0"][..]),
@@ -723,7 +724,7 @@ fn check_options_fails_as_a_run_does() {
         ),
         (
             &FORMATS[..],
-            &["-subject_loc", "2-1", "-matrix", "PAM30"][..],
+            &["-subject_loc", "2-1", "-matrix", "IDENTITY"][..],
         ),
         (&FORMATS[..], &["-query_loc", "2-1", "-evalue", "0"][..]),
         (
@@ -752,7 +753,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query)).unwrap();
     let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-    let cases: [(&str, fn(&mut BlastxArgs)); 10] = [
+    let cases: [(&str, fn(&mut BlastxArgs)); 9] = [
         ("Word-size must be greater than zero", |a| {
             a.word_size = Some(0)
         }),
@@ -764,10 +765,6 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
             a.word_size = Some(4)
         }),
         ("No hits are being saved", |a| a.max_target_seqs = Some(-1)),
-        (
-            "unsupported BLASTX composition-based statistics mode 1: use 0 or 2",
-            |a| a.comp_based_stats = 1,
-        ),
         (
             "the task blastp is not supported by LOSAT's BLASTX (use blastx or blastx-fast)",
             |a| a.task = "blastp".into(),

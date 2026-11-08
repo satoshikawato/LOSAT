@@ -141,23 +141,56 @@ pub fn query_infos(
 //                                      do_link_hsps, &redo_align_callbacks,
 //                                      near_identical_cutoff);
 // ```
+/// The composition mode of `-comp_based_stats` (`args.rs` `composition_mode`, 1 to 3 here).
+fn compo_adjust_mode(composition: u8) -> BlastCompoAdjustMode {
+    match composition {
+        1 => BlastCompoAdjustMode::CompositionBasedStats,
+        3 => BlastCompoAdjustMode::ForceFullMatrixAdjust,
+        _ => BlastCompoAdjustMode::CompositionMatrixAdjust,
+    }
+}
+
+/// The composition workspace of the search's matrix (`NRrecord`, `Blast_CompositionWorkspaceInit`
+/// with `scoringParams->options->matrix`): BLOSUM62's as before, another matrix's made from its
+/// frequency data (`BlastCompositionWorkspace::new`, cold, as TBLASTN's `use_matrix_workspace`).
+fn composition_workspace(matrix: ScoringMatrix) -> Result<BlastCompositionWorkspace> {
+    if matrix == ScoringMatrix::Blosum62 {
+        Ok(BlastCompositionWorkspace::new_blosum62())
+    } else {
+        other_matrix_workspace(matrix)
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn other_matrix_workspace(matrix: ScoringMatrix) -> Result<BlastCompositionWorkspace> {
+    BlastCompositionWorkspace::new(matrix)
+}
+
 pub fn redo_params(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
 ) -> Result<BlastRedoAlignParams> {
     ensure!(
-        options.composition == 2 && options.gapped,
-        "BLASTX Kappa requires gapped composition 2"
+        options.composition != 0 && options.gapped,
+        "BLASTX Kappa requires a gapped composition mode"
     );
     let scale = 32.0;
+    let matrix = options.scoring;
     let ka = lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
     let scaled_lambda = ka.lambda / scale;
-    let ideal = compute_blosum62_ideal_karlin_params().map_err(anyhow::Error::msg)?;
+    // The ideal block of the matrix: BLOSUM62's as before, another matrix's as TBLASTN's redo
+    // takes it (`stage_d_kappa_params.rs` `local_kappa_redo_params`).
+    let ideal = if matrix == ScoringMatrix::Blosum62 {
+        compute_blosum62_ideal_karlin_params().map_err(anyhow::Error::msg)?
+    } else {
+        crate::algorithm::tblastx::lookup::ideal_karlin_params_of(matrix)
+    };
     let do_link = link_parameters(options).is_some();
     // `hit_params->cutoff_score_min` is that of the query batch: the reader batch when the unit
     // is a part of one (`reader_batch.rs`).
@@ -178,7 +211,7 @@ pub fn redo_params(
         .max(options.gap_x_dropoff * std::f64::consts::LN_2 / ka.lambda)
         as i32;
     Ok(BlastRedoAlignParams {
-        matrix_info: build_matrix_info(ScoringMatrix::Blosum62, ideal.lambda / scale)?,
+        matrix_info: build_matrix_info(matrix, ideal.lambda / scale)?,
         gapping_params: BlastCompoGappingParams {
             gap_open: options.gap_open * 32,
             gap_extend: options.gap_extend * 32,
@@ -188,7 +221,7 @@ pub fn redo_params(
                 .max(extension_final),
             context: Cell::new(None),
         },
-        compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
+        compo_adjust_mode: compo_adjust_mode(options.composition),
         alphsize: BLASTAA_SIZE as i32,
         composition_test_index: 0,
         unified_p: false,
@@ -456,7 +489,7 @@ fn redo_alignment(
         subject.data(),
         usize::try_from(h.q_gapped_start - qrange.begin)?,
         usize::try_from(h.s_gapped_start - srange.begin)?,
-        ScoringMatrix::Blosum62,
+        params.matrix_info.matrix,
         adjusted,
         params.gapping_params.gap_open,
         params.gapping_params.gap_extend,
@@ -1112,7 +1145,7 @@ impl KappaState {
         let params = redo_params(batch, parameters, options)?;
         let infos = query_infos(batch, parameters);
         let ka = lookup_protein_params(&ProteinScoringSpec {
-            matrix: ScoringMatrix::Blosum62,
+            matrix: options.scoring,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,
         });
@@ -1121,7 +1154,7 @@ impl KappaState {
             infos: std::sync::Arc::new(infos),
             lambda: ka.lambda / 32.0,
             scratch: GapAlignScratch::new(),
-            workspace: BlastCompositionWorkspace::new_blosum62(),
+            workspace: composition_workspace(options.scoring)?,
             matrix: None,
         })
     }
@@ -1160,7 +1193,7 @@ impl KappaState {
             infos: std::sync::Arc::clone(&self.infos),
             lambda: self.lambda,
             scratch: GapAlignScratch::new(),
-            workspace: BlastCompositionWorkspace::new_blosum62(),
+            workspace: composition_workspace(options.scoring)?,
             matrix: None,
         })
     }

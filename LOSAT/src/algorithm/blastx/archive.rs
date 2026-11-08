@@ -91,7 +91,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
         .max_target_seqs
         .or(args.num_alignments.map(|size| size as i32))
         .map_or(500, |size| size);
-    inputs.comp_based_stats = i32::from(args.comp_based_stats);
+    inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs
 }
 
@@ -607,7 +607,7 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
     // BLOSUM62 with 11 / 1); an ungapped search has none.
     let gapped = options.gapped.then(|| {
         crate::stats::tables::lookup_protein_params(&crate::config::ProteinScoringSpec {
-            matrix: crate::config::ScoringMatrix::Blosum62,
+            matrix: options.scoring,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,
         })
@@ -831,10 +831,10 @@ mod tests {
         }
     }
 
-    /// The inputs of a command line that LOSAT's `blastx` refuses (a task, matrix, word size,
-    /// composition mode or `-use_sw_tback` it does not search with): the options model must still
-    /// write the list NCBI wrote for it. The options LOSAT takes come from its arguments, the
-    /// refused ones are set by hand.
+    /// The inputs of a command line that LOSAT's `blastx` refuses (a word size, X-dropoff or
+    /// `-use_sw_tback` it does not search with): the options model must still write the list NCBI
+    /// wrote for it. The options LOSAT takes come from its arguments, the refused ones are set by
+    /// hand.
     fn refused_inputs(extra: &[&str]) -> OptionInputs {
         const REFUSED: [&str; 8] = [
             "-task",
@@ -873,7 +873,8 @@ mod tests {
                 "-xdrop_gap" => inputs.xdrop_gap = value.parse().ok(),
                 "-xdrop_gap_final" => inputs.xdrop_gap_final = value.parse().ok(),
                 "-comp_based_stats" => {
-                    inputs.comp_based_stats = value.trim_end_matches('u').parse().unwrap_or(2);
+                    inputs.comp_based_stats =
+                        i32::from(crate::algorithm::blastx::args::composition_mode(value));
                 }
                 "-use_sw_tback" => inputs.use_sw_tback = true,
                 _ => {}
@@ -932,8 +933,9 @@ mod tests {
                 "{name} {extra:?}"
             );
         }
-        // The cases LOSAT's command line takes are the model's check of `option_inputs`.
-        assert!(refused > 10 && CASES.len() - refused > 50, "{refused}");
+        // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
+        // matrix and composition mode since series SC, SC6: 8 of the 80 are refused).
+        assert!(refused >= 5 && CASES.len() - refused > 60, "{refused}");
     }
 
     #[test]

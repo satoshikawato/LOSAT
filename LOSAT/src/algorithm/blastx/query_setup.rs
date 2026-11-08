@@ -267,6 +267,43 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
 //      virtual bool Verify(const string& value) const {
 //          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
 // ```
+/// NCBI's error of a query batch whose score block cannot load the `-matrix` of an ungapped search
+/// (a name its matrix loader does not know, `args.rs` `unknown_matrix`): the message of each query
+/// of the batch, a query without letters with its own after it.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (the score block of
+/// the batch: a name that the matrix loader does not know fails with -1, blast_stat.c:1679-1680,
+/// posted for all queries, blast_setup.c:498-501)
+/// ```c
+///     Int2 status = BLAST_MainSetUp(opts_memento->m_ProgramType,
+/// ...
+///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, search_messages);
+///     if (status != 0 &&
+///         (!(blast_msg.Get()) || (blast_msg.Get() && blast_msg.Get()->severity == eBlastSevError)))
+///     {
+///         	string msg;
+///         	if (search_messages.HasMessages()) {
+///             		msg = search_messages.ToString();
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:246 (the text of -1)
+/// ```c
+///             snprintf(buf, sizeof(buf) - 1, "Unknown error code %d", error_code);
+/// ```
+/// One message per query (`TSearchMessages::ToString`), `Error: ` first (`GetMessage`); a query
+/// without letters keeps its `Sequence contains no data` (blast_setup_cxx.cpp:631-638) after the
+/// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
+/// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
+pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
+    let mut message = String::new();
+    for record in records {
+        message.push_str("Error: Unknown error code -1 ");
+        if record.sequence.is_empty() {
+            message.push_str("Warning: Sequence contains no data ");
+        }
+    }
+    message
+}
+
 pub fn prepare_queries(
     records: &[FastaRecord],
     options: &ResolvedOptions,
@@ -379,6 +416,18 @@ pub(crate) fn prepare_unit_queries(
     };
     if fails {
         anyhow::bail!("{}", "Warning: Sequence contains no data ".repeat(empty));
+    }
+    // The matrix error comes after the set-up's errors above, with the messages of the whole
+    // query batch: a unit of a reader batch raises its batch's (`ReaderBatchShape::matrix_error`).
+    if options.unknown_matrix {
+        let message = match batch {
+            Some(batch) => batch.matrix_error.as_deref().map(str::to_string),
+            None => None,
+        };
+        anyhow::bail!(
+            "{}",
+            message.unwrap_or_else(|| unknown_matrix_message(records))
+        );
     }
     let nomask = buffer.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1144-1158
@@ -524,8 +573,10 @@ pub(crate) fn prepare_unit_queries(
         );
     }
     let lookup_segments = complement_masks(&contexts);
-    let x_ungap_sent =
-        super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size);
+    // The sentinel walks are BLOSUM62's (its byte table); another matrix's loop does not read them
+    // (`x_seed_scan.rs` `x_word_finder_matrix`).
+    let x_ungap_sent = options.scoring == crate::config::ScoringMatrix::Blosum62
+        && super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size);
     Ok(PreparedQueryBatch {
         original_lengths: records.iter().map(|r| r.sequence.len()).collect(),
         contexts,

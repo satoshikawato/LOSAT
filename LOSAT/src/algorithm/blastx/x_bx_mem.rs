@@ -108,7 +108,7 @@
 //! preparation that fails is dropped, and the search prepares again and meets the error where it
 //! met it before). Only which thread computes what, and when, changes.
 
-use super::{compute_subject, SubjectComputation};
+use super::{compute_subject_any, SubjectComputation};
 use crate::algorithm::blastx::{
     args::ResolvedOptions,
     parameters::ContextParameters,
@@ -619,7 +619,7 @@ pub(super) fn chunk_subjects_on_pool(
             let table = slot.get()?;
             let mut kept = Vec::new();
             for oid in first..end {
-                let mut computed = compute_subject(
+                let mut computed = compute_subject_any(
                     subjects,
                     batch,
                     params,

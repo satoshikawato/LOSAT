@@ -6,9 +6,9 @@
 //! [`api::run_collect`]), with the command line's options and the command line's reports.
 //!
 //! Every other module is the command line or the engine: NCBI's algorithms, ported function by
-//! function. The modules that the command line, the web adapters or the tests name are `pub` but
-//! hidden from this documentation and outside the compatibility promise of the version number:
-//! their items change as the port advances. The others are `pub(crate)`.
+//! function. They are `pub(crate)`, or `pub` but hidden from this documentation and outside the
+//! compatibility promise of the version number: their items change as the port advances. The
+//! `losat` binary calls one hidden function, `main_entry`, and names no module.
 
 #[doc(hidden)]
 pub mod algorithm;
@@ -51,6 +51,9 @@ pub(crate) mod web_api;
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 #[doc(hidden)]
 pub mod cli;
+// The body of the `losat` binary (`src/main.rs`): the one item of this crate that the binary names.
+#[doc(hidden)]
+pub use cli::main_entry::main_entry;
 
 // The type of `api::FastaRecord`: private, so that rustdoc inlines its re-exports (record.rs).
 mod record;

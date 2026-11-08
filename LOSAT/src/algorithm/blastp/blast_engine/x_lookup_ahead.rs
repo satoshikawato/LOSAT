@@ -802,7 +802,8 @@ fn x_flat_ahead_table(part: XFlatAheadPart, pool: &SearchPool<'_>) -> Option<XAh
         locations,
         appends,
     } = part;
-    let table = x_bp_flat_ahead_table(matrix, appends, &query, &locations, pool, spare)?;
+    let segments = crate::algorithm::blastp::x_query_blocks::x_bp_segments(pool);
+    let table = x_bp_flat_ahead_table(matrix, appends, &query, &locations, pool, spare, segments)?;
     crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", true);
     Some(XAheadLookup {
         key,

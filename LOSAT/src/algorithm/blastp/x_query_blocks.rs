@@ -391,7 +391,7 @@ use std::path::Path;
 
 use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bpclut_on, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
+    x_bpclut_on, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat, XSegmentPool,
 };
 use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -707,6 +707,9 @@ pub(crate) struct XBlockSubjects {
     /// allocated or moved here by the block search's thread for the build of that table ahead of its
     /// block (`blast_engine/x_lookup_ahead.rs`, `x_bp_lookup_spares`).
     x_lookup_ahead: XFlatSpare,
+    /// Item SC2d-2: the segments of packed appends kept from one flat build to the next
+    /// (`x_bp_segments`).
+    x_segments: XSegmentPool,
     /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the vectors and neighbour lists of exact blastp's tables
     /// built ahead of their blocks (`x_bp_aa_spares`); EXPERIMENT (LOSAT_X_BPLKREUSE): or the
     /// vectors of the last block's table, for the next block's own build (`x_bp_aa_block_spare`).
@@ -723,6 +726,7 @@ impl XBlockSubjects {
             encoded,
             x_lookup_spare: XFlatSpare::default(),
             x_lookup_ahead: XFlatSpare::default(),
+            x_segments: XSegmentPool::default(),
             x_aa_spares: XAaSpares::default(),
         }
     }
@@ -823,6 +827,15 @@ pub(crate) fn x_bp_lookup_spares<'p>(
         .map(|subjects| (&subjects.x_lookup_spare, &subjects.x_lookup_ahead))
 }
 
+// No NCBI counterpart: buffer reuse between the blocks' flat builds (`XSegmentPool`).
+/// Item SC2d-2: the block search's kept segments of packed appends, where its flat tables take spare
+/// vectors (`x_bp_lookup_spare`): each build's appends pass takes them, its stripes pass keeps its own.
+pub(crate) fn x_bp_segments<'p>(pool: &SearchPool<'p>) -> Option<&'p XSegmentPool> {
+    x_bp_lookup_spare(pool)?;
+    pool.x_ext::<XBlockSubjects>()
+        .map(|subjects| &subjects.x_segments)
+}
+
 // No NCBI counterpart: where LOSAT_X_BPLKPAHEAD acts for exact blastp, and buffer reuse between its
 // tables (`XAaSpares`); it reads switches and changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the block search's spares of exact blastp's tables
@@ -881,6 +894,8 @@ pub(crate) enum XLookupFor {
 pub(crate) struct XLookupFlat<'a> {
     mode: XLkpFlat,
     spare: Option<&'a XFlatSpare>,
+    /// Item SC2d-2: the block search's kept segments of packed appends (`x_bp_segments`).
+    segments: Option<&'a XSegmentPool>,
     /// LOSAT_X_BPLKPAHEAD: the build ahead of its block (`XLookupFor::Ahead`).
     x_ahead: bool,
     #[cfg(all(
@@ -923,6 +938,10 @@ impl<'a> XLookupFlat<'a> {
             XLookupFor::Ahead => x_bp_lookup_spares(pool).map(|(_, ahead)| ahead),
         };
         let x_ahead = x_for == XLookupFor::Ahead;
+        let segments = match x_for {
+            XLookupFor::Search | XLookupFor::Ahead => x_bp_segments(pool),
+            XLookupFor::QueryChunk => None,
+        };
         if matrix != ScoringMatrix::Blosum62 {
             let (query, locations, contexts) =
                 crate::algorithm::tblastx::lookup::prepare_matrix_lookup_query_for_word_size(
@@ -935,6 +954,7 @@ impl<'a> XLookupFlat<'a> {
             let flat = Self {
                 mode,
                 spare,
+                segments,
                 x_ahead,
                 #[cfg(all(
                     feature = "parallel",
@@ -952,12 +972,14 @@ impl<'a> XLookupFlat<'a> {
             let (mut flat, query, locations, contexts) =
                 Self::with_karlin_tasks(query_frames, word_size, mode, spare);
             flat.x_ahead = x_ahead;
+            flat.segments = segments;
             return (flat, query, locations, contexts);
         }
         let (query, locations, contexts) = x_bp_lookup_query(query_frames, word_size, pool);
         let flat = Self {
             mode,
             spare,
+            segments,
             x_ahead,
             #[cfg(all(
                 feature = "parallel",
@@ -1006,6 +1028,7 @@ impl<'a> XLookupFlat<'a> {
         let flat = Self {
             mode,
             spare,
+            segments: None,
             x_ahead: false,
             karlin: Some(karlin),
         };
@@ -1031,6 +1054,7 @@ impl<'a> XLookupFlat<'a> {
         XFlatArgs {
             mode: self.mode,
             spare: self.spare,
+            segments: self.segments,
             extra,
             x_ahead: self.x_ahead,
         }

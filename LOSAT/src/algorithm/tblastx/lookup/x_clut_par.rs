@@ -70,7 +70,11 @@
 //! - `TooLarge` (the reference builder runs) when the appends pass `x_max_appends`, as the serial
 //!   builder's bound; the reference then decides the table or the refusal.
 //!
-//! The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
+//! The cuts (chunks, stripes) depend on the thread count; by the above the table does not. The chunks'
+//! sizes are guided (item SC2d-2, `XChunkSizes::Guided`): a chunk takes the offsets left over
+//! `X_GUIDED_SHARE` times the threads, at least `X_MIN_CHUNK_OFFSETS`, so that there are few chunks
+//! (each chunk's sort and each of its stripes' parts costs a fixed amount) and the last ones are small
+//! (the tasks end together); by the above any sizes give the same table.
 //!
 //! With `LOSAT_X_BPLKPFLAT` the same passes are scheduled otherwise and the table's vectors may come
 //! from an earlier table (`XParallelCuts::passes`, `XParallelCuts::spare`); the table is the same:
@@ -95,6 +99,10 @@
 //!   and they are not kept beside it). The unit tests fill the spare's vectors with `u32::MAX` /
 //!   `i32::MIN` first (a spare of garbage first gets room for a word-size-5 table), so that an
 //!   entry no stripe writes differs from the fresh build's where the spare has the room.
+//! - kept segments (item SC2d-2, `XSegmentPool`, the block search's): the appends pass takes a kept
+//!   segment before it makes a new one, and the stripes pass keeps at most one segment per thread
+//!   for the next build. A segment's values are not read: each piece writes every entry of its range
+//!   before the stripes pass reads it.
 //! - extra tasks (`XExtraTasks`: the contexts' Karlin blocks of a blastp block,
 //!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
 //!   past the chunks), each once, also when the build then ends `TooLarge` or refused. They read
@@ -141,15 +149,18 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 /// stays small; the copies of all tasks hold about `1 / X_PARTS_PER_THREAD` of the table's hits
 /// (item SC2d-2).
 const X_PARTS_PER_THREAD: usize = 64;
-/// Chunks per thread: many small chunks, so that the tasks of the appends pass end together and each
-/// task's scratch (`XAppendsScratch`) stays small.
-const X_CHUNKS_PER_THREAD: usize = 64;
+/// Guided chunk sizes (`XChunkSizes::Guided`, item SC2d-2): a chunk takes the offsets left over
+/// `X_GUIDED_SHARE` times the threads, so that the first chunks are large (few chunks and parts: each
+/// chunk's sort and each (chunk, stripe) part costs a fixed amount) and the last ones small (the tasks
+/// of the appends pass end together).
+const X_GUIDED_SHARE: usize = 2;
 // No NCBI counterpart: where the chunks' packed appends are stored. Memory placement only.
 /// The fewest entries of a segment of packed appends (`XSegmentOut`): 40 MiB, above glibc's largest
 /// mmap threshold (32 MiB), so that each segment is a mapping of its own, returned whole when it is
 /// dropped, whichever thread made it (a pool thread's smaller blocks stay in its arena).
 const X_APPENDS_SEGMENT: usize = 10 << 20;
-/// The fewest query offsets of a chunk (about 65 appends each with blastp-fast's threshold).
+/// The fewest query offsets of a chunk (about 65 appends each with blastp-fast's threshold; about
+/// 12,800 with BLOSUM45 at word size 7).
 const X_MIN_CHUNK_OFFSETS: usize = 256;
 // No NCBI counterpart: how a task's scratch is bounded (item SC2d-2). Memory only.
 /// The appends of a piece (`x_chunk_appends`): a chunk's appends are sorted into the task's segment
@@ -218,6 +229,8 @@ struct XSegmentOut<'r> {
     registry: &'r Mutex<Vec<Vec<u32>>>,
     /// The fewest entries of a segment (`XParallelCuts::appends_segment`).
     size: usize,
+    /// Item SC2d-2: the block search's kept segments, taken before a new one is made.
+    pool: Option<&'r XSegmentPool>,
     segment: Vec<u32>,
     /// The segment's slot in `registry` (`usize::MAX`: none yet).
     index: usize,
@@ -225,10 +238,15 @@ struct XSegmentOut<'r> {
 }
 
 impl<'r> XSegmentOut<'r> {
-    fn new(registry: &'r Mutex<Vec<Vec<u32>>>, size: usize) -> Self {
+    fn new(
+        registry: &'r Mutex<Vec<Vec<u32>>>,
+        size: usize,
+        pool: Option<&'r XSegmentPool>,
+    ) -> Self {
         Self {
             registry,
             size,
+            pool,
             segment: Vec::new(),
             index: usize::MAX,
             used: 0,
@@ -244,7 +262,11 @@ impl<'r> XSegmentOut<'r> {
             self.index = registry.len();
             registry.push(Vec::new());
             drop(registry);
-            self.segment = vec![0u32; n.max(self.size)];
+            // A kept segment's values are not read: the range is written before it is read.
+            self.segment = self
+                .pool
+                .and_then(|pool| pool.take(n))
+                .unwrap_or_else(|| vec![0u32; n.max(self.size)]);
             self.used = 0;
         }
         let at = self.used;
@@ -276,11 +298,15 @@ struct XAppendsScratch<'r> {
 }
 
 impl<'r> XAppendsScratch<'r> {
-    fn new(registry: &'r Mutex<Vec<Vec<u32>>>, segment: usize) -> Self {
+    fn new(
+        registry: &'r Mutex<Vec<Vec<u32>>>,
+        segment: usize,
+        pool: Option<&'r XSegmentPool>,
+    ) -> Self {
         Self {
             targets: Vec::new(),
             per_offset: Vec::new(),
-            out: XSegmentOut::new(registry, segment),
+            out: XSegmentOut::new(registry, segment, pool),
         }
     }
 }
@@ -307,7 +333,7 @@ pub(super) fn x_try_build_flat_in_pool(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare, x_ahead, stripe_fill| {
+    let build = |passes, spare, segments, x_ahead, stripe_fill| {
         pool.install(|| {
             x_try_build_flat_parallel_with(
                 word_size,
@@ -323,6 +349,7 @@ pub(super) fn x_try_build_flat_in_pool(
                     stripe_shift: None,
                     appends_segment: X_APPENDS_SEGMENT,
                     piece_appends: X_PIECE_APPENDS,
+                    segments,
                     passes,
                     spare,
                     x_ahead,
@@ -336,11 +363,12 @@ pub(super) fn x_try_build_flat_in_pool(
         if x_flat_args.x_ahead {
             return None;
         }
-        return build(XPasses::Rayon, None, false, false);
+        return build(XPasses::Rayon, None, None, false, false);
     }
     let built = build(
         XPasses::OneLatch(x_flat_args.extra),
         x_flat_args.spare,
+        x_flat_args.segments,
         x_flat_args.x_ahead,
         x_bpstripefill_on(),
     );
@@ -373,7 +401,7 @@ pub(super) fn x_try_build_flat_in_pool_of(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare, x_ahead, stripe_fill| {
+    let build = |passes, spare, segments, x_ahead, stripe_fill| {
         pool.install(|| {
             x_try_build_flat_parallel_of(
                 matrix,
@@ -390,6 +418,7 @@ pub(super) fn x_try_build_flat_in_pool_of(
                     stripe_shift: None,
                     appends_segment: X_APPENDS_SEGMENT,
                     piece_appends: X_PIECE_APPENDS,
+                    segments,
                     passes,
                     spare,
                     x_ahead,
@@ -403,11 +432,12 @@ pub(super) fn x_try_build_flat_in_pool_of(
         if x_flat_args.x_ahead {
             return None;
         }
-        return build(XPasses::Rayon, None, false, false);
+        return build(XPasses::Rayon, None, None, false, false);
     }
     let built = build(
         XPasses::OneLatch(x_flat_args.extra),
         x_flat_args.spare,
+        x_flat_args.segments,
         x_flat_args.x_ahead,
         x_bpstripefill_on(),
     );
@@ -454,6 +484,7 @@ pub(super) fn x_flat_ahead_appends_in_pool(
         stripe_shift: None,
         appends_segment: X_APPENDS_SEGMENT,
         piece_appends: X_PIECE_APPENDS,
+        segments: x_flat_args.segments,
         passes: XPasses::OneLatch(x_flat_args.extra),
         // The spare's vectors are the second part's.
         spare: None,
@@ -507,6 +538,7 @@ pub(super) fn x_flat_ahead_stripes_in_pool(
     locations: &[(i32, i32)],
     pool: &SearchPool<'_>,
     spare: &XFlatSpare,
+    segments: Option<&XSegmentPool>,
 ) -> Option<XFlatBuild> {
     let built = pool.install(|| {
         if matrix == ScoringMatrix::Blosum62 {
@@ -517,9 +549,18 @@ pub(super) fn x_flat_ahead_stripes_in_pool(
                 locations,
                 Some(spare),
                 true,
+                segments,
             )
         } else {
-            x_flat_stripes_on(matrix, appends, query, locations, Some(spare), true)
+            x_flat_stripes_on(
+                matrix,
+                appends,
+                query,
+                locations,
+                Some(spare),
+                true,
+                segments,
+            )
         }
     });
     if matches!(built, Some(XFlatBuild::Table(_))) {
@@ -649,8 +690,7 @@ struct XParallelCuts<'a> {
     /// `None`: `x_max_appends`, the serial builder's bound.
     max_appends: Option<usize>,
     threads: usize,
-    /// The chunks' sizes in query offsets, in turn; empty: the offsets over `X_CHUNKS_PER_THREAD`
-    /// chunks per thread, at least `X_MIN_CHUNK_OFFSETS` each.
+    /// The chunks' sizes in query offsets, in turn; empty: guided sizes (`XChunkSizes::Guided`).
     chunk_sizes: &'a [usize],
     /// The stripes' width 2^shift; `None`: the widest that makes `X_PARTS_PER_THREAD` stripes per
     /// thread, or fewer so that the chunks' parts are at most `X_MAX_PARTS`.
@@ -660,6 +700,9 @@ struct XParallelCuts<'a> {
     appends_segment: usize,
     /// The appends of a piece (`x_chunk_appends`): `X_PIECE_APPENDS` (smaller in the tests).
     piece_appends: usize,
+    /// Item SC2d-2: the block search's kept segments of packed appends (`XSegmentPool`): the appends
+    /// pass takes them before it makes new ones, the stripes pass keeps the build's.
+    segments: Option<&'a XSegmentPool>,
     /// LOSAT_X_BPLKPFLAT: how the passes are scheduled, and the extra tasks.
     passes: XPasses<'a>,
     /// LOSAT_X_BPLKPFLAT: the vectors of an earlier table for `starts` and `hits` (else fresh ones).
@@ -702,30 +745,54 @@ fn x_stripe_shift(backbone_size: usize, stripes: usize, smallest: usize) -> usiz
 //
 //         for (offset = from; offset <= to; offset++){
 // ```
-/// The count ranges' offsets cut into chunks (module header) of `sizes[i % sizes.len()]` offsets
-/// (chunk i), fewer at a range's end and where the offsets would pass `X_OFFSET_SPAN`.
+// No NCBI counterpart: how the appends pass is divided among the pool's threads. Scheduling only.
+/// The chunks' sizes in query offsets (`x_chunks`).
+#[derive(Clone, Copy)]
+enum XChunkSizes<'a> {
+    /// Chunk i takes `sizes[i % sizes.len()]` (the tests' cuts).
+    List(&'a [usize]),
+    /// Guided (item SC2d-2): a chunk takes the offsets not yet in a chunk (of `offsets`) over
+    /// `X_GUIDED_SHARE * threads`, at least `X_MIN_CHUNK_OFFSETS`.
+    Guided { threads: usize, offsets: usize },
+}
+
+impl XChunkSizes<'_> {
+    /// The size of chunk `chunk`, opened when `placed` offsets are in the chunks before it.
+    fn size(self, chunk: usize, placed: usize) -> usize {
+        match self {
+            Self::List(sizes) => sizes[chunk % sizes.len()].max(1),
+            Self::Guided { threads, offsets } => (offsets.saturating_sub(placed)
+                / (X_GUIDED_SHARE * threads.max(1)))
+            .max(X_MIN_CHUNK_OFFSETS),
+        }
+    }
+}
+
+/// The count ranges' offsets cut into chunks (module header) of the sizes of `sizes`, fewer at a
+/// range's end and where the offsets would pass `X_OFFSET_SPAN`.
 fn x_chunks(
     word_size: usize,
     ranges: &[(std::ops::Range<usize>, bool)],
     locations: &[(i32, i32)],
-    sizes: &[usize],
+    sizes: XChunkSizes<'_>,
 ) -> Vec<XChunk> {
     let word = word_size as i64;
     let mut chunks: Vec<XChunk> = Vec::new();
+    // The offsets in the chunks so far (the open one's included).
+    let mut placed = 0usize;
     for (range_index, (range, _)) in ranges.iter().enumerate() {
-        // The chunk being filled (it is chunk `chunks.len()`) and its offsets.
-        let mut open: Option<(XChunk, usize)> = None;
+        // The chunk being filled (it is chunk `chunks.len()`), its offsets and its size.
+        let mut open: Option<(XChunk, usize, usize)> = None;
         for &(left, right) in &locations[range.clone()] {
             let to = i64::from(right) - word + 1;
             let mut from = i64::from(left);
             while from <= to {
-                let size = sizes[chunks.len() % sizes.len()].max(1);
-                let joins = matches!(&open, Some((chunk, count))
-                    if *count < size
+                let joins = matches!(&open, Some((chunk, count, size))
+                    if *count < *size
                         && from >= i64::from(chunk.base)
                         && from < i64::from(chunk.base) + X_OFFSET_SPAN);
                 if !joins {
-                    if let Some((chunk, _)) = open.take() {
+                    if let Some((chunk, _, _)) = open.take() {
                         chunks.push(chunk);
                     }
                     open = Some((
@@ -735,10 +802,11 @@ fn x_chunks(
                             base: from as i32,
                         },
                         0,
+                        sizes.size(chunks.len(), placed),
                     ));
                 }
-                let size = sizes[chunks.len() % sizes.len()].max(1);
-                let (chunk, count) = open.as_mut().expect("an open chunk");
+                let (chunk, count, size) = open.as_mut().expect("an open chunk");
+                let size = *size;
                 // `size - count` is at least 1 (`joins`); past `X_OFFSET_SPAN` it does not matter.
                 let take = ((size - *count).min(X_OFFSET_SPAN as usize) as i64)
                     .min(to - from + 1)
@@ -748,10 +816,11 @@ fn x_chunks(
                     .pieces
                     .push((from as i32, (from + take - 1 + word - 1) as i32));
                 *count += take as usize;
+                placed += take as usize;
                 from += take;
             }
         }
-        if let Some((chunk, _)) = open.take() {
+        if let Some((chunk, _, _)) = open.take() {
             chunks.push(chunk);
         }
     }
@@ -1216,7 +1285,7 @@ fn x_flat_parallel_on<S: CompressedScores>(
     cuts: XParallelCuts<'_>,
     serial: impl FnOnce(usize) -> Option<XFlatBuild>,
 ) -> Option<XFlatBuild> {
-    let (spare, x_ahead) = (cuts.spare, cuts.x_ahead);
+    let (spare, x_ahead, segments) = (cuts.spare, cuts.x_ahead, cuts.segments);
     match x_flat_appends_on(
         scores,
         word_size,
@@ -1229,7 +1298,7 @@ fn x_flat_parallel_on<S: CompressedScores>(
     ) {
         XFlatStage::Built(built) => built,
         XFlatStage::Appends(appends) => {
-            x_flat_stripes_on(scores, appends, query, locations, spare, x_ahead)
+            x_flat_stripes_on(scores, appends, query, locations, spare, x_ahead, segments)
         }
     }
 }
@@ -1308,7 +1377,6 @@ fn x_flat_appends_on<S: CompressedScores>(
         .unwrap_or_else(|| x_max_appends(backbone_size));
 
     let ranges = x_count_ranges(tables, locations.len());
-    let default_size;
     let sizes = if cuts.chunk_sizes.is_empty() {
         let word = word_size as i64;
         let offsets: i64 = ranges
@@ -1316,12 +1384,12 @@ fn x_flat_appends_on<S: CompressedScores>(
             .flat_map(|(range, _)| &locations[range.clone()])
             .map(|&(left, right)| (i64::from(right) - word + 2 - i64::from(left)).max(0))
             .sum();
-        default_size = [(offsets as usize)
-            .div_ceil(X_CHUNKS_PER_THREAD * threads)
-            .max(X_MIN_CHUNK_OFFSETS)];
-        &default_size[..]
+        XChunkSizes::Guided {
+            threads,
+            offsets: offsets as usize,
+        }
     } else {
-        cuts.chunk_sizes
+        XChunkSizes::List(cuts.chunk_sizes)
     };
     let chunks = x_chunks(word_size, &ranges, locations, sizes);
     // LOSAT_X_BPSTRIPEFILL (module header).
@@ -1358,7 +1426,7 @@ fn x_flat_appends_on<S: CompressedScores>(
         XPasses::Rayon => chunks
             .par_iter()
             .map_init(
-                || XAppendsScratch::new(&registry, cuts.appends_segment),
+                || XAppendsScratch::new(&registry, cuts.appends_segment, cuts.segments),
                 chunk_appends,
             )
             .collect(),
@@ -1367,7 +1435,7 @@ fn x_flat_appends_on<S: CompressedScores>(
             threads,
             chunks.len(),
             extra.map_or(0, |extra| extra.count()),
-            || XAppendsScratch::new(&registry, cuts.appends_segment),
+            || XAppendsScratch::new(&registry, cuts.appends_segment, cuts.segments),
             |scratch, index| chunk_appends(scratch, &chunks[index]),
             |index| {
                 if let Some(extra) = extra {
@@ -1438,6 +1506,7 @@ fn x_flat_stripes_on<S: CompressedScores>(
     locations: &[(i32, i32)],
     spare: Option<&XFlatSpare>,
     x_ahead: bool,
+    segments: Option<&XSegmentPool>,
 ) -> Option<XFlatBuild> {
     let XFlatAppends {
         header,
@@ -1589,7 +1658,11 @@ fn x_flat_stripes_on<S: CompressedScores>(
             )
         }
     };
-    drop(appends);
+    // Item SC2d-2: at most one segment per thread kept for the next build (`XSegmentPool`).
+    match segments {
+        Some(pool) => pool.keep(appends.segments, threads),
+        None => drop(appends),
+    }
 
     // NCBI's tables (`x_try_build_flat_with_capacity`'s test, at each table's end).
     for (range_index, (range, is_table)) in ranges.iter().enumerate() {
@@ -1727,6 +1800,7 @@ mod tests {
                     stripe_shift,
                     appends_segment: X_APPENDS_SEGMENT,
                     piece_appends: X_PIECE_APPENDS,
+                    segments: None,
                     passes,
                     spare: spare.map(|(spare, _)| spare),
                     x_ahead: false,
@@ -1915,6 +1989,7 @@ mod tests {
             stripe_shift: None,
             appends_segment: X_APPENDS_SEGMENT,
             piece_appends: X_PIECE_APPENDS,
+            segments: None,
             passes: XPasses::Rayon,
             spare: None,
             x_ahead: false,
@@ -2133,6 +2208,7 @@ mod tests {
                 mode: XLkpFlat::On,
                 spare: Some(&spare),
                 extra: None,
+                segments: None,
                 x_ahead: false,
             }) else {
                 panic!("{matrix:?}: no flat table on the spare")
@@ -2163,6 +2239,7 @@ mod tests {
                 mode: XLkpFlat::On,
                 spare: Some(&spare),
                 extra: None,
+                segments: None,
                 x_ahead: true,
             }) else {
                 panic!("{matrix:?}: no flat table built ahead")
@@ -2184,12 +2261,13 @@ mod tests {
                         mode: XLkpFlat::On,
                         spare: None,
                         extra: None,
+                        segments: None,
                         x_ahead: true,
                     },
                 )
                 .expect("the appends pass");
                 Ok(super::super::x_bp_flat_ahead_table(
-                    matrix, appends, &query, &locations, pool, &spare,
+                    matrix, appends, &query, &locations, pool, &spare, None,
                 ))
             })
             .expect("pool")
@@ -2206,6 +2284,7 @@ mod tests {
                     mode: XLkpFlat::On,
                     spare: None,
                     extra: None,
+                    segments: None,
                     x_ahead: true,
                 })
                 .is_none(),
@@ -2231,6 +2310,7 @@ mod tests {
                 stripe_shift: None,
                 appends_segment: X_APPENDS_SEGMENT,
                 piece_appends: X_PIECE_APPENDS,
+                segments: None,
                 passes: XPasses::OneLatch(None),
                 spare: None,
                 x_ahead: false,
@@ -2252,7 +2332,7 @@ mod tests {
                 panic!("{matrix:?}: the appends pass ended the build")
             };
             let apart = in_pool(2, || {
-                x_flat_stripes_on(matrix, appends, &query, &locations, None, false)
+                x_flat_stripes_on(matrix, appends, &query, &locations, None, false, None)
             });
             match (&serial_one, &apart) {
                 (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused)) => {}
@@ -2634,6 +2714,7 @@ mod tests {
                         mode,
                         spare: None,
                         extra: Some(&extra),
+                        segments: None,
                         x_ahead: false,
                     },
                 ))
@@ -2674,6 +2755,7 @@ mod tests {
                     stripe_shift: None,
                     appends_segment: X_APPENDS_SEGMENT,
                     piece_appends: X_PIECE_APPENDS,
+                    segments: None,
                     passes: XPasses::OneLatch(None),
                     stripe_fill,
                     spare,
@@ -2729,6 +2811,7 @@ mod tests {
                     stripe_shift: None,
                     appends_segment: X_APPENDS_SEGMENT,
                     piece_appends: X_PIECE_APPENDS,
+                    segments: None,
                     passes,
                     spare: spare_a,
                     x_ahead,
@@ -2757,6 +2840,7 @@ mod tests {
                     locations,
                     spare_b,
                     x_ahead,
+                    None,
                 )
             }),
         }
@@ -3123,6 +3207,7 @@ mod tests {
                         stripe_shift: None,
                         appends_segment: segment,
                         piece_appends: piece,
+                        segments: None,
                         passes,
                         spare: None,
                         x_ahead: false,
@@ -3186,7 +3271,7 @@ mod tests {
                         many_seen += 1;
                     }
                     let built = in_pool(threads, || {
-                        x_flat_stripes_on(matrix, appends, &query, &locations, None, false)
+                        x_flat_stripes_on(matrix, appends, &query, &locations, None, false, None)
                     });
                     x_assert_same_flat_tables_as(&what, &flat(built), &serial);
                 }
@@ -3196,5 +3281,170 @@ mod tests {
             many_seen > 0 && whole_seen > 0 && cut_seen > 0,
             "{many_seen} {whole_seen} {cut_seen}"
         );
+    }
+
+    // Item SC2d-2: guided chunk sizes (`XChunkSizes::Guided`): the chunks hold every offset of the
+    // count ranges once, in order, each within its range and `X_OFFSET_SPAN` of its first offset; a
+    // chunk takes the offsets left over `X_GUIDED_SHARE * threads` (at least `X_MIN_CHUNK_OFFSETS`)
+    // unless a range ends first, so the first chunks are the largest.
+    #[test]
+    fn guided_chunks_cover_the_offsets_in_order_and_shrink_to_the_floor() {
+        let mut rng = XorShift(0x9b05_688c_2b3e_6c1e);
+        for round in 0..6 {
+            let lengths: Vec<usize> = (0..1 + rng.below(40))
+                .map(|_| 1 + rng.below(3000))
+                .collect();
+            let (_, locations, first) = queries(&mut rng, &lengths, &LETTERS, round % 2);
+            let half = first[lengths.len() / 2];
+            let tables = if round % 2 == 0 {
+                vec![first[0]..half, half..first[lengths.len()]]
+            } else {
+                vec![first[0]..first[lengths.len()]]
+            };
+            let ranges = x_count_ranges(&tables, locations.len());
+            let word = 5i64;
+            let expected: Vec<(usize, i64)> = ranges
+                .iter()
+                .enumerate()
+                .flat_map(|(index, (range, _))| {
+                    locations[range.clone()]
+                        .iter()
+                        .flat_map(move |&(left, right)| {
+                            (i64::from(left)..=i64::from(right) - word + 1).map(move |o| (index, o))
+                        })
+                })
+                .collect();
+            for threads in [1, 3, 8] {
+                let sizes = XChunkSizes::Guided {
+                    threads,
+                    offsets: expected.len(),
+                };
+                let chunks = x_chunks(5, &ranges, &locations, sizes);
+                let got: Vec<(usize, i64)> = chunks
+                    .iter()
+                    .flat_map(|chunk| {
+                        chunk.pieces.iter().flat_map(move |&(a, b)| {
+                            (i64::from(a)..=i64::from(b) - word + 1).map(move |o| (chunk.range, o))
+                        })
+                    })
+                    .collect();
+                assert_eq!(got, expected, "round {round} n{threads}: the offsets");
+                let mut placed = 0usize;
+                for (index, chunk) in chunks.iter().enumerate() {
+                    let count: usize = chunk
+                        .pieces
+                        .iter()
+                        .map(|&(a, b)| (i64::from(b) - word + 2 - i64::from(a)) as usize)
+                        .sum();
+                    let span = chunk
+                        .pieces
+                        .iter()
+                        .map(|&(_, b)| i64::from(b) - word + 1 - i64::from(chunk.base))
+                        .max()
+                        .unwrap_or(0);
+                    assert!(span < X_OFFSET_SPAN, "round {round} n{threads}: span");
+                    let size = sizes.size(index, placed);
+                    assert!(count <= size, "round {round} n{threads} chunk {index}");
+                    // A chunk short of its size ends at its range's end or where the next offset
+                    // is past its offset span.
+                    let closed_early = chunks.get(index + 1).is_none_or(|next| {
+                        next.range != chunk.range
+                            || i64::from(next.base) >= i64::from(chunk.base) + X_OFFSET_SPAN
+                    });
+                    assert!(
+                        count == size || closed_early,
+                        "round {round} n{threads} chunk {index}: {count} of {size}"
+                    );
+                    placed += count;
+                }
+            }
+        }
+    }
+
+    // Item SC2d-2: the segments a build keeps (`XSegmentPool`, at most one per thread) are the next
+    // build's (its first segments are the kept buffers, garbage in them), and both builds give the
+    // serial table slot for slot.
+    #[test]
+    fn kept_segments_are_the_next_builds_and_the_table_is_the_serial_one() {
+        let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
+        let pool = XSegmentPool::default();
+        for round in 0..4 {
+            let lengths: Vec<usize> = (0..2 + rng.below(4)).map(|_| 20 + rng.below(300)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, &LETTERS, round % 2);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let serial = flat(x_try_build_flat_compressed_lookup(
+                5, 1100, &query, &locations, &tables,
+            ));
+            let threads = 3;
+            let kept: Vec<usize> = {
+                let mut kept = pool.0.lock().unwrap();
+                for segment in kept.iter_mut() {
+                    segment.fill(u32::MAX);
+                }
+                kept.iter()
+                    .map(|segment| segment.as_ptr() as usize)
+                    .collect()
+            };
+            assert!(
+                kept.len() <= threads,
+                "round {round}: at most one per thread"
+            );
+            let stage = in_pool(threads, || {
+                x_flat_appends_on(
+                    Blosum62Compressed,
+                    5,
+                    1100,
+                    &query,
+                    &locations,
+                    &tables,
+                    XParallelCuts {
+                        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                        max_appends: None,
+                        threads,
+                        chunk_sizes: &[3, 11, 29],
+                        stripe_shift: None,
+                        appends_segment: 64,
+                        piece_appends: X_PIECE_APPENDS,
+                        segments: Some(&pool),
+                        passes: XPasses::OneLatch(None),
+                        spare: None,
+                        x_ahead: false,
+                        stripe_fill: true,
+                    },
+                    |_| None,
+                )
+            });
+            let XFlatStage::Appends(appends) = stage else {
+                panic!("round {round}: the appends pass ended the build")
+            };
+            let used: Vec<usize> = appends
+                .appends
+                .segments
+                .iter()
+                .map(|segment| segment.as_ptr() as usize)
+                .collect();
+            assert!(
+                kept.iter().all(|address| used.contains(address)),
+                "round {round}: the kept segments are taken"
+            );
+            assert!(pool.0.lock().unwrap().is_empty() || used.len() < kept.len());
+            let built = in_pool(threads, || {
+                x_flat_stripes_on(
+                    Blosum62Compressed,
+                    appends,
+                    &query,
+                    &locations,
+                    None,
+                    false,
+                    Some(&pool),
+                )
+            });
+            x_assert_same_flat_tables_as(&format!("round {round}"), &flat(built), &serial);
+            let after = pool.0.lock().unwrap().len();
+            assert!(
+                (1..=threads).contains(&after),
+                "round {round}: {after} kept"
+            );
+        }
     }
 }

@@ -375,6 +375,56 @@ impl XFlatSpare {
     }
 }
 
+// No NCBI counterpart: buffer reuse between the builds of a block search (memory placement only); it
+// changes no value NCBI computes.
+/// Item SC2d-2: segments of packed appends (`x_clut_par.rs` `XSegmentOut`) kept by the block search
+/// (`blastp/x_query_blocks.rs` `XBlockSubjects`) from one build's stripes pass to the next build's
+/// appends pass, at most one per thread of the build, so that the next build writes their pages,
+/// which the last build touched, instead of faulting the pages of fresh mappings. A kept segment's
+/// values are not read: a piece writes every entry of its range before any is read. What a smaller
+/// next build leaves of them is at most the last build's appends (as many as the hits of the table
+/// that build made).
+#[derive(Default)]
+pub(crate) struct XSegmentPool(Mutex<Vec<Vec<u32>>>);
+
+impl XSegmentPool {
+    // No NCBI counterpart: buffer reuse only (above).
+    /// A kept segment of at least `n` entries, if any (the pool then keeps it no more).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn take(&self, n: usize) -> Option<Vec<u32>> {
+        // The lock is held only around a move.
+        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = kept.iter().position(|segment| segment.len() >= n)?;
+        Some(kept.swap_remove(at))
+    }
+
+    // No NCBI counterpart: buffer reuse only (above).
+    /// Keeps segments of `segments` until the pool holds `at_most`; the others are dropped.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn keep(&self, segments: Vec<Vec<u32>>, at_most: usize) {
+        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let room = at_most.saturating_sub(kept.len());
+        kept.extend(
+            segments
+                .into_iter()
+                .filter(|segment| !segment.is_empty())
+                .take(room),
+        );
+    }
+}
+
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): tasks of another computation that the parallel build's appends
 /// pass runs after its chunks (`x_clut_par.rs`), each once; the caller of the build runs those the
 /// build did not run (the serial builder runs none). A task does not read the table.
@@ -409,6 +459,8 @@ pub(crate) struct XFlatArgs<'a> {
     /// `x_bp_flat_ahead_appends`, whose second part takes the second spare's).
     pub(crate) spare: Option<&'a XFlatSpare>,
     pub(crate) extra: Option<&'a dyn XExtraTasks>,
+    /// Item SC2d-2: the block search's kept segments of packed appends (`XSegmentPool`).
+    pub(crate) segments: Option<&'a XSegmentPool>,
     /// LOSAT_X_BPLKPAHEAD: the build of a block's table ahead of that block, on a pool task
     /// (`blastp/blast_engine/x_lookup_ahead.rs`): it allocates none of the table's vectors, takes
     /// them all from `spare` (made ready by `XFlatSpare::x_make_room`), and makes no table where they
@@ -2894,6 +2946,7 @@ pub(crate) fn x_bp_flat_ahead_appends(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_bp_flat_ahead_table(
     matrix: ScoringMatrix,
     appends: XFlatAppends,
@@ -2901,9 +2954,11 @@ pub(crate) fn x_bp_flat_ahead_table(
     locations: &[(i32, i32)],
     pool: &SearchPool<'_>,
     spare: &XFlatSpare,
+    segments: Option<&XSegmentPool>,
 ) -> Option<XFlatCompressedLookup> {
-    match x_clut_par::x_flat_ahead_stripes_in_pool(matrix, appends, query, locations, pool, spare)?
-    {
+    match x_clut_par::x_flat_ahead_stripes_in_pool(
+        matrix, appends, query, locations, pool, spare, segments,
+    )? {
         XFlatBuild::Table(table) => Some(table),
         XFlatBuild::Refused | XFlatBuild::TooLarge => None,
     }

@@ -92,12 +92,12 @@ use super::super::scoring::{
     context_blocks_ungapped, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use super::super::seqalign::write_blastn_seqalign;
+use super::super::tracing as blastn_trace;
 use super::super::ungapped;
 use crate::blastinput::app::{self as app, Program};
 use crate::core::blast_hits::reap_by_query_coverage;
 use crate::report::record::{QueryNames, SubjectNames};
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
-use super::super::tracing as blastn_trace;
 use super::super::x_subject_store::{
     x_blastna_into, x_blastna_into_pool, x_bnstore, x_read_subject_stores, SubjectLetters,
 };

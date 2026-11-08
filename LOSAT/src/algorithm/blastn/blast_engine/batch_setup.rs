@@ -19,10 +19,10 @@ use super::{
     x_query_prep_par, BlastnArgs, ContextKarlin, LookupTables, QueryContext, QueryContextIndex,
     QueryLetters, QueryStrand, SequenceData, SubjectSource, OFFSET_ARRAY_SIZE,
 };
+use crate::algorithm::blastn::coordination::{build_lookup_tables, TaskConfig};
 // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
 // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
 // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
-use crate::algorithm::blastn::coordination::{build_lookup_tables, TaskConfig};
 use crate::algorithm::blastn::ncbi_cutoffs::{
     cutoff_score_for_ungapped_extension, cutoff_score_max_from_evalue, gap_trigger_raw_score,
     GAP_TRIGGER_BIT_SCORE_NUCL,
@@ -89,7 +89,8 @@ pub(super) fn query_block(
     //     } else {
     // ```
     // Each context starts after the context before and its sentinel; the contexts of a
-    // query without letters take no room (and are invalid, `context_ungapped` below).
+    // query without letters take no room (and are invalid: `context_ungapped` in
+    // `search_query_batch`).
     //
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:229-243
     // ```c
@@ -259,7 +260,7 @@ pub(super) fn encode_query_block(
     // }
     // ```
     // With `-soft_masking true` (the default) the DUST, lower-case and WindowMasker masks only
-    // restrict the lookup table through query_context_masks below, and there is one copy of the
+    // restrict the lookup table through query_context_masks, and there is one copy of the
     // query. `false` searches a copy with the masks written into it.
     if args.soft_masking() {
         None
@@ -481,7 +482,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // space is retained across subjects, just as for output statistics.
     for context_idx in 0..query_contexts.len() {
         // An invalid context has an infinite cutoff and, unset, a zero X-drop and
-        // reduced cutoff (blast_parameters.c:324-332 above).
+        // reduced cutoff (blast_parameters.c:324-332, in `search_query_batch`).
         if !context_valid_ref[context_idx] {
             cutoff_scores.push(i32::MAX);
             hit_saving_cutoff_scores.push(i32::MAX);

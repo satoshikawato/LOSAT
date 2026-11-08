@@ -426,8 +426,9 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 ├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
 │   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]` or `pub(crate)`
-│   ├── main.rs            # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, makeblastdb, blastdbcmd
+│   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
+│   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd
 │   ├── common.rs          # Shared hit type, gap edit operations and the older output writers
 │   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
@@ -504,7 +505,7 @@ remains subject to all the requirements above.
 
 ## Entry Points
 
-- CLI: `LOSAT/src/main.rs`
+- CLI: `LOSAT/src/cli/main_entry.rs` (`main_entry`, which `LOSAT/src/main.rs` calls)
 - TBLASTX engine: `LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs`
 - BLASTN engine: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`
 - BLASTP engine: `LOSAT/src/algorithm/blastp/blast_engine.rs`

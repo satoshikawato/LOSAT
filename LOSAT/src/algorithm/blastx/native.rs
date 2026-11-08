@@ -503,10 +503,6 @@ fn run_inner(
             record.cut_in_place(from, to_exclusive, keep_whole);
         }
     }
-    // LOSAT's refusal of a title the archive cannot write, before its first byte.
-    if archive.is_some() {
-        archive::check_titles(&subjects, "subject")?;
-    }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, x_t_read_fasta);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // ```c++
@@ -826,22 +822,27 @@ fn run_inner(
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
     // is searched. (`batch_size` is read above, for the reads before the search.)
     let batch_size = batch_size?;
-    // LOSAT's refusal of a query title the archive cannot write comes before its first byte,
-    // though the query file is read batch by batch: the titles are checked by a read of the
-    // file before the search.
+    // LOSAT's refusal of a title the archive cannot write comes before its first byte, though
+    // the query file is read batch by batch: the query titles are checked by a read of the file
+    // before the search, and the `-subject` titles when NCBI writes the archive of a batch (the
+    // error archive of a run that no batch completes holds no sequence).
     if archive.is_some() {
         if !query_is_regular {
             archive::refuse_irregular_query()?;
         }
-        archive::prescan_query_titles(
+        let written = archive::prescan_query_titles(
             query_prescan
                 .as_ref()
                 .expect("the second handle of a regular query"),
             &query_settings,
             args.lcase_masking,
+            &options,
             batch_size,
             query_range.as_ref(),
         )?;
+        if written {
+            archive::check_titles(&subjects, "subject")?;
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // ```c++
@@ -2767,7 +2768,7 @@ fn x_flow(
 pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
     crate::blastinput::report_counts::report_counts(
         outfmt,
-        args.max_target_seqs.map(|n| n as usize),
+        super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
     )

@@ -108,7 +108,7 @@ pub(crate) struct PssmRedo1<'a> {
 
 /// The values of the search that the redo scales (`s_RescaleSearch`) and derives
 /// (`s_GetAlignParams`), and its working memory.
-struct RedoRun<'a> {
+pub(crate) struct RedoRun<'a> {
     /// The query (NCBIstdaa, O as X) and its unmasked letters.
     query: &'a [u8],
     query_nomask: &'a [u8],
@@ -129,6 +129,10 @@ struct RedoRun<'a> {
     /// The PSSM of NCBI's thread-local copy: what the last adjustment left.
     matrix: QueryPssm,
     scratch: PssmGapScratch,
+    /// RPS-BLAST: whether each adjusted matrix is checked against `INT4_MAX` (the sum of its
+    /// rows' best scores), and the first sum that was above it.
+    bound_check: bool,
+    bound_exceeded: Option<i64>,
 }
 
 /// `BlastCompo_Alignment`: an incoming (preliminary) alignment, scaled, or a redone one with its
@@ -149,6 +153,123 @@ struct Align {
 struct Redone {
     align: Align,
     e_value: f64,
+}
+
+impl<'a> RedoRun<'a> {
+    /// The values of the search that the redo scales (`s_RescaleSearch` on `kbp_gap` and the gap
+    /// costs, `s_GetAlignParams`) and the query's data, from the scaled gapped block `karlin`
+    /// (Lambda over the scaling factor, the K of the redo's copy) with its `log_k`, the search's
+    /// unscaled gap costs, the final gapped X-drop of the search (raw score) and the PSSM the
+    /// redo starts from (the matrix of NCBI's thread-local copy, which each adjustment
+    /// overwrites). psiblast's run starts from the file's PSSM; RPS-BLAST's from zeros, one run
+    /// for each profile.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2133
+    /// ```c
+    ///     for (i = 0;  i < num_queries;  i++) {
+    ///         if (sbp->kbp_gap[i] != NULL) {
+    ///             Blast_KarlinBlk * kbp = sbp->kbp_gap[i];
+    ///             kbp->Lambda /= scale_factor;
+    ///             kbp->logK = log(kbp->K);
+    ///         }
+    ///     }
+    ///
+    ///     sp->gap_open = (Int4)BLAST_Nint(sp->gap_open  * scale_factor);
+    ///     sp->gap_extend = (Int4)BLAST_Nint(sp->gap_extend * scale_factor);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2437-2450
+    /// ```c
+    ///     for (index = queryInfo->first_context;
+    ///                      index <= queryInfo->last_context; ++index) {
+    ///
+    ///         if ((queryInfo->contexts[index].is_valid)) {
+    ///     		near_identical_cutoff =
+    ///        		 (near_identical_cutoff_bits * NCBIMATH_LN2)
+    ///         		/ context->sbp->kbp_gap[index]->Lambda;
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2375-2383
+    /// ```c
+    ///     for (i = 0;  i < num_queries;  i++) {
+    ///         if (context->sbp->kbp_gap[i] != NULL &&
+    ///             context->sbp->kbp_gap[i]->Lambda < min_lambda) {
+    ///             min_lambda = context->sbp->kbp_gap[i]->Lambda;
+    ///         }
+    ///     }
+    ///     gapping_params->x_dropoff = (Int4)
+    ///         MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
+    ///             extendParams->gap_x_dropoff_final);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2308-2331 (`s_GetQueryInfo`:
+    /// `Blast_ReadAaComposition` and `s_CreateWordArray` of the query)
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        query: &'a [u8],
+        query_nomask: &'a [u8],
+        karlin: KarlinParams,
+        log_k: f64,
+        gap_costs: (i32, i32),
+        x_drop_final: i32,
+        matrix: QueryPssm,
+        scratch: PssmGapScratch,
+    ) -> Self {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1682-1691
+        // ```c
+        //     Uint1 *origData = query->data + q_range->begin;
+        //     /* Copy the query sequence (necessary for SEG filtering.) */
+        //     queryData->length = q_range->end - q_range->begin;
+        //     ...
+        //         queryData->data[idx] = (origData[idx] != 24) ? origData[idx] : 3;
+        // ```
+        let query_u_as_c: Vec<u8> = query
+            .iter()
+            .map(|&residue| {
+                if residue == ncbistdaa::U {
+                    ncbistdaa::C
+                } else {
+                    residue
+                }
+            })
+            .collect();
+        let lambda = karlin.lambda;
+        RedoRun {
+            query,
+            query_nomask,
+            query_data: BlastCompoSequenceData::from_ncbistdaa(&query_u_as_c),
+            query_words: build_query_word_hashes(query),
+            query_true_amino_acids: read_aa_composition(query).num_true_amino_acids,
+            karlin,
+            log_k,
+            gap_open: blast_nint(gap_costs.0 as f64 * SCALING_FACTOR),
+            gap_extend: blast_nint(gap_costs.1 as f64 * SCALING_FACTOR),
+            x_dropoff: (X_DROP_GAPPED_FINAL as f64 * std::f64::consts::LN_2 / lambda)
+                .max(x_drop_final as f64) as i32,
+            near_identical_cutoff: (NEAR_IDENTICAL_BITS_PER_POSITION * std::f64::consts::LN_2)
+                / lambda,
+            matrix,
+            scratch,
+            bound_check: false,
+            bound_exceeded: None,
+        }
+    }
+
+    /// Checks every matrix the composition adjustment builds: an alignment uses each row once,
+    /// so the sum of the rows' best scores bounds its score, and above `INT4_MAX` NCBI's 32-bit
+    /// scores overflow (undefined behavior in C).
+    pub(crate) fn with_bound_check(mut self) -> Self {
+        self.bound_check = true;
+        self
+    }
+
+    /// The first sum of best row scores above `INT4_MAX` that an adjusted matrix had.
+    pub(crate) fn bound_exceeded(&self) -> Option<i64> {
+        self.bound_exceeded
+    }
+
+    /// The matrix and the alignment scratch, for the next run (RPS-BLAST redoes one profile
+    /// after the other on the same memory).
+    pub(crate) fn into_buffers(self) -> (QueryPssm, PssmGapScratch) {
+        (self.matrix, self.scratch)
+    }
 }
 
 impl PssmRedo1<'_> {
@@ -314,48 +435,55 @@ impl PssmRedo1<'_> {
         let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
         let query_nomask_full = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
         let query_nomask = &query_nomask_full[1..query_nomask_full.len() - 1];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1682-1691
-        // ```c
-        //     Uint1 *origData = query->data + q_range->begin;
-        //     /* Copy the query sequence (necessary for SEG filtering.) */
-        //     queryData->length = q_range->end - q_range->begin;
-        //     ...
-        //         queryData->data[idx] = (origData[idx] != 24) ? origData[idx] : 3;
-        // ```
-        let query_u_as_c: Vec<u8> = query
-            .iter()
-            .map(|&residue| {
-                if residue == ncbistdaa::U {
-                    ncbistdaa::C
-                } else {
-                    residue
-                }
-            })
-            .collect();
         let lambda = self.karlin.lambda / SCALING_FACTOR;
-        RedoRun {
+        RedoRun::new(
             query,
             query_nomask,
-            query_data: BlastCompoSequenceData::from_ncbistdaa(&query_u_as_c),
-            query_words: build_query_word_hashes(query),
-            query_true_amino_acids: read_aa_composition(query).num_true_amino_acids,
-            karlin: KarlinParams {
+            KarlinParams {
                 lambda,
                 k: self.info.gapped_k,
                 ..*self.karlin
             },
-            log_k: self.info.gapped_k.ln(),
-            gap_open: blast_nint(self.gap_open as f64 * SCALING_FACTOR),
-            gap_extend: blast_nint(self.gap_extend as f64 * SCALING_FACTOR),
-            x_dropoff: (X_DROP_GAPPED_FINAL as f64 * std::f64::consts::LN_2 / lambda)
-                .max(self.x_drop_final as f64) as i32,
-            near_identical_cutoff: (NEAR_IDENTICAL_BITS_PER_POSITION * std::f64::consts::LN_2)
-                / lambda,
-            matrix: self.pssm.clone(),
-            scratch: PssmGapScratch::new(),
-        }
+            self.info.gapped_k.ln(),
+            (self.gap_open, self.gap_extend),
+            self.x_drop_final,
+            self.pssm.clone(),
+            PssmGapScratch::new(),
+        )
     }
 
+    /// The redo of one match of the PSSM query: the subject read from the database, then
+    /// [`RedoMatch::redo_match`].
+    fn redo_match(
+        &self,
+        run: &mut RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+    ) -> Result<Option<(BlastpHspList, i32, f64)>> {
+        let subject_read = self.subjects.read(oid)?;
+        Ok(RedoMatch {
+            info: self.info,
+            gumbel: self.gumbel,
+            expect_value: self.expect_value,
+            query_length: self.context.aa_len as i32,
+            rps_roles: false,
+        }
+        .redo_match(run, oid, hsps, subject_read.residues()))
+    }
+}
+
+/// What the redo of one match reads besides its run: the matrix information, the Gumbel block,
+/// `-evalue`, the query's length and the roles of the lengths in the e-values (RPS-BLAST's
+/// query is the profile and its subject the user's query: `Blast_HSPListGetEvalues` swaps them).
+pub(crate) struct RedoMatch<'a> {
+    pub(crate) info: &'a PosMatrixInfo,
+    pub(crate) gumbel: &'a BlastGumbelBlk,
+    pub(crate) expect_value: f64,
+    pub(crate) query_length: i32,
+    pub(crate) rps_roles: bool,
+}
+
+impl RedoMatch<'_> {
     /// The redo of one match (the HSPs of the query and one subject): `Blast_RedoOneMatch`, then
     /// `s_HSPListFromDistinctAlignments`, `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge`,
     /// and for a list whose best e-value passes `-evalue`, `s_HSPListNormalizeScores` and
@@ -377,14 +505,13 @@ impl PssmRedo1<'_> {
     ///                             localScalingFactor);
     ///                     s_ComputeNumIdentities(
     /// ```
-    fn redo_match(
+    pub(crate) fn redo_match(
         &self,
         run: &mut RedoRun<'_>,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
-    ) -> Result<Option<(BlastpHspList, i32, f64)>> {
-        let subject_read = self.subjects.read(oid)?;
-        let subject = subject_read.residues();
+        subject: &[u8],
+    ) -> Option<(BlastpHspList, i32, f64)> {
         let alignments = self.redo_one_match(run, hsps, subject);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-354
         // ```c
@@ -430,23 +557,21 @@ impl PssmRedo1<'_> {
         // ```
         // psiblast's e-values are not adjusted by a composition p-value (that is blastp's and
         // blastx's, with `-comp_based_stats 2u`/`3u`).
-        let query_length = self.context.aa_len as i32;
+        let query_length = self.query_length;
         let subject_length = subject.len() as i32;
         let mut best_evalue = i32::MAX as f64;
         for hsp in &mut redone {
-            hsp.e_value = blast_spouge_stoe(
-                hsp.align.score,
-                &run.karlin,
-                self.gumbel,
-                query_length,
-                subject_length,
-            );
+            // (RPS-BLAST's roles are swapped, `Blast_HSPListGetEvalues`: its `isRPS`.)
+            let (m, n) = if self.rps_roles {
+                (subject_length, query_length)
+            } else {
+                (query_length, subject_length)
+            };
+            hsp.e_value = blast_spouge_stoe(hsp.align.score, &run.karlin, self.gumbel, m, n);
             best_evalue = best_evalue.min(hsp.e_value);
         }
         redone.retain(|hsp| hsp.e_value <= self.expect_value);
-        let Some(first) = redone.first() else {
-            return Ok(None);
-        };
+        let first = redone.first()?;
         let best_score = first.align.score;
         // NCBI's `best_evalue <= hitParams->options->expect_value` holds: the list keeps an HSP,
         // whose e-value is at most `-evalue`, and `best_evalue` is the smallest of all.
@@ -501,7 +626,7 @@ impl PssmRedo1<'_> {
             };
             hsp_list.hsps.push(hsp);
         }
-        Ok(Some((hsp_list, best_score, best_evalue)))
+        Some((hsp_list, best_score, best_evalue))
     }
 
     /// `Blast_RedoOneMatch` for the one window of a protein query and subject (the whole query,
@@ -663,6 +788,17 @@ impl PssmRedo1<'_> {
                             self.info,
                             &subject_composition.prob,
                         );
+                        if run.bound_check && run.bound_exceeded.is_none() {
+                            let bound: i64 = run
+                                .matrix
+                                .rows
+                                .iter()
+                                .map(|row| i64::from(row.iter().copied().max().unwrap_or(0).max(0)))
+                                .sum();
+                            if bound > i64::from(i32::MAX) {
+                                run.bound_exceeded = Some(bound);
+                            }
+                        }
                     }
                     num_adjustments += 1;
                 }

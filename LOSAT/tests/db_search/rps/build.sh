@@ -5,6 +5,13 @@
 #              psiblast rounds against tests/db_search/paja), Seq-ids gnl|CDD|101..103, scores at
 #              makeprofiledb's default scale 100 (as CDD's)
 #   rps_mini4  the same profiles, version 4
+#   rps_mini3v the same profiles as three volumes of one profile each (rps_mini3v.00 to .02, version 5,
+#              each made by makeprofiledb from one profile, and the alias file rps_mini3v.pal that
+#              lists them, written below: makeprofiledb -max_smp_vol never makes one profile per
+#              volume of three profiles)
+#   rps_tie    two volumes of one profile each (rps_tie.00, .01 and rps_tie.pal), both the ribonucleotide
+#              reductase profile, gnl|CDD|102 and gnl|CDD|202: every hit of one ties exactly with the other's
+#              (the order of the merge at equal e-values and bit scores)
 #   rps_mini26 version 4 with a 26-column .rps (magic 0x1e16 in .rps and .loo, rows cut to their
 #              first 26 columns), its .freq left at 28 columns: the layout of NCBI's own test
 #              database rpstest_le
@@ -67,6 +74,26 @@ PY
 done
 "$N/makeprofiledb" -in list.txt -out "$O/rps_mini" -title rps_mini -dbtype rps
 "$N/makeprofiledb" -in list.txt -out "$O/rps_mini4" -title rps_mini4 -dbtype rps -blastdb_version 4
+i=0
+for tag in 101 102 103; do
+  echo f$tag.smp > list3v.txt
+  "$N/makeprofiledb" -in list3v.txt -out "$O/rps_mini3v.0$i" -title rps_mini3v -dbtype rps
+  i=$((i + 1))
+done
+# NSEQ and LENGTH are the sums over the volumes, as makeprofiledb writes them into its alias files.
+nseq=0; len=0
+for i in 00 01 02; do
+  info=$("$N/blastdbcmd" -db "$O/rps_mini3v.$i" -info | grep ' sequences;')
+  nseq=$((nseq + $(echo "$info" | awk '{print $1}')))
+  len=$((len + $(echo "$info" | awk '{gsub(",", "", $3); print $3}')))
+done
+printf '#\n# Alias file created by build.sh\n#\nTITLE rps_mini3v\nDBLIST "rps_mini3v.00" "rps_mini3v.01" "rps_mini3v.02" \nNSEQ %s\nLENGTH %s\n' "$nseq" "$len" > "$O/rps_mini3v.pal"
+sed 's/tag id 102/tag id 202/' f102.smp > g102.smp
+echo f102.smp > tie0.txt; echo g102.smp > tie1.txt
+"$N/makeprofiledb" -in tie0.txt -out "$O/rps_tie.00" -title rps_tie -dbtype rps
+"$N/makeprofiledb" -in tie1.txt -out "$O/rps_tie.01" -title rps_tie -dbtype rps
+tie_len=$(for i in 00 01; do "$N/blastdbcmd" -db "$O/rps_tie.$i" -info | grep ' sequences;' | awk '{gsub(",", "", $3); print $3}'; done | paste -sd+ | bc)
+printf '#\n# Alias file created by build.sh\n#\nTITLE rps_tie\nDBLIST "rps_tie.00" "rps_tie.01" \nNSEQ 2\nLENGTH %s\n' "$tie_len" > "$O/rps_tie.pal"
 "$N/makeprofiledb" -in list.txt -out "$O/rps_mini26" -title rps_mini26 -dbtype rps -blastdb_version 4
 # rps_mini26: the .rps rows cut to 26 columns and the 26-letter magic in .rps and .loo.
 python3 - "$O/rps_mini26" <<'PY'

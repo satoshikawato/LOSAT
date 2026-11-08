@@ -20,7 +20,7 @@ use super::WriteDbError;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageSize {
     /// LMDB's `GET_PAGESIZE` on the host, looked up when a version 5 database creates its
-    /// LMDB files ([`host_page_size`]).
+    /// LMDB files (`host_page_size`).
     Host,
     /// The page size of another platform.
     Fixed(usize),

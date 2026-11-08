@@ -49,8 +49,8 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoAdjustMode, BlastCompoGappingParams,
 };
 use crate::report::{
-    write_blastp_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig,
-    OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
+    write_blastp_pairwise_report, write_blastp_pairwise_window, BlastpPairwiseQuery,
+    BlastpPairwiseReport, OutputConfig, OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
 };
 use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::search_space::SearchSpace;
@@ -2468,6 +2468,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         && args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats
         && !(args.psi_search.is_some()
             && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
+        && args.rps_search.is_none()
     {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
@@ -5038,9 +5039,6 @@ pub fn run(
             }
         },
     };
-    if archive.is_some() {
-        super::archive::check_titles(&subjects.records, "subject")?;
-    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -5466,10 +5464,16 @@ fn search_cli(
     let mut resolved = args.check_options(outputs.diagnostics)?;
     // rpsblast: NCBI's check of the database's frequency ratios comes between the options and
     // the database (`rps_hooks::check_freq_ratio_file`).
-    if let Some(rps) = resolved.rps_search.clone() {
-        rps_hooks::check_freq_ratio_file(&resolved, &rps, &settings, outputs.diagnostics)?;
+    if resolved.rps_search.is_some() {
+        rps_hooks::check_freq_ratio_file(&mut resolved, &settings, outputs.diagnostics)?;
     }
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
+    // rpsblast `-num_threads 0`: one thread for each volume of the database.
+    if let (Some(rps), Some(database)) = (resolved.rps_search.as_deref(), database.as_ref()) {
+        if rps.auto_threads {
+            resolved.num_threads = rps_hooks::volume_count(database);
+        }
+    }
     // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
     if resolved.app == BlastpApp::Psiblast && database.is_none() {
         psiblast_check_subject_letters(&subjects.records)?;
@@ -5582,12 +5586,10 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
-    // The refusal of a title the archive cannot write comes before its first byte.
-    if args.archive.is_some() {
-        super::archive::check_titles(&records, "query")?;
-    }
-    // So does the refusal of a title that psiblast's ASN.1 PSSM cannot write, and of a PSSM file
-    // that LOSAT cannot write as NCBI does (one of the report streams, a named pipe).
+    // The refusal of a title that psiblast's ASN.1 PSSM cannot write comes before the first
+    // byte, and so does that of a PSSM file that LOSAT cannot write as NCBI does (one of the
+    // report streams, a named pipe). (The titles of the archive are checked with the query
+    // batches, `search`.)
     // psiblast's rounds write the files of their PSSMs too (`PsiRoundPlan::file_request`).
     if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
         resolved
@@ -5691,13 +5693,17 @@ pub fn run_local(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTP_TASK.check(&mut args.task)?;
     // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
     // database is read from files by the command line only.
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
-    // cannot write, and a diagnostics stream that saves the messages.
+    // cannot write (the titles with the query batches, `search`), and a diagnostics stream that
+    // saves the messages.
     let archive_requested = outputs
         .formats
         .iter()
@@ -5705,8 +5711,6 @@ pub fn run_local(
     if archive_requested {
         args.archive = super::archive::handle_for(&args, true)?
             .map(|handle| outputs.with_archive_outfmt(handle));
-        super::archive::check_titles(query_records, "query")?;
-        super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
@@ -5809,6 +5813,9 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTP_TASK.check(&mut args.task)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -5846,9 +5853,6 @@ fn search_database(
     let mut resolved = resolve_for_formats(&args, outputs)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
-    if args.archive.is_some() {
-        super::archive::check_titles(query_records, "query")?;
-    }
     search(
         resolved,
         query_records,
@@ -6418,6 +6422,24 @@ fn search(
     if !batches.starts.is_empty() {
         check_identity_compressed_lookup_of(&args)?;
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //     ...
+    //             if (fmt_args->ArchiveFormatRequested(args)) {
+    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
+    // ```
+    // The BLAST archive (outfmt 11) of each batch that NCBI completes holds its queries and,
+    // with `-subject`, every subject; the batch that stops the run (a reader error, `Empty
+    // CBlastQueryVector`, a batch of queries without letters) writes neither, and the error
+    // archive holds no sequence. So the refusal of a title the archive cannot write looks at
+    // the queries of the batches before the stop, and at the subjects when there is one; it
+    // comes before the first byte (the reports are written after the batches are read).
+    if args.archive.is_some() && batches.searched_done > 0 {
+        super::archive::check_titles(&searched_queries[..batches.searched_done], "query")?;
+        super::archive::check_titles(&subjects.records, "subject")?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
     // one search per round per query (`psi_round`).
@@ -6618,7 +6640,8 @@ fn search(
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                 // The last checks of the block search, on the pool; when one fails, nothing has
                 // been written and the search of all queries below runs: the lookup tables' words
-                // (`x_block_words_fit`), then with `-db` the definition lines
+                // (`x_word_blocks`, which also closes the blocks of a compressed table on their
+                // words), then with `-db` the definition lines
                 // (`database::x_titles_allow_blocks`; for outfmt 8, 9, 12 and 5
                 // `database::x_titles_read_allow_blocks`; for outfmt 0, 5, 6 and 7 with `taxdb.bti`
                 // found also the taxids and lookups of the batches' prefetch), with outfmt 0 and
@@ -6627,10 +6650,17 @@ fn search(
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
                 // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
                 // checks of every kind of report among them.
-                if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
+                let Some((blocks, x_block_words)) = x_word_blocks(
+                    &args,
+                    &searched_queries,
+                    &query_input,
+                    batch_size,
+                    &blocks,
+                    pool,
+                ) else {
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
-                }
+                };
                 // Outfmt 0, 5, 6 and 7 (psiblast's 0, 6 and 7) prefetch the subjects of each
                 // batch, which with `taxdb.bti` on the search path reads their taxids and looks
                 // them up in the taxonomy database (`ListedTitles::prefetch_messages`); a refusal
@@ -6736,9 +6766,16 @@ fn search(
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
                 // line (utils/xtiming.rs). No NCBI counterpart.
                 let t_encode = crate::utils::xtiming::clock();
-                let x_subjects =
+                let mut x_subjects =
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
+                // Each block's words, for its table's build (`x_query_blocks::x_block_appends`).
+                x_subjects.x_set_block_words(
+                    blocks
+                        .iter()
+                        .zip(&x_block_words)
+                        .map(|(block, &words)| (&searched_queries[block.clone()], words)),
+                );
                 let pool = &pool.x_with_ext(&x_subjects);
                 // The caller's receivers of the side files of outfmt 13 and 14, which every
                 // block's output keeps.
@@ -7115,7 +7152,8 @@ fn x_query_block_plan(
         }
     }
     let query_batches = query_input.batches(batch_size);
-    let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
+    let blocks =
+        super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters, None)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
         .then_some((kinds, blocks))
 }
@@ -7127,7 +7165,7 @@ fn x_query_block_plan(
 //   the concatenated length of all queries; a block's is shorter);
 // - the split of a long query batch (the `ensure!`s of `search_split_query_batches`);
 // - with the compressed lookup table, a table of one of NCBI's query batches (or of a query
-//   chunk of a split batch) that fills NCBI's overflow banks: `x_block_words_fit`, which the block
+//   chunk of a split batch) that fills NCBI's overflow banks: `x_word_blocks`, which the block
 //   search tests on its pool before the first block (and leaves the search to the reference path
 //   when it fails).
 // A search that passes them is refused by none of them in any block either: a block's batches are
@@ -7177,39 +7215,92 @@ fn x_block_search_refuses_nothing(
     true
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
+// ```c++
+//     // 5. Create the lookup table
+//     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+//         LookupTableWrap* lut =
+//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:208-211
+// ```c++
+//     else
+//     {
+//         m_InternalData->m_LookupTable.Reset(NULL);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:189,221-231
+// ```c
+// #define COMPRESSED_HITS_PER_BACKBONE_CELL 4
+// ...
+// typedef struct CompressedLookupBackboneCell {
+// 	Int4 num_used;
+// 	Int4 query_offset;
+//     /** structure for holding the list of query offsets */
+//     union {
+//         /** storage for query offsets local to the backbone cell */
+//         Int4 query_offsets[COMPRESSED_HITS_PER_BACKBONE_CELL];
+//         /** storage for remote query offsets */
+//         CompressedMixedOffsets overflow_list;
+//     } payload;
+// } CompressedLookupBackboneCell;
+// ```
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the last check of `x_block_search_refuses_nothing`, made on the
-// search's pool before the first block: with the compressed lookup table, whether no table of one of
-// NCBI's query batches (or of a query chunk of a split batch) can fill NCBI's overflow banks
-// (`try_build_blosum62_compressed_lookup`). A table takes at most a quarter of its words as overflow
-// cells, and a batch's tables have no more words than the batch's offsets add
-// (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot fill
-// them; a batch with more leaves the search to the reference path, which tests the batch exactly.
-// The batches are tested one by one, on the pool's threads when it has more than one, with one
-// counter whose kept counts serve them all; the outcome is whether all pass.
-// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
-fn x_block_words_fit(
+// search's pool before the first block, and the blocks' ends. With the compressed lookup table:
+// - whether no table of one of NCBI's query batches (or of a query chunk of a split batch) can fill
+//   NCBI's overflow banks (`try_build_blosum62_compressed_lookup`). A table takes at most a quarter
+//   of its words as overflow cells, and a batch's tables have no more words than the batch's
+//   offsets add (`CompressedWordCount`): a batch whose words are at most four times the banks'
+//   cells cannot fill them; a batch with more leaves the search to the reference path (`None`),
+//   which tests the batch exactly.
+// - the blocks closed also on their words (`x_query_blocks`). NCBI builds the table of one batch,
+//   searches the batch and frees the table before the next batch (above), so its largest table is
+//   that of the batch with the most words: a backbone cell has slots for four offsets whatever the
+//   threshold (24 bytes with its count), and the words past them go to overflow cells of four (24
+//   bytes). A block's table (`x_clut_direct.rs`: an entry of 4 bytes per word and per backbone cell)
+//   is kept to the slots of that table: at most four words per backbone cell plus the words of the
+//   batch with the most, so a block's finished table takes about the memory of NCBI's largest
+//   table, not a multiple of it (the builder's own vectors, and at more than one thread the next
+//   block's table built ahead, `x_lookup_ahead.rs`, come on top). At the default thresholds of
+//   blastp-fast (word size 5, 20) and of word size 6 (21) a block of `LOSAT_X_BPQBLOCK` letters
+//   holds fewer words (the backbone's slots dominate), and the blocks are those of the letters; at
+//   those of word sizes 5 (19.3) and 7 (20.25) of `-task blastp` the words of a block of 50,000
+//   letters come near the most, and a block can end one batch earlier; with a lowered threshold a
+//   block holds one batch or a few.
+// The batches are counted one by one, on the pool's threads when it has more than one, with one
+// counter whose kept counts serve them all. The standard table (`AaLookupTable`) has no overflow
+// banks and keeps `blocks`, the blocks of the letters. Each block comes with its words (the sum of
+// its batches'), the most appends of its table's build (`x_query_blocks::x_block_appends`); the
+// standard table's blocks with none.
+// No NCBI counterpart: chooses LOSAT's path and blocks; it does not change any value NCBI computes.
+fn x_word_blocks(
     args: &ResolvedBlastpArgs,
     queries: &[FastaRecord],
     query_input: &seq_range::QueryInput,
     batch_size: u32,
+    blocks: &[std::ops::Range<usize>],
     pool: &crate::utils::threading::SearchPool<'_>,
-) -> bool {
-    use crate::algorithm::tblastx::lookup::compressed::CompressedWordCount;
+) -> Option<(Vec<std::ops::Range<usize>>, Vec<u64>)> {
+    use crate::algorithm::tblastx::lookup::compressed::{
+        CompressedWordCount, COMPRESSED_HITS_PER_BACKBONE_CELL,
+    };
     if args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable {
-        return true;
+        return Some((blocks.to_vec(), Vec::new()));
     }
     // The threshold as the table is built (`run_resolved_in_pool`), with the words of the search's
     // matrix (`blastp_matrix_compressed_lookup` builds another matrix's table).
-    let Some(words) = CompressedWordCount::new_of(
+    let counter = CompressedWordCount::new_of(
         args.scoring.matrix,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
-    ) else {
-        return false;
-    };
-    // The letters of the lookup query (`encode_protein_query_frame_with_seg`) where SEG does
-    // not mask them; a lookup segment holds only those (`build_lookup_segments_for_context`).
-    let fits = |searched: &std::ops::Range<usize>| {
+    )?;
+    // The words of all letters of the queries: the lookup query
+    // (`encode_protein_query_frame_with_seg`) has the same letters, and its lookup segments
+    // (`build_lookup_segments_for_context`) leave out those that SEG or `-lcase_masking` mask, so
+    // a block's table holds at most these words (all of them without masks). Counting the masked
+    // letters too only closes such a block earlier and reserves room that its table does not fill
+    // (`x_block_appends`) and never touches.
+    let words = |searched: &std::ops::Range<usize>| {
         let encoded: Vec<EncodedProtein> = queries[searched.clone()]
             .iter()
             .map(|record| encode_protein_sequence(record.seq()))
@@ -7217,25 +7308,60 @@ fn x_block_words_fit(
         let mut letters = encoded
             .iter()
             .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
-        words.fits_banks(&mut letters)
+        counter.batch_words(&mut letters)
     };
-    let searched_batches: Vec<std::ops::Range<usize>> = query_input
-        .batches(batch_size)
-        .iter()
-        .map(|batch| batch.searched.clone())
-        .filter(|searched| !searched.is_empty())
-        .collect();
+    let query_batches = query_input.batches(batch_size);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if pool.enabled() && pool.threads() > 1 {
+    let batch_words: Option<Vec<u64>> = if pool.enabled() && pool.threads() > 1 {
         // The batches on the pool's threads, with the one counter (whose kept counts serve all
         // batches).
-        return pool.install(|| searched_batches.par_iter().all(fits));
+        pool.install(|| {
+            query_batches
+                .par_iter()
+                .map(|batch| words(&batch.searched))
+                .collect()
+        })
+    } else {
+        query_batches
+            .iter()
+            .map(|batch| words(&batch.searched))
+            .collect()
+    };
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let batch_words: Option<Vec<u64>> = {
+        let _ = pool;
+        query_batches
+            .iter()
+            .map(|batch| words(&batch.searched))
+            .collect()
+    };
+    let batch_words = batch_words?;
+    let most = (COMPRESSED_HITS_PER_BACKBONE_CELL as u64)
+        .saturating_mul(counter.backbone_cells())
+        .saturating_add(batch_words.iter().copied().max().unwrap_or(0));
+    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    let blocks = super::x_query_blocks::x_query_blocks(
+        &query_batches,
+        &lengths,
+        super::x_query_blocks::x_bp_qblock()?,
+        Some((&batch_words, most)),
+    )?;
+    // A block is whole batches, in order (`x_query_blocks`).
+    let mut block_words = vec![0u64; blocks.len()];
+    let mut block = 0;
+    for (batch, &words) in query_batches.iter().zip(&batch_words) {
+        while blocks[block].end < batch.searched.end {
+            block += 1;
+        }
+        block_words[block] = block_words[block].saturating_add(words);
     }
-    let _ = pool;
-    searched_batches.iter().all(fits)
+    Some((blocks, block_words))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the outfmt 0 report of the search of all queries refuses a
@@ -8078,7 +8204,9 @@ fn blastp_aa_lookup_on_block_spare(
 /// `x_for` says which build of a block search this is (the spare vectors it takes,
 /// `x_query_blocks::XLookupFor`; a query chunk's NCBI tables are its one table). The build of the
 /// next block's table ahead of that block (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`) calls it too,
-/// with `XLookupFor::Ahead`.
+/// with `XLookupFor::Ahead`. `x_appends` is the most appends of the build where the block search
+/// counted them (`x_query_blocks::x_block_appends`), else 0.
+#[allow(clippy::too_many_arguments)]
 fn blastp_compressed_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
@@ -8086,6 +8214,7 @@ fn blastp_compressed_lookup(
     query_lengths: &[usize],
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
     x_for: super::x_query_blocks::XLookupFor,
+    x_appends: usize,
 ) -> Result<(BlastpRuntimeLookup, Vec<QueryContext>)> {
     // Another matrix than BLOSUM62: `blastp_matrix_compressed_lookup`.
     if args.scoring.matrix != ScoringMatrix::Blosum62 {
@@ -8136,7 +8265,7 @@ fn blastp_compressed_lookup(
         &locations,
         &ncbi_tables,
         blastp_parallel_pool,
-        x_flat.build_args(),
+        x_flat.build_args(x_appends),
     )
     .context("failed to build NCBI compressed amino-acid lookup table")?
     .map_err(|()| {
@@ -8579,6 +8708,11 @@ fn run_resolved_in_pool(
                 } else {
                     super::x_query_blocks::XLookupFor::Search
                 },
+                if chunk_prelim.is_some() {
+                    0
+                } else {
+                    super::x_query_blocks::x_block_appends(blastp_parallel_pool, query_records)
+                },
             )?,
         },
     };
@@ -8754,7 +8888,8 @@ fn run_resolved_in_pool(
     let num_subjects = match database {
         None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
-        Some(database) => database.statistics_num_sequences() as usize,
+        Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
+            .unwrap_or(database.statistics_num_sequences() as usize),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
@@ -10341,6 +10476,9 @@ fn run_resolved_in_pool(
     // rpsblast: the RPS engine's whole search (`rps_hooks::rps_search`): the final hit lists,
     // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
+    // A database of several volumes: its merged lists are not sorted or cut below, and it prints
+    // no query warnings.
+    let mut rps_multi_volume = false;
     if let Some(rps) = args.rps_search.as_deref() {
         let run = rps_hooks::RpsSearchRun {
             contexts: &contexts,
@@ -10379,7 +10517,8 @@ fn run_resolved_in_pool(
                 (_, Err(other)) => other,
             }
         })?;
-        rps_gapped_k = Some(searched);
+        rps_gapped_k = Some(searched.gapped_k);
+        rps_multi_volume = searched.volumes > 1;
     } else if let Some(psi) = args.psi_search.as_deref() {
         pssm_hooks::pssm_prelim(
             psi,
@@ -10675,14 +10814,18 @@ fn run_resolved_in_pool(
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
-    for hit_list_opt in &mut preliminary_hit_lists {
-        if let Some(hit_list) = hit_list_opt.as_mut() {
+    // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order, which
+    // NCBI sorts nowhere after.)
+    if !rps_multi_volume {
+        for hit_list_opt in &mut preliminary_hit_lists {
+            if let Some(hit_list) = hit_list_opt.as_mut() {
+                hit_list.sort_by_evalue();
+            }
+        }
+        // The same sort of the compact lists.
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
             hit_list.sort_by_evalue();
         }
-    }
-    // The same sort of the compact lists.
-    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
-        hit_list.sort_by_evalue();
     }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
@@ -10722,7 +10865,8 @@ fn run_resolved_in_pool(
     // position-based redo) takes the place of both, and reads them as they are too.
     let ordinary_traceback = args.comp_based_stats.mode
         == BlastpCompositionMode::NoCompositionBasedStats
-        || args.psi_search.is_some();
+        || args.psi_search.is_some()
+        || args.rps_search.is_some();
     if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -11135,7 +11279,7 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
+    if super::kappa::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
     }
     if x_redo_par_run {
@@ -11245,7 +11389,8 @@ fn run_resolved_in_pool(
                                     search_spaces[q_idx].effective_space,
                                 )
                             });
-                            let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
+                            let mut kappa_subject_range_cache =
+                                BlastpKappaSubjectRangeCache::new(None);
 
                             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3585
                             // ```c
@@ -11429,7 +11574,7 @@ fn run_resolved_in_pool(
                         let mut kappa_gap_scratch = GapAlignScratch::new();
                         // See XSharedSubjectRanges.
                         let mut kappa_subject_range_cache =
-                            BlastpKappaSubjectRangeCache::x_with_shared(x_shared_ranges.clone());
+                            BlastpKappaSubjectRangeCache::new(x_shared_ranges.clone());
                         let mut redone_match = BlastCompoHeap::new(
                             args.traceback_hitlist_size(),
                             args.inclusion_ethresh,
@@ -11672,7 +11817,13 @@ fn run_resolved_in_pool(
         //                                        &fence_hit);
         // ```
         let mut kappa_gap_scratch = GapAlignScratch::new();
-        let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
+        // In a block search of the subjects encoded for all blocks, the store of SEG-masked subject
+        // ranges of all blocks (`x_query_blocks::x_block_seg_store`): an entry depends on its key
+        // only.
+        let x_block_seg_store =
+            super::x_query_blocks::x_block_seg_store(blastp_parallel_pool, subjects);
+        let mut kappa_subject_range_cache =
+            BlastpKappaSubjectRangeCache::new(x_block_seg_store.clone());
 
         for q_idx in 0..query_ids.len() {
             let batch = kappa_query_batches[q_idx].clone();
@@ -11829,6 +11980,20 @@ fn run_resolved_in_pool(
             preliminary_hit_lists[q_idx] = None;
             x_prelim_freed += 1;
         }
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as
+        // LOSAT_X_BPSEGWIN keeps it for the next window (`x_redo_par.rs` `x_redo`).
+        if let Some(store) = &x_block_seg_store {
+            let seg_win = super::kappa::x_bp_seg_win();
+            let emptied = seg_win.is_none_or(|min| store.x_len() >= min);
+            if emptied {
+                store.x_clear();
+            }
+            // The switch's own side here is a store kept for the next block (`=0` empties it after
+            // every block, as each block of the search before the store).
+            if seg_win.is_some() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", !emptied);
+            }
+        }
     }
 
     if timing_enabled {
@@ -11906,8 +12071,12 @@ fn run_resolved_in_pool(
                     hit_list.purge_empty_hsp_lists();
                 }
             }
-            hit_list.sort_by_evalue();
-            hit_list.prune_by_size(args.traceback_hitlist_size());
+            // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order
+            // and the formatter cuts them, `psiblast_hits_found` below.)
+            if !rps_multi_volume {
+                hit_list.sort_by_evalue();
+                hit_list.prune_by_size(args.traceback_hitlist_size());
+            }
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
@@ -12040,7 +12209,7 @@ fn run_resolved_in_pool(
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
-        (BlastpApp::Psiblast, Some(titles)) => {
+        (app, Some(titles)) if app.prunes_after_traceback() => {
             Some(titles.joined_cut(&hit_lists, args.max_target_seqs)?)
         }
         _ => None,
@@ -12075,7 +12244,7 @@ fn run_resolved_in_pool(
     // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
     // (`ListedTitles::prefetched_ranks`).
     let psiblast_prefetched: Option<Vec<Vec<usize>>> =
-        (args.app == BlastpApp::Psiblast && batches_prefetch).then(|| {
+        (args.app.prunes_after_traceback() && batches_prefetch).then(|| {
             hit_lists
                 .iter()
                 .map(|hit_list| {
@@ -12171,7 +12340,7 @@ fn run_resolved_in_pool(
             titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
         }
     }
-    let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
+    let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
         hit_lists
             .iter_mut()
             .enumerate()
@@ -12271,7 +12440,22 @@ fn run_resolved_in_pool(
     // (*hsp_list_out)->query_index = index;
     // --hit_list->hsplist_count;
     // ```
-    let mut pairwise_hits = if needs_pairwise_hits {
+    // rpsblast's outfmt 0 alone: the rows are made and written a window of queries at a time
+    // (`x_pairwise_par::query_windows`, as BLASTN's and TBLASTX's), not for the whole run
+    // first: the rendered rows of CDD's 165,000 HSPs held 150 MB at once.
+    let rps_streamed_rows = args.rps_search.is_some()
+        && matches!(format_plans, [BlastpReport::Text(OutputFormat::Pairwise)]);
+    // What the streamed rows do not do (hit records and an observer come only from the library
+    // API and the Web build, which refuse rpsblast; the parser refuses `-lcase_masking`; rounds
+    // are psiblast's): a future relaxation of those refusals must not bypass them silently.
+    debug_assert!(
+        !rps_streamed_rows
+            || (outputs.hits.is_none()
+                && outputs.observer.is_none()
+                && !args.lcase_masking
+                && reports.psi_round.is_none())
+    );
+    let mut pairwise_hits = if needs_pairwise_hits && !rps_streamed_rows {
         Some(build_pairwise_hits(
             collect_hits_and_methods_from_hit_lists(&hit_lists),
             &contexts,
@@ -12296,10 +12480,13 @@ fn run_resolved_in_pool(
                 .map(|searched| ranges.subject_placements.length(s_idx, searched));
         }
     }
-    for hit_list in hit_lists.iter_mut().flatten() {
-        for hsp_list in &mut hit_list.hsplist_array {
-            for hsp in &mut hsp_list.hsps {
-                shift_hsp_to_records(hsp, ranges);
+    // (The streamed rows are made from the searched coordinates, window by window.)
+    if !rps_streamed_rows {
+        for hit_list in hit_lists.iter_mut().flatten() {
+            for hsp_list in &mut hit_list.hsplist_array {
+                for hsp in &mut hsp_list.hsps {
+                    shift_hsp_to_records(hsp, ranges);
+                }
             }
         }
     }
@@ -12381,12 +12568,17 @@ fn run_resolved_in_pool(
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
-            let messages = crate::report::query_warnings::query_messages(
+            let mut messages = crate::report::query_warnings::query_messages(
                 record.seq(),
                 query_valid[q_idx],
                 reports.x_queries_before + q_idx < reports.identity_warned,
                 filtered_empty && !query_batch_skipped[q_idx],
             );
+            // rpsblast over several volumes: the merged results keep the errors of the volumes'
+            // results and no warning (`s_CombineSearchSets`, rpsblast_local.cpp:165).
+            if rps_multi_volume {
+                messages.clear();
+            }
             let mut lines = reports
                 .reader_warnings
                 .get(q_idx)
@@ -13229,6 +13421,91 @@ fn run_resolved_in_pool(
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
+                if rps_streamed_rows {
+                    // The shown subjects are those of the final lists (the rows' subjects).
+                    let shown: std::collections::BTreeSet<usize> = hit_lists
+                        .iter()
+                        .flatten()
+                        .flat_map(|hit_list| {
+                            hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
+                        })
+                        .flat_map(|hsp_list| &hsp_list.hsps)
+                        .map(|hsp| hsp.s_idx as usize)
+                        .collect();
+                    match listed_titles.as_ref() {
+                        Some(titles) => titles.check_shown_titles(
+                            database.expect("listed titles are a database's"),
+                            &shown,
+                        )?,
+                        None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
+                    }
+                    let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
+                    let estimates: Vec<usize> = (0..pairwise_queries.len())
+                        .map(|q_idx| {
+                            crate::report::x_pairwise_par::query_estimate_of(
+                                hit_lists
+                                    .get(q_idx)
+                                    .and_then(Option::as_ref)
+                                    .into_iter()
+                                    .flat_map(|hit_list| {
+                                        hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
+                                    })
+                                    .flat_map(|hsp_list| &hsp_list.hsps)
+                                    .map(|hsp| hsp.length),
+                            )
+                        })
+                        .collect();
+                    let mut windows = crate::report::x_pairwise_par::query_windows(
+                        &estimates,
+                        crate::report::x_pairwise_par::window_bytes(x_pool),
+                    );
+                    if windows.is_empty() {
+                        windows.push(0..0);
+                    }
+                    for window in windows {
+                        let end = window.end.min(hit_lists.len());
+                        let mut rows = build_pairwise_hits(
+                            collect_hits_and_methods_from_hit_lists(
+                                &hit_lists[window.start.min(end)..end],
+                            ),
+                            &contexts,
+                            subjects,
+                            args.scoring.matrix,
+                            true,
+                            query_records,
+                            shown_subjects,
+                            x_pool,
+                        )?;
+                        for hit in rows.iter_mut() {
+                            let s_idx = hit.hit.s_idx as usize;
+                            shift_to_records(&mut hit.hit, ranges);
+                            hit.subject_length = hit
+                                .subject_length
+                                .map(|searched| ranges.subject_placements.length(s_idx, searched));
+                        }
+                        let masked_rows =
+                            masked_query_rows(&rows, &query_frames, &ranges.query_input.placements);
+                        write_blastp_pairwise_window(
+                            masked_rows.as_deref().unwrap_or(&rows),
+                            window,
+                            &mut writer,
+                            &pairwise_config,
+                            &pairwise_queries,
+                            &query_titles,
+                            &subject_titles,
+                            listed_parsed,
+                            &pairwise_report,
+                            rps_gapped_k.as_deref(),
+                            pairwise_database.as_ref(),
+                            None,
+                            warnings.as_mut(),
+                            reports.x_prolog,
+                            reports.epilog,
+                            x_pool,
+                        )?;
+                    }
+                    return Ok(());
+                }
                 let pairwise_hits = pairwise_hits
                     .as_ref()
                     .expect("pairwise hits prepared for blastp outfmt 0");
@@ -15802,6 +16079,7 @@ mod tests {
                 &whole_batches,
                 &lengths,
                 block_letters,
+                None,
             )
             .unwrap();
             assert!(blocks.len() > 2, "blocks of {block_letters}: {blocks:?}");
@@ -15852,7 +16130,7 @@ mod tests {
         ));
         // A threshold below every score: each offset can add all 15^5 compressed words, more
         // than the banks take for a batch of 4,500 letters, so the bound does not clear it
-        // (`x_block_words_fit`, on one thread and on three; with batches of one query each, the
+        // (`x_word_blocks`, on one thread and on three; with batches of one query each, the
         // queries of 1,500 and 2,000 letters fail and the one of 1,000 passes).
         let mut low = resolved.clone();
         low.threshold = -1000.0;
@@ -15860,24 +16138,47 @@ mod tests {
         // The default lookup table has no overflow banks.
         low_aa.lookup_table_type = BlastpLookupTableType::AaLookupTable;
         let input = seq_range::QueryInput::whole(&records);
+        let letter_blocks = [0..3];
         for threads in [1, 3] {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 for batch_size in [10000, 1] {
-                    assert!(x_block_words_fit(
-                        &resolved, &records, &input, batch_size, pool
-                    ));
-                    assert!(!x_block_words_fit(&low, &records, &input, batch_size, pool));
-                    assert!(x_block_words_fit(
-                        &low_aa, &records, &input, batch_size, pool
-                    ));
+                    assert!(x_word_blocks(
+                        &resolved,
+                        &records,
+                        &input,
+                        batch_size,
+                        &letter_blocks,
+                        pool
+                    )
+                    .is_some());
+                    assert!(x_word_blocks(
+                        &low,
+                        &records,
+                        &input,
+                        batch_size,
+                        &letter_blocks,
+                        pool
+                    )
+                    .is_none());
+                    assert!(x_word_blocks(
+                        &low_aa,
+                        &records,
+                        &input,
+                        batch_size,
+                        &letter_blocks,
+                        pool
+                    )
+                    .is_some());
                 }
-                assert!(x_block_words_fit(
+                assert!(x_word_blocks(
                     &low,
                     &records[2..],
                     &seq_range::QueryInput::whole(&records[2..]),
                     1,
+                    &[0..1],
                     pool
-                ));
+                )
+                .is_some());
                 Ok(())
             })
             .expect("pool");
@@ -15896,5 +16197,85 @@ mod tests {
         assert!(!x_block_search_refuses_nothing(
             &wide, &records, &batches, &lengths
         ));
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): with the compressed lookup table the blocks also close on
+    // their words (`x_word_blocks`): at blastp-fast's threshold a block of whole batches keeps the
+    // blocks of the letters; with a lowered one, a block holds at most four words per backbone cell
+    // plus the words of the batch with the most (or one batch), on one thread and on three. The
+    // standard table keeps the blocks it is given.
+    #[test]
+    fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
+        use crate::algorithm::tblastx::lookup::compressed::CompressedWordCount;
+        let lengths = [900usize, 1200, 700, 1100, 800, 1000];
+        let records = x_block_test_records(&lengths);
+        let input = seq_range::QueryInput::whole(&records);
+        let mut args = make_blastp_args();
+        args.task = "blastp-fast".to_string();
+        let resolved = args.resolve().expect("resolved blastp-fast args");
+        // Batches of one query each; the blocks of 50,000 letters (`x_bp_qblock`'s default, the
+        // variable is not set in tests) are one block of all six.
+        let batch_size = 1;
+        let whole = [0..6];
+        let mut low = resolved.clone();
+        low.threshold = 11.0;
+        let mut low_aa = low.clone();
+        low_aa.lookup_table_type = BlastpLookupTableType::AaLookupTable;
+        let counter = CompressedWordCount::new(5, 1100).expect("word size 5");
+        let words: Vec<u64> = records
+            .iter()
+            .map(|record| {
+                let encoded = encode_protein_sequence(record.seq());
+                counter
+                    .batch_words(&mut std::iter::once(
+                        &encoded.aa_seq[1..encoded.aa_seq.len() - 1],
+                    ))
+                    .expect("within the banks")
+            })
+            .collect();
+        let most = 4 * 15u64.pow(5) + words.iter().copied().max().expect("words");
+        for threads in [1, 3] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                assert_eq!(
+                    x_word_blocks(&resolved, &records, &input, batch_size, &whole, pool)
+                        .map(|(blocks, _)| blocks),
+                    Some(whole.to_vec())
+                );
+                let (blocks, block_words) =
+                    x_word_blocks(&low, &records, &input, batch_size, &whole, pool)
+                        .expect("blocks");
+                // Each block's words are its batches' (one batch per query here).
+                assert_eq!(
+                    block_words,
+                    blocks
+                        .iter()
+                        .map(|block| words[block.clone()].iter().sum::<u64>())
+                        .collect::<Vec<_>>()
+                );
+                assert!(blocks.len() > 1, "{blocks:?}");
+                assert_eq!(blocks.first().map(|block| block.start), Some(0));
+                assert_eq!(blocks.last().map(|block| block.end), Some(6));
+                for (block, next) in blocks.iter().zip(&blocks[1..]) {
+                    assert_eq!(block.end, next.start);
+                    // Closed before the next batch: the block and that batch pass the most.
+                    let block_words: u64 = words[block.clone()].iter().sum();
+                    assert!(block_words + words[next.start] > most, "{blocks:?}");
+                }
+                // No block holds more than the most (a batch holds at most the largest batch's
+                // words, which the most includes).
+                for block in &blocks {
+                    assert!(
+                        words[block.clone()].iter().sum::<u64>() <= most,
+                        "{blocks:?}"
+                    );
+                }
+                assert_eq!(
+                    x_word_blocks(&low_aa, &records, &input, batch_size, &whole, pool),
+                    Some((whole.to_vec(), Vec::new()))
+                );
+                Ok(())
+            })
+            .expect("pool");
+        }
     }
 }

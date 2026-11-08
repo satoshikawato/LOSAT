@@ -211,8 +211,11 @@ same request.
 - `blastn`: `-task` other than `megablast` or `blastn` fails with
   `unsupported blastn task for web API: <task>` (`:360`). The default task is
   `megablast`. `-word_size 28` is read as no word size, so `-task blastn -word_size 28`
-  has the blastn default of 11 (`v1_blastn_word_size`, `:370`). The `E`-value default is
-  10. The strands are both.
+  has the blastn default of 11 (`v1_blastn_word_size`, `:370`). A `-word_size` below 4
+  fails with NCBI's error of the options (`Word-size must be greater than zero` for 0,
+  `Word-size must be 4 or greater for nucleotide comparison` for 1 to 3,
+  `check_scoring_options`; before 2026-11-08 it ran, with other hits). The `E`-value default
+  is 10. The strands are both.
 - `blastp`: the default task is `blastp` and `-comp_based_stats` is `2`.
 - The other options of each program take the defaults of the args structure in the
   parser. Ranges (`-query_loc`, `-subject_loc`), masking, and database options are not
@@ -224,7 +227,8 @@ same request.
   `.ncbirc`, `tblastn.ini` or `NCBI_CONFIG__*` variables: the CLI's run without them);
   the other environment variables that the CLI reads (`BATCH_SIZE`, `OLD_FSC`,
   `BLASTDB` for `taxdb.bti`, LOSAT's switches) are read from the module's environment
-  as the CLI reads them. A run that succeeds returns what the CLI writes to standard
+  as the CLI reads them; LOSAT Web, which calls ABI v2, gives the module an empty
+  environment (`web/app/src/infra/reactor/wasi.ts`), and a host of v1 gives its own. A run that succeeds returns what the CLI writes to standard
   output. A run that fails returns only the error, which is what the CLI writes to
   standard error for its parser's errors (`cli::render_message`) and NCBI's
   (`BLAST query/options error: ...`, `BLAST engine error: ...`); for LOSAT's own errors

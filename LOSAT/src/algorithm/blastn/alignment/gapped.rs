@@ -159,8 +159,8 @@ pub struct GapAlignScratch {
     trace_offsets: Vec<usize>,
     trace_rows_used: usize,
     // No NCBI counterpart: empty vectors that the SIMD kernel's traceback fills with one
-    // direction's operations (`x_ops_vec`). `extend_gapped_heuristic_with_traceback` copies the two
-    // directions into the HSP's own list and gives them back here. Reuse only.
+    // direction's operations (`x_ops_vec`). `extend_gapped_heuristic_with_traceback_with_scratch`
+    // copies the two directions into the HSP's own list and gives them back here. Reuse only.
     x_spare_ops: Vec<Vec<GapEditOp>>,
 }
 
@@ -1107,9 +1107,9 @@ pub fn extend_gapped_heuristic_with_scratch(
 /// - Row i corresponds to query position i
 /// - Band index k represents diagonal offset: j = i + (k - W) where W is half-bandwidth
 /// - Three matrices track different alignment states:
-///   - M[i,j]: best score ending with a match/mismatch at (i,j)
-///   - Ix[i,j]: best score ending with a gap in subject (deletion from query)
-///   - Iy[i,j]: best score ending with a gap in query (insertion in query)
+///   - `M[i,j]`: best score ending with a match/mismatch at (i,j)
+///   - `Ix[i,j]`: best score ending with a gap in subject (deletion from query)
+///   - `Iy[i,j]`: best score ending with a gap in query (insertion in query)
 ///
 /// Returns: (q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters)
 /// Extend alignment in one direction using NCBI-style semi-gapped DP with affine gap penalties.
@@ -2171,54 +2171,6 @@ pub(crate) fn stats_from_edit_ops(
     (matches, mismatches, gap_opens, gap_letters)
 }
 
-/// Extend alignment in one direction with TRACEBACK capture.
-///
-/// This is a faithful transpilation of NCBI BLAST's ALIGN_EX function.
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:364-733
-///
-/// Unlike the score-only version, this function:
-/// 1. Stores edit_script for each DP cell (1 byte per cell)
-/// 2. After DP, reconstructs the traceback path from best position to origin
-/// 3. Returns the edit script as a Vec<GapEditOp> with run-length encoding
-///
-/// Returns: (q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters, edit_ops)
-pub fn extend_gapped_one_direction_with_traceback(
-    q_seq: &[u8],
-    s_seq: &[u8],
-    reward: i32,
-    penalty: i32,
-    score_matrix: &BlastnaMatrix,
-    gap_open: i32,
-    gap_extend: i32,
-    x_drop: i32,
-) -> (
-    usize,
-    usize,
-    i32,
-    usize,
-    usize,
-    usize,
-    usize,
-    Vec<GapEditOp>,
-) {
-    // NCBI reference: blast_gapalign.c:364-733 ALIGN_EX function
-    // This is the traceback-capturing version (score_only = FALSE case)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
-    let mut gap_scratch = GapAlignScratch::new();
-    extend_gapped_one_direction_with_traceback_with_scratch(
-        q_seq,
-        s_seq,
-        reward,
-        penalty,
-        score_matrix,
-        gap_open,
-        gap_extend,
-        x_drop,
-        &mut gap_scratch,
-    )
-}
-
 fn extend_gapped_one_direction_with_traceback_with_scratch(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -2911,51 +2863,6 @@ fn extend_gapped_one_direction_with_traceback_scalar(
     )
 }
 
-/// Extended version of traceback-capturing extension that supports reverse access.
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:364-733 (ALIGN_EX)
-///
-/// When `reverse` is true, sequences are accessed from the end (for left extension).
-pub fn extend_gapped_one_direction_with_traceback_ex(
-    q_seq: &[u8],
-    s_seq: &[u8],
-    len1: usize,
-    len2: usize,
-    reward: i32,
-    penalty: i32,
-    score_matrix: &BlastnaMatrix,
-    gap_open: i32,
-    gap_extend: i32,
-    x_drop: i32,
-    reverse: bool,
-) -> (
-    usize,
-    usize,
-    i32,
-    usize,
-    usize,
-    usize,
-    usize,
-    Vec<GapEditOp>,
-) {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
-    let mut gap_scratch = GapAlignScratch::new();
-    extend_gapped_one_direction_with_traceback_ex_with_scratch(
-        q_seq,
-        s_seq,
-        len1,
-        len2,
-        reward,
-        penalty,
-        score_matrix,
-        gap_open,
-        gap_extend,
-        x_drop,
-        reverse,
-        &mut gap_scratch,
-    )
-}
-
 fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -3555,56 +3462,6 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     )
 }
 
-/// Bidirectional gapped extension with traceback capture.
-/// Extends from a seed position in both directions.
-///
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2778-2831
-/// BLAST_GappedAlignmentWithTraceback
-///
-/// Returns: (qs, qe, ss, se, score, matches, mismatches, gaps, gap_letters, edit_ops)
-pub fn extend_gapped_heuristic_with_traceback(
-    q_seq: &[u8],
-    s_seq: &[u8],
-    qs: usize,
-    ss: usize,
-    len: usize,
-    reward: i32,
-    penalty: i32,
-    score_matrix: &BlastnaMatrix,
-    gap_open: i32,
-    gap_extend: i32,
-    x_drop: i32,
-) -> (
-    usize,
-    usize,
-    usize,
-    usize,
-    i32,
-    usize,
-    usize,
-    usize,
-    usize,
-    Vec<GapEditOp>,
-) {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:313-319 (BLAST_GapAlignStructNew)
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
-    let mut gap_scratch = GapAlignScratch::new();
-    extend_gapped_heuristic_with_traceback_with_scratch(
-        q_seq,
-        s_seq,
-        qs,
-        ss,
-        len,
-        reward,
-        penalty,
-        score_matrix,
-        gap_open,
-        gap_extend,
-        x_drop,
-        &mut gap_scratch,
-    )
-}
-
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct reuse)
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4609-4647
 // ```c
@@ -3636,7 +3493,7 @@ fn debug_coords_traceback_enabled(qs: usize, ss: usize) -> bool {
         && s_filter.trim().parse::<usize>().ok() == Some(ss)
 }
 
-pub fn extend_gapped_heuristic_with_traceback_with_scratch(
+pub(crate) fn extend_gapped_heuristic_with_traceback_with_scratch(
     q_seq: &[u8],
     s_seq: &[u8],
     qs: usize,

@@ -48,7 +48,8 @@ line), writes the same lines to --out, and exits 0 only when every row is `same`
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
 failure's exit status counts as any other failure's, a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
-before it searches, so the reports of the batches before the error do not exist), and the rows that
+before it searches, so the reports of the batches before the error do not exist; so is a rejection
+row whose query has a reader error after the batch that the command line refuses), and the rows that
 write PSSM files (the PSSM kinds) or pass a PSSM file option are `library-skip`: the library API
 writes no PSSM file and refuses those options (`LIBRARY_REFUSED`); so are psiblast's rounds (`-num_iterations`
 other than 1), whose results the library API does not have (`library_refused_rounds`).
@@ -392,6 +393,12 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     else:
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
+        # The library reads the whole query before it searches: a reader error ends the call before
+        # the batch that the command line refuses (an outfmt 11 title the archive cannot write, in a
+        # batch before the reader error), with the reader's message.
+        if library and run.returncode != 0 and run.stdout == b"" and run.stderr.startswith(b"BLAST query error:") \
+                and expected_text(row).encode() not in run.stderr:
+            return "library-input-error", ""
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")

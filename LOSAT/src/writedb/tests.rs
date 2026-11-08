@@ -1014,7 +1014,8 @@ fn an_existing_directory_without_write_permission_stops_the_build_before_the_log
     let ro = tmp.0.join("ro");
     std::fs::create_dir(&ro).unwrap();
     std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
-    // The superuser passes every access test (euidaccess too): nothing to test then.
+    // A process that can create a file in a 0555 directory (root, CAP_DAC_OVERRIDE) has
+    // nothing to test here.
     if std::fs::File::create(ro.join("probe")).is_ok() {
         std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
         return;

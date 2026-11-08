@@ -107,7 +107,7 @@ ruzstd = "0.9"
 # alignment through `mmap` and `mprotect` on Linux, which needs neither /proc nor
 # the C library), and the read-only mappings of the RPS-BLAST profile files
 # (`utils::mapped_file`, as NCBI's `CMemoryFile`), and `fs` for the write-permission
-# test of makeblastdb's output directory (`faccessat`, NCBI's `euidaccess`,
+# test of makeblastdb's output directory (`access`, which NCBI's `euidaccess` calls,
 # `writedb::build_db::check_access_write`). No BLAST behavior, foreign algorithm, NCBI runtime/build
 # dependency or libc-auxv feature (the pure-Rust runtime boundary,
 # tests/check_pure_rust_runtime_boundary.py, allows no direct libc call).

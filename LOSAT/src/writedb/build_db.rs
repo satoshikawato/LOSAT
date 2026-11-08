@@ -413,23 +413,6 @@ fn create_path(dir: &str) -> bool {
 //         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1735-1748
-// ```c++
-//     const char* path = GetPath().c_str();
-//     int         mode = F_OK;
-//
-//     if ( access_mode & fRead)    mode |= R_OK;
-//     if ( access_mode & fWrite)   mode |= W_OK;
-//     if ( access_mode & fExecute) mode |= X_OK;
-//
-//     // Use euidaccess() where possible
-// #  if defined(HAVE_EUIDACCESS)
-//     if (euidaccess(path, mode) != 0) {
-//         CNcbiError::SetFromErrno(path);
-//         return false;
-//     }
-//     return true;
-// ```
 // The directory is the part of `dbname` up to its last separator, after the
 // trailing separators of `dbname` are dropped: `-out sub/` names the
 // database `sub` of the current directory and makes no directory.
@@ -442,13 +425,14 @@ fn create_path(dir: &str) -> bool {
 // directory "is created" (it exists), `nodir/..` does not resolve, and
 // makeblastdb stops with the write-permission message.
 //
-// On Unix LOSAT asks the question of `euidaccess(path, W_OK)` (`check_access_write`):
-// a path that does not resolve and a directory that exists and cannot be written to
-// both stop it here, before the log. On Windows NCBI reads the effective rights of the
-// directory's ACL (`CWinSecurity::GetFilePermissions`), which LOSAT does not: it stops
-// here only for a path that does not resolve, and for a directory it cannot write to
-// it goes on, writes the log header and fails when it creates the first file of the
-// first volume, with the system's message for that file and the same exit status 255.
+// On Unix LOSAT asks the question of `euidaccess(path, W_OK)` (`check_access_write`): a
+// path that does not resolve and a directory that exists and cannot be written to (by
+// its mode, an ACL, a read-only file system) both stop it here, before the log. On
+// Windows NCBI reads the effective rights of the directory's ACL
+// (`CWinSecurity::GetFilePermissions`), which LOSAT does not: it stops here only for a
+// path that does not resolve, and for a directory it cannot write to it goes on, writes
+// the log header and fails when it creates the first file of the first volume, with the
+// system's message for that file and the same exit status 255.
 /// `CBuildDatabase::CreateDirectories`.
 fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
@@ -470,20 +454,31 @@ fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1735-1748
+// ```c++
+//     const char* path = GetPath().c_str();
+//     int         mode = F_OK;
+//
+//     if ( access_mode & fRead)    mode |= R_OK;
+//     if ( access_mode & fWrite)   mode |= W_OK;
+//     if ( access_mode & fExecute) mode |= X_OK;
+//
+//     // Use euidaccess() where possible
+// #  if defined(HAVE_EUIDACCESS)
+//     if (euidaccess(path, mode) != 0) {
+//         CNcbiError::SetFromErrno(path);
+//         return false;
+//     }
+//     return true;
+// ```
 /// `CDirEntry::CheckAccess(fWrite)` of the path as it was given: `euidaccess(path,
-/// F_OK | W_OK)`, which `faccessat(AT_FDCWD, path, W_OK, AT_EACCESS)` asks with the
-/// effective user and group ids, as euidaccess does. Linux before 5.8 has no `faccessat2`;
-/// there rustix answers `ENOSYS` for a set-user-ID or set-group-ID process, and LOSAT then
-/// tests only that the path resolves (as on Windows) rather than refuse a directory it may
-/// write to.
+/// F_OK | W_OK)`. glibc's `euidaccess` calls `access(path, mode)` when the process's real
+/// and effective user and group ids are equal, and LOSAT makes that call (`F_OK` is 0).
+/// For a set-user-ID or set-group-ID process glibc compares the mode bits with the
+/// effective ids instead; `access` asks with the real ids there.
 #[cfg(unix)]
 fn check_access_write(path: &str) -> bool {
-    use rustix::fs::{accessat, Access, AtFlags, CWD};
-    match accessat(CWD, path, Access::WRITE_OK, AtFlags::EACCESS) {
-        Ok(()) => true,
-        Err(rustix::io::Errno::NOSYS) => std::fs::metadata(path).is_ok(),
-        Err(_) => false,
-    }
+    rustix::fs::access(path, rustix::fs::Access::WRITE_OK).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1722-1732

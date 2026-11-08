@@ -3981,7 +3981,7 @@ pub fn write_pairwise<W: Write>(
     let writer = &mut buffered;
 
     // Write program header
-    let version = context.version.as_deref().unwrap_or("0.1.0");
+    let version = crate::NCBI_BLAST_VERSION;
     writeln!(writer, "{} {}", context.program.to_uppercase(), version)?;
     writeln!(writer)?;
 
@@ -4573,7 +4573,6 @@ mod tests {
             database_name: Some("test_db".to_string()),
             database_num_sequences: Some(1),
             database_total_letters: Some(100),
-            version: Some("0.1.0".to_string()),
         };
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c

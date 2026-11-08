@@ -2621,7 +2621,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     batch_skipped: bool,
     iteration: Option<u32>,
 ) -> std::io::Result<()> {
-    let version_str = context.version.as_deref().unwrap_or("0.1.0");
+    let version_str = crate::NCBI_BLAST_VERSION;
     writeln!(
         writer,
         "# {} {}",
@@ -12337,7 +12337,6 @@ fn run_resolved_in_pool(
         database_num_sequences: Some(shown_num_sequences),
         database_total_letters: Some(shown_total_letters),
         program: args.app.ncbi_name().to_string(),
-        version: Some(crate::NCBI_BLAST_VERSION.to_string()),
     };
 
     // The requested output formats; only the reporting depends on the format, the search above

@@ -258,7 +258,8 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
         return Ok(());
     }
     let columns = usize::try_from(pssm.num_columns).unwrap_or(0);
-    let cells = columns * usize::try_from(pssm.num_rows).unwrap_or(0);
+    let rows_n = usize::try_from(pssm.num_rows).unwrap_or(0);
+    let cells = columns * rows_n;
     let weighted = data.weighted_res_freqs_per_pos.as_deref().unwrap_or(&[]);
     let matching = data.num_matching_seqs.as_deref().unwrap_or(&[]);
     let gapless = data.gapless_column_weights.as_deref().unwrap_or(&[]);
@@ -266,10 +267,48 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
     let gapless_short = (gapless.len()..columns.min(matching.len())).any(|i| {
         matching[i] > 1 && letters.get(i).copied() != Some(crate::utils::matrix::ncbistdaa::X)
     });
-    if weighted.len() != cells || info.len() < columns || matching.len() < columns || gapless_short
-    {
+    // `Convert2Matrix` reads the first numRows × numColumns values (a longer list's others are
+    // never read; `_ASSERT` only): fewer is a read past the list.
+    if weighted.len() < cells || info.len() < columns || matching.len() < columns || gapless_short {
         bail!(
             "an ASCII PSSM (-out_ascii_pssm) of a PSSM file whose informationContent comes without weightedResFreqsPerPos, informationContent, numMatchingSeqs or gaplessColumnWeights for every column (NCBI BLAST+ reads past them) is not supported by LOSAT's PSIBLAST"
+        );
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:274-282
+    // ```c++
+    //             for (SIZE_TYPE c = 0; c < DIM(RESIDUE_ORDER); c++) {
+    //                 if ((*pssm)(RESIDUE_ORDER[c], i) != BLAST_SCORE_MIN) {
+    //                     double value = 100;
+    //                     value *= (*weighted_res_freqs)(RESIDUE_ORDER[c], i);
+    //                     // round to the nearest integer
+    //                     value = (int)(value + (value > 0. ? 0.5 : -0.5));
+    //                     out << setw(4) << (int)value;
+    // ```
+    // A weighted frequency whose rounded percentage is not an `int` (or is NaN) is undefined
+    // behaviour in that conversion (x86-64 prints -2147483648): LOSAT's refusal, for the cells
+    // NCBI prints (the engine's frequencies lie in [0, 1]; only a file reaches this).
+    let by_row = pssm.by_row == Some(true);
+    let scores = super::in_pssm::convert_2_matrix(
+        pssm.final_data
+            .as_ref()
+            .map_or(&[][..], |data| data.scores.as_slice()),
+        rows_n,
+        columns,
+        by_row,
+        BLAST_SCORE_MIN,
+    );
+    let weighted = super::in_pssm::convert_2_matrix(weighted, rows_n, columns, by_row, 0.0);
+    let outside_int = scores.iter().zip(&weighted).any(|(scores, weighted)| {
+        super::pssm::RESIDUE_ORDER.iter().any(|&r| {
+            let value = 100.0 * weighted[r];
+            let rounded = value + if value > 0.0 { 0.5 } else { -0.5 };
+            scores[r] != BLAST_SCORE_MIN
+                && !(rounded > -2_147_483_649.0 && rounded < 2_147_483_648.0)
+        })
+    });
+    if outside_int {
+        bail!(
+            "an ASCII PSSM (-out_ascii_pssm) of a PSSM file with a weighted residue frequency whose percentage is not an int or is NaN (NCBI BLAST+'s conversion is undefined behaviour) is not supported by LOSAT's PSIBLAST"
         );
     }
     Ok(())
@@ -278,7 +317,7 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
 /// The query's letters as NCBIstdaa codes (`CPssm::GetQuerySequenceData`, which converts an
 /// IUPACaa or NCBIeaa `Seq-data`; `in_pssm` admits only letters of NCBIstdaa).
 fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
-    const LETTERS: &[u8; BLASTAA_SIZE] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+    const LETTERS: &[u8; BLASTAA_SIZE] = super::pssm::NCBISTDAA_TO_AMINOACID;
     match object
         .pssm
         .query
@@ -353,16 +392,16 @@ impl InPssmRounds {
         let (Some(object), Some(_)) = (self.object.as_ref(), request.asn_path.as_ref()) else {
             return Ok(None);
         };
-        let mut object = object.clone();
-        if let Some(data) = object.pssm.final_data.as_mut() {
-            data.lambda = gapped.lambda;
-            data.kappa = gapped.k;
-            data.h = gapped.h;
-            data.lambda_ungapped = Some(ungapped.lambda);
-            data.kappa_ungapped = Some(ungapped.k);
-            data.h_ungapped = Some(ungapped.h);
-        }
-        crate::report::serial::pssm::asn_text(&object)
+        // The six values are written in place of the object's (no copy of the object).
+        let karlin = crate::report::serial::pssm::FinalKarlin {
+            lambda: gapped.lambda,
+            kappa: gapped.k,
+            h: gapped.h,
+            lambda_ungapped: ungapped.lambda,
+            kappa_ungapped: ungapped.k,
+            h_ungapped: ungapped.h,
+        };
+        crate::report::serial::pssm::asn_text_with_karlin(object, Some(karlin))
             .map(Some)
             .map_err(|error| anyhow::anyhow!("{error}"))
     }
@@ -619,6 +658,43 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("informationContent"), "{error}");
+    }
+
+    // The review of PS5b, N1 and S1: a longer `weightedResFreqsPerPos` is read as NCBI's
+    // `Convert2Matrix` reads it (its first cells); a printed weighted frequency whose rounded
+    // percentage is not an `int`, or is NaN, is refused (NCBI's conversion is undefined behaviour).
+    #[test]
+    fn the_long_ascii_form_reads_the_first_cells_and_refuses_weights_outside_int() {
+        let long = |weighted: Vec<f64>| {
+            let mut object = pssm(ObjectId::Id(1), 1, 28);
+            let mut row = [-1; BLASTAA_SIZE];
+            row[0] = BLAST_SCORE_MIN;
+            with_computed_scores(&mut object, &[row], GAPPED);
+            let data = object.pssm.intermediate_data.as_mut().unwrap();
+            data.information_content = Some(vec![0.5]);
+            data.num_matching_seqs = Some(vec![1]);
+            data.gapless_column_weights = Some(vec![0.0]);
+            data.weighted_res_freqs_per_pos = Some(weighted);
+            check_long_ascii(&object)
+        };
+        let mut weighted = vec![0.25; 28];
+        long(weighted.clone()).unwrap();
+        weighted.extend([7.0, 8.0]);
+        long(weighted.clone()).unwrap();
+        long(vec![0.25; 27]).unwrap_err();
+        // Row 0 (`-`) is not printed: its value is not read.
+        let mut unprinted = vec![0.25; 28];
+        unprinted[0] = f64::NAN;
+        long(unprinted).unwrap();
+        for value in [1e8, -1e8, f64::NAN, f64::INFINITY] {
+            let mut weighted = vec![0.25; 28];
+            weighted[1] = value;
+            let error = long(weighted).unwrap_err().to_string();
+            assert!(error.contains("not an int or is NaN"), "{value}: {error}");
+        }
+        let mut edge = vec![0.25; 28];
+        edge[1] = 21_474_836.47;
+        long(edge).unwrap();
     }
 
     // psiblast_impl.cpp:150-168 (quoted at `written_back`): the six values of `finalData`.

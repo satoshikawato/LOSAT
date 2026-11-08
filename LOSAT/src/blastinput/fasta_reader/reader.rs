@@ -717,11 +717,10 @@ impl<R: Read> FastaReader<R> {
     /// reads from the next line (oracle BI net2, net5).
     pub(crate) fn read_one_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
         if self.config.data_loaders {
-            let line = trim_input_space(self.lines.next_line()).to_vec();
-            if !line.is_empty() && line[0].is_ascii_alphanumeric() {
-                if let Some(rejection) = super::seq_id::reject_seq_id_line(&line, &self.config) {
-                    return Err(ReadError::Unsupported(rejection));
-                }
+            let (program, role) = (self.config.program, self.config.role);
+            let line = self.lines.next_line();
+            if let Some(rejection) = super::seq_id::reject_seq_id_line(line, program, role) {
+                return Err(ReadError::Unsupported(rejection));
             }
             self.lines.unget_line();
         }

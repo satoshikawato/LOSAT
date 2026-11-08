@@ -498,9 +498,19 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists name it
 // by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple alignment
 // keeps its rows by subject (`pssm::input_msa`): two Seq-aligns of one id there are copies of one
-// record that the engine purges (line DBID admits shared ids for such copies only).
+// record (line DBID admits shared ids for such copies only), which NCBI's PSSM puts in one row
+// (review 2 of line DBID weakbatch, H1; line DBID's next item).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509 (quoted at
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
+/// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,
+/// below `-inclusion_ethresh`, `x_ExtractAlignmentData`): the round's inclusion set and the
+/// subjects whose letters the PSSM reads (`ListedTitles::check_pssm_subjects`).
+pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
+    const BLAST_EXPECT_VALUE: f64 = 10.0;
+    crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
+        < inclusion_ethresh
+}
+
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -515,7 +525,6 @@ pub(super) fn round_outcome(
     listed_ordinals: Option<&[u32]>,
     parsed: &[Option<Arc<ParsedSubject>>],
 ) -> Option<Vec<bool>> {
-    const BLAST_EXPECT_VALUE: f64 = 10.0;
     let key = |s_idx: u32| -> SetKey {
         match listed_ordinals {
             None => SetKey::Index(s_idx),
@@ -541,14 +550,9 @@ pub(super) fn round_outcome(
         })
         .unwrap_or_default();
     let has_alignments = !hsps.is_empty();
-    let lowest_evalue = |e_value: f64| e_value.min(BLAST_EXPECT_VALUE);
     let set: InclusionSet = hsps
         .iter()
-        .filter(|hsp| {
-            lowest_evalue(crate::report::serial::seqalign::seqalign_evalue(
-                hsp.e_value,
-            )) < args.inclusion_ethresh
-        })
+        .filter(|hsp| included(hsp.e_value, args.inclusion_ethresh))
         .map(|hsp| key(hsp.s_idx))
         .collect();
     let previous = io.state.previously_found();

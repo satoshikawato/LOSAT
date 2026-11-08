@@ -2084,6 +2084,7 @@ fn parsed_shown(
                 number => number,
             },
         )) && !crate::algorithm::common::database::prefetch_always_off(),
+        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
     }
 }
 

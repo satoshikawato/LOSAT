@@ -3872,6 +3872,7 @@ impl BatchReports<'_> {
                         .first()
                         .is_some_and(|format| format.prefetches_subjects())
                         && !crate::algorithm::common::database::prefetch_always_off(),
+                    one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
                 };
                 // Whether each query's batch prefetches (`done.spans`, in the numbering of
                 // `hits`), for the subjects that only the prefetch reads.

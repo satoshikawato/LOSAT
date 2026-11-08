@@ -203,12 +203,13 @@ export const PROTEIN_GAP_COSTS: PairSelect = {
   labels: gapCostsLabel,
 };
 const PROTEIN_SCORING: Pick<ParameterSection, 'pairs'> = { pairs: { 'Gap Costs': PROTEIN_GAP_COSTS } };
-// LOSAT's BLASTP scores with NCBI's matrices and the gap costs of their lists (IDENTITY, which
-// NCBI's page does not list, is refused); LOSAT's BLASTX with BLOSUM62 and gap costs 11/1 only;
-// both adjust with modes 0 and 2: their lists keep these of NCBI's values ("Other" still takes any
-// matrix and costs, which the engine refuses with its message; Compositional adjustments has no
-// "Other"). A series that makes the engine read more widens them (the engine's e2e of the selects
-// fails until then).
+// LOSAT's BLASTP scores with NCBI's matrices and the gap costs of their lists (and with IDENTITY,
+// which NCBI's page does not list: "Other"), and keeps NCBI's four modes, as TBLASTN: its engine
+// reads modes 1 and 3 with -matrix IDENTITY (resetting them to 0). LOSAT's BLASTX scores with
+// BLOSUM62 and gap costs 11/1 only and adjusts with modes 0 and 2: its lists keep these of NCBI's
+// values ("Other" still takes any matrix and costs, which the engine refuses with its message;
+// Compositional adjustments has no "Other"). A series that makes the engine read more widens them
+// (the engine's e2e of the selects fails until then).
 const BLOSUM62_ONLY: Pick<ParameterSection, 'pairs'> = {
   pairs: { 'Gap Costs': { id: 'gapcosts', separator: ' ', lists: { '': ['11 1'] }, labels: gapCostsLabel } },
 };
@@ -372,7 +373,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'Scoring Parameters',
         placement: 'algorithm',
-        fields: [matrix, gapOpen, gapExtend, { ...compBasedStats, choices: ['0', '2'] }],
+        fields: [matrix, gapOpen, gapExtend, compBasedStats],
         ...PROTEIN_SCORING,
       },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },

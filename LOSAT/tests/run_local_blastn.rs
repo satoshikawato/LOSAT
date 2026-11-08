@@ -735,6 +735,174 @@ fn run_local_outputs(
     (sinks, diagnostics, result)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1326
+// ```c
+//     if (options->word_size <= 0)
+//     {
+//         if ( !Blast_ProgramIsRpsBlast(program_number)) {
+//             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+//                                      "Word-size must be greater than zero");
+//             return BLASTERR_OPTION_VALUE_INVALID;
+//         }
+//     } else if (/*program_number == eBlastTypeBlastn*/
+//                Blast_ProgramIsNucleotide(program_number) &&
+//                !Blast_QueryIsPattern(program_number) && options->word_size < 4)
+//     {
+//         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+//                   "Word-size must be 4 or greater for nucleotide comparison");
+// ```
+// The command line's `-word_size` is at least 4 (clap's `blastn_word_size`); a caller of
+// `run_local` that sets the field itself gets the error of NCBI's core (the task's lookup word
+// is longer, so the search would have wrapped `word - lut + 1` and reported other hits).
+#[test]
+fn a_word_size_below_four_is_ncbis_core_error() {
+    let inputs = Inputs::new();
+    for (task, word, message) in [
+        ("megablast", 0, "Word-size must be greater than zero"),
+        (
+            "blastn",
+            3,
+            "Word-size must be 4 or greater for nucleotide comparison",
+        ),
+        (
+            "blastn-short",
+            1,
+            "Word-size must be 4 or greater for nucleotide comparison",
+        ),
+    ] {
+        let queries = reader_records(
+            &inputs.query.0,
+            ReaderConfig::query("BLASTN", false, true).with_defline(true),
+        );
+        let subjects = reader_records(
+            &inputs.subject.0,
+            ReaderConfig::subject("BLASTN", false, true).with_defline(true),
+        );
+        let mut args = inputs.args(&["-task", task]);
+        args.word_size = Some(word);
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut sink),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            run_local_blastn(args, &queries, &subjects, &mut outputs)
+        };
+        assert_eq!(
+            native_error(result),
+            (
+                1,
+                format!("BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n")
+            ),
+            "-task {task} word size {word}"
+        );
+        assert!(sink.is_empty() && diagnostics.is_empty());
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1263-1269 and :1422-1427
+// (quoted at `check_scoring_options_with`); c++/src/algo/blast/api/blast_aux.cpp:662-673
+// (`ThrowIfInvalidTask`, quoted at `TaskParser::check`). Values that the command line cannot give
+// (a template length the parser refuses, `limit_lookup`, which has no spelling, a task the parser
+// refuses) get NCBI's errors, or LOSAT's for rmblastn, instead of a search.
+#[test]
+fn hand_set_template_lookup_and_task_are_refused() {
+    let inputs = Inputs::new();
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
+    );
+    let cases: [(&[&str], &str, fn(&mut BlastnArgs)); 6] = [
+        (
+            &["-task", "dc-megablast"],
+            "Invalid discontiguous template parameters: template length must be 16, 18, or 21",
+            |a| a.template_length = Some(17),
+        ),
+        // NCBI's options factory reads the task in lower case (blast_options_handle.cpp:341):
+        // DC-MEGABLAST is dc-megablast, whose template the next check refuses.
+        (
+            &["-task", "dc-megablast"],
+            "Invalid discontiguous template parameters: template length must be 16, 18, or 21",
+            |a| {
+                a.task = "DC-MEGABLAST".into();
+                a.template_length = Some(17)
+            },
+        ),
+        (
+            &["-task", "blastn"],
+            "The limit_lookup option can only be used with word size >= 16",
+            |a| a.limit_lookup = true,
+        ),
+        (&[], "'blastz' is not a supported task", |a| a.task = "BlastZ".into()),
+        (
+            &[],
+            "the task tblastn is not supported by LOSAT's BLASTN (use megablast, dc-megablast, blastn or blastn-short)",
+            |a| a.task = "tblastn".into(),
+        ),
+        (
+            &[],
+            "the task rmblastn is not supported by LOSAT's BLASTN",
+            |a| a.task = "rmblastn".into(),
+        ),
+    ];
+    for (extra, message, set) in cases {
+        let mut args = inputs.args(extra);
+        set(&mut args);
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut sink),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            run_local_blastn(args, &queries, &subjects, &mut outputs)
+        };
+        let error = format!("{:#}", result.expect_err(message));
+        assert!(error.contains(message), "{message}: {error}");
+        assert!(sink.is_empty() && diagnostics.is_empty(), "{message}");
+    }
+    // The database entry checks the task first too (before the database is opened).
+    let mut args = inputs.args(&[]);
+    args.db = Some("no_such_database".into());
+    args.task = "blastz".into();
+    let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+    let result = {
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt: "6",
+                sink: OutputSink::Writer(&mut sink),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        LOSAT::api::local_blast::run_local_database_blastn(
+            args,
+            &queries,
+            LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+            &mut outputs,
+        )
+    };
+    let error = format!("{:#}", result.expect_err("refused"));
+    assert!(
+        error.contains("'blastz' is not a supported task"),
+        "{error}"
+    );
+}
+
 /// The exit code and the message of NCBI's error that a run ended with.
 fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     let error = result.expect_err("the run fails");

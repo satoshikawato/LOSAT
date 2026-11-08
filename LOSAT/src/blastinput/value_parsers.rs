@@ -1298,15 +1298,126 @@ mod tests {
 /// names are NCBI tasks outside LOSAT's implementation.
 #[derive(Clone)]
 pub struct TaskParser {
+    program: &'static str,
     accepted: &'static [&'static str],
     rejected: &'static [(&'static str, &'static str)],
 }
 
-pub fn task_parser(
+/// The `-task` of `program` (its name in LOSAT's messages, `BLASTN`), `TaskParser`.
+pub const fn task_parser(
+    program: &'static str,
     accepted: &'static [&'static str],
     rejected: &'static [(&'static str, &'static str)],
 ) -> TaskParser {
-    TaskParser { accepted, rejected }
+    TaskParser {
+        program,
+        accepted,
+        rejected,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:211-255
+// ```c++
+// set<string>
+// CBlastOptionsFactory::GetTasks(ETaskSets choice /* = eAll */)
+// {
+//     set<string> retval;
+//     if (choice == eNuclNucl || choice == eAll) {
+//         retval.insert("blastn");
+//         retval.insert("blastn-short");
+//         retval.insert("megablast");
+//         retval.insert("dc-megablast");
+//         retval.insert("vecscreen");
+//         // -RMH-
+//         retval.insert("rmblastn");
+//     }
+// ...
+// ```
+/// The tasks of NCBI's options factory (`GetTasks(eAll)`).
+const NCBI_TASKS: &[&str] = &[
+    "blastn",
+    "blastn-short",
+    "megablast",
+    "dc-megablast",
+    "vecscreen",
+    "rmblastn",
+    "blastp",
+    "blastp-short",
+    "blastp-fast",
+    "psiblast",
+    "phiblastp",
+    "rpsblast",
+    "rpstblastn",
+    "blastx",
+    "blastx-fast",
+    "deltablast",
+    "tblastn",
+    "tblastn-fast",
+    "psitblastn",
+    "tblastx",
+    "kblastp",
+    "mapper",
+    "mapr2g",
+    "mapr2r",
+    "mapg2g",
+];
+
+impl TaskParser {
+    /// The check of a task that a caller of `run_local` set itself (the command line's parser
+    /// makes it at parsing), as NCBI's options factory makes it: the name in lower case (the
+    /// engine compares it exactly), then a task of `accepted`; the message of a `rejected` one;
+    /// LOSAT's refusal for another task of NCBI's factory (another program's, which NCBI's API
+    /// would set up); NCBI's error for a name NCBI does not know.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:336-342
+    /// ```c++
+    /// CBlastOptionsHandle*
+    /// CBlastOptionsFactory::CreateTask(string task, EAPILocality locality)
+    /// {
+    ///     CBlastOptionsHandle* retval = NULL;
+    ///
+    ///     string lc_task(NStr::ToLower(task));
+    ///     ThrowIfInvalidTask(lc_task);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:662-673
+    /// ```c++
+    /// void ThrowIfInvalidTask(const string& task)
+    /// {
+    ///     set<string> valid_tasks;
+    ///     if (valid_tasks.empty()) {
+    ///         valid_tasks = CBlastOptionsFactory::GetTasks();
+    ///     }
+    ///
+    ///     if (valid_tasks.find(task) == valid_tasks.end()) {
+    ///         ostringstream os;
+    ///         os << "'" << task << "' is not a supported task";
+    ///         NCBI_THROW(CBlastException, eInvalidArgument, os.str());
+    ///     }
+    /// }
+    /// ```
+    pub fn check(&self, task: &mut str) -> anyhow::Result<()> {
+        task.make_ascii_lowercase();
+        let task = &*task;
+        if self.accepted.contains(&task) {
+            return Ok(());
+        }
+        if let Some(&(_, message)) = self.rejected.iter().find(|(name, _)| *name == task) {
+            anyhow::bail!("{message}");
+        }
+        if NCBI_TASKS.contains(&task) {
+            let (last, rest) = self.accepted.split_last().expect("a program has a task");
+            let tasks = if rest.is_empty() {
+                last.to_string()
+            } else {
+                format!("{} or {last}", rest.join(", "))
+            };
+            anyhow::bail!(
+                "the task {task} is not supported by LOSAT's {} (use {tasks})",
+                self.program
+            );
+        }
+        anyhow::bail!("'{task}' is not a supported task")
+    }
 }
 
 impl clap::builder::TypedValueParser for TaskParser {

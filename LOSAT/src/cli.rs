@@ -351,7 +351,7 @@ where
         if arg.get_action().takes_values() {
             let value = match inline {
                 Some(value) if token.to_str().is_some() => OsString::from(value),
-                Some(_) => inline_value(&token, name),
+                Some(_) => inline_value(&token),
                 None => input.next().ok_or_else(|| {
                     clap::Error::raw(
                         ErrorKind::InvalidValue,
@@ -403,13 +403,17 @@ where
     }
 }
 
-/// The value of a word `-name=value` that is not UTF-8: its bytes after the `=` that
-/// follows `-name` (`try_parse_from`; `name` is an argument's ASCII name).
-fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
+/// The value of a word `-name=value` that is not UTF-8: its bytes after the first `=`
+/// (`try_parse_from`, which found the name before the first `=` of the word's lossy text; a
+/// replaced byte is never `=`, so the first `=` of the bytes is that one, whatever the name's
+/// letters are).
+fn inline_value(token: &std::ffi::OsStr) -> OsString {
     let bytes = token.as_encoded_bytes();
-    let start = 1 + name.len() + 1;
-    debug_assert_eq!(bytes.get(start - 1), Some(&b'='));
-    // SAFETY: `start` is just after an ASCII `=`, a split point that
+    let start = bytes
+        .iter()
+        .position(|&b| b == b'=')
+        .map_or(bytes.len(), |at| at + 1);
+    // SAFETY: `start` is just after an ASCII `=` or at the end, split points that
     // `OsStr::from_encoded_bytes_unchecked` allows (after a valid non-empty UTF-8 substring).
     unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&bytes[start..]) }.to_os_string()
 }
@@ -1348,6 +1352,32 @@ mod tests {
         ]);
         let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
         assert!(!message.contains("not UTF-8"), "{message}");
+    }
+
+    // `try_parse_from` is generic: a caller's own type can name an option with letters that are
+    // not ASCII, here U+FFFD (3 bytes), which a byte that is not UTF-8 also reads as in the
+    // word's lossy text. The value of `-name=value` starts after the first `=` of the bytes,
+    // not `name.len()` bytes on (which skipped `\xfe\xfd` and read `abc`).
+    #[test]
+    fn inline_value_starts_after_the_first_equals_sign() {
+        #[derive(clap::Parser)]
+        enum Own {
+            Blastn(OwnArgs),
+        }
+        #[derive(clap::Args)]
+        struct OwnArgs {
+            #[arg(long = "q\u{fffd}")]
+            q: Option<String>,
+        }
+        let argv = vec![
+            OsString::from("losat"),
+            OsString::from("blastn"),
+            OsString::from_vec(b"-q\xff=\xfe\xfdabc".to_vec()),
+        ];
+        let error = try_parse_from::<Own, _, _>(argv)
+            .err()
+            .expect("a value that is not UTF-8");
+        assert_eq!(error.kind(), ErrorKind::InvalidUtf8);
     }
 
     // A file name keeps its bytes in both spellings (`check_utf8_file_name` reads it).

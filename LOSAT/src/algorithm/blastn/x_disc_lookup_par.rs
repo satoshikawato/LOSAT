@@ -1521,7 +1521,8 @@ pub(super) fn csr(
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
 ) -> (super::x_dc_csr::Csr, bool) {
-    debug_assert!(!words.two_templates);
+    // One template: `read` pushes into the first buckets only (`SharedBuckets::at`).
+    assert!(!words.two_templates);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1606,7 +1607,8 @@ fn csr_on_pool(
     // Once per table: the owners' cells cover the table (every element of `offsets` is written),
     // and the positions, which bound the words, fit the `u32` offsets.
     assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
-    assert!(pv_array_bts >= 5 && helper_array.len() == cells >> 11);
+    // `sum_cells` (x_dc_csr.rs) writes the helper word of every 2048 cells.
+    assert!(pv_array_bts >= 5 && cells.is_multiple_of(2048) && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
     assert!(
         total <= u32::MAX as usize,
@@ -1984,7 +1986,8 @@ fn csr_on_pool_steps(
         *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
     }
     assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
-    assert!(pv_array_bts >= 5 && helper_array.len() == cells >> 11);
+    // `sum_cells` (x_dc_csr.rs) writes the helper word of every 2048 cells.
+    assert!(pv_array_bts >= 5 && cells.is_multiple_of(2048) && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
     assert!(
         total <= u32::MAX as usize,

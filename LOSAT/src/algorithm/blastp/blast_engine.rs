@@ -1028,21 +1028,42 @@ fn x_outlined<R>(f: impl FnOnce() -> R) -> R {
 /// The composition-based redo's workspace of another matrix than BLOSUM62 (item SC2b), put in
 /// place of `workspace` (BLOSUM62's, which its callers make as before): cold and in place, so that
 /// the callers' frames do not grow by a second workspace (SC1's `use_matrix_workspace` of
-/// TBLASTN). Every matrix whose search runs the redo has NCBI's data. IDENTITY, which has none, is
-/// searched in mode 0 only (`ResolvedBlastpArgs::identity_cbs_reset`), whose redo has no input
-/// (the preliminary lists are taken before it, item SC4a): it keeps BLOSUM62's workspace unused, as
-/// NCBI makes none below mode 2.
+/// TBLASTN). Every matrix whose search runs the redo has NCBI's data; IDENTITY keeps BLOSUM62's
+/// workspace unused (`blastp_redo_matrix`).
 #[cold]
 #[inline(never)]
 pub(super) fn blastp_use_matrix_workspace(
     workspace: &mut BlastCompositionWorkspace,
     matrix: ScoringMatrix,
 ) {
-    if matrix == ScoringMatrix::Identity {
+    if blastp_redo_matrix(matrix) == ScoringMatrix::Blosum62 {
         return;
     }
     *workspace = BlastCompositionWorkspace::new(matrix)
         .expect("BLASTP searches only the matrices with NCBI's composition data");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1499
+// ```c
+//     } else if (ext_params->options->compositionBasedStats > 0 ||
+//                ext_params->options->eTbackExt == eSmithWatermanTbck) {
+// ...
+//         retval =
+//                 Blast_RedoAlignmentCore_MT(program_number,
+// ...
+//     } else {
+// ```
+/// The matrix whose composition data the redo's workspace and initial matrix take: the search's,
+/// but BLOSUM62 for IDENTITY, which has none. IDENTITY is searched in mode 0 only
+/// (`ResolvedBlastpArgs::identity_cbs_reset`), whose redo has no input (the preliminary lists are
+/// taken before it, item SC4a), so those tables stay unused, as NCBI, which does not run the redo
+/// below mode 1, makes none.
+fn blastp_redo_matrix(matrix: ScoringMatrix) -> ScoringMatrix {
+    if matrix == ScoringMatrix::Identity {
+        ScoringMatrix::Blosum62
+    } else {
+        matrix
+    }
 }
 
 fn blastp_local_scaling_factor(mode: BlastpCompositionMode, matrix: ScoringMatrix) -> f64 {
@@ -10669,7 +10690,7 @@ fn run_resolved_in_pool(
         let matrix_info = initial_matrix_info
             .get_or_init(|| {
                 build_matrix_info(
-                    args.scoring.matrix,
+                    blastp_redo_matrix(args.scoring.matrix),
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2216-2231
                     // ```c
                     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;

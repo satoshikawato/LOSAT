@@ -592,6 +592,14 @@ with `sp||NAME_R` for `sp|P00051.1|name_r` (another letter case), `gb|FFF00053.1
 `pir|S12347|`; queries `ids/pweak_r_q<k>.faa` are T's letters; rows `db.id.blastp.weak.r.*` and `.v4.r.*`: NCBI writes T's names
 for S at `PRE_FETCH_SEQS_LIMIT=0` in both versions, and both its own rows without the variable).
 
+Rows `db.id.wkb.*` (line DBID weakbatch): NCBI counts a positive `PRE_FETCH_SEQS_LIMIT` against each query batch's
+Seq-aligns. A batch at or below it prefetches its sequences, each by its own id, and shows each pair of the rows above as
+two sequences (the `ncbi` rows, in all six programs, versions 4 and 5, outfmt 0 and 5); a batch above it reads them one by
+one and shows T for S (the rejection rows). `ids/wkb_q8x2.faa` and `ids/wkb_n1x2.fna` are `pweak_q8.faa` and
+`nweak_q1.fna` twice, joined by 30 `X` and 40 `N` (two HSPs a subject, so 4 Seq-aligns in a gapped search), and
+`ids/wkb_q0_q4x3.faa` is `pweak_q0.faa` followed by `pweak_q4.faa` three times (with `BATCH_SIZE=1`, a batch of 1 Seq-align
+that prefetches beside one of 3 that does not).
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`

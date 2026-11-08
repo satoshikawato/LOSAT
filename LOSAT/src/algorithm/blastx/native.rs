@@ -1009,6 +1009,7 @@ fn run_inner(
                                 false,
                                 crate::report::tabular::PrintedIds::default(),
                                 false,
+                                false,
                             )
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
@@ -1286,6 +1287,7 @@ pub(super) fn reported_batch(
         asks.taxonomy,
         asks.words,
         asks.prefetched && !prefetch_off,
+        prefetch_off,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported

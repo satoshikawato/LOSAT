@@ -236,18 +236,14 @@ pub(super) fn dbsize_volume_num_seqs(
     }
     let first = volumes
         .iter()
-        .min_by(|a, b| {
-            a.base()
-                .as_os_str()
-                .as_encoded_bytes()
-                .cmp(b.base().as_os_str().as_encoded_bytes())
-        })
+        .min_by(|a, b| crate::seqdb::SeqDb::compare_volume_paths(a.base(), b.base()))
         .expect("not empty");
     Some(first.num_oids() as usize)
 }
 
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread
-/// for each: NCBI's "auto"); a volume named twice counts once.
+/// for each: NCBI's "auto"). (A volume listed twice is refused by the database layer, as for every
+/// program.)
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:419-424
 /// ```c++
@@ -261,15 +257,7 @@ pub(super) fn dbsize_volume_num_seqs(
 #[cold]
 #[inline(never)]
 pub(super) fn volume_count(database: &database::BlastpDatabase) -> usize {
-    let mut bases: Vec<&std::path::Path> = database
-        .seqdb()
-        .volumes()
-        .iter()
-        .map(|volume| volume.base())
-        .collect();
-    bases.sort();
-    bases.dedup();
-    bases.len().max(1)
+    database.seqdb().volumes().len().max(1)
 }
 
 /// What the RPS search of the run returns besides the hit lists.
@@ -291,7 +279,7 @@ pub(super) struct RpsSearched {
 /// (a `set<string>`, `FindVolumePaths`), with the statistics of the whole database
 /// (`x_AdjustDbSize`: the database's length and sequence count, which `run` already holds), a
 /// per-volume hit list size, and merges each query's results into volume 0's (`s_MergeAlignSet`,
-/// `merge_volumes`).
+/// `merge_volume`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:341-346
 /// ```c++
@@ -327,13 +315,8 @@ pub(super) fn rps_search(
     }
     let mut order: Vec<usize> = (0..db_volumes.len()).collect();
     order.sort_by(|&a, &b| {
-        db_volumes[a]
-            .base()
-            .as_os_str()
-            .as_encoded_bytes()
-            .cmp(db_volumes[b].base().as_os_str().as_encoded_bytes())
+        crate::seqdb::SeqDb::compare_volume_paths(db_volumes[a].base(), db_volumes[b].base())
     });
-    order.dedup_by(|a, b| db_volumes[*a].base() == db_volumes[*b].base());
     let cbs = match args.comp_based_stats.mode {
         BlastpCompositionMode::NoCompositionBasedStats => 0u8,
         BlastpCompositionMode::CompositionBasedStats => 1,
@@ -407,7 +390,6 @@ pub(super) fn rps_search(
         }
     }
     let mut gapped_k = Vec::new();
-    let mut later_volumes: Vec<Vec<Option<BlastpHitList>>> = Vec::new();
     let mut first_costs: Option<(String, i32, i32)> = None;
     for (position, &index) in order.iter().enumerate() {
         let volume = &db_volumes[index];
@@ -603,6 +585,9 @@ pub(super) fn rps_search(
             let mut list = traced.hit_list;
             if let Some(list) = list.as_mut() {
                 shift_ordinal_ids(list, start);
+                // (The 100-slot reservation of NCBI's pointer array is 4 KB of `BlastpHspList`s.)
+                list.hsplist_array.truncate(list.hsplist_count);
+                list.hsplist_array.shrink_to_fit();
             }
             lists.push(list);
             k_marks.push(traced.k_mark);
@@ -620,14 +605,14 @@ pub(super) fn rps_search(
                 *slot = list;
             }
         } else {
-            later_volumes.push(lists);
+            // Merged into the running lists at once: no later volume's lists are held.
+            merge_volume(hit_lists, lists);
         }
     }
-    let volumes = order.len();
-    if !later_volumes.is_empty() {
-        merge_volumes(hit_lists, later_volumes);
-    }
-    Ok(RpsSearched { gapped_k, volumes })
+    Ok(RpsSearched {
+        gapped_k,
+        volumes: order.len(),
+    })
 }
 
 /// A volume's local ordinal ids as the database's: `start` is the volume's first ordinal id.
@@ -700,35 +685,34 @@ fn shift_ordinal_ids(hit_list: &mut BlastpHitList, start: u32) {
 /// ```
 #[cold]
 #[inline(never)]
-fn merge_volumes(
-    hit_lists: &mut [Option<BlastpHitList>],
-    later_volumes: Vec<Vec<Option<BlastpHitList>>>,
-) {
-    for volume in later_volumes {
-        for (slot, input) in hit_lists.iter_mut().zip(volume) {
-            let Some(mut input) = input else {
-                continue;
-            };
-            crate::algorithm::blastp::hsp::hit_list_to_seqalign_order(&mut input);
-            if input.hsplist_count == 0 {
-                continue;
+fn merge_volume(hit_lists: &mut [Option<BlastpHitList>], volume: Vec<Option<BlastpHitList>>) {
+    for (slot, input) in hit_lists.iter_mut().zip(volume) {
+        let Some(mut input) = input else {
+            continue;
+        };
+        crate::algorithm::blastp::hsp::hit_list_to_seqalign_order(&mut input);
+        if input.hsplist_count == 0 {
+            continue;
+        }
+        match slot.as_mut() {
+            None => {
+                input.hsplist_array.shrink_to_fit();
+                *slot = Some(input);
             }
-            match slot.as_mut() {
-                None => *slot = Some(input),
-                Some(final_list) => {
-                    crate::algorithm::blastp::hsp::hit_list_to_seqalign_order(final_list);
-                    if final_list.hsplist_count == 0 {
-                        *slot = Some(input);
-                        continue;
-                    }
-                    merge_align_set(final_list, input);
+            Some(final_list) => {
+                crate::algorithm::blastp::hsp::hit_list_to_seqalign_order(final_list);
+                if final_list.hsplist_count == 0 {
+                    input.hsplist_array.shrink_to_fit();
+                    *slot = Some(input);
+                    continue;
                 }
+                merge_align_set(final_list, input);
             }
         }
     }
 }
 
-/// `s_MergeAlignSet` of one query's lists (see [`merge_volumes`]).
+/// `s_MergeAlignSet` of one query's lists (see [`merge_volume`]).
 fn merge_align_set(final_list: &mut BlastpHitList, mut input: BlastpHitList) {
     final_list.hsplist_array.truncate(final_list.hsplist_count);
     input.hsplist_array.truncate(input.hsplist_count);
@@ -755,6 +739,7 @@ fn merge_align_set(final_list: &mut BlastpHitList, mut input: BlastpHitList) {
         }
     }
     final_list.hsplist_count = final_list.hsplist_array.len();
+    final_list.hsplist_array.shrink_to_fit();
 }
 
 /// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole.
@@ -836,7 +821,7 @@ mod tests {
             list(12, 1e-3, 40.0),
             list(13, 5.0, 20.0),
         ]))];
-        merge_volumes(&mut lists, vec![input]);
+        merge_volume(&mut lists, input);
         // 10 before 1; at equal E-values 11 (larger bit score) before 2, but 12 (equal) after 2;
         // 13 goes after 3 (the final side runs out: the rest is appended).
         assert_eq!(
@@ -852,7 +837,7 @@ mod tests {
             None,
             Some(hit_list(vec![list(10, 1e-6, 55.0), list(11, 1e-2, 9.0)])),
         ];
-        merge_volumes(&mut lists, vec![input]);
+        merge_volume(&mut lists, input);
         assert_eq!(oids(lists[0].as_ref().unwrap()), vec![1]);
         assert_eq!(oids(lists[1].as_ref().unwrap()), vec![10, 11]);
     }
@@ -865,8 +850,22 @@ mod tests {
             list(11, 1e-1, 10.0),
         ]))];
         let third = vec![Some(hit_list(vec![list(20, 1e-2, 10.0)]))];
-        merge_volumes(&mut lists, vec![second, third]);
+        merge_volume(&mut lists, second);
+        merge_volume(&mut lists, third);
         // 20 ties with 1 on both values: the final side's (already merged) group goes first.
         assert_eq!(oids(lists[0].as_ref().unwrap()), vec![10, 1, 20, 11]);
+    }
+
+    #[test]
+    fn volumes_are_ordered_by_file_name_then_path() {
+        use crate::seqdb::SeqDb;
+        use std::path::Path;
+        let mut paths = ["zd/x", "ad/y", "prof_rps2v.01", "b/x", "a/x"]
+            .map(Path::new)
+            .to_vec();
+        paths.sort_by(|a, b| SeqDb::compare_volume_paths(a, b));
+        let sorted: Vec<&str> = paths.iter().map(|p| p.to_str().unwrap()).collect();
+        // prof_rps2v.01, then x (a/x, b/x, zd/x by path), then y.
+        assert_eq!(sorted, ["prof_rps2v.01", "a/x", "b/x", "zd/x", "ad/y"]);
     }
 }

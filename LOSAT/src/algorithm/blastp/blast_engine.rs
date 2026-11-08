@@ -10570,14 +10570,18 @@ fn run_resolved_in_pool(
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
-    for hit_list_opt in &mut preliminary_hit_lists {
-        if let Some(hit_list) = hit_list_opt.as_mut() {
+    // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order, which
+    // NCBI sorts nowhere after.)
+    if !rps_multi_volume {
+        for hit_list_opt in &mut preliminary_hit_lists {
+            if let Some(hit_list) = hit_list_opt.as_mut() {
+                hit_list.sort_by_evalue();
+            }
+        }
+        // The same sort of the compact lists.
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
             hit_list.sort_by_evalue();
         }
-    }
-    // The same sort of the compact lists.
-    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
-        hit_list.sort_by_evalue();
     }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(

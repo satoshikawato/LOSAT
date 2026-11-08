@@ -5547,6 +5547,18 @@ impl SubjectHits {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// No NCBI counterpart (memory placement only): each list keeps only its length. A list
+    /// leaves the traceback with its preliminary count as its capacity, and the purges, the final
+    /// tree and the e-value reap drop HSPs from it; a list kept past its subject holds its count.
+    /// A shrinking `realloc` (glibc shrinks the block in place; another allocator may copy the
+    /// kept HSPs).
+    fn fit(&mut self) {
+        match self {
+            SubjectHits::Mixed(hits) => hits.shrink_to_fit(),
+            SubjectHits::ByQuery(lists) => lists.iter_mut().for_each(Vec::shrink_to_fit),
+        }
+    }
 }
 
 fn update_hitlists_with_subject_hits(
@@ -19712,6 +19724,13 @@ fn search_query_batch<const UNGAPPED: bool>(
                         &mut subject_hits,
                         &mut prelim_hits,
                     );
+                    // Every listed sequence's lists are kept until the last one is traced
+                    // (`found` below), so each keeps only its length (`SubjectHits::fit`). A
+                    // subject set's lists go to the hit lists at once (`search_subjects` above),
+                    // whose copies and `update_hitlists_with_subject_hits` hold their counts.
+                    if let Some(hits) = subject_hits.as_mut() {
+                        hits.fit();
+                    }
                     subject_hits
                 },
                 &|kept: &Vec<PrelimHit>| {

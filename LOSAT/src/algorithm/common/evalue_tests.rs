@@ -3,7 +3,7 @@
 use crate::algorithm::common::evalue::{
     bit_score, calculate_evalue_alignment_length, calculate_evalue_database_search,
 };
-use crate::algorithm::common::test_helpers::{
+use crate::algorithm::common::helpers_tests::{
     assert_bit_score_close, assert_evalue_close, default_nucl_params, default_protein_params,
 };
 

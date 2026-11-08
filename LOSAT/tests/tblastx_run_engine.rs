@@ -120,6 +120,75 @@ fn tblastx_output_filter_debug_stderr_is_env_gated() {
     let _ = fs::remove_file(out_debug);
 }
 
+// No NCBI counterpart: LOSAT_DIAGNOSTICS (algorithm/common/diagnostics.rs) prints LOSAT's pipeline
+// counters after the search. The read of the variable is checked here, in child processes: the
+// value check runs in the lib's tests (`diagnostics_tests.rs`), which share one process and so do
+// not set the variable.
+#[test]
+fn tblastx_diagnostics_summary_is_env_gated() {
+    let query = temp_path("diag_query", "fa");
+    let out_normal = temp_path("diag_normal", "txt");
+    let out_diag = temp_path("diag_enabled", "txt");
+
+    fs::write(&query, ">q\nATGATGATGATGATGATGATGATGATGATG\n").expect("write query FASTA");
+
+    let run = |out: &Path, diagnostics: Option<&str>| {
+        let mut command = Command::new(losat_binary());
+        command
+            .args([
+                "tblastx",
+                "-query",
+                query.to_str().expect("query path UTF-8"),
+                "-subject",
+                query.to_str().expect("subject path UTF-8"),
+                "-seg",
+                "no",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-out",
+                out.to_str().expect("output path UTF-8"),
+            ])
+            .env_remove("LOSAT_DEBUG_OUTPUT_FILTER")
+            .env_remove("LOSAT_DEBUG_CUTOFFS")
+            .env_remove("LOSAT_TIMING");
+        match diagnostics {
+            Some(value) => command.env("LOSAT_DIAGNOSTICS", value),
+            None => command.env_remove("LOSAT_DIAGNOSTICS"),
+        };
+        let output = command.output().expect("run tblastx");
+        assert!(
+            output.status.success(),
+            "tblastx run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+
+    let normal_stderr = run(&out_normal, None);
+    let diag_stderr = run(&out_diag, Some("1"));
+    let same_output = fs::read_to_string(&out_normal).expect("read normal output")
+        == fs::read_to_string(&out_diag).expect("read diagnostics output");
+
+    let _ = fs::remove_file(query);
+    let _ = fs::remove_file(out_normal);
+    let _ = fs::remove_file(out_diag);
+
+    assert!(
+        !normal_stderr.contains("=== TBLASTX Pipeline Diagnostics ==="),
+        "a run without LOSAT_DIAGNOSTICS should not print the diagnostics: {normal_stderr}"
+    );
+    assert!(
+        diag_stderr.contains("=== TBLASTX Pipeline Diagnostics ==="),
+        "LOSAT_DIAGNOSTICS=1 should print the diagnostics: {diag_stderr}"
+    );
+    assert!(
+        same_output,
+        "LOSAT_DIAGNOSTICS must not change the search output"
+    );
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
 // ```c
 // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,

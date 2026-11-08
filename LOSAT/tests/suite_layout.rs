@@ -744,27 +744,37 @@ fn walk_finds_the_lone_files_changes() {
         }
     }
     // The inline-module handling, checked on files written for it (no test file depends on it
-    // since `tests/unit_tests.rs` moved into the crate): the change sits in `outer/inner.rs`,
-    // declared inside `mod outer { ... }` of the root file.
+    // since `tests/unit_tests.rs` moved into the crate): inside `mod outer { ... }` of the root file,
+    // `mod inner;` resolves to `outer/inner.rs` and `mod nested;` to `outer/nested/mod.rs`, and each
+    // holds a change.
     let dir =
         std::env::temp_dir().join(format!("losat-suite-layout-inline-{}", std::process::id()));
-    fs::create_dir_all(dir.join("outer")).expect("create the fixture directory");
+    fs::create_dir_all(dir.join("outer").join("nested")).expect("create the fixture directory");
     let root = dir.join("root.rs");
     let inner = dir.join("outer").join("inner.rs");
-    fs::write(&root, "mod outer {\n    pub mod inner;\n}\n").expect("write the fixture root");
+    let nested = dir.join("outer").join("nested").join("mod.rs");
+    let change = "pub fn change() {\n    std::env::set_var(\"A\", \"1\");\n}\n";
     fs::write(
-        &inner,
-        "pub fn change() {\n    std::env::set_var(\"A\", \"1\");\n}\n",
+        &root,
+        "mod outer {\n    pub mod inner;\n    pub mod nested;\n}\n",
     )
-    .expect("write the fixture member");
+    .expect("write the fixture root");
+    fs::write(&inner, change).expect("write the fixture file module");
+    fs::write(&nested, change).expect("write the fixture mod.rs module");
     let inline_walk = walk_from(&root);
     let _ = fs::remove_dir_all(&dir);
-    if !inline_walk.unresolved.is_empty()
-        || !inline_walk.changes.iter().any(|(file, _)| *file == inner)
-    {
+    for (member, shape) in [(&inner, "outer/inner.rs"), (&nested, "outer/nested/mod.rs")] {
+        if !inline_walk.changes.iter().any(|(file, _)| file == member) {
+            problems.push(format!(
+                "the walk of a root file with `mod outer {{ pub mod inner; pub mod nested; }}` does not \
+                 reach {shape} ({}): fix the inline-module handling of the walk",
+                inline_walk.unresolved.join("; ")
+            ));
+        }
+    }
+    if !inline_walk.unresolved.is_empty() {
         problems.push(format!(
-            "the walk of a root file with `mod outer {{ pub mod inner; }}` does not reach outer/inner.rs \
-             ({}): fix the inline-module handling of the walk",
+            "the walk of the inline-module fixture leaves declarations unresolved: {}",
             inline_walk.unresolved.join("; ")
         ));
     }

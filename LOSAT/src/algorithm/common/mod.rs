@@ -21,4 +21,4 @@ pub(crate) mod translated_chunks;
 pub(crate) mod x_db_stream;
 
 #[cfg(test)]
-mod test_helpers;
+mod helpers_tests;

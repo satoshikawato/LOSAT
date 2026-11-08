@@ -168,10 +168,13 @@ const X_MIN_CHUNK_OFFSETS: usize = 256;
 const X_MAX_GUIDED_OFFSETS: usize = 4 * X_MIN_CHUNK_OFFSETS;
 // No NCBI counterpart: how a task's scratch is bounded (item SC2d-2). Memory only.
 /// The appends of a piece (`x_chunk_appends`): a chunk's appends are sorted into the task's segment
-/// in pieces of this many (the last one fewer), so that a task's scratch holds at most a piece (4 MiB
-/// of targets) whatever a chunk's offsets add (about 12,800 appends per offset with BLOSUM45 at word
-/// size 7).
-const X_PIECE_APPENDS: usize = 1 << 20;
+/// in pieces of this many (the last one fewer), so that a task's scratch holds at most a piece (512
+/// KiB of targets, and the appends of the offset that passes it) whatever a chunk's offsets add
+/// (about 380 appends per offset with BLOSUM45 and blastp-fast's threshold, 12,800 at word size 7).
+/// A task's scratch stays in its pool thread's malloc arena after the pass, so that the threads keep
+/// a piece each between builds: 2^20 appends (4 MiB) per thread raised the peak RSS of BLOSUM45
+/// blastp-fast at 8 threads by about 10 % (SC2d-2).
+const X_PIECE_APPENDS: usize = 1 << 17;
 /// The most (chunk, stripe) parts: a stripe reads its part of every chunk.
 const X_MAX_PARTS: usize = 1 << 20;
 // No NCBI counterpart: the 16 bits of a packed append that hold the offset less the chunk's first.

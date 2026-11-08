@@ -101,7 +101,7 @@ project-authored production algorithm delegation.
 Owner and mechanism:
 
 ```text
-LOSAT/src/algorithm/blastn/blast_engine/run.rs:3504-3517
+LOSAT/src/algorithm/blastn/blast_engine/run.rs:3133-3375
 native_prelim_qsort
 qsort_prelim_hits_by
 target cfg: native adapter under cfg(not(target_arch = "wasm32"));

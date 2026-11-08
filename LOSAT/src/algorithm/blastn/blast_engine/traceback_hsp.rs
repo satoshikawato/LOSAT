@@ -226,7 +226,8 @@ pub(super) fn prepare_traceback(
 /// the subject range (`prepare_traceback`) and the traceback call, dynamic-programming or greedy.
 /// Index in, value out. The tree test and the tree insertion stay in the ordered loop.
 /// No NCBI counterpart: the traceback of the ordered loop (`trace_align_one`, called by
-/// `x_trace_list`) as a function of the HSP's index, for the look-ahead helpers.
+/// `x_trace_list`) as a function of the HSP's index, which the look-ahead helpers run and the
+/// ordered loop runs through `Ahead::take` for an HSP that no helper has taken.
 pub(super) fn x_trace_compute(
     traceback_ctx: &TracebackCtx<'_>,
     prelim_hits: &[PrelimHit],

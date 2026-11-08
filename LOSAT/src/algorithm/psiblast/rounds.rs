@@ -1,4 +1,5 @@
-//! psiblast's rounds of a FASTA query (`-num_iterations` other than 1; series PS, item PS5a):
+//! psiblast's rounds of a FASTA query (`-num_iterations` other than 1; series PS, item PS5a) and of
+//! a PSSM query (`-in_pssm` with `-num_iterations` other than 1 or a PSSM file, item PS5b):
 //! the plan of a run (`PsiRoundPlan`), NCBI's iteration state (`IterationState`, a port of
 //! `CPsiBlastIterationState`), the inclusion set of a round (`InclusionSet`), what one round's
 //! search hands the round driver (`PsiRoundIo`, `RoundOutcome`) and the PSSM files the driver
@@ -57,34 +58,50 @@ use std::io::Write as _;
 
 use anyhow::Result;
 
+use super::in_pssm_files::{InPssmFile, InPssmRounds};
 use super::pssm::{
-    is_regular_file, OutputFileReset, PsiblastPssmOptions, PssmFileCheck, PssmRequest, QueryPssm,
+    is_regular_file, OutputFileReset, PsiblastPssmOptions, PssmFileCheck, PssmRequest,
 };
+use crate::report::serial::pssm::ObjectId;
 
-/// The rounds of a psiblast run of FASTA queries: `-num_iterations` (0: until convergence), the
-/// PSSM engine's options and files (`-pseudocount`, `-out_pssm`, `-out_ascii_pssm`,
-/// `-save_each_pssm`) and `-save_pssm_after_last_round`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The rounds of a psiblast run of FASTA queries or of a PSSM query: `-num_iterations` (0: until
+/// convergence), the PSSM engine's options and files (`-pseudocount`, `-out_pssm`,
+/// `-out_ascii_pssm`, `-save_each_pssm`), `-save_pssm_after_last_round`, and the input PSSM of
+/// `-in_pssm` (`input`).
+#[derive(Debug, Clone, PartialEq)]
 pub struct PsiRoundPlan {
     pub(crate) num_iterations: u32,
     pub(crate) request: PssmRequest,
     pub(crate) save_last: bool,
+    pub(crate) input: Option<InPssmRounds>,
 }
 
 impl PsiRoundPlan {
-    /// The plan of psiblast's options with `-num_iterations` other than 1 (`None` with 1).
-    pub(crate) fn of(options: &PsiblastPssmOptions) -> Option<Self> {
-        let num_iterations = options.rounds?;
-        Some(Self {
+    /// The plan of psiblast's options with rounds (`PsiblastPssmOptions::rounds`; `None`
+    /// without), with the PSSM file of `-in_pssm` (`file`), or LOSAT's refusal of a file it cannot
+    /// write back as NCBI does (`in_pssm_files::rounds_input`).
+    pub(crate) fn of(
+        options: &PsiblastPssmOptions,
+        file: Option<InPssmFile>,
+    ) -> Result<Option<Self>> {
+        let Some(num_iterations) = options.rounds else {
+            return Ok(None);
+        };
+        let request = PssmRequest {
+            asn_path: options.out_pssm.clone(),
+            ascii_path: options.out_ascii_pssm.clone(),
+            save_each: options.save_each_pssm,
+            pseudocount: options.pseudocount,
+        };
+        let input = file
+            .map(|file| super::in_pssm_files::rounds_input(file, &request))
+            .transpose()?;
+        Ok(Some(Self {
             num_iterations,
-            request: PssmRequest {
-                asn_path: options.out_pssm.clone(),
-                ascii_path: options.out_ascii_pssm.clone(),
-                save_each: options.save_each_pssm,
-                pseudocount: options.pseudocount,
-            },
+            request,
             save_last: options.save_pssm_after_last_round,
-        })
+            input,
+        }))
     }
 
     /// The PSSM files of the run, for the checks before the search (`check_pssm_titles`,
@@ -242,6 +259,9 @@ pub(crate) struct PsiRoundIo {
     pub(crate) save_last: bool,
     /// The PSSM engine's options and the files' requests (`PsiRoundPlan::request`).
     pub(crate) request: PssmRequest,
+    /// The Seq-id of the next PSSM's query: the PSSM query's of `-in_pssm`, `None` for a FASTA
+    /// query (`Query_<n>`).
+    pub(crate) query_id: Option<ObjectId>,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 
@@ -259,13 +279,15 @@ impl PsiRoundIo {
 }
 
 /// The outcome of a round: whether it has alignments (`HasAlignments`), its inclusion set
-/// (`GetSeqIds`), and the PSSM made from its Seq-aligns where NCBI makes one (after `Advance`,
+/// (`GetSeqIds`), the PSSM made from its Seq-aligns where NCBI makes one (after `Advance`,
 /// `itr || save_last`), with NCBI's error of the PSSM engine, which comes after the round's
-/// report.
+/// report, and for a round that searched a PSSM the blocks that NCBI writes back into it
+/// (`kbp_psi[0]`, `kbp_gap_psi[0]`; `in_pssm_files::InPssmRounds::written_back`).
 pub(crate) struct RoundOutcome {
     pub(crate) has_alignments: bool,
     pub(crate) set: InclusionSet,
-    pub(crate) next: Option<Result<QueryPssm>>,
+    pub(crate) next: Option<Result<super::pssm::QueryPssm>>,
+    pub(crate) searched: Option<(crate::core::psi::KarlinBlk, crate::core::psi::KarlinBlk)>,
 }
 
 /// The PSSM files of a run (`SavePssmToFile`), written between the rounds: each option's
@@ -289,12 +311,13 @@ impl RoundFiles {
         }
     }
 
-    /// `SavePssmToFile` of `pssm`. An ASN.1 file that cannot be written is LOSAT's refusal there,
-    /// where NCBI stops with its serial stream's write error (DECISIONS 10 of line PS: after the
-    /// report of the round before; no partial file is left); an ASCII file that cannot be opened
-    /// gets nothing, as NCBI's unchecked `ofstream`.
-    pub(crate) fn write(&mut self, pssm: &QueryPssm) -> Result<()> {
-        if let (Some(stream), Some(bytes)) = (self.asn.as_mut(), pssm.asn.as_deref()) {
+    /// `SavePssmToFile` of a PSSM whose ASN.1 text is `asn` and ASCII PSSM `ascii` (each as
+    /// requested). An ASN.1 file that cannot be written is LOSAT's refusal there, where NCBI stops
+    /// with its serial stream's write error (DECISIONS 10 of line PS: after the report of the round
+    /// before, or with `-in_pssm` before round 1, after the prolog; no partial file is left); an ASCII file that cannot be opened gets nothing, as
+    /// NCBI's unchecked `ofstream`.
+    pub(crate) fn write(&mut self, asn: Option<&[u8]>, ascii: Option<&[u8]>) -> Result<()> {
+        if let (Some(stream), Some(bytes)) = (self.asn.as_mut(), asn) {
             let file = stream.next_file();
             self.check.check("-out_pssm", &file.path)?;
             let written = file.open().and_then(|mut out| {
@@ -306,12 +329,12 @@ impl RoundFiles {
                     let _ = std::fs::remove_file(&file.path);
                 }
                 anyhow::bail!(
-                    "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops after the round's report with a serial-stream write error, is not supported by LOSAT's PSIBLAST",
+                    "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops with a serial-stream write error (after the report of the round before; with -in_pssm before round 1), is not supported by LOSAT's PSIBLAST",
                     file.path.display()
                 );
             }
         }
-        if let (Some(stream), Some(bytes)) = (self.ascii.as_mut(), pssm.ascii.as_deref()) {
+        if let (Some(stream), Some(bytes)) = (self.ascii.as_mut(), ascii) {
             let file = stream.next_file();
             self.check.check("-out_ascii_pssm", &file.path)?;
             if let Ok(mut out) = file.open() {

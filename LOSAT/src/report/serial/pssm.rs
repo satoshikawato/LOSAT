@@ -387,12 +387,34 @@ pub struct FormatRpsDbParameters {
     pub gap_extend: Option<i32>,
 }
 
+/// The six Karlin-Altschul values of a `finalData`, written in place of the object's: psiblast's
+/// K/A write-back into the PSSM it searched (`psiblast_impl.cpp:150-168`, quoted at
+/// `algorithm::psiblast::in_pssm_files::InPssmRounds::written_back`), which sets all six.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FinalKarlin {
+    pub lambda: f64,
+    pub kappa: f64,
+    pub h: f64,
+    pub lambda_ungapped: f64,
+    pub kappa_ungapped: f64,
+    pub h_ungapped: f64,
+}
+
 /// Writes `value` as a document (`WriteFileHeader`, the object, `EndOfWrite` and the separator).
 pub fn write_pssm_with_parameters<E: Encoder>(enc: &mut E, value: &PssmWithParameters) {
+    write_document(enc, value, None);
+}
+
+/// `write_pssm_with_parameters`, with `karlin` in place of the six values of `finalData`.
+fn write_document<E: Encoder>(
+    enc: &mut E,
+    value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+) {
     enc.begin_document("PssmWithParameters");
     enc.begin_sequence("PssmWithParameters");
     enc.member("pssm", 0);
-    write_pssm(enc, &value.pssm);
+    write_pssm(enc, &value.pssm, karlin);
     enc.end_member();
     if let Some(params) = &value.params {
         enc.member("params", 1);
@@ -435,7 +457,7 @@ fn write_reals<E: Encoder>(enc: &mut E, values: &[f64]) {
     enc.end_list();
 }
 
-fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm) {
+fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>) {
     enc.begin_sequence("Pssm");
     if let Some(is_protein) = pssm.is_protein {
         enc.member("isProtein", 0);
@@ -482,7 +504,7 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm) {
     }
     if let Some(data) = &pssm.final_data {
         enc.member("finalData", 8);
-        write_final_data(enc, data);
+        write_final_data(enc, data, karlin);
         enc.end_member();
     }
     enc.end_sequence();
@@ -667,16 +689,30 @@ fn write_intermediate_data<E: Encoder>(enc: &mut E, data: &PssmIntermediateData)
     enc.end_sequence();
 }
 
-fn write_final_data<E: Encoder>(enc: &mut E, data: &PssmFinalData) {
+fn write_final_data<E: Encoder>(enc: &mut E, data: &PssmFinalData, karlin: Option<FinalKarlin>) {
+    let (lambda, kappa, h, lambda_ungapped, kappa_ungapped, h_ungapped) = match karlin {
+        Some(karlin) => (
+            karlin.lambda,
+            karlin.kappa,
+            karlin.h,
+            Some(karlin.lambda_ungapped),
+            Some(karlin.kappa_ungapped),
+            Some(karlin.h_ungapped),
+        ),
+        None => (
+            data.lambda,
+            data.kappa,
+            data.h,
+            data.lambda_ungapped,
+            data.kappa_ungapped,
+            data.h_ungapped,
+        ),
+    };
     enc.begin_sequence("PssmFinalData");
     enc.member("scores", 0);
     write_ints(enc, &data.scores);
     enc.end_member();
-    for (name, tag, value) in [
-        ("lambda", 1, data.lambda),
-        ("kappa", 2, data.kappa),
-        ("h", 3, data.h),
-    ] {
+    for (name, tag, value) in [("lambda", 1, lambda), ("kappa", 2, kappa), ("h", 3, h)] {
         enc.member(name, tag);
         enc.real(value);
         enc.end_member();
@@ -687,9 +723,9 @@ fn write_final_data<E: Encoder>(enc: &mut E, data: &PssmFinalData) {
         enc.end_member();
     }
     for (name, tag, value) in [
-        ("lambdaUngapped", 5, data.lambda_ungapped),
-        ("kappaUngapped", 6, data.kappa_ungapped),
-        ("hUngapped", 7, data.h_ungapped),
+        ("lambdaUngapped", 5, lambda_ungapped),
+        ("kappaUngapped", 6, kappa_ungapped),
+        ("hUngapped", 7, h_ungapped),
         ("wordScoreThreshold", 8, data.word_score_threshold),
     ] {
         if let Some(value) = value {
@@ -748,9 +784,18 @@ fn write_params<E: Encoder>(enc: &mut E, params: &PssmParameters) {
 /// value (a byte outside the visible ASCII range in a VisibleString, which the callers refuse
 /// first).
 pub fn asn_text(value: &PssmWithParameters) -> Result<Vec<u8>, super::encoder::SerialError> {
+    asn_text_with_karlin(value, None)
+}
+
+/// `asn_text` of `value` with `karlin`, when given, in place of the six values of its `finalData`
+/// (the object is not copied).
+pub fn asn_text_with_karlin(
+    value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+) -> Result<Vec<u8>, super::encoder::SerialError> {
     let mut out = Vec::new();
     let mut enc = super::asn_text::AsnTextEncoder::new(&mut out);
-    write_pssm_with_parameters(&mut enc, value);
+    write_document(&mut enc, value, karlin);
     if let Some(error) = enc.error() {
         return Err(error);
     }

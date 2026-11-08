@@ -142,6 +142,9 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
     ("I22", &["-db", "../seqdb/db/alias_nested", "-info"], 0),
     ("I24", &["-db", "../seqdb/db/prot_mv", "-info"], 0),
     ("I25", &["-db", "../seqdb/db/empty", "-info"], 0),
+    // NCBI's database with a user column and no masks (`.paa` and the big-endian `.pab`
+    // alone), NCBI 2.17.0 on 2026-11-08 (`blastdbcmd_masks.rs`, cases `U`).
+    ("U01", &["-db", "../seqdb/db/user-column-db", "-info"], 0),
     ("I26", &["-db", "db/p5", "-dbtype", "prot", "-info"], 0),
     ("I27", &["-db", "db/p5", "-dbtype", "nucl", "-info"], 2),
     ("I29", &["-db", "db/nosuch", "-info"], 2),

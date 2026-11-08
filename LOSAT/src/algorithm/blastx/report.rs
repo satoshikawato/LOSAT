@@ -1419,7 +1419,7 @@ pub(super) fn render_queries_with(
                     })
                     .sum();
                 if comments {
-                    writeln!(writer, "# BLASTX 2.17.0+")?;
+                    writeln!(writer, "# BLASTX {}", crate::NCBI_BLAST_VERSION)?;
                     writeln!(
                         writer,
                         "# Query: {}",
@@ -1835,7 +1835,7 @@ fn pairwise_metadata(
         ),
     };
     BlastpPairwiseReport {
-        version: "2.17.0+".into(),
+        version: crate::NCBI_BLAST_VERSION.into(),
         database_name,
         database_num_sequences: num_sequences,
         database_total_letters: total,

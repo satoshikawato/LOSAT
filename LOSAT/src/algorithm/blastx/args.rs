@@ -832,8 +832,8 @@ pub struct ResolvedOptions {
     // ```
     pub db_length: i64,
     pub effective_search_space: i64,
-    /// Whether `-searchsp` was given, at any value: NCBI then has no Gumbel block
-    /// (`gumbel_block`).
+    /// Whether `-searchsp` was given, at any value, or the environment variable `OLD_FSC` is set
+    /// (`app::old_fsc_environment`): NCBI then has no Gumbel block (`gumbel_block`).
     pub old_fsc: bool,
 
     pub evalue: f64,
@@ -1331,7 +1331,13 @@ impl BlastxArgs {
             // `-dbsize` (`CBlastOptions::SetDbLength`, blast_args.cpp:2570-2572).
             db_length: self.dbsize.unwrap_or(0),
             effective_search_space: self.searchsp.unwrap_or(0),
-            old_fsc: self.searchsp.is_some(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+            // ```c
+            //     use_old_fsc = getenv("OLD_FSC");
+            //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+            // ```
+            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307, `parameters::gumbel_block`).
+            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
             window_size,
             evalue: self.evalue,
             sum_stats: self.sum_stats.unwrap_or(true),

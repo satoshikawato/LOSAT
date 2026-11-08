@@ -53,7 +53,7 @@ use crate::report::tabular::{
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
-const PROGRAM_VERSION: &str = "BLASTX 2.17.0+";
+const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::ncbi_blast_version!());
 
 /// The program of NCBI's messages.
 const PROGRAM: &str = "blastx";

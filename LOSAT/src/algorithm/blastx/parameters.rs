@@ -215,20 +215,6 @@ pub fn gumbel_db_length(options: &ResolvedOptions, db_length: i64) -> i64 {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
-// ```c++
-//     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
-//         CNcbiEnvironment env;
-//         env.Set("OLD_FSC", "true");
-//         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
-// ```c
-//     /* FSCOLD: to switch back to original FSC, comment out the following line */
-//     use_old_fsc = getenv("OLD_FSC");
-//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-// ```
 /// The gapped Karlin block of the search's matrix and gap costs (`kbp_gap`, from NCBI's tables);
 /// an ungapped search reads none (its gap costs need not be in the matrix's table, `args.rs`), and
 /// gets the default block, which it never reads.
@@ -244,7 +230,22 @@ pub(crate) fn gapped_karlin(options: &ResolvedOptions) -> KarlinParams {
     }
 }
 
-/// The Gumbel block of a gapped search, none with `-searchsp`, at any value.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
+// ```c++
+//     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
+//         CNcbiEnvironment env;
+//         env.Set("OLD_FSC", "true");
+//         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
+// ```c
+//     /* FSCOLD: to switch back to original FSC, comment out the following line */
+//     use_old_fsc = getenv("OLD_FSC");
+//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+// ```
+/// The Gumbel block of a gapped search, none with `-searchsp` (at any value) or `OLD_FSC`
+/// (`ResolvedOptions::old_fsc`).
 pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGumbelBlk> {
     if options.old_fsc {
         return None;
@@ -602,7 +603,7 @@ pub fn subject_parameters(
     // length is too short"; LOSAT refuses the search instead.
     ensure!(
         !options.old_fsc || avg_subject_length > 0,
-        "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
+        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
     );
     let n = if options.gapped && !options.old_fsc {
         i32::try_from(min_subject_length.max(10))?

@@ -16,9 +16,8 @@
 //! than the checkpoint spacing.
 
 use losat_web_adapter::scan::{scan_ncbi, LineLayout, NcbiScanner, ScanRecord, CHECKPOINT_EVERY};
-use LOSAT::blastinput::fasta_reader::{
-    FastaInputSource, FastaRecord, ParseErrorCode, ReadError, ReaderConfig,
-};
+use LOSAT::api::FastaRecord;
+use LOSAT::web_adapter::{FastaInputSource, ParseErrorCode, ReadError, ReaderConfig};
 
 /// A small deterministic generator (xorshift64*).
 struct Random(u64);

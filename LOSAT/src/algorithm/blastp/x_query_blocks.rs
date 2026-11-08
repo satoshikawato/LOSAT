@@ -737,7 +737,7 @@ pub(crate) struct XBlockSubjects {
     /// Each block's queries (`x_key`: the address and count of its records) and words
     /// (`blast_engine.rs` `x_word_blocks`), for its table's build (`x_block_appends`).
     x_block_words: Vec<((usize, usize), u64)>,
-    /// The SEG-masked subject ranges of the redo, kept from block to block
+    /// The SEG-masked subject ranges of the redo of `encoded`, kept from block to block
     /// (`x_block_seg_store`).
     x_seg_store: std::sync::Arc<super::kappa::XSharedSubjectRanges>,
 }
@@ -778,15 +778,28 @@ impl XBlockSubjects {
 //                                              subject_maybe_biased);
 // ```
 // NCBI masks a subject range in each batch that reaches it. Reuse of an identical result only: an
-// entry is a function of its key.
+// entry is a function of its key where the key names the same subject in every block.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the store of SEG-masked subject ranges that the blocks' redos
 /// share (`x_redo_par.rs` `x_redo`, which empties it after a block as LOSAT_X_BPSEGWIN empties it
-/// after a window); `None` outside the block search.
+/// after a window), where the redo's `subjects` are the subjects encoded once for all blocks
+/// (`XBlockSubjects`); `None` outside the block search and for other subjects. The store's key
+/// names a subject by its index in the redo's subjects (`kappa.rs` `BlastpKappaSubjectRangeCache`),
+/// the same subject in every block only in that shared encoding: a `-db` search's redo names a
+/// subject by its rank among the block's listed subjects (`x_redo_subjects.rs`), another subject in
+/// another block, so each block of a `-db` search keeps its own store, as the search of all queries.
 pub(crate) fn x_block_seg_store(
     pool: &SearchPool<'_>,
+    subjects: super::x_redo_subjects::XRedoSubjects<'_>,
 ) -> Option<std::sync::Arc<super::kappa::XSharedSubjectRanges>> {
+    let super::x_redo_subjects::XRedoSubjects::Encoded(encoded) = subjects else {
+        return None;
+    };
     pool.x_ext::<XBlockSubjects>()
-        .map(|subjects| subjects.x_seg_store.clone())
+        .filter(|block| {
+            std::ptr::eq(block.encoded.as_ptr(), encoded.as_ptr())
+                && block.encoded.len() == encoded.len()
+        })
+        .map(|block| block.x_seg_store.clone())
 }
 
 // No NCBI counterpart: the reserve of a build (`x_clut_direct.rs` `x_try_build_flat_reserving`); it
@@ -1532,5 +1545,41 @@ mod tests {
         }
         assert_eq!(std::fs::read(&path).unwrap(), b"a\t1\nb\t2\n");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The redo's store of SEG-masked subject ranges is the blocks' only for the subjects encoded
+    // for all blocks (`x_block_seg_store`): its key is a subject's index in the redo's subjects,
+    // which in another set (another encoding, a `-db` search's listed subjects, whose ranks differ
+    // between blocks) may name another subject.
+    #[test]
+    fn the_seg_store_of_the_blocks_serves_only_their_subject_encoding() {
+        use super::super::encoding::encode_protein_sequence;
+        use super::super::x_redo_subjects::XRedoSubjects;
+        let records: Vec<FastaRecord> = [&b"MKVLAAGIVALLLAAGCSS"[..], b"MSTNPKPQRKTKRNTNRR"]
+            .iter()
+            .enumerate()
+            .map(|(index, seq)| FastaRecord::new(format!("Subject_{}", index + 1), b"", seq))
+            .collect();
+        let encode = || {
+            records
+                .iter()
+                .map(|record| encode_protein_sequence(record.seq()))
+                .collect::<Vec<_>>()
+        };
+        let other = encode();
+        let subjects = XBlockSubjects::new(&records, encode());
+        crate::utils::threading::with_search_pool(1, "blastp", |pool| {
+            assert!(x_block_seg_store(pool, XRedoSubjects::Encoded(&subjects.encoded)).is_none());
+            let pool = pool.x_with_ext(&subjects);
+            let store = x_block_seg_store(&pool, XRedoSubjects::Encoded(&subjects.encoded))
+                .expect("the blocks' store");
+            assert!(std::sync::Arc::ptr_eq(&store, &subjects.x_seg_store));
+            assert!(x_block_seg_store(&pool, XRedoSubjects::Encoded(&other)).is_none());
+            assert!(
+                x_block_seg_store(&pool, XRedoSubjects::Encoded(&subjects.encoded[..1])).is_none()
+            );
+            Ok(())
+        })
+        .unwrap();
     }
 }

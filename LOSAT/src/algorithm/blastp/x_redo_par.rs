@@ -1179,10 +1179,10 @@ where
     // reported here, before any match, as there.
     (search.build_redo_align_params)(0)?;
     // One store of masked subject ranges for the search, as in the query-parallel redo
-    // (`XSharedSubjectRanges`); in a block search the store of all blocks
-    // (`x_query_blocks::x_block_seg_store`): an entry depends on its key only (the subject, the range
-    // and the SEG parameters), the same in every block.
-    let block_store = super::x_query_blocks::x_block_seg_store(search.pool);
+    // (`XSharedSubjectRanges`); in a block search of the subjects encoded for all blocks the store
+    // of all blocks (`x_query_blocks::x_block_seg_store`): an entry depends on its key only (the
+    // subject's index in that encoding, the range), the same in every block.
+    let block_store = super::x_query_blocks::x_block_seg_store(search.pool, search.subjects);
     let shared = block_store
         .clone()
         .unwrap_or_else(|| Arc::new(XSharedSubjectRanges::new()));

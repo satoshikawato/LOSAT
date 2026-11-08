@@ -11579,9 +11579,11 @@ fn run_resolved_in_pool(
         //                                        &fence_hit);
         // ```
         let mut kappa_gap_scratch = GapAlignScratch::new();
-        // In a block search, the store of SEG-masked subject ranges of all blocks
-        // (`x_query_blocks::x_block_seg_store`): an entry depends on its key only.
-        let x_block_seg_store = super::x_query_blocks::x_block_seg_store(blastp_parallel_pool);
+        // In a block search of the subjects encoded for all blocks, the store of SEG-masked subject
+        // ranges of all blocks (`x_query_blocks::x_block_seg_store`): an entry depends on its key
+        // only.
+        let x_block_seg_store =
+            super::x_query_blocks::x_block_seg_store(blastp_parallel_pool, subjects);
         let mut kappa_subject_range_cache =
             BlastpKappaSubjectRangeCache::x_with_shared(x_block_seg_store.clone());
 

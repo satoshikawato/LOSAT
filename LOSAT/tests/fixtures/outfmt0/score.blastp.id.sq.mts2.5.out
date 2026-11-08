@@ -1,0 +1,571 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastp</BlastOutput_program>
+  <BlastOutput_version>BLASTP 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db></BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>s1 one residue, residues 31-31 of BDT63499.1</BlastOutput_query-def>
+  <BlastOutput_query-len>1</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>IDENTITY</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>15</Parameters_gap-open>
+      <Parameters_gap-extend>2</Parameters_gap-extend>
+      <Parameters_filter>F</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>s1 one residue, residues 31-31 of BDT63499.1</Iteration_query-def>
+  <Iteration_query-len>1</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>0</Statistics_hsp-len>
+      <Statistics_eff-space>18210</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_1 s1 one residue, r.. :  Query_1 s1 one residue, r.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0  No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>s2 two residues, residues 31-32 of BDT63499.1</Iteration_query-def>
+  <Iteration_query-len>2</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>0</Statistics_hsp-len>
+      <Statistics_eff-space>36420</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_2 s2 two residues, .. :  Query_2 s2 two residues, .. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0  No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>3</Iteration_iter-num>
+  <Iteration_query-ID>Query_3</Iteration_query-ID>
+  <Iteration_query-def>s5 five residues, residues 12-16 of BDT63500.1</Iteration_query-def>
+  <Iteration_query-len>5</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>1</Statistics_hsp-len>
+      <Statistics_eff-space>72760</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_3 s5 five residues,.. :  Query_3 s5 five residues,.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0  No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>4</Iteration_iter-num>
+  <Iteration_query-ID>Query_4</Iteration_query-ID>
+  <Iteration_query-def>s9 nine residues, residues 41-49 of BDT63501.1</Iteration_query-def>
+  <Iteration_query-len>9</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT63501.1</Hit_id>
+  <Hit_def>BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_4</Hit_accession>
+  <Hit_len>1023</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>35.1008</Hsp_bit-score>
+      <Hsp_score>81</Hsp_score>
+      <Hsp_evalue>7.89336e-08</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>9</Hsp_query-to>
+      <Hsp_hit-from>41</Hsp_hit-from>
+      <Hsp_hit-to>49</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>9</Hsp_identity>
+      <Hsp_positive>9</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>9</Hsp_align-len>
+      <Hsp_qseq>KHTNQDDND</Hsp_qseq>
+      <Hsp_hseq>KHTNQDDND</Hsp_hseq>
+      <Hsp_midline>KHTNQDDND</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>5</Statistics_hsp-len>
+      <Statistics_eff-space>72440</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_4 s9 nine residues,.. :  Query_4 s9 nine residues,.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 </Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>5</Iteration_iter-num>
+  <Iteration_query-ID>Query_5</Iteration_query-ID>
+  <Iteration_query-def>s15 fifteen residues, residues 6-20 of BDT63502.1</Iteration_query-def>
+  <Iteration_query-len>15</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT63502.1</Hit_id>
+  <Hit_def>BDT63502.1 wsv161-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_5</Hit_accession>
+  <Hit_len>794</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>57.187</Hsp_bit-score>
+      <Hsp_score>135</Hsp_score>
+      <Hsp_evalue>8.52236e-15</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>15</Hsp_query-to>
+      <Hsp_hit-from>6</Hsp_hit-from>
+      <Hsp_hit-to>20</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>15</Hsp_identity>
+      <Hsp_positive>15</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>15</Hsp_align-len>
+      <Hsp_qseq>KTVAQKYIIRNIKRK</Hsp_qseq>
+      <Hsp_hseq>KTVAQKYIIRNIKRK</Hsp_hseq>
+      <Hsp_midline>KTVAQKYIIRNIKRK</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>6</Statistics_hsp-len>
+      <Statistics_eff-space>162810</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_5 s15 fifteen resid.. :  Query_5 s15 fifteen resid.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 </Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>6</Iteration_iter-num>
+  <Iteration_query-ID>Query_6</Iteration_query-ID>
+  <Iteration_query-def>s22 22 residues, residues 61-82 of BDT63504.1</Iteration_query-def>
+  <Iteration_query-len>22</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT63505.1</Hit_id>
+  <Hit_def>BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_8</Hit_accession>
+  <Hit_len>981</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>82.9542</Hsp_bit-score>
+      <Hsp_score>198</Hsp_score>
+      <Hsp_evalue>6.28009e-23</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>22</Hsp_query-to>
+      <Hsp_hit-from>61</Hsp_hit-from>
+      <Hsp_hit-to>82</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>22</Hsp_identity>
+      <Hsp_positive>22</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>22</Hsp_align-len>
+      <Hsp_qseq>TQPSCSFGILSDDNNDDNEEDV</Hsp_qseq>
+      <Hsp_hseq>TQPSCSFGILSDDNNDDNEEDV</Hsp_hseq>
+      <Hsp_midline>TQPSCSFGILSDDNNDDNEEDV</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>23.6486</Hsp_bit-score>
+      <Hsp_score>53</Hsp_score>
+      <Hsp_evalue>0.0172941</Hsp_evalue>
+      <Hsp_query-from>11</Hsp_query-from>
+      <Hsp_query-to>19</Hsp_query-to>
+      <Hsp_hit-from>19</Hsp_hit-from>
+      <Hsp_hit-to>27</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>7</Hsp_identity>
+      <Hsp_positive>7</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>9</Hsp_align-len>
+      <Hsp_qseq>SDDNNDDNE</Hsp_qseq>
+      <Hsp_hseq>SDDSDDDNE</Hsp_hseq>
+      <Hsp_midline>SDD  DDNE</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT63504.1</Hit_id>
+  <Hit_def>BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_7</Hit_accession>
+  <Hit_len>986</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>82.9542</Hsp_bit-score>
+      <Hsp_score>198</Hsp_score>
+      <Hsp_evalue>6.28072e-23</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>22</Hsp_query-to>
+      <Hsp_hit-from>61</Hsp_hit-from>
+      <Hsp_hit-to>82</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>22</Hsp_identity>
+      <Hsp_positive>22</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>22</Hsp_align-len>
+      <Hsp_qseq>TQPSCSFGILSDDNNDDNEEDV</Hsp_qseq>
+      <Hsp_hseq>TQPSCSFGILSDDNNDDNEEDV</Hsp_hseq>
+      <Hsp_midline>TQPSCSFGILSDDNNDDNEEDV</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>23.6486</Hsp_bit-score>
+      <Hsp_score>53</Hsp_score>
+      <Hsp_evalue>0.0172949</Hsp_evalue>
+      <Hsp_query-from>11</Hsp_query-from>
+      <Hsp_query-to>19</Hsp_query-to>
+      <Hsp_hit-from>19</Hsp_hit-from>
+      <Hsp_hit-to>27</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>7</Hsp_identity>
+      <Hsp_positive>7</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>9</Hsp_align-len>
+      <Hsp_qseq>SDDNNDDNE</Hsp_qseq>
+      <Hsp_hseq>SDDSDDDNE</Hsp_hseq>
+      <Hsp_midline>SDD  DDNE</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>6</Statistics_hsp-len>
+      <Statistics_eff-space>289440</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_6 s22 22 residues, .. :  Query_6 s22 22 residues, .. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 </Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>7</Iteration_iter-num>
+  <Iteration_query-ID>Query_7</Iteration_query-ID>
+  <Iteration_query-def>s30 30 residues of SicyWSV, residues 21-50 of BDT63074.1</Iteration_query-def>
+  <Iteration_query-len>30</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>6</Statistics_hsp-len>
+      <Statistics_eff-space>434160</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_7 s30 30 residues o.. :  Query_7 s30 30 residues o.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0  No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>8</Iteration_iter-num>
+  <Iteration_query-ID>Query_8</Iteration_query-ID>
+  <Iteration_query-def>sx X in the middle, residues 11-30 of BDT63506.1</Iteration_query-def>
+  <Iteration_query-len>20</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT63506.1</Hit_id>
+  <Hit_def>BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_9</Hit_accession>
+  <Hit_len>992</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>64.14</Hsp_bit-score>
+      <Hsp_score>152</Hsp_score>
+      <Hsp_evalue>1.93636e-16</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>20</Hsp_query-to>
+      <Hsp_hit-from>11</Hsp_hit-from>
+      <Hsp_hit-to>30</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>18</Hsp_identity>
+      <Hsp_positive>18</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>20</Hsp_align-len>
+      <Hsp_qseq>QNFVEQGVXXDSDDDNEQYV</Hsp_qseq>
+      <Hsp_hseq>QNFVEQGVSDDSDDDNEQYV</Hsp_hseq>
+      <Hsp_midline>QNFVEQGV  DSDDDNEQYV</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT63505.1</Hit_id>
+  <Hit_def>BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_8</Hit_accession>
+  <Hit_len>981</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>54.733</Hsp_bit-score>
+      <Hsp_score>129</Hsp_score>
+      <Hsp_evalue>4.52214e-13</Hsp_evalue>
+      <Hsp_query-from>2</Hsp_query-from>
+      <Hsp_query-to>20</Hsp_query-to>
+      <Hsp_hit-from>12</Hsp_hit-from>
+      <Hsp_hit-to>30</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>16</Hsp_identity>
+      <Hsp_positive>16</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>19</Hsp_align-len>
+      <Hsp_qseq>NFVEQGVXXDSDDDNEQYV</Hsp_qseq>
+      <Hsp_hseq>NFVGQGVSDDSDDDNEQYV</Hsp_hseq>
+      <Hsp_midline>NFV QGV  DSDDDNEQYV</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>6</Statistics_hsp-len>
+      <Statistics_eff-space>253260</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_8 sx X in the middl.. :  Query_8 sx X in the middl.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 </Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>9</Iteration_iter-num>
+  <Iteration_query-ID>Query_9</Iteration_query-ID>
+  <Iteration_query-def>slc lower case first seven, residues 6-25 of BDT63503.1</Iteration_query-def>
+  <Iteration_query-len>20</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT63503.1</Hit_id>
+  <Hit_def>BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_6</Hit_accession>
+  <Hit_len>2342</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>75.5922</Hsp_bit-score>
+      <Hsp_score>180</Hsp_score>
+      <Hsp_evalue>1.33778e-20</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>20</Hsp_query-to>
+      <Hsp_hit-from>6</Hsp_hit-from>
+      <Hsp_hit-to>25</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>20</Hsp_identity>
+      <Hsp_positive>20</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>20</Hsp_align-len>
+      <Hsp_qseq>ISNTDDTFQRCGVLSDPDSG</Hsp_qseq>
+      <Hsp_hseq>ISNTDDTFQRCGVLSDPDSG</Hsp_hseq>
+      <Hsp_midline>ISNTDDTFQRCGVLSDPDSG</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>6</Statistics_hsp-len>
+      <Statistics_eff-space>253260</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_9 slc lower case fi.. :  Query_9 slc lower case fi.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 </Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>10</Iteration_iter-num>
+  <Iteration_query-ID>Query_10</Iteration_query-ID>
+  <Iteration_query-def>sodd B Z U O J and a stop around residues 41-52 of BDT63505.1</Iteration_query-def>
+  <Iteration_query-len>18</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT63505.1</Hit_id>
+  <Hit_def>BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_8</Hit_accession>
+  <Hit_len>981</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>46.1439</Hsp_bit-score>
+      <Hsp_score>108</Hsp_score>
+      <Hsp_evalue>2.69079e-10</Hsp_evalue>
+      <Hsp_query-from>6</Hsp_query-from>
+      <Hsp_query-to>17</Hsp_query-to>
+      <Hsp_hit-from>41</Hsp_hit-from>
+      <Hsp_hit-to>52</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>12</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>12</Hsp_align-len>
+      <Hsp_qseq>NTASCSVKMKKS</Hsp_qseq>
+      <Hsp_hseq>NTASCSVKMKKS</Hsp_hseq>
+      <Hsp_midline>NTASCSVKMKKS</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>33.0557</Hsp_bit-score>
+      <Hsp_score>76</Hsp_score>
+      <Hsp_evalue>9.13597e-06</Hsp_evalue>
+      <Hsp_query-from>8</Hsp_query-from>
+      <Hsp_query-to>17</Hsp_query-to>
+      <Hsp_hit-from>95</Hsp_hit-from>
+      <Hsp_hit-to>104</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>9</Hsp_identity>
+      <Hsp_positive>9</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>10</Hsp_align-len>
+      <Hsp_qseq>ASCSVKMKKS</Hsp_qseq>
+      <Hsp_hseq>ASCSVKRKKS</Hsp_hseq>
+      <Hsp_midline>ASCSVK KKS</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT63504.1</Hit_id>
+  <Hit_def>BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_7</Hit_accession>
+  <Hit_len>986</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>46.1439</Hsp_bit-score>
+      <Hsp_score>108</Hsp_score>
+      <Hsp_evalue>2.69097e-10</Hsp_evalue>
+      <Hsp_query-from>6</Hsp_query-from>
+      <Hsp_query-to>17</Hsp_query-to>
+      <Hsp_hit-from>41</Hsp_hit-from>
+      <Hsp_hit-to>52</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>12</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>12</Hsp_align-len>
+      <Hsp_qseq>NTASCSVKMKKS</Hsp_qseq>
+      <Hsp_hseq>NTASCSVKMKKS</Hsp_hseq>
+      <Hsp_midline>NTASCSVKMKKS</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>33.0557</Hsp_bit-score>
+      <Hsp_score>76</Hsp_score>
+      <Hsp_evalue>9.13649e-06</Hsp_evalue>
+      <Hsp_query-from>8</Hsp_query-from>
+      <Hsp_query-to>17</Hsp_query-to>
+      <Hsp_hit-from>95</Hsp_hit-from>
+      <Hsp_hit-to>104</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>9</Hsp_identity>
+      <Hsp_positive>9</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>10</Hsp_align-len>
+      <Hsp_qseq>ASCSVKMKKS</Hsp_qseq>
+      <Hsp_hseq>ASCSVKRKKS</Hsp_hseq>
+      <Hsp_midline>ASCSVK KKS</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>6</Statistics_hsp-len>
+      <Statistics_eff-space>217080</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_10 sodd B Z U O J a.. :  Query_10 sodd B Z U O J a.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 One or more O characters replaced by X for alignment score calculations at positions 3 </Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>11</Iteration_iter-num>
+  <Iteration_query-ID>Query_11</Iteration_query-ID>
+  <Iteration_query-def>snohit no hits</Iteration_query-def>
+  <Iteration_query-len>12</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>5</Statistics_hsp-len>
+      <Statistics_eff-space>126770</Statistics_eff-space>
+      <Statistics_kappa>0.255</Statistics_kappa>
+      <Statistics_lambda>0.2835</Statistics_lambda>
+      <Statistics_entropy>1.49</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_11 snohit no hits:  Query_11 snohit no hits: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0  No hits found</Iteration_message>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

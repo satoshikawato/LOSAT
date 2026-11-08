@@ -1,17 +1,5 @@
 Warning: [blastp] Examining 5 or more matches is recommended
 Warning: [blastp] Query_1 BDT63074.1 tyrosi.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_2 BDT63075.1 wsv226.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_3 BDT63076.1 hypoth.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_4 BDT63077.1 hypoth.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_5 BDT63078.1 hypoth.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_6 BDT63079.1 wsv447.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_7 BDT63080.1 wsv442.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_8 BDT63081.1 wsv440.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_9 BDT63082.1 wsv433.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_10 BDT63083.1 wsv42.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_11 BDT63084.1 wsv42.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_12 BDT63085.1 hypot.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_13 BDT63086.1 wsv45.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_14 BDT63087.1 hypot.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_15 BDT63088.1 wsv41.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
-Warning: [blastp] Query_16 BDT63089.1 wsv41.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_2 nohit a query without hits: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_3 BDT63075.1 wsv226.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_4 BDT63076.1 hypoth.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 

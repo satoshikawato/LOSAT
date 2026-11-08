@@ -1243,6 +1243,20 @@ fn check_ncbi_options(
     if args.word_threshold() <= 0.0 {
         return Err(options_error("Non-zero threshold required"));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1318
+    // ```c
+    //     if (options->word_size <= 0)
+    //     {
+    //         if ( !Blast_ProgramIsRpsBlast(program_number)) {
+    //             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //                                      "Word-size must be greater than zero");
+    //             return BLASTERR_OPTION_VALUE_INVALID;
+    // ```
+    // The command line's `-word_size` is at least 2 (`protein_word_size`); a caller of
+    // `run_local` sets the field itself.
+    if args.word_size() <= 0 {
+        return Err(options_error("Word-size must be greater than zero"));
+    }
     if args.word_size() > 4 {
         return Err(options_error(
             "Word-size must be less than 6 for protein comparison",
@@ -2028,7 +2042,7 @@ fn write_pairwise_prologs(
                 ShownSubjects::Fasta { records, x_stored } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
-                        report::NCBI_TBLASTX_VERSION,
+                        crate::NCBI_BLAST_VERSION,
                         &tblastx_database_name(args),
                         records.len(),
                         match x_stored {
@@ -2041,7 +2055,7 @@ fn write_pairwise_prologs(
                 ShownSubjects::Database { pairwise, .. } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
-                        report::NCBI_TBLASTX_VERSION,
+                        crate::NCBI_BLAST_VERSION,
                         "",
                         0,
                         0,
@@ -2301,7 +2315,7 @@ fn write_tblastx_outputs(
                     args.report_counts.num_alignments,
                 );
                 let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
-                    version: report::NCBI_TBLASTX_VERSION.to_string(),
+                    version: crate::NCBI_BLAST_VERSION.to_string(),
                     database_name: database.clone(),
                     // `-db`: the `Database:` lines are the database's (`database` below).
                     database_num_sequences: match &run.database {

@@ -13,7 +13,7 @@ use std::ptr::NonNull;
 use super::x_align_index::{x_add_distinct, x_contains, x_finish, XAlignIndexes};
 use crate::common::GapEditOp;
 use crate::sequence::packed_subject::SubjectNt;
-use crate::stats::compute_lambda_from_score_probs;
+use crate::stats::karlin_calc::calc_lambda_of_score_probs;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
 use crate::utils::seg::{SegMasker, SegParams};
@@ -23,14 +23,27 @@ use super::adjust_scores::{
     BlastAminoAcidComposition, BlastCompositionWorkspace, BlastMatrixInfo,
 };
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-570
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:550-572
 // ```c
-// static double s_CalcLambda(double probs[], int min_score,
-//                            int max_score, double lambda0) {
-//     ...
+// static double
+// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
+// {
+// ...
+//     freq.obs_min = min_score;
+//     freq.obs_max = max_score;
+//     freq.sprob0 = probs;
+//     freq.sprob = &probs[-min_score];
+//     freq.score_avg = avg;
+//
 //     return Blast_KarlinLambdaNR(&freq, lambda0);
 // }
 // ```
+/// The redo's `calc_lambda` callback of BLASTP, TBLASTN and BLASTX: NCBI's `s_CalcLambda` as
+/// written (`calc_lambda_of_score_probs`: the probabilities of the scores `min_score` to
+/// `max_score` as given, neither normalized nor narrowed to the nonzero scores), -1.0 where
+/// `Blast_KarlinLambdaNR` gives it, which `Blast_CompositionBasedStats` turns into the lower bound
+/// of the ratio (`adjust_scores::compute_lambda_ratio`). Mode 1 calls it for every pair (item SC5
+/// of line NP), modes 2 and 3 where the matrix adjustment falls back to scaling.
 #[inline]
 pub(crate) fn redo_calc_lambda(
     probs: &[f64],
@@ -38,8 +51,12 @@ pub(crate) fn redo_calc_lambda(
     max_score: i32,
     lambda0: f64,
 ) -> Result<f64> {
-    compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
-        .map_err(|err| anyhow::anyhow!(err))
+    Ok(calc_lambda_of_score_probs(
+        probs.to_vec(),
+        min_score,
+        max_score,
+        lambda0,
+    ))
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:41-46
@@ -88,6 +105,36 @@ pub enum BlastCompoAdjustMode {
     CompositionBasedStats,
     CompositionMatrixAdjust,
     ForceFullMatrixAdjust,
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_constants.h:59-70
+// ```c
+// typedef enum ECompoAdjustModes {
+//     /** Don't use composition based statistics */
+//     eNoCompositionBasedStats       = 0,
+//     /** Composition-based statistics as in NAR 29:2994-3005, 2001 */
+//     eCompositionBasedStats         = 1,
+// ...
+//     eCompositionMatrixAdjust       = 2,
+// ...
+//     eCompoForceFullMatrixAdjust    = 3,
+//     eNumCompoAdjustModes
+// ```
+impl BlastCompoAdjustMode {
+    /// NCBI's value of the mode (`ECompoAdjustModes`, 0 to 3).
+    pub fn ncbi_value(self) -> i32 {
+        match self {
+            BlastCompoAdjustMode::NoCompositionBasedStats => 0,
+            BlastCompoAdjustMode::CompositionBasedStats => 1,
+            BlastCompoAdjustMode::CompositionMatrixAdjust => 2,
+            BlastCompoAdjustMode::ForceFullMatrixAdjust => 3,
+        }
+    }
+
+    /// Whether the search runs the composition-based redo (a mode above 0).
+    pub fn is_enabled(self) -> bool {
+        self != BlastCompoAdjustMode::NoCompositionBasedStats
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_constants.h:61-68

@@ -11,6 +11,7 @@ use crate::utils::genetic_code::GeneticCode;
 
 use super::stage_d_pipeline::LocalStageDScoring;
 use crate::config::ScoringMatrix;
+use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
 
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:54-61
 // ```c++
@@ -22,6 +23,10 @@ use crate::config::ScoringMatrix;
 //     arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
 //     m_Args.push_back(arg);
 // ```
+/// TBLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
+pub(crate) const TBLASTN_TASK: TaskParser =
+    task_parser("TBLASTN", &["tblastn", "tblastn-fast"], &[]);
+
 // NCBI reference: c++/src/algo/blast/api/tblastn_options.cpp:54-85
 // ```c++
 // SetWordThreshold(BLAST_WORD_THRESHOLD_TBLASTN);
@@ -116,7 +121,7 @@ pub struct TblastnArgs {
     #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
     // `tblastn-fast`: word size 5, the compressed lookup table and threshold 20 (`resolve`).
-    #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn", "tblastn-fast"], &[]))]
+    #[arg(long, default_value = "tblastn", value_parser = TBLASTN_TASK)]
     pub task: String,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
@@ -712,7 +717,8 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     //     } else {
     // ```
     // The composition mode selects the ordinary traceback (mode 0) or the composition
-    // redo; LOSAT's TBLASTN implements modes 0 and 2.
+    // redo, whose matrix adjustment rule modes 1 to 3 pick (`blast_adjust_scores`; item SC5 of
+    // line NP).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155
     // ```c++
     //     if (opts_memento->m_ScoringOpts->matrix &&
@@ -731,17 +737,12 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // (`blast_aux_priv.cpp:175-229`), so that size is mode 0's too.
     let identity_cbs_reset = args.matrix_name.eq_ignore_ascii_case("identity")
         && args.composition_mode != CompositionMode::NoCompositionBasedStats;
-    let composition_mode2 = match args.composition_mode {
-        _ if identity_cbs_reset => false,
-        CompositionMode::NoCompositionBasedStats => false,
-        CompositionMode::CompositionMatrixAdjust => true,
-        CompositionMode::CompositionBasedStats | CompositionMode::CompoForceFullMatrixAdjust => {
-            anyhow::bail!(
-                "-comp_based_stats {} (composition mode {}) is not supported by LOSAT's TBLASTN",
-                args.comp_based_stats,
-                args.composition_mode as i32
-            )
-        }
+    let compo_adjust_mode = match args.composition_mode {
+        _ if identity_cbs_reset => BlastCompoAdjustMode::NoCompositionBasedStats,
+        CompositionMode::NoCompositionBasedStats => BlastCompoAdjustMode::NoCompositionBasedStats,
+        CompositionMode::CompositionBasedStats => BlastCompoAdjustMode::CompositionBasedStats,
+        CompositionMode::CompositionMatrixAdjust => BlastCompoAdjustMode::CompositionMatrixAdjust,
+        CompositionMode::CompoForceFullMatrixAdjust => BlastCompoAdjustMode::ForceFullMatrixAdjust,
     };
     // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
     // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
@@ -770,7 +771,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // A hit list size whose preliminary size is not positive crashes NCBI.
     if crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         args.hitlist_size,
-        composition_mode2,
+        compo_adjust_mode.is_enabled(),
         true,
     ) < 1
     {
@@ -821,7 +822,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
         );
     };
     Ok(SearchSettings {
-        composition_mode2,
+        compo_adjust_mode,
         identity_cbs_reset,
         scoring: LocalStageDScoring {
             matrix,
@@ -873,7 +874,8 @@ pub(super) fn check_identity_compressed_lookup_of(args: &ResolvedTblastnArgs) ->
 // search reads; these are the ones the Stage D port uses.
 /// The search settings that the options select.
 pub(super) struct SearchSettings {
-    pub(super) composition_mode2: bool,
+    /// The composition mode of the search (mode 0 for IDENTITY, `identity_cbs_reset`).
+    pub(super) compo_adjust_mode: BlastCompoAdjustMode,
     /// IDENTITY with a composition mode above 0, which NCBI searches in mode 0 with a warning
     /// for each query of the first query batch (`IDENTITY_CBS_RESET_MESSAGE`).
     pub(super) identity_cbs_reset: bool,
@@ -1026,9 +1028,6 @@ mod tests {
         for extra in [
             &["-ungapped", "-comp_based_stats", "F"][..],
             &["-max_intron_length", "100"],
-            &["-comp_based_stats", "1"],
-            &["-comp_based_stats", "3"],
-            &["-matrix", "PAM30", "-comp_based_stats", "1"],
             &["-window_size", "0"],
             &["-word_size", "5", "-window_size", "0"],
             &["-max_target_seqs", "1073741799"],
@@ -1050,9 +1049,20 @@ mod tests {
             );
         }
         // Every matrix of NCBI's tables with every gap cost pair of its table, word sizes 2 to 4,
-        // and composition modes 0 and 2 (series SC, SC1).
+        // and composition modes 0 and 2 (series SC, SC1) and 1 and 3 (SC5).
         for extra in [
             &["-matrix", "PAM30"][..],
+            &["-comp_based_stats", "1"],
+            &["-comp_based_stats", "3"],
+            &["-matrix", "PAM30", "-comp_based_stats", "1"],
+            &[
+                "-task",
+                "tblastn-fast",
+                "-matrix",
+                "BLOSUM45",
+                "-comp_based_stats",
+                "3",
+            ],
             &["-matrix", "pam250", "-comp_based_stats", "0"],
             &["-matrix", "BLOSUM45", "-gapopen", "13", "-gapextend", "3"],
             &["-matrix", "BLOSUM45", "-word_size", "3"],
@@ -1108,6 +1118,24 @@ mod tests {
             ),
             (6, 21.0, 60)
         );
+        // NCBI blast_args.cpp:836-879: the typed mode is the search's (`compo_adjust_mode`).
+        for (value, mode) in [
+            ("0", BlastCompoAdjustMode::NoCompositionBasedStats),
+            ("F", BlastCompoAdjustMode::NoCompositionBasedStats),
+            ("1", BlastCompoAdjustMode::CompositionBasedStats),
+            ("2", BlastCompoAdjustMode::CompositionMatrixAdjust),
+            ("T", BlastCompoAdjustMode::CompositionMatrixAdjust),
+            ("3", BlastCompoAdjustMode::ForceFullMatrixAdjust),
+        ] {
+            let settings = search_settings(
+                &parse(&["-comp_based_stats", value])
+                    .unwrap()
+                    .resolve()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(settings.compo_adjust_mode, mode, "{value}");
+        }
         // NCBI setup_factory.cpp:143-155: IDENTITY is searched in mode 0 with a warning (for the
         // first query batch), whatever mode is asked.
         for (extra, reset) in [
@@ -1119,7 +1147,10 @@ mod tests {
         ] {
             let settings = search_settings(&parse(extra).unwrap().resolve().unwrap()).unwrap();
             assert_eq!(
-                (settings.identity_cbs_reset, settings.composition_mode2),
+                (
+                    settings.identity_cbs_reset,
+                    settings.compo_adjust_mode.is_enabled()
+                ),
                 (reset, !reset && extra.len() == 2),
                 "{extra:?}"
             );

@@ -38,6 +38,7 @@
 
 pub(crate) mod engine;
 pub(crate) mod prelim;
+pub(crate) mod redo;
 pub(crate) mod rescale;
 pub(crate) mod scan;
 pub(crate) mod traceback;

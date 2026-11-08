@@ -42,7 +42,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use super::hsp::{blastn_hsp_count, BlastnHitList, BlastnHsp, NCBI_BLASTN_VERSION};
+use super::hsp::{blastn_hsp_count, BlastnHitList, BlastnHsp};
 use super::pairwise::xml_rows_into;
 use super::x_subject_store::SubjectLetters;
 use crate::algorithm::common::tabular::TabularSubjects;
@@ -103,7 +103,7 @@ pub(crate) struct BlastnTabular<'a> {
 ///     }
 /// ```
 pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
-    let version = format!("BLASTN {NCBI_BLASTN_VERSION}");
+    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
     TabularWriter {
         spec,
         program_version: &version,
@@ -172,7 +172,7 @@ pub(crate) fn write_blastn_tabular(
             }
         }
     }
-    let version = format!("BLASTN {NCBI_BLASTN_VERSION}");
+    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
     let table = TabularWriter {
         spec,
         program_version: &version,

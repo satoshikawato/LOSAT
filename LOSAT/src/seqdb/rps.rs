@@ -165,6 +165,77 @@ pub(crate) fn canonical_volume_path(base: &Path) -> String {
         .into_owned()
 }
 
+/// A `.freq` file read at offsets: the file itself where the platform has positioned reads, else
+/// (WASI, which refuses rpsblast anyway) its bytes in the heap.
+enum FreqSource {
+    #[cfg(any(unix, windows))]
+    File(std::fs::File),
+    #[cfg(not(any(unix, windows)))]
+    Heap(Vec<u8>),
+}
+
+impl FreqSource {
+    fn open(path: &Path) -> std::io::Result<Self> {
+        #[cfg(any(unix, windows))]
+        {
+            std::fs::File::open(path).map(FreqSource::File)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            std::fs::read(path).map(FreqSource::Heap)
+        }
+    }
+
+    fn len(&self) -> std::io::Result<usize> {
+        #[cfg(any(unix, windows))]
+        {
+            let FreqSource::File(file) = self;
+            Ok(usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let FreqSource::Heap(bytes) = self;
+            Ok(bytes.len())
+        }
+    }
+
+    /// Fills `buf` from the bytes at `offset`.
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            let FreqSource::File(file) = self;
+            file.read_exact_at(buf, offset)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileExt;
+            let FreqSource::File(file) = self;
+            let mut done = 0;
+            while done < buf.len() {
+                let n = file.seek_read(&mut buf[done..], offset + done as u64)?;
+                if n == 0 {
+                    return Err(std::io::ErrorKind::UnexpectedEof.into());
+                }
+                done += n;
+            }
+            Ok(())
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let FreqSource::Heap(bytes) = self;
+            let start = usize::try_from(offset).unwrap_or(usize::MAX);
+            let end = start.saturating_add(buf.len());
+            buf.copy_from_slice(
+                bytes
+                    .get(start..end)
+                    .ok_or(std::io::ErrorKind::UnexpectedEof)?,
+            );
+            Ok(())
+        }
+    }
+}
+
 /// One volume's `.aux`, `.loo` and `.rps`, checked against the volume's sequences.
 pub(crate) struct RpsVolumeFiles {
     pub(crate) aux: RpsAux,
@@ -183,6 +254,10 @@ pub(crate) struct RpsVolumeFiles {
     narrow: Option<Vec<[i32; 28]>>,
     /// The presence bits of the backbone's cells (`lookup->pv`).
     pv: Vec<u64>,
+    /// The `.freq` file (frequency ratios), opened by [`Self::open_freq`]: read by `pread`, not
+    /// mapped, so that its pages never count in the resident set (a CDD volume's is 81 MB; the
+    /// redo of a search touches almost all of it).
+    freq: Option<FreqSource>,
 }
 
 impl RpsVolumeFiles {
@@ -361,6 +436,7 @@ impl RpsVolumeFiles {
             backbone_start,
             narrow: None,
             pv: vec![0u64; RPS_BACKBONE_SIZE / 64],
+            freq: None,
         };
         if files.cells().is_none() || files.overflow().is_none() {
             return Err(refused(".loo file is shorter than its backbone"));
@@ -370,6 +446,159 @@ impl RpsVolumeFiles {
             files.narrow = Some(files.widen_rows(num_rows));
         }
         Ok(files)
+    }
+
+    /// Opens the volume's `.freq` file (the frequency ratios of the composition-based
+    /// statistics), after the other files as NCBI does. A missing file, an empty one or a wrong
+    /// magic number is NCBI's error (the file's own text is replaced by the message below);
+    /// a file shorter than the rows that the `.rps` offsets name (NCBI reads past it) is
+    /// LOSAT's refusal.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:568-584
+    /// ```c++
+    ///     if (flags & fFreqRatiosFile) {
+    ///         try {
+    ///             // read frequency ratios data
+    ///             m_FreqRatiosFile.Reset(new CRpsFreqRatiosFile(path));
+    ///         } catch (const CBlastException& e) {
+    ///         	string msg = rps_dbname + " contains no frequency ratios needed for composition-based statistics.\n" \
+    ///         			     "Please disable composition-based statistics when searching against " + rps_dbname + ".";
+    ///             NCBI_RETHROW(e, CBlastException, eRpsInit, msg);
+    ///         }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:485-499
+    /// ```c++
+    ///     m_Data = (BlastRPSFreqRatiosHeader *) m_MmappedFile->GetPtr();
+    ///     if (m_Data->magic_number != RPS_MAGIC_NUM &&
+    ///             m_Data->magic_number != RPS_MAGIC_NUM_28) {
+    ///             m_Data = NULL;
+    ///             NCBI_THROW(CBlastException, eRpsInit,
+    ///                    "RPS BLAST freq ratios file (" + filename_no_extn + kExtension +
+    ///                    ") is either corrupt or constructed for an incompatible "
+    ///                    "architecture");
+    /// ```
+    /// The rows start after the header and `num_profiles + 1` offsets, with the profile count
+    /// of the `.rps` file (`freq_header->start_offsets + num_profiles + 1`,
+    /// blast_traceback.c:956-957), and their stride is the `.rps` alphabet.
+    pub(crate) fn open_freq(&mut self, base: &Path) -> Result<(), RpsOpenError> {
+        let shown = canonical_volume_path(base);
+        let missing = || {
+            RpsOpenError::Ncbi(format!(
+                "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
+            ))
+        };
+        let mut path = base.as_os_str().to_os_string();
+        path.push(".freq");
+        let freq = FreqSource::open(&PathBuf::from(path)).map_err(|_| missing())?;
+        let mut magic = [0u8; 4];
+        freq.read_at(&mut magic, 0).map_err(|_| missing())?;
+        let magic = i32::from_le_bytes(magic);
+        if magic != RPS_MAGIC_NUM && magic != RPS_MAGIC_NUM_28 {
+            return Err(missing());
+        }
+        let num_rows = self.offsets()[self.num_profiles] as usize;
+        let needed = num_rows
+            .checked_mul(self.alphabet * 4)
+            .and_then(|bytes| bytes.checked_add(self.rows_start()));
+        if needed.is_none_or(|needed| freq.len().map_or(true, |len| len < needed)) {
+            return Err(RpsOpenError::Refused(
+                "a profile database whose .freq file is shorter than its rows (NCBI BLAST+ reads past it) is not supported by LOSAT's RPSBLAST".to_string(),
+            ));
+        }
+        self.freq = Some(freq);
+        Ok(())
+    }
+
+    /// The sum of the positive maxima of the rows of each profile, read from the `.rps` file
+    /// through a small buffer (the mapping would bring the whole file into the resident set).
+    /// An alignment uses each row of its profile at most once, so no alignment of the profile
+    /// scores more than this; `None` where the file cannot be read.
+    ///
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h
+    /// (`BlastGapAlignStruct::score` is an `Int4`, as the extensions' scores are: a sum above
+    /// `INT4_MAX` overflows in C, which is undefined behavior).
+    pub(crate) fn profile_score_bounds(&self, base: &Path) -> Option<Vec<i64>> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut path = base.as_os_str().to_os_string();
+        path.push(".rps");
+        let mut file = std::fs::File::open(PathBuf::from(path)).ok()?;
+        file.seek(SeekFrom::Start(self.rows_start() as u64)).ok()?;
+        let offsets = self.offsets();
+        let row_bytes = self.alphabet * 4;
+        const ROWS_PER_READ: usize = 8192;
+        let mut buffer = vec![0u8; row_bytes * ROWS_PER_READ];
+        let num_rows = offsets[self.num_profiles] as usize;
+        let mut bounds = vec![0i64; self.num_profiles];
+        let (mut profile, mut row) = (0usize, 0usize);
+        while row < num_rows {
+            let rows = ROWS_PER_READ.min(num_rows - row);
+            file.read_exact(&mut buffer[..rows * row_bytes]).ok()?;
+            for chunk in buffer[..rows * row_bytes].chunks_exact(row_bytes) {
+                while row >= offsets[profile + 1] as usize {
+                    profile += 1;
+                }
+                let best = chunk
+                    .chunks_exact(4)
+                    .map(|cell| i32::from_le_bytes([cell[0], cell[1], cell[2], cell[3]]))
+                    .max()
+                    .unwrap_or(0);
+                bounds[profile] += i64::from(best.max(0));
+                row += 1;
+            }
+        }
+        Some(bounds)
+    }
+
+    /// The frequency ratios of the rows `start..start + count` into `out` (28 per row): each
+    /// row takes `alphabet` integers from the `.freq` file at the `.rps` alphabet's stride,
+    /// divided by `FREQ_RATIO_SCALE` and padded with 0.0 (a 26-column `.rps` with a 28-column
+    /// `.freq` reads rows two integers early, as NCBI does).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:985-1006
+    /// ```c
+    ///    for (ic=0; ic<ncol; ic++) {
+    ///        for (ir=0; ir<psi_matrix->pssm->nrows; ir++) {
+    ///            psi_matrix->freq_ratios[ic][ir] = (double) freq[ic][ir]/ (double) FREQ_RATIO_SCALE;
+    ///        }
+    ///        for (;  ir<BLASTAA_SIZE; ir++) {
+    ///            psi_matrix->freq_ratios[ic][ir] = 0.0;
+    ///        }
+    ///    }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:91
+    /// ```c
+    /// #define FREQ_RATIO_SCALE 1000000000
+    /// ```
+    pub(crate) fn freq_ratios(
+        &self,
+        start: usize,
+        count: usize,
+        bytes: &mut Vec<u8>,
+        out: &mut Vec<[f64; 28]>,
+    ) -> std::io::Result<()> {
+        out.clear();
+        let Some(freq) = self.freq.as_ref() else {
+            return Ok(());
+        };
+        // (`bytes` only grows: a list's rows are not zeroed again for the next one.)
+        let wanted = count * self.alphabet * 4;
+        if bytes.len() < wanted {
+            bytes.resize(wanted, 0);
+        }
+        let bytes = &mut bytes[..wanted];
+        freq.read_at(
+            bytes,
+            (self.rows_start() + start * self.alphabet * 4) as u64,
+        )?;
+        out.extend(bytes.chunks_exact(self.alphabet * 4).map(|row| {
+            let mut ratios = [0.0f64; 28];
+            for (ratio, value) in ratios.iter_mut().zip(row.chunks_exact(4)) {
+                *ratio = f64::from(i32::from_le_bytes([value[0], value[1], value[2], value[3]]))
+                    / 1_000_000_000.0;
+            }
+            ratios
+        }));
+        Ok(())
     }
 
     /// Every hit of the table names a position whose word lies in the concatenated rows
@@ -580,6 +809,90 @@ mod tests {
         // Letters 26 and 27 read the next row's columns 0 and 1 (stride 26).
         assert_eq!((rows[2][26], rows[2][27]), (300, 301));
         assert_eq!((rows[6][26], rows[6][27]), (0, 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `.freq` file of `columns` columns for the two profiles of `write_volume` (rows 0 to
+    /// 6): the ratio of row `r`, column `c` is `r * 1000 + c` over 10^9.
+    fn write_freq(base: &Path, columns: usize) {
+        let magic = if columns == 26 {
+            RPS_MAGIC_NUM
+        } else {
+            RPS_MAGIC_NUM_28
+        };
+        let mut freq = vec![magic, 2, 0, 4, 7];
+        for row in 0..7 {
+            for column in 0..columns {
+                freq.push((row * 1000 + column) as i32);
+            }
+        }
+        std::fs::write(base.with_extension("freq"), words(&freq)).unwrap();
+    }
+
+    #[test]
+    fn the_freq_rows_have_the_rps_alphabets_stride() {
+        let dir = scratch("freq");
+        let mut ratios = Vec::new();
+        let mut bytes = Vec::new();
+        // 28 columns on both sides: rows as written, ÷ 10^9.
+        let base = write_volume(&dir, 28, AUX);
+        write_freq(&base, 28);
+        let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+        files.open_freq(&base).unwrap();
+        files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
+        assert_eq!(ratios.len(), 2);
+        assert_eq!(ratios[0][0], 4000.0 / 1e9);
+        assert_eq!(ratios[1][27], 5027.0 / 1e9);
+        // A 26-column `.rps` with a 28-column `.freq` reads rows two integers early: row r
+        // starts at integer 26 r of the rows (NCBI's drift), and columns 26 and 27 are 0.0.
+        let base = write_volume(&dir, 26, AUX);
+        write_freq(&base, 28);
+        let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+        files.open_freq(&base).unwrap();
+        files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
+        let flat: Vec<i32> = (0..7)
+            .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
+            .collect();
+        assert_eq!(ratios[0][0], f64::from(flat[52]) / 1e9);
+        assert_eq!(ratios[0][25], f64::from(flat[77]) / 1e9);
+        assert_eq!((ratios[0][26], ratios[0][27]), (0.0, 0.0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_score_bound_of_a_profile_sums_its_rows_positive_maxima() {
+        let dir = scratch("bounds");
+        let base = write_volume(&dir, 28, AUX);
+        let files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+        // Row r holds r * 100 + c: the maximum of a row is r * 100 + 27. Profile 0 has rows
+        // 0..=3 (the last is its sentinel row), profile 1 rows 4..=6.
+        let bounds = files.profile_score_bounds(&base).unwrap();
+        assert_eq!(bounds, vec![27 + 127 + 227 + 327, 427 + 527 + 627]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
+        let dir = scratch("freqerr");
+        let base = write_volume(&dir, 28, AUX);
+        let shown = canonical_volume_path(&base);
+        let text = format!(
+            "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
+        );
+        let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+        assert_eq!(
+            files.open_freq(&base).err(),
+            Some(RpsOpenError::Ncbi(text.clone()))
+        );
+        std::fs::write(base.with_extension("freq"), words(&[7, 2, 0, 4, 7])).unwrap();
+        assert_eq!(files.open_freq(&base).err(), Some(RpsOpenError::Ncbi(text)));
+        write_freq(&base, 28);
+        let freq = std::fs::read(base.with_extension("freq")).unwrap();
+        std::fs::write(base.with_extension("freq"), &freq[..freq.len() - 4]).unwrap();
+        assert!(matches!(
+            files.open_freq(&base),
+            Err(RpsOpenError::Refused(_))
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

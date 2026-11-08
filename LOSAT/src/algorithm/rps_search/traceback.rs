@@ -42,12 +42,18 @@ pub(crate) struct RpsTraceback<'a> {
     pub(crate) expect_value: f64,
     /// `hit_options->hitlist_size`.
     pub(crate) hitlist_size: usize,
+    /// The composition-based redo (modes 1 to 3), else the rescaled PSSM's traceback.
+    pub(crate) redo: Option<super::redo::RpsRedoParams<'a>>,
 }
 
 /// The memory of one worker's traceback.
 pub(crate) struct RpsTraceScratch {
-    gap: PssmGapScratch,
-    pssm: QueryPssm,
+    pub(super) gap: PssmGapScratch,
+    pub(super) pssm: QueryPssm,
+    /// The frequency ratios of the profile being redone.
+    pub(super) ratios: Vec<[f64; 28]>,
+    /// The bytes of those rows as the `.freq` file holds them.
+    pub(super) freq_bytes: Vec<u8>,
 }
 
 impl RpsTraceScratch {
@@ -55,6 +61,8 @@ impl RpsTraceScratch {
         Self {
             gap: PssmGapScratch::new(),
             pssm: QueryPssm { rows: Vec::new() },
+            ratios: Vec::new(),
+            freq_bytes: Vec::new(),
         }
     }
 }
@@ -64,6 +72,49 @@ impl RpsTraceScratch {
 pub(crate) struct RpsTraced {
     pub(crate) hit_list: Option<BlastpHitList>,
     pub(crate) k_mark: Option<u32>,
+}
+
+/// `s_BlastHSPListRPSUpdate`'s part before the sort: the query and the subject of each HSP
+/// switched back (the HSPs are in the profile's and the user query's local coordinates), the
+/// insertions and deletions of its edit script switched, and the user query's fields.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:148-170
+/// ```c
+///    hsp = hsplist->hsp_array;
+///    for (i = 0; i < hsplist->hspcnt; i++) {
+///
+///       /* switch query and subject (which are already in local coordinates) */
+///       tmp = hsp[i]->query;
+///       hsp[i]->query = hsp[i]->subject;
+///       hsp[i]->subject = tmp;
+///
+///       /* Change the traceback information to reflect the query and subject
+///          sequences getting switched */
+///       s_BlastHSPRPSUpdate(hsp[i]);
+///       ...
+///    }
+///    Blast_HSPListSortByScore(hsplist);
+/// ```
+/// (The sort is the caller's.)
+pub(super) fn swap_roles(hsp_list: &mut BlastpHspList, query_length: usize) {
+    for hsp in &mut hsp_list.hsps {
+        std::mem::swap(&mut hsp.q_start, &mut hsp.s_start);
+        std::mem::swap(&mut hsp.q_end, &mut hsp.s_end);
+        std::mem::swap(&mut hsp.gapped_q_start, &mut hsp.gapped_s_start);
+        if let Some(ops) = hsp.gap_info.as_mut() {
+            for op in ops.iter_mut() {
+                *op = match *op {
+                    GapEditOp::Ins(n) => GapEditOp::Del(n),
+                    GapEditOp::Del(n) => GapEditOp::Ins(n),
+                    sub => sub,
+                };
+            }
+        }
+        hsp.query_length = query_length;
+        hsp.query_context = hsp_list.query_index as i32;
+        hsp.q_idx = hsp_list.query_index;
+        hsp.s_idx = hsp_list.oid;
+    }
 }
 
 impl RpsTraceback<'_> {
@@ -120,8 +171,12 @@ impl RpsTraceback<'_> {
         prelim: BlastpHitList<XPrelimHsp>,
         query: &[u8],
         q_idx: u32,
+        batch_kbp: &KarlinParams,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
+        if let Some(redo) = &self.redo {
+            return self.trace_query_redo(redo, prelim, query, q_idx, batch_kbp, scratch);
+        }
         let probabilities = residue_probabilities(query);
         let mut lists: Vec<BlastpHspList<XPrelimHsp>> = prelim
             .hsplist_array
@@ -268,24 +323,7 @@ impl RpsTraceback<'_> {
         query_length: usize,
         profile_length: usize,
     ) {
-        for hsp in &mut hsp_list.hsps {
-            std::mem::swap(&mut hsp.q_start, &mut hsp.s_start);
-            std::mem::swap(&mut hsp.q_end, &mut hsp.s_end);
-            std::mem::swap(&mut hsp.gapped_q_start, &mut hsp.gapped_s_start);
-            if let Some(ops) = hsp.gap_info.as_mut() {
-                for op in ops.iter_mut() {
-                    *op = match *op {
-                        GapEditOp::Ins(n) => GapEditOp::Del(n),
-                        GapEditOp::Del(n) => GapEditOp::Ins(n),
-                        sub => sub,
-                    };
-                }
-            }
-            hsp.query_length = query_length;
-            hsp.query_context = hsp_list.query_index as i32;
-            hsp.q_idx = hsp_list.query_index;
-            hsp.s_idx = hsp_list.oid;
-        }
+        swap_roles(hsp_list, query_length);
         sort_by_score(&mut hsp_list.hsps);
         let scaled = KarlinParams {
             lambda: karlin.lambda / self.scale,
@@ -337,7 +375,7 @@ impl RpsTraceback<'_> {
 ///         result = BLAST_CMP(h2->query.end, h1->query.end);
 ///     }
 /// ```
-fn sort_by_score(hsps: &mut [BlastpHsp]) {
+pub(super) fn sort_by_score(hsps: &mut [BlastpHsp]) {
     let compare = |a: &BlastpHsp, b: &BlastpHsp| {
         b.raw_score
             .cmp(&a.raw_score)

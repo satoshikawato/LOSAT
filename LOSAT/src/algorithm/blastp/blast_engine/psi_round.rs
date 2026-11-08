@@ -1,4 +1,5 @@
-//! psiblast's rounds of FASTA queries (`-num_iterations` other than 1; series PS, item PS5a): the
+//! psiblast's rounds of FASTA queries (`-num_iterations` other than 1; series PS, item PS5a) and of
+//! a PSSM query (`-in_pssm` with `-num_iterations` other than 1 or a PSSM file, item PS5b): the
 //! round driver (`search_rounds`), which `search` calls for such a run, and the hook of one
 //! round's search (`round_outcome`), which `run_resolved_in_pool` calls beside `psiblast_pssms`.
 //! Both are cold: blastp's default path only tests `ResolvedBlastpArgs::psi_rounds` and
@@ -7,11 +8,13 @@
 //! The driver runs `run_resolved_in_pool` once per round per query, as NCBI's `CPsiBlast` searches
 //! one query per batch and round (psiblast_app.cpp:468, `x_RunLocalPsiBlastIterations`; quoted at
 //! `algorithm::psiblast::rounds`), on one search pool and the database opened once: round 1 is
-//! blastp's search of the FASTA query, a later round the PSSM search (`algorithm::pssm_search`) of
-//! the PSSM that the engine made from the round before (`PsiSearch::from_engine`). The outfmt 0
+//! blastp's search of the FASTA query (with `-in_pssm` the PSSM search of the input PSSM), a later
+//! round the PSSM search (`algorithm::pssm_search`) of the PSSM that the engine made from the round
+//! before (`PsiSearch::from_engine`), whose query stays the round-1 query. The outfmt 0
 //! prolog comes with the first call; every call writes no epilog, which the driver writes after
 //! the last query (outfmt 7's count is that of the rounds). The PSSM files are written between
-//! the calls, where NCBI writes them, after the report of the round before.
+//! the calls, where NCBI writes them, after the report of the round before (with `-in_pssm` the
+//! input PSSM before round 1, `algorithm::psiblast::in_pssm_files`).
 
 use std::io::Write as _;
 use std::sync::Arc;
@@ -21,7 +24,7 @@ use anyhow::{bail, Result};
 use super::{
     blastp_database_name, run_resolved_in_pool, write_pairwise_prologs,
     write_reports_without_queries, BlastpRanges, BlastpReports, BlastpSubjectSource, ShownLetters,
-    ShownSubjects, SubjectSet, NCBI_BLASTP_VERSION,
+    ShownSubjects, SubjectSet,
 };
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
@@ -169,6 +172,8 @@ fn run_queries(
         &plan.request,
         args.out.as_deref().filter(|path| path.as_os_str() != "-"),
     );
+    // With `-in_pssm` the options' mode is already the PSSM search's (`check_options`), so a later
+    // round warns no more.
     let original_mode = args.comp_based_stats.mode;
     let pssm_mode =
         crate::algorithm::psiblast::in_pssm::position_based_mode(app_mode(original_mode));
@@ -188,13 +193,37 @@ fn run_queries(
             x_ordinal_base: input_start,
         };
         let mut state = IterationState::new(plan.num_iterations);
-        // The PSSM that the next round searches (`pssm`, made after the round before).
+        // The PSSM that the next round searches (`pssm`, made after the round before); before
+        // round 1 of `-in_pssm` the input PSSM (`args.psi_search`), whose files are `input_files`.
         let mut pssm: Option<QueryPssm> = None;
+        let mut input_files = match &plan.input {
+            Some(input) => Some(input.files(&plan.request)?),
+            None => None,
+        };
+        // `kbp_psi[0]` and `kbp_gap_psi[0]` of the input PSSM's search, after a round 1 without
+        // alignments (`in_pssm_files::InPssmRounds::written_back`).
+        let mut searched_input = None;
         while state.go() {
-            if let Some(current) = &pssm {
-                files.write(current)?;
-            }
             let round = state.number();
+            match (&pssm, input_files.as_mut()) {
+                (Some(current), _) => {
+                    files.write(current.asn.as_deref(), current.ascii.as_deref())?
+                }
+                (None, Some((asn, ascii))) if round == 1 => {
+                    // NCBI's prolog comes before the rounds (`PrintProlog`), so before a file
+                    // that cannot be written stops the run here.
+                    if let Err(error) = files.write(asn.as_deref(), ascii.as_deref()) {
+                        if calls == 0 {
+                            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                        }
+                        return Err(error);
+                    }
+                    // Only the ASCII PSSM is written again (after a round 1 without alignments;
+                    // the ASN.1 text is then made with the write-back).
+                    *asn = None;
+                }
+                _ => {}
+            }
             let mut round_args = args.clone();
             if let Some(current) = &pssm {
                 // The options' mode when this round's score block is set up: the given one in
@@ -206,6 +235,12 @@ fn run_queries(
                 };
                 let mut search =
                     PsiSearch::from_engine(&current.engine, records[0].clone(), Vec::new());
+                // The query source is fixed for the run: a PSSM query's warning label keeps its
+                // title rule in every round (`PsiSearch::warning_title`).
+                search.warning_title = args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.warning_title.clone());
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
                     setup_mode,
@@ -218,6 +253,7 @@ fn run_queries(
                 state: state.clone(),
                 save_last: plan.save_last,
                 request: plan.request.clone(),
+                query_id: plan.input.as_ref().map(|input| input.id.clone()),
                 outcome: std::sync::Mutex::new(None),
             };
             // The reader's messages of the batch come with its first round.
@@ -274,6 +310,9 @@ fn run_queries(
                 .take()
                 .expect("every round's search reaches its outcome hook");
             if !outcome.has_alignments {
+                if round == 1 {
+                    searched_input = outcome.searched;
+                }
                 break;
             }
             state.advance(outcome.set);
@@ -286,9 +325,20 @@ fn run_queries(
                 );
             }
         }
+        // After a round without alignments NCBI writes the PSSM it searched last, after that
+        // round's K/A write-back (psiblast_impl.cpp:150-168): an engine PSSM's own values (the
+        // same bytes), or the input PSSM's after round 1 (`InPssmRounds::written_back`), whose
+        // ASCII PSSM is round 1's (`m_AncillaryData` is still the input PSSM's).
         if plan.save_last {
-            if let Some(current) = &pssm {
-                files.write(current)?;
+            match (&pssm, &plan.input, &input_files, searched_input) {
+                (Some(current), _, _, _) => {
+                    files.write(current.asn.as_deref(), current.ascii.as_deref())?
+                }
+                (None, Some(input), Some((_, ascii)), Some((ungapped, gapped))) => {
+                    let asn = input.written_back(&plan.request, ungapped, gapped)?;
+                    files.write(asn.as_deref(), ascii.as_deref())?;
+                }
+                _ => {}
             }
         }
         if state.has_converged() {
@@ -370,7 +420,7 @@ fn write_round_epilogs(
             _ => continue,
         }
         let report = crate::report::BlastpPairwiseReport {
-            version: NCBI_BLASTP_VERSION.to_string(),
+            version: crate::NCBI_BLAST_VERSION.to_string(),
             database_name: blastp_database_name(args, subject_label),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,
@@ -529,10 +579,17 @@ pub(super) fn round_outcome(
     };
     let next =
         makes_next.then(|| next_pssm(args, io, &hsps, ranges, shown_subjects, contexts, gapped));
+    // The blocks of a PSSM round's search, which NCBI writes back into the PSSM it searched
+    // (`in_pssm_files::InPssmRounds::written_back`).
+    let searched = args.psi_search.as_deref().map(|psi| {
+        let karlin = super::pssm_hooks::psi_karlin(psi, contexts, gapped);
+        (engine_block(&karlin.ungapped), engine_block(&karlin.gapped))
+    });
     *io.outcome.lock().expect("the round's outcome") = Some(RoundOutcome {
         has_alignments,
         set,
         next,
+        searched,
     });
     found_before
 }
@@ -592,10 +649,32 @@ fn next_pssm(
         .collect();
     let ordinal = ranges.query_input.ordinal(0);
     let record = &ranges.input_records[ordinal];
-    let id = format!(
-        "Query_{}",
-        args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
-    );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:148-158
+    // ```c++
+    //     m_QueryBioseq.Reset(new CBioseq);
+    //     // set the sequence id
+    //     CRef<CSeq_align> aln =
+    //         const_cast<CSeq_align_set*>(&*m_SeqAlignSet)->Set().front();
+    //     CRef<CSeq_id> query_id(const_cast<CSeq_id*>(&aln->GetSeq_id(0)));
+    //     m_QueryBioseq->SetId().push_back(query_id);
+    //
+    //     CRef<CSeqdesc> desc(new CSeqdesc);
+    //     desc->SetTitle(m_QueryTitle);
+    // ```
+    // The Seq-align's query id: `Query_<n>` of a FASTA query, the PSSM query's own id with
+    // `-in_pssm` (a `local id` stays an integer). The title is the query's (`s_GetQueryBioseq`
+    // gives the current PSSM's Bioseq, whose title is the input PSSM's, `""` without one), and its
+    // letters the round-1 query's, O as X (`encode_protein_sequence` in `query_pssm`).
+    let id = match &io.query_id {
+        Some(id) => id.clone(),
+        None => crate::report::serial::pssm::ObjectId::Str(
+            format!(
+                "Query_{}",
+                args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
+            )
+            .into_bytes(),
+        ),
+    };
     let standard_ungapped = engine_block(&contexts[0].karlin_params);
     let table_gapped = engine_block(gapped);
     let ancillary = match args.psi_search.as_deref() {

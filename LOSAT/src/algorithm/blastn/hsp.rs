@@ -247,8 +247,6 @@ impl BlastnOutputFormat {
     }
 }
 
-pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";
-
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
 // ```c
 // x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
@@ -271,7 +269,7 @@ fn write_blastn_outfmt7_header<W: Write>(
     subject_title: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
-    writeln!(writer, "# BLASTN {NCBI_BLASTN_VERSION}")?;
+    writeln!(writer, "# BLASTN {}", crate::NCBI_BLAST_VERSION)?;
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
     // ```c
     //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,

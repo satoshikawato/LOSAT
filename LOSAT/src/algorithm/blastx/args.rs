@@ -6,6 +6,17 @@ use anyhow::{bail, Result};
 use clap::Args;
 use std::path::PathBuf;
 
+/// `-max_target_seqs` as the hit list count of `blastinput::report_counts`: a value below 1, which a
+/// caller of `run_local` can set (the command line's is at least 1), counts 0 (NCBI's hit list size
+/// below 1, "No hits are being saved").
+pub(crate) fn max_target_seqs_count(max_target_seqs: Option<i32>) -> Option<usize> {
+    max_target_seqs.map(|n| usize::try_from(n).unwrap_or(0))
+}
+
+/// BLASTX's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
+pub(crate) const BLASTX_TASK: crate::blastinput::value_parsers::TaskParser =
+    crate::blastinput::value_parsers::task_parser("BLASTX", &["blastx", "blastx-fast"], &[]);
+
 #[derive(Args, Debug)]
 #[command(rename_all = "snake_case")]
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:49-62
@@ -152,7 +163,7 @@ pub struct BlastxArgs {
     //         arg_desc.AddDefaultKey(kTask, "task_name", "Task to execute",
     //                                CArgDescriptions::eString, m_DefaultTask);
     // ```
-    #[arg(long, default_value = "blastx", value_parser = ["blastx", "blastx-fast"])]
+    #[arg(long, default_value = "blastx", value_parser = BLASTX_TASK)]
     pub task: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:146-146
     // ```c++
@@ -772,8 +783,8 @@ pub struct ResolvedOptions {
     // ```
     pub db_length: i64,
     pub effective_search_space: i64,
-    /// Whether `-searchsp` was given, at any value: NCBI then has no Gumbel block
-    /// (`gumbel_block`).
+    /// Whether `-searchsp` was given, at any value, or the environment variable `OLD_FSC` is set
+    /// (`app::old_fsc_environment`): NCBI then has no Gumbel block (`gumbel_block`).
     pub old_fsc: bool,
 
     pub evalue: f64,
@@ -897,6 +908,15 @@ impl BlastxArgs {
         &self,
         choice: &crate::blastinput::app::FormatChoice,
     ) -> Result<ResolvedOptions> {
+        // The command line's parser has checked the values below, a caller of `run_local` has
+        // not (the task: `run_local`, first).
+        crate::algorithm::blastn::args::QueryStrand::parse(&self.strand)?;
+        if self.seg.enabled && !(self.seg.locut.is_finite() && self.seg.hicut.is_finite()) {
+            bail!("SEG requires finite cutoffs");
+        }
+        if !self.evalue.is_finite() {
+            bail!("-evalue requires a finite real value");
+        }
         let outfmt = u8::try_from(choice.number)?;
         if self
             .subject
@@ -930,6 +950,14 @@ impl BlastxArgs {
         if self.ungapped && self.comp_based_stats != 0 {
             return Err(SemanticOptionsError("Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search").into());
         }
+        // The command line's `composition` reads 0 or 2 only (LOSAT's limit); a caller of
+        // `run_local` sets the mode itself.
+        if !matches!(self.comp_based_stats, 0 | 2) {
+            bail!(
+                "unsupported BLASTX composition-based statistics mode {}: use 0 or 2",
+                self.comp_based_stats
+            );
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1765-1773
         // ```c++
         //    if ((status = LookupTableOptionsValidate(program_number,
@@ -956,11 +984,46 @@ impl BlastxArgs {
         if self.threshold.is_some_and(|x| x <= 0.0) {
             return Err(SemanticOptionsError("Non-zero threshold required").into());
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1348
+        // ```c++
+        //     if (options->word_size <= 0)
+        //     {
+        //         if ( !Blast_ProgramIsRpsBlast(program_number)) {
+        //             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                                      "Word-size must be greater than zero");
+        // ...
+        //         if (program_number == eBlastTypeBlastp ||
+        //             program_number == eBlastTypeTblastn ||
+        //             program_number == eBlastTypeBlastx)
+        //         {
+        //             if (options->word_size > 7) {
+        //                 Blast_MessageWrite(blast_msg, eBlastSevError,
+        //                                    kBlastMessageNoContext,
+        //                                    "Word-size must be less than "
+        //                                    "8 for a tblastn, blastp or blastx search");
+        // ```
+        // The command line's `-word_size` is 3 or 5 (`word_size`, LOSAT's limit); a caller of
+        // `run_local` sets the field itself: NCBI's errors, then LOSAT's limit.
+        if let Some(word) = self.word_size {
+            if word <= 0 {
+                return Err(SemanticOptionsError("Word-size must be greater than zero").into());
+            }
+            if word > 7 {
+                return Err(SemanticOptionsError(
+                    "Word-size must be less than 8 for a tblastn, blastp or blastx search",
+                )
+                .into());
+            }
+            if !matches!(word, 3 | 5) {
+                bail!("unsupported BLASTX word_size: use 3 or 5");
+            }
+        }
         // The hit list size and the counts of the pairwise report
-        // (`blastinput::report_counts`).
+        // (`blastinput::report_counts`). A `-max_target_seqs` below 1 (a caller of `run_local`
+        // sets it; the command line's is at least 1) is NCBI's hit list size below 1.
         let counts = crate::blastinput::report_counts::report_counts(
             i32::from(outfmt),
-            self.max_target_seqs.map(|n| n as usize),
+            max_target_seqs_count(self.max_target_seqs),
             self.num_descriptions,
             self.num_alignments,
         );
@@ -1120,7 +1183,13 @@ impl BlastxArgs {
             // `-dbsize` (`CBlastOptions::SetDbLength`, blast_args.cpp:2570-2572).
             db_length: self.dbsize.unwrap_or(0),
             effective_search_space: self.searchsp.unwrap_or(0),
-            old_fsc: self.searchsp.is_some(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+            // ```c
+            //     use_old_fsc = getenv("OLD_FSC");
+            //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+            // ```
+            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307, `parameters::gumbel_block`).
+            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
             window_size: self.window_size.unwrap_or(40),
             evalue: self.evalue,
             sum_stats: self.sum_stats.unwrap_or(true),

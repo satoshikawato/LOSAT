@@ -22,18 +22,6 @@ use super::hit_collector::QueryLists;
 use super::hit_collector::TblastxHspList;
 use super::scoring::{Blosum62Score, TbxScore};
 
-/// The version that NCBI's TBLASTX reports print.
-///
-/// NCBI reference: c++/src/algo/blast/format/blastfmtutil.cpp:60-64
-/// ```c++
-/// string CBlastFormatUtil::BlastGetVersion(const string program)
-/// {
-///     string program_uc = program;
-///     return NStr::ToUpper(program_uc) + " " + blast::CBlastVersion().Print();
-/// }
-/// ```
-pub(crate) const NCBI_TBLASTX_VERSION: &str = "2.17.0+";
-
 /// The 4-bit IUPAC code of a nucleotide as the display's translation table reads it
 /// (`A` 1, `C` 2, `G` 4, `T` 8, ambiguity letters their union, `U` as `T`, `X` as `N`);
 /// another byte is a gap (0), which translates to `X`.
@@ -1403,7 +1391,7 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
     database: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
-    writeln!(writer, "# TBLASTX {NCBI_TBLASTX_VERSION}")?;
+    writeln!(writer, "# TBLASTX {}", crate::NCBI_BLAST_VERSION)?;
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
     // ```c
     //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,

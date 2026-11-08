@@ -897,6 +897,9 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -965,6 +968,9 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::TBLASTN_TASK.check(&mut args.task)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -1101,7 +1107,7 @@ fn write_first_batch_prologs(
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
-                "2.17.0+",
+                crate::NCBI_BLAST_VERSION,
                 &name,
                 num_subjects,
                 total,
@@ -1181,7 +1187,7 @@ fn search(
         ),
     };
     let SearchSettings {
-        composition_mode2,
+        compo_adjust_mode,
         identity_cbs_reset,
         scoring,
     } = search_settings(&resolved)?;
@@ -1211,7 +1217,6 @@ fn search(
         0
     };
     app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
-    app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the
@@ -1241,6 +1246,13 @@ fn search(
         database: database.map(TblastnDatabase::numbers),
         dbsize: args.dbsize,
         searchsp: args.searchsp,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+        // ```c
+        //     use_old_fsc = getenv("OLD_FSC");
+        //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+        // ```
+        // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
+        old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
@@ -1440,7 +1452,7 @@ fn search(
                 engine_positives,
                 culling_limit: resolved.culling_limit,
             },
-            composition_mode2,
+            compo_adjust_mode,
             resolved.sum_stats,
             scoring,
             resolved.num_threads,
@@ -1486,7 +1498,7 @@ fn search(
                             engine_positives,
                             culling_limit: resolved.culling_limit,
                         },
-                        composition_mode2,
+                        compo_adjust_mode,
                         resolved.sum_stats,
                         scoring,
                         resolved.num_threads,

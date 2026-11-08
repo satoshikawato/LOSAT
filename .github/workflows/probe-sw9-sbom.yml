@@ -1,0 +1,83 @@
+name: Probe sw9 SBOM step (temporary)
+
+# Throwaway probe (branch probe/sw9-sbom only, never merged): runs the CycloneDX SBOM step that
+# PR ci/sw9-release-attest adds to release-readiness-v020.yml, on dev 7e688fdcb, because that
+# workflow is dispatchable only from main. No attestation is signed here.
+
+on:
+  push:
+    branches: [probe/sw9-sbom]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CANDIDATE_SHA: 7e688fdcb4a826a5b6bfeb3afa7d91dce91ec31b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: 7e688fdcb4a826a5b6bfeb3afa7d91dce91ec31b
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-cyclonedx@0.5.9
+
+      # Same commands as the release step (the aggregate step creates the handoff directory there).
+      - name: CycloneDX SBOM of the release dependencies
+        run: |
+          mkdir -p .tmp/release-readiness/handoff
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct "$CANDIDATE_SHA")"
+          export SOURCE_DATE_EPOCH
+          cd LOSAT
+          cargo cyclonedx --format json --spec-version 1.5 --all-features --target all \
+            --override-filename LOSAT-0.2.0.cdx
+          git diff --exit-code -- Cargo.lock
+          mv LOSAT-0.2.0.cdx.json ../.tmp/release-readiness/handoff/
+
+      - name: A second run gives the same bytes
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct "$CANDIDATE_SHA")"
+          export SOURCE_DATE_EPOCH
+          cd LOSAT
+          cargo cyclonedx --format json --spec-version 1.5 --all-features --target all \
+            --override-filename LOSAT-0.2.0.cdx
+          cmp LOSAT-0.2.0.cdx.json ../.tmp/release-readiness/handoff/LOSAT-0.2.0.cdx.json
+          rm LOSAT-0.2.0.cdx.json
+          git status --porcelain
+          test -z "$(git status --porcelain -- LOSAT)"
+
+      - name: What the SBOM holds against LOSAT/Cargo.lock
+        run: |
+          python3 - <<'PY'
+          import json, tomllib
+          bom = json.load(open(".tmp/release-readiness/handoff/LOSAT-0.2.0.cdx.json"))
+          lock = tomllib.load(open("LOSAT/Cargo.lock", "rb"))
+          meta = bom["metadata"]
+          print("bomFormat", bom["bomFormat"], "specVersion", bom["specVersion"])
+          print("serialNumber present:", "serialNumber" in bom, "timestamp:", meta.get("timestamp"))
+          print("root:", meta["component"]["name"], meta["component"]["version"], meta["component"].get("purl"))
+          print("properties:", meta.get("properties"))
+          comps = {(c["name"], c["version"]) for c in bom.get("components", [])}
+          pkgs = {(p["name"], p["version"]) for p in lock["package"] if p["name"] != "LOSAT"}
+          print("components", len(comps), "lock packages (without LOSAT)", len(pkgs))
+          print("in lock, not in SBOM:", sorted(pkgs - comps))
+          print("in SBOM, not in lock:", sorted(comps - pkgs))
+          print("dependencies entries:", len(bom.get("dependencies", [])))
+          PY
+          ls -l .tmp/release-readiness/handoff/
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: probe-sw9-sbom
+          path: .tmp/release-readiness/handoff
+          if-no-files-found: error
+          retention-days: 3

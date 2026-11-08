@@ -82,7 +82,8 @@ Two variables are not yet read as NCBI BLAST+ reads them in every program; do no
 
 `TMPDIR` (`TEMP` or `TMP` on Windows): where a search program inflates a `.gz`, `.bz2` or `.zst`
 `-query` or `-subject` when the input's own directory refuses the file or has no room (see
-"Common Command-Line Options" in the [README](../../README.md#common-command-line-options)).
+"Common Command-Line Options" in the [README](../../README.md#common-command-line-options)). The
+WASI command has no temporary directory: it inflates beside the input or stops with an error.
 
 ## Variables that LOSAT refuses
 

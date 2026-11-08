@@ -14,7 +14,8 @@
 //! In this branch `log_slice` calls the same libm function (`f64::ln`) on the same arguments in
 //! the same order, so each result is the one NCBI gets on this machine.
 
-// No NCBI counterpart: an empty function so that main.rs builds with or without the optional patch.
+// No NCBI counterpart: an empty function so that the command entry (`cli/main_entry.rs`) builds
+// with or without the optional patch.
 /// No shadow mode in the strict version (nothing to compare).
 pub fn print_shadow_stats() {}
 

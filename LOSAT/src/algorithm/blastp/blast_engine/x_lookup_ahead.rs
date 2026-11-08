@@ -620,7 +620,9 @@ fn x_make_room(
 /// On the block's thread, after its preliminary stage: the second spare takes the `starts` and
 /// `hits` of the block's flat table `table` (which nothing reads any more) and gets the room for the
 /// next block's table as `x_make_room` makes it (the hits grown in place where short). `false` where
-/// the block search has no spares (the table is dropped).
+/// the block search has no spares (the table is dropped). Item SC2d-2: the hits are first cut to
+/// their length, so that the pages past them, which a larger table before touched, are returned
+/// before the next table's appends pass (the room made again is not touched).
 #[cfg_attr(
     not(all(
         feature = "parallel",
@@ -633,7 +635,7 @@ fn x_make_room(
 )]
 fn x_make_room_flat(
     pool: &SearchPool<'_>,
-    table: XFlatCompressedLookup,
+    mut table: XFlatCompressedLookup,
     largest_hits: &Cell<usize>,
 ) -> bool {
     let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
@@ -641,6 +643,7 @@ fn x_make_room_flat(
     };
     let backbone_size = table.starts.len().saturating_sub(1);
     let (room, grown) = x_room_of(largest_hits, table.hits.len());
+    table.hits.shrink_to_fit();
     ahead.give(table);
     ahead.x_make_room(block, backbone_size, room, grown);
     true

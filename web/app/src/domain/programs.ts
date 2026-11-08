@@ -344,7 +344,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     label: 'BLASTP',
     summary: 'BLASTP mode searches protein subjects using a protein query.',
     searches: 'protein subjects',
-    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP' },
+    taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP', 'blastp-short': 'optimized for short sequences' },
     query: 'protein',
     subject: 'protein',
     sections: [
@@ -359,16 +359,13 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
             choiceLabels: {
               blastp: 'blastp (protein-protein BLAST)',
               'blastp-fast': 'Quick BLASTP (blastp-fast)',
+              'blastp-short': 'Short sequences (blastp-short)',
             },
           },
         ],
       },
-      // LOSAT's BLASTP reads word sizes 3 and 5 to 7 (7, which NCBI's select lacks, through "Other").
-      {
-        title: 'General Parameters',
-        placement: 'algorithm',
-        fields: [maxTargetSeqs, evalue, { ...wordSize, list: ['3', '5', '6'] }, cullingLimit],
-      },
+      // LOSAT's BLASTP reads word sizes 2, 3 and 5 to 7 (7, which NCBI's select lacks, through "Other").
+      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
       {
         title: 'Scoring Parameters',
         placement: 'algorithm',

@@ -125,6 +125,22 @@ jobs:
       # changelog.d/ and docs/ that have no row in docs/decisions/LINE_IDS.md, as warnings only.
       - name: Line IDs
         run: python3 scripts/line_ids.py check
+      # No NCBI counterpart: supply-chain checks of the dependencies (SWEBOK 2026-11-04 audit,
+      # KA13/KA15). The licenses, sources and bans of deny.toml over the three lock files; they
+      # depend only on this commit's lock files. The advisories run in nightly.yml (job `audit`).
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-deny@0.20.2
+      - name: cargo deny (bans, licenses, sources)
+        run: |
+          status=0
+          for manifest in LOSAT/Cargo.toml web/adapter/Cargo.toml python/Cargo.toml; do
+            echo "::group::$manifest"
+            cargo deny --manifest-path "$manifest" --config deny.toml --locked \
+              check bans licenses sources || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --locked --all-targets --all-features -- -D warnings
 

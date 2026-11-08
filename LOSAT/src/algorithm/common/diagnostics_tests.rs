@@ -1,40 +1,35 @@
 //! Unit tests for common/diagnostics.rs
 
 use crate::algorithm::common::diagnostics::{
-    diagnostics_enabled, BaseDiagnosticCounters, NucleotideDiagnosticCounters,
+    diagnostics_flag, BaseDiagnosticCounters, NucleotideDiagnosticCounters,
     ProteinDiagnosticCounters,
 };
-use std::env;
+use std::env::VarError;
 use std::sync::atomic::Ordering;
 
+// The values go to the parser of LOSAT_DIAGNOSTICS, not into the environment: the lib's tests
+// share one process, and `tblastx::x_hsp_inplace::gate` keeps the first value it reads.
 #[test]
 fn test_diagnostics_enabled() {
+    let value = |text: &str| Ok(text.to_string());
+
     // Test default (disabled)
-    env::remove_var("LOSAT_DIAGNOSTICS");
-    assert!(!diagnostics_enabled());
+    assert!(!diagnostics_flag(Err(VarError::NotPresent)));
 
     // Test enabled with "1"
-    env::set_var("LOSAT_DIAGNOSTICS", "1");
-    assert!(diagnostics_enabled());
+    assert!(diagnostics_flag(value("1")));
 
     // Test enabled with "true"
-    env::set_var("LOSAT_DIAGNOSTICS", "true");
-    assert!(diagnostics_enabled());
+    assert!(diagnostics_flag(value("true")));
 
     // Test enabled with "TRUE"
-    env::set_var("LOSAT_DIAGNOSTICS", "TRUE");
-    assert!(diagnostics_enabled());
+    assert!(diagnostics_flag(value("TRUE")));
 
     // Test disabled with "0"
-    env::set_var("LOSAT_DIAGNOSTICS", "0");
-    assert!(!diagnostics_enabled());
+    assert!(!diagnostics_flag(value("0")));
 
     // Test disabled with "false"
-    env::set_var("LOSAT_DIAGNOSTICS", "false");
-    assert!(!diagnostics_enabled());
-
-    // Clean up
-    env::remove_var("LOSAT_DIAGNOSTICS");
+    assert!(!diagnostics_flag(value("false")));
 }
 
 #[test]

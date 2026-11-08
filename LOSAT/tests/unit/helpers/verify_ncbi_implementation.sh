@@ -169,7 +169,7 @@ echo "  1. Update Karlin-Altschul parameters in the test case"
 echo "     (Extract lambda, K, H, alpha, beta from NCBI BLAST output)"
 echo ""
 echo "  2. Run the test:"
-echo "     cargo test --test unit_tests test_${TEST_NAME}_effective_search_space -- --nocapture"
+echo "     cargo test --lib test_${TEST_NAME}_effective_search_space -- --nocapture"
 echo ""
 echo "  3. If the test passes, integrate it into the main test suite"
 

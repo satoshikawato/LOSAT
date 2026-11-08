@@ -25,9 +25,9 @@
 //! The serial builder makes the reference's appends (a query offset's cells, in the order of
 //! `add_word_hits`) for the query offsets of its count ranges (`x_count_ranges`) in order. Here:
 //! - chunks (`x_chunks`): each count range's query offsets, in order, cut into contiguous runs, a run
-//!   given as pieces of segments (a piece `(a, b + word_length - 1)` holds the offsets a..=b of its
-//!   segment, which `x_for_each_offset` visits as it visits them in the segment, with the same
-//!   `end <= query.len()` guard). The chunks in order hold the count ranges' offsets in order, so the
+//!   given as ranges of lookup segments (`XChunk::pieces`: a range `(a, b + word_length - 1)` holds
+//!   the offsets a..=b of its lookup segment, which `x_for_each_offset` visits as it visits them in
+//!   the lookup segment, with the same `end <= query.len()` guard; not the pieces of appends below). The chunks in order hold the count ranges' offsets in order, so the
 //!   chunks' appends one after the other are the serial count pass's appends in its order.
 //! - stripes: the backbone cut into ranges of 2^shift cells. Each chunk sorts its appends by stripe,
 //!   stably (counting sort), so a stripe's part of a chunk holds the chunk's appends to the stripe's
@@ -100,8 +100,8 @@
 //!   `i32::MIN` first (a spare of garbage first gets room for a word-size-5 table), so that an
 //!   entry no stripe writes differs from the fresh build's where the spare has the room.
 //! - kept segments (item SC2d-2, `XSegmentPool`, the block search's): the appends pass takes a kept
-//!   segment before it makes a new one, and the stripes pass keeps at most one segment per thread
-//!   for the next build. A segment's values are not read: each piece writes every entry of its range
+//!   segment before it makes a new one, and the stripes pass keeps at most as many segments as threads
+//!   for the next build, in place of what the pool still holds. A segment's values are not read: each piece writes every entry of its range
 //!   before the stripes pass reads it.
 //! - extra tasks (`XExtraTasks`: the contexts' Karlin blocks of a blastp block,
 //!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
@@ -157,8 +157,15 @@ const X_GUIDED_SHARE: usize = 2;
 // No NCBI counterpart: where the chunks' packed appends are stored. Memory placement only.
 /// The fewest entries of a segment of packed appends (`XSegmentOut`): 40 MiB, above glibc's largest
 /// mmap threshold (32 MiB), so that each segment is a mapping of its own, returned whole when it is
-/// dropped, whichever thread made it (a pool thread's smaller blocks stay in its arena).
+/// dropped, whichever thread made it (a pool thread's smaller blocks stay in its arena). The pages
+/// past the entries written are not touched.
+#[cfg(not(target_arch = "wasm32"))]
 const X_APPENDS_SEGMENT: usize = 10 << 20;
+/// The fewest entries of a segment on wasm32: a piece's. There is no mapping to return there (the
+/// linear memory only grows, and the allocator clears what it hands out), so a segment holds about
+/// what its task writes.
+#[cfg(target_arch = "wasm32")]
+const X_APPENDS_SEGMENT: usize = X_PIECE_APPENDS;
 /// The fewest query offsets of a chunk (about 65 appends each with blastp-fast's threshold; about
 /// 12,800 with BLOSUM45 at word size 7).
 const X_MIN_CHUNK_OFFSETS: usize = 256;
@@ -168,14 +175,17 @@ const X_MIN_CHUNK_OFFSETS: usize = 256;
 const X_MAX_GUIDED_OFFSETS: usize = 4 * X_MIN_CHUNK_OFFSETS;
 // No NCBI counterpart: how a task's scratch is bounded (item SC2d-2). Memory only.
 /// The appends of a piece (`x_chunk_appends`): a chunk's appends are sorted into the task's segment
-/// in pieces of this many (the last one fewer), so that a task's scratch holds at most a piece (512
-/// KiB of targets, and the appends of the offset that passes it) whatever a chunk's offsets add
-/// (about 380 appends per offset with BLOSUM45 and blastp-fast's threshold, 12,800 at word size 7).
+/// in pieces of this many (the last one fewer), so that a task's scratch holds at most a piece and
+/// the appends of the offset that passes it (512 KiB of targets, in a vector of 1 MiB once an offset
+/// passes it) whatever a chunk's offsets add (about 380 appends per offset with BLOSUM45 and
+/// blastp-fast's threshold, 12,800 at word size 7).
 /// A task's scratch stays in its pool thread's malloc arena after the pass, so that the threads keep
 /// a piece each between builds: 2^20 appends (4 MiB) per thread raised the peak RSS of BLOSUM45
 /// blastp-fast at 8 threads by about 10 % (SC2d-2).
 const X_PIECE_APPENDS: usize = 1 << 17;
-/// The most (chunk, stripe) parts: a stripe reads its part of every chunk.
+/// The most (chunk, stripe) parts the stripe count allows: a stripe reads its part of every piece of
+/// every chunk, so the (piece, stripe) parts are this many times the pieces per chunk (one for
+/// blastp-fast's chunks; tens with BLOSUM45 at word size 7).
 const X_MAX_PARTS: usize = 1 << 20;
 // No NCBI counterpart: the 16 bits of a packed append that hold the offset less the chunk's first.
 /// A chunk's offsets lie in `base..base + X_OFFSET_SPAN`.
@@ -260,7 +270,7 @@ impl<'r> XSegmentOut<'r> {
         }
     }
 
-    /// `n` entries for one chunk (each range is taken once; the chunk writes every entry of it
+    /// `n` entries for one piece (each range is taken once; the piece writes every entry of it
     /// before any is read): the segment's slot, the range's start, the range.
     fn take(&mut self, n: usize) -> (usize, usize, &mut [u32]) {
         if self.segment.len() - self.used < n {
@@ -1668,7 +1678,7 @@ fn x_flat_stripes_on<S: CompressedScores>(
             )
         }
     };
-    // Item SC2d-2: at most one segment per thread kept for the next build (`XSegmentPool`).
+    // Item SC2d-2: at most as many segments as threads kept for the next build (`XSegmentPool`).
     match segments {
         Some(pool) => pool.keep(appends.segments, threads),
         None => drop(appends),
@@ -3377,9 +3387,9 @@ mod tests {
         }
     }
 
-    // Item SC2d-2: the segments a build keeps (`XSegmentPool`, at most one per thread) are the next
-    // build's (its first segments are the kept buffers, garbage in them), and both builds give the
-    // serial table slot for slot.
+    // Item SC2d-2: the segments a build keeps (`XSegmentPool`, at most as many as threads) may be
+    // the next build's (here filled with garbage first), and every build gives the serial table slot
+    // for slot.
     #[test]
     fn kept_segments_of_any_values_leave_the_table_the_serial_one() {
         let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
@@ -3396,7 +3406,7 @@ mod tests {
                 let mut kept = pool.0.lock().unwrap();
                 assert!(
                     kept.len() <= threads,
-                    "round {round}: at most one per thread"
+                    "round {round}: at most as many as threads"
                 );
                 for segment in kept.iter_mut() {
                     segment.fill(u32::MAX);
@@ -3513,5 +3523,8 @@ mod tests {
             .unwrap()
             .iter()
             .all(|segment| segment.capacity() == segment.len()));
+        // A later build's segments replace the ones it did not take.
+        pool.keep(vec![vec![5u32; 3]], 2);
+        assert_eq!(lengths(&pool), [3]);
     }
 }

@@ -379,7 +379,7 @@ impl XFlatSpare {
 // changes no value NCBI computes.
 /// Item SC2d-2: segments of packed appends (`x_clut_par.rs` `XSegmentOut`) kept by the block search
 /// (`blastp/x_query_blocks.rs` `XBlockSubjects`) from one build's stripes pass to the next build's
-/// appends pass, at most one per thread of the build, each cut to the entries that build wrote (the
+/// appends pass, at most as many as the build's threads, each cut to the entries that build wrote (the
 /// pages past them returned), so that the next build writes their pages, which the last build
 /// touched, instead of faulting the pages of fresh mappings. A kept segment's values are not read: a
 /// piece writes every entry of its range before any is read. What the pool holds is at most the last
@@ -405,7 +405,9 @@ impl XSegmentPool {
     }
 
     // No NCBI counterpart: buffer reuse only (above).
-    /// Keeps segments of `segments` until the pool holds `at_most`; the others are dropped.
+    /// Keeps at most `at_most` of `segments` (a build's, each cut to its entries) in place of what the
+    /// pool holds: segments of earlier builds that this build did not take (none long enough for its
+    /// pieces, or more than it needed) are dropped, so the pool holds at most the last build's.
     #[cfg_attr(
         not(all(
             feature = "parallel",
@@ -414,19 +416,22 @@ impl XSegmentPool {
         allow(dead_code)
     )]
     fn keep(&self, segments: Vec<Vec<u32>>, at_most: usize) {
-        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let room = at_most.saturating_sub(kept.len());
-        kept.extend(
-            segments
-                .into_iter()
-                .filter(|segment| !segment.is_empty())
-                .take(room)
-                .map(|mut segment| {
-                    // The capacity past the entries written is returned (their pages too).
-                    segment.shrink_to_fit();
-                    segment
-                }),
+        let new: Vec<Vec<u32>> = segments
+            .into_iter()
+            .filter(|segment| !segment.is_empty())
+            .take(at_most)
+            .map(|mut segment| {
+                // The capacity past the entries written is returned (their pages too).
+                segment.shrink_to_fit();
+                segment
+            })
+            .collect();
+        // The lock is held only around a move; the old segments are dropped after it.
+        let old = std::mem::replace(
+            &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
+            new,
         );
+        drop(old);
     }
 }
 

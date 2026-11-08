@@ -8293,8 +8293,9 @@ fn blastp_compressed_lookup(
 /// thread), NCBI's tables of the query batches (`ncbi_compressed_lookup_tables`) and the compressed
 /// table of the matrix's words (`x_bp_build_compressed_lookup_of`: the flat table, by the search's
 /// pool where it has more than one thread, on the spare vectors of `x_for` as BLOSUM62's; the
-/// reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`; the reserve `x_appends`
-/// as BLOSUM62's), with the refusals of the BLOSUM62 table.
+/// reference one where the flat builders decline or with `LOSAT_X_BPCLUT=0`), with the refusals of
+/// the BLOSUM62 table. `x_appends` goes to the build as BLOSUM62's (only BLOSUM62's serial builder
+/// reserves it, `x_build_flat_in_pool`).
 #[inline(never)]
 fn blastp_matrix_compressed_lookup(
     args: &ResolvedBlastpArgs,

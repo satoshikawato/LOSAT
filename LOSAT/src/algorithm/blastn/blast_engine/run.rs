@@ -73,7 +73,7 @@ use super::super::filtering::{
 use super::super::hsp::{
     evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue, sort_hsps_by_score,
     trim_by_max_hsps, update_best_evalue, BlastnHitList, BlastnHsp, BlastnHspList,
-    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    BlastnOutputFormat, HitList, HitListEntry,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{
@@ -5854,7 +5854,7 @@ fn blastn_pairwise_report(
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
-        version: NCBI_BLASTN_VERSION.to_string(),
+        version: crate::NCBI_BLAST_VERSION.to_string(),
         megablast: report.megablast,
         database_name: subject_title.to_string(),
         database_num_sequences: report.shown_num_seqs(),
@@ -6830,7 +6830,7 @@ fn post_process_hits_and_write(
                     messages
                 })
                 .collect();
-            let version = format!("BLASTN {NCBI_BLASTN_VERSION}");
+            let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
             let filter = crate::report::blast_xml::filter::filter_string(
                 report.dust,
                 None,
@@ -10374,7 +10374,7 @@ fn write_format_prolog(
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
-            NCBI_BLASTN_VERSION,
+            crate::NCBI_BLAST_VERSION,
             megablast,
             &shown.name,
             shown.num_seqs,

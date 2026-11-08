@@ -3515,24 +3515,7 @@ fn blast_choose_matrix_adjust_rule(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stats::compute_lambda_from_score_probs;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
-    // ```c
-    // s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-    // {
-    //     return Blast_KarlinLambdaNR(&freq, lambda0);
-    // }
-    // ```
-    fn test_compute_lambda_from_score_probs(
-        score_probs: &[f64],
-        min_score: i32,
-        max_score: i32,
-        lambda0: f64,
-    ) -> Result<f64> {
-        compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
-            .map_err(anyhow::Error::msg)
-    }
+    use crate::core::composition_adjustment::redo_alignment::redo_calc_lambda;
 
     // NCBI composition_adjustment/composition_adjustment.c:1204-1248:
     // if (i + kCompositionMargin < left) left = i + kCompositionMargin;
@@ -3637,7 +3620,7 @@ mod tests {
                     BlastCompoAdjustMode::CompositionMatrixAdjust,
                     call[6].parse().unwrap(),
                     &mut workspace,
-                    test_compute_lambda_from_score_probs,
+                    redo_calc_lambda,
                 )
                 .unwrap()
                 .unwrap();
@@ -4068,7 +4051,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap()
         .expect("adjusted matrix result");
@@ -4098,7 +4081,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap();
         assert!(adjusted.is_none());

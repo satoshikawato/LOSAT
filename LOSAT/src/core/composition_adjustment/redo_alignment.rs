@@ -90,6 +90,36 @@ pub enum BlastCompoAdjustMode {
     ForceFullMatrixAdjust,
 }
 
+// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/composition_constants.h:59-70
+// ```c
+// typedef enum ECompoAdjustModes {
+//     /** Don't use composition based statistics */
+//     eNoCompositionBasedStats       = 0,
+//     /** Composition-based statistics as in NAR 29:2994-3005, 2001 */
+//     eCompositionBasedStats         = 1,
+// ...
+//     eCompositionMatrixAdjust       = 2,
+// ...
+//     eCompoForceFullMatrixAdjust    = 3,
+//     eNumCompoAdjustModes
+// ```
+impl BlastCompoAdjustMode {
+    /// NCBI's value of the mode (`ECompoAdjustModes`, 0 to 3).
+    pub fn ncbi_value(self) -> i32 {
+        match self {
+            BlastCompoAdjustMode::NoCompositionBasedStats => 0,
+            BlastCompoAdjustMode::CompositionBasedStats => 1,
+            BlastCompoAdjustMode::CompositionMatrixAdjust => 2,
+            BlastCompoAdjustMode::ForceFullMatrixAdjust => 3,
+        }
+    }
+
+    /// Whether the search runs the composition-based redo (a mode above 0).
+    pub fn is_enabled(self) -> bool {
+        self != BlastCompoAdjustMode::NoCompositionBasedStats
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_constants.h:61-68
 // ```c
 // typedef enum EMatrixAdjustRule {

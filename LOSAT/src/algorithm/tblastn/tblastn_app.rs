@@ -1185,7 +1185,7 @@ fn search(
         ),
     };
     let SearchSettings {
-        composition_mode2,
+        compo_adjust_mode,
         identity_cbs_reset,
         scoring,
     } = search_settings(&resolved)?;
@@ -1447,7 +1447,7 @@ fn search(
                 engine_positives,
                 culling_limit: resolved.culling_limit,
             },
-            composition_mode2,
+            compo_adjust_mode,
             resolved.sum_stats,
             scoring,
             resolved.num_threads,
@@ -1493,7 +1493,7 @@ fn search(
                             engine_positives,
                             culling_limit: resolved.culling_limit,
                         },
-                        composition_mode2,
+                        compo_adjust_mode,
                         resolved.sum_stats,
                         scoring,
                         resolved.num_threads,

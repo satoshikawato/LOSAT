@@ -408,13 +408,13 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
   const field = (id: ProgramId, flag: string) => programById(id).sections.flatMap((section) => section.fields).find((f) => f.flag === flag)!;
   const list = (id: ProgramId, flag: string, values: FormValues = {}) => fieldList(field(id, flag), values, optionsOf(id));
 
-  it("gives BLASTP NCBI's matrices, word sizes 2, 3, 5 and 6, and modes 0 and 2, in each task", () => {
+  it("gives BLASTP NCBI's matrices, word sizes 2, 3, 5 and 6, and every mode, in each task", () => {
     for (const values of [{}, { '-task': 'blastp-fast' }, { '-task': 'blastp-short' }]) {
       expect(list('blastp', '-matrix', values)).toEqual(MATRICES);
       expect(list('blastp', '-word_size', values)).toEqual(['2', '3', '5', '6']);
     }
-    expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(['0', '2']);
-    // TBLASTN keeps NCBI's four: its engine reads modes 1 and 3 with -matrix IDENTITY (resetting them to 0).
+    // BLASTP and TBLASTN offer NCBI's four (series SC, SC5): their engines read every mode.
+    expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
     expect(fieldChoices(field('tblastn', '-comp_based_stats'), optionsOf('tblastn').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
   });
 

@@ -496,7 +496,8 @@ test('BLASTN scores without a table row: the form accepts them and the run gives
 // WA-FM-02: a select offers the values of NCBI's page that LOSAT's engine reads, and no other;
 // "Other" takes the rest of a matrix, word size or gap costs, which the engine refuses. A change
 // of the engine that reads more of them fails here until the select offers them. Compositional
-// adjustments has no "Other", so the native CLI of the same commit tells which modes it reads.
+// adjustments has no "Other", so the native CLI of the same commit tells which modes BLASTP, BLASTX
+// and TBLASTN read.
 test("the selects of the protein modes offer NCBI's values that the engine reads, and no other", async ({ page }, testInfo) => {
   test.skip(!BUILD_HAS_ENGINE, "the engine's checks need the engine build");
   test.setTimeout(600_000);
@@ -531,6 +532,26 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       await expect(validation).toHaveAttribute('data-state', 'ok');
     }
   };
+  /** The program's Compositional adjustments offer the modes that the native CLI of the same commit reads. */
+  const checkModes = async (id: 'blastp' | 'blastx' | 'tblastn') => {
+    if (NATIVE === undefined) {
+      testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
+      return;
+    }
+    const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ';
+    const nucleotide = 'ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT';
+    const query = testInfo.outputPath(`${id}-query.fa`);
+    const subject = testInfo.outputPath(`${id}-subject.fa`);
+    writeFileSync(query, `>q\n${id === 'blastx' ? nucleotide : protein}\n`);
+    writeFileSync(subject, `>s\n${id === 'tblastn' ? nucleotide : protein}\n`);
+    const offered = await page.getByTestId('param-comp_based_stats').locator('option').evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+    for (const mode of COMPOSITION_MODES) {
+      const run = spawnSync(NATIVE, [id, '-query', query, '-subject', subject, '-comp_based_stats', mode, '-outfmt', '6', '-num_threads', '1'], {
+        timeout: 60_000,
+      });
+      expect(run.status === 0, `${id} -comp_based_stats ${mode}: ${run.error?.message ?? String(run.stderr)}`).toBe(offered.includes(mode));
+    }
+  };
   for (const [id, tasks] of [['blastp', ['blastp', 'blastp-fast', 'blastp-short']], ['blastx', ['blastx', 'blastx-fast']]] as const) {
     await program(page, id);
     for (const name of tasks) {
@@ -552,20 +573,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
         await expect(validation).toHaveAttribute('data-state', 'ok');
       }
     }
-    if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
-    else {
-      const query = testInfo.outputPath(`${id}-query.fa`);
-      const subject = testInfo.outputPath(`${id}-subject.fa`);
-      writeFileSync(query, id === 'blastp' ? '>q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n' : '>q\nATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT\n');
-      writeFileSync(subject, '>s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n');
-      const offered = await page.getByTestId('param-comp_based_stats').locator('option').evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
-      for (const mode of COMPOSITION_MODES) {
-        const run = spawnSync(NATIVE, [id, '-query', query, '-subject', subject, '-comp_based_stats', mode, '-outfmt', '6', '-num_threads', '1'], {
-          timeout: 60_000,
-        });
-        expect(run.status === 0, `${id} -comp_based_stats ${mode}: ${run.error?.message ?? String(run.stderr)}`).toBe(offered.includes(mode));
-      }
-    }
+    await checkModes(id);
   }
   await program(page, 'tblastx');
   await check('word_size', PROTEIN_WORD_SIZES.filter((size) => ['2', '3'].includes(size)), '3');
@@ -579,6 +587,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
   await task(page, 'tblastn');
   await page.getByTestId('param-word_size').selectOption('6');
   await check('matrix', MATRICES, 'BLOSUM62');
+  await checkModes('tblastn');
 });
 
 // WA-FM-03: BLAST+ reads the template length only with its type, and the type with its length.

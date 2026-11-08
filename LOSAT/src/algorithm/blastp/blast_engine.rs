@@ -2458,22 +2458,15 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 adjusts each query's e-values with the lengths of the next query, and reads past its data for the last one)"
         );
     }
-    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), psiblast's first round of a
-    // FASTA query too (with psiblast's hit list size, `traceback_hitlist_size`), and the PSSM's of
-    // psiblast `-in_pssm` and of its later rounds (`pssm_search::traceback0`). psiblast's PSSM
-    // searches run modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`, the options), and mode 1 as the
-    // position-based redo (`pssm_search::redo1`); a FASTA query's first round of mode 1 or 3 is
-    // blastp's, which LOSAT does not run.
-    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
-        && args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats
-        && !(args.psi_search.is_some()
-            && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
-    {
-        bail!(
-            "-comp_based_stats {} is not supported by LOSAT's {program}",
-            args.comp_based_stats.to_ncbi_cli_string()
-        );
-    }
+    // Every composition mode runs (item SC5 of line NP). Mode 0 runs BLASTP's ordinary traceback
+    // (`traceback.rs`), psiblast's first round of a FASTA query too (with psiblast's hit list
+    // size, `traceback_hitlist_size`), and the PSSM's of psiblast `-in_pssm` and of its later
+    // rounds (`pssm_search::traceback0`). Modes 1 to 3 run the composition-based redo, whose
+    // matrix adjustment rule the mode picks (`blast_adjust_scores`: 1 scales the matrix by the
+    // ratio of the Lambdas, 3 always adjusts it to the target relative entropy), psiblast's first
+    // round of a FASTA query too; psiblast's PSSM searches run modes 2 and 3 as 1
+    // (`PsiBlastSetupScoreBlock`, the options), and mode 1 as the position-based redo
+    // (`pssm_search::redo1`).
     Ok(())
 }
 

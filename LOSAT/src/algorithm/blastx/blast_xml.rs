@@ -754,7 +754,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     );
     let run = XmlRun {
         program: "blastx",
-        version: "BLASTX 2.17.0+",
+        version: concat!("BLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name: db_name.as_bytes(),
         matrix: Some(&options.matrix),

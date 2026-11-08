@@ -21,7 +21,7 @@ use anyhow::{bail, Result};
 use super::{
     blastp_database_name, run_resolved_in_pool, write_pairwise_prologs,
     write_reports_without_queries, BlastpRanges, BlastpReports, BlastpSubjectSource, ShownLetters,
-    ShownSubjects, SubjectSet, NCBI_BLASTP_VERSION,
+    ShownSubjects, SubjectSet,
 };
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
@@ -370,7 +370,7 @@ fn write_round_epilogs(
             _ => continue,
         }
         let report = crate::report::BlastpPairwiseReport {
-            version: NCBI_BLASTP_VERSION.to_string(),
+            version: crate::NCBI_BLAST_VERSION.to_string(),
             database_name: blastp_database_name(args, subject_label),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,

@@ -783,20 +783,6 @@ fn prepare_blastp_subjects_preserving_order(
     Ok(subject_records.iter().map(prepare_subject).collect())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:81-83
-// ```c
-// NCBI_XBLAST_EXPORT const int   kBlastMajorVersion = 2;
-// NCBI_XBLAST_EXPORT const int   kBlastMinorVersion = 17;
-// NCBI_XBLAST_EXPORT const int   kBlastPatchVersion = 0;
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/api/version.hpp:57-60
-// ```c
-// virtual string Print(void) const {
-//     return CVersionInfo::Print() + "+";
-// }
-// ```
-const NCBI_BLASTP_VERSION: &str = "2.17.0+";
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3698-3699
 // ```c
 // const double kRestrictedMult = 0.68;/* fraction of the ordinary cutoff score
@@ -2629,7 +2615,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     batch_skipped: bool,
     iteration: Option<u32>,
 ) -> std::io::Result<()> {
-    let version_str = context.version.as_deref().unwrap_or("0.1.0");
+    let version_str = crate::NCBI_BLAST_VERSION;
     writeln!(
         writer,
         "# {} {}",
@@ -7446,7 +7432,7 @@ fn write_pairwise_prologs(
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
-                NCBI_BLASTP_VERSION,
+                crate::NCBI_BLAST_VERSION,
                 args.app.ncbi_name(),
                 &blastp_database_name(args, subject_label),
                 num_sequences,
@@ -7554,7 +7540,7 @@ fn write_reports_without_queries(
         match outfmt {
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
-                    version: NCBI_BLASTP_VERSION.to_string(),
+                    version: crate::NCBI_BLAST_VERSION.to_string(),
                     database_name: blastp_database_name(args, subject_label),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
@@ -12380,7 +12366,6 @@ fn run_resolved_in_pool(
         database_num_sequences: Some(shown_num_sequences),
         database_total_letters: Some(shown_total_letters),
         program: args.app.ncbi_name().to_string(),
-        version: Some(NCBI_BLASTP_VERSION.to_string()),
     };
 
     // The requested output formats; only the reporting depends on the format, the search above
@@ -13162,7 +13147,7 @@ fn run_resolved_in_pool(
                     placements: &ranges.query_input.placements,
                 };
                 let db_name = database.map(|database| database.name().to_string());
-                let version = format!("BLASTP {NCBI_BLASTP_VERSION}");
+                let version = format!("BLASTP {}", crate::NCBI_BLAST_VERSION);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
                 // ```c
                 //     if (SBlastFilterOptionsMaskAtHash(filtering_options)) {
@@ -13378,7 +13363,7 @@ fn run_resolved_in_pool(
                     })
                     .collect();
                 let pairwise_report = BlastpPairwiseReport {
-                    version: NCBI_BLASTP_VERSION.to_string(),
+                    version: crate::NCBI_BLAST_VERSION.to_string(),
                     database_name: blastp_scan_mode_definition(&subject_input_label),
                     database_num_sequences: shown_num_sequences,
                     database_total_letters: shown_total_letters,
@@ -13623,8 +13608,9 @@ fn run_resolved_in_pool(
                     },
                 };
                 let program_version = format!(
-                    "{} {NCBI_BLASTP_VERSION}",
-                    args.app.ncbi_name().to_uppercase()
+                    "{} {}",
+                    args.app.ncbi_name().to_uppercase(),
+                    crate::NCBI_BLAST_VERSION
                 );
                 let tab = super::tabular::BlastpTabular {
                     spec,

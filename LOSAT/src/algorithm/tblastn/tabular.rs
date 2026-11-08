@@ -64,7 +64,7 @@ use crate::utils::genetic_code::GeneticCode;
 
 const PROGRAM: &str = "TBLASTN";
 /// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
-const PROGRAM_VERSION: &str = "TBLASTN 2.17.0+";
+const PROGRAM_VERSION: &str = concat!("TBLASTN ", crate::ncbi_blast_version!());
 
 /// Whether `nident` is the only field of the counts' block of `spec`, which reads the rows of some
 /// HSPs (`write_tblastn_tabular`).

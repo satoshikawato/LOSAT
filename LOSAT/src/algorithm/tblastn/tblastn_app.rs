@@ -1107,7 +1107,7 @@ fn write_first_batch_prologs(
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
-                "2.17.0+",
+                crate::NCBI_BLAST_VERSION,
                 &name,
                 num_subjects,
                 total,

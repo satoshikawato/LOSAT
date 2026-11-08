@@ -315,9 +315,6 @@ impl TblastnArgs {
                 return Err(error);
             }
         };
-        if archive.is_some() {
-            super::archive::check_titles(&subjects, "subject")?;
-        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
         // ```c
         //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -914,7 +911,6 @@ pub fn run_local(
     if archive_requested {
         args.archive = super::archive::handle_for(&args, true)?
             .map(|handle| outputs.with_archive_outfmt(handle));
-        super::archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
@@ -1285,11 +1281,21 @@ fn search(
         reading,
         batch_size,
     );
-    // The refusal of a title the archive cannot write comes before its first byte: the queries
-    // of the batches NCBI completes are written (the records of the batch that a reader error
-    // interrupts are not).
-    if args.archive.is_some() {
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-295
+    // ```c++
+    //                 query =  input->GetNextSeqBatch(*scope);
+    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
+    //     ...
+    //                 if (fmt_args->ArchiveFormatRequested(args)) {
+    //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+    // ```
+    // The refusal of a title the archive cannot write comes before its first byte. The archive
+    // of each batch that NCBI completes holds its queries and, with `-subject`, every subject;
+    // the batch that stops the run (a reader error, `Empty CBlastQueryVector`, a batch of
+    // queries without letters) writes neither, and the error archive holds no sequence.
+    if args.archive.is_some() && batches.searched_done > 0 {
         super::archive::check_titles(&searched_queries[..batches.searched_done], "query")?;
+        super::archive::check_titles(subject_records, "subject")?;
     }
     if batches.searched_done == 0 && batches.stop.is_some() {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380

@@ -45,6 +45,9 @@ const LOSAT_HELP_TEMPLATE: &str =
 
 pub use crate::utils::entry_names::{entry_argv, ENTRY_NAMES};
 
+// What the `losat` binary runs; the crate's root re-exports `main_entry` for it.
+pub(crate) mod main_entry;
+
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it (`render_message` writes long options with one dash).
 pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
@@ -175,6 +178,7 @@ pub enum Commands {
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
     /// Pairwise nucleotide alignment (megablast [default], blastn)
+    #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastn(blastn::BlastnArgs),
     /// Pairwise protein alignment (blastp)
@@ -1155,7 +1159,7 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
     }
 }
 
-/// Set by `main` (`post_errors_in_run`): the command line's run writes the text of an error that
+/// Set by `main_entry` (`post_errors_in_run`): the command line's run writes the text of an error that
 /// gets an error archive itself, before the archive (`post_native_error`). A library caller of the
 /// command line entries (`api::run_blastn` and the others) does not set it, and the text stays in
 /// the error it gets back.
@@ -1176,7 +1180,7 @@ fn posted(text: &str) -> bool {
 }
 
 /// Makes the command line's run write an error's text before its error archive
-/// (`post_native_error`); called by `main` only.
+/// (`post_native_error`); called by `main_entry` only.
 pub fn post_errors_in_run() {
     POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
 }

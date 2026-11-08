@@ -326,7 +326,9 @@ pub(crate) struct BlastpKappaSubjectRangeCache {
 /// search, so a subject is SEG-masked once however many queries hit it. The
 /// query-parallel redo creates one cache per query, in which a subject range
 /// is never looked up twice, so every (query, subject) pair runs SEG again.
-/// Those per-query caches read and write this store. The
+/// Those per-query caches read and write this store. The one-thread redo of
+/// the block search keeps the blocks' store from block to block where its
+/// subjects are those encoded for all blocks (`x_query_blocks::x_block_seg_store`). The
 /// entry for a key is the value the serial cache holds for it: the masked
 /// range and its bias flag depend on the subject range only. Two threads may
 /// compute the same entry at the same time; they then store equal values.
@@ -335,16 +337,6 @@ pub(crate) struct XSharedSubjectRanges {
 }
 
 impl XSharedSubjectRanges {
-    #[cfg_attr(
-        not(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )),
-        expect(
-            dead_code,
-            reason = "used only with `parallel` threads: by the parallel redo (x_redo_par) and the parallel kappa redo of run_resolved_in_pool"
-        )
-    )]
     pub(crate) fn new() -> Self {
         Self {
             shards: (0..64)
@@ -364,20 +356,10 @@ impl XSharedSubjectRanges {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN, `x_redo_par::x_bp_seg_win`); it changes
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN, `x_bp_seg_win`); it changes
     // no value NCBI computes.
     /// Drops every entry and the maps' room. A range looked up afterwards is masked again, into the
     /// value it had: an entry depends on its key only.
-    #[cfg_attr(
-        not(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )),
-        expect(
-            dead_code,
-            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
-        )
-    )]
     pub(crate) fn x_clear(&self) {
         for shard in &self.shards {
             *shard
@@ -389,16 +371,6 @@ impl XSharedSubjectRanges {
     // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN's size rule); it changes no value NCBI
     // computes.
     /// The number of entries (LOSAT_X_BPSEGWIN's rule, after a window: the sum of the shards').
-    #[cfg_attr(
-        not(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )),
-        expect(
-            dead_code,
-            reason = "used only with `parallel` threads: called only by the parallel redo (x_redo_par)"
-        )
-    )]
     pub(crate) fn x_len(&self) -> usize {
         self.shards
             .iter()
@@ -412,22 +384,34 @@ impl XSharedSubjectRanges {
     }
 }
 
-impl BlastpKappaSubjectRangeCache {
-    pub(crate) fn new() -> Self {
-        Self {
-            masked_ranges: HashMap::new(),
-            x_shared: None,
-        }
-    }
+/// EXPERIMENT (LOSAT_X_BPSEGWIN): the built-in number of entries (about 320 bytes each) from
+/// which the store is emptied after a window.
+const X_SEG_WIN_ENTRIES: usize = 4_096;
 
+// No NCBI counterpart: reads the LOSAT_X_BPSEGWIN switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSEGWIN): the number of entries from which the search's store of
+/// SEG-masked subject ranges (`XSharedSubjectRanges`) is emptied after a window, or `None` (off).
+/// A strict-set value switch: the integer given, 2 or more, else 4,096; `None` for `0`. Where the
+/// redo runs in windows, a store that holds that many entries once a window is computed is
+/// emptied, so it holds about the ranges of one window, not those of the whole search; a smaller
+/// store is kept for the next windows (masking its ranges again costs more time than it saves
+/// memory: bp_wssv at 8 threads, 86 entries). A later window that reaches a range again masks it
+/// again: an entry is a function of its key (the subject, the range and the SEG parameters), so
+/// it gets the same bytes and bias flag.
+pub(crate) fn x_bp_seg_win() -> Option<usize> {
+    static MIN: OnceLock<Option<usize>> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_BPSEGWIN", 2..=usize::MAX, X_SEG_WIN_ENTRIES)
+    })
+}
+
+impl BlastpKappaSubjectRangeCache {
     // No NCBI counterpart: constructor that selects the search-wide store (see
     // XSharedSubjectRanges); it does not change any value NCBI computes.
-    /// A cache backed by the search-wide store (`None`: the cache keeps its own map).
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub(crate) fn x_with_shared(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
+    /// A cache backed by `shared`, a store of more than one cache (`None`: the cache keeps its own
+    /// map).
+    pub(crate) fn new(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
         Self {
             masked_ranges: HashMap::new(),
             x_shared: shared,
@@ -2852,7 +2836,7 @@ mod tests {
             None,
         );
         let words = build_query_word_hashes(query.data());
-        let mut cache = BlastpKappaSubjectRangeCache::new();
+        let mut cache = BlastpKappaSubjectRangeCache::new(None);
         let get = |cache: &mut BlastpKappaSubjectRangeCache| {
             build_subject_range_data(
                 &matching_seq,

@@ -9,7 +9,7 @@
 //! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: blastp's fused loop with
 //! LOSAT_X_BPDIAG's cell test) reads the hits of each lookup cell in place, in the same order, and
 //! applies the outcomes of the test that touch only the hit's diagonal entry; a hit that passes the
-//! test goes to the closure of [`x_word_finder_fused`], which runs the rest of the reference's
+//! test goes to the closure of `x_word_finder_fused`, which runs the rest of the reference's
 //! statements unchanged (the context check, the two-hit extension, the save, the entry's update).
 //!
 //! Why the outcome is the reference's: blastx's diagonal entries are NCBI's `DiagStruct`, as
@@ -63,16 +63,16 @@
 //! still read x1.43 and x1.37 at 1.76 (line SF S3 s4, family bx-seed-loop). Both loops give the
 //! reference's hits and table, so the choice changes only the speed; it is made once per thread and
 //! table build
-//! ([`x_fused_pays`]; a table built from the pooled vectors of the one before is a new build),
+//! (`x_fused_pays`; a table built from the pooled vectors of the one before is a new build),
 //! and once for all the threads that search one table's subjects in tasks
-//! ([`x_shared_table_ratio`]). The timing line then also gives `min_hits_per_cell=` (the cutoff),
+//! (`x_shared_table_ratio`). The timing line then also gives `min_hits_per_cell=` (the cutoff),
 //! `tables_fused=` and `tables_other=` (the choices made) and
 //! `hits_per_cell=LEAST-MOST` (hundredths).
 //!
 //! The hits of a table the fused loop scans are stored in 16 bits (`BxLookup::Narrow`,
 //! `BackboneCell16`: 8-byte cells and a `u16` overflow array, half the bytes of the 16-byte cells
 //! and `Int4` overflow): the builder chooses the width after its count pass, from the same
-//! hits-per-used-cell test as the choice of the loop ([`x_narrow_cutoff`]) and the length of the
+//! hits-per-used-cell test as the choice of the loop (`x_narrow_cutoff`) and the length of the
 //! lookup query (at most 65,535 letters, so every query offset and every cell's count fits). The
 //! fused loop is generic over the table's cell, and widens each hit to an `i32` before any
 //! arithmetic (`(q - s) & mask`, `q - diff`), so the tables, calls and reports are those of the
@@ -84,7 +84,7 @@
 //! window with a repeated entry in parts cut before each hit that repeats an entry of its part, the
 //! last hits of the subject one after the other; the argument that the calls, their order and the
 //! table are the per-hit loop's is in `x_seed_fused`'s module header (it rests on the closures of
-//! [`x_word_finder_fused`] and [`x_word_finder_fused_sent`] writing only their hit's entry). The
+//! `x_word_finder_fused` and `x_word_finder_fused_sent` writing only their hit's entry). The
 //! stage keeps no query offset: it is recovered as `(coord + s) & mask`, exact because the table
 //! made by `Diagonals::new` for the query batch has at least its length plus the window entries,
 //! so `mask` is at least every query offset of the batch's lookup

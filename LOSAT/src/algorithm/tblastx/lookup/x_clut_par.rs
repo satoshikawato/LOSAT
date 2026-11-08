@@ -200,6 +200,8 @@ impl XAppends {
 /// last one, when the task ends) goes to its slot of `registry`, whose index the chunks keep.
 struct XSegmentOut<'r> {
     registry: &'r Mutex<Vec<Vec<u32>>>,
+    /// The fewest entries of a segment (`XParallelCuts::appends_segment`).
+    size: usize,
     segment: Vec<u32>,
     /// The segment's slot in `registry` (`usize::MAX`: none yet).
     index: usize,
@@ -207,9 +209,10 @@ struct XSegmentOut<'r> {
 }
 
 impl<'r> XSegmentOut<'r> {
-    fn new(registry: &'r Mutex<Vec<Vec<u32>>>) -> Self {
+    fn new(registry: &'r Mutex<Vec<Vec<u32>>>, size: usize) -> Self {
         Self {
             registry,
+            size,
             segment: Vec::new(),
             index: usize::MAX,
             used: 0,
@@ -225,7 +228,7 @@ impl<'r> XSegmentOut<'r> {
             self.index = registry.len();
             registry.push(Vec::new());
             drop(registry);
-            self.segment = vec![0u32; n.max(X_APPENDS_SEGMENT)];
+            self.segment = vec![0u32; n.max(self.size)];
             self.used = 0;
         }
         let at = self.used;
@@ -257,11 +260,11 @@ struct XAppendsScratch<'r> {
 }
 
 impl<'r> XAppendsScratch<'r> {
-    fn new(registry: &'r Mutex<Vec<Vec<u32>>>) -> Self {
+    fn new(registry: &'r Mutex<Vec<Vec<u32>>>, segment: usize) -> Self {
         Self {
             targets: Vec::new(),
             per_offset: Vec::new(),
-            out: XSegmentOut::new(registry),
+            out: XSegmentOut::new(registry, segment),
         }
     }
 }
@@ -302,6 +305,7 @@ pub(super) fn x_try_build_flat_in_pool(
                     threads,
                     chunk_sizes: &[],
                     stripe_shift: None,
+                    appends_segment: X_APPENDS_SEGMENT,
                     passes,
                     spare,
                     x_ahead,
@@ -367,6 +371,7 @@ pub(super) fn x_try_build_flat_in_pool_of(
                     threads,
                     chunk_sizes: &[],
                     stripe_shift: None,
+                    appends_segment: X_APPENDS_SEGMENT,
                     passes,
                     spare,
                     x_ahead,
@@ -429,6 +434,7 @@ pub(super) fn x_flat_ahead_appends_in_pool(
         threads: pool.threads(),
         chunk_sizes: &[],
         stripe_shift: None,
+        appends_segment: X_APPENDS_SEGMENT,
         passes: XPasses::OneLatch(x_flat_args.extra),
         // The spare's vectors are the second part's.
         spare: None,
@@ -624,12 +630,15 @@ struct XParallelCuts<'a> {
     /// `None`: `x_max_appends`, the serial builder's bound.
     max_appends: Option<usize>,
     threads: usize,
-    /// The chunks' sizes in query offsets, in turn; empty: the offsets over `X_PARTS_PER_THREAD`
+    /// The chunks' sizes in query offsets, in turn; empty: the offsets over `X_CHUNKS_PER_THREAD`
     /// chunks per thread, at least `X_MIN_CHUNK_OFFSETS` each.
     chunk_sizes: &'a [usize],
     /// The stripes' width 2^shift; `None`: the widest that makes `X_PARTS_PER_THREAD` stripes per
     /// thread, or fewer so that the chunks' parts are at most `X_MAX_PARTS`.
     stripe_shift: Option<usize>,
+    /// The fewest entries of a segment of packed appends (`XSegmentOut`): `X_APPENDS_SEGMENT`
+    /// (smaller in the tests).
+    appends_segment: usize,
     /// LOSAT_X_BPLKPFLAT: how the passes are scheduled, and the extra tasks.
     passes: XPasses<'a>,
     /// LOSAT_X_BPLKPFLAT: the vectors of an earlier table for `starts` and `hits` (else fresh ones).
@@ -1303,14 +1312,17 @@ fn x_flat_appends_on<S: CompressedScores>(
     let chunk_list: Vec<XChunkAppends> = match cuts.passes {
         XPasses::Rayon => chunks
             .par_iter()
-            .map_init(|| XAppendsScratch::new(&registry), chunk_appends)
+            .map_init(
+                || XAppendsScratch::new(&registry, cuts.appends_segment),
+                chunk_appends,
+            )
             .collect(),
         // LOSAT_X_BPLKPFLAT: the extra tasks after the chunks (module header).
         XPasses::OneLatch(extra) => x_one_latch_pass(
             threads,
             chunks.len(),
             extra.map_or(0, |extra| extra.count()),
-            || XAppendsScratch::new(&registry),
+            || XAppendsScratch::new(&registry, cuts.appends_segment),
             |scratch, index| chunk_appends(scratch, &chunks[index]),
             |index| {
                 if let Some(extra) = extra {
@@ -1662,6 +1674,7 @@ mod tests {
                     threads,
                     chunk_sizes,
                     stripe_shift,
+                    appends_segment: X_APPENDS_SEGMENT,
                     passes,
                     spare: spare.map(|(spare, _)| spare),
                     x_ahead: false,
@@ -1848,6 +1861,7 @@ mod tests {
             threads,
             chunk_sizes,
             stripe_shift: None,
+            appends_segment: X_APPENDS_SEGMENT,
             passes: XPasses::Rayon,
             spare: None,
             x_ahead: false,
@@ -2162,6 +2176,7 @@ mod tests {
                 threads,
                 chunk_sizes: &[],
                 stripe_shift: None,
+                appends_segment: X_APPENDS_SEGMENT,
                 passes: XPasses::OneLatch(None),
                 spare: None,
                 x_ahead: false,
@@ -2603,6 +2618,7 @@ mod tests {
                     threads,
                     chunk_sizes: &[],
                     stripe_shift: None,
+                    appends_segment: X_APPENDS_SEGMENT,
                     passes: XPasses::OneLatch(None),
                     stripe_fill,
                     spare,
@@ -2656,6 +2672,7 @@ mod tests {
                     threads: threads.0,
                     chunk_sizes: &[],
                     stripe_shift: None,
+                    appends_segment: X_APPENDS_SEGMENT,
                     passes,
                     spare: spare_a,
                     x_ahead,
@@ -2997,5 +3014,108 @@ mod tests {
         assert_eq!([taken[0], taken[1]], [moved[0], moved[1]]);
         assert_eq!(spare_capacities(&block), (0, 0));
         assert_eq!(empty.0.lock().unwrap().1.len(), 5000);
+    }
+
+    // Item SC2d-2: the chunks' packed appends in the tasks' segments (`XSegmentOut`) of any size: a
+    // task's chunks fill a segment and go on in a new one (a chunk never straddles two), a chunk of
+    // more appends than a segment holds gets one of its own, and the table is the serial one slot
+    // for slot, with rayon's passes and the one-latch passes (with and without the stripe fill), at
+    // 2, 3 and 7 threads, for BLOSUM62's words and another matrix's.
+    #[test]
+    fn the_appends_in_segments_of_any_size_build_the_serial_table() {
+        let mut rng = XorShift(0x510e_527f_ade6_82d1);
+        let (mut many_seen, mut whole_seen) = (0usize, 0usize);
+        for round in 0..4 {
+            let matrix = [ScoringMatrix::Blosum62, ScoringMatrix::Blosum45][round % 2];
+            let letters: &[u8] = if round < 2 { &FEW_LETTERS } else { &LETTERS };
+            let lengths: Vec<usize> = (0..2 + rng.below(4)).map(|_| 20 + rng.below(300)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, letters, round % 2);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let serial = flat(x_try_build_flat_of(
+                matrix,
+                5,
+                1100,
+                &query,
+                &locations,
+                &tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            ));
+            for segment in [1, 7, 64, 1000, X_APPENDS_SEGMENT] {
+                for (threads, passes, stripe_fill) in [
+                    (2, XPasses::Rayon, false),
+                    (3, XPasses::OneLatch(None), false),
+                    (7, XPasses::OneLatch(None), true),
+                ] {
+                    let what = format!("round {round} {matrix:?} segment {segment} n{threads}");
+                    let cuts = XParallelCuts {
+                        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                        max_appends: None,
+                        threads,
+                        // Chunks of a few offsets, so that a task fills its segments with many.
+                        chunk_sizes: &[3, 11, 29],
+                        stripe_shift: None,
+                        appends_segment: segment,
+                        passes,
+                        spare: None,
+                        x_ahead: false,
+                        stripe_fill,
+                    };
+                    let stage = in_pool(threads, || {
+                        x_flat_appends_on(
+                            matrix,
+                            5,
+                            1100,
+                            &query,
+                            &locations,
+                            &tables,
+                            cuts,
+                            |_| None,
+                        )
+                    });
+                    let XFlatStage::Appends(appends) = stage else {
+                        panic!("{what}: the appends pass ended the build")
+                    };
+                    // Each chunk's range lies in its segment; a segment holds one chunk larger
+                    // than `segment`, or chunks whose appends sum to at most `segment`.
+                    let segments = &appends.appends.segments;
+                    let mut used = vec![0usize; segments.len()];
+                    for chunk in &appends.appends.chunks {
+                        if chunk.len == 0 {
+                            continue;
+                        }
+                        assert!(
+                            chunk.at + chunk.len <= segments[chunk.segment].len(),
+                            "{what}: a chunk past its segment"
+                        );
+                        used[chunk.segment] += chunk.len;
+                        if chunk.len > segment {
+                            assert_eq!(
+                                segments[chunk.segment].len(),
+                                chunk.len,
+                                "{what}: a chunk larger than a segment, in one of its own"
+                            );
+                            whole_seen += 1;
+                        }
+                    }
+                    for (index, (segment_entries, used)) in
+                        segments.iter().map(Vec::len).zip(&used).enumerate()
+                    {
+                        assert!(
+                            *used <= segment_entries,
+                            "{what}: segment {index} overfilled"
+                        );
+                    }
+                    if segments.len() > threads {
+                        many_seen += 1;
+                    }
+                    let built = in_pool(threads, || {
+                        x_flat_stripes_on(matrix, appends, &query, &locations, None, false)
+                    });
+                    x_assert_same_flat_tables_as(&what, &flat(built), &serial);
+                }
+            }
+        }
+        assert!(many_seen > 0 && whole_seen > 0, "{many_seen} {whole_seen}");
     }
 }

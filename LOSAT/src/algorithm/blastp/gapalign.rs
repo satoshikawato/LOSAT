@@ -3567,28 +3567,11 @@ mod tests {
     use crate::core::composition_adjustment::adjust_scores::{
         blast_adjust_scores, build_matrix_info, read_aa_composition, BlastCompositionWorkspace,
     };
+    use crate::core::composition_adjustment::redo_alignment::redo_calc_lambda;
     use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
-    use crate::stats::compute_lambda_from_score_probs;
     use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
     use crate::utils::seg::{SegMasker, SegParams};
     use std::fs;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
-    // ```c
-    // s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-    // {
-    //     return Blast_KarlinLambdaNR(&freq, lambda0);
-    // }
-    // ```
-    fn test_compute_lambda_from_score_probs(
-        score_probs: &[f64],
-        min_score: i32,
-        max_score: i32,
-        lambda0: f64,
-    ) -> anyhow::Result<f64> {
-        compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
-            .map_err(anyhow::Error::msg)
-    }
 
     fn fasta_sequence_by_id(contents: &str, wanted_id: &str) -> Vec<u8> {
         let mut current_id = None::<&str>;
@@ -4221,7 +4204,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut composition_workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap()
         .expect("adjusted matrix");
@@ -4317,7 +4300,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut composition_workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap()
         .expect("adjusted matrix");

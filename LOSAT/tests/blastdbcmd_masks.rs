@@ -96,7 +96,11 @@ fn expected(name: &str) -> Vec<u8> {
 
 /// The probe's cases: id, words, exit status. `db/nm5` and `db/nm4` have the dust masks 11 and
 /// 12, `db/pm5` the seg masks 21, `db/palias` is an alias of `p5` and `pm5`, `db/m/nms4` has masks
-/// 12 on one sequence, `db/m/pmg` an index of PIGs (a copy of its index of GIs). Approved
+/// 12 on one sequence, `db/m/pmg` an index of PIGs (a copy of its index of GIs), `db/m/bad4/b_big`
+/// is `db/nm4` without its little-endian data file `.nac` (NCBI reads the `.nab`; the ranges of
+/// `%m` come out with their bytes reversed), `../seqdb/db/user-column-db` is NCBI's database
+/// with a user column (`.paa .pab`) and no masks (cases `U`: NCBI 2.17.0 on this machine on
+/// 2026-11-08, the database at `{T}/seqdb/db`). Approved
 /// differences (expected bytes from NCBI's own neighbouring run, line BDC's
 /// `probe/make_expected.py`): 3, a mask and `-strand minus` in FASTA (`M04`, `S31`, `M348`,
 /// `M352`, `M372`, `M380`, `M392`, `M395`, `M397`, `M399`, `M401`, `M405`, `M406`, `M446`, `M449`,
@@ -270,6 +274,15 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("M945", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%é%m11"], 1),
     ("M946", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%m11%%"], 0),
     ("M947", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%é %m11 %m12"], 1),
+    ("M782", &["-db", "db/m/bad4/b_big", "-info"], 0),
+    ("M784", &["-db", "db/m/bad4/b_big", "-entry", "all", "-outfmt", "%o %m11"], 0),
+    ("M785", &["-db", "db/m/bad4/b_big", "-entry", "all", "-outfmt", "%o %m99"], 1),
+    ("M787", &["-db", "db/m/bad4/b_big", "-entry", "all", "-mask_sequence_with", "11"], 0),
+    ("M788", &["-db", "db/m/bad4/b_big", "-entry", "all", "-mask_sequence_with", "dust"], 1),
+    ("M789", &["-db", "db/m/bad4/b_big", "-entry", "all", "-mask_sequence_with", "11", "-range", "100-260"], 0),
+    ("M790", &["-db", "db/m/bad4/b_big", "-entry", "all", "-outfmt", "%o %s", "-mask_sequence_with", "11", "-range", "100-260"], 0),
+    ("U03", &["-db", "../seqdb/db/user-column-db", "-entry", "all", "-outfmt", "%o %m1"], 1),
+    ("U04", &["-db", "../seqdb/db/user-column-db", "-entry", "all", "-mask_sequence_with", "1"], 1),
 ];
 
 #[test]
@@ -306,7 +319,8 @@ fn masks_are_ncbi_s_bytes() {
 
 /// What NCBI does not answer: an algorithm id that overflows its `int`, a negative id it looks
 /// up, an algorithm of the alias `mask_remap` that the sequence's volume does not know (NCBI
-/// reads the masks of another algorithm).
+/// reads the masks of another algorithm), `%s` without a range on the byte-reversed masks of
+/// `db/m/bad4/b_big`, which pass the sequence (NCBI crashes, M786).
 #[rustfmt::skip]
 const REFUSED: &[(&str, &[&str])] = &[
     ("M143", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%m4294967307"]),
@@ -316,6 +330,7 @@ const REFUSED: &[(&str, &[&str])] = &[
     ("M226", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%a %s", "-mask_sequence_with=-2"]),
     ("M180", &["-db", "../seqdb/db/mask_remap", "-entry", "all", "-outfmt", "%o|%a|%l|%m11"]),
     ("M261", &["-db", "../seqdb/db/mask_remap", "-entry", "all", "-mask_sequence_with", "11"]),
+    ("M786", &["-db", "db/m/bad4/b_big", "-entry", "all", "-outfmt", "%o %s", "-mask_sequence_with", "11"]),
 ];
 
 #[test]
@@ -511,10 +526,10 @@ fn damaged_metadata_and_masks_are_ncbi_s_errors() {
     assert_eq!(code, 1);
 }
 
-/// A column without its data files is no column (M772, M774); one with the big-endian data file
-/// alone (M784), another column before the masks (M824) and, for `%s`, a stored mask outside the
-/// sequence (M886, M896) are refused, where NCBI reads them as something else or crashes. The
-/// FASTA path clips that mask (M887, M897).
+/// A column without its data files is no column (M772, M774); another column before the masks
+/// (M824) and, for `%s`, a stored mask outside the sequence (M886, M896) are refused, where NCBI
+/// reads them as something else or crashes. The FASTA path clips that mask (M887, M897). A column
+/// with the big-endian data file alone is read as NCBI reads it (`CASES`, `db/m/bad4/b_big`).
 #[test]
 fn columns_that_ncbi_misreads_are_refused() {
     let config = TestDir::new("misread-config");
@@ -543,11 +558,6 @@ fn columns_that_ncbi_misreads_are_refused() {
          Error: [blastdbcmd] Invalid filtering algorithm ID for outfmt %m.\n"
     );
     assert_eq!(code, 1);
-
-    let dir = TestDir::new("big");
-    let db = copy_of_nm4(&dir.0);
-    fs::remove_file(dir.0.join("b.nac")).unwrap();
-    refused(&db, &["-outfmt", "%o %m11"]);
 
     let dir = TestDir::new("other");
     let db = copy_of_nm4(&dir.0);

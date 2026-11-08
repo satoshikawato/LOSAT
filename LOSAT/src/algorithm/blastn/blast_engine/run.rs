@@ -226,6 +226,21 @@ mod x_qgroup_par;
 #[path = "traceback_finish.rs"]
 mod traceback_finish;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1526-1528,1556-1573 (the
+// subject that `BLAST_ComputeTraceback_MT` fetches for the traceback) and :1691-1696 (the search
+// without a traceback).
+// The subject's letters for the traceback of one subject and the traceback of an ungapped search
+// (a child module, so that it uses the private types of this file).
+#[path = "traceback_subject.rs"]
+mod traceback_subject;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375-514 (the loop of
+// `Blast_TracebackFromHSPList` up to the traceback call).
+// Where the traceback of one HSP starts, its traceback call and the speculative batch of the
+// traceback loop (a child module, so that it uses the private types of this file).
+#[path = "traceback_hsp.rs"]
+mod traceback_hsp;
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 // ```c++
 //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
@@ -16286,113 +16301,67 @@ fn search_query_batch<const UNGAPPED: bool>(
 
         let hits = &mut subject_scratch.hits;
         hits.clear();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1528, 1567-1573
-        // ```c
-        //             const EBlastEncoding encoding = Blast_TracebackGetEncoding(program_number);
-        // ...
-        //                 seq_arg.oid = batch->hsplist_array[0]->oid;
-        //                 seq_arg.encoding = encoding;
-        // ...
-        //                 if (BlastSeqSrcGetSequence(seqsrc, &seq_arg) < 0) {
-        // ```
-        // The traceback fetches the uncompressed (blastna) subject of each subject with
-        // preliminary HSPs; the preliminary stage reads only the packed one. The blastna letters
-        // are made here, for this subject only, instead of being kept for every subject of the
-        // search. A database sequence comes with its blastna letters, read with its
-        // ambiguity codes (`database::traceback_listed`).
-        let mut s_seq_blastna_vec: Vec<u8>;
-        let s_seq_blastna: &[u8] = match (subject.blastna, subject.store) {
-            (Some(blastna), _) => blastna,
-            // EXPERIMENT (LOSAT_X_BNSTORE): made from the packed subject, on the threads of the
-            // pool (one thread decoding a long subject left the others waiting at every batch).
-            (None, Some(store)) => {
-                s_seq_blastna_vec = Vec::new();
-                x_blastna_into_pool(store, &mut s_seq_blastna_vec, parallel_pool);
-                s_seq_blastna_vec.as_slice()
-            }
-            (None, None) => {
-                s_seq_blastna_vec = encode_iupac_to_blastna(
-                    subject
-                        .letters
-                        .expect("a subject reaches the traceback with its letters"),
-                );
-                s_seq_blastna_vec.as_slice()
-            }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1573 (the
+        // subject of the traceback, `traceback_subject::traceback_subject_blastna`). The letters
+        // made for it are this buffer's, which lives as long as `s_seq_blastna` is read.
+        let mut s_seq_blastna_vec: Vec<u8> = Vec::new();
+        let s_seq_blastna: &[u8] = traceback_subject::traceback_subject_blastna(
+            subject,
+            parallel_pool,
+            &mut s_seq_blastna_vec,
+        );
+
+        // The values the traceback reads (`traceback_subject.rs`, `traceback_hsp.rs` and
+        // `traceback_finish.rs`), for the query group tasks and the look-ahead helpers on the pool
+        // as for the owner thread.
+        let traceback_ctx = traceback_finish::TracebackCtx {
+            timing_ref,
+            timing_enabled,
+            blastn_trace_enabled,
+            s_idx,
+            s_id,
+            s_seq_blastna,
+            x_fenced,
+            encoded_queries_blastna: &encoded_queries_blastna,
+            encoded_queries_nomask,
+            query_lengths: &query_lengths,
+            cutoff_scores,
+            hit_saving_cutoff_scores,
+            query_eff_searchsp,
+            search_karlin_ref,
+            round_down_evalue_score,
+            db_len_total,
+            db_num_seqs,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop_final,
+            score_matrix: &score_matrix,
+            use_dp,
+            percent_identity,
+            min_hit_length,
+            min_diag_separation,
+            evalue_threshold,
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1526,1690-1706
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1526,1701-1706
         // ```c
-        //     const Boolean perform_traceback = score_params->options->gapped_calculation;
-        //     ...
-        //             if (perform_traceback) { ... }
-        //             /* Update bit scores */
-        //             Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
-        //             ...
-        //             status = Blast_HSPResultsInsertHSPList(results, hsp_list, hit_options->hitlist_size);
+        //             const Boolean perform_traceback = score_params->options->gapped_calculation;
+        // ...
+        //                 if (hsp_list->hspcnt == 0) {
+        //                     hsp_list = Blast_HSPListFree(hsp_list);
+        //                 }
+        //                 else {
+        //                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
+        //                                   hit_params->options->hitlist_size);
         // ```
-        // The traceback of an ungapped (`-ungapped`) search aligns nothing and purges nothing:
-        // the HSPs the preliminary stage kept (re-evaluated, with their e-values) become the
-        // subject's hits in the kept order, with the identities counted again on the subject's
-        // BLASTNA letters (the ranges the traceback decoded include the HSPs').
+        // The traceback of an ungapped (`-ungapped`) search aligns nothing and purges nothing
+        // (`traceback_subject::ungapped_traceback_hits`); a subject with hits gives them to the
+        // results.
         if UNGAPPED {
-            let mut final_hits: Vec<BlastnHsp> = Vec::with_capacity(combined_prelim_hits.len());
-            for prelim in combined_prelim_hits.iter() {
-                let context_idx = prelim.context_idx as usize;
-                let length = prelim.prelim_qe - prelim.prelim_qs;
-                let matches = ungapped::count_identities_ungapped(
-                    encoded_queries_nomask[context_idx],
-                    s_seq_blastna,
-                    prelim.prelim_qs,
-                    prelim.prelim_ss,
-                    length,
-                );
-                let eff_searchsp = query_eff_searchsp[context_idx];
-                let (bit_score, eval) = calculate_blastn_context_statistics(
-                    prelim.prelim_score,
-                    &search_karlin_ref[context_idx].gapped,
-                    eff_searchsp,
-                    round_down_evalue_score,
-                );
-                let identity = if length > 0 {
-                    ((matches as f64 / length as f64) * 100.0).min(100.0)
-                } else {
-                    0.0
-                };
-                let query_length = query_lengths[prelim.query_idx as usize];
-                let (hit_q_start, hit_q_end, hit_s_start, hit_s_end) = adjust_blastn_offsets(
-                    prelim.prelim_qs,
-                    prelim.prelim_qe,
-                    prelim.prelim_ss,
-                    prelim.prelim_se,
-                    query_length,
-                    prelim.query_frame,
-                );
-                final_hits.push(BlastnHsp {
-                    identity,
-                    length,
-                    mismatch: length - matches,
-                    gapopen: 0,
-                    q_start: hit_q_start,
-                    q_end: hit_q_end,
-                    s_start: hit_s_start,
-                    s_end: hit_s_end,
-                    e_value: eval,
-                    bit_score,
-                    num_ident: matches,
-                    query_frame: prelim.query_frame,
-                    query_length,
-                    q_idx: prelim.query_idx,
-                    s_idx: s_idx as u32,
-                    raw_score: prelim.prelim_score,
-                    internal_q_offset_0: prelim.prelim_qs,
-                    internal_q_end_0: prelim.prelim_qe,
-                    internal_s_offset_0: prelim.prelim_ss,
-                    internal_s_end_0: prelim.prelim_se,
-                    internal_query_context_offset: prelim.query_context_offset,
-                    gap_info: None,
-                    num_positives: matches,
-                });
-            }
+            let final_hits =
+                traceback_subject::ungapped_traceback_hits(&traceback_ctx, &combined_prelim_hits);
             if !final_hits.is_empty() {
                 *subject_hits = Some(SubjectHits::Mixed(final_hits));
             }
@@ -16481,96 +16450,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                 // This preserves NCBI node order while avoiding repeated Vec growth.
                 interval_tree.reserve_nodes_for_hsps(prelim_hits.len());
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
-                // ```c
-                // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
-                //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                //     AdjustSubjectRange(&s_start, &adjusted_s_length, q_start, query_length, &start_shift);
-                //     /* traceback, identity test, then BlastIntervalTreeAddHSP */
-                // }
-                // ```
-                // N02 scheduling only: speculative values have no externally visible effects;
-                // the original ordered contains/materialize/add sequence remains authoritative.
-                let prepare_traceback = |prelim: &PrelimHit| {
-                    let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize];
-                    let mut trace_q_start = prelim.seed_qs;
-                    let mut trace_s_start = prelim.seed_ss;
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-460
-                    // ```c
-                    // if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
-                    //                       hsp->subject.gapped_start == 0) {
-                    //    Boolean retval =
-                    //       BlastGetOffsetsForGappedAlignment(query, subject, sbp,
-                    //           hsp, &q_start, &s_start);
-                    //    if (!retval) { ... }
-                    //    hsp->query.gapped_start = q_start;
-                    //    hsp->subject.gapped_start = s_start;
-                    // } else {
-                    //    ...
-                    //    BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                    //    q_start = hsp->query.gapped_start;
-                    //    s_start = hsp->subject.gapped_start;
-                    // }
-                    // ```
-                    if trace_q_start == 0 && trace_s_start == 0 {
-                        let (q_start, s_start) = match blast_get_offsets_for_gapped_alignment(
-                            q_seq_blastna,
-                            s_seq_blastna,
-                            prelim.prelim_qs,
-                            prelim.prelim_qe,
-                            prelim.prelim_ss,
-                            prelim.prelim_se,
-                            &score_matrix,
-                        ) {
-                            Some(value) => value,
-                            None => return None,
-                        };
-                        trace_q_start = q_start;
-                        trace_s_start = s_start;
-                    } else {
-                        let (q_start, s_start) = blast_get_start_for_gapped_alignment_nucl(
-                            q_seq_blastna,
-                            s_seq_blastna,
-                            prelim.prelim_qs,
-                            prelim.prelim_qe,
-                            prelim.prelim_ss,
-                            prelim.prelim_se,
-                            trace_q_start,
-                            trace_s_start,
-                        );
-                        trace_q_start = q_start;
-                        trace_s_start = s_start;
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:466-472
-                    // ```c
-                    // AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-                    //                    query_length, &start_shift);
-                    // adjusted_subject = subject + start_shift;
-                    // hsp->subject.gapped_start = s_start;
-                    // ```
-                    let mut adjusted_s_len = s_seq_blastna.len();
-                    let mut s_start_i32 = trace_s_start as i32;
-                    let mut s_len_i32 = adjusted_s_len as i32;
-                    let start_shift_i32 = adjust_subject_range(
-                        &mut s_start_i32,
-                        &mut s_len_i32,
-                        trace_q_start as i32,
-                        q_seq_blastna.len() as i32,
-                    );
-                    let start_shift = start_shift_i32 as usize;
-                    adjusted_s_len = s_len_i32 as usize;
-                    let trace_s_start_adj = s_start_i32 as usize;
-
-                    Some((
-                        trace_q_start,
-                        trace_s_start,
-                        start_shift,
-                        adjusted_s_len,
-                        trace_s_start_adj,
-                    ))
-                };
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
                 // ```c
                 // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
@@ -16680,70 +16559,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                             .unwrap_or(X_DEFAULT_SPECULATIVE_TRACEBACK_BATCH_SIZE)
                     })
                 };
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-440,457,466-469,503-509
-                // ```c
-                //          if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
-                //                                hsp->subject.gapped_start == 0) {
-                //             Boolean retval =
-                //                BlastGetOffsetsForGappedAlignment(query, subject, sbp,
-                // ...
-                //                BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                // ...
-                //             AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-                //                                query_length, &start_shift);
-                // ...
-                //         } else if (kGreedyTraceback) {
-                //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
-                // ...
-                //         } else {
-                //           BLAST_GappedAlignmentWithTraceback(program_number, query,
-                // ```
-                // This closure is the part of the loop body that depends on the HSP alone: the start offsets and
-                // the subject range (`prepare_traceback`) and the traceback call, dynamic-programming or greedy.
-                // Index in, value out. The tree test and the tree insertion stay in the ordered loop.
-                // No NCBI counterpart: the traceback of the loop below as a
-                // function of the HSP's index (the job of the speculative batch).
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-472,503-512
+                // (the part of the loop body that depends on the HSP alone). The traceback of one
+                // HSP of this list by its index (`traceback_hsp::x_trace_compute`), for the
+                // look-ahead helpers and the ordered loop.
                 let x_trace_compute = |x_index: usize, x_scratch: &mut XAheadScratch<'_>| {
-                    let p = &prelim_hits[x_index];
-                    let prepared = prepare_traceback(p)?;
-                    let (qs, _, shift, slen, ss) = prepared;
-                    if x_fence::x_fenced(x_fenced) {
-                        return None;
-                    }
-                    let x_mark = x_fence::x_fence_mark(x_fenced);
-                    if !use_dp {
-                        let result = greedy_gapped_alignment_with_traceback(
-                            encoded_queries_blastna[p.context_idx as usize],
-                            &s_seq_blastna[shift..shift + slen],
-                            slen,
-                            qs,
-                            ss,
-                            reward,
-                            penalty,
-                            gap_open,
-                            gap_extend,
-                            x_drop_final,
-                            &mut *x_scratch.greedy,
-                        );
-                        x_fence::x_fence_note(x_fenced, x_mark);
-                        return Some((prepared, XSpecTraceback::Greedy(result)));
-                    }
-                    let result = extend_gapped_heuristic_with_traceback_with_scratch(
-                        encoded_queries_blastna[p.context_idx as usize],
-                        &s_seq_blastna[shift..shift + slen],
-                        qs,
-                        ss,
-                        1,
-                        reward,
-                        penalty,
-                        &score_matrix,
-                        gap_open,
-                        gap_extend,
-                        x_drop_final,
-                        &mut *x_scratch.gap,
-                    );
-                    x_fence::x_fence_note(x_fenced, x_mark);
-                    Some((prepared, XSpecTraceback::Dp(result)))
+                    traceback_hsp::x_trace_compute(&traceback_ctx, prelim_hits, x_index, x_scratch)
                 };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375
                 // ```c
@@ -16847,145 +16668,28 @@ fn search_query_batch<const UNGAPPED: bool>(
                             //                 query_length, adjusted_s_length,
                             //                 fence_hit);
                             // ```
-                            // Look-ahead: with helpers the batch below is not used; the tracebacks come
-                            // from `x_ahead.take`. Both ways only compute the traceback call of this loop ahead of its turn.
+                            // Look-ahead: with helpers the batch (`traceback_hsp::speculative_batch`) is
+                            // not used; the tracebacks come from `x_ahead.take`. Both ways only compute
+                            // the traceback call of this loop ahead of its turn.
                             if speculative_traceback
                                 && x_ahead.is_none()
                                 && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0
                             {
-                                let batch_end = (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE)
-                                    .min(prelim_hits.len());
-                                speculative_jobs.clear();
-                                speculative_jobs.extend((prelim_index..batch_end).filter(
-                                    |&index| {
-                                        let p = &prelim_hits[index];
-                                        let h = TreeHsp {
-                                            query_offset: p.prelim_qs as i32,
-                                            query_end: p.prelim_qe as i32,
-                                            subject_offset: p.prelim_ss as i32,
-                                            subject_end: p.prelim_se as i32,
-                                            score: p.prelim_score,
-                                            query_frame: p.query_frame,
-                                            query_length: query_contexts[p.context_idx as usize].len
-                                                as i32,
-                                            query_context_offset: p.query_context_offset,
-                                            subject_frame_sign: 1,
-                                        };
-                                        interval_tree
-                                            .containing_hsp(
-                                                &h,
-                                                p.query_context_offset,
-                                                min_diag_separation,
-                                            )
-                                            .is_none()
+                                traceback_hsp::speculative_batch(
+                                    &traceback_ctx,
+                                    traceback_hsp::SpeculativeBatch {
+                                        prelim_hits,
+                                        prelim_index,
+                                        batch_size: SPECULATIVE_TRACEBACK_BATCH_SIZE,
+                                        interval_tree,
+                                        query_contexts,
+                                        num_threads,
+                                        parallel_pool,
+                                        speculative_jobs: &mut speculative_jobs,
+                                        speculative_results: &mut speculative_results,
+                                        speculative_scratch: &mut speculative_scratch,
                                     },
-                                ));
-                                let jobs = &speculative_jobs;
-                                // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
-                                // BLAST_GappedAlignmentWithTraceback(...);
-                                crate::utils::threading::report_stage(
-                                    "blastn",
-                                    "dp_traceback",
-                                    jobs.len(),
-                                    jobs.len() > 1,
                                 );
-                                speculative_results.clear();
-                                speculative_results.resize_with(batch_end - prelim_index, || None);
-                                let pool = parallel_pool;
-                                pool.install(|| {
-                                    speculative_scratch.par_iter_mut().enumerate().for_each(
-                                        |(slot, (scratch, x_greedy_scratch, results))| {
-                                            results.clear();
-                                            results.extend(
-                                                jobs.iter().skip(slot).step_by(num_threads).filter_map(
-                                                    |&index| {
-                                                        let p = &prelim_hits[index];
-                                                        // NCBI reference: core/blast_traceback.c:436-472,509-513
-                                                        // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                                                        // AdjustSubjectRange(&s_start, &adjusted_s_length,
-                                                        //                    q_start, query_length, &start_shift);
-                                                        // BLAST_GappedAlignmentWithTraceback(...);
-                                                        // Keep the exact preparation with its speculative DP.
-                                                        let prepared = prepare_traceback(p)?;
-                                                        let (qs, _, shift, slen, ss) = prepared;
-                                                        if x_fence::x_fenced(x_fenced) {
-                                                            return None;
-                                                        }
-                                                        let x_mark = x_fence::x_fence_mark(x_fenced);
-                                                        if !use_dp {
-                                                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
-                                                            // ```c
-                                                            //         } else if (kGreedyTraceback) {
-                                                            //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
-                                                            //                 query_length, adjusted_s_length, gap_align,
-                                                            //                 score_params, q_start, s_start, FALSE, TRUE,
-                                                            //                 fence_hit);
-                                                            // ```
-                                                            // The greedy traceback call of the ordered loop, made ahead on this slot's
-                                                            // scratch. The call depends on its arguments only, so the value is the one the ordered loop would
-                                                            // compute.
-                                                            // No NCBI counterpart: the call of
-                                                            // the ordered loop below, on this slot's scratch.
-                                                            let result =
-                                                                greedy_gapped_alignment_with_traceback(
-                                                                    encoded_queries_blastna
-                                                                        [p.context_idx as usize],
-                                                                    &s_seq_blastna[shift..shift + slen],
-                                                                    slen,
-                                                                    qs,
-                                                                    ss,
-                                                                    reward,
-                                                                    penalty,
-                                                                    gap_open,
-                                                                    gap_extend,
-                                                                    x_drop_final,
-                                                                    x_greedy_scratch,
-                                                                );
-                                                            x_fence::x_fence_note(x_fenced, x_mark);
-                                                            return Some((
-                                                                index,
-                                                                (
-                                                                    prepared,
-                                                                    XSpecTraceback::Greedy(result),
-                                                                ),
-                                                            ));
-                                                        }
-                                                        let result =
-                                                    extend_gapped_heuristic_with_traceback_with_scratch(
-                                                        encoded_queries_blastna
-                                                            [p.context_idx as usize],
-                                                        &s_seq_blastna[shift..shift + slen],
-                                                        qs,
-                                                        ss,
-                                                        1,
-                                                        reward,
-                                                        penalty,
-                                                        &score_matrix,
-                                                        gap_open,
-                                                        gap_extend,
-                                                        x_drop_final,
-                                                        scratch,
-                                                    );
-                                                        x_fence::x_fence_note(x_fenced, x_mark);
-                                                        Some((
-                                                            index,
-                                                            (prepared, XSpecTraceback::Dp(result)),
-                                                        ))
-                                                    },
-                                                ),
-                                            );
-                                        },
-                                    )
-                                });
-                                // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:583-612
-                                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-                                // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
-                                // One owner restores each result to its original batch index.
-                                for (_, _, results) in &mut speculative_scratch {
-                                    for (index, result) in results.drain(..) {
-                                        speculative_results[index - prelim_index] = Some(result);
-                                    }
-                                }
                             }
 
                             let prelim = &prelim_hits[prelim_index];
@@ -17186,7 +16890,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                             let prepared = precomputed
                                 .as_ref()
                                 .map(|(prepared, _)| *prepared)
-                                .or_else(|| prepare_traceback(prelim));
+                                .or_else(|| {
+                                    traceback_hsp::prepare_traceback(&traceback_ctx, prelim)
+                                });
                             if let (Some(timing), Some(start)) = (timing_ref, start_offsets_start) {
                                 BlastnTiming::record_duration(
                                     &timing.traceback_start_offsets_ns,
@@ -17691,35 +17397,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         // Reference: blast_traceback.c:633-692
         // =================================================================
 
-        // The values the two traceback steps below read, for the query group tasks on the pool as
-        // for the owner thread (`traceback_finish.rs`).
-        let traceback_ctx = traceback_finish::TracebackCtx {
-            timing_ref,
-            timing_enabled,
-            blastn_trace_enabled,
-            s_idx,
-            s_id,
-            s_seq_blastna,
-            encoded_queries_blastna: &encoded_queries_blastna,
-            encoded_queries_nomask,
-            cutoff_scores,
-            hit_saving_cutoff_scores,
-            query_eff_searchsp,
-            search_karlin_ref,
-            round_down_evalue_score,
-            db_len_total,
-            db_num_seqs,
-            reward,
-            penalty,
-            gap_open,
-            gap_extend,
-            score_matrix: &score_matrix,
-            use_dp,
-            percent_identity,
-            min_hit_length,
-            min_diag_separation,
-            evalue_threshold,
-        };
         // Dispatch point of LOSAT_X_QGROUPPAR for the traceback: the kept HSPs are the queries'
         // hit lists one after another, so each query's are one slice; per query on the pool, the
         // final lists concatenated in query order and sorted by score (stable, so ties stay in

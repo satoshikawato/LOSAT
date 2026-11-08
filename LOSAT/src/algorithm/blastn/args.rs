@@ -1050,3 +1050,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "args_tests.rs"]
+mod args_tests;

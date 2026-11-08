@@ -480,3 +480,7 @@ impl TblastxArgs {
             .display()
     }
 }
+
+#[cfg(test)]
+#[path = "args_tests.rs"]
+mod args_tests;

@@ -1,11 +1,11 @@
 //! Unit tests for tblastx/lookup.rs
 
-use LOSAT::algorithm::tblastx::lookup::{build_direct_lookup, encode_aa_kmer};
-use LOSAT::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test};
-use LOSAT::algorithm::tblastx::translation::generate_frames;
-use LOSAT::stats::KarlinParams;
-use LOSAT::utils::genetic_code::GeneticCode;
-use LOSAT::utils::matrix::ncbistdaa;
+use crate::algorithm::tblastx::lookup::{build_direct_lookup, encode_aa_kmer};
+use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, pv_test};
+use crate::algorithm::tblastx::translation::generate_frames;
+use crate::stats::KarlinParams;
+use crate::utils::genetic_code::GeneticCode;
+use crate::utils::matrix::ncbistdaa;
 
 #[test]
 fn test_encode_aa_kmer_basic() {

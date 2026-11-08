@@ -29,8 +29,9 @@ name = "losat"
 path = "src/main.rs"
 
 # The files of tests/ are modules of six suite binaries (tests/suites/<name>.rs, one `#[path]` module per
-# file) instead of one binary each; the three files that change the process environment or
-# process-wide state (the counting global allocator of thread_memory) stay alone.
+# file) instead of one binary each; the two files that change the process environment or
+# process-wide state (the counting global allocator of thread_memory) stay alone. Unit tests live in
+# the crate, next to the code they test (`#[cfg(test)]`).
 # tests/suite_layout.rs checks that every file is in exactly one test binary.
 [[test]]
 name = "blastn"
@@ -59,10 +60,6 @@ path = "tests/suites/common.rs"
 [[test]]
 name = "blastn_report_stream_api"
 path = "tests/blastn_report_stream_api.rs"
-
-[[test]]
-name = "unit_tests"
-path = "tests/unit_tests.rs"
 
 [[test]]
 name = "thread_memory"

@@ -447,8 +447,8 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   └── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 └── tests/
     ├── suites/            # Six test targets (five programs and common); each includes its files by `#[path]`
-    ├── unit/              # Unit tests, in the `unit_tests` target
-    ├── *.rs               # Test files of the suites, and three targets of their own: `blastn_report_stream_api`, `unit_tests`, `thread_memory` (`suite_layout.rs` checks)
+    ├── unit/              # Data only: `.tsv` files read by in-crate tests, NCBI reference outputs (`helpers/`)
+    ├── *.rs               # Test files of the suites, and two targets of their own: `blastn_report_stream_api`, `thread_memory` (`suite_layout.rs` checks)
     ├── fixtures/ db_search/ blastdbcmd/ seqdb/ fasta/ ...   # Inputs and frozen NCBI outputs
     ├── *.py               # Gate scripts (fast regressions, platform checks, switch reach)
     └── *.sh               # Older comparison scripts (run_comparison.sh, run_all_tests.sh)

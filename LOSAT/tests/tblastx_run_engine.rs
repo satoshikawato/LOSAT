@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use LOSAT::algorithm::tblastx::{run, TblastxArgs};
-
 fn temp_path(stem: &str, extension: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -32,81 +30,6 @@ fn losat_binary() -> PathBuf {
     }
     path.push(format!("losat{}", std::env::consts::EXE_SUFFIX));
     path
-}
-
-#[test]
-fn db_gencode_controls_local_subject_search_translation() {
-    let query = temp_path("query", "fa");
-    let subject = temp_path("subject", "fa");
-    let out = temp_path("out", "txt");
-
-    fs::write(&query, ">q\nTGATGATGATGATGATGATGATGATGA\n").expect("write query FASTA");
-    fs::write(&subject, ">s\nTGATGATGATGATGATGATGATGATGA\n").expect("write subject FASTA");
-
-    let args = TblastxArgs {
-        query: query.clone(),
-        subject: Some(subject.clone()),
-        db: None,
-        db_filter: Default::default(),
-        dbsize: None,
-        show_gis: false,
-        parse_deflines: false,
-        id_scope: None,
-        searchsp: None,
-        evalue: 10.0,
-        threshold: None,
-        matrix: None,
-        word_size: None,
-        num_threads: 1,
-        out: Some(out.clone()),
-        query_gencode: 4,
-        db_gencode: 4,
-        max_target_seqs: None,
-        num_descriptions: None,
-        num_alignments: None,
-        report_counts: Default::default(),
-        max_hsps: None,
-        qcov_hsp_perc: None,
-        seg: "no".to_string(),
-        soft_masking: None,
-        lcase_masking: false,
-        window_size: None,
-        outfmt: "6".to_string(),
-        culling_limit: None,
-        query_loc: None,
-        subject_loc: None,
-        archive: None,
-        tabular_taxdb: None,
-        first_query_ordinal: 0,
-    };
-
-    run(
-        args,
-        LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
-    )
-    .expect("tblastx run");
-    let output = fs::read_to_string(&out).expect("read tblastx output");
-
-    let has_full_length_w_hit = output.lines().any(|line| {
-        let fields: Vec<_> = line.split('\t').collect();
-        fields.len() >= 12
-            && fields[0] == "q"
-            && fields[1] == "s"
-            && fields[3] == "9"
-            && fields[6] == "1"
-            && fields[7] == "27"
-            && fields[8] == "1"
-            && fields[9] == "27"
-    });
-
-    let _ = fs::remove_file(query);
-    let _ = fs::remove_file(subject);
-    let _ = fs::remove_file(out);
-
-    assert!(
-        has_full_length_w_hit,
-        "-db_gencode 4 should translate local subject TGA codons as W during search"
-    );
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
@@ -195,6 +118,75 @@ fn tblastx_output_filter_debug_stderr_is_env_gated() {
     let _ = fs::remove_file(subject);
     let _ = fs::remove_file(out_normal);
     let _ = fs::remove_file(out_debug);
+}
+
+// No NCBI counterpart: LOSAT_DIAGNOSTICS (algorithm/common/diagnostics.rs) prints LOSAT's pipeline
+// counters after the search. The read of the variable is checked here, in child processes: the
+// value check runs in the lib's tests (`diagnostics_tests.rs`), which share one process and so do
+// not set the variable.
+#[test]
+fn tblastx_diagnostics_summary_is_env_gated() {
+    let query = temp_path("diag_query", "fa");
+    let out_normal = temp_path("diag_normal", "txt");
+    let out_diag = temp_path("diag_enabled", "txt");
+
+    fs::write(&query, ">q\nATGATGATGATGATGATGATGATGATGATG\n").expect("write query FASTA");
+
+    let run = |out: &Path, diagnostics: Option<&str>| {
+        let mut command = Command::new(losat_binary());
+        command
+            .args([
+                "tblastx",
+                "-query",
+                query.to_str().expect("query path UTF-8"),
+                "-subject",
+                query.to_str().expect("subject path UTF-8"),
+                "-seg",
+                "no",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-out",
+                out.to_str().expect("output path UTF-8"),
+            ])
+            .env_remove("LOSAT_DEBUG_OUTPUT_FILTER")
+            .env_remove("LOSAT_DEBUG_CUTOFFS")
+            .env_remove("LOSAT_TIMING");
+        match diagnostics {
+            Some(value) => command.env("LOSAT_DIAGNOSTICS", value),
+            None => command.env_remove("LOSAT_DIAGNOSTICS"),
+        };
+        let output = command.output().expect("run tblastx");
+        assert!(
+            output.status.success(),
+            "tblastx run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+
+    let normal_stderr = run(&out_normal, None);
+    let diag_stderr = run(&out_diag, Some("1"));
+    let same_output = fs::read_to_string(&out_normal).expect("read normal output")
+        == fs::read_to_string(&out_diag).expect("read diagnostics output");
+
+    let _ = fs::remove_file(query);
+    let _ = fs::remove_file(out_normal);
+    let _ = fs::remove_file(out_diag);
+
+    assert!(
+        !normal_stderr.contains("=== TBLASTX Pipeline Diagnostics ==="),
+        "a run without LOSAT_DIAGNOSTICS should not print the diagnostics: {normal_stderr}"
+    );
+    assert!(
+        diag_stderr.contains("=== TBLASTX Pipeline Diagnostics ==="),
+        "LOSAT_DIAGNOSTICS=1 should print the diagnostics: {diag_stderr}"
+    );
+    assert!(
+        same_output,
+        "LOSAT_DIAGNOSTICS must not change the search output"
+    );
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584

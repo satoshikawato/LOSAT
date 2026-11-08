@@ -468,10 +468,11 @@ v0.1.0 certification and release contracts retain their historical target scope.
 
 ## Rust integration tests
 
-The files `tests/*.rs` are built into nine test binaries: the suites `blastn`, `blastp`, `blastx`,
-`tblastn`, `tblastx` and `common` (`tests/suites/<suite>.rs`, one module per file) and the three files that
-change the process environment or process-wide state, `blastn_report_stream_api`, `unit_tests` and
-`thread_memory` (a counting global allocator). A test
+The files `tests/*.rs` are built into eight test binaries: the suites `blastn`, `blastp`, `blastx`,
+`tblastn`, `tblastx` and `common` (`tests/suites/<suite>.rs`, one module per file) and the two files that
+change the process environment or process-wide state, `blastn_report_stream_api` and
+`thread_memory` (a counting global allocator). Unit tests are in the crate (`#[cfg(test)]` modules
+next to the code, `cargo test --lib`). A test
 is named `<file>::<test>`. Run one file with `cargo test --all-features --test blastn blastn_strand::`
 (keep `--test <suite>`, since the filter is a substring: `blastx_hitbf::` alone also runs
 `tblastx_hitbf::`), or with nextest `-E 'test(/^blastn_strand::/)'` (the binary id is `LOSAT::blastn`). A

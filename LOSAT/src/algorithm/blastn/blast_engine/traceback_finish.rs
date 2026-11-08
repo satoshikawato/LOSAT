@@ -9,9 +9,10 @@
 //!
 //! This module is a child of `run` for the types it keeps private (`BlastnTiming`, the e-value
 //! helpers). The two functions are the bodies of what were two closures of
-//! `search_query_batch`'s `process_subject`; the values those closures captured are the fields of
-//! `TracebackCtx`, which is `Sync` (shared references and `Copy` values only) because the query
-//! group tasks of `x_qgroup_par` call the functions from pool threads.
+//! `search_query_batch`'s `process_subject`; the values those closures captured are among the
+//! fields of `TracebackCtx`, which `traceback_hsp` and `traceback_subject` share, and which pool
+//! threads read (the query group tasks of `x_qgroup_par`, the look-ahead helpers, and the
+//! speculative batch's jobs).
 
 use super::{
     blast_hsp_test_identity_and_length, blastn_trace, calculate_blastn_context_statistics,
@@ -26,7 +27,8 @@ use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 /// one HSP (`traceback_hsp`) and the subject's side (`traceback_subject`). Built once per
 /// `process_subject` call of the traceback, once the subject's blastna letters are made; every
 /// field is a shared reference or a `Copy` value (mostly the types the closures captured), so the
-/// struct is `Sync` for the query group tasks and the look-ahead helpers on the pool.
+/// struct is `Sync` for the query group tasks, the look-ahead helpers and the speculative batch's
+/// jobs on the pool.
 pub(super) struct TracebackCtx<'a> {
     /// `LOSAT_TIMING` counters, `None` when timing is off.
     pub(super) timing_ref: Option<&'a BlastnTiming>,

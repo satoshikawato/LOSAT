@@ -72,7 +72,7 @@ pub(super) type XTraced = (TraceStart, XSpecTraceback<DpTraceback, GreedyTraceba
 /// subject range of its alignment (`AdjustSubjectRange`). `None` when no start is found (NCBI frees
 /// the HSP and goes to the next one).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-447,457,463-473
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-447,457-460,463-473
 /// ```c
 ///          if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
 ///                                hsp->subject.gapped_start == 0) {
@@ -112,13 +112,16 @@ pub(super) type XTraced = (TraceStart, XSpecTraceback<DpTraceback, GreedyTraceba
 /// ```
 /// N02 scheduling only: speculative values have no externally visible effects;
 /// the original ordered contains/materialize/add sequence remains authoritative.
-pub(super) fn prepare_traceback(ctx: &TracebackCtx<'_>, prelim: &PrelimHit) -> Option<TraceStart> {
+pub(super) fn prepare_traceback(
+    traceback_ctx: &TracebackCtx<'_>,
+    prelim: &PrelimHit,
+) -> Option<TraceStart> {
     let &TracebackCtx {
         s_seq_blastna,
         encoded_queries_blastna,
         score_matrix,
         ..
-    } = ctx;
+    } = traceback_ctx;
     let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize];
     let mut trace_q_start = prelim.seed_qs;
     let mut trace_s_start = prelim.seed_ss;
@@ -222,10 +225,10 @@ pub(super) fn prepare_traceback(ctx: &TracebackCtx<'_>, prelim: &PrelimHit) -> O
 /// This function is the part of the loop body that depends on the HSP alone: the start offsets and
 /// the subject range (`prepare_traceback`) and the traceback call, dynamic-programming or greedy.
 /// Index in, value out. The tree test and the tree insertion stay in the ordered loop.
-/// No NCBI counterpart: the traceback of the ordered loop (`x_trace_list` in `process_subject`)
-/// as a function of the HSP's index (the job of the speculative batch).
+/// No NCBI counterpart: the traceback of the ordered loop (`trace_align_one`, called by
+/// `x_trace_list`) as a function of the HSP's index, for the look-ahead helpers.
 pub(super) fn x_trace_compute(
-    ctx: &TracebackCtx<'_>,
+    traceback_ctx: &TracebackCtx<'_>,
     prelim_hits: &[PrelimHit],
     x_index: usize,
     x_scratch: &mut XAheadScratch<'_>,
@@ -242,9 +245,9 @@ pub(super) fn x_trace_compute(
         x_fenced,
         x_drop_final,
         ..
-    } = ctx;
+    } = traceback_ctx;
     let p = &prelim_hits[x_index];
-    let prepared = prepare_traceback(ctx, p)?;
+    let prepared = prepare_traceback(traceback_ctx, p)?;
     let (qs, _, shift, slen, ss) = prepared;
     if x_fence::x_fenced(x_fenced) {
         return None;
@@ -321,13 +324,15 @@ pub(super) struct SpeculativeBatch<'b, 's> {
 /// ordered loop still tests each HSP against the tree when it reaches it; an HSP left out here
 /// (contained now) that the tree no longer contains then is traced there.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,403-405,509-512
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,403-405,503-507,509-512
 /// ```c
 ///    for (index=0; index < num_initial_hsps; index++) {
 /// ...
 ///       if (program_number == eBlastTypeRpsBlast ||
 ///           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
 ///                                hit_options->min_diag_separation)) {
+/// ...
+///            BLAST_GreedyGappedAlignment(query, adjusted_subject, ...);
 /// ...
 ///            BLAST_GappedAlignmentWithTraceback(program_number, query,
 ///                  adjusted_subject, gap_align, score_params, q_start, s_start,
@@ -340,7 +345,7 @@ pub(super) struct SpeculativeBatch<'b, 's> {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(super) fn speculative_batch(ctx: &TracebackCtx<'_>, batch: SpeculativeBatch<'_, '_>) {
+pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: SpeculativeBatch<'_, '_>) {
     let &TracebackCtx {
         s_seq_blastna,
         encoded_queries_blastna,
@@ -354,7 +359,7 @@ pub(super) fn speculative_batch(ctx: &TracebackCtx<'_>, batch: SpeculativeBatch<
         x_fenced,
         x_drop_final,
         ..
-    } = ctx;
+    } = traceback_ctx;
     let SpeculativeBatch {
         prelim_hits,
         prelim_index,
@@ -409,7 +414,7 @@ pub(super) fn speculative_batch(ctx: &TracebackCtx<'_>, batch: SpeculativeBatch<
                             //                    q_start, query_length, &start_shift);
                             // BLAST_GappedAlignmentWithTraceback(...);
                             // Keep the exact preparation with its speculative DP.
-                            let prepared = prepare_traceback(ctx, p)?;
+                            let prepared = prepare_traceback(traceback_ctx, p)?;
                             let (qs, _, shift, slen, ss) = prepared;
                             if x_fence::x_fenced(x_fenced) {
                                 return None;
@@ -428,7 +433,7 @@ pub(super) fn speculative_batch(ctx: &TracebackCtx<'_>, batch: SpeculativeBatch<
                                 // scratch. The call depends on its arguments only, so the value is the one the ordered loop would
                                 // compute.
                                 // No NCBI counterpart: the call of the ordered loop
-                                // (`x_trace_list` in `process_subject`), on this slot's scratch.
+                                // (`trace_align_one`, called by `x_trace_list`), on this slot's scratch.
                                 let result = greedy_gapped_alignment_with_traceback(
                                     encoded_queries_blastna[p.context_idx as usize],
                                     &s_seq_blastna[shift..shift + slen],

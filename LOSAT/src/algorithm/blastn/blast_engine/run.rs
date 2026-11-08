@@ -16313,8 +16313,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         );
 
         // The values the traceback reads (`traceback_subject.rs`, `traceback_hsp.rs` and
-        // `traceback_finish.rs`), for the query group tasks and the look-ahead helpers on the pool
-        // as for the owner thread.
+        // `traceback_finish.rs`), for the query group tasks, the look-ahead helpers and the
+        // speculative batch's jobs on the pool as for the owner thread.
         let traceback_ctx = traceback_finish::TracebackCtx {
             timing_ref,
             timing_enabled,

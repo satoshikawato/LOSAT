@@ -77,7 +77,7 @@ pub(super) fn traceback_subject_blastna<'v>(
 ///                 }
 /// ```
 pub(super) fn ungapped_traceback_hits(
-    ctx: &TracebackCtx<'_>,
+    traceback_ctx: &TracebackCtx<'_>,
     combined_prelim_hits: &[PrelimHit],
 ) -> Vec<BlastnHsp> {
     let &TracebackCtx {
@@ -89,7 +89,7 @@ pub(super) fn ungapped_traceback_hits(
         round_down_evalue_score,
         query_lengths,
         ..
-    } = ctx;
+    } = traceback_ctx;
 
     let mut final_hits: Vec<BlastnHsp> = Vec::with_capacity(combined_prelim_hits.len());
     for prelim in combined_prelim_hits.iter() {

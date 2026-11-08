@@ -1,9 +1,9 @@
 //! The rendered rows (`PairwiseHit`) of a call's final hits as its reports read them: a window of
 //! queries at a time (`row_windows`), made by the call's producer of rows (`rows_of` in
 //! `run_resolved_in_pool`) and dropped before the next window's, as BLASTN's and TBLASTX's outfmt 0
-//! make theirs (`x_pairwise_par::query_windows`). Outfmt 0 takes each window's rows whole; BLAST
-//! XML and the tabular fields that show the alignment read them query by query in order
-//! (`QueryRows`).
+//! make theirs (`x_pairwise_par::query_windows`). Outfmt 0 takes each window's rows whole; the
+//! tabular fields that show the alignment read them query by query in order (`QueryRows`), and so
+//! does BLAST XML, whose windows are single queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
 //! ```c++

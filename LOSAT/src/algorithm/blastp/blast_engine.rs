@@ -12306,8 +12306,8 @@ fn run_resolved_in_pool(
     // ```
     // NCBI makes and prints the alignments of one query's result set at a time: the reports
     // make the rows of a window of queries and drop them before the next window's
-    // (`query_rows`: outfmt 0, BLAST XML and the tabular fields that show the alignment,
-    // `TabularNeeds::rows`), as BLASTN's and TBLASTX's outfmt 0. The rows of every query are
+    // (`query_rows`: outfmt 0 and the tabular fields that show the alignment,
+    // `TabularNeeds::rows`, as BLASTN's and TBLASTX's outfmt 0; BLAST XML one query's). The rows of every query are
     // made once, before any format is written, only where a consumer reads them all: the
     // caller's hit records, and a format observer of outfmt 0, whose HSP numbers count over the
     // whole report.
@@ -13071,10 +13071,12 @@ fn run_resolved_in_pool(
                     program: "BLASTP",
                     epilog: reports.epilog,
                 };
-                // The rows of the queries' HSPs, a window at a time (`query_rows`); the document
-                // reads their letters.
+                // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
+                // reads their letters query by query and formats them serially, so a window of
+                // several queries would hold more rows for no gain (300 proteins x Swiss-Prot,
+                // 8 threads: 46.0 MB with windows, 39.6 MB a query at a time, the same time).
                 let mut xml_rows = query_rows::QueryRows::new(
-                    query_rows::row_windows(&hit_lists, hit_lists.len(), x_rows_pool),
+                    (0..hit_lists.len()).map(|q_idx| q_idx..q_idx + 1).collect(),
                     pairwise_hits.as_deref().map(Vec::as_slice),
                     &rows_of,
                 );

@@ -37,6 +37,7 @@
 use anyhow::Result;
 
 use super::prelim::{RpsPrelim, RpsPrelimScratch};
+use super::redo::RpsRedoParams;
 use super::scan::{RpsBuckets, RpsTable};
 use super::traceback::{filter_results, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
@@ -47,13 +48,15 @@ use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 /// The options of an RPS-BLAST search that blastp's driver does not apply itself: `-max_hsps`
 /// and `-qcov_hsp_perc` (the RPS traceback filters with the length of the first query of a
 /// batch, `traceback::filter_results`), and the composition-based statistics mode that the
-/// command line asks for (the search runs mode 0: the others are refused until item PS11b,
-/// unless the database has no frequency ratios, `rps_hooks::check_freq_ratio_file`).
+/// command line asks for (the mode the search runs is blastp's `comp_based_stats`, which
+/// `rps_hooks::check_freq_ratio_file` sets to 0 where the database has no frequency ratios).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RpsSearch {
     pub(crate) max_hsps_per_subject: usize,
     pub(crate) query_cov_hsp_perc: f64,
     pub(crate) requested_cbs: u8,
+    /// `-num_threads 0`: one thread per volume of the database (NCBI's "auto").
+    pub(crate) auto_threads: bool,
 }
 
 /// One user query as the search reads it.
@@ -67,6 +70,10 @@ pub(crate) struct RpsQuery<'a> {
     pub(crate) kbp_std: KarlinParams,
     /// The length of the first query of the query's batch (`-qcov_hsp_perc`).
     pub(crate) first_query_length: usize,
+    /// The ungapped block of the first valid query of the query's batch: `kbp_psi[0]` of the
+    /// score block that the composition-based redo copies, which stays where the profile has no
+    /// score frequencies.
+    pub(crate) batch_kbp: KarlinParams,
 }
 
 /// What the search of every query of a volume reads besides the volume.
@@ -77,8 +84,15 @@ pub(crate) struct RpsRun<'a> {
     pub(crate) gumbel: &'a BlastGumbelBlk,
     /// `avg_subject_length` of the hit cutoff (`BLAST_SEQSRC_MINLENGTH`).
     pub(crate) cutoff_subject_length: i32,
-    /// `-evalue` (the preliminary e-value too, without composition-based statistics).
+    /// `-evalue`.
     pub(crate) evalue: f64,
+    /// `hit_params->prelim_evalue` and the e-value of the hit cutoff: `-evalue`, five times it
+    /// with composition-based statistics 2 and 3 (`cbs_stretch`, blast_parameters.c:937).
+    pub(crate) prelim_evalue: f64,
+    /// The composition-based statistics mode the search runs (0 to 3).
+    pub(crate) cbs: u8,
+    /// BLOSUM62's score block for the redo's matrix information (modes 1 to 3).
+    pub(crate) sbp: Option<&'a crate::core::psi::PsiScoreBlk>,
     pub(crate) hitlist_size: usize,
     pub(crate) prelim_hitlist_size: usize,
     pub(crate) window: i32,
@@ -217,7 +231,7 @@ impl RpsRun<'_> {
             return None;
         }
         let hit_cutoff = spouge_etos(
-            self.evalue,
+            self.prelim_evalue,
             &self.gapped,
             self.gumbel,
             (query.aa_seq.len() - 2) as i32,
@@ -332,6 +346,12 @@ impl RpsRun<'_> {
             gumbel: self.gumbel,
             expect_value: self.evalue,
             hitlist_size: self.hitlist_size,
+            redo: self.sbp.filter(|_| self.cbs > 0).map(|sbp| RpsRedoParams {
+                files,
+                sbp,
+                gap_open: files.aux.gap_open,
+                gap_extend: files.aux.gap_extend,
+            }),
         };
         let prelim_karlin = KarlinParams {
             lambda: self.gapped.lambda / scale,
@@ -376,7 +396,7 @@ impl RpsRun<'_> {
                 hit_cutoff: cutoffs.hit_cutoff,
                 karlin: prelim_karlin,
                 gumbel: self.gumbel,
-                prelim_evalue: self.evalue,
+                prelim_evalue: self.prelim_evalue,
                 prelim_hitlist_size: self.prelim_hitlist_size,
                 query_index: q_idx as u32,
             };
@@ -385,7 +405,13 @@ impl RpsRun<'_> {
                 return Ok(none);
             };
             let letters = &query.aa_seq[1..query.aa_seq.len() - 1];
-            let mut traced = traceback.trace_query(lists, letters, q_idx as u32, &mut scratch.1)?;
+            let mut traced = traceback.trace_query(
+                lists,
+                letters,
+                q_idx as u32,
+                &query.batch_kbp,
+                &mut scratch.1,
+            )?;
             if let Some(hit_list) = traced.hit_list.as_mut() {
                 filter_results(
                     hit_list,
@@ -418,9 +444,12 @@ impl RpsRun<'_> {
 }
 
 /// The gapped K that the outfmt 0 footer of each query prints: for the first query of a batch,
-/// `RPS_K_MULT` times the `.aux` K of the highest profile whose rescaled PSSM any query of the
-/// batch wrote (the last list the batch's traceback reads, by ordinal id), else the table's K;
-/// every other query prints the table's K.
+/// `RPS_K_MULT` times the `.aux` K of the last list the batch's traceback reads, else the
+/// table's K; every other query prints the table's K. Without composition-based statistics the
+/// lists of the batch are read by ordinal id and only those whose rescaled PSSM exists write
+/// the K (the mark is the highest); with them the lists are read query by query in the order of
+/// `s_EvalueCompareHSPLists` and each writes it (the mark is that of the last query that has
+/// one).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1234-1235
 /// ```c
@@ -451,13 +480,20 @@ pub(crate) fn batch_gapped_k(
     k_marks: &[Option<u32>],
     karlin_k: &[f64],
     table_k: f64,
+    composition_based: bool,
 ) -> Vec<f64> {
     let mut gapped_k = vec![table_k; k_marks.len()];
     for batch in batches {
         if batch.is_empty() {
             continue;
         }
-        if let Some(mark) = k_marks[batch.clone()].iter().flatten().max() {
+        let marks = &k_marks[batch.clone()];
+        let mark = if composition_based {
+            marks.iter().flatten().next_back()
+        } else {
+            marks.iter().flatten().max()
+        };
+        if let Some(mark) = mark {
             gapped_k[batch.start] = RPS_K_MULT * karlin_k[*mark as usize];
         }
     }
@@ -472,10 +508,15 @@ mod tests {
     fn the_first_query_of_a_batch_gets_the_k_of_the_highest_mark() {
         let marks = [Some(2), None, Some(5), None, None, Some(1)];
         let karlin_k = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06];
-        let k = batch_gapped_k(&[0..3, 3..5, 5..6], &marks, &karlin_k, 0.041);
+        let k = batch_gapped_k(&[0..3, 3..5, 5..6], &marks, &karlin_k, 0.041, false);
         assert_eq!(k[0], RPS_K_MULT * 0.06);
         assert_eq!(k[1], 0.041);
         assert_eq!(k[2], 0.041);
+        assert_eq!(k[3], 0.041);
+        assert_eq!(k[5], RPS_K_MULT * 0.02);
+        // With composition-based statistics: the mark of the last query that has one.
+        let k = batch_gapped_k(&[0..3, 3..5, 5..6], &marks, &karlin_k, 0.041, true);
+        assert_eq!(k[0], RPS_K_MULT * 0.03);
         assert_eq!(k[3], 0.041);
         assert_eq!(k[5], RPS_K_MULT * 0.02);
     }

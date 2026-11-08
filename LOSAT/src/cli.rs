@@ -600,14 +600,13 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
 // `algorithm::rpsblast::args`)
 /// rpsblast's NCBI arguments that LOSAT does not run (its search reads the profile database's
-/// statistics and scale as NCBI's does; `-dbsize` and `-searchsp` would need NCBI's per-volume
-/// rule, `rpsblast_local.cpp:351-354`), the formats' options that LOSAT's reports do not have,
-/// and the query masks of the reversed scan.
+/// statistics and scale as NCBI's does; `-searchsp` switches NCBI's RPS search to the old
+/// Karlin-Altschul statistics, which item PS11c would port), the formats' options that LOSAT's
+/// reports do not have, and the query masks of the reversed scan.
 fn is_unported_rpsblast_arg(name: &str) -> bool {
     matches!(
         name,
-        "dbsize"
-            | "entrez_query"
+        "entrez_query"
             | "export_search_strategy"
             | "html"
             | "import_search_strategy"

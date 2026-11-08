@@ -720,8 +720,8 @@ pub fn write_hsp_info<W: Write>(
     // NCBI: " Score = XXX bits (YYY),  Expect = Z.Ze-NN"
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
-    // psiblast's first round has blastp's methods.
-    if matches!(config.program.as_str(), "blastp" | "psiblast") {
+    // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
+    if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
         // ```c
         //             if (aln_vec_info->comp_adj_method == 1)

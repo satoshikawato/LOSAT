@@ -2431,6 +2431,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         && args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats
         && !(args.psi_search.is_some()
             && args.comp_based_stats.mode == BlastpCompositionMode::CompositionBasedStats)
+        && args.rps_search.is_none()
     {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
@@ -5412,10 +5413,16 @@ fn search_cli(
     let mut resolved = args.check_options(outputs.diagnostics)?;
     // rpsblast: NCBI's check of the database's frequency ratios comes between the options and
     // the database (`rps_hooks::check_freq_ratio_file`).
-    if let Some(rps) = resolved.rps_search.clone() {
-        rps_hooks::check_freq_ratio_file(&resolved, &rps, &settings, outputs.diagnostics)?;
+    if resolved.rps_search.is_some() {
+        rps_hooks::check_freq_ratio_file(&mut resolved, &settings, outputs.diagnostics)?;
     }
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?;
+    // rpsblast `-num_threads 0`: one thread for each volume of the database.
+    if let (Some(rps), Some(database)) = (resolved.rps_search.as_deref(), database.as_ref()) {
+        if rps.auto_threads {
+            resolved.num_threads = rps_hooks::volume_count(database);
+        }
+    }
     // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
     if resolved.app == BlastpApp::Psiblast && database.is_none() {
         psiblast_check_subject_letters(&subjects.records)?;
@@ -8637,7 +8644,8 @@ fn run_resolved_in_pool(
     let num_subjects = match database {
         None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
-        Some(database) => database.statistics_num_sequences() as usize,
+        Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
+            .unwrap_or(database.statistics_num_sequences() as usize),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
@@ -10224,6 +10232,9 @@ fn run_resolved_in_pool(
     // rpsblast: the RPS engine's whole search (`rps_hooks::rps_search`): the final hit lists,
     // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
+    // A database of several volumes: its merged lists are not sorted or cut below, and it prints
+    // no query warnings.
+    let mut rps_multi_volume = false;
     if let Some(rps) = args.rps_search.as_deref() {
         let run = rps_hooks::RpsSearchRun {
             contexts: &contexts,
@@ -10262,7 +10273,8 @@ fn run_resolved_in_pool(
                 (_, Err(other)) => other,
             }
         })?;
-        rps_gapped_k = Some(searched);
+        rps_gapped_k = Some(searched.gapped_k);
+        rps_multi_volume = searched.volumes > 1;
     } else if let Some(psi) = args.psi_search.as_deref() {
         pssm_hooks::pssm_prelim(
             psi,
@@ -10605,7 +10617,8 @@ fn run_resolved_in_pool(
     // position-based redo) takes the place of both, and reads them as they are too.
     let ordinary_traceback = args.comp_based_stats.mode
         == BlastpCompositionMode::NoCompositionBasedStats
-        || args.psi_search.is_some();
+        || args.psi_search.is_some()
+        || args.rps_search.is_some();
     if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -11789,8 +11802,12 @@ fn run_resolved_in_pool(
                     hit_list.purge_empty_hsp_lists();
                 }
             }
-            hit_list.sort_by_evalue();
-            hit_list.prune_by_size(args.traceback_hitlist_size());
+            // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order
+            // and the formatter cuts them, `psiblast_hits_found` below.)
+            if !rps_multi_volume {
+                hit_list.sort_by_evalue();
+                hit_list.prune_by_size(args.traceback_hitlist_size());
+            }
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
@@ -11923,7 +11940,7 @@ fn run_resolved_in_pool(
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
-        (BlastpApp::Psiblast, Some(titles)) => {
+        (app, Some(titles)) if app.prunes_after_traceback() => {
             Some(titles.joined_cut(&hit_lists, args.max_target_seqs)?)
         }
         _ => None,
@@ -11958,7 +11975,7 @@ fn run_resolved_in_pool(
     // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
     // (`ListedTitles::prefetched_ranks`).
     let psiblast_prefetched: Option<Vec<Vec<usize>>> =
-        (args.app == BlastpApp::Psiblast && batches_prefetch).then(|| {
+        (args.app.prunes_after_traceback() && batches_prefetch).then(|| {
             hit_lists
                 .iter()
                 .map(|hit_list| {
@@ -12028,7 +12045,7 @@ fn run_resolved_in_pool(
         ),
         None => None,
     };
-    let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
+    let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
         hit_lists
             .iter_mut()
             .enumerate()
@@ -12249,6 +12266,11 @@ fn run_resolved_in_pool(
             }
             if filtered_empty && !query_batch_skipped[q_idx] {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
+            }
+            // rpsblast over several volumes: the merged results keep the errors of the volumes'
+            // results and no warning (`s_CombineSearchSets`, rpsblast_local.cpp:165).
+            if rps_multi_volume {
+                messages.clear();
             }
             let mut lines = reports
                 .reader_warnings

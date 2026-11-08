@@ -419,6 +419,8 @@ LOSAT also runs in the browser through the Web GUI (`web/app`), which follows th
 
 The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X_REACH` and the `--features diagnostics` build are development variables. They are unsupported and may change or disappear without notice. The defaults (no variable set, a normal build) are the configuration that the release tests cover; do not set these variables in production runs.
 
+[Environment variables](docs/user/environment.md) lists the environment variables and configuration files that LOSAT reads as NCBI BLAST+ does (`BLASTDB`, `.ncbirc` and the others), the ones it does not yet read as NCBI BLAST+ does, the ones it refuses, and the development ones.
+
 ---
 
 ## Scope & Differences from NCBI BLAST+

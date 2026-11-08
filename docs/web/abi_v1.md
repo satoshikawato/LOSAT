@@ -224,7 +224,8 @@ same request.
   `.ncbirc`, `tblastn.ini` or `NCBI_CONFIG__*` variables: the CLI's run without them);
   the other environment variables that the CLI reads (`BATCH_SIZE`, `OLD_FSC`,
   `BLASTDB` for `taxdb.bti`, LOSAT's switches) are read from the module's environment
-  as the CLI reads them. A run that succeeds returns what the CLI writes to standard
+  as the CLI reads them; LOSAT Web, which calls ABI v2, gives the module an empty
+  environment (`web/app/src/infra/reactor/wasi.ts`), and a host of v1 gives its own. A run that succeeds returns what the CLI writes to standard
   output. A run that fails returns only the error, which is what the CLI writes to
   standard error for its parser's errors (`cli::render_message`) and NCBI's
   (`BLAST query/options error: ...`, `BLAST engine error: ...`); for LOSAT's own errors

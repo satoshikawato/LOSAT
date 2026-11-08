@@ -784,11 +784,11 @@ impl Column {
 // The index file holds the offsets of the `.?xb` blobs (`WriteInt4`, big-endian), and the
 // `.?xc` blob of a sequence has the size of its `.?xb` blob, so one index serves either
 // data file. Only the mask column writes a `.?xc` (`blob2`, its ranges `WriteInt4_LE`); a
-// user column has `.?xb` alone. NCBI's test `ptr[0] == 0x11` holds on the little-endian
-// hosts of NCBI BLAST+ 2.17.0 (Linux x64 and arm64, macOS x64 and arm64, Windows x64) and of
-// LOSAT (x86-64, aarch64, wasm32): the `.?xc` when it exists, else the `.?xb`, read through
-// the same index. A blob is the file's bytes either way (`GetBlob`); `mask::read_ranges`
-// reads the ranges of a `.?xb` as NCBI's copy in host order does.
+// user column has `.?xb` alone. A blob is the file's bytes either way (`GetBlob`);
+// `mask::read_ranges` reads the ranges in host order, as NCBI's copy does, so a column read
+// from its `.?xb` alone on a little-endian host gives each number byte-reversed, a
+// deterministic result that LOSAT reproduces (line SW, SW8 DECISIONS 40; a refusal remains
+// where a consumer would index letters with those ranges).
 /// Opens every column of the volume `base` (`CSeqDBVol::x_OpenAllColumns`): for the letters
 /// `a` to `z`, the columns whose index file exists, in letter order. `volume_oids` is the
 /// number of sequences of the volume.
@@ -811,7 +811,29 @@ pub(super) fn open_all(
         if !(big || small) {
             continue;
         }
-        let data_path = if small { small_path } else { big_path };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3345-3358
+        // ```c++
+        //             bool big   = CSeqDBColumn::ColumnExists(m_VolName, ed, m_Atlas);
+        //             bool small = CSeqDBColumn::ColumnExists(m_VolName, ed2, m_Atlas);
+        //
+        //             if ( ! (big || small)) continue;
+        //
+        //             CRef<CSeqDBColumn> col;
+        //
+        //             const Int2 bytetest = 0x0011;
+        //             const char * ptr = (const char *) &bytetest;
+        //             if (ptr[0] == 0x11 && small) {
+        //                 col.Reset(new CSeqDBColumn(m_VolName, ei, ed2, & locked));
+        //             } else {
+        //                 col.Reset(new CSeqDBColumn(m_VolName, ei, ed, & locked));
+        //             }
+        // ```
+        // `ptr[0] == 0x11` is a little-endian host.
+        let data_path = if cfg!(target_endian = "little") && small {
+            small_path
+        } else {
+            big_path
+        };
         let column = Column::open(&index_path, &data_path)?;
 
         let mut message = String::new();

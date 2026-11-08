@@ -136,8 +136,8 @@ As of dev 6ecdb2bf2 (2026-11-06).
 ## Decisions cited by log entry
 
 The heading names the log (the work line's folder name, as the repository cites it); Entry is the
-entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
-99 Owner-delegated, 6 records.
+entry's number in that log. 124 entries: 15 Owner, 3 Owner in part,
+100 Owner-delegated, 6 records.
 
 ### `blastdb-ids-20261021`: line DBID
 
@@ -176,7 +176,7 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | 9 | 2026-10-29 | Owner-delegated |  | blastdbcmd refuses -outfmt %d and %b (ASN.1 text of the defline set or Bioseq); no downstream tool uses them. | blastdbcmd -outfmt | `LOSAT/src/blastdbcmd/format.rs:113`, `LOSAT/tests/blastdbcmd_retrieve.rs:803` |
 | 12 | 2026-10-29 | Owner | 「これはあえて直してお出しするのは？TBLASTX みたいに」 | Four wrong NCBI blastdbcmd combinations become approved differences that output the correct result, built from NCBI's own correct neighbouring path, instead of being refused. | blastdbcmd, PD-LOSAT-BLASTDBCMD-DEVIATIONS | `LOSAT/src/seqdb/lookup.rs:270`, `LOSAT/src/blastdbcmd/fasta.rs:229` and 7 more |
 | 31 | 2026-11-01 | Owner-delegated |  | BDC3a: taxid lookups share the DI-8 LMDB readers; -taxids 1 is answered as in DI-8; NCBI rc 255 exceptions that print the build path (non-numeric taxids and similar) are refused with LOSAT sentences. | blastdbcmd taxid options (BDC3a) | `LOSAT/tests/blastdbcmd_batch_line_ends.rs:260` |
-| 33 | 2026-11-01 | Owner, in part | 「差 5・6 の承認: 承認します」 | BDC3b reads mask column files; differences 5 and 6 (protein FASTA mask applied to the first third only, stale mask in batch lines) are fixed and presented as approved differences; the Owner approved them. | blastdbcmd masks (BDC3b) | `docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md:15` |
+| 33 | 2026-11-01 | Owner, in part | 「差 5・6 の承認: 承認します」 | BDC3b reads mask column files; differences 5 and 6 (protein FASTA mask applied to the first third only, stale mask in batch lines) are fixed and presented as approved differences; the Owner approved them. | blastdbcmd masks (BDC3b); the refusal of a column with its big-endian data file alone (M784, item 4) is superseded by swebok-improve SW8 DECISIONS 40 (2026-11-08): NCBI's reading there is deterministic and is reproduced | `docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md:15` |
 | 34 | 2026-11-02 | Owner-delegated |  | BDC4 lifts the refusal of several names in -db and of quotes in -metadata; the difference 6 extension (mask carried to another sequence of the same Seq-id) was approved by the Owner on 2026-11-02. | blastdbcmd -db "a b" (BDC4) | `docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md:16`, `docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md:18` |
 | 36 | 2026-11-02 | Owner | 「承認する」 | The Owner approves the difference 6 extension of the blastdbcmd approved differences (mask carried over to another sequence with the same accession when several names are in -db). | blastdbcmd approved differences, item 6 | related entry (not cited) |
 | 44 | 2026-11-03 | Owner | 「(b) 検索前の検査をやめる」 | Drop the pre-search definition-line and ambiguity checks of report streaming; check only the reported subjects at report time, as NCBI does. | NCMEM1, report streaming (RPTSTREAM) | `LOSAT/src/algorithm/blastn/blast_engine/x_rpt_stream.rs:71`, `LOSAT/src/algorithm/blastn/blast_engine/x_rpt_stream.rs:550` and 9 more |
@@ -254,7 +254,7 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 9 | 2026-10-20 | Owner-delegated |  | Refuse an alias whose volumes have differing algorithm sets or a missing mask-algorithm column, and a big-endian-only mask volume; NCBI reads uninitialised or wrong data there. | window-masker column reader (series M, M4); the big-endian-only part withdrawn on 2026-11-08: NCBI's reading there is deterministic and is reproduced (`PD-LOSAT-BLASTDBCMD-DEVIATIONS` 1.5) | `LOSAT/src/blastdbcmd/retrieve.rs:185` |
+| 9 | 2026-10-20 | Owner-delegated |  | Refuse an alias whose volumes have differing algorithm sets or a missing mask-algorithm column, and a big-endian-only mask volume; NCBI reads uninitialised or wrong data there. | window-masker column reader (series M, M4); for blastdbcmd the big-endian-only part is superseded by swebok-improve SW8 DECISIONS 40 (2026-11-08): NCBI's reading there is deterministic and is reproduced; the searches' -db_soft_mask/-db_hard_mask (M4) keep the refusal | `LOSAT/src/blastdbcmd/retrieve.rs:185` |
 | 14 | 2026-10-25 | Owner-delegated |  | Where NCBI exception reports are copied, write the official Linux x64 2.17.0 tarball build root; conda builds differ only in that root. | NCBI exception text, NCBI_BUILD_ROOT | `LOSAT/src/utils/winmask/ncbi_report.rs:30`, `LOSAT/tests/blastn_window_masker.rs:3` and 1 more |
 
 ### `ncbi-parity-20261019/WW`: line NP, stage WW0 (the Wasm memory maximum on dev)
@@ -313,6 +313,12 @@ entry's number in that log. 123 entries: 15 Owner, 3 Owner in part,
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-10-08 ABI v1 | 2026-10-08 | Owner-delegated |  | ABI v1 keeps the bio reader and its checks and enters run_local through FastaRecord::from_bio, so v1 outputs and messages do not change (planner Q1). | Web ABI v1 input reading | related entry (not cited) |
+
+### `swebok-improve-20261105/sw8`: line SW, stage SW8
+
+| Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
+| --- | --- | --- | --- | --- | --- | --- |
+| 40 | 2026-11-08 | Owner-delegated |  | blastdbcmd reads a column whose little-endian data file (.?ac) is missing from its big-endian .?ab, as NCBI does, reproducing NCBI's byte-reversed mask ranges and refusing only where NCBI's use of them is undefined (-outfmt %s without -range); this supersedes, for blastdbcmd only, the refusal of line NP's M entry 9 and drop-in survey entry 33 (item 4, M784). | blastdbcmd column reading | `LOSAT/src/seqdb/column.rs:790`, `LOSAT/src/seqdb/mask.rs:1034` and 1 more |
 
 ### `v4-A`: plan v4 line A
 

@@ -62,7 +62,8 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
 - `db/user-column-db.{pin,psq,phr,paa,pab}`: a copy of NCBI's
   `c++/src/algo/blast/unit_tests/seqdb_reader/data/user-column-db` (598d8ae6; written by NCBI's
   `CWriteDB::CreateUserColumn` in 2007): six proteins and the user column `comedy`, whose data
-  file is the big-endian `.pab` alone; no masks. Its ISAM files are left out.
+  file is the big-endian `.pab` alone; no masks. Its `.pnd .pni .psd .psi` and `.pog` files are
+  left out.
 - `expected/mask_*.algorithms.txt`: the table that NCBI prints for the algorithms of the
   database (`GetAvailableMaskAlgorithmDescriptions`, with its leading empty line).
 - `expected/mask_*.masks.tsv`: rows `algorithm<TAB>oid<TAB>ranges` from

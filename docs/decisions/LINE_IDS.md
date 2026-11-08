@@ -172,6 +172,13 @@ and `docs/`. State: 142 done, 12 in progress, 0 stopped.
 | `SF S1` | SF stage S1: flatten per-unit fixed costs (allocation, zeroing, re-reading, serial head and tail) so the ratio to NCBI stays within x1.15 as the number of work units grows tenfold. | in progress | #653, #724, #737, #746, #772, #786, #804 | [docs/agents/diagnostics.md](../../docs/agents/diagnostics.md) |
 | `SF S3` | SF stage S3: fold conditional speed switches family by family into one form, aiming at 68 or fewer conditional switches and no timing-midpoint thresholds. | in progress | #663, #682, #709, #720, #756, #748 (closed) | [docs/agents/diagnostics.md](../../docs/agents/diagnostics.md), “Performance switches (on by default)” |
 
+### SW: the revision after the SWEBOK audit
+
+| ID | Meaning | State | Main pull requests | Record in this repository |
+| --- | --- | --- | --- | --- |
+| `SW` | Line SW (Nov 2026): the revision of LOSAT after its SWEBOK audit, in stages SW1-SW11: CI and configuration, records and decision registries, unsafe code, lints, duplication and cycles, large functions, test adequacy, dependencies and release integrity, engine documents. | in progress | #825, #853, #857, #865, #873, #914, #960, #885, #950, #967 | [docs/decisions/OWNER_DECISIONS.md](../../docs/decisions/OWNER_DECISIONS.md) |
+| `SW SW8` | Stage SW8: test adequacy (damaged-input tests, coverage in the nightly run, orphan tests, the NCBI unit-case ledger) and the checkout prefix of frozen outputs replaced when comparing; follow-ups such as `losat blastdbcmd` reading a column's big-endian data file as NCBI does (DECISIONS 40). | in progress | #885, #886, #888, #897, #925, #931, #935, #945, #947, #953, #954 | [docs/evidence/ncbi_unit_cases/LEDGER.tsv](../../docs/evidence/ncbi_unit_cases/LEDGER.tsv) |
+
 ### Plan v4 (speed and memory lines)
 
 | ID | Meaning | State | Main pull requests | Record in this repository |

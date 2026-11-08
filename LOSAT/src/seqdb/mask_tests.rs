@@ -563,7 +563,9 @@ fn byte_reversed(ranges: &str) -> String {
 
 /// The data file `x_OpenAllColumns` reads: none without data files; the little-endian `.nac`
 /// when it exists; else the big-endian `.nab`, whose ranges NCBI reads with the bytes of each
-/// number reversed (line BDC's probe M784: `120-161` is `2013265920-2701131776`).
+/// number reversed (line BDC's probe M784: `120-161` is `2013265920-2701131776`). The
+/// expectations are those of a little-endian host, every host of NCBI BLAST+ 2.17.0 and of
+/// LOSAT (as for the other columns made here: a big-endian NCBI reads no `.?xc`).
 #[test]
 fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
     // An index file without any data file is skipped.
@@ -617,6 +619,20 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
         let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
         assert_eq!(text, expected, "{algo} {oid}");
     }
+
+    // A protein mask column alike (seg, 21): `.pab` alone gives the ranges byte-reversed
+    // (line SW8's probe Q01, NCBI's `%o\t%m21` of this copy, 2026-11-08).
+    let dir = TempDir::new("prot-big");
+    copy_files("mask_prot_v4", &["pin", "psq", "phr", "paa", "pab"], &dir);
+    let db = SeqDb::open_with_masks(&dir.name("mask_prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(db.mask_algorithms().unwrap().ids(), [21]);
+    assert!(db.volumes()[0].columns().unwrap()[0]
+        .data_path()
+        .ends_with("mask_prot_v4.pab"));
+    for (algo, oid, expected) in expected_rows("mask_prot_v4") {
+        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        assert_eq!(text, byte_reversed(&expected), "{algo} {oid}");
+    }
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:3698-3783 UserDefinedColumns
@@ -669,7 +685,7 @@ fn ncbi_s_user_column_reads_from_its_big_endian_data_file() {
 }
 
 /// A user column with its big-endian data file alone after the mask column (NCBI's
-/// `x_OpenAllColumns` opens both; this session's probe X01, X02: `-info` and `%m11` as without
+/// `x_OpenAllColumns` opens both; line SW8's probe X01-X03 (2026-11-08): `-info` and `%m11` as without
 /// it).
 #[test]
 fn a_user_column_beside_the_masks_reads_its_big_endian_data_file() {

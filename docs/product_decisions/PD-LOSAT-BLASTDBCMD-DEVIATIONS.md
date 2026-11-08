@@ -16,11 +16,11 @@
   1.4, 2026-11-02 (BDC4, several names in `-db`, drop-in survey `DECISIONS.md` 34): the items hold
   on a list of names; item 6 covers one accession on two sequences, a widening the Owner
   approved on 2026-11-02 ("差 6 の拡張を承認", drop-in survey `DECISIONS.md` 34).
-  1.5, 2026-11-08 (session SW8, item c): a column with its big-endian data file alone is no
-  longer an explicit rejection. NCBI reads it through the same index (its offsets are
-  big-endian on every host), a user column as it was written, and the ranges of the mask column
-  with the bytes of each number reversed (probe M782-M790): a deterministic result, which LOSAT
-  reproduces. The six items are unchanged.
+  1.5, 2026-11-08 (line SW, SW8 DECISIONS 40): a column with its big-endian data file alone is
+  no longer an explicit rejection of `losat blastdbcmd`. NCBI reads it through the same index
+  (its offsets are big-endian on every host), a user column as it was written, and the ranges of
+  the mask column with the bytes of each number reversed (probe M782-M790): a deterministic
+  result, which LOSAT reproduces. The six items are unchanged.
 - Status: Accepted (approved deviations).
 
 ## Scope

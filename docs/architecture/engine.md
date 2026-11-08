@@ -6,7 +6,7 @@ work, and how errors end a run. It is written for a contributor who is new to th
 that bind a change are in [AGENTS.md](../../AGENTS.md); this page explains the structure those
 rules act on and points to the code.
 
-It was written against `dev` at `c47177db5` (2026-11-08). Files, functions and types are named so
+It was written against `dev` at `9d8d153c8` (2026-11-08). Files, functions and types are named so
 that they can be found with a search; counts are those of that commit and are marked as such.
 
 ## The contract the structure serves
@@ -35,7 +35,7 @@ which runs blastp's; the library runs psiblast through blastp's `run_local*`.
 
 ```mermaid
 flowchart LR
-  bin["losat binary<br/>main.rs"] --> cli["cli<br/>(clap, Commands)"]
+  bin["losat binary<br/>main.rs → main_entry"] --> cli["cli<br/>(clap, Commands)"]
   cli --> run["&lt;program&gt;::run"]
   lib["library users<br/>python/, LOSAT/examples"] --> api["api<br/>(run, run_batches, ...)"]
   api --> lb["api::local_blast"]
@@ -48,8 +48,9 @@ flowchart LR
   local --> engine
 ```
 
-- The binary: `main.rs` reads a few words before clap (`blastdbcmd`, `--install-shims`,
-  `-version`), then `cli::try_parse_from`, then dispatches on `cli::Commands` to the program.
+- The binary: `main.rs` only calls `main_entry` (`cli/main_entry.rs`, re-exported at the crate
+  root). `main_entry` reads a few words before clap (`blastdbcmd`, `--install-shims`, `-version`),
+  then `cli::try_parse_from`, then dispatches on `cli::Commands` to the program.
   `losat blastdbcmd` bypasses clap and reads its arguments as NCBI's `blastdbcmd` does
   (`blastdbcmd::run`).
 - The library: `api` is the only documented module of the crate (`lib.rs`). It reads FASTA
@@ -65,17 +66,17 @@ through `algorithm::common::database`.
 
 ## Module map
 
-`lib.rs` declares 17 modules (at `c47177db5`). Only `api` is documented; the modules that the
-binary, the Web adapter or the tests name are `pub` but hidden from the documentation and outside
-the compatibility promise of the version number; the rest are private to the crate (`lib.rs`,
-module comment).
+`lib.rs` declares 17 modules. Only `api` is documented. The others are private to the crate, or
+`pub` but hidden from the documentation and outside the compatibility promise of the version
+number (the Web adapter and the tests name them); the `losat` binary calls one hidden function,
+`main_entry`, and names no module (`lib.rs`, module comment).
 
 | Module | Holds | NCBI counterpart |
 | :--- | :--- | :--- |
 | `algorithm` | the search programs, one directory each ([Programs](#programs)) | `app/blast/*_app.cpp` and the per-program code of `algo/blast/core` |
 | `api` | the library API; `api::local_blast` routes reports to outputs | `algo/blast/api` (`CLocalBlast`) |
 | `blastinput` | NCBI's application layer: FASTA reader, query batches, ranges, input files, the environment and registry check, value parsers | `algo/blast/blastinput` |
-| `cli` | clap `Cli` and `Commands`, NCBI-style `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
+| `cli` | the command line's entry `main_entry`, clap `Cli` and `Commands`, NCBI-style `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
 | `core` | ports of `core/` that several programs share: encoding, composition-based statistics, HSP filters, the PSSM engine | `algo/blast/core`, `algo/blast/composition_adjustment` |
 | `stats` | Karlin-Altschul parameters, length adjustment, search space, Spouge's finite-size correction, sum statistics, the matrix tables | `core/blast_stat.c`, `core/blast_setup.c` (`BLAST_CalcEffLengths`) |
 | `report` | every output format: pairwise, tabular, XML, XML2, JSON, archive, SAM, serial ASN.1 | `objtools/align_format`, `algo/blast/format` |
@@ -96,7 +97,7 @@ the crate's `report` and `algorithm::blastx::report` / `algorithm::tblastx::repo
 
 The top-level modules are not a strict stack. Most of the engine (`algorithm`) uses `utils`,
 `report`, `blastinput`, `stats`, `core` and `seqdb`, but some edges point back up, and in non-test
-code they tie 12 of the 17 modules into one cycle at `c47177db5` (all but `config`, `utils`,
+code they tie 12 of the 17 modules into one cycle at `9d8d153c8` (all but `config`, `utils`,
 `stats`, `seqid` and `web_api`). The diagram shows the main edges; the dashed ones point back up.
 
 ```mermaid
@@ -462,7 +463,7 @@ with the same output. It has no NCBI counterpart, and no switch of the set chang
   (`xswitch::on`, `xswitch::value`). Nothing checks the names: a misspelt `LOSAT_X_*` variable is
   ignored.
 - **Two lists.** `STRICT_SET` holds the switches that are on by default and still have a variable
-  (145 at `c47177db5`); `GRADUATED` holds the switches whose variable is gone but whose rule and
+  (145 at `9d8d153c8`); `GRADUATED` holds the switches whose variable is gone but whose rule and
   fallback stay (23). `STRICT_SET` and the `export` block of
   [docs/agents/diagnostics.md](../agents/diagnostics.md) are the same list, which a unit test in
   `xswitch.rs` enforces.
@@ -488,7 +489,7 @@ The diagnostic variables are not switches: `LOSAT_X_STATS` (work counters; those
 `utils::xstats` count only with the cargo feature `xstats`, the others in every build),
 `LOSAT_TIMING` (`[TIMING]` lines: each program's own and one common line), `LOSAT_X_REACH`, and
 the trace and debug variables (those of `xdiag` are read only in a build with the feature
-`diagnostics`). They write to standard error or to files. `main` writes the reach files, the
+`diagnostics`). They write to standard error or to files. `main_entry` writes the reach files, the
 counters and the common timing line only when the run succeeds; the programs' own timing lines
 and the traces are written as the run goes. [docs/user/environment.md](../user/environment.md)
 lists NCBI's variables and names the development ones as a group.
@@ -502,13 +503,13 @@ There are two kinds of error:
   through `anyhow::Result`. Helpers build the common ones: `blastinput::app::options_error`,
   `blastinput::app::engine_error`, `cli::inaccessible` and
   `algorithm::common::database::database_error`.
-- **LOSAT's refusals and other errors.** Everything else is a plain `anyhow` error. `main` returns
-  it, and Rust prints `Error: ` with the message and exits with status 1. A refusal says what is
+- **LOSAT's refusals and other errors.** Everything else is a plain `anyhow` error. `main_entry`
+  returns it to `main`, and Rust prints `Error: ` with the message and exits with status 1. A refusal says what is
   not supported, for example `... is not supported by LOSAT's BLASTN`.
 
-Only `main.rs` ends the process on an error: it calls `cli::exit_on_native_error` (which nothing
-else calls), and that writes a `NativeError`'s text and exits with its status, or aborts for a
-negative status; any other error is returned from `main`. In a release build a panic aborts
+Only `main_entry` ends the process on an error: it calls `cli::exit_on_native_error` (which
+nothing else calls), and that writes a `NativeError`'s text and exits with its status, or aborts
+for a negative status; any other error is returned to `main`. In a release build a panic aborts
 wherever it happens (`panic = "abort"` in the release profile).
 
 | Status | NCBI's meaning (`app/blast/blast_app_util.hpp`) | LOSAT |

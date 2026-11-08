@@ -301,7 +301,7 @@ impl RoundFiles {
     /// `SavePssmToFile` of a PSSM whose ASN.1 text is `asn` and ASCII PSSM `ascii` (each as
     /// requested). An ASN.1 file that cannot be written is LOSAT's refusal there, where NCBI stops
     /// with its serial stream's write error (DECISIONS 10 of line PS: after the report of the round
-    /// before; no partial file is left); an ASCII file that cannot be opened gets nothing, as
+    /// before, or with `-in_pssm` before round 1, after the prolog; no partial file is left); an ASCII file that cannot be opened gets nothing, as
     /// NCBI's unchecked `ofstream`.
     pub(crate) fn write(&mut self, asn: Option<&[u8]>, ascii: Option<&[u8]>) -> Result<()> {
         if let (Some(stream), Some(bytes)) = (self.asn.as_mut(), asn) {
@@ -316,7 +316,7 @@ impl RoundFiles {
                     let _ = std::fs::remove_file(&file.path);
                 }
                 anyhow::bail!(
-                    "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops after the round's report with a serial-stream write error, is not supported by LOSAT's PSIBLAST",
+                    "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops with a serial-stream write error (after the report of the round before; with -in_pssm before round 1), is not supported by LOSAT's PSIBLAST",
                     file.path.display()
                 );
             }

@@ -298,7 +298,14 @@ fn an_unwritable_pssm_file_of_in_pssm_stops_before_round_1() {
         command
             .args(["-db", "tests/db_search/paja"])
             .args(["-in_pssm", "tests/fixtures/db_search/db.ps.asn.rnd.6.asn"])
-            .args(["-num_threads", "1", "-num_iterations", "2", "-outfmt", outfmt])
+            .args([
+                "-num_threads",
+                "1",
+                "-num_iterations",
+                "2",
+                "-outfmt",
+                outfmt,
+            ])
             .args(args);
         command.output().expect("run LOSAT CLI")
     };

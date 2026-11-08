@@ -225,7 +225,7 @@ fn check(subject: &[&str], extra: &[&str], env: &[Var<'_>]) {
     let queries = queries();
     let (expected, expected_stderr) = blastn(&queries, subject, extra, 1, &joined(&[env, &[OFF]]));
     assert!(!expected.is_empty(), "{extra:?}: no hits");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = blastn(&queries, subject, extra, threads, &joined(&[env, &[OFF]]));
         assert!(
             report == expected,
@@ -588,7 +588,7 @@ fn dc_megablast_csr_of_a_large_table() {
             .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("no {name} in: {line}"))
     };
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = blastn(&query, &subject, extra, threads, &[CSR]);
         assert!(report == expected, "threads {threads}: on differs");
         assert_eq!(stderr, expected_stderr, "threads {threads}");

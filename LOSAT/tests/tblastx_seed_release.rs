@@ -46,7 +46,7 @@ fn fixture(name: &str) -> PathBuf {
 /// at most 1.5 threads' share of the bases (`2 * longest * threads <= 3 * total`).
 const FRAME_LOOP: (&str, &str) = ("LOSAT_X_PAIRPARGATE", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// One TBLASTX run of the fixture query against `subject` (`-outfmt 6` on standard output)
 /// with the given variables as its only `LOSAT_*` variables that choose a code path.

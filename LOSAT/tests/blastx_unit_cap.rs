@@ -376,7 +376,7 @@ fn several_queries_give_the_report_without_ka_once() {
     let (query, set) = inputs(&dir, 4, 4_000, 595);
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     let off = [("LOSAT_X_BXKAONCE", "0")];
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let reference = blastx(&query, &args, threads, &off);
         assert!(
             reference.iter().filter(|&&b| b == b'\n').count() > 20,
@@ -414,7 +414,7 @@ fn queries_give_the_report_without_pool_n1() {
             blastx(&query, &args, 1, &[]) == reference,
             "{pieces} x {length} letters: report differs"
         );
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             assert_eq!(
                 sides(&dir, &query, &args, threads, &[], "LOSAT_X_BXPOOLN1"),
                 (threads == 1, threads > 1),

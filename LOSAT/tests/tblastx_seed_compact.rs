@@ -45,7 +45,7 @@ fn fasta(name: &str) -> PathBuf {
 
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// The binary with the given variables as its only `LOSAT_*` variables that choose a code path.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature

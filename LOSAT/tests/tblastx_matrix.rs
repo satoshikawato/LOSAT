@@ -101,7 +101,7 @@ fn equals_ncbi_with_stdin(case: &str, args: &[&str], stdin: &[u8], status: i32) 
         fixture(&format!("{case}.out")),
         fixture(&format!("{case}.err")),
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_with_stdin(args, threads, stdin);
         assert_eq!(output.status.code(), Some(status), "{case} n{threads}");
         assert_eq!(

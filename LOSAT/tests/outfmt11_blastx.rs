@@ -609,7 +609,7 @@ fn the_libm_rule_accepts_only_a_last_digit_of_a_real() {
 #[test]
 fn archives_equal_ncbis_at_one_and_four_threads() {
     for case in &cases() {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             check(case, &[], threads);
         }
     }
@@ -941,7 +941,7 @@ fn a_batch_size_that_is_not_an_integer_is_refused() {
 /// archive of `noquery_sub` for ` 11 `.
 #[test]
 fn an_outfmt_spec_gets_no_error_archive() {
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
             let output = run(
                 &[],

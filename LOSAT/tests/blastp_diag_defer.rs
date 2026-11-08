@@ -237,7 +237,7 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
     // of the rows. `tests/blastp_diag_batch.rs` relies on this test for the fixture pair's run of
     // `BATCHES` and its pairwise reports of the per-hit loop and the default.
     let pairs = [
-        (query, subject, &[1, 4][..], "6"),
+        (query, subject, &[1, 4, 8, 16][..], "6"),
         (
             fixture("MeenMJNV.faa"),
             fixture("MejoMJNV.faa"),
@@ -334,7 +334,7 @@ fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
     let short = query.with_file_name("short.faa");
     std::fs::write(&short, format!(">short\n{}\n", &first[..60])).expect("write FASTA");
     const FORCED: &[(&str, &str)] = &[("LOSAT_X_BPMASKEDMIN", "0")];
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let what = format!("short query threads {threads}");
         let (reference, _, _) = blastp(&short, &subject, threads, REFERENCE, &["-outfmt", "6"]);
         assert!(

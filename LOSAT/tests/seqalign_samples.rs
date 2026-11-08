@@ -101,7 +101,7 @@ fn subject_searches_write_ncbis_seq_annots() {
         for outfmt in ["8", "9", "12"] {
             let expected = std::fs::read(fixtures().join(format!("{name}_fmt{outfmt}.out")))
                 .expect("NCBI's output");
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = losat()
                     .args(argv)
                     .args(["-outfmt", outfmt, "-num_threads", threads])
@@ -216,7 +216,7 @@ fn translated_subject_searches_write_ncbis_seq_annots() {
         for &outfmt in formats {
             let expected = std::fs::read(fixtures().join(format!("{name}_fmt{outfmt}.out")))
                 .expect("NCBI's output");
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = losat()
                     .args(argv)
                     .args(["-outfmt", outfmt, "-num_threads", threads])

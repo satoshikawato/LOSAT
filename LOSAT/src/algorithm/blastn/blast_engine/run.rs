@@ -20795,7 +20795,7 @@ mod tests {
             "/tests/unit/helpers/ncbi_reference_data/blastn_word7_subject_set.out"
         ));
         let threads: &[usize] = if cfg!(feature = "parallel") {
-            &[1, 4]
+            &[1, 4, 8, 16]
         } else {
             &[1]
         };

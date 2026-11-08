@@ -225,7 +225,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     // `deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches` in
     // `tests/blastp_diag_defer.rs`.
     let pairs = [
-        (query, subject, &[1, 4][..], true),
+        (query, subject, &[1, 4, 8, 16][..], true),
         (
             fixture("MeenMJNV.faa"),
             fixture("MejoMJNV.faa"),

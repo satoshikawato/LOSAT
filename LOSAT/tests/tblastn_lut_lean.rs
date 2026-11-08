@@ -124,7 +124,7 @@ fn the_lean_tables_give_the_chain_builders_report() {
         "0",
     ];
     for (query, options) in [(all, &[][..]), (one, &[][..]), (all, blosum45)] {
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let (lean, lean_err) = tblastn(query, options, threads, &[]);
             let (chain, chain_err) =
                 tblastn(query, options, threads, &[("LOSAT_X_TBNLUTLEAN", "0")]);

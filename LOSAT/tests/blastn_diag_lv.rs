@@ -162,7 +162,7 @@ fn check(dir: &Path, query: &Path, subject: &Path, task: &str, extra: &[(&str, &
     let (expected, expected_stderr) = blastn(dir, query, subject, task, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let at = format!("{task} {extra:?} threads {threads}");
         let reach = reach_support::Reach::new("diaglv");
         let mut on = extra.to_vec();
@@ -221,7 +221,7 @@ fn the_memo_and_the_lean_folds_give_the_same_report() {
     const MEMO: (&str, &str) = ("LOSAT_X_DIAGLV2", "1");
     const LEAN: (&str, &str) = ("LOSAT_X_FOLDLEAN", "1");
     const FOLD: (&str, &str) = ("LOSAT_X_PAIRPARFOLD", "1");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let folds: &[bool] = if threads > 1 {
             &[false, true]
         } else {

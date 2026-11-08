@@ -177,7 +177,7 @@ fn check_task(task: &str, extra: &[&str]) {
     let (expected, expected_stderr) = blastn(&queries, &args, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         // At one thread the search without the switch is `expected` itself.
         if threads > 1 {
             let (report, stderr) = blastn(&queries, &args, threads, &[]);
@@ -300,7 +300,7 @@ fn dust_no_and_other_scores() {
         ][..],
     ] {
         let (expected, _) = blastn(&queries, args, 1, &[]);
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let reach = reach_support::Reach::new("qpreppar-scores");
             let (report, _) = blastn(&queries, args, threads, &[SWITCH, reach.var()]);
             assert!(report == expected, "{args:?} threads {threads}: on differs");

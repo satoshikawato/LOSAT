@@ -21,7 +21,7 @@ fn fixture(name: &str) -> PathBuf {
 
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// The lines `LOSAT_TIMING` printed for a TBLASTX batch before the stage lines were added, in
 /// their order.

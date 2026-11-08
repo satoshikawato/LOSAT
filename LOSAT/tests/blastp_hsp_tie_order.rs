@@ -138,7 +138,7 @@ fn blastp(threads: usize) -> String {
 
 #[test]
 fn hsps_with_rounded_score_ties_below_the_evalue_epsilon_are_in_ncbi_order() {
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         assert_eq!(blastp(threads), NCBI_ROWS, "{threads} threads");
     }
 }

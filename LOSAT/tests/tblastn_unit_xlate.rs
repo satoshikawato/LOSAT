@@ -187,7 +187,7 @@ fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
         "the search must report hits in the long subject"
     );
     assert_eq!(stats(&stderr), None);
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = tblastn(threads, &[]);
         assert!(
             report == expected,
@@ -241,7 +241,7 @@ fn a_database_search_translates_in_its_units() {
             .any(|line| line.split('\t').nth(1) == Some("long")),
         "the search must report hits in the long sequence"
     );
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = tblastn_of(db, threads, &[]);
         assert!(report == expected, "{threads} threads: the report");
         assert_eq!(

@@ -96,7 +96,7 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
             args.extend(subject_args);
             args.extend(["-num_threads", "1", "-outfmt", format]);
             let expected = fs::read(dir.join(format!("badbatch_{mode}_{format}.out"))).unwrap();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = args.clone();
                 let at = args.iter().position(|a| *a == "-num_threads").unwrap();
                 args[at + 1] = threads;
@@ -131,7 +131,7 @@ fn an_empty_query_pipe_writes_the_prolog_and_the_epilog() {
             ["-subject", subject.to_str().unwrap()],
             ["-db", db.to_str().unwrap()],
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastp", "-query", "-"];
                 args.extend(subject_args);
                 args.extend(["-num_threads", threads, "-outfmt", format]);
@@ -395,7 +395,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
         if env.is_empty() {
             continue;
         }
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 engine,
                 &[
@@ -451,7 +451,7 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
             let name = format!("{stem}_{mode}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
             let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastp", "-query", query];
                 args.extend(if mode == "sub" {
                     ["-subject", "sprot.faa"]
@@ -548,7 +548,7 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let damaged = "tests/seqdb/taxdb/btd_empty";
     let refusal = "unsupported database: the taxonomy record of taxid 9606";
     for format in ["8", "0", "5", "6", "7"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastp",
                 "-db",

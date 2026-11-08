@@ -164,7 +164,7 @@ fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
         ],
     );
     for threshold in [None, Some("11")] {
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let (base, _) = tblastx(
                 &query,
                 &subject,
@@ -230,7 +230,7 @@ fn the_default_path_reports_the_same_with_the_switch() {
         "s.fna",
         &[("mela", &letters("MelaMJNV.fasta")[..40_000])],
     );
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (base, _) = tblastx(&query, &subject, None, threads, &[SWITCH_OFF]);
         let (with, _) = tblastx(&query, &subject, None, threads, &[]);
         assert_eq!(base, with, "default path, threads {threads}");

@@ -423,7 +423,7 @@ fn child_search() {
 #[test]
 fn outputs_records_and_ranges_of_the_blocks_are_those_of_all_queries() {
     let inputs = Inputs::new();
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         for formats in [&WEB[..], &EIGHT[..]] {
             let tag = format!("{}_{threads}", formats.len());
             let blocks = child(

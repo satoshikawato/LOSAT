@@ -130,7 +130,7 @@ fn the_reports_do_not_depend_on_the_threads_or_the_query_batches() {
         for batch in [None, Some("2000")] {
             let batch_env: Vec<(&str, &str)> =
                 batch.map(|b| ("BATCH_SIZE", b)).into_iter().collect();
-            for threads in [1, 4] {
+            for threads in [1, 4, 8, 16] {
                 let run = tblastn(&query, &db, args, threads, &batch_env);
                 assert!(
                     run == reference,
@@ -154,7 +154,7 @@ fn a_stage_lets_a_subject_go_after_its_last_match_with_the_same_reports() {
         &["-outfmt", "6"][..],
         &["-outfmt", "6", "-comp_based_stats", "0"][..],
     ] {
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let held = tblastn(&query, &db, args, threads, &[("LOSAT_X_TBNSTAGEDROP", "0")]);
             assert_eq!(held.0, Some(0), "{}", held.2);
             let dropped = tblastn(&query, &db, args, threads, &[]);

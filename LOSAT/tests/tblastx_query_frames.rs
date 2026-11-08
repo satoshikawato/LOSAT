@@ -168,7 +168,7 @@ fn check(env: &[(&'static str, &'static str)], extra: &[&str]) {
     let (expected, stderr) = tblastx(&inputs, extra, 1, &with(env, &[OFF]));
     assert!(!expected.is_empty(), "{env:?} {extra:?}: no hits");
     assert_eq!(stderr, "", "{env:?} {extra:?}");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = tblastx(&inputs, extra, threads, &with(env, &[OFF]));
         assert!(
             report == expected,
@@ -220,7 +220,7 @@ fn seg_no_is_not_acted_on() {
     let extra = ["-seg", "no"];
     let (expected, _) = tblastx(&inputs, &extra, 1, &[OFF]);
     assert!(!expected.is_empty());
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let reach = reach_support::Reach::new("qframes_seg_no");
         let (report, _) = tblastx(&inputs, &extra, threads, &[reach.var()]);
         assert!(report == expected, "threads {threads}: default differs");

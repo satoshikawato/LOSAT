@@ -120,7 +120,7 @@ fn a_query_title_outside_us_ascii_is_refused() {
             records[position] = (title, nucleotide.as_bytes());
             fasta(&query, &records);
             fasta(&subject, &[(b"s1 subject", nucleotide.as_bytes())]);
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let out = dir.join("out.xml");
                 let output = run_str(&[
                     "tblastx",
@@ -179,7 +179,7 @@ fn a_subject_title_outside_us_ascii_is_refused_where_it_is_written() {
             ("s2 caf\u{e9}".as_bytes(), nucleotide.as_bytes()),
         ],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let args = [
             "tblastx",
             "-query",
@@ -233,7 +233,7 @@ fn a_database_name_outside_us_ascii_is_refused() {
         )
         .expect("copy database");
     }
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "tblastx",
             "-query",
@@ -279,7 +279,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "tblastx",
             "-query",
@@ -319,7 +319,7 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "tblastx",
             "-query",
@@ -347,7 +347,7 @@ fn an_empty_seekable_query_input_writes_nothing() {
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
     );
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LOSAT_") {
@@ -396,7 +396,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
     }
     let good = text.clone();
     text.extend_from_slice(b">q3\nACGT%%%%\n");
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let run = |text: &[u8]| {
             fs::write(&query, text).expect("write query");
             let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));

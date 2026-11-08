@@ -179,7 +179,7 @@ fn check_task(task: &str, extra: &[&str]) {
     let (expected, expected_stderr) = blastn(&queries, &args, 1, &[]);
     assert!(!expected.is_empty(), "{task}: no hits");
     assert_eq!(expected_stderr, "", "{task}");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = blastn(&queries, &args, threads, &[]);
         assert!(report == expected, "{task} threads {threads}: off differs");
         assert_eq!(stderr, "", "{task} threads {threads}");
@@ -288,7 +288,7 @@ fn dust_no_is_not_acted_on() {
     let args = ["-task", "megablast", "-dust", "no"];
     let (expected, _) = blastn(&queries, &args, 1, &[]);
     assert!(!expected.is_empty());
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = blastn(&queries, &args, threads, &[SWITCH, ("LOSAT_X_STATS", "1")]);
         assert!(report == expected, "threads {threads}: on differs");
         assert!(!stderr.contains("QDUSTPAR"), "threads {threads}: {stderr}");

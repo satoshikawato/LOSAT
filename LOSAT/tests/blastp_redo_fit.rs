@@ -127,7 +127,7 @@ fn fitted_redone_lists_give_the_reports_of_the_one_thread_search() {
     for outfmt in ["6", "0"] {
         let (reference, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", outfmt]);
         assert!(!reference.is_empty(), "the queries have a report");
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let vars = &[BATCH, BLOCKS_OFF][..];
             let (report, fitted) = blastp(&query, threads, vars, &["-outfmt", outfmt]);
             assert!(
@@ -152,7 +152,7 @@ fn fitted_redone_lists_give_the_reports_of_the_one_thread_search() {
 fn fitted_redone_lists_in_query_blocks_give_the_rows_of_the_search_of_all_queries() {
     let query = queries("blocks");
     let (reference, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         // Blocks of 1,500 letters (BDT62583.1 and BDT62584.1, two batches, then BDT62585.1), as the
         // default blocks of 50,000 letters hold several batches; and one batch per block.
         for (vars, blocks) in [

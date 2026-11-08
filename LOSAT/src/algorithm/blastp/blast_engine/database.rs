@@ -3642,7 +3642,7 @@ mod tests {
             databases.push((missing, false));
         }
         for (database, readable) in &databases {
-            for threads in [1, 4] {
+            for threads in [1, 4, 8, 16] {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                     for names in [true, false] {
                         let two = x_titles_read_allow_blocks(database, pool)
@@ -3815,7 +3815,7 @@ mod tests {
                 program: "BLASTP",
             };
             assert_eq!(database.taxdb_found(), taxdb.is_some());
-            for threads in [1, 4] {
+            for threads in [1, 4, 8, 16] {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                     for pairwise in [false, true] {
                         let titles = x_titles_allow_blocks(&database, pairwise, false, pool);

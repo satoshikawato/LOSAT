@@ -266,7 +266,7 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
 #[test]
 fn archives_equal_ncbis_at_one_and_four_threads() {
     for case in CASES {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             check(case, &[], threads);
         }
     }
@@ -280,7 +280,7 @@ fn xml_is_read_in_any_case() {
     let subject = input("arch_s.fna");
     let want = frozen("default_sub_xml", "out");
     for spelling in ["XML", "Xml", "xMl"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run(
                 &[("ARCHIVE_FORMAT", spelling)],
                 &["-query", &query, "-subject", &subject, "-outfmt", "11"],
@@ -310,7 +310,7 @@ fn batch_cases_do_not_depend_on_report_streaming() {
             &[("LOSAT_X_RPTSTREAM", "0")][..],
             &[("LOSAT_X_RPTSTREAM", "1")][..],
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 check(case, extra, threads);
             }
         }
@@ -450,7 +450,7 @@ fn a_utf8_window_masker_path_is_written_as_it_is_in_xml() {
         "-outfmt",
         "11",
     ];
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_in(&dir, &[XML_FORMAT], &args, threads);
         assert_eq!(output.status.code(), Some(0), "threads {threads}");
         let want = frozen("wm_utf8_xml", "out");
@@ -606,7 +606,7 @@ fn an_archive_read_from_standard_input_equals_the_file_run() {
 /// A `-query` file that does not exist, with a database: the error archive of NCBI, rc 1.
 #[test]
 fn a_missing_query_file_gives_an_error_archive_with_a_database() {
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run(
             &[],
             &[
@@ -632,7 +632,7 @@ fn a_missing_query_file_gives_an_error_archive_with_a_database() {
 fn messages_left_at_the_end_make_an_error_archive() {
     use std::io::Write;
     use std::process::Stdio;
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let mut command = Command::new(BIN);
         command
             .current_dir(engine())
@@ -682,7 +682,7 @@ fn messages_left_at_the_end_make_an_error_archive() {
 /// archive of `noquery_sub` for ` 11 `.
 #[test]
 fn an_outfmt_spec_gets_no_error_archive() {
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
             let output = run(
                 &[],

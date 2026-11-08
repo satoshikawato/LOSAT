@@ -206,7 +206,7 @@ fn the_parts_give_the_reports_of_the_one_thread_reading() {
     let target = ["-subject", subject.to_str().unwrap()];
     check(&query, target, "dc-megablast", &[1, 2, 4], true);
     check(&query, target, "megablast", &[1, 2, 4], true);
-    check(&query, target, "blastn", &[1, 4], true);
+    check(&query, target, "blastn", &[1, 4, 8, 16], true);
 }
 
 #[test]

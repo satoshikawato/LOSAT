@@ -123,7 +123,7 @@ fn tabular_rows_do_not_depend_on_the_switch() {
     let queries = Queries::new();
     for task in ["megablast", "blastn"] {
         for outfmt in ["6", "7"] {
-            for threads in [1u32, 4] {
+            for threads in [1u32, 4, 8, 16] {
                 let reach =
                     reach_support::Reach::new(&format!("bntabpar-{task}-{outfmt}-{threads}"));
                 let default = blastn(&queries, task, outfmt, threads, &[reach.var()]);

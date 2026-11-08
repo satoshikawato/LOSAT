@@ -38,7 +38,7 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 /// The batches of `queries`: {BDT62581.1}, {BDT62582.1, BDT62583.1}, {BDT62584.1} (a batch takes
 /// records while it holds fewer letters).
 const BATCH: (&str, &str) = ("BATCH_SIZE", "500");

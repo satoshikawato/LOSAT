@@ -253,7 +253,7 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
 #[test]
 fn archives_equal_ncbis_at_one_and_four_threads() {
     for case in CASES {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             check(case, &[], threads);
         }
     }
@@ -268,7 +268,7 @@ fn query_blocks_do_not_change_the_archives() {
     // Only these cases run more than one batch to a searched end: the others have one batch, or
     // stop or fail before a search, so the plan of blocks refuses them.
     for case in CASES.iter().filter(|case| MULTI_BATCH.contains(&case.name)) {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let reach = reach_support::Reach::new("outfmt11_bp");
             check(case, &[("LOSAT_X_BPQBLOCK", "1"), reach.var()], threads);
             let sides = reach.sides("LOSAT_X_BPQBLOCK");
@@ -461,7 +461,7 @@ fn an_archive_read_from_standard_input_equals_the_file_run() {
 /// A `-query` file that does not exist, with a database: the error archive of NCBI, rc 1.
 #[test]
 fn a_missing_query_file_gives_an_error_archive_with_a_database() {
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run(
             &[],
             &[
@@ -487,7 +487,7 @@ fn a_missing_query_file_gives_an_error_archive_with_a_database() {
 fn messages_left_at_the_end_make_an_error_archive() {
     use std::io::Write;
     use std::process::Stdio;
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let mut command = Command::new(BIN);
         command
             .current_dir(engine())
@@ -537,7 +537,7 @@ fn messages_left_at_the_end_make_an_error_archive() {
 /// archive of `noquery_sub` for ` 11 `.
 #[test]
 fn an_outfmt_spec_gets_no_error_archive() {
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
             let output = run(
                 &[],

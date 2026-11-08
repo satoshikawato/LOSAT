@@ -153,7 +153,7 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bo
         let what = format!("{extra:?} {}", subjects.0);
         let (expected, expected_stderr) = search(query, subjects, extra, 1, &[SWITCH_OFF]);
         assert!(!expected.is_empty(), "{what}: no hits");
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let reach = reach_support::Reach::new("bncsr");
             let (report, stderr) = search(query, subjects, extra, threads, &[reach.var()]);
             assert!(

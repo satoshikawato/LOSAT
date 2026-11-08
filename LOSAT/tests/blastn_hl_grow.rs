@@ -169,7 +169,7 @@ fn the_report_does_not_depend_on_how_the_hit_lists_grow() {
     let set = set.to_str().unwrap();
     for target in [["-subject", set], ["-db", db.as_str()]] {
         for extra in [&[][..], &["-max_target_seqs", "50"][..]] {
-            for threads in [1, 4] {
+            for threads in [1, 4, 8, 16] {
                 let what = format!("{target:?} {extra:?} threads {threads}");
                 let (default, default_stderr) = search(&query, &target, extra, threads, &[]);
                 assert_eq!(default_stderr, "", "{what}");

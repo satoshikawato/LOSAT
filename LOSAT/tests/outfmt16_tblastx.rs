@@ -116,7 +116,7 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
             let name = format!("{stem}_{mode}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
             let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = args(query, mode, threads, format);
                 args.extend(extra);
                 let output = run_in(&dir, &args, env);
@@ -147,7 +147,7 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("badbatch_tblastx_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = run_in(
                     &dir,
                     &args("qnucl_bad.fna", mode, threads, format),
@@ -258,7 +258,7 @@ fn an_empty_query_pipe_writes_the_prolog_and_the_epilog() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("emptypipe_tblastx_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let (subject, db) = (
                     dir.join(SUBJECT).to_str().unwrap().to_string(),
                     dir.join(DB).to_str().unwrap().to_string(),
@@ -346,7 +346,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
     let protein = &protein[..];
     let (query, subject) = (dir.join("q.fna"), dir.join("s.fna"));
     for format in ["15", "16"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             for title in ["caf\u{e9} ".as_bytes(), b"caf\xe9"] {
                 for position in 0..2 {
                     let mut records: Vec<(&[u8], &[u8])> =
@@ -410,7 +410,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
         .expect("copy database");
     }
     for format in ["15", "16"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 &dir,
                 &[
@@ -447,7 +447,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
                 .join(format!("sa.x16.tblastx.both.{format}.out")),
         )
         .unwrap();
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let scratch = temp_dir("file_sink");
             let out = scratch.join("report.out");
             let output = run_in(
@@ -522,7 +522,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
                 None => options.push(token),
             }
         }
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let mut args = vec!["tblastx", "-db", db, "-query", query];
             args.extend(&options);
             args.extend(["-outfmt", outfmt, "-num_threads", threads]);
@@ -574,7 +574,7 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let damaged = "tests/seqdb/taxdb/btd_empty";
     let refusal = "unsupported database: the taxonomy record of taxid 9606";
     for format in ["8", "9", "12", "0", "5", "6", "7"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "tblastx",
                 "-db",

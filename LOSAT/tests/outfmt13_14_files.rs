@@ -186,7 +186,7 @@ fn blastp_names_the_side_files_and_the_master_entries_as_ncbi() {
     let subject = inputs().join("sprot.faa");
     let (query, subject) = (query.to_str().unwrap(), subject.to_str().unwrap());
     for (case, format, expected, out) in NAMING {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let root = temp_dir(case);
             fs::create_dir_all(root.join("d")).unwrap();
             // `rel.xml` is relative to the working directory (probe `naming/rel14`).
@@ -248,7 +248,7 @@ fn blastn_writes_the_same_files() {
             "master_blastn14",
         ),
     ] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let root = temp_dir("blastn");
             fs::create_dir_all(root.join("d")).unwrap();
             let output = run_in(
@@ -459,7 +459,7 @@ fn a_run_with_no_query_writes_a_master_with_no_entry() {
             ["-subject", subject.to_str().unwrap()],
             ["-db", db.to_str().unwrap()],
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let root = temp_dir("emptypipe");
                 let mut args = vec!["blastp", "-query", "-"];
                 args.extend(target);
@@ -518,7 +518,7 @@ fn a_failed_batch_keeps_the_db_files_and_loses_the_held_subject_file() {
             ("sub", ["-subject", "sprot.faa"], 1),
             ("db", ["-db", "db/sprot"], 2),
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let work = temp_dir("badbatch");
                 let out = work.join(format!("badbatch_{mode}_{format}.out"));
                 let mut args = vec!["blastp", "-query", "qprot_bad.faa"];
@@ -687,7 +687,7 @@ fn equals_frozen_files(
     stderr_start: &str,
 ) {
     let expected = frozen_names(case);
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let work = temp_dir(case);
         let out = work.join(format!("{case}.out"));
         let mut argv = args.to_vec();
@@ -964,7 +964,7 @@ fn blastx_hold_stops_at_a_side_file_it_cannot_open() {
 fn a_refusal_in_a_later_batch_leaves_no_side_file_and_an_empty_master() {
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for format in ["13", "14"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let work = temp_dir("taxrefused");
             let out = work.join("o.out");
             let mut args = blastx_args("qnx_late.fna", ["-db", "db/sprot_tax"]);
@@ -1046,7 +1046,7 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
         ))
     };
     for format in ["13", "14"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let work = temp_dir("q2");
             let (query, subject) = (work.join("q.fa"), work.join("s.fa"));
             let out = work.join("o.out");
@@ -1204,7 +1204,7 @@ fn an_empty_query_gives_an_empty_master_or_a_master_with_no_entry_in_the_other_p
                 ["-subject", subject.to_str().unwrap()],
                 ["-db", db.to_str().unwrap()],
             ] {
-                for threads in ["1", "4"] {
+                for threads in ["1", "4", "8", "16"] {
                     let root = temp_dir("emptypipe2");
                     let mut args = vec![program, "-query", "-"];
                     args.extend(target);
@@ -1591,7 +1591,7 @@ fn blastx_hold_stops_at_an_unopenable_side_file_before_it_reads_the_later_batche
     let warned = format!("{}ACGTJJACGT{}", "ACGT".repeat(2400), "ACGT".repeat(100));
     for (format, extension) in [("13", "json"), ("14", "xml")] {
         for (label, third) in [("warning", warned.as_str()), ("bad batch", "ACGT%%%%")] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let work = temp_dir("holdearly");
                 let (query, subject) = write_hold_inputs(&work, third);
                 let out = work.join("o.out");

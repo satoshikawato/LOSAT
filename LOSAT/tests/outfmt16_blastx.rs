@@ -145,7 +145,7 @@ fn equals_frozen(stem: &str, query: &str, modes: &[&str], rc: i32, stderr_start:
             let name = format!("{stem}_{mode}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
             let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastx", "-query", query];
                 args.extend(match mode {
                     "sub" => ["-subject", "sprot.faa"],
@@ -192,7 +192,7 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
         for mode in ["sub", "db"] {
             let name = format!("unsearchedmask_blastx_{mode}_{format}");
             let expected = fs::read(dir.join(format!("{name}.out"))).unwrap();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastx", "-query", "qnx_unsearched_lc.fna"];
                 args.extend(if mode == "sub" {
                     ["-subject", "sprot.faa"]
@@ -283,7 +283,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
     let nucleotide = back_translate(PROTEIN);
     let padded = batch_of_its_own("");
     for format in ["15", "16"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let run = || {
                 run_in(
                     &dir,
@@ -354,7 +354,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
         .expect("copy database");
     }
     for format in ["15", "16"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 &dir,
                 &[
@@ -443,7 +443,7 @@ fn a_taxdb_refusal_in_a_later_batch_leaves_nothing_written() {
     let dir = fixtures();
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for format in ["15", "16"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastx",
                 "-query",
@@ -496,7 +496,7 @@ fn a_taxid_that_is_in_the_database_but_never_reported_does_not_refuse_the_run() 
             let taxdb = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/seqdb/taxdb")
                 .join(taxdb);
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let args = [
                     "blastx",
                     "-query",
@@ -554,7 +554,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
             );
             env.push((name, value));
         }
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 engine,
                 &[
@@ -615,7 +615,7 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let damaged = "tests/seqdb/taxdb/btd_empty";
     let refusal = "unsupported database: the taxonomy record of taxid 9606";
     for format in ["8", "0", "5", "6", "7"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastx",
                 "-db",

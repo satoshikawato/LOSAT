@@ -42,7 +42,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// One TBLASTX run of the fixture pair (`-outfmt 6` on standard output) with the given
 /// variables as its only `LOSAT_*` variables that choose a code path.

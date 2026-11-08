@@ -86,7 +86,7 @@ fn counts<const K: usize>(stderr: &str, head: &str, fields: [&str; K]) -> [u64; 
 /// taken; the default drops some of the results not taken, `=0` none.
 #[test]
 fn dropping_results_not_taken_keeps_the_report() {
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (drop, drop_err) = tblastn(threads, &[]);
         let (keep, keep_err) = tblastn(threads, &[("LOSAT_X_NEWTONDROP", "0")]);
         assert!(!drop.is_empty(), "the search finds hits");
@@ -122,7 +122,7 @@ fn dropping_results_not_taken_keeps_the_report() {
 /// computed ahead, taken and dropped; only the default keeps batches.
 #[test]
 fn keeping_the_batch_keeps_the_report() {
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (batch, batch_err) = tblastn(threads, &[]);
         let (store, store_err) = tblastn(threads, &[("LOSAT_X_NEWTONBATCH", "0")]);
         assert!(!batch.is_empty(), "the search finds hits");

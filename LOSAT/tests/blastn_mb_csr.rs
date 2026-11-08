@@ -140,7 +140,7 @@ fn check(dir: &TestDir, copies: usize, taken: bool) {
         let what = format!("{} taken {taken}", subjects.0);
         let (expected, expected_stderr) = search(query, subjects, 1, &[SWITCH_OFF]);
         assert!(!expected.is_empty(), "{what}: no hits");
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let reach = reach_support::Reach::new("mbcsr");
             let (report, stderr) = search(query, subjects, threads, &[reach.var()]);
             assert!(
@@ -189,7 +189,7 @@ fn a_word_is_tested_once_on_a_packed_table_of_4_11_cells() {
     let subjects = ("-subject", subject.as_path());
     let (expected, _) = search_task("blastn", &query, subjects, 1, &[("LOSAT_X_BNPVONCE", "0")]);
     assert!(!expected.is_empty(), "no hits");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let reach = reach_support::Reach::new("pvonce");
         let (report, _) = search_task("blastn", &query, subjects, threads, &[reach.var()]);
         assert!(report == expected, "threads {threads}: default differs");

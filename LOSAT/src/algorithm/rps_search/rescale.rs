@@ -202,6 +202,17 @@ pub(crate) fn rps_rescale_pssm(
         }
         rescaled
     }));
+    // An alignment uses each row once: the best scores of the rows sum to the most it can score.
+    // A sum above `INT4_MAX` overflows NCBI's `Int4` scores (undefined behavior in C).
+    let bound: i64 = out
+        .iter()
+        .map(|row| i64::from(row.iter().copied().max().unwrap_or(0).max(0)))
+        .sum();
+    if bound > i64::from(i32::MAX) {
+        bail!(
+            "a profile whose rescaled scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's RPSBLAST"
+        );
+    }
     Ok(true)
 }
 

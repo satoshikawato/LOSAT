@@ -208,7 +208,8 @@
 //!   before the first byte are those of outfmt 8 (with `-db` the definition lines,
 //!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids) and the titles
 //!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`),
-//!   which `search_cli` checks for every record before the search starts. The errors that NCBI
+//!   which are checked before the search starts (the titles in `search`: the queries of the
+//!   batches NCBI completes, and the subjects when there is one). The errors that NCBI
 //!   turns into an error archive (`run`) come after the documents of the batches before, from
 //!   the same handle. In a call of several outputs, hit records or an observer
 //!   the plan is refused for 11 as for 15 and 16: the handle's muting and

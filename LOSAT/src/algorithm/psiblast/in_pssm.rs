@@ -486,8 +486,9 @@ pub(crate) fn psi_search_and_object(
     //     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
     // ```
     // NCBI's `Query=` and `# Query:` lines join every title of the Bioseq and trim the spaces at
-    // the line's ends, while `qseqid` and the warnings read the first title as it is (and a title
-    // that starts with a space has an empty first word, so `qseqid` is the local id). A FASTA
+    // the line's ends, `qseqid` reads the first title's first word (a title that starts with a
+    // space has an empty first word, so `qseqid` is the local id), and the warnings read the first
+    // title without its trailing `.` and spaces (`GetTitle`, below). A FASTA
     // defline gives one title without white space at its ends (psiblast's own PSSMs hold such a
     // title); the PSSM search reads that one only.
     if titles.len() > 1 {
@@ -501,7 +502,7 @@ pub(crate) fn psi_search_and_object(
         || title.last().is_some_and(u8::is_ascii_whitespace)
     {
         return Err(refuse(
-            "a PSSM query whose title starts or ends with white space (NCBI's Query= line trims it, its tabular query id and warnings keep it)",
+            "a PSSM query whose title starts or ends with white space (NCBI's Query= line, tabular query id and warnings each read such a title their own way)",
         ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:345-372

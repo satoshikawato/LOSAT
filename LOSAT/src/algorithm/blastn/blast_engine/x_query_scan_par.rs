@@ -53,8 +53,8 @@
 //! When it does not act (the first reading runs on one thread, `scan` on the search's reader, which
 //! no part has moved: the parts read with `read_at`, which leaves the file position alone): one
 //! thread; a target without `unix` file reads at an offset or without the `parallel` feature
-//! (WebAssembly, Windows); the BLAST archive (its title check, `check_titles_for`, comes from the
-//! first reading); a file of fewer than `MIN_BYTES` bytes after the reader's start
+//! (WebAssembly, Windows); the BLAST archive (the first reading notes the titles it cannot write,
+//! `x_query_stream::scan`); a file of fewer than `MIN_BYTES` bytes after the reader's start
 //! (`LOSAT_X_QSCANPARMIN`, tuning, sets it); and, found while the parts are read, a `\r` anywhere in
 //! the file, a `>?` anywhere in it (a gap line, whose length becomes that many `N`s, or a `>?_`
 //! defline), a target with no record start within `MAX_REACH` bytes after it (a record that long

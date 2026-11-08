@@ -154,6 +154,12 @@ impl ReaderBatchShape {
         }
     }
 
+    /// Whether NCBI's set-up fails the batch: no context is valid and a query has no letters
+    /// (`query_setup::prepare_unit_queries`, whose error has one message per empty query).
+    pub(crate) fn set_up_fails(&self) -> bool {
+        !self.valid && self.empty_queries > 0
+    }
+
     /// The shape of a reader batch of `layout` from its units' preparations, in order (phase 1
     /// ends with it).
     pub(crate) fn reduce<'u>(

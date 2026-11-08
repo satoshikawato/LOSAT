@@ -7326,14 +7326,6 @@ pub fn run(
             }
         }
     };
-    if archive.is_some() {
-        if let Some(read) = &cli_subjects {
-            archive::check_titles(&read.subjects, "subject")?;
-            if let Some(full) = &read.records {
-                archive::check_titles(full, "subject")?;
-            }
-        }
-    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -7864,9 +7856,6 @@ fn search_cli(
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
-    if args.archive.is_some() {
-        archive::check_titles(&records, "query")?;
-    }
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
@@ -8118,7 +8107,8 @@ pub fn run_local(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what
-    // LOSAT cannot write, and a diagnostics stream that saves the messages.
+    // LOSAT cannot write (the titles with the batches NCBI completes, `run_in_pool`), and a
+    // diagnostics stream that saves the messages.
     let archive_requested = outputs.formats.iter().any(|format| {
         app::parse_formatting_string(format.outfmt)
             .is_ok_and(|choice| choice.number == app::output_format::ARCHIVE_FORMAT)
@@ -8127,8 +8117,6 @@ pub fn run_local(
         QueryStrand::parse(&args.strand)?;
         args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?
             .map(|handle| outputs.with_archive_outfmt(handle));
-        archive::check_titles(query_records, "query")?;
-        archive::check_titles(subject_records, "subject")?;
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
@@ -8286,9 +8274,6 @@ fn search_database(
         outputs,
     )?
     .ok_or_else(app::missing_subject_error)?;
-    if args.archive.is_some() {
-        archive::check_titles(query_records, "query")?;
-    }
     let no_placements = Placements::default();
     search(
         args,
@@ -9284,6 +9269,7 @@ fn run_in_pool(
         query_input,
         &lengths,
         batching,
+        args.archive.is_some() && queries.archive_title(),
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
@@ -10088,6 +10074,33 @@ fn run_in_pool(
         // For a caller that sizes the batches itself (`QueryBatchSizes`).
         if let Some(observer) = outputs.observer.as_deref_mut() {
             observer.batch_extensions(batch.good_init_extends as u32 as i32);
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:279-305
+        // ```c++
+        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+        //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+        //     ...
+        //                 results = lcl_blast.Run();
+        //     ...
+        //             if (isArchiveFormat) {
+        //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+        // ```
+        // NCBI completes this batch here and writes its BLAST archive (outfmt 11): its queries
+        // and, with `-subject`, every subject. The batch that stops the run (a reader error,
+        // `Empty CBlastQueryVector`, an error of its search, all above) writes neither, and the
+        // error archive holds no sequence. So a title the archive cannot write is refused here,
+        // for the batch's queries and, in the first batch, the subjects, before the batch's
+        // reports and the reader's messages that come with them. It comes before the first byte:
+        // the reports of the batches before are written after the loop where a query's title is
+        // refused (`x_rpt_stream::Off::ArchiveTitle`), and the first batch's are the first.
+        if args.archive.is_some() {
+            archive::check_titles(batch_records.searched(), "query")?;
+            if let (0, SubjectSource::Prepared(prepared)) = (start, source) {
+                archive::check_titles(
+                    subject_ranges.records.unwrap_or(prepared.records),
+                    "subject",
+                )?;
+            }
         }
         // EXPERIMENT (LOSAT_X_RPTSTREAM): the batch's reports, written now, after the mixer
         // has its gie, as NCBI's loop prints a batch's result sets (`x_rpt_stream.rs`). The

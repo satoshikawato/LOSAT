@@ -1028,14 +1028,19 @@ fn x_outlined<R>(f: impl FnOnce() -> R) -> R {
 /// The composition-based redo's workspace of another matrix than BLOSUM62 (item SC2b), put in
 /// place of `workspace` (BLOSUM62's, which its callers make as before): cold and in place, so that
 /// the callers' frames do not grow by a second workspace (SC1's `use_matrix_workspace` of
-/// TBLASTN). Every matrix whose search runs the redo has NCBI's data (IDENTITY, which has none, is
-/// searched in mode 0: `ResolvedBlastpArgs::identity_cbs_reset`).
+/// TBLASTN). Every matrix whose search runs the redo has NCBI's data. IDENTITY, which has none, is
+/// searched in mode 0 only (`ResolvedBlastpArgs::identity_cbs_reset`), whose redo has no input
+/// (the preliminary lists are taken before it, item SC4a): it keeps BLOSUM62's workspace unused, as
+/// NCBI makes none below mode 2.
 #[cold]
 #[inline(never)]
 pub(super) fn blastp_use_matrix_workspace(
     workspace: &mut BlastCompositionWorkspace,
     matrix: ScoringMatrix,
 ) {
+    if matrix == ScoringMatrix::Identity {
+        return;
+    }
     *workspace = BlastCompositionWorkspace::new(matrix)
         .expect("BLASTP searches only the matrices with NCBI's composition data");
 }
@@ -2433,11 +2438,23 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.scoring.gap_extend
         );
     }
-    // NCBI api/blast_advprot_options.cpp:57:
-    // m_Opts->SetCompositionBasedStats(eCompositionMatrixAdjust);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:431-435
+    // ```c
+    //         if ((0 <= pvalueForThisPair) && (pvalueForThisPair <= 1)) {
+    //             s_AdjustEvaluesForComposition(hsp_list, pvalueForThisPair, seqSrc,
+    //                                           subject_length,
+    //                                           &queryInfo->contexts[context_index],
+    //                                           LambdaRatio, subject_id);
+    // ```
+    // NCBI 2.17.0's redo passes it the context of the next query (`context_index` has gone past
+    // the query's frames, blast_kappa.c:3590-3592,3680): each query's E-values take the next
+    // query's lengths and search space, and the last query's are read past the contexts, so one
+    // search gives different reports from run to run (DECISIONS 23 a of line NP; memory "No NCBI
+    // bug repro"). A search that IDENTITY resets to mode 0 has no unified P-values
+    // (`identity_cbs_reset`).
     if args.comp_based_stats.unified_p {
         bail!(
-            "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
+            "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 adjusts each query's e-values with the lengths of the next query, and reads past its data for the last one)"
         );
     }
     // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`), psiblast's first round of a

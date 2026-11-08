@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.8
+- Version: 1.9
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -12,7 +12,8 @@
   2026-11-03, the form is Owner-delegated); 1.7 2026-11-04 (exception 8 also for `.bz2` and
   `.zst`, the Owner's ask of 2026-11-04); 1.8 2026-11-04 (exception 8: the inflated copy is
   made beside the input, the Owner's ask of 2026-11-04; the fallback to `TMPDIR` is
-  Owner-delegated)
+  Owner-delegated); 1.9 2026-11-08 (exception 8: a `.gz` file is read as makeblastdb's
+  decompressor reads it, its trailer and header CRC not checked; line GZ)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -116,11 +117,16 @@ BLAST+.
    room for it; the copy is then read exactly as the plain file would be: the same records,
    messages and line numbers), concatenated members, streams and
    frames (bgzip, pbzip2, pzstd) included; the name alone decides, in any case, as it does for
-   NCBI's `makeblastdb -in` (`makeblastdb.cpp:1037-1039`), and `-` is read as it comes. NCBI's
+   NCBI's `makeblastdb -in` (`makeblastdb.cpp:1037-1039`), and `-` is read as it comes. A `.gz`
+   file is read as makeblastdb's decompressor reads it (version 1.9): neither a member's trailer
+   (CRC-32 and length) nor its header CRC is checked, a trailer cut short reads as the whole
+   member, and a file that does not start with a gzip header is read as a zlib stream (the rules
+   are listed under `-input_type` in `PD-LOSAT-DATABASE-SEARCH`). NCBI's
    search programs open the file as text (`CNcbiIfstream`) and stop at its first line:
    `BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like
    plausible data, but it's not marked as defline or comment.`, exit code 1. A file that is
-   not what its name says, or is cut short, stops LOSAT before the search, with
+   not what its name says, or is cut short (for `.gz`: where makeblastdb's decompressor fails
+   too), stops LOSAT before the search, with
    `Error: -query: 'x.fa.gz' is named .gz but is not gzip data (...); LOSAT reads a file named
    .gz through gzip` (`.bz2` / bzip2, `.zst` / zstd alike; exit code 1; outfmt 11 writes the
    error archive it writes for a file that does not open). A plain file, or a compressed file

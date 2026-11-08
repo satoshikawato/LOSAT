@@ -386,6 +386,21 @@ fn compressed_query_and_subject_read_as_the_plain_files() {
         assert_eq!(inflated.stderr, plain.stderr, "{format}");
         let inflated_7 = String::from_utf8_lossy(&inflated_7.stdout).into_owned();
         assert_eq!(input_line(&inflated_7, &subject_c), plain_7, "{format}");
+        // A gzip trailer is not checked, as makeblastdb does not check it
+        // (`makeblastdb_reads_compressed_inputs_as_makeblastdb_does`): a wrong CRC-32 reads as
+        // the intact file.
+        if format == "gzip" {
+            let mut bytes = encode(&[GZ_QUERY.as_bytes()]);
+            let crc_at = bytes.len() - 8;
+            bytes[crc_at] ^= 0xff;
+            let badcrc = temp_path("compressed_query_badcrc", &format!("fa{suffix}"));
+            fs::write(&badcrc, bytes).unwrap();
+            let read = blastn_output(&badcrc, &subject, "6");
+            let _ = fs::remove_file(&badcrc);
+            assert_eq!(read.status.code(), Some(0), "{format}: bad CRC");
+            assert_eq!(read.stdout, plain.stdout, "{format}: bad CRC");
+            assert_eq!(read.stderr, plain.stderr, "{format}: bad CRC");
+        }
     }
     let _ = fs::remove_file(&query);
     let _ = fs::remove_file(&subject);
@@ -571,6 +586,48 @@ fn makeblastdb_reads_compressed_inputs_as_makeblastdb_does() {
             !dir.join(format!("db_text{suffix}.nsq")).exists(),
             "{format}: the failed build leaves no files"
         );
+
+        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1513-1526
+        // ```c++
+        //             if ((errcode == Z_STREAM_END)  &&  m_IsGZ) {
+        //                 // Skip .gz file footer (8 bytes)
+        //                 if (STREAM->avail_in < 8) {
+        //                     m_SkipInput = 8 - STREAM->avail_in;
+        //                     STREAM->avail_in = 0;
+        //                 } else {
+        //                     STREAM->avail_in -= 8;
+        //                 }
+        // ```
+        // makeblastdb skips a gzip member's trailer without checking it: a wrong CRC-32, or a
+        // trailer cut short, builds the database of the intact file (makeblastdb 2.17.0,
+        // 2026-11-08: exit 0, "added 1 sequences", no message).
+        if format == "gzip" {
+            let intact = encode(&[GZ_SUBJECT.as_bytes()]);
+            let mut badcrc = intact.clone();
+            let crc_at = intact.len() - 8;
+            badcrc[crc_at] ^= 0xff;
+            let cut = intact[..intact.len() - 4].to_vec();
+            for (case, bytes) in [("badcrc", badcrc), ("cut4", cut)] {
+                let input = dir.join(format!("{case}.fna.gz"));
+                fs::write(&input, bytes).unwrap();
+                let out = format!("db_{case}");
+                let built = build(&input, &out);
+                assert_eq!(
+                    built.status.code(),
+                    Some(0),
+                    "{case}: {}",
+                    String::from_utf8_lossy(&built.stderr)
+                );
+                assert_eq!(built.stderr, from_plain.stderr, "{case}");
+                for extension in ["nsq", "nhr"] {
+                    assert_eq!(
+                        fs::read(dir.join(format!("{out}.{extension}"))).unwrap(),
+                        fs::read(dir.join(format!("db_plain.{extension}"))).unwrap(),
+                        "{case}: {extension}"
+                    );
+                }
+            }
+        }
     }
     let _ = fs::remove_dir_all(&dir);
 }

@@ -66,8 +66,10 @@ pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<s
 /// lines and messages, the same readable-byte hint of `FastaStream::from_file`, the same second
 /// handle of blastn's query stream and second reads of BLASTX's query), while the decoder holds
 /// its window. Concatenated members, streams and frames (bgzip, pbzip2, pzstd, `cat a.gz b.gz`)
-/// are read whole. A file that is not what its name says, or is cut short, is refused here,
-/// before the search (line GZ, DECISIONS 3, 5 and 9).
+/// are read whole, and a `.gz` file as makeblastdb reads it (`compressed::GzipMembers`: a member's
+/// trailer is not checked). A file that is not what its name says, or is cut short (for `.gz`:
+/// where makeblastdb's decompressor fails), is refused here, before the search (line GZ,
+/// DECISIONS 3, 5 and 9).
 ///
 /// No NCBI counterpart: the NCBI search programs read such a file as text and stop at its first
 /// line (`CFastaReader: Near line 1, there's a line that doesn't look like plausible data`);

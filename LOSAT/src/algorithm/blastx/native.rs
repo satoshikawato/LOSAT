@@ -736,7 +736,7 @@ fn run_inner(
         // The documents of a `-db` search with a taxonomy database on the search path: a later
         // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
         // database (`read_reported_taxonomy`, which needs the batch's hits; outfmt 5 looks the
-        // batch's subjects up in its prefetch, `ReportedSubjects::prefetch_messages`, DBID item
+        // batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
         // T). The taxids of every sequence are looked up here, once, and the output is held only
         // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the
         // usual run, in which none is, writes batch by batch. Where NCBI's taxonomy cache would
@@ -1318,7 +1318,7 @@ pub(super) fn reported_batch(
     // ```
     // Before the reports of a batch NCBI fetches every subject that the batch
     // reports, and with `taxdb.bti` on the search path the taxonomy database
-    // writes its messages there (`ReportedSubjects::prefetch_messages`: the
+    // writes its messages there (`ReportedSubjects::batch_prefetch`: the
     // texts of opening it at the run's first lookup, a volume's lookup of a
     // taxid once per run): after the reader's messages of the reader batch,
     // which every batch loop writes before it calls this, and before the
@@ -1350,7 +1350,10 @@ pub(super) fn reported_batch(
         outfmt => i32::from(outfmt),
     };
     let mut reported = reported;
-    if prefetches_subjects(Some(prefetch_format)) && database.taxdb_found() {
+    // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
+    // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
+    let taxdb_found = database.taxdb_found();
+    if prefetches_subjects(Some(prefetch_format)) && (taxdb_found || database.parsed_seqids()) {
         let discard = |error: &anyhow::Error| {
             if error.is::<TaxonomyRefusal>() {
                 if let Some(held) = held {
@@ -1363,7 +1366,8 @@ pub(super) fn reported_batch(
         // subjects it shows, after the query's own warnings
         // (`ReportedSubjects::fetch_by_query`), where the format's rows read
         // their Bioseqs (`TabularSpec::subject_fetch`).
-        if prefetch_off {
+        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
+        if prefetch_off && taxdb_found {
             let rows = options
                 .tabular
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
@@ -1375,9 +1379,9 @@ pub(super) fn reported_batch(
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }
-        } else {
+        } else if !prefetch_off {
             let messages = reported
-                .prefetch_messages(database, results, options.gapped)
+                .batch_prefetch(database, results, options.gapped)
                 .inspect_err(discard)?;
             diagnostics.write_all(&messages)?;
         }
@@ -1984,7 +1988,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         match &result {
             Err(error) => {
                 if let Some(lines) = archive::error_lines(error, false) {
-                    let _ = crate::report::archive::write_error_archive(handle, &lines, writer);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle, error, &lines, writer,
+                    );
                 }
             }
             Ok(()) => {
@@ -2024,7 +2030,12 @@ fn write_run_error_archive(
             None => Some(Box::new(io::stdout().lock())),
         };
     if let Some(mut destination) = destination {
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut destination);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut destination,
+        );
         let _ = destination.flush();
     }
 }

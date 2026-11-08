@@ -7376,13 +7376,17 @@ pub fn run(
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status:
-    // blastn_app.cpp:331-334).
+    // blastn_app.cpp:329-332).
     if let Some(handle) = &archive {
         match &result {
             Err(error) => {
                 if let Some(lines) = archive::error_lines(error, false) {
-                    let _ =
-                        crate::report::archive::write_error_archive(handle, &lines, &mut report);
+                    let _ = crate::report::archive::write_error_archive_after_post(
+                        handle,
+                        error,
+                        &lines,
+                        &mut report,
+                    );
                 }
             }
             Ok(()) => {
@@ -7443,7 +7447,12 @@ fn write_run_error_archive(
     };
     if let Ok(out_file) = open_out_file(args) {
         let mut report = cli_report_stream(out_file);
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = crate::report::archive::write_error_archive_after_post(
+            handle,
+            error,
+            &lines,
+            &mut report,
+        );
         let _ = std::io::Write::flush(&mut report);
     }
 }
@@ -9867,19 +9876,24 @@ fn run_in_pool(
             // that LOSAT cannot read as NCBI does) or an error of the taxonomy database is
             // written as the titles' refusals above: with LOSAT_X_RPTSTREAM after the reports of
             // the batches before (`x_rpt_stream`).
+            // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning
+            // after those messages (`BlastnDatabase::batch_prefetch`), with or without
+            // `taxdb.bti`.
+            let taxdb_found = database.taxdb_found();
             if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
-                && database.taxdb_found()
+                && (taxdb_found || database.parsed_seqids())
             {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
                 // the taxonomy database before a later batch's prefetch
                 // (`TaxdbRun::open_for_rows`).
-                let plural_names = matches!(
-                    output_formats.first(),
-                    Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
-                );
+                let plural_names = taxdb_found
+                    && matches!(
+                        output_formats.first(),
+                        Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
+                    );
                 let rows_open = |hit_lists: &[Option<BlastnHitList>]| -> Result<()> {
                     if plural_names
                         && hit_lists
@@ -9909,30 +9923,35 @@ fn run_in_pool(
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    let fetches = match output_formats.first() {
-                        Some(BlastnOutputFormat::CustomTabular(spec)) => {
-                            spec.subject_fetch(crate::blastinput::app::Program::Blastn)
-                                != crate::report::tabular::SubjectFetch::Never
-                        }
-                        _ => true,
-                    };
-                    batch_hit_lists
-                        .iter()
-                        .map(|hit_list| {
-                            let shown = std::slice::from_ref(hit_list);
-                            let messages = if fetches && seq_aligns_of(shown) > 0 {
-                                database.prefetch_messages(&titles, shown)?
-                            } else {
+                    if !taxdb_found {
+                        // No prefetch, and the reports' fetches look nothing up.
+                        Ok(Vec::new())
+                    } else {
+                        let fetches = match output_formats.first() {
+                            Some(BlastnOutputFormat::CustomTabular(spec)) => {
+                                spec.subject_fetch(crate::blastinput::app::Program::Blastn)
+                                    != crate::report::tabular::SubjectFetch::Never
+                            }
+                            _ => true,
+                        };
+                        batch_hit_lists
+                            .iter()
+                            .map(|hit_list| {
+                                let shown = std::slice::from_ref(hit_list);
+                                let messages = if fetches && seq_aligns_of(shown) > 0 {
+                                    database.prefetch_messages(&titles, shown)?
+                                } else {
+                                    Vec::new()
+                                };
+                                rows_open(shown)?;
+                                Ok(messages)
+                            })
+                            .collect::<Result<Vec<_>>>()
+                            .map(|messages| {
+                                query_fetches = messages;
                                 Vec::new()
-                            };
-                            rows_open(shown)?;
-                            Ok(messages)
-                        })
-                        .collect::<Result<Vec<_>>>()
-                        .map(|messages| {
-                            query_fetches = messages;
-                            Vec::new()
-                        })
+                            })
+                    }
                 } else if seq_aligns == 0 {
                     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
                     // ```c++
@@ -9946,7 +9965,7 @@ fn run_in_pool(
                     rows_open(&batch_hit_lists).map(|()| Vec::new())
                 } else {
                     database
-                        .prefetch_messages(&titles, &batch_hit_lists)
+                        .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped)
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
                             Ok(messages)

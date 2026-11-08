@@ -3173,6 +3173,21 @@ impl XContextTable {
         }
         Some(idx)
     }
+
+    /// [`XContextTable::get`] and the context's frame base (`starts[idx]`, the table's copy of
+    /// `contexts[idx].frame_base`), so that the caller's test of the frame base reads the line the
+    /// search just read instead of the context's record.
+    #[inline(always)]
+    pub(crate) fn get_with_start(&self, query_offset: i32) -> Option<(usize, i32)> {
+        let q = usize::try_from(query_offset)
+            .ok()
+            .filter(|&q| q < self.span)?;
+        let mut idx = self.coarse[q >> self.shift] as usize;
+        while self.starts[idx + 1] <= query_offset {
+            idx += 1;
+        }
+        Some((idx, self.starts[idx]))
+    }
 }
 
 #[cfg(test)]

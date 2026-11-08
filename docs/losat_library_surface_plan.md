@@ -67,7 +67,7 @@
 - **P1 検索条件は argv 1 本。** CLI と同じ clap の定義で parse する（`cli::try_parse_from`）。NCBI のオプション互換の実装を 1 か所に保つ。ABI v2 §7 と同じ。
 - **P2 入力はメモリ上の FASTA か、`-db` の path。** メモリ入力は LOSAT 自前の `FastaRecord` を公開して受け、CLI / adapter と同じ reader（`FastaInputSource` と `ReaderConfig`）で読む。`-db` はファイルシステムのあるホストだけ（ネイティブ）。
 - **P3 出力は、要求した outfmt ごとのバイト列 + HSP レコード + 診断。** HSP レコードの項目は ABI v2 §8 と同じ。バイト列は CLI の出力と一致する（§6）。
-- **P4 公開面は `api` だけ（§10.2）。** 他のモジュールは `#[doc(hidden)]` を付け、semver の保証外と README に書く。`pub(crate)` 化は別の線（dead-code 警告が今は `allow(warnings)` で隠れていて、一斉に出る）。
+- **P4 公開面は `api` だけ（§10.2）。** 他のモジュールは `#[doc(hidden)]` を付け、semver の保証外と README に書く。`pub(crate)` 化は別の線（dead-code 警告が今は `allow(warnings)` で隠れていて、一斉に出る）。（2026-11-07 注: 保守者の決定で、段 P-V1〜P-V5 として段ごとに `pub(crate)` にする。§14）
 - **P5 ライブラリは stdout / stderr に触れず、`process::exit` しない。** 出力は呼び出し側の writer だけに書く。
 - **P6 新しい BLAST の動作を入れない。** 4 program の façade は既存の入口を包むだけ。blastx の入口（LIB-1b）は `native::run` を `run_local` の形に分けるもので、動作は変えない。`AGENTS.md` の規則（NCBI の権威、参照コメント、parity gate）はそのまま適用する。参照は NCBI の API 層（`c++/src/algo/blast/api/`、`local_blast`、`blast_results`）で、`api/mod.rs` の既存の参照と同じ。
 - **P7 版。** crate の version は CLI の version と同じ。0.x の間は `api` の破壊的変更で minor を上げる。ABI v2 §10 と同じ考え方。
@@ -225,7 +225,7 @@ LIB-1、LIB-1b、LIB-2 は `LOSAT/src` を触るので `AGENTS.md` の規則の�
 - wasm-bindgen（§4.2）。pyo3 は §9.1 で対象に入った（LIB-5、段階 3）。
 - ネイティブの C ABI（`cdylib` は wasm のために既にあるが、C のヘッダと FFI は作らない）。
 - 検索の途中での中断。バッチの境界で止めることは対象に入った（段階 2、§10.1）：Python の Ctrl-C は同じ process の中で止めるほかない。ブラウザではホストが worker を止める。バッチの中で止めるには NCBI の `SetInterruptCallback` に当たるものをエンジンに入れる（まだやらない）。
-- 内部モジュールの `pub(crate)` 化（別の線。`#[doc(hidden)]` で足りる間はやらない）。
+- 内部モジュールの `pub(crate)` 化（別の線。`#[doc(hidden)]` で足りる間はやらない）。（2026-11-07 注: 対象に入った。`#[doc(hidden)]` は文書を隠すだけで、外の crate からの呼び出しを止めない。§14 の P-V1〜P-V5）
 
 ## 9. LIB-1 の決定（2026-11-05、PR `feature/library-api`）
 
@@ -511,6 +511,7 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | P-S1 | crate の外から安全に呼べる `pub fn` が範囲外を読まないようにする（`#[doc(hidden)]` は呼び出しを止めない）。可視性を狭めるのが先で、テストが呼ぶ物は検査つきの `pub` と検査なしの `pub(crate)` に分ける | すぐ |
 | P-CI1 | 公開面の差分検査を CI に（§14.1） | すぐ |
 | P-R1 | crate 名を `losat` に（LIB-3、§4.1） | P-S1 と P-CI1 の後 |
+| P-V1〜P-V5 | `#[doc(hidden)] pub` の top-level module を段ごとに `pub(crate)` にし、外の crate が名指す物は狭い隠した façade 1 つに集める（保守者の決定 2026-11-07「すべて推奨通り」、DECISIONS 13）。P-V1 = 外の利用者の無い `sequence`、`seqid`、`web_api`（ABI v1 の export は同じ） | P-S1 の後 |
 
 ### 14.1 公開面の検査（P-CI1、PR `ci/lib-public-api`）
 

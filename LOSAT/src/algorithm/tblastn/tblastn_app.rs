@@ -381,11 +381,7 @@ impl TblastnArgs {
             match &result {
                 Err(error) => {
                     if let Some(lines) = super::archive::error_lines(error, false) {
-                        let _ = crate::report::archive::write_error_archive(
-                            handle,
-                            &lines,
-                            &mut stream,
-                        );
+                        let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
                     }
                 }
                 Ok(()) => {
@@ -518,8 +514,26 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(mut report) = report_stream(args, io) {
-        let _ = crate::report::archive::write_error_archive(handle, &lines, &mut report);
+        let _ = write_error_archive(io, handle, error, &lines, &mut report);
         let _ = std::io::Write::flush(&mut report);
+    }
+}
+
+/// The error archive of a run that stopped with `error` (`lines`), into `report`: on the command
+/// line after the error's text (`write_error_archive_after_post`); web ABI v1 (`RunIo::Memory`)
+/// reports the error itself, so there only the archive.
+fn write_error_archive(
+    io: &RunIo<'_>,
+    handle: &crate::report::archive::ArchiveHandle,
+    error: &anyhow::Error,
+    lines: &[crate::report::diag_log::Message],
+    report: &mut crate::cli::ReportStream,
+) -> Result<()> {
+    match io {
+        RunIo::Files => {
+            crate::report::archive::write_error_archive_after_post(handle, error, lines, report)
+        }
+        RunIo::Memory { .. } => crate::report::archive::write_error_archive(handle, lines, report),
     }
 }
 
@@ -1763,6 +1777,10 @@ fn search(
             // ```
             // Outfmt 10 and 20 prefetch as the tabular 6 and 7 do (a name of the taxonomy
             // database that the prefetch would look up is LOSAT's refusal, `tabular`).
+            // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning
+            // after those messages (`TblastnDatabase::batch_prefetch`), with or without
+            // `taxdb.bti`.
+            let taxdb_found = database.taxdb_found();
             if outputs.formats.first().is_some_and(|format| {
                 crate::algorithm::common::database::prefetches_subjects(Some(
                     match super::stage_e_report::format_number(format.outfmt) {
@@ -1770,7 +1788,7 @@ fn search(
                         number => number,
                     },
                 ))
-            }) && database.taxdb_found()
+            }) && (taxdb_found || database.parsed_seqids())
             {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
@@ -1780,7 +1798,8 @@ fn search(
                     .formats
                     .first()
                     .and_then(|format| super::tabular::tabular_spec(format.outfmt));
-                let plural_names = first_spec.as_ref().is_some_and(|spec| spec.checks_taxdb());
+                let plural_names =
+                    taxdb_found && first_spec.as_ref().is_some_and(|spec| spec.checks_taxdb());
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
                     if plural_names
                         && hitlists
@@ -1807,6 +1826,10 @@ fn search(
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
                     if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
+                        if !taxdb_found {
+                            continue;
+                        }
                         let rows = first_spec.as_ref().map_or(SubjectFetch::Every, |spec| {
                             spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
                         });
@@ -1836,8 +1859,7 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
-                    let messages =
-                        database.prefetch_messages(reported, hitlists, SubjectFetch::Every)?;
+                    let messages = database.batch_prefetch(reported, hitlists)?;
                     rows_open(hitlists)?;
                     if messages.is_empty() {
                         continue;

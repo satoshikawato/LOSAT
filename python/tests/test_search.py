@@ -75,6 +75,14 @@ def test_psiblast_takes_no_pssm_query_here():
         Search.from_argv("psiblast", ["-in_pssm", "q.asn"])
 
 
+def test_psiblast_runs_one_round_here():
+    # Line PS, PS5a: the command line runs psiblast's rounds; the library's results have one round.
+    for rounds in ("0", "2"):
+        with pytest.raises(ArgumentError, match="its results have one round"):
+            Search.from_argv("psiblast", ["-num_iterations", rounds])
+    Search.from_argv("psiblast", ["-num_iterations", "1"])
+
+
 def test_the_parser_refuses_as_on_the_command_line():
     with pytest.raises(ArgumentError):
         Search.from_argv("blastp", ["-evalue"])

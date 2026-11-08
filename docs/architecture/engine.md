@@ -263,8 +263,8 @@ flowchart LR
 | :--- | :--- | :--- | :--- |
 | input | `CBlastInput::GetNextSeqBatch`; subjects as a `BlastSeqSrc` (`MultiSeqBlastSeqSrcInit`, `SeqDbBlastSeqSrcInit`) | `read_cli_subjects` or `open_search_database`, then `search_cli` reads the queries | the same names in `blast_engine.rs` |
 | query batches | `CBatchSizeMixer` (blastn), `GetQueryBatchSize` | `run_in_pool` with the adaptive `BatchSizeMixer` (`blastinput/query_batch.rs`) | a fixed size: 10,000 letters unless `BATCH_SIZE` is set; psiblast one query |
-| masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`) | SEG in `blastp/encoding.rs` |
-| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | the head of `search_query_batch` | the head of `run_resolved_in_pool` |
+| masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`); the encoding in `batch_setup.rs` (`encode_query_block`) | SEG in `blastp/encoding.rs` |
+| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | the head of `run_resolved_in_pool` |
 | lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks |
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`; `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges` and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |

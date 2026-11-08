@@ -21,7 +21,8 @@ const BLASTNA_SIZE: usize = 16;
 const BLASTNA_TO_NCBI4NA: [u8; BLASTNA_SIZE] =
     [1, 2, 4, 8, 5, 10, 3, 12, 9, 6, 14, 13, 11, 7, 15, 0];
 
-type BlastnaMatrix = [i32; BLASTNA_SIZE * BLASTNA_SIZE];
+/// A BLASTNA score matrix, row by row (`build_blastna_matrix`).
+pub(crate) type BlastnaMatrix = [i32; BLASTNA_SIZE * BLASTNA_SIZE];
 
 /// Round to nearest integer (half away from zero).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441 (BLAST_Nint)

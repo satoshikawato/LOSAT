@@ -482,7 +482,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // space is retained across subjects, just as for output statistics.
     for context_idx in 0..query_contexts.len() {
         // An invalid context has an infinite cutoff and, unset, a zero X-drop and
-        // reduced cutoff (blast_parameters.c:324-332, in `search_query_batch`).
+        // reduced cutoff (blast_parameters.c:324-332, in `context_statistics::context_statistics`).
         if !context_valid_ref[context_idx] {
             cutoff_scores.push(i32::MAX);
             hit_saving_cutoff_scores.push(i32::MAX);

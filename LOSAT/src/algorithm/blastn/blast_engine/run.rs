@@ -3247,7 +3247,7 @@ pub(super) fn x_bn_tb_range() -> bool {
 
 /// No NCBI counterpart: the shortest sequence that LOSAT_X_BNTBRANGE decodes in ranges, 1 Mi
 /// bases (below it the whole BLASTNA is small, and an allocation below glibc's mmap threshold
-/// may come from an arena that writes it); LOSAT_X_BNTBRANGEMIN=<bases> sets it (0 = every
+/// may come from an arena that writes it); `LOSAT_X_BNTBRANGEMIN=<bases>` sets it (0 = every
 /// sequence, for the tests: the fixtures' sequences are short).
 pub(super) fn x_tb_range_min() -> usize {
     static MIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();

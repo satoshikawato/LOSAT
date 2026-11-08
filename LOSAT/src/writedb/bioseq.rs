@@ -50,7 +50,7 @@ pub enum SeqData {
     Ncbieaa(Vec<u8>),
     Ncbistdaa(Vec<u8>),
     /// Any other choice (ncbi8na, ncbipna, ncbi8aa, ncbipaa, gap): CWriteDB
-    /// stops with "Unable to process sequence for entry [id].".
+    /// stops with "Unable to process sequence for entry \[id\].".
     Other,
 }
 
@@ -63,7 +63,7 @@ pub struct Bioseq {
     /// The content of the first Seq-id, a local id: `lcl|<local_id>` is
     /// `AsFastaString()` (the "Ignoring sequence 'lcl|2' ..." log line) and
     /// `<local_id>` is `GetSeqIdString(false)` ("Unable to process sequence
-    /// for entry [6]."). Without `-parse_seqids` CFastaReader numbers the
+    /// for entry \[6\]."). Without `-parse_seqids` CFastaReader numbers the
     /// records of the input from 1.
     pub local_id: String,
     /// The title that `CWriteDB::ExtractBioseqDeflines` puts into the

@@ -132,7 +132,7 @@ pub struct MakedbArgs {
     #[arg(long, value_name = "TaxID", value_parser = clap::value_parser!(i32).range(0..),
           conflicts_with = "taxid_map")]
     pub taxid: Option<i32>,
-    /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>
+    /// Text file mapping sequence IDs to taxonomy IDs. Format: `<SequenceId> <TaxonomyId><newline>`
     #[arg(long, value_name = "TaxIDMapFile", requires = "parse_seqids")]
     pub taxid_map: Option<String>,
     /// Option to parse seqid for FASTA input if set, for all other input types seqids are

@@ -21,7 +21,7 @@ pub const NO_ACCESSION_INFO: &str = "DB contains no accession info.";
 
 /// Text of NCBI's catch block of `GetOid` / `GetOids` for any LMDB error; `dbname` is the base
 /// name of the `.ndb` file. (`MDB_NOTFOUND` there gives "Seqid list specified but no accession
-/// table is found in <dbname>", which cannot happen once the table exists.)
+/// table is found in `<dbname>`", which cannot happen once the table exists.)
 pub fn accessions_lookup_error(dbname: &str) -> String {
     format!("Accessions to Oids lookup error in {dbname}")
 }
@@ -132,7 +132,7 @@ fn read_u64_at<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<u64, String> {
 ///
 /// Errors: [`NO_VOLUME_INFO`], "Volinfo error " (the two tables have different entry counts),
 /// "Volinfo error : N volumes" (LOSAT: a count larger than the tables' leaf pages can hold),
-/// "No volinfo for <name>".
+/// "No volinfo for `<name>`".
 pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, String> {
     let volname = ndb
         .open_db(b"volname")?
@@ -309,10 +309,10 @@ pub fn acc_oids<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Vec<u32>
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaxError {
     /// The `.ntf` has no `taxid2offset` table (`MDB_NOTFOUND` of `mdb_dbi_open`). NCBI:
-    /// "No taxonomy info found in <dbname>".
+    /// "No taxonomy info found in `<dbname>`".
     NoTaxInfo,
     /// Any other LMDB failure while reading the `.ntf` (corrupt file, bad value size). NCBI:
-    /// "Taxonomy Id to Oids lookup error in <dbname>"; the string is the detail.
+    /// "Taxonomy Id to Oids lookup error in `<dbname>`"; the string is the detail.
     Lookup(String),
     /// The `.nto` / `.not` data is unreadable or points outside the file or the OID range
     /// (a crash or a `CFileException` in NCBI). The string is the full message.

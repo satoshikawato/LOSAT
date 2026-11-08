@@ -47,7 +47,7 @@ const DBTAG_TAG: u8 = 1;
 const OBJECT_ID_ID: u8 = 0;
 
 /// A byte of a title that a VisibleString cannot hold, as NCBI's serializer
-/// reports it ("Bad char [0xC3] in string at byte 21").
+/// reports it ("Bad char \[0xC3\] in string at byte 21").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BadTitleChar {
     /// The byte of the title.
@@ -284,7 +284,7 @@ pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleCha
 }
 
 /// A byte of a VisibleString of a parsed definition line that the serializer replaces
-/// (`ReplaceVisibleChar` posts "Bad char [0xE9] in string at byte 38", the member's
+/// (`ReplaceVisibleChar` posts "Bad char \[0xE9\] in string at byte 38", the member's
 /// stack path before it and the whole string after it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BadChar {

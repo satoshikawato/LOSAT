@@ -8,7 +8,7 @@
 //! c++/src/algo/blast/core/blast_hits.c:43-71 (`GetPrelimHitlistSize`);
 //! c++/src/algo/blast/core/blast_parameters.c:422-490 (`BlastExtensionParametersNew`, the gapped
 //! X-dropoffs) and :158-277 (`BlastInitialWordParametersNew`, the ungapped X-dropoff and the
-//! score table of the word extension); c++/src/algo/blast/core/blast_stat.c:1052-1127
+//! score table of the word extension); c++/src/algo/blast/core/blast_stat.c:1052-1130
 //! (`BlastScoreBlkNuclMatrixCreate`); c++/src/algo/blast/api/prelim_stage.cpp:141-203
 //! (`CBlastPrelimSearch::x_LaunchMultiThreadedSearch`, the threads of the subjects).
 //!
@@ -23,14 +23,13 @@ use super::{
     x_few_subj, x_pair_seed, x_qgroup_par, BlastnArgs, ContextKarlin, SequenceData, SubjectSource,
     NCBIMATH_LN2,
 };
+use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::coordination::TaskConfig;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 use crate::algorithm::blastn::scoring::gap_x_dropoffs;
 use crate::utils::threading::SearchPool;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
-
-const BLASTNA_SIZE: usize = 16;
 
 /// What `subject_search_env` reads.
 pub(super) struct SubjectEnvInputs<'a> {
@@ -60,15 +59,15 @@ pub(super) struct SubjectSearchEnv {
     pub(super) progress_bar: Option<ProgressBar>,
     pub(super) hitlist_size: usize,
     pub(super) prelim_hitlist_size: usize,
-    /// The diagnostic flags (`BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, the trace, `--verbose`,
-    /// `BLEMIR_DEBUG_WINDOW`).
+    // The diagnostic flags (`BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, the trace,
+    // `BlastnArgs::verbose`, `BLEMIR_DEBUG_WINDOW`).
     pub(super) debug_mode: bool,
     pub(super) blastn_debug: bool,
     pub(super) blastn_trace_enabled: bool,
     pub(super) verbose: bool,
     pub(super) debug_window: Option<(usize, usize, usize, usize)>,
     pub(super) lcase_masking: bool,
-    /// The task's values (`TaskConfig`) and the X-dropoffs in raw score.
+    // The task's values (`TaskConfig`) and the X-dropoffs in raw score.
     pub(super) effective_word_size: usize,
     pub(super) min_ungapped_score: i32,
     pub(super) use_dp: bool,
@@ -81,20 +80,21 @@ pub(super) struct SubjectSearchEnv {
     pub(super) x_drop_final: i32,
     pub(super) scan_range: usize,
     pub(super) min_diag_separation: i32,
-    /// The schedule of the subjects (`subject_schedule`).
+    // The schedule of the subjects (`subject_schedule`).
     pub(super) x_strips: bool,
     pub(super) x_kind: x_few_subj::Kind,
     pub(super) use_parallel: bool,
+    // The database size, the e-value threshold, `-subject_besthit` and LOSAT_X_QGROUPPAR.
     pub(super) db_len_total: usize,
     pub(super) db_num_seqs: usize,
     pub(super) evalue_threshold: f64,
     pub(super) subject_besthit: bool,
     pub(super) x_qgroup_batch: bool,
-    /// The hit-saving options, the score matrix and table, and the ungapped X-dropoff of each
-    /// context.
+    // The hit-saving options, the score matrix and table, and the ungapped X-dropoff of each
+    // context.
     pub(super) percent_identity: f64,
     pub(super) min_hit_length: usize,
-    pub(super) score_matrix: [i32; BLASTNA_SIZE * BLASTNA_SIZE],
+    pub(super) score_matrix: BlastnaMatrix,
     pub(super) nucl_score_table: [i32; 256],
     pub(super) x_dropoff_init: Vec<i32>,
 }
@@ -313,7 +313,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     let percent_identity = args.percent_identity_value();
     let min_hit_length = args.min_hit_length;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1127 (BlastScoreBlkNuclMatrixCreate)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259

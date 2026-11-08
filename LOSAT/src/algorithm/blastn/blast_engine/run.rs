@@ -8508,7 +8508,7 @@ fn search(
 
 /// An error of a query batch after the first that does not depend on the batch's queries
 /// (the Karlin-Altschul error of the scoring options, or the average subject length;
-/// `search_query_batch`): the first batch with a valid query meets it, and NCBI raises it
+/// `search_query_batch`, in `context_statistics`): the first batch with a valid query meets it, and NCBI raises it
 /// after the reports of the batches before, whose queries were all invalid.
 #[derive(Debug)]
 struct ErrorAfterInvalidBatches(anyhow::Error);
@@ -9175,7 +9175,7 @@ fn run_in_pool(
             SubjectSource::Prepared(&prepared)
         }
         // A database without sequences fails in the first searched batch
-        // (`search_query_batch`).
+        // (`search_query_batch`, in `context_statistics`).
         Subjects::Database(database) => SubjectSource::Database(database),
     };
     // The subjects as the reports show them, and the stored titles of the database
@@ -11569,7 +11569,29 @@ fn search_query_batch<const UNGAPPED: bool>(
         x_drop_final,
         scan_range,
         min_diag_separation,
+        // Read only by the chunk strips of `process_subject`, which a build without the parallel
+        // feature (or serial Wasm) does not have.
+        #[cfg_attr(
+            not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            )),
+            expect(
+                unused_variables,
+                reason = "read only by the chunk strips, built with the parallel feature outside serial Wasm"
+            )
+        )]
         x_strips,
+        #[cfg_attr(
+            not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            )),
+            expect(
+                unused_variables,
+                reason = "read only by the chunk strips, built with the parallel feature outside serial Wasm"
+            )
+        )]
         x_kind,
         use_parallel,
         db_len_total,

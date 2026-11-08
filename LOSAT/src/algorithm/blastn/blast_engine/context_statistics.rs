@@ -109,9 +109,9 @@ pub(super) fn context_statistics<const UNGAPPED: bool>(
     })
 }
 
-/// The ungapped and gapped Karlin-Altschul blocks of every context (`None` for an invalid
-/// context) and whether the e-values round the score down; the error of scoring options without
-/// Karlin-Altschul values.
+/// The Karlin-Altschul blocks of every context: the gapped blocks made over the given ungapped
+/// ones (`None` for an invalid context), and whether the e-values round the score down; the error
+/// of scoring options without Karlin-Altschul values.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:455-532
 /// (`BlastSetup_ScoreBlkInit`), which calls c++/src/algo/blast/core/blast_stat.c:2736-2829

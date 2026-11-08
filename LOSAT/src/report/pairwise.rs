@@ -2211,10 +2211,52 @@ pub fn write_blastp_pairwise_report<W: Write>(
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> io::Result<()> {
+    write_blastp_pairwise_window(
+        hits,
+        0..queries.len(),
+        writer,
+        config,
+        queries,
+        query_titles,
+        subject_titles,
+        parsed_subjects,
+        report,
+        query_gapped_k,
+        database,
+        probe,
+        warnings,
+        prolog,
+        epilog,
+        x_pool,
+    )
+}
+
+/// The queries `query_range` of a BLASTP pairwise report, whose `hits` are those queries' (the
+/// rows of a caller that makes them a window of queries at a time, as BLASTN's and TBLASTX's
+/// do, `x_pairwise_par::query_windows`): the prolog with the report's first query, the epilog
+/// with its last.
+pub fn write_blastp_pairwise_window<W: Write>(
+    hits: &[PairwiseHit],
+    query_range: std::ops::Range<usize>,
+    writer: &mut W,
+    config: &PairwiseConfig,
+    queries: &[BlastpPairwiseQuery],
+    query_titles: &[Arc<[u8]>],
+    subject_titles: &[Arc<[u8]>],
+    parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    report: &BlastpPairwiseReport,
+    query_gapped_k: Option<&[f64]>,
+    database: Option<&PairwiseDatabase>,
+    probe: Option<&mut FormatProbe<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    prolog: bool,
+    epilog: bool,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    if prolog {
+    if prolog && query_range.start == 0 {
         write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
         // The prolog ends with one blank line; each query's preamble starts with two
         // (blast_format.cpp:1491), after the query's warnings.
@@ -2236,9 +2278,12 @@ pub fn write_blastp_pairwise_report<W: Write>(
     // ```
     // Each hit keeps its index in `hits` (the final result order), which identifies it
     // to the probe.
-    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
-        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+        if let Some(bucket) = (hit.hit.q_idx as usize)
+            .checked_sub(query_range.start)
+            .and_then(|offset| hits_by_query.get_mut(offset))
+        {
             bucket.push((hsp_index, hit));
         }
     }
@@ -2255,7 +2300,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
             database,
             parsed_subjects,
         },
-        0,
+        query_range.start,
         &hits_by_query,
         subject_titles,
         probe,
@@ -2270,7 +2315,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     // ```
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog.
-    if !epilog {
+    if !(epilog && query_range.end == queries.len()) {
         return writer.flush();
     }
 

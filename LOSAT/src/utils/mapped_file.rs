@@ -79,6 +79,12 @@ impl MappedFile {
                 0,
             )
         }?;
+        // The profile files are read at random places (the lookup table's cells of a query's
+        // words, the rows around a hit): no read-ahead, no mapping of neighbouring pages at a
+        // fault, so that the resident set holds the pages that were read. (Advice only: a failure
+        // changes nothing.)
+        // SAFETY: `ptr..ptr + len` is the mapping made above, and advice does not change it.
+        let _ = unsafe { rustix::mm::madvise(ptr, len, rustix::mm::Advice::Random) };
         Ok(Self {
             inner: Inner::Unix { ptr, len },
         })

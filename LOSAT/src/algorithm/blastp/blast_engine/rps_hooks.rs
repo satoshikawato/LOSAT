@@ -719,6 +719,23 @@ fn merge_volume(hit_lists: &mut [Option<BlastpHitList>], volume: Vec<Option<Blas
     }
 }
 
+/// The E-value of a Seq-align's score list: 0 below `SMALLEST_EVALUE` (what `s_MergeAlignSet`
+/// reads with `GetNamedScore`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1131 (and `:62`)
+/// ```c++
+/// #define SMALLEST_EVALUE 1.0e-180
+/// ...
+///     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
+/// ```
+fn seqalign_evalue(e_value: f64) -> f64 {
+    if e_value < 1.0e-180 {
+        0.0
+    } else {
+        e_value
+    }
+}
+
 /// `s_MergeAlignSet` of one query's lists (see [`merge_volume`]).
 fn merge_align_set(final_list: &mut BlastpHitList, mut input: BlastpHitList) {
     final_list.hsplist_array.truncate(final_list.hsplist_count);
@@ -727,7 +744,11 @@ fn merge_align_set(final_list: &mut BlastpHitList, mut input: BlastpHitList) {
     let mut at = 0usize;
     while let Some(group) = incoming.peek() {
         let (final_first, input_first) = (&final_list.hsplist_array[at].hsps[0], &group.hsps[0]);
-        let (mut final_value, mut input_value) = (final_first.e_value, input_first.e_value);
+        // The Seq-align carries 0 for an E-value below `SMALLEST_EVALUE`, so those compare equal.
+        let (mut final_value, mut input_value) = (
+            seqalign_evalue(final_first.e_value),
+            seqalign_evalue(input_first.e_value),
+        );
         if input_value == final_value {
             // The trick of NCBI's loop: the bit scores take the e-values' places.
             input_value = final_first.bit_score;
@@ -874,5 +895,26 @@ mod tests {
         let sorted: Vec<&str> = paths.iter().map(|p| p.to_str().unwrap()).collect();
         // prof_rps2v.01, then x (a/x, b/x, zd/x by path), then y.
         assert_eq!(sorted, ["prof_rps2v.01", "a/x", "b/x", "zd/x", "ad/y"]);
+    }
+
+    #[test]
+    fn e_values_below_the_smallest_compare_equal_and_the_bit_score_decides() {
+        // 1e-189 (535 bits) and 1e-190 (534 bits) are both 0 in the Seq-aligns: the larger bit
+        // score first, whichever has the smaller E-value.
+        let mut lists = vec![Some(hit_list(vec![
+            list(1, 1e-189, 535.0),
+            list(2, 1e-100, 300.0),
+        ]))];
+        let input = vec![Some(hit_list(vec![
+            list(10, 1e-190, 534.0),
+            list(11, 1e-190, 536.0),
+        ]))];
+        merge_volume(&mut lists, input);
+        // 10 (534) after 1 (535); 11 (536) is compared with 2 (1e-100): before it.
+        assert_eq!(oids(lists[0].as_ref().unwrap()), vec![1, 10, 11, 2]);
+        let mut lists = vec![Some(hit_list(vec![list(1, 1e-189, 535.0)]))];
+        let input = vec![Some(hit_list(vec![list(10, 1e-190, 536.0)]))];
+        merge_volume(&mut lists, input);
+        assert_eq!(oids(lists[0].as_ref().unwrap()), vec![10, 1]);
     }
 }

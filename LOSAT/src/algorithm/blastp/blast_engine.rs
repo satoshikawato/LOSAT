@@ -49,8 +49,8 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoAdjustMode, BlastCompoGappingParams,
 };
 use crate::report::{
-    write_blastp_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig,
-    OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
+    write_blastp_pairwise_report, write_blastp_pairwise_window, BlastpPairwiseQuery,
+    BlastpPairwiseReport, OutputConfig, OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
 };
 use crate::stats::compute_blosum62_ideal_karlin_params;
 use crate::stats::search_space::SearchSpace;
@@ -12169,7 +12169,16 @@ fn run_resolved_in_pool(
     // (*hsp_list_out)->query_index = index;
     // --hit_list->hsplist_count;
     // ```
-    let mut pairwise_hits = if needs_pairwise_hits {
+    // rpsblast's outfmt 0 alone: the rows are made and written a window of queries at a time
+    // (`x_pairwise_par::query_windows`, as BLASTN's and TBLASTX's), not for the whole run
+    // first: the rendered rows of CDD's 165,000 HSPs held 150 MB at once.
+    let rps_streamed_rows = args.rps_search.is_some()
+        && outputs.hits.is_none()
+        && outputs.observer.is_none()
+        && !args.lcase_masking
+        && reports.psi_round.is_none()
+        && matches!(format_plans, [BlastpReport::Text(OutputFormat::Pairwise)]);
+    let mut pairwise_hits = if needs_pairwise_hits && !rps_streamed_rows {
         Some(build_pairwise_hits(
             collect_hits_and_methods_from_hit_lists(&hit_lists),
             &contexts,
@@ -12194,10 +12203,13 @@ fn run_resolved_in_pool(
                 .map(|searched| ranges.subject_placements.length(s_idx, searched));
         }
     }
-    for hit_list in hit_lists.iter_mut().flatten() {
-        for hsp_list in &mut hit_list.hsplist_array {
-            for hsp in &mut hsp_list.hsps {
-                shift_hsp_to_records(hsp, ranges);
+    // (The streamed rows are made from the searched coordinates, window by window.)
+    if !rps_streamed_rows {
+        for hit_list in hit_lists.iter_mut().flatten() {
+            for hsp_list in &mut hit_list.hsplist_array {
+                for hsp in &mut hsp_list.hsps {
+                    shift_hsp_to_records(hsp, ranges);
+                }
             }
         }
     }
@@ -13148,6 +13160,91 @@ fn run_resolved_in_pool(
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
+                if rps_streamed_rows {
+                    // The shown subjects are those of the final lists (the rows' subjects).
+                    let shown: std::collections::BTreeSet<usize> = hit_lists
+                        .iter()
+                        .flatten()
+                        .flat_map(|hit_list| {
+                            hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
+                        })
+                        .flat_map(|hsp_list| &hsp_list.hsps)
+                        .map(|hsp| hsp.s_idx as usize)
+                        .collect();
+                    match listed_titles.as_ref() {
+                        Some(titles) => titles.check_shown_titles(
+                            database.expect("listed titles are a database's"),
+                            &shown,
+                        )?,
+                        None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
+                    }
+                    let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
+                    let estimates: Vec<usize> = (0..pairwise_queries.len())
+                        .map(|q_idx| {
+                            crate::report::x_pairwise_par::query_estimate_of(
+                                hit_lists
+                                    .get(q_idx)
+                                    .and_then(Option::as_ref)
+                                    .into_iter()
+                                    .flat_map(|hit_list| {
+                                        hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
+                                    })
+                                    .flat_map(|hsp_list| &hsp_list.hsps)
+                                    .map(|hsp| hsp.length),
+                            )
+                        })
+                        .collect();
+                    let mut windows = crate::report::x_pairwise_par::query_windows(
+                        &estimates,
+                        crate::report::x_pairwise_par::window_bytes(x_pool),
+                    );
+                    if windows.is_empty() {
+                        windows.push(0..0);
+                    }
+                    for window in windows {
+                        let end = window.end.min(hit_lists.len());
+                        let mut rows = build_pairwise_hits(
+                            collect_hits_and_methods_from_hit_lists(
+                                &hit_lists[window.start.min(end)..end],
+                            ),
+                            &contexts,
+                            subjects,
+                            args.scoring.matrix,
+                            true,
+                            query_records,
+                            shown_subjects,
+                            x_pool,
+                        )?;
+                        for hit in rows.iter_mut() {
+                            let s_idx = hit.hit.s_idx as usize;
+                            shift_to_records(&mut hit.hit, ranges);
+                            hit.subject_length = hit
+                                .subject_length
+                                .map(|searched| ranges.subject_placements.length(s_idx, searched));
+                        }
+                        let masked_rows =
+                            masked_query_rows(&rows, &query_frames, &ranges.query_input.placements);
+                        write_blastp_pairwise_window(
+                            masked_rows.as_deref().unwrap_or(&rows),
+                            window,
+                            &mut writer,
+                            &pairwise_config,
+                            &pairwise_queries,
+                            &query_titles,
+                            &subject_titles,
+                            listed_parsed,
+                            &pairwise_report,
+                            rps_gapped_k.as_deref(),
+                            pairwise_database.as_ref(),
+                            None,
+                            warnings.as_mut(),
+                            reports.x_prolog,
+                            reports.epilog,
+                            x_pool,
+                        )?;
+                    }
+                    return Ok(());
+                }
                 let pairwise_hits = pairwise_hits
                     .as_ref()
                     .expect("pairwise hits prepared for blastp outfmt 0");

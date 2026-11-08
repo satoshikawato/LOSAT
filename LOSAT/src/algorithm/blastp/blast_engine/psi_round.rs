@@ -447,7 +447,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists name it
 // by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple alignment
 // keeps its rows by subject (`pssm::input_msa`): two Seq-aligns of one id there are copies of one
-// record that the engine purges (line DBID admits shared ids for such copies only).
+// record (line DBID admits shared ids for such copies only), which NCBI's PSSM puts in one row
+// (review 2 of line DBID weakbatch, H1; line DBID's next item).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509 (quoted at
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
 /// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,

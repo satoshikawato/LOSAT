@@ -113,7 +113,7 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("badbatch_blastn_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = run_in(
                     &dir,
                     &args("qnucl_bad.fna", mode, threads, format),
@@ -159,7 +159,7 @@ fn a_first_batch_that_fails_to_read_leaves_the_prolog_alone() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("firstbad_blastn_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = run_in(&dir, &args("qnucl_bad.fna", mode, threads, format), &[]);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 assert_eq!(output.status.code(), Some(1), "{mode} {format}: {stderr}");
@@ -199,7 +199,7 @@ fn a_query_of_an_unsearched_batch_has_no_hits_member_and_the_no_hits_suffix() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("unsearched_blastn_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = run_in(
                     &dir,
                     &args("qnucl_unsearched.fna", mode, threads, format),
@@ -226,7 +226,7 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("unsearchedmask_blastn_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = args("qnucl_unsearched_lc.fna", mode, threads, format);
                 args.push("-lcase_masking");
                 let output = run_in(&dir, &args, &[("BATCH_SIZE", "10")]);
@@ -257,7 +257,7 @@ fn an_empty_query_pipe_writes_the_prolog_and_the_epilog() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let expected = frozen(&format!("emptypipe_blastn_{mode}_{format}.out"));
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let (subject, db) = (
                     dir.join(SUBJECT).to_str().unwrap().to_string(),
                     dir.join(DB).to_str().unwrap().to_string(),
@@ -416,7 +416,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
                 .join(format!("sa.x16.blastn.minus.{format}.out")),
         )
         .unwrap();
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let scratch = temp_dir("file_sink");
             let out = scratch.join("report.out");
             let output = run_in(
@@ -450,8 +450,8 @@ fn a_file_sink_holds_the_document_of_standard_output() {
 
 /// What NCBI BLAST+ 2.17.0 wrote for `blastn -query QUERY (-subject snucl.fna | -db db/snucl)
 /// EXTRA -outfmt N -num_threads 1` in `tests/fixtures/outfmt16` (`<stem>_{sub,db}_{15,16}.out`, and
-/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one and four
-/// threads writes the same stdout, stderr and exit status.
+/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one, four,
+/// eight and sixteen threads writes the same stdout, stderr and exit status.
 fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], rc: i32) {
     let dir = fixtures();
     for format in ["15", "16"] {
@@ -459,7 +459,7 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
             let name = format!("{stem}_{mode}_{format}");
             let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
             let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = args(query, mode, threads, format);
                 args.extend(extra);
                 let output = run_in(&dir, &args, env);
@@ -524,9 +524,9 @@ fn a_karlin_error_in_the_first_batch_leaves_the_prolog_alone() {
 /// and by no other: a `taxdb.bti` of the search path whose record of the database's taxid (9606)
 /// NCBI reads from unmapped memory (`btd_empty`, NCBI BLAST+ crashes) changes no byte of outfmt 8
 /// and adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13
-/// (3)) at 1 and 4 threads. BLASTN has written the outfmt 0 prolog by then, so outfmt 0 keeps those
-/// first lines (the start of the bytes without the taxonomy database, no `Query=`); the other
-/// formats write nothing.
+/// (3)) at 1, 4, 8 and 16 threads. BLASTN has written the outfmt 0 prolog by then, so outfmt 0
+/// keeps those first lines (the start of the bytes without the taxonomy database, no `Query=`);
+/// the other formats write nothing.
 #[test]
 fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -537,7 +537,7 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let damaged = "tests/seqdb/taxdb/btd_empty";
     let refusal = "unsupported database: the taxonomy record of taxid 9606";
     for format in ["8", "0", "5", "6", "7", "17"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastn",
                 "-db",

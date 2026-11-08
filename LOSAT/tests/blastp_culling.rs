@@ -181,7 +181,7 @@ fn the_report_is_the_same_at_every_thread_count_and_source() {
     for limit in ["1", "2", "5"] {
         let reference = subject_search(&["-culling_limit", limit], &[]);
         assert_eq!(rows(&reference), limit.parse::<usize>().unwrap());
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = ["-culling_limit", limit, "-num_threads", threads];
             let subject = subject_search(&args, &[]);
             assert_eq!(

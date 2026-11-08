@@ -59,11 +59,14 @@ use std::io::{self, Write};
 /// before the report of the batch that holds it. Queries without a record are NCBI's
 /// `Query is Empty!`.
 pub fn run_local(
-    args: BlastxArgs,
+    mut args: BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
     subject_records: &[fasta_reader::FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTX_TASK.check(&mut args.task)?;
     let requested = requested_formats(&args, outputs);
     // LOSAT Web registers records before it knows the options: they keep no ids of their
     // deflines. The library API's `read_inputs` reads them.
@@ -141,10 +144,6 @@ fn search_records(
     //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
     //     }
     // ```
-    // LOSAT's refusal of a title the archive cannot write, before its first byte.
-    if archive.is_some() {
-        archive::check_titles(&subjects, "subject")?;
-    }
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
@@ -166,12 +165,19 @@ fn search_records(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
-    write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
-    // LOSAT's refusal of a query title the archive cannot write, before its first byte. A batch
-    // size of 0 reads no query, so no title (`archive::prescan_query_titles`).
-    if archive.is_some() && batch_size != 0 {
-        crate::report::archive::check_titles(query_records, "query", "BLASTX")?;
+    // Before the subjects' warnings, as the command line's read of the query file
+    // (`native::run_inner`).
+    if archive.is_some() {
+        check_archive_titles(
+            query_records,
+            args.lcase_masking,
+            query_range,
+            batch_size,
+            &resolved[0],
+            &subjects,
+        )?;
     }
+    write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // The environment of a search of subject records, after the subjects' warnings
     // (`native::run_inner`).
     app::check_search_environment("BLASTX", true, outputs.only_archive())?;
@@ -265,6 +271,89 @@ fn batch_shown<'a>(
     }
 }
 
+/// The reader batches of `query_records` as BLASTX's reader makes them
+/// (`input::emit_fasta_batch`), given to `deliver` in order: a record's messages (`warn`), then
+/// the record, and the batch once it holds `batch_size` letters or more; the rest at the end. With
+/// `query_range` (`-query_loc`) a record is cut to its interval (its whole letters kept with
+/// `keep_whole`, the archive's) and the batch counts the whole record; a record whose interval
+/// starts more than one letter past its end is not searched and adds nothing, so the last batch
+/// can hold none (NCBI's `Empty CBlastQueryVector`). Only the batch being read is kept.
+fn reader_batches(
+    query_records: &[fasta_reader::FastaRecord],
+    lowercase: bool,
+    query_range: Option<SequenceRange>,
+    batch_size: usize,
+    keep_whole: bool,
+    deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
+    warn: &mut dyn FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    let mut batch = Vec::new();
+    let (mut letters, mut records_read) = (0, 0);
+    for record in query_records {
+        let mut query = blastx_record(record, lowercase)?;
+        if !record.warnings.is_empty() {
+            warn(&record.warnings)?;
+        }
+        let length = query.sequence.len();
+        records_read += 1;
+        match query_range.map(|range| record_interval(&range, length)) {
+            None => {}
+            Some(RecordInterval::Letters { from, to }) => {
+                // The whole letters of a record whose letter before the interval is lower
+                // case, for the chunks of a split query (`split::x_chunk_masks`).
+                let keep_whole = keep_whole || query.lower_case_before(from);
+                query.cut_in_place(from, to + 1, keep_whole)
+            }
+            Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
+            Some(RecordInterval::PastEnd) => continue,
+        }
+        letters += length;
+        batch.push(query);
+        if letters >= batch_size {
+            deliver(&batch)?;
+            batch.clear();
+            (letters, records_read) = (0, 0);
+        }
+    }
+    if records_read > 0 {
+        deliver(&batch)?;
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of a title the archive cannot write, before its first byte (as
+/// `native::run_inner`): the queries of the reader batches that NCBI writes
+/// (`archive::check_batch_titles` of `reader_batches`), and the subjects when it writes one (the
+/// error archive of a run that no batch completes holds no sequence). A batch size of 0 reads no
+/// query: nothing is checked.
+fn check_archive_titles(
+    query_records: &[fasta_reader::FastaRecord],
+    lowercase: bool,
+    query_range: Option<SequenceRange>,
+    batch_size: usize,
+    options: &ResolvedOptions,
+    subjects: &[FastaRecord],
+) -> Result<()> {
+    if batch_size == 0 {
+        return Ok(());
+    }
+    let written = archive::check_batch_titles(options, &mut |deliver| {
+        reader_batches(
+            query_records,
+            lowercase,
+            query_range,
+            batch_size,
+            true,
+            deliver,
+            &mut |_| Ok(()),
+        )
+    })?;
+    if written {
+        archive::check_titles(subjects, "subject")?;
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
 // ```c++
 //         formatter.PrintProlog();
@@ -346,48 +435,20 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // The search's options are those of every format; the formats differ only in the counts of
     // the pairwise report (`run_report_counts`).
     let search_options = &resolved[0];
-    // The reader batches as BLASTX's reader makes them (`input::emit_fasta_batch`): a record's
-    // messages, then the record, and the batch once it holds `batch_size` letters or more; the
-    // rest at the end. With `-query_loc` a record is cut to its interval and the batch counts the
-    // whole record; a record whose interval starts more than one letter past its end is not
-    // searched and adds nothing, so the last batch can hold none (NCBI's `Empty
-    // CBlastQueryVector`). Only the batch being read is kept.
-    let mut batch = Vec::new();
     // The archive's Bioseq of a cut record holds its whole letters (`FastaRecord::cut_in_place`).
     let keep_whole = archive.is_some();
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<Vec<FastaRecord>> {
-        let (mut letters, mut records_read) = (0, 0);
-        for record in query_records {
-            let mut query = blastx_record(record, lowercase)?;
-            if !record.warnings.is_empty() {
-                warn(&record.warnings)?;
-            }
-            let length = query.sequence.len();
-            records_read += 1;
-            match query_range.map(|range| record_interval(&range, length)) {
-                None => {}
-                Some(RecordInterval::Letters { from, to }) => {
-                    // The whole letters of a record whose letter before the interval is lower
-                    // case, for the chunks of a split query (`split::x_chunk_masks`).
-                    let keep_whole = keep_whole || query.lower_case_before(from);
-                    query.cut_in_place(from, to + 1, keep_whole)
-                }
-                Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
-                Some(RecordInterval::PastEnd) => continue,
-            }
-            letters += length;
-            batch.push(query);
-            if letters >= batch_size {
-                deliver(&batch)?;
-                batch.clear();
-                (letters, records_read) = (0, 0);
-            }
-        }
-        if records_read > 0 {
-            deliver(&batch)?;
-        }
+        reader_batches(
+            query_records,
+            lowercase,
+            query_range,
+            batch_size,
+            keep_whole,
+            deliver,
+            warn,
+        )?;
         Ok(Vec::new())
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
@@ -635,11 +696,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// refusal. An archive (outfmt 11) ends as the command line's does
 /// (`ReportOutputs::finish_archive`).
 pub fn run_local_database(
-    args: BlastxArgs,
+    mut args: BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTX_TASK.check(&mut args.task)?;
     let requested = requested_formats(&args, outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
@@ -741,10 +805,15 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
-    // LOSAT's refusal of a query title the archive cannot write, before its first byte. A batch
-    // size of 0 reads no query, so no title (`archive::prescan_query_titles`).
-    if archive.is_some() && batch_size != 0 {
-        crate::report::archive::check_titles(query_records, "query", "BLASTX")?;
+    if archive.is_some() {
+        check_archive_titles(
+            query_records,
+            args.lcase_masking,
+            query_range,
+            batch_size,
+            &resolved[0],
+            &[],
+        )?;
     }
     app::check_search_environment("BLASTX", false, outputs.only_archive())?;
     let pairwise = database.pairwise_database();
@@ -936,7 +1005,7 @@ fn check_resolutions(
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts(
         "blastx",
         &outfmts,
-        args.max_target_seqs.map(|n| n as usize),
+        super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
     )?;

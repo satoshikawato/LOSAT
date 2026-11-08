@@ -1623,8 +1623,8 @@ fn compressed_table_fills_banks(
 //                                     current_pos + 1);
 // ```
 // No NCBI counterpart: counts the words of `add_word_hits` (above) without a table, for LOSAT's
-// choice of a path (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/blast_engine.rs`
-// `x_block_search_refuses_nothing`); it changes no value NCBI computes.
+// choice of a path and of the blocks' ends (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/blast_engine.rs`
+// `x_block_search_refuses_nothing` and `x_word_blocks`); it changes no value NCBI computes.
 /// The number of words that `add_word_hits` adds to a table for one query offset: none when a
 /// letter of the word has no compressed letter; otherwise the word itself (`add_unencoded`) when
 /// there is no threshold or its own score is below it, and with a threshold the neighbors that
@@ -1748,7 +1748,7 @@ impl CompressedWordCount {
             words_and_one => return u64::from(words_and_one - 1),
         }
         let words = self.count(word);
-        // At most 10^7 + 1 words (15 letters up to word size 6, 10 at 7).
+        // At most 15^6 + 1 words (15 letters at word size 6; 15^5 + 1 at 5, 10^7 + 1 at 7).
         if let Some(words_and_one) = u32::try_from(words).ok().and_then(|w| w.checked_add(1)) {
             kept.store(words_and_one, Ordering::Relaxed);
         }
@@ -1792,16 +1792,17 @@ impl CompressedWordCount {
         neighbors
     }
 
-    /// Whether a table whose words are some of the words of `queries`' offsets (each query's
-    /// NCBISTDAA letters) takes at most `overflow_cell_capacity` overflow cells: a backbone cell
-    /// with n offsets takes cells(n) <= n / 4 of them
-    /// (`try_build_compressed_lookup_with_capacity`), so such a table takes at most a
-    /// quarter of the queries' words. Stops counting once they are more than that.
-    fn fits(
+    /// The words of `queries`' offsets (each query's NCBISTDAA letters), the most that a table
+    /// whose words are some of them holds; `None` once they are more than
+    /// `overflow_cell_capacity` overflow cells can take. A backbone cell with n offsets takes
+    /// cells(n) <= n / 4 of them (`try_build_compressed_lookup_with_capacity`), so such a table
+    /// takes at most a quarter of the queries' words. Stops counting once they are more than four
+    /// times the capacity.
+    fn words_within(
         &self,
         queries: &mut dyn Iterator<Item = &[u8]>,
         overflow_cell_capacity: usize,
-    ) -> bool {
+    ) -> Option<u64> {
         let limit = (COMPRESSED_HITS_PER_OVERFLOW_CELL as u64)
             .saturating_mul(overflow_cell_capacity as u64);
         let mut words = 0u64;
@@ -1809,19 +1810,26 @@ impl CompressedWordCount {
             for word in query.windows(self.word_length) {
                 words = words.saturating_add(self.words(word));
                 if words > limit {
-                    return false;
+                    return None;
                 }
             }
         }
-        true
+        Some(words)
     }
 
-    /// Whether no table whose words are some of the words of `queries`' offsets can fill NCBI's
+    /// The words of `queries`' offsets when no table whose words are some of them can fill NCBI's
     /// overflow banks: a query batch's table, or the table of one of its query chunks (whose
-    /// parts are pieces of the batch's queries). `false` when their words are more than four
+    /// parts are pieces of the batch's queries). `None` when their words are more than four
     /// times the banks' cells, though the table might still fit.
-    pub(crate) fn fits_banks(&self, queries: &mut dyn Iterator<Item = &[u8]>) -> bool {
-        self.fits(queries, NCBI_OVERFLOW_CELL_CAPACITY)
+    pub(crate) fn batch_words(&self, queries: &mut dyn Iterator<Item = &[u8]>) -> Option<u64> {
+        self.words_within(queries, NCBI_OVERFLOW_CELL_CAPACITY)
+    }
+
+    /// The cells of NCBI's backbone of the table that a word's index can reach: the compressed
+    /// alphabet's size to the power of the word length. NCBI's `backbone_size` (blast_aalookup.c
+    /// above) is one more, a last cell that no word's index reaches.
+    pub(crate) fn backbone_cells(&self) -> u64 {
+        (self.compressed_alphabet_size as u64).pow(self.word_length as u32)
     }
 }
 
@@ -2539,8 +2547,14 @@ mod tests {
         let cells = table.overflow_cells.len();
         let cleared = words.div_ceil(4) as usize;
         assert!(cells > 0 && cells <= cleared);
-        assert!(counter.fits(&mut queries.iter().copied(), cleared));
-        assert!(!counter.fits(&mut queries.iter().copied(), cleared - 1));
+        assert_eq!(
+            counter.words_within(&mut queries.iter().copied(), cleared),
+            Some(words)
+        );
+        assert_eq!(
+            counter.words_within(&mut queries.iter().copied(), cleared - 1),
+            None
+        );
         let table = try_build_compressed_lookup_with_capacity(
             Blosum62Compressed,
             5,
@@ -2552,8 +2566,19 @@ mod tests {
         )
         .expect("word size 5");
         assert!(table.is_ok());
-        // The public test uses NCBI's capacity.
-        assert!(counter.fits_banks(&mut queries.iter().copied()));
+        // The public count uses NCBI's capacity.
+        assert_eq!(
+            counter.batch_words(&mut queries.iter().copied()),
+            Some(words)
+        );
+        // NCBI's backbone of word size 5 (15 letters) and 7 (10 letters).
+        assert_eq!(counter.backbone_cells(), 15u64.pow(5));
+        assert_eq!(
+            CompressedWordCount::new(7, LOW_THRESHOLD)
+                .expect("word size 7")
+                .backbone_cells(),
+            10u64.pow(7)
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:400-405

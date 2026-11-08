@@ -12577,14 +12577,15 @@ fn run_resolved_in_pool(
         //         sequence_data.erase();
         //         ERR_POST(Warning << "Failed to retrieve sequence " <<
         // ```
-        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`) reads the letters of each aligned
-        // subject by its Seq-align id, as those formats do (review 1 of line DBID tabfields, H1).
+        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`, and each round's PSSM for the next
+        // round) reads the letters of each included subject by its Seq-align id, as those formats
+        // do (review 1 of line DBID tabfields, H1). `check_pssm_subjects` refuses those, before the
+        // cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
+        // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
             &hit_lists,
             &batch_prefetch,
-            format_plans.iter().any(|outfmt| outfmt.reads_subjects())
-                || args.psi_pssm.is_some()
-                || reports.psi_round.is_some(),
+            format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Text(OutputFormat::Pairwise)
                 | BlastpReport::Xml

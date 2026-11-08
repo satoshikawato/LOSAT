@@ -629,6 +629,21 @@ a search where neither is included in the PSSM nor shown, so NCBI's handles neve
 (`db.id.psr.k.i2.6`, `-inclusion_ethresh 1e-150 -max_target_seqs 1`). `psr_gim` holds `gim|123` (a giim id) in front of
 `gb|BBB00001.1|` and `gb|CCC00001.1|`: NCBI's handles never take a giim id for one with an equal id, so NCBI writes
 `Unknown` for it and does not converge in 4 rounds, and LOSAT refuses (`db.id.psr.gim.i4.6.reject`).
+Review 2 (`ids/psr_gz.faa`: `gb|SSS00001.1|` identical to the query, `gb|AAA00001.1|`, `gim|123`; `ids/psr_gimn.fna`: `gim|456`
+and `gb|NNN00001.1|`, queries `ids/psr_qp.fna` and `ids/psr_qm.fna`): `db.id.psr.last.k2.*` is `psr_k` with
+`-inclusion_ethresh 1e-135 -max_target_seqs 2` (outfmt 6 and 0, the last row of the PSSM's multiple alignment) and
+`db.id.psr.gz.r2m2.6` the same search of `psr_gz`. A giim id is refused wherever a report reads its sequence:
+`db.id.psr.gim.bp6q`, `bnm6q` and `tbx6q` (`qseqid`, which reads nothing of the subject; the blastn row has NCBI's
+`Error pre-fetching sequence data` warning in its `.err`) are NCBI's bytes, and `db.id.psr.gim.bp6.reject`,
+`bnm6.reject` and `ni.reject` (psiblast with three rounds; `sseqid`, where NCBI writes `Unknown`) are LOSAT's refusals.
+psiblast's PSSM reads the letters of the subjects it includes (below `-inclusion_ethresh`), not those of every reported
+subject: at `-inclusion_ethresh 1e-140` the giim id of `psr_gim` is not included, so `db.id.psr.gim.r3q.6` (three
+rounds) and `db.id.psr.gim.s1q` (round 1 and its ASCII PSSM) are NCBI's bytes. `psr_jv` (`gb|HHH00001.1|`, then
+`gb|HHH00001|`) and `psr_vm` (`gb|AAA00001.1|`, then `gb|AAA00001|`) hold a sequence whose Seq-align id the lookup
+does not give back as that sequence; it is not included at `-inclusion_ethresh 1e-100` (`psr_jv`) and `1e-150`
+(`psr_vm`), so `db.id.psr.jv.r3q.6` and `db.id.psr.vm.r3q.6` (three rounds, `qseqid`) are NCBI's bytes. At the default
+threshold `psr_jv` includes it: NCBI warns `Failed to retrieve sequence gb|HHH00001|` and drops its letters, and LOSAT
+refuses (`db.id.psr.jv.r3q.i.reject`).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

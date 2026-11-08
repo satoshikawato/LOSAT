@@ -115,7 +115,8 @@ weakbatch (psiblast's rounds read the sequences before the cut for the next PSSM
 query `wkb_qy.faa`. `--weakbatch-only` builds only these. Line DBID pssmrows (psiblast's PSSM rows follow the
 Seq-align ids): the databases `psr_*` from the FASTA of the same names (copies of one record, ids that `CSeq_id::Match`
 and their controls, for the query `psr_q.faa`) and the aliases `psr_cp.pal`, `psr_cbxp.pal`, `psr_jx.pal`, `psr_cul.pal`,
-`psr_cue.pal` and `psr_k.pal`. `--pssmrows-only` builds only these.
+`psr_cue.pal` and `psr_k.pal`, and the nucleotide database `psr_gimn` from `psr_gimn.fna` (queries `psr_qp.fna`,
+`psr_qm.fna`). `--pssmrows-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -249,9 +250,11 @@ def build_weakbatch(args: argparse.Namespace) -> None:
 
 def build_pssmrows(args: argparse.Namespace) -> None:
     for name in ("psr_cpa", "psr_cpb", "psr_cbx", "psr_jm", "psr_jn", "psr_jx1", "psr_jx2", "psr_jctl", "psr_self",
-                 "psr_cu", "psr_cl", "psr_ce", "psr_ka", "psr_kb", "psr_gim"):
+                 "psr_cu", "psr_cl", "psr_ce", "psr_ka", "psr_kb", "psr_gim", "psr_gz", "psr_gimn", "psr_jv", "psr_vm"):
+        nucleotides = name == "psr_gimn"
         subprocess.run(
-            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.faa"), "-dbtype", "prot", "-parse_seqids",
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{'fna' if nucleotides else 'faa'}"),
+             "-dbtype", "nucl" if nucleotides else "prot", "-parse_seqids",
              "-blastdb_version", "5", "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
     for alias, names in (("psr_cp", "psr_cpa psr_cpb"), ("psr_cbxp", "psr_cbx psr_cpb"), ("psr_jx", "psr_jx1 psr_jx2"),

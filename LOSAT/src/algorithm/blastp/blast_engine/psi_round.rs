@@ -496,14 +496,21 @@ pub(super) fn round_outcome(
         .filter(|hsp| included(hsp.e_value, args.inclusion_ethresh))
         .map(|hsp| key(hsp.s_idx))
         .collect();
-    // The handles that NCBI compares: the inclusion set and the PSSM's rows among themselves and
-    // with the previous set (convergence); the two-part table looks the shown subjects up in the
-    // previous set (`FoundBefore::unsure`, refused where it shows them).
-    HandleIndex::new(previous.iter().chain(&set))?;
+    // The handles that NCBI compares: the set's keys with the previous set's (convergence,
+    // `CPsiBlastIterationState::HasConverged`), the PSSM's rows among themselves (below, where the
+    // round makes the next PSSM), and the shown subjects with the previous set in the two-part
+    // table (`FoundBefore::unsure`, refused where it shows them). The previous set is one that
+    // passed the rows' check: a round follows only one that made the next PSSM.
+    let earlier = HandleIndex::new(previous)?;
+    if let Some((other, key)) = set
+        .iter()
+        .find_map(|key| earlier.unsure(key).map(|other| (other, key)))
+    {
+        return Err(SetKey::refuse_pair(other, key));
+    }
     let found_before = if previous.is_empty() {
         None
     } else {
-        let earlier = HandleIndex::new(previous)?;
         let subjects = hsps
             .iter()
             .map(|hsp| hsp.s_idx as usize + 1)
@@ -529,6 +536,9 @@ pub(super) fn round_outcome(
     } else {
         false
     };
+    if makes_next {
+        HandleIndex::new(&set)?;
+    }
     let next = makes_next.then(|| {
         next_pssm(
             args,
@@ -562,7 +572,10 @@ pub(super) struct FoundBefore {
 
 impl FoundBefore {
     /// LOSAT's refusal of a subject of `shown` (subject indices of the outfmt 0 report) that the
-    /// two-part table cannot place as NCBI does (`unsure`).
+    /// two-part table cannot place as NCBI does (`unsure`). `shown` is every reported subject, a
+    /// superset of the first `-num_descriptions` Seq-aligns that NCBI's `x_SplitSeqAlign` looks up
+    /// (blast_format.cpp:541-553); the checks of the shown titles refuse every such subject first
+    /// in the cases built so far (review 2 of line DBID pssmrows, L1), so this stays a backstop.
     pub(super) fn refuse_unsure_shown(&self, shown: impl IntoIterator<Item = usize>) -> Result<()> {
         for s_idx in shown {
             if let Some((earlier, subject)) = u32::try_from(s_idx)
@@ -695,4 +708,35 @@ fn next_pssm(
         &|s_idx| keys.key(s_idx),
         ancillary,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(text: &str) -> SetKey {
+        use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
+        let ids = crate::seqid::parse::parse_ids(
+            text.as_bytes(),
+            PARTIAL_OK | ANY_LOCAL | RAW_TEXT,
+            &mut |_| {},
+        )
+        .unwrap();
+        SetKey::Id(ids.into_iter().next().unwrap().unwrap())
+    }
+
+    // Review 1 of line DBID pssmrows, M1: only a shown subject that a previous key can be one
+    // handle with is refused (blast_format.cpp:541-553, quoted at `refuse_unsure_shown`).
+    #[test]
+    fn only_a_shown_unsure_subject_is_refused() {
+        let found = FoundBefore {
+            found: vec![true, false, false],
+            unsure: [(2, (id("gb|ABC12.1|"), id("emb|ABC12.1|")))]
+                .into_iter()
+                .collect(),
+        };
+        found.refuse_unsure_shown([0, 1]).unwrap();
+        let error = found.refuse_unsure_shown([0, 2]).unwrap_err().to_string();
+        assert!(error.contains("gb|ABC12.1| and emb|ABC12.1|"), "{error}");
+    }
 }

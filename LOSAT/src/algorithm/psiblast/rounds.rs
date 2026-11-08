@@ -195,8 +195,9 @@ impl SetKey {
 // that psiblast compares.
 /// The keys that one round of psiblast compares by NCBI's handles (`CSeq_id_Handle`), by their
 /// `seqid::defline_set::handle_superset_key`: building it refuses two keys that differ but share
-/// that key (NCBI's handles can be one or two) and a `giim` key; `unsure` then names a key of the
-/// index that another key differs from but can be one handle with.
+/// that key (NCBI's handles can be one or two) and a `giim` key (built for the rows of a PSSM, and
+/// for a previous set, which was such rows); `unsure` then names a key of the index that another
+/// key differs from but can be one handle with.
 pub(crate) struct HandleIndex<'a> {
     by_superset: std::collections::BTreeMap<Vec<u8>, &'a SetKey>,
 }
@@ -207,7 +208,7 @@ impl<'a> HandleIndex<'a> {
         for key in keys {
             if let SetKey::Id(crate::seqid::model::ParsedSeqId::Giim(_)) = key {
                 anyhow::bail!(
-                    "the Seq-align id {} of a database sequence that psiblast compares (in its inclusion sets, the rows of its PSSM or its two-part description table), a giim id, which NCBI BLAST+'s Seq-id handles never take for one sequence with an equal id, is not supported by LOSAT's PSIBLAST",
+                    "the Seq-align id {} of a database sequence in psiblast's PSSM, a giim id, which NCBI BLAST+'s Seq-id handles never take for one sequence with an equal id (it counts each of its alignments as a row of the PSSM's multiple alignment and cannot read its letters), is not supported by LOSAT's PSIBLAST",
                     key.label()
                 );
             }

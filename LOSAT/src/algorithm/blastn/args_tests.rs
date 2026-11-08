@@ -1,7 +1,7 @@
 //! Unit tests for blastn/args.rs
 
+use crate::algorithm::blastn::BlastnArgs;
 use std::path::PathBuf;
-use LOSAT::algorithm::blastn::BlastnArgs;
 
 fn parse_args(args: &[&str]) -> BlastnArgs {
     let mut all_args = vec!["losat".to_string(), "blastn".to_string()];
@@ -9,8 +9,8 @@ fn parse_args(args: &[&str]) -> BlastnArgs {
 
     // NCBI blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
     all_args.extend(["-outfmt".into(), "6".into()]);
-    let cli: LOSAT::cli::Cli = LOSAT::cli::try_parse_from(all_args).unwrap();
-    let LOSAT::cli::Commands::Blastn(args) = cli.command else {
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(all_args).unwrap();
+    let crate::cli::Commands::Blastn(args) = cli.command else {
         panic!("wrong program")
     };
     args
@@ -29,7 +29,7 @@ fn test_default_values() {
     // task's default (10, or 1000 for blastn-short; coordination.rs determine_evalue).
     assert_eq!(args.evalue, None);
     assert_eq!(
-        LOSAT::algorithm::blastn::coordination::determine_evalue(&args),
+        crate::algorithm::blastn::coordination::determine_evalue(&args),
         10.0
     );
     // NCBI blast_args.cpp:2913-2927: an omitted -max_target_seqs keeps the defaults of
@@ -132,7 +132,7 @@ fn test_custom_scoring_parameters() {
 
 #[test]
 fn given_scores_replace_the_task_defaults_even_when_equal_to_megablast_ones() {
-    use LOSAT::algorithm::blastn::coordination::{
+    use crate::algorithm::blastn::coordination::{
         determine_effective_word_size, determine_scoring_params,
     };
     let base = [
@@ -191,7 +191,7 @@ fn options_without_an_ncbi_blastn_equivalent_are_rejected() {
         let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
         argv.extend(extra);
         assert!(
-            LOSAT::cli::try_parse_from::<LOSAT::cli::Cli, _, _>(argv).is_err(),
+            crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_err(),
             "{extra:?}"
         );
     }

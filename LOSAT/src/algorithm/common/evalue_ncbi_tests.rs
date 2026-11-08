@@ -17,8 +17,8 @@
 //!    correctness. End-to-end NCBI BLAST compatibility is verified in integration
 //!    tests (tests/run_comparison.sh).
 
-use LOSAT::algorithm::common::evalue::calculate_evalue_database_search;
-use LOSAT::stats::search_space::SearchSpace;
+use crate::algorithm::common::evalue::calculate_evalue_database_search;
+use crate::stats::search_space::SearchSpace;
 
 #[test]
 fn test_effective_search_space_variation() {
@@ -29,7 +29,7 @@ fn test_effective_search_space_variation() {
     // not exact values, because NCBI BLAST's effective length calculation
     // is extremely complex and may differ slightly in implementation.
 
-    let params = LOSAT::stats::tables::KarlinParams {
+    let params = crate::stats::tables::KarlinParams {
         lambda: 1.28,
         k: 0.46,
         h: 0.85,
@@ -74,7 +74,7 @@ fn test_evalue_with_fixed_alignment() {
     // X-drop butterfly effects where slight differences in alignment termination
     // cause score differences.
 
-    let params = LOSAT::stats::tables::KarlinParams {
+    let params = crate::stats::tables::KarlinParams {
         lambda: 1.28,
         k: 0.46,
         h: 0.85,
@@ -114,7 +114,7 @@ fn test_parameter_set_independence() {
     // Test that different parameter sets produce different but consistent results
     // This catches bugs where parameters are hardcoded or incorrectly looked up
 
-    let params1 = LOSAT::stats::tables::KarlinParams {
+    let params1 = crate::stats::tables::KarlinParams {
         lambda: 1.28, // Megablast
         k: 0.46,
         h: 0.85,
@@ -122,7 +122,7 @@ fn test_parameter_set_independence() {
         beta: -2.0,
     };
 
-    let params2 = LOSAT::stats::tables::KarlinParams {
+    let params2 = crate::stats::tables::KarlinParams {
         lambda: 0.267, // BLOSUM62
         k: 0.041,
         h: 0.14,

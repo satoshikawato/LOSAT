@@ -403,7 +403,15 @@ selected from the changed paths against the S02 baseline and the frozen hashes,
 the `-subject` fixtures of `outfmt0_manifest.tsv` (`check_losat.py`) and the `-db` fixtures of the five programs
 (`db_search_fixtures.py`), and the command lines of the downstream tools and each program's common forms
 (`dropin_corpus.py`, inputs and provenance in `dropin_corpus/README.md`), without NCBI executables (TBLASTX runs only its short
-cases; `--all-cases` runs all of them nightly). Both manifests freeze NCBI's
+cases; `--all-cases` runs all of them nightly). Besides the rules the comparison tools name
+(the SAM @PG CL tag, `check_losat.py`'s database lines of the approved TBLASTX rows, the drop-in
+corpus's `<RUNDIR>` and makeblastdb report lines, the `{OUT}` and `{LOSAT}` paths of the captured stderr), there
+is one replacement of a checkout-path prefix (Owner 2026-11-05: replace the prefix when comparing):
+the TBLASTN Stage G cases froze NCBI's outfmt 0/7 bytes of inputs named under the developer
+machine's checkout `/mnt/c/Users/genom/GitHub/LOSAT`, so `capture_outputs.py` runs them from the
+repository root with the relative run root of `frozen_paths.py` in its place (of the same length,
+so outfmt 0 wraps its `Database:` lines at the same columns) and puts the prefix back into the
+output and stderr before hashing; no link to that path is needed. Both manifests freeze NCBI's
 outfmt 0/6/7 and, in the rows `sa.*` and `db.sa.*`, outfmt 8 (Seq-annot, ASN.1 text),
 12 (Seq-annot, JSON) and 9 (Seq-annot, binary ASN.1; the ids ending `.9`, a subset of the 8
 rows' searches) of all five programs (the BLASTX `-subject` rows are 8, 9 and 12 only);
@@ -460,10 +468,11 @@ v0.1.0 certification and release contracts retain their historical target scope.
 
 ## Rust integration tests
 
-The files `tests/*.rs` are built into nine test binaries: the suites `blastn`, `blastp`, `blastx`,
-`tblastn`, `tblastx` and `common` (`tests/suites/<suite>.rs`, one module per file) and the three files that
-change the process environment or process-wide state, `blastn_report_stream_api`, `unit_tests` and
-`thread_memory` (a counting global allocator). A test
+The files `tests/*.rs` are built into eight test binaries: the suites `blastn`, `blastp`, `blastx`,
+`tblastn`, `tblastx` and `common` (`tests/suites/<suite>.rs`, one module per file) and the two files that
+change the process environment or process-wide state, `blastn_report_stream_api` and
+`thread_memory` (a counting global allocator). Unit tests are in the crate (`#[cfg(test)]` modules
+next to the code, `cargo test --lib`). A test
 is named `<file>::<test>`. Run one file with `cargo test --all-features --test blastn blastn_strand::`
 (keep `--test <suite>`, since the filter is a substring: `blastx_hitbf::` alone also runs
 `tblastx_hitbf::`), or with nextest `-E 'test(/^blastn_strand::/)'` (the binary id is `LOSAT::blastn`). A

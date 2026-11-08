@@ -6,8 +6,8 @@
 //! - Assertion helpers for alignment results
 //! - NCBI BLAST output comparison utilities
 
-use LOSAT::common::Hit;
-use LOSAT::stats::tables::KarlinParams;
+use crate::common::Hit;
+use crate::stats::tables::KarlinParams;
 
 /// Create a test Hit with default values
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166

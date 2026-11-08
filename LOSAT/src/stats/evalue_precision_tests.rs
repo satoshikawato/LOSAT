@@ -7,7 +7,7 @@
 //!   - blast_stat.c: BLAST_SmallGapSumE, s_BlastSumP
 //!   - ncbi_math.c: BLAST_LnFactorial, BLAST_LnGammaInt
 
-use LOSAT::stats::sum_statistics::{
+use crate::stats::sum_statistics::{
     e_to_p, ln_factorial, normalize_score, p_to_e, small_gap_sum_e,
 };
 

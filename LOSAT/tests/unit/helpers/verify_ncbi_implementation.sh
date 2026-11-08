@@ -95,8 +95,8 @@ cat > "$TEST_CASE_FILE" << EOF
 // Subject: $SUBJECT_FASTA
 // NCBI BLAST mode: $BLAST_MODE
 
-use LOSAT::stats::search_space::SearchSpace;
-use LOSAT::stats::tables::KarlinParams;
+use crate::stats::search_space::SearchSpace;
+use crate::stats::tables::KarlinParams;
 
 #[test]
 #[ignore] // Generated test case - enable after verification
@@ -168,8 +168,8 @@ echo "Step 4: Next steps"
 echo "  1. Update Karlin-Altschul parameters in the test case"
 echo "     (Extract lambda, K, H, alpha, beta from NCBI BLAST output)"
 echo ""
-echo "  2. Run the test:"
-echo "     cargo test --test unit_tests test_${TEST_NAME}_effective_search_space -- --nocapture"
+echo "  2. Add it to LOSAT/src/stats/search_space_ncbi_tests.rs (an in-crate test) and run it:"
+echo "     cargo test --lib test_${TEST_NAME}_effective_search_space -- --nocapture"
 echo ""
-echo "  3. If the test passes, integrate it into the main test suite"
+echo "  3. If the test passes, remove its #[ignore]"
 

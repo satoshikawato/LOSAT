@@ -1,9 +1,9 @@
 //! Unit tests for tblastx/chaining.rs
 
+use crate::algorithm::tblastx::chaining::{chain_and_filter_hsps_protein, ExtendedHit};
+use crate::common::Hit;
+use crate::stats::KarlinParams;
 use rustc_hash::FxHashMap;
-use LOSAT::algorithm::tblastx::chaining::{chain_and_filter_hsps_protein, ExtendedHit};
-use LOSAT::common::Hit;
-use LOSAT::stats::KarlinParams;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c

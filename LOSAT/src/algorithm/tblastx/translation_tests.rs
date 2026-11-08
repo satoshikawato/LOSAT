@@ -1,7 +1,7 @@
 //! Unit tests for tblastx/translation.rs
 
-use LOSAT::algorithm::tblastx::translation::generate_frames;
-use LOSAT::utils::genetic_code::GeneticCode;
+use crate::algorithm::tblastx::translation::generate_frames;
+use crate::utils::genetic_code::GeneticCode;
 
 #[test]
 fn test_generate_frames_basic() {

@@ -1,7 +1,7 @@
 //! Unit tests for tblastx/args.rs
 
+use crate::algorithm::tblastx::TblastxArgs;
 use std::path::PathBuf;
-use LOSAT::algorithm::tblastx::TblastxArgs;
 
 fn parse_args(args: &[&str]) -> TblastxArgs {
     let mut all_args = vec!["losat".to_string(), "tblastx".to_string()];
@@ -9,8 +9,8 @@ fn parse_args(args: &[&str]) -> TblastxArgs {
 
     // NCBI blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
     all_args.extend(["-outfmt".into(), "6".into()]);
-    let cli: LOSAT::cli::Cli = LOSAT::cli::try_parse_from(all_args).unwrap();
-    let LOSAT::cli::Commands::Tblastx(args) = cli.command else {
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(all_args).unwrap();
+    let crate::cli::Commands::Tblastx(args) = cli.command else {
         panic!("wrong program")
     };
     args
@@ -72,8 +72,8 @@ fn test_custom_threshold() {
 // the name is kept as typed.
 #[test]
 fn test_matrix_suggests_threshold_and_window() {
-    use LOSAT::algorithm::tblastx::args::TblastxMatrix;
-    use LOSAT::config::ScoringMatrix;
+    use crate::algorithm::tblastx::args::TblastxMatrix;
+    use crate::config::ScoringMatrix;
     let args = parse_args(&[
         "-query",
         "query.fasta",

@@ -310,3 +310,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<UngappedHit>(), 88);
     }
 }
+
+#[cfg(test)]
+#[path = "chaining_tests.rs"]
+mod chaining_tests;

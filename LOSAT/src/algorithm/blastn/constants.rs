@@ -69,3 +69,7 @@ pub const INVALID_DIAG: i32 = 100_000_000;
 /// Two HSPs are considered "close" if |diag1 - diag2| < min_diag_separation
 pub const MIN_DIAG_SEPARATION_BLASTN: i32 = 50;
 pub const MIN_DIAG_SEPARATION_MEGABLAST: i32 = 6;
+
+#[cfg(test)]
+#[path = "constants_tests.rs"]
+mod constants_tests;

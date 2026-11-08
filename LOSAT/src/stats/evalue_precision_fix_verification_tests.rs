@@ -2,7 +2,7 @@
 //!
 //! This test verifies that the weight_divisor handling matches NCBI's behavior exactly.
 
-use LOSAT::stats::sum_statistics::{large_gap_sum_e, small_gap_sum_e};
+use crate::stats::sum_statistics::{large_gap_sum_e, small_gap_sum_e};
 
 /// Test that weight_divisor handling matches NCBI's behavior
 /// NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )

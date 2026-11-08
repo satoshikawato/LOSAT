@@ -7,7 +7,7 @@ use std::io::{BufRead, Read, Write};
 use clap::Args;
 
 use super::build_db::BuildDatabase;
-use super::data_size::{string_to_uint8_data_size, uint8_to_string_data_size};
+use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
 use super::metadata::{db_files_metadata, last_updated, write_metadata_file, DbMetadata};
 use super::platform::Platform;
@@ -16,6 +16,7 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
+use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::{SeqDb, SeqDbError, SeqType};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:224-244
@@ -250,7 +251,7 @@ impl MakedbError {
                 | WriteDbError::Rename { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
-            MakedbError::Database(_) => 2,
+            MakedbError::Database(_) | MakedbError::Build(WriteDbError::Database(_)) => 2,
             MakedbError::Build(
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
@@ -503,68 +504,9 @@ pub fn check_registry_settings(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:646-656
-// ```c++
-// unsigned int
-// NStr::StringToUInt(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Uint8 value = StringToUInt8(str, flags, base);
-//     if ( value > kMax_UInt ) {
-//         S2N_CONVERT_ERROR(unsigned int, "overflow", ERANGE, 0);
-//     }
-//     return (unsigned int) value;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:884-918
-// ```c++
-//     if ( base == 10  &&  (flags & slow_flags) == 0 ) {
-//         // fast conversion
-//
-//         // Current position in the string
-//         CTempString::const_iterator ptr = str.begin(), end = str.end();
-//
-//         // Determine sign
-//         if ( ptr != end && *ptr == '+' ) {
-//             ++ptr;
-//         }
-//         if ( ptr == end ) {
-//             S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, ptr-str.begin());
-//         }
-//
-//         // Begin conversion
-//         Uint8 n = 0;
-//
-//         const Uint8 limdiv = kMax_UI8/10;
-//         const int   limoff = int(kMax_UI8 % 10);
-//
-//         do {
-//             char ch = *ptr;
-//             int  delta = ch - '0';
-//             if ( unsigned(delta) >= 10 ) {
-//                 S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, ptr-str.begin());
-//             }
-//             // Overflow check
-//             if ( n >= limdiv && (n > limdiv || delta > limoff) ) {
-//                 S2N_CONVERT_ERROR(Uint8, kEmptyStr, ERANGE, ptr-str.begin());
-//             }
-//             n = n*10+delta;
-//         } while ( ++ptr != end );
-//
-//         return n;
-//     }
-// ```
 /// `NStr::StringToUInt(value)` with no flags: `None` where it throws.
 fn string_to_uint(value: &str) -> Option<u32> {
-    let digits = value.strip_prefix('+').unwrap_or(value);
-    if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    let mut n: u64 = 0;
-    for c in digits.bytes() {
-        n = n.checked_mul(10)?.checked_add(u64::from(c - b'0'))?;
-    }
-    u32::try_from(n).ok()
+    crate::ncbi_str::string_to_uint(value.as_bytes()).ok()
 }
 
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not
@@ -731,8 +673,9 @@ fn read_taxids(
 }
 
 /// The value of `-max_file_sz`, read where makeblastdb reads it: after the constructor of
-/// `CBuildDatabase` (the head of the log, the removal of an existing database of the same name,
-/// the checks of the output directory), before the log line "Maximum file size".
+/// `CBuildDatabase` (the checks of the output directory, then the head of the log and the
+/// removal of an existing database of the same name, build_db.cpp:1165-1177), before the log
+/// line "Maximum file size".
 fn max_file_size(args: &MakedbArgs) -> Result<u64, MakedbError> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1267-1272
     // ```c++

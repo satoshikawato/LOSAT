@@ -5,7 +5,7 @@
 use std::io::BufRead;
 
 use crate::ncbi_exception::NcbiException;
-use crate::ncbi_str::{string_to_int, string_to_int8};
+use crate::ncbi_str::{string_to_int, string_to_int8, ALLOW_LEADING_SPACES};
 use crate::seqid::accguide::{parse_flags, SeqIdWarning};
 use crate::seqid::parse::{seq_id_from_text, truncate_spaces};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
@@ -59,7 +59,7 @@ pub enum TaxIdMapError {
 /// `NStr::StringToNumeric<TTaxId>(str, fAllowLeadingSpaces)` (`TTaxId` is `int`:
 /// `StringToInt`).
 fn string_to_taxid(s: &[u8]) -> Result<i32, NcbiException> {
-    string_to_int(s, true)
+    string_to_int(s, ALLOW_LEADING_SPACES)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:157-160
@@ -134,7 +134,7 @@ fn check_accession(
     warn: &mut dyn FnMut(SeqIdWarning),
 ) -> Result<Option<Checked>, NcbiException> {
     if !acc.is_empty() && acc.iter().all(u8::is_ascii_digit) {
-        return string_to_int8(acc, false).map(|gi| Some(Checked::Gi(gi)));
+        return string_to_int8(acc, 0).map(|gi| Some(Checked::Gi(gi)));
     }
     Ok(match seq_id_from_text(acc, parse_flags::ANY_RAW, warn) {
         Err(_) => None,

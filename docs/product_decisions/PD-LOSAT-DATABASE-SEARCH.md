@@ -253,10 +253,14 @@ exception reports do; a makeblastdb built elsewhere (bioconda, macOS, Windows) n
 Removal of an existing database and the paths of the output:
 
 - An output path with a space or a double quote in its absolute form (for example a build
-  inside a directory `my data`). makeblastdb reads the path as a list of names: it removes
-  nothing of an existing database, writes the new files beside the old ones and ends with
-  exit status 2. LOSAT takes the path as one name, replaces the database and ends with 0.
-  (`-out` itself may not contain a space, in both programs.)
+  inside a directory `my data`). makeblastdb reads the path as a list of names when it looks
+  for the volumes of an existing database: it removes only that database's LMDB files (`.pdb`,
+  `.pot`, `.ptf`, `.pto`, and logs "Deleted existing ..."), keeps its volume files, writes the
+  new files over or beside them and ends with exit status 2 when it opens the result. LOSAT
+  takes the path as one name, removes the whole database, replaces it and ends with 0; a build
+  that fails after the removal (a `-max_file_sz` that is no size) leaves none of the old
+  database, where makeblastdb leaves its volume files. (`-out` itself may not contain a space,
+  in both programs.)
 - An existing `sub/db.pal` while the current directory holds volumes of the same names
   (`./db.00.*`). NCBI looks for a volume in the current directory first, so makeblastdb
   removes the files of the current directory. LOSAT removes the volumes beside the alias
@@ -277,15 +281,15 @@ Version 5 and the options added to the writer:
 - `-logfile` is read as makeblastdb's option, not wherever it stands in the command line
   (makeblastdb's corelib also finds it as the value of another option).
 - Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
-  that removes what the earlier files added; makeblastdb skips it without a word. `-in ""`
-  (no name) is refused where makeblastdb reads the list, after the log line "Maximum file
-  size" and `-taxid_map`; makeblastdb reads an empty list and crashes.
+  that removes what the earlier files added; makeblastdb skips it without a word.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
-  of a database; one left at the path is removed, makeblastdb's final state). So an output
-  name of 247 to 251 bytes, whose `NAME.pdb-lock` passes the file-name limit of 255 bytes,
-  stops makeblastdb ("BLAST Database error: LMDB runtime error: mdb_env_open: File name too
-  long", exit status 2, no volume written) while LOSAT builds the database (exit status 0;
-  every file is valid and its own name fits).
+  of a database; one left at the path is removed, makeblastdb's final state after a build; a
+  build that fails after LMDB has opened leaves them in makeblastdb, not in LOSAT). A lock file
+  that LMDB cannot create stops LOSAT where it stops makeblastdb: an output name of 247 bytes
+  or more, whose `NAME.pdb-lock` passes the file-name limit of 255 bytes, ends with "BLAST
+  Database error: LMDB runtime error: mdb_env_open: File name too long" (exit status 2) when
+  the second sequence is added, or that creation error (exit status 1) for one sequence, with
+  no file written, in both programs.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
@@ -323,8 +327,13 @@ Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1
 - A `-taxid_map` line of white space only (makeblastdb crashes).
 - Version 5 with `-parse_seqids`: `LMDB_SPLIT_CHUNK_SIZE` or `LMDB_MIN_SPLIT_SIZE` that is not
   a number of the range of `unsigned int` (makeblastdb aborts in its LMDB writer, after the
-  volumes are written); LOSAT stops with `BLAST Database creation error: Cannot convert string
-  '<value>' to ...` (exit status 1).
+  volumes are written, and leaves the whole database and the lock files); LOSAT stops with
+  `BLAST Database creation error: Cannot convert string '<value>' to ...` (exit status 1),
+  removes the volumes and leaves `NAME.pos` and `NAME.ptf`.
+- `-in ""` (no name): makeblastdb reads the first name of an empty list after the log line
+  "Maximum file size" and `-taxid_map`, and crashes (a segmentation fault). LOSAT refuses it
+  there, so that an existing database of the output name has been removed first, as
+  makeblastdb removes it, and the errors of `-max_file_sz` and `-taxid_map` come first.
 
 Reproduced although it looks wrong (deterministic NCBI behaviour): with `-hash_index`, no
 `-parse_seqids` and several volumes, the first sequence of a later volume is indexed under the

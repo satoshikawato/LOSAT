@@ -401,7 +401,7 @@ impl DbFilterArgs {
         let invalid = || options_error("Invalid taxidlist file ");
         let mut tax_ids = BTreeSet::new();
         for id in &ids {
-            if id.iter().all(u8::is_ascii_whitespace) {
+            if crate::seqid::parse::is_blank(id) {
                 continue;
             }
             let taxid = string_to_int(id).ok_or_else(invalid)?;
@@ -561,23 +561,21 @@ fn stream_lines(bytes: &[u8]) -> Vec<Vec<u8>> {
     lines
 }
 
-// `NStr::StringToNumeric<int>` with `fAllowLeadingSpaces | fAllowTrailingSpaces`
-// (corelib/ncbistr.cpp, `NStr::StringToInt`): white space may surround the number; a sign (`+` or `-`) may lead it; the digits are
-// decimal and the value must fit a signed 32-bit integer.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2431-2436
+// ```c++
+//     for (auto id : ids) {
+//         try {
+//             if (NStr::IsBlank(id)) {
+//                 continue;
+//             }
+//             auto taxid = NStr::StringToNumeric<TTaxId>(id, NStr::fAllowLeadingSpaces | NStr::fAllowTrailingSpaces);
+// ```
+// `TTaxId` is an `int` (`NStr::StringToInt`, `crate::ncbi_str`): C `isspace` may surround the
+// number, a sign may lead it, and an entry read from a file ends at a NUL byte.
 /// `NStr::StringToNumeric<TTaxId>` of a list entry, `None` for NCBI's exception.
 pub(crate) fn string_to_int(token: &[u8]) -> Option<i32> {
-    let text = std::str::from_utf8(token).ok()?;
-    let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
-    let (negative, digits) = match text.as_bytes().first()? {
-        b'-' => (true, &text[1..]),
-        b'+' => (false, &text[1..]),
-        _ => (false, text),
-    };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let magnitude: i64 = digits.parse().ok()?;
-    i32::try_from(if negative { -magnitude } else { magnitude }).ok()
+    use crate::ncbi_str::{ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
+    crate::ncbi_str::string_to_int(token, ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES).ok()
 }
 
 #[cfg(test)]
@@ -634,6 +632,7 @@ mod tests {
         assert_eq!(string_to_int(b"  -5 "), Some(-5));
         assert_eq!(string_to_int(b"2147483647"), Some(i32::MAX));
         assert_eq!(string_to_int(b"-2147483648"), Some(i32::MIN));
+        assert_eq!(string_to_int(b"\x0b42\x0b"), Some(42));
         for bad in [
             &b"abc"[..],
             b"# human",

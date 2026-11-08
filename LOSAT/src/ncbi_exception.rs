@@ -56,7 +56,8 @@
 //! `__FILE__` names it in NCBI's build tree, the line, the severity (`Error`), the class and
 //! error code (`GetType()::GetErrCodeString()`), the function (`module::class::function() - `,
 //! when NCBI knows one) and the message (`GetMsg()`). `CStringException` adds its position
-//! (`ReportExtra`: `m_Pos = <pos>`, ncbistr.hpp:4436-4439).
+//! (`ReportExtra` of its base `CParseTemplException<CCoreException>`: `m_Pos = <pos>`,
+//! ncbistr.hpp:4435-4439, 4499).
 
 /// The build tree that NCBI's reports name: that of the official Linux x64 release of BLAST+
 /// 2.17.0 (`ncbi-blast-2.17.0+-x64-linux.tar.gz`). Other builds of 2.17.0 name their own tree
@@ -100,6 +101,8 @@ impl NcbiException {
         }
     }
 
+    // `CStringException` derives from `CParseTemplException<CCoreException>` (ncbistr.hpp:4499),
+    // whose `ReportExtra` prints the position.
     // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:4435-4439
     // ```c++
     //     /// Report error position.
@@ -282,7 +285,9 @@ mod tests {
     // The text of an exception report has one owner: a second format string for it (as four
     // modules had until 2026-11-08: winmask, the Seq-id parser, the taxid map and the seqid list
     // filter) fails here. Test files (`tests.rs`, `*_tests.rs`, files under a `tests/` directory)
-    // and test modules hold NCBI's bytes as expected values and are not read.
+    // and test modules hold NCBI's bytes as expected values and are not read. The needles are
+    // the escaped forms in ordinary string literals: a raw string (`r#"..."#`) or a text put
+    // together with `concat!` or from pieces is not caught.
     #[test]
     fn exception_reports_are_formatted_only_here() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -308,7 +313,10 @@ mod tests {
             }
             let text = std::fs::read_to_string(&path).unwrap();
             for (number, line) in code_lines(&text) {
-                if line.contains("NCBI C++ Exception:\\n") || line.contains("T0 \\\"") {
+                if ["NCBI C++ Exception:\\n", "T0 \\\"", ": Error: ("]
+                    .iter()
+                    .any(|needle| line.contains(needle))
+                {
                     offenders.push(format!("{}:{number}: {}", relative.display(), line.trim()));
                 }
             }

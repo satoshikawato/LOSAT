@@ -1,15 +1,41 @@
-//! NCBI's number conversions of `NStr` (`c++/src/corelib/ncbistr.cpp`) as LOSAT's ports call
-//! them: base 10, the flags each caller passes, and the `CStringException` each throws, with the
-//! place it is thrown from ([`ThrowSite`]). `NStr::StringToUInt8_DataSize` is in
-//! `writedb::data_size`.
+//! The functions of NCBI's `NStr` (`c++/src/corelib/ncbistr.cpp`) that makeblastdb uses to
+//! convert numbers, as LOSAT's ports call them: base 10, the flags each caller passes, and the
+//! `CStringException` each throws, with the place it is thrown from ([`ThrowSite`]); with them
+//! `NStr::PrintableString`, which their messages quote the string with, and
+//! `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`).
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (no caller asks for
 //! them), the bases other than 10, and the flags no caller passes (`fMandatorySign`,
-//! `fAllowCommas`, `fAllowTrailingSymbols`, the leading symbols other than spaces).
+//! `fAllowCommas`, the leading and trailing symbols other than spaces). Other modules keep copies
+//! of some of these conversions (`blastinput::query_batch`, `seqdb::isam`, `seqdb::mask`,
+//! `blastdbcmd`), not yet folded here.
+
+mod data_size;
+
+pub use data_size::string_to_uint8_data_size;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::seqid::parse::is_space;
-use crate::writedb::data_size::printable_string;
+
+/// `NStr::TStringToNumFlags`, of the flags LOSAT's callers pass.
+pub(crate) type Flags = u32;
+
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:294-298
+// ```c++
+//         fAllowLeadingSpaces      = (1 << 19),     ///< Ignore leading whitespace characters in converted string.
+//         fAllowLeadingSymbols     = (1 << 20) | fAllowLeadingSpaces,
+//         ...
+//         fAllowTrailingSpaces     = (1 << 21),     ///< Ignore trailing whitespace characters.
+//         fAllowTrailingSymbols    = (1 << 22) | fAllowTrailingSpaces,
+// ```
+/// `NStr::fAllowLeadingSpaces`.
+pub(crate) const ALLOW_LEADING_SPACES: Flags = 1 << 19;
+/// `NStr::fAllowTrailingSpaces`.
+pub(crate) const ALLOW_TRAILING_SPACES: Flags = 1 << 21;
+
+/// `isspace` in the C locale.
+pub(crate) fn is_space(c: u8) -> bool {
+    c == b' ' || (b'\t'..=b'\r').contains(&c)
+}
 
 /// A throw of `S2N_CONVERT_ERROR` in `NStr::<function>` at `line` of ncbistr.cpp.
 const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
@@ -21,7 +47,217 @@ const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:544-558
+/// `NStr::PrintableString(str)` with its default mode `fNewLine_Quote | fNonAscii_Passthru` (both 0) and language C,
+/// which is what `CS2N_Guard::Message` uses on the input string.
+/// Ported branches: `s_PrintableString` with `mode == 0`, `lang == eLanguage_C`
+/// (so `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are not ported).
+pub(crate) fn printable_string(str_: &[u8]) -> String {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3736-3742
+    // ```c++
+    //     unique_ptr<CNcbiOstrstream> out;
+    //     SIZE_TYPE i, j = 0;
+    //
+    //     for (i = 0;  i < str.size();  ++i) {
+    //         bool octal = false;
+    //         char c = str[i];
+    //         switch (c) {
+    // ```
+    let mut out: Option<Vec<u8>> = None;
+    let mut j: usize = 0;
+    for i in 0..str_.len() {
+        let mut octal = false;
+        let mut c = str_[i];
+        match c {
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3743-3771
+            // ```c++
+            //         case '\a':
+            //             if (lang == eLanguage_C)
+            //                 c = 'a';
+            //             else
+            //                 octal = true;
+            //             break;
+            //         case '\b':
+            //             c = 'b';
+            //             break;
+            //         case '\f':
+            //             c = 'f';
+            //             break;
+            //         case '\r':
+            //             c = 'r';
+            //             break;
+            //         case '\t':
+            //             c = 't';
+            //             break;
+            //         case '\v':
+            //             c = 'v';
+            //             break;
+            //         case '\n':
+            //             if (!(mode & NStr::fNewLine_Passthru))
+            //                 c = 'n';
+            //             /*FALLTHRU*/
+            //         case '\\':
+            //         case '\'':
+            //         case '"':
+            //             break;
+            // ```
+            // '\a' (lang is C)
+            0x07 => c = b'a',
+            0x08 => c = b'b',
+            0x0c => c = b'f',
+            b'\r' => c = b'r',
+            b'\t' => c = b't',
+            0x0b => c = b'v',
+            // '\n': fNewLine_Passthru is not set, so c becomes 'n'
+            b'\n' => c = b'n',
+            b'\\' | b'\'' | b'"' => {}
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3772-3775
+            // ```c++
+            //         case '&':
+            //             if (lang == eLanguage_Javascript)
+            //                 break;
+            //             continue;
+            // ```
+            b'&' => continue,
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3776-3783
+            // ```c++
+            //         case '?':
+            //             if (lang == eLanguage_C) {
+            //                 if (i  &&  str[i - 1] == '?')
+            //                     break;
+            //                 if (i < str.size() - 1  &&  str[i + 1] == '?')
+            //                     break;
+            //             }
+            //             continue;
+            // ```
+            b'?' => {
+                if !((i != 0 && str_[i - 1] == b'?') || (i < str_.len() - 1 && str_[i + 1] == b'?'))
+                {
+                    continue;
+                }
+            }
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3784-3795
+            // ```c++
+            //         default:
+            //             if (!isascii((unsigned char) c)) {
+            //                 if (mode & NStr::fNonAscii_Quote) {
+            //                     octal = true;
+            //                     break;
+            //                 }
+            //             }
+            //             if (!isprint((unsigned char) c)) {
+            //                 octal = true;
+            //                 break;
+            //             }
+            //             continue;
+            // ```
+            _ => {
+                // fNonAscii_Quote is not set; isprint of the "C" locale is 0x20..=0x7e
+                if !(0x20..=0x7e).contains(&c) {
+                    octal = true;
+                } else {
+                    continue;
+                }
+            }
+        }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3797-3803
+        // ```c++
+        //         if (!out.get()) {
+        //             out.reset(new CNcbiOstrstream);
+        //         }
+        //         if (i > j) {
+        //             out->write(str.data() + j, i - j);
+        //         }
+        //         out->put('\\');
+        // ```
+        let out_buf = out.get_or_insert_with(Vec::new);
+        if i > j {
+            out_buf.extend_from_slice(&str_[j..i]);
+        }
+        out_buf.push(b'\\');
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3804-3831
+        // ```c++
+        //         if (c == '\n') {
+        //             out->write("n\\\n", 3);
+        //         } else if (octal) {
+        //             bool reduce;
+        //             if (!(mode & NStr::fPrintable_Full)) {
+        //                 reduce = (i == str.size() - 1  ||
+        //                           str[i + 1] < '0' || '7' < str[i + 1] ? true : false);
+        //             } else {
+        //                 reduce = false;
+        //             }
+        //             unsigned char v;
+        //             char val[3];
+        //             int k = 0;
+        //             v =  (unsigned char) c >> 6;
+        //             if (v  ||  !reduce) {
+        //                 val[k++] = char('0' + v);
+        //                 reduce = false;
+        //             }
+        //             v = ((unsigned char) c >> 3) & 7;
+        //             if (v  ||  !reduce) {
+        //                 val[k++] = char('0' + v);
+        //             }
+        //             v =  (unsigned char) c       & 7;
+        //             val[k++] = char('0' + v);
+        //             out->write(val, k);
+        //         } else {
+        //             out->put(c);
+        //         }
+        // ```
+        // `c == '\n'` cannot be true here: c was changed to 'n' above (no fNewLine_Passthru).
+        if octal {
+            // fPrintable_Full is not set
+            let mut reduce = i == str_.len() - 1 || str_[i + 1] < b'0' || b'7' < str_[i + 1];
+            let mut val: Vec<u8> = Vec::with_capacity(3);
+            let mut v = c >> 6;
+            if v != 0 || !reduce {
+                val.push(b'0' + v);
+                reduce = false;
+            }
+            v = (c >> 3) & 7;
+            if v != 0 || !reduce {
+                val.push(b'0' + v);
+            }
+            v = c & 7;
+            val.push(b'0' + v);
+            out_buf.extend_from_slice(&val);
+        } else {
+            out_buf.push(c);
+        }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3832-3832
+        // ```c++
+        //         j = i + 1;
+        // ```
+        j = i + 1;
+    }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3834-3844
+    // ```c++
+    //     if (j  &&  i > j) {
+    //         _ASSERT(out.get());
+    //         out->write(str.data() + j, i - j);
+    //     }
+    //     if (out.get()) {
+    //         // Return encoded string
+    //         return CNcbiOstrstreamToString(*out);
+    //     }
+    //
+    //     // All characters are good - return (a copy of) the original string
+    //     return str;
+    // ```
+    let i = str_.len();
+    if j != 0 && i > j {
+        out.as_mut()
+            .expect("out is set whenever j != 0")
+            .extend_from_slice(&str_[j..i]);
+    }
+    match out {
+        Some(buf) => String::from_utf8_lossy(&buf).into_owned(),
+        None => String::from_utf8_lossy(str_).into_owned(),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:545-558
 // ```c++
 // string CS2N_Guard::Message(const CTempString str, const char* to_type, const CTempString msg)
 // {
@@ -117,7 +353,11 @@ fn convert_error(
 //     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
 //         S2N_CONVERT_ERROR_INVAL(Int8);
 //     }
-//     ...
+//     // Skip allowed trailing symbols
+//     if (flags & fAllowTrailingSymbols) {
+//         bool spaces = ((flags & fAllowTrailingSymbols) == fAllowTrailingSpaces);
+//         s_SkipAllowedSymbols(str, pos, spaces ? eSkipSpacesOnly : eSkipAll, flags);
+//     }
 //     // Assign sign before the end pointer check
 //     n = sign ? -n : n;
 //     CHECK_ENDPTR(Int8);
@@ -144,27 +384,36 @@ fn convert_error(
 //     }
 // }
 // ```
-// The string is a `std::string`'s or a C string's: the loop ends at its terminating NUL, and at
-// an embedded one (whose end check then passes). The errors are thrown at lines 852
+// `CTempString::operator[]` gives NUL past the end (tempstr.hpp:341-347): the loop ends there and
+// at an embedded NUL, whose end check (`if ( str[pos] )`, lines 603-606) then passes, so
+// "12\0x" is 12. A decimal point stops the skipping of trailing spaces, and the end check then
+// fails on it, as on any other byte that is not a space. The errors are thrown at lines 852
 // (overflow), 861 (no digit) and 870 (`CHECK_ENDPTR`).
 const STRING_TO_INT8_OVERFLOW: ThrowSite = convert_site(852, "ncbi::NStr::StringToInt8");
 const STRING_TO_INT8_INVAL: ThrowSite = convert_site(861, "ncbi::NStr::StringToInt8");
 const STRING_TO_INT8_ENDPTR: ThrowSite = convert_site(870, "ncbi::NStr::StringToInt8");
 
-/// `NStr::StringToInt8(str, flags)` in base 10; `leading_spaces` is `fAllowLeadingSpaces`,
-/// the only flag a caller passes.
-pub(crate) fn string_to_int8(s: &[u8], leading_spaces: bool) -> Result<i64, NcbiException> {
+/// `s_SkipAllowedSymbols(str, pos, eSkipSpacesOnly, flags)`: the position after the white space
+/// from `pos`.
+fn skip_spaces(s: &[u8], mut pos: usize) -> usize {
+    while pos < s.len() {
+        let ch = s[pos];
+        if ch.is_ascii_digit() || ch == b'+' || ch == b'-' || !is_space(ch) {
+            break;
+        }
+        pos += 1;
+    }
+    pos
+}
+
+/// `NStr::StringToInt8(str, flags)` in base 10, `flags` [`ALLOW_LEADING_SPACES`] and
+/// [`ALLOW_TRAILING_SPACES`] or 0.
+pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiException> {
     let at = |pos: usize| s.get(pos).copied().unwrap_or(0);
     let error = |site: ThrowSite, msg: &str, pos: usize| convert_error(s, "Int8", msg, site, pos);
     let mut pos = 0;
-    if leading_spaces {
-        while pos < s.len() {
-            let ch = s[pos];
-            if ch.is_ascii_digit() || ch == b'+' || ch == b'-' || !is_space(ch) {
-                break;
-            }
-            pos += 1;
-        }
+    if flags & ALLOW_LEADING_SPACES != 0 {
+        pos = skip_spaces(s, pos);
     }
     let sign = match at(pos) {
         b'-' => {
@@ -197,6 +446,9 @@ pub(crate) fn string_to_int8(s: &[u8], leading_spaces: bool) -> Result<i64, Ncbi
     if pos == pos0 {
         return Err(error(STRING_TO_INT8_INVAL, "", pos));
     }
+    if flags & ALLOW_TRAILING_SPACES != 0 {
+        pos = skip_spaces(s, pos);
+    }
     let n = if sign { n.wrapping_neg() } else { n };
     if at(pos) != 0 {
         return Err(error(STRING_TO_INT8_ENDPTR, "", pos));
@@ -218,13 +470,13 @@ pub(crate) fn string_to_int8(s: &[u8], leading_spaces: bool) -> Result<i64, Ncbi
 // ```
 const STRING_TO_INT_OVERFLOW: ThrowSite = convert_site(640, "ncbi::NStr::StringToInt");
 
-/// `NStr::StringToInt(str, flags)` in base 10; `leading_spaces` as for [`string_to_int8`].
-pub(crate) fn string_to_int(s: &[u8], leading_spaces: bool) -> Result<i32, NcbiException> {
-    let value = string_to_int8(s, leading_spaces)?;
+/// `NStr::StringToInt(str, flags)` in base 10, `flags` as for [`string_to_int8`].
+pub(crate) fn string_to_int(s: &[u8], flags: Flags) -> Result<i32, NcbiException> {
+    let value = string_to_int8(s, flags)?;
     i32::try_from(value).map_err(|_| convert_error(s, "int", "overflow", STRING_TO_INT_OVERFLOW, 0))
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:876-917
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:876-918
 // ```c++
 // Uint8 NStr::StringToUInt8(const CTempString str,
 //                           TStringToNumFlags flags, int base)
@@ -373,25 +625,25 @@ mod tests {
                 "19",
             ),
             (
-                string_to_int(b"abc", false).map(drop),
+                string_to_int(b"abc", 0).map(drop),
                 "Cannot convert string 'abc' to Int8",
                 861,
                 "0",
             ),
             (
-                string_to_int(b"-1x", false).map(drop),
+                string_to_int(b"-1x", 0).map(drop),
                 "Cannot convert string '-1x' to Int8",
                 870,
                 "2",
             ),
             (
-                string_to_int(b"99999999999", false).map(drop),
+                string_to_int(b"99999999999", 0).map(drop),
                 "Cannot convert string '99999999999' to int, overflow",
                 640,
                 "0",
             ),
             (
-                string_to_int(b"99999999999999999999", false).map(drop),
+                string_to_int(b"99999999999999999999", 0).map(drop),
                 "Cannot convert string '99999999999999999999' to Int8, overflow",
                 852,
                 "18",
@@ -427,15 +679,25 @@ mod tests {
     // int, BLASTDB_LMDB_MAP_SIZE="-5" stops it).
     #[test]
     fn values_convert_as_ncbi_converts_them() {
-        assert_eq!(string_to_int(b"+3", false), Ok(3));
-        assert_eq!(string_to_int(b"-1", false), Ok(-1));
-        assert_eq!(string_to_int(b"-2147483648", false), Ok(i32::MIN));
-        assert!(string_to_int(b" 3", false).is_err());
-        assert_eq!(string_to_int(b" 3", true), Ok(3));
-        assert!(string_to_int(b"3 ", true).is_err());
-        assert!(string_to_int(b"", false).is_err());
-        assert_eq!(string_to_int8(b"-9223372036854775808", false), Ok(i64::MIN));
-        assert_eq!(string_to_int8(b"12\x0034", false), Ok(12));
+        assert_eq!(string_to_int(b"+3", 0), Ok(3));
+        assert_eq!(string_to_int(b"-1", 0), Ok(-1));
+        assert_eq!(string_to_int(b"-2147483648", 0), Ok(i32::MIN));
+        assert!(string_to_int(b" 3", 0).is_err());
+        assert_eq!(string_to_int(b" 3", ALLOW_LEADING_SPACES), Ok(3));
+        assert!(string_to_int(b"3 ", ALLOW_LEADING_SPACES).is_err());
+        assert!(string_to_int(b"", 0).is_err());
+        assert_eq!(string_to_int8(b"-9223372036854775808", 0), Ok(i64::MIN));
+        assert_eq!(string_to_int8(b"12\x0034", 0), Ok(12));
+        // fAllowLeadingSpaces | fAllowTrailingSpaces (a taxid list's entry); C `isspace`
+        // includes the vertical tab.
+        let both = ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES;
+        assert_eq!(string_to_int(b" \x0b-5\t\r ", both), Ok(-5));
+        assert_eq!(string_to_int(b"7 \x00x", both), Ok(7));
+        for bad in [&b"1 2"[..], b"9606.0", b"+", b" ", b"0x10", b"3 -"] {
+            assert!(string_to_int(bad, both).is_err(), "{bad:?}");
+        }
+        assert!(string_to_int(b"3 ", ALLOW_TRAILING_SPACES).is_ok());
+        assert!(string_to_int(b" 3", ALLOW_TRAILING_SPACES).is_err());
         assert_eq!(string_to_uint(b"4294967295"), Ok(u32::MAX));
         assert_eq!(string_to_uint(b"+0"), Ok(0));
         assert!(string_to_uint8(b"-5").is_err());

@@ -173,36 +173,52 @@ fn masked(text: &str) -> String {
         + if text.ends_with('\n') { "\n" } else { "" }
 }
 
+/// `losat makeblastdb -in in.fa -dbtype prot -out db` (and `-parse_seqids`) in `dir`, with
+/// `variable` set to `value` and the other variables of the LMDB writer and LOSAT's removed.
+fn makeblastdb(
+    dir: &std::path::Path,
+    parse_seqids: bool,
+    variable: &str,
+    value: &std::ffi::OsStr,
+) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    command.current_dir(dir).args([
+        "makeblastdb",
+        "-in",
+        "in.fa",
+        "-dbtype",
+        "prot",
+        "-out",
+        "db",
+    ]);
+    if parse_seqids {
+        command.arg("-parse_seqids");
+    }
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LOSAT_") {
+            command.env_remove(name);
+        }
+    }
+    for name in VARIABLES {
+        command.env_remove(name);
+    }
+    command
+        .env(variable, value)
+        .output()
+        .expect("run losat makeblastdb")
+}
+
 #[test]
 fn unconvertible_lmdb_variables_end_as_makeblastdb_ends() {
     for case in &CASES {
         let dir = TempDir::new(case.name);
         std::fs::write(dir.0.join("in.fa"), case.input).unwrap();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-        command.current_dir(&dir.0).args([
-            "makeblastdb",
-            "-in",
-            "in.fa",
-            "-dbtype",
-            "prot",
-            "-out",
-            "db",
-        ]);
-        if case.parse_seqids {
-            command.arg("-parse_seqids");
-        }
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LOSAT_") {
-                command.env_remove(name);
-            }
-        }
-        for name in VARIABLES {
-            command.env_remove(name);
-        }
-        let output = command
-            .env(case.variable, case.value)
-            .output()
-            .expect("run losat makeblastdb");
+        let output = makeblastdb(
+            &dir.0,
+            case.parse_seqids,
+            case.variable,
+            std::ffi::OsStr::new(case.value),
+        );
         assert_eq!(output.status.code(), Some(case.status), "{}", case.name);
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
@@ -215,6 +231,36 @@ fn unconvertible_lmdb_variables_end_as_makeblastdb_ends() {
             case.stdout,
             "{}",
             case.name
+        );
+    }
+}
+
+// The bytes of a variable reach `NStr` as `getenv` gives them: a byte that is not UTF-8 is quoted
+// in octal (`NStr::PrintableString`), as makeblastdb 2.17.0 quotes it (probe of 2026-11-08).
+#[cfg(unix)]
+#[test]
+fn a_variable_s_bytes_are_quoted_as_makeblastdb_quotes_them() {
+    use std::os::unix::ffi::OsStrExt;
+    for (variable, value, stderr) in [
+        (
+            MAP,
+            &b"\xff"[..],
+            "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '\\377' to Uint8 (m_Pos = 0)\n\n",
+        ),
+        (
+            TXN,
+            b"1\xff",
+            "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 870: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '1\\377' to Int8 (m_Pos = 1)\n\n",
+        ),
+    ] {
+        let dir = TempDir::new("bytes");
+        std::fs::write(dir.0.join("in.fa"), TWO).unwrap();
+        let output = makeblastdb(&dir.0, false, variable, std::ffi::OsStr::from_bytes(value));
+        assert_eq!(output.status.code(), Some(255), "{variable}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            stderr.replace("{ROOT}", ROOT),
+            "{variable}"
         );
     }
 }

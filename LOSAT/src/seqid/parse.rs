@@ -16,6 +16,7 @@ use super::model::{
     TextseqId, SEQ_ID_ALTERNATIVES,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::ncbi_str::is_space;
 
 /// A `CSeqIdException` (`eFormat`): where NCBI throws it and its message.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,11 +64,6 @@ impl SeqIdError {
 
 const SEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Seq_id.cpp";
 const TEXTSEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Textseq_id.cpp";
-
-/// `isspace` in the C locale.
-pub fn is_space(c: u8) -> bool {
-    c == b' ' || (b'\t'..=b'\r').contains(&c)
-}
 
 /// `NStr::TruncateSpaces_Unsafe(s, NStr::eTrunc_Both)`.
 pub fn truncate_spaces(s: &[u8]) -> &[u8] {
@@ -149,71 +145,27 @@ pub fn string_to_non_negative_int(s: &[u8]) -> i32 {
     value as i32
 }
 
-/// `NStr::StringToNumeric<TGi>(str)` (`NStr::StringToInt8` with no flags): `None` where NCBI
-/// throws.
+/// `NStr::StringToNumeric<TGi>(str)` (`NStr::StringToInt8` with no flags, `crate::ncbi_str`):
+/// `None` where NCBI throws, which `CSeq_id::Set` catches.
 ///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-871
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2925-2935
 /// ```c++
-/// Int8 NStr::StringToInt8(const CTempString str, TStringToNumFlags flags, int base)
-/// {
-///     ...
-///     // Determine sign
-///     bool sign = false;
-///     switch (str[pos]) {
-///     case '-':
-///         sign = true;
-///         /*FALLTHRU*/
-///     case '+':
-///         pos++;
-///         break;
-///     ...
-///     Int8 limdiv = base==10? kMax_I8 / 10: kMax_I8 / base;
-///     Int8 limoff = (base==10? kMax_I8 % 10: kMax_I8 % base) + (sign ? 1 : 0);
-///     ...
-///     while (char ch = str[pos]) {
-///         int  delta;   // corresponding numeric value of 'ch'
-///         ...
-///         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
-///             break;
-///         }
-///         // Overflow check
-///         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
-///             S2N_CONVERT_ERROR_OVERFLOW(Int8);
-///         }
-///         n *= base;
-///         n += delta;
-///         pos++;
-///     }
-///
-///     // Last checks
-///     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-///         S2N_CONVERT_ERROR_INVAL(Int8);
-///     }
-///     ...
-///     n = sign ? -n : n;
-///     CHECK_ENDPTR(Int8);
+///         if ( the_type == e_Gi ) {
+///             try {
+///                 TGi gi = NStr::StringToNumeric<TGi>(acc);
+///                 if ( gi > ZERO_GI ) {
+///                     SetGi(gi);
+///                     return *this;
+///                 }
+///             }
+///             catch ( CException& /*ignored*/ ) {
+///                 // will be processed by the code below
+///             }
 /// ```
-/// (A NUL byte ends the digits; then the end check fails.)
+/// `acc` is a `CTempString` (the accession with its spaces truncated): a NUL byte in it ends
+/// the digits and passes the end check, as for any `CTempString` (`ncbi_str::string_to_int8`).
 fn string_to_int8(s: &[u8]) -> Option<i64> {
-    let (negative, digits) = match s.first() {
-        Some(b'-') => (true, &s[1..]),
-        Some(b'+') => (false, &s[1..]),
-        _ => (false, s),
-    };
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let mut n: i64 = 0;
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(negative);
-    for &c in digits {
-        let delta = i64::from(c - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return None;
-        }
-        n = n.wrapping_mul(10).wrapping_add(delta);
-    }
-    Some(if negative { n.wrapping_neg() } else { n })
+    crate::ncbi_str::string_to_int8(s, 0).ok()
 }
 
 /// `CObject_id::SetStrOrId(str)`.

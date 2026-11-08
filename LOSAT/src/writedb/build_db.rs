@@ -647,11 +647,12 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //
 // * `dbpath` is one database name. NCBI's reader splits the name at spaces
 //   and double quotes, so for an output path with such a character (a
-//   directory `my data`) the call above throws, nothing is removed, the new
-//   files are written beside the old ones (an old alias file then hides the
-//   new database), and makeblastdb ends with exit status 2 when it opens its
-//   result. LOSAT removes the existing database of that path and the build
-//   ends with status 0.
+//   directory `my data`) the call above throws: only the LMDB files removed
+//   before it are gone, the volume files stay, the new files are written over
+//   or beside them (an old alias file then hides the new database), and
+//   makeblastdb ends with exit status 2 when it opens its result. LOSAT
+//   removes the whole existing database of that path and the build ends with
+//   status 0.
 // * The volumes that an alias file names are those in the alias file's own
 //   directory. NCBI takes a volume of the same name in the current directory
 //   first, and so removes files that do not belong to the database being
@@ -1158,6 +1159,7 @@ impl<'a> BuildDatabase<'a> {
             Some(
                 WriteDbError::Creation(message)
                 | WriteDbError::Options(message)
+                | WriteDbError::Database(message)
                 | WriteDbError::Other(message),
             ) => Err(WriteDbError::Creation(message)),
             Some(WriteDbError::Exception(e)) => {

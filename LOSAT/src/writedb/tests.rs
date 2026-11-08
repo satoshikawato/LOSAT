@@ -594,13 +594,24 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
 /// One run of `losat makeblastdb` for a protein database titled "t": the exit
 /// status, the log and the messages of the standard error stream.
 fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, String, String) {
+    makedb_version(input, out, max_file_sz, stdin, 4)
+}
+
+/// [`makedb`] of the format version `version`.
+fn makedb_version(
+    input: &str,
+    out: &str,
+    max_file_sz: &str,
+    stdin: &[u8],
+    version: i32,
+) -> (i32, String, String) {
     let args = MakedbArgs {
         input: input.to_string(),
         input_type: "fasta".to_string(),
         dbtype: "prot".to_string(),
         title: Some("t".to_string()),
         out: Some(out.to_string()),
-        blastdb_version: 4,
+        blastdb_version: version,
         max_file_sz: max_file_sz.to_string(),
         logfile: None,
         parse_seqids: false,
@@ -1001,6 +1012,113 @@ fn other_errors_end_with_status_255() {
         ["f"],
         "nothing but the planted file"
     );
+}
+
+/// `-in ""` names no input file: makeblastdb 2.17.0 reads the first name of the empty list
+/// after the log line "Maximum file size" and `-taxid_map`, and crashes (a segmentation fault,
+/// probe of 2026-11-08). LOSAT refuses it there (exit status 1): after an existing database of
+/// the output name has been removed, as makeblastdb removes it, and after the errors of
+/// `-max_file_sz`.
+#[test]
+fn an_empty_in_is_refused_where_makeblastdb_reads_the_list() {
+    let refusal = "losat makeblastdb: -in names no input file; losat makeblastdb reads FASTA \
+                   files or the standard input\n";
+    let tmp = TempDir::new("inempty");
+    let db = tmp.base("db");
+    let (status, log, messages) = makedb("", &db, "3GB", b"");
+    assert_eq!((status, messages.as_str()), (1, refusal));
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        format!("{LOG_HEAD}Maximum file size: 3000000000B\n")
+    );
+    let (status, log, messages) = makedb("", &db, "abc", b"");
+    assert_eq!(
+        (status, messages),
+        (
+            255,
+            ncbi_report(
+                "corelib/ncbistr.cpp",
+                "1622: Error: (CStringException::eConvert) \
+                 ncbi::NStr::StringToUInt8_DataSize() - Cannot convert string 'abc' to Uint8 \
+                 (m_Pos = 0)"
+            )
+        )
+    );
+    assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
+    let (status, _, _) = makedb(&prot_fasta(), &db, "3GB", b"");
+    assert_eq!(status, 0);
+    assert!(!files_named(&tmp.0, "db.").is_empty());
+    let (status, log, messages) = makedb("", &db, "3GB", b"");
+    assert_eq!((status, messages.as_str()), (1, refusal));
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        format!(
+            "{}Maximum file size: 3000000000B\n",
+            LOG_HEAD.replace(
+                "Keep MBits",
+                &format!(
+                    "Deleted existing Protein BLAST database named {}\nKeep MBits",
+                    logged_db_name(&log)
+                )
+            )
+        )
+    );
+    assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0]);
+}
+
+/// An output name whose LMDB lock file (`NAME.pdb-lock`) passes the file system's limit of a
+/// file name, 255 bytes (an output name of 247 bytes and more), stops a version 5 build where
+/// LMDB's open of that file fails, as in makeblastdb 2.17.0 (probe of 2026-11-08): when the
+/// second sequence publishes the first, with `BLAST Database error: LMDB runtime error:
+/// mdb_env_open: File name too long` (exit status 2); with one sequence in the close, as a
+/// creation error (exit status 1). No file is left. At 246 bytes the build ends normally.
+#[cfg(unix)]
+#[test]
+fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
+    let tmp = TempDir::new("lockname");
+    let one = tmp.0.join("one.fa");
+    let two = tmp.0.join("two.fa");
+    std::fs::write(&one, ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n").unwrap();
+    std::fs::write(
+        &two,
+        ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n>seq2 second\nMKKLLPTAAAGLLLLAAQPAMA\n",
+    )
+    .unwrap();
+    let (one, two) = (one.to_string_lossy(), two.to_string_lossy());
+    let head = format!("{LOG_HEAD}Maximum file size: 3000000000B\n");
+    let error = "LMDB runtime error: mdb_env_open: File name too long";
+    for length in [247, 250] {
+        let out = tmp.base(&"e".repeat(length));
+        let (status, log, messages) = makedb_version(&two, &out, "3GB", b"", 5);
+        assert_eq!(
+            (status, messages),
+            (2, format!("BLAST Database error: {error}\n")),
+            "{length}"
+        );
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            format!("{head}\nNo volumes were created.\n\n"),
+            "{length}"
+        );
+        let (status, log, messages) = makedb_version(&one, &out, "3GB", b"", 5);
+        assert_eq!(
+            (status, messages),
+            (1, format!("BLAST Database creation error: {error}\n")),
+            "{length}"
+        );
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            format!(
+                "{head}Adding sequences from FASTA; added 1 sequences in <S> seconds.\n\nNo \
+                 volumes were created.\n\n"
+            ),
+            "{length}"
+        );
+        assert_eq!(files_named(&tmp.0, "e"), [] as [&str; 0], "{length}");
+    }
+    let (status, _, messages) = makedb_version(&two, &tmp.base(&"e".repeat(246)), "3GB", b"", 5);
+    assert_eq!((status, messages.as_str()), (0, ""));
+    assert!(files_named(&tmp.0, "e").contains(&format!("{}.pdb", "e".repeat(246))));
 }
 
 /// The directory of the output name is made as makeblastdb makes it

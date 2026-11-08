@@ -138,3 +138,7 @@ pub fn can_chain_hsps(
 
     q_ok && s_ok
 }
+
+#[cfg(test)]
+#[path = "chaining_tests.rs"]
+mod chaining_tests;

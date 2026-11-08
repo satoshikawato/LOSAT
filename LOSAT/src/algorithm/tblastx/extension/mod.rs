@@ -116,3 +116,6 @@ pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize)
 pub fn calculate_statistics(score: i32, aln_len: usize, params: &KarlinParams) -> (f64, f64) {
     calculate_evalue_alignment_length(score, aln_len, params)
 }
+
+#[cfg(test)]
+mod extension_tests;

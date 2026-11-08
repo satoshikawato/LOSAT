@@ -76,7 +76,6 @@ FAST_TBLASTX = frozenset({
 # inputs selects all four programs (they share the reader).
 FASTA_INPUT_PATHS = ("LOSAT/src/blastinput/", "LOSAT/tests/fasta_input_fixtures", "LOSAT/tests/fixtures/fasta_input/")
 PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx|psiblast|rpsblast)/")
-STAGE_G_PREFIX = "/mnt/c/Users/genom/GitHub/LOSAT/"
 
 
 def program_dependents() -> dict[str, set[str]]:
@@ -348,8 +347,6 @@ def main() -> int:
     if ordered:
         losat = args.losat.resolve()
         stage_lexical_fixtures()
-        if "tblastn" in programs and not Path(STAGE_G_PREFIX).is_dir():
-            raise SystemExit(f"TBLASTN Stage G inputs are named by {STAGE_G_PREFIX}; link the checkout there first")
         cases = capture_outputs.all_cases(programs)
         if not args.all_cases:
             cases = [case for case in cases if case.program != "tblastx" or case.case_id in FAST_TBLASTX]

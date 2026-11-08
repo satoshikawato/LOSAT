@@ -48,7 +48,7 @@ plus the one focused fixture from the stage's `AUTHORITY.md`. Adapter: `cargo fm
 `cargo test --locked` in `web/adapter` (1-2 min). App: `cd web/app && npm run check` (median
 77 s); `npm ci` only when `package-lock.json` changed.
 
-- A bare `cargo test <filter>` builds and links every test binary before it filters: the lib tests, the bin, and the nine under `LOSAT/tests/` (the suites blastn, blastp, blastx, tblastn, tblastx and common in `tests/suites/`, plus blastn_report_stream_api, unit_tests and thread_memory). A plain `cargo test --test <suite>` runs all of that suite's files' tests at once, up to the CPU count, so a timing gate passes `-- --test-threads N`.
+- A bare `cargo test <filter>` builds and links every test binary before it filters: the lib tests, the bin, and the eight under `LOSAT/tests/` (the suites blastn, blastp, blastx, tblastn, tblastx and common in `tests/suites/`, plus blastn_report_stream_api and thread_memory). A plain `cargo test --test <suite>` runs all of that suite's files' tests at once, up to the CPU count, so a timing gate passes `-- --test-threads N`.
 - `LOSAT/Cargo.toml` sets `[profile.test] opt-level = 1`, so a local test build needs no `CARGO_PROFILE_TEST_OPT_LEVEL`. CI builds the test profile at opt-level 3 with line tables only (`CARGO_PROFILE_TEST_*` in `.github/workflows/ci.yml`).
 
 ## Standard (end of a step and before every push; 10-25 minutes)

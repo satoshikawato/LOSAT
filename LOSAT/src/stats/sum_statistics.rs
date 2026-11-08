@@ -997,3 +997,11 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "evalue_precision_tests.rs"]
+mod evalue_precision_tests;
+
+#[cfg(test)]
+#[path = "evalue_precision_fix_verification_tests.rs"]
+mod evalue_precision_fix_verification_tests;

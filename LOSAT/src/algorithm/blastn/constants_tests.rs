@@ -1,6 +1,6 @@
 //! Unit tests for blastn/constants.rs
 
-use LOSAT::algorithm::blastn::constants::*;
+use crate::algorithm::blastn::constants::*;
 
 #[test]
 fn test_x_drop_constants() {

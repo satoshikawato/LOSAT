@@ -1424,3 +1424,7 @@ mod extend_hit_ungapped_bounds_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "extension_tests.rs"]
+mod extension_tests;

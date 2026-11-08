@@ -1,6 +1,6 @@
 //! Unit tests for blastn/alignment modules
 
-use LOSAT::algorithm::blastn::alignment::utilities::gdb3;
+use crate::algorithm::blastn::alignment::utilities::gdb3;
 
 #[test]
 fn test_gdb3_no_reduction() {

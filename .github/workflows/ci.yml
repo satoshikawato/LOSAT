@@ -55,14 +55,14 @@ jobs:
         run: python3 LOSAT/tests/check_program_edges.py --root .
       - name: Program-edge ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_program_edges.py'
-      # No NCBI counterpart: CI wiring. Every test_*.py file is named in a `run:` command of a
-      # workflow that runs on push, pull request or schedule, or one it calls (SWEBOK 2026-11-04
-      # audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a directory in
-      # python.yml.
-      - name: Python tests in CI
-        run: python3 LOSAT/tests/check_python_tests_in_ci.py --root .
-      - name: Python-tests-in-CI checker tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_python_tests_in_ci.py'
+      # No NCBI counterpart: CI wiring. Every test_*.py and test_*.js file is named in a `run:`
+      # command of a workflow that runs on push, pull request or schedule, or one it calls (SWEBOK
+      # 2026-11-04 audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a
+      # directory in python.yml.
+      - name: Tests in CI
+        run: python3 LOSAT/tests/check_tests_in_ci.py --root .
+      - name: Tests-in-CI checker tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_tests_in_ci.py'
       - name: Public API checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_public_api.py'
       - name: Release-candidate tooling tests

@@ -501,9 +501,11 @@ target directory and are counted again; `cargo llvm-cov clean --profraw-only` re
 
 The `test_*.py` files here test the Python tools beside them (regression drivers, certification
 audits, ratchets, release tooling) with small files and stand-in programs. ci.yml's `rust lint` and the
-other workflows run each file by name. `check_python_tests_in_ci.py` (tested by
-`test_check_python_tests_in_ci.py`) fails `rust lint` when a `test_*.py` file of the repository is named
-in the `run:` commands of no workflow that runs on push, pull request or schedule (or of a workflow one
-of them calls); a release workflow that runs only when dispatched does not count. `python/tests/`,
-pylosat's pytest suite, runs as a directory in `python.yml`. Add the step that runs a new test file in
-the same pull request, and delete a test together with the tool it tests.
+other workflows run each file by name. `check_tests_in_ci.py` (tested by
+`test_check_tests_in_ci.py`) fails `rust lint` when a `test_*.py` or `test_*.js` file of the
+repository is named in the `run:` commands of no workflow that runs on push, pull request or
+schedule (or of a workflow one of them calls); a release workflow that runs only when dispatched
+does not count. `python/tests/`, pylosat's pytest suite, runs as a directory in `python.yml`;
+web/app's vitest and Playwright files (`*.test.ts`, `*.spec.ts`) run as suites in `web.yml` and are
+not read. Add the step that runs a new test file in the same pull request, and delete a test
+together with the tool it tests.

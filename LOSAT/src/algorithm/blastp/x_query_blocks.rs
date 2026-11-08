@@ -207,9 +207,10 @@
 //!   blocks, so a block sees what the search of all queries has at that batch. The refusals
 //!   before the first byte are those of outfmt 8 (with `-db` the definition lines,
 //!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids) and the titles
-//!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`),
-//!   which are checked before the search starts (the titles in `search`: the queries of the
-//!   batches NCBI completes, and the subjects when there is one). The errors that NCBI
+//!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`):
+//!   the name before the search starts, the titles where the search of all queries writes the
+//!   archive of the batches NCBI completes (`run_resolved_in_pool`, after their search), so a run
+//!   with such a title takes that search and no block (`x_query_block_plan`). The errors that NCBI
 //!   turns into an error archive (`run`) come after the documents of the batches before, from
 //!   the same handle. In a call of several outputs, hit records or an observer
 //!   the plan is refused for 11 as for 15 and 16: the handle's muting and

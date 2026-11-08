@@ -943,9 +943,9 @@ pub fn run(
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
     // A title that the archive cannot hold is refused where NCBI would write its Bioseq, which
-    // is known only after the search. BLASTX/TBLASTN refuse before they create `-out`, and so
-    // does this run when the file was not there and nothing was written to it: no empty file is
-    // left behind.
+    // is known only after the search. When the file was not there and nothing was written to it,
+    // no empty file is left behind (the other programs create `-out` before their option checks,
+    // as NCBI does, and leave it empty: DECISIONS 24 f of line NP, series SM).
     let write_failed = stream.failed;
     drop(stream);
     if out_is_new

@@ -129,19 +129,6 @@ pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// A title the archive cannot write, found by `check_batch_titles` (`check_titles`); a typed
-/// error, so that it is told apart from the reader's own errors, which end the scan.
-#[derive(Debug)]
-struct TitleRefusal(String);
-
-impl std::fmt::Display for TitleRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for TitleRefusal {}
-
 /// Whether the query is a regular file, decided on the handle already open (`fstat`), before any
 /// second `open` by path: `prescan_query_titles` reads the file a second time, which would take
 /// bytes from a pipe (`<(...)`, `/dev/stdin`) or wait for a writer of a named FIFO.
@@ -156,22 +143,16 @@ pub(crate) fn refuse_irregular_query() -> Result<()> {
 }
 
 /// Reads the query file once before the search, batch by batch as the search reads it
-/// (`batch_size` letters, the run's), and refuses the first record whose title the archive
-/// cannot write (`check_titles`), so that no refusal can follow a written byte. Returns whether
-/// NCBI writes the archive of a batch (`written_batch`), whose Bioseqs hold the `-subject`
-/// records too. The scan ends at the batch that stops the run, as the search does: a reader
-/// error (the run reads the file again and fails there as it always did, after the archives of
-/// the batches before it, which NCBI writes), and a batch that NCBI fails (`written_batch`); so
-/// the titles of the batches before it are checked, and the records of that batch, never
-/// written, are not. The file must be a regular file (`query_is_regular`). It is
-/// read as the search reads it (`settings`: under `-parse_deflines`, a first line that is not a
-/// defline is the reader error), and the records are cut to `range` as the search cuts them: a
-/// record the range skips is never written and is not checked. It keeps no defline, so LOSAT's
-/// refusal of a Seq-id range in a defline (`refuse_range_in_archive`, which the search with the
-/// archive makes) does not stop it, and a later title may be refused first: both refusals come
-/// before any byte, and keeping the deflines would keep whole records under `-query_loc`. A
-/// batch size of 0 reads no query (NCBI's first batch is empty and the search stops at it):
-/// nothing is checked and no batch is written.
+/// (`batch_size` letters, the run's), and returns whether a batch that the search may write holds
+/// a query whose title the archive cannot write (`batches_may_refuse`). The file must be a regular
+/// file (`query_is_regular`). It is read as the search reads it (`settings`: under
+/// `-parse_deflines`, a first line that is not a defline is the reader error, where the scan ends
+/// as the search does), and the records are cut to `range` as the search cuts them: a record the
+/// range skips is never written and is not scanned. It keeps no defline, so LOSAT's refusal of a
+/// Seq-id range in a defline (`refuse_range_in_archive`, which the search with the archive makes)
+/// does not stop it, and keeping the deflines would keep whole records under `-query_loc`. A batch
+/// size of 0 reads no query (NCBI's first batch is empty and the search stops at it): nothing is
+/// scanned.
 pub(crate) fn prescan_query_titles(
     file: &std::fs::File,
     settings: &super::input::QueryStreamSettings,
@@ -188,7 +169,7 @@ pub(crate) fn prescan_query_titles(
     // reaches, `input_files::open_file_input`); the handles share one position, put back below.
     let start = (&*file).stream_position()?;
     let mut stream = settings.stream_before_search(file.try_clone()?);
-    let written = check_batch_titles(options, &mut |deliver| {
+    let found = batches_may_refuse(options, &mut |deliver| {
         super::input::parse_fasta_stream_keeping(
             &mut stream,
             false,
@@ -203,30 +184,183 @@ pub(crate) fn prescan_query_titles(
     });
     drop(stream);
     (&*file).seek(std::io::SeekFrom::Start(start))?;
-    written
+    Ok(found)
 }
 
-/// Checks the query titles of the reader batches that `read` gives its argument, in order, up to
-/// the batch that stops the run: the end of `read` (a reader error, or another error of LOSAT's
-/// reading, which the search meets in its place) or a batch that NCBI fails (`written_batch`).
-/// Refuses the first title that the archive cannot write (`check_titles`), and returns whether
-/// NCBI writes the archive of a batch (`prescan_query_titles`, `local::search_records`).
-pub(crate) fn check_batch_titles(
+/// Whether one of the reader batches that `read` gives its argument, in order, holds a query whose
+/// title the archive cannot write (`check_titles`), up to the batch that stops the run before its
+/// search: the end of `read` (a reader error, or another error of LOSAT's reading, which the search
+/// meets in its place) or a batch that NCBI fails at its set-up (`written_batch`); the records of
+/// that batch, never written, are not looked at. Such a title is refused where the archive of its
+/// batch is written, after the batch's search (`check_batch_titles`), since NCBI writes no archive
+/// of a batch whose search fails; until then the run holds what it writes (`ArchiveHold`), so that
+/// the refusal follows no byte (`prescan_query_titles` for the command line, the records of
+/// `local::report_batches`).
+pub(crate) fn batches_may_refuse(
     options: &ResolvedOptions,
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
-) -> Result<bool> {
-    let mut written = false;
-    let scanned = read(&mut |batch| {
+) -> bool {
+    let mut found = false;
+    let _ = read(&mut |batch| {
         if !written_batch(batch, options) {
-            // The batches end here (an error that is not a refusal).
             anyhow::bail!("NCBI stops the run at this batch");
         }
-        written = true;
-        check_titles(batch, "query").map_err(|refusal| TitleRefusal(refusal.to_string()).into())
+        if check_titles(batch, "query").is_err() {
+            found = true;
+            anyhow::bail!("a title the archive cannot write");
+        }
+        Ok(())
     });
-    match scanned {
-        Err(error) if error.is::<TitleRefusal>() => Err(error),
-        _ => Ok(written),
+    found
+}
+
+/// No NCBI counterpart: the output streams of a run whose archive may still refuse the title of a
+/// later batch (`batches_may_refuse`), held in the order in which they are written: each write keeps
+/// its bytes with the index of its stream (`writer`), so that `release` writes them in that order
+/// (the archives of the batches and the messages between them, as a stream that both go to reads
+/// them from NCBI) and `discard` drops them. Outside `hold` the bytes pass through. Shared, so that
+/// the diagnostics stream behind the archive's message log (`report::archive::DiagTee`) can be one
+/// of its streams.
+pub(crate) struct ArchiveHold<S: Write>(std::sync::Arc<std::sync::Mutex<HoldState<S>>>);
+
+struct HoldState<S> {
+    holding: bool,
+    discarded: bool,
+    sinks: Vec<S>,
+    held: Vec<(usize, Vec<u8>)>,
+}
+
+/// A stream of an `ArchiveHold`.
+pub(crate) struct HoldWriter<S: Write> {
+    hold: ArchiveHold<S>,
+    sink: usize,
+}
+
+impl<S: Write> Clone for ArchiveHold<S> {
+    fn clone(&self) -> Self {
+        ArchiveHold(self.0.clone())
+    }
+}
+
+impl<S: Write> ArchiveHold<S> {
+    pub(crate) fn new() -> Self {
+        ArchiveHold(std::sync::Arc::new(std::sync::Mutex::new(HoldState {
+            holding: false,
+            discarded: false,
+            sinks: Vec::new(),
+            held: Vec::new(),
+        })))
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, HoldState<S>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// A stream that writes to `sink`.
+    pub(crate) fn writer(&self, sink: S) -> HoldWriter<S> {
+        let mut state = self.state();
+        state.sinks.push(sink);
+        HoldWriter {
+            hold: self.clone(),
+            sink: state.sinks.len() - 1,
+        }
+    }
+
+    /// Keeps everything written from now on.
+    pub(crate) fn hold(&self) {
+        self.state().holding = true;
+    }
+
+    /// Writes what is held, in order, and passes the bytes on again.
+    pub(crate) fn release(&self) -> std::io::Result<()> {
+        let mut state = self.state();
+        state.holding = false;
+        let held = std::mem::take(&mut state.held);
+        if state.discarded {
+            return Ok(());
+        }
+        for (sink, bytes) in held {
+            state.sinks[sink].write_all(&bytes)?;
+        }
+        for sink in &mut state.sinks {
+            sink.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Drops what is held and everything written after.
+    pub(crate) fn discard(&self) {
+        let mut state = self.state();
+        state.discarded = true;
+        state.held.clear();
+    }
+
+    /// The end of a run that stopped with `error`: one of NCBI's own errors, after which NCBI
+    /// writes its error archive (`error_lines`), follows the archives of the batches before it,
+    /// which NCBI wrote (released); LOSAT's refusal (the title of the batch, or another) follows
+    /// no byte (dropped).
+    pub(crate) fn end_with(&self, error: &anyhow::Error) {
+        if error_lines(error, false).is_some() {
+            let _ = self.release();
+        } else {
+            self.discard();
+        }
+    }
+}
+
+impl<S: Write> Write for HoldWriter<S> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let mut state = self.hold.state();
+        if state.discarded {
+            return Ok(bytes.len());
+        }
+        if state.holding {
+            match state.held.last_mut() {
+                Some((sink, held)) if *sink == self.sink => held.extend_from_slice(bytes),
+                _ => state.held.push((self.sink, bytes.to_vec())),
+            }
+            return Ok(bytes.len());
+        }
+        state.sinks[self.sink].write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut state = self.hold.state();
+        if state.discarded || state.holding {
+            return Ok(());
+        }
+        state.sinks[self.sink].flush()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-284
+// ```c++
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//     ...
+//                 results = lcl_blast.Run();
+//     ...
+//             if (fmt_args->ArchiveFormatRequested(args)) {
+//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+// ```
+/// The refusal of a title that the archive of a query batch cannot write (`check_titles`), made
+/// where the batch's archive is written, after its search (and, with `-db`, the read of its
+/// definition lines): the archive of each batch that NCBI completes holds the batch's queries and,
+/// with `-subject`, every subject (`subjects`, checked with the run's first batch, `first`). The
+/// batch that stops the run writes neither: a reader error, `Empty CBlastQueryVector`, a batch
+/// whose set-up fails (`written_batch`), and a batch whose search fails (the sequence file or a
+/// header file of `-db` that NCBI cannot read); the error archive holds no sequence.
+pub(crate) fn check_batch_titles(
+    queries: &[FastaRecord],
+    subjects: Option<&[FastaRecord]>,
+    first: bool,
+) -> Result<()> {
+    check_titles(queries, "query")?;
+    match subjects {
+        Some(subjects) if first => check_titles(subjects, "subject"),
+        _ => Ok(()),
     }
 }
 

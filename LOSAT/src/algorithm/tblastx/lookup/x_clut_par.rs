@@ -3381,7 +3381,7 @@ mod tests {
     // build's (its first segments are the kept buffers, garbage in them), and both builds give the
     // serial table slot for slot.
     #[test]
-    fn kept_segments_are_the_next_builds_and_the_table_is_the_serial_one() {
+    fn kept_segments_of_any_values_leave_the_table_the_serial_one() {
         let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
         let pool = XSegmentPool::default();
         for round in 0..4 {
@@ -3392,19 +3392,16 @@ mod tests {
                 5, 1100, &query, &locations, &tables,
             ));
             let threads = 3;
-            let kept: Vec<usize> = {
+            {
                 let mut kept = pool.0.lock().unwrap();
+                assert!(
+                    kept.len() <= threads,
+                    "round {round}: at most one per thread"
+                );
                 for segment in kept.iter_mut() {
                     segment.fill(u32::MAX);
                 }
-                kept.iter()
-                    .map(|segment| segment.as_ptr() as usize)
-                    .collect()
-            };
-            assert!(
-                kept.len() <= threads,
-                "round {round}: at most one per thread"
-            );
+            }
             let stage = in_pool(threads, || {
                 x_flat_appends_on(
                     Blosum62Compressed,
@@ -3433,17 +3430,9 @@ mod tests {
             let XFlatStage::Appends(appends) = stage else {
                 panic!("round {round}: the appends pass ended the build")
             };
-            let used: Vec<usize> = appends
-                .appends
-                .segments
-                .iter()
-                .map(|segment| segment.as_ptr() as usize)
-                .collect();
-            assert!(
-                kept.iter().all(|address| used.contains(address)),
-                "round {round}: the kept segments are taken"
-            );
-            assert!(pool.0.lock().unwrap().is_empty() || used.len() < kept.len());
+            // Which kept segments a build takes depends on the tasks' order (and a kept segment
+            // shorter than a piece is not taken): `a_task_writes_into_kept_segments_first` checks
+            // the order on one task. Here the kept ones hold u32::MAX and the table is the serial one.
             let built = in_pool(threads, || {
                 x_flat_stripes_on(
                     Blosum62Compressed,
@@ -3456,11 +3445,73 @@ mod tests {
                 )
             });
             x_assert_same_flat_tables_as(&format!("round {round}"), &flat(built), &serial);
-            let after = pool.0.lock().unwrap().len();
+            let kept = pool.0.lock().unwrap();
             assert!(
-                (1..=threads).contains(&after),
-                "round {round}: {after} kept"
+                (1..=threads).contains(&kept.len()),
+                "round {round}: {} kept",
+                kept.len()
+            );
+            assert!(
+                kept.iter()
+                    .all(|segment| !segment.is_empty() && segment.capacity() == segment.len()),
+                "round {round}: the kept segments are cut to their entries"
             );
         }
+    }
+
+    #[test]
+    fn a_task_writes_into_kept_segments_first() {
+        let lengths = |pool: &XSegmentPool| -> Vec<usize> {
+            pool.0.lock().unwrap().iter().map(Vec::len).collect()
+        };
+        let pool = XSegmentPool::default();
+        // The empty segment is not kept.
+        pool.keep(vec![vec![7u32; 10], Vec::new(), vec![7u32; 4]], 3);
+        assert_eq!(lengths(&pool), [10, 4]);
+        let kept: Vec<usize> = pool
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|segment| segment.as_ptr() as usize)
+            .collect();
+        let registry = Mutex::new(Vec::new());
+        {
+            let mut out = XSegmentOut::new(&registry, 64, Some(&pool));
+            let mut take = |n: usize, value: u32| {
+                let (segment, at, range) = out.take(n);
+                assert_eq!(range.len(), n);
+                range.fill(value);
+                (segment, at)
+            };
+            // The first kept segment of at least 6 entries (10), then 3 more in it.
+            assert_eq!(take(6, 1), (0, 0));
+            assert_eq!(take(3, 2), (0, 6));
+            // 2 do not fit in the 1 left: the next kept one of at least 2 (4 entries).
+            assert_eq!(take(2, 3), (1, 0));
+            // 5 do not fit, and the pool is empty: a new segment of at least 64 entries.
+            assert_eq!(take(5, 4), (2, 0));
+        }
+        let segments = registry.into_inner().unwrap();
+        assert_eq!(
+            segments.iter().map(Vec::len).collect::<Vec<_>>(),
+            [9, 2, 5],
+            "each segment cut to the entries taken"
+        );
+        assert_eq!(segments[0], [1, 1, 1, 1, 1, 1, 2, 2, 2]);
+        assert_eq!(segments[1], [3, 3]);
+        assert_eq!(segments[2], [4; 5]);
+        assert_eq!(segments[0].as_ptr() as usize, kept[0]);
+        assert_eq!(segments[1].as_ptr() as usize, kept[1]);
+        assert!(lengths(&pool).is_empty());
+        // At most 2 kept, each cut to its entries.
+        pool.keep(segments, 2);
+        assert_eq!(lengths(&pool), [9, 2]);
+        assert!(pool
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|segment| segment.capacity() == segment.len()));
     }
 }

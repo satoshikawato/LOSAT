@@ -51,8 +51,10 @@ pub(crate) struct ReportRound<'a> {
     pub(crate) found_before: Option<&'a [bool]>,
 }
 
-/// The outfmt 0 report of one round of `queries` (the one query of a round): the prolog when
-/// `prolog` is set (the run's first round), the query's warnings, then its section. No epilog.
+/// The outfmt 0 report of the queries `query_range` of one round of `queries` (the one query of a
+/// round), whose `hits` are those queries' (the rows of a window of queries,
+/// `pairwise::write_blastp_pairwise_window`): the prolog when `prolog` is set (the run's first
+/// round) and the window starts the report, each query's warnings, then its section. No epilog.
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:278-286
 // ```c++
 //                 	   //BlastFormatter_PreFetchSequenceData(*results, scope);
@@ -65,6 +67,7 @@ pub(crate) struct ReportRound<'a> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_psiblast_round_report(
     hits: &[PairwiseHit],
+    query_range: std::ops::Range<usize>,
     writer: &mut dyn Write,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
@@ -80,7 +83,7 @@ pub(crate) fn write_psiblast_round_report(
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
-    if prolog {
+    if prolog && query_range.start == 0 {
         write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
         match database {
             Some(database) => write_blast_database_header(writer, database)?,
@@ -93,9 +96,12 @@ pub(crate) fn write_psiblast_round_report(
             )?,
         }
     }
-    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
-        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+        if let Some(bucket) = (hit.hit.q_idx as usize)
+            .checked_sub(query_range.start)
+            .and_then(|offset| hits_by_query.get_mut(offset))
+        {
             bucket.push((hsp_index, hit));
         }
     }
@@ -109,7 +115,7 @@ pub(crate) fn write_psiblast_round_report(
         round,
     };
     let mut warnings = warnings;
-    for (q_idx, query_hits) in hits_by_query.iter().enumerate() {
+    for (q_idx, query_hits) in query_range.zip(&hits_by_query) {
         // The query's warnings come before its preamble, after the report written so far
         // (`QueryWarnings::before_query`).
         if let Some(warnings) = warnings.as_deref_mut() {

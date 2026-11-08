@@ -48,9 +48,8 @@ registered standard-field expansion. Output goes to stdout unless `-out` names
 a file; `-out -` also uses stdout.
 
 Each protein subject may contain at most 5,000,000 residues. Longer subjects,
-database searches, stdin FASTA specified with `-query -` or `-subject -`,
-unsupported options/tasks/matrices/gap costs,
-and composition modes 1/3 fail explicitly. Native threads 1/2/4/8 and serial
+stdin FASTA specified with `-query -` or `-subject -`, and unsupported options
+and tasks fail explicitly. Native threads 1/2/4/8 and serial
 and threaded command-WASI and Web/reactor entry points are implemented. Their
 full v0.2.0 acceptance, including browser and pool-failure coverage, remains
 open. Formal performance measurements exist for fixed workloads; they do not

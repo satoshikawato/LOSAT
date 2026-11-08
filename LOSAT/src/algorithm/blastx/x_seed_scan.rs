@@ -309,7 +309,7 @@ pub(crate) fn x_word_finder_scan(
 
 /// `x_word_finder_scan` with another matrix than BLOSUM62 (item SC6 of line NP): the direct loop
 /// (`x_word_finder_direct_with`, the port of NCBI's loop) with the matrix's extensions
-/// (`MatrixBx`), on its tables of `Int4` hits (`Lookup::x_new_as` builds no 16-bit table for it);
+/// (`MatrixBx`), on its tables of `Int4` hits (`Lookup::x_new_of` builds no 16-bit table for it);
 /// the fused loop (LOSAT_X_BXDIAG) and the sentinel walks (LOSAT_X_BXUNGAPSENT) are BLOSUM62's.
 /// Not inlined, so that BLOSUM62's loops keep their code.
 #[inline(never)]

@@ -1150,9 +1150,8 @@ pub(crate) fn word_finder(
     )
 }
 
-/// [`word_finder`] for a lookup table of either width ([`BxLookup`]).
 /// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`): its tables are the standard
-/// ones of `Int4` hits (`Lookup::x_new_as` builds no 16-bit table for it).
+/// ones of `Int4` hits (`Lookup::x_new_of` builds no 16-bit table for it).
 #[cold]
 #[inline(never)]
 pub(super) fn word_finder_bx_of(
@@ -1187,6 +1186,7 @@ pub(super) fn word_finder_bx_of(
     )
 }
 
+/// [`word_finder`] for a lookup table of either width ([`BxLookup`]).
 pub(super) fn word_finder_bx(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],

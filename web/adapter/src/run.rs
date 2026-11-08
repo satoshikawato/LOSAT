@@ -2802,7 +2802,7 @@ mod tests {
         }
     }
 
-    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 52 rows of the manifest that a
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 54 rows of the manifest that a
     // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
     // store refuses: maintainer decision 3), stream 4 and stream 3.
     #[test]
@@ -2823,7 +2823,7 @@ mod tests {
                 !gap_line(file("-query")) && !gap_line(file("-subject"))
             })
             .collect();
-        assert_eq!(rows.len(), 52);
+        assert_eq!(rows.len(), 54);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];

@@ -173,7 +173,7 @@ const NUCLEOTIDE_GAP_COSTS: PairSelect = {
   only: { tasks: ['megablast'], values: ['0 0'] },
   labels: gapCostsLabel,
 };
-// NCBI's gap costs of BLOSUM62, all of which LOSAT's BLASTP and TBLASTN read.
+// NCBI's gap costs of BLOSUM62, all of which LOSAT's BLASTP, BLASTX and TBLASTN read.
 const BLOSUM62_GAP_COSTS = ['11 2', '10 2', '9 2', '8 2', '7 2', '6 2', '13 1', '12 1', '11 1', '10 1', '9 1'];
 // NCBI's lists of the protein programs' pages (the same on BLASTP's, BLASTX's, TBLASTN's and TBLASTX's), by matrix.
 export const PROTEIN_GAP_COSTS: PairSelect = {
@@ -206,7 +206,8 @@ const PROTEIN_SCORING: Pick<ParameterSection, 'pairs'> = { pairs: { 'Gap Costs':
 // LOSAT's BLASTP and BLASTX score with NCBI's matrices and the gap costs of their lists and adjust
 // with every mode. BLASTP also takes IDENTITY, which NCBI's page does not list ("Other"; its modes
 // reset to 0 with NCBI's warning); BLASTX's gapped search stops at IDENTITY with NCBI BLAST+'s own
-// error, as NCBI's does (the engine's e2e of the selects checks both sides).
+// error, as NCBI's does (the adapter's tests of the runs check it; the engine's e2e of the selects
+// checks NCBI's matrices).
 // `describe` explains the values of -comp_based_stats only in its help text; the names are NCBI's.
 const compBasedStats: ParameterField = {
   flag: '-comp_based_stats',

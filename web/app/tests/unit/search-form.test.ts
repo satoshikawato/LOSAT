@@ -331,6 +331,13 @@ describe("knownDefault: the defaults that the engine resolves (describe's defaul
     expect(knownDefault(blastp, '-gapopen', { '-matrix': 'NOSUCH' }, bp)).toBeUndefined();
     expect(knownDefault(blastp, '-evalue', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '10' });
     expect(knownDefault(tblastx, '-window_size', { '-matrix': 'BLOSUM45' }, tx)).toEqual({ defaultValue: '60' });
+    // BLASTX (series SC, SC6): the matrix's gap costs, window and threshold + 1 (a translated query); blastx-fast keeps 20.
+    const blastx = programById('blastx');
+    const bx = optionsOf('blastx');
+    expect(knownDefault(blastx, '-gapopen', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '9' });
+    expect(knownDefault(blastx, '-window_size', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '15' });
+    expect(knownDefault(blastx, '-threshold', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '17' });
+    expect(knownDefault(blastx, '-threshold', { '-matrix': 'PAM30', '-task': 'blastx-fast' }, bx)).toEqual({ defaultValue: '20' });
   });
 
   it("takes a given word size's threshold from the engine's table, and none for two such options set", () => {

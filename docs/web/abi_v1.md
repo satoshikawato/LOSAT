@@ -211,8 +211,11 @@ same request.
 - `blastn`: `-task` other than `megablast` or `blastn` fails with
   `unsupported blastn task for web API: <task>` (`:360`). The default task is
   `megablast`. `-word_size 28` is read as no word size, so `-task blastn -word_size 28`
-  has the blastn default of 11 (`v1_blastn_word_size`, `:370`). The `E`-value default is
-  10. The strands are both.
+  has the blastn default of 11 (`v1_blastn_word_size`, `:370`). A `-word_size` below 4
+  fails with NCBI's error of the options (`Word-size must be greater than zero` for 0,
+  `Word-size must be 4 or greater for nucleotide comparison` for 1 to 3,
+  `check_scoring_options`; before 2026-11-08 it ran, with other hits). The `E`-value default
+  is 10. The strands are both.
 - `blastp`: the default task is `blastp` and `-comp_based_stats` is `2`.
 - The other options of each program take the defaults of the args structure in the
   parser. Ranges (`-query_loc`, `-subject_loc`), masking, and database options are not

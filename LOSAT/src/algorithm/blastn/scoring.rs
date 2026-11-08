@@ -84,7 +84,8 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///    }
 /// ```
 /// The template length and type are 16, 18 or 21 and 0, 1 or 2 by the argument
-/// constraints (`-template_length`, `-template_type`), so their two checks cannot fail.
+/// constraints (`-template_length`, `-template_type`); a caller of `run_local` can set another
+/// length, which the length's check refuses (the type is an enum of the three).
 /// The lookup table type of the options is the task's: megablast and dc-megablast
 /// `eMBLookupTable`, blastn and blastn-short `eNaLookupTable`
 /// (blast_nucl_options.cpp:137-150, disc_nucl_options.cpp:55-64).
@@ -159,12 +160,57 @@ fn check_scoring_options_with(
         //         "BLASTN gap extension penalty cannot be 0");
         // ```
         "BLASTN gap extension penalty cannot be 0".to_string()
+    } else if word_size == 0 {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1326
+        // ```c
+        //     if (options->word_size <= 0)
+        //     {
+        //         if ( !Blast_ProgramIsRpsBlast(program_number)) {
+        //             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                                      "Word-size must be greater than zero");
+        //             return BLASTERR_OPTION_VALUE_INVALID;
+        //         }
+        //     } else if (/*program_number == eBlastTypeBlastn*/
+        //                Blast_ProgramIsNucleotide(program_number) &&
+        //                !Blast_QueryIsPattern(program_number) && options->word_size < 4)
+        //     {
+        //         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                   "Word-size must be 4 or greater for nucleotide comparison");
+        // ```
+        // The command line's `-word_size` is at least 4 (`blastn_word_size`); a caller of
+        // `run_local` sets the field itself.
+        "Word-size must be greater than zero".to_string()
+    } else if word_size < 4 {
+        "Word-size must be 4 or greater for nucleotide comparison".to_string()
     } else if word_size > DBSEQ_CHUNK_OVERLAP {
         format!("Word-size must be less than or equal to {DBSEQ_CHUNK_OVERLAP}")
     } else if template_length > 0 && word_size != 11 && word_size != 12 {
         "Invalid discontiguous template parameters: word size must be either 11 or 12".to_string()
+    } else if template_length > 0 && !matches!(template_length, 16 | 18 | 21) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1263-1269
+        // ```c
+        //    if (template_length != 16 && template_length != 18 &&
+        //        template_length != 21) {
+        //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                          "Invalid discontiguous template parameters: "
+        //                          "template length must be 16, 18, or 21");
+        // ```
+        // The command line's `-template_length` is one of the three (`blastn_template_length`);
+        // a caller of `run_local` sets the field itself.
+        "Invalid discontiguous template parameters: template length must be 16, 18, or 21"
+            .to_string()
     } else if template_length > 0 && !mb_lookup_options {
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
+    } else if args.limit_lookup && word_size < 16 {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1422-1427
+        // ```c
+        //    if (options->db_filter && options->word_size < 16) {
+        //        Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                           "The limit_lookup option can only be used with "
+        //                           "word size >= 16");
+        // ```
+        // `limit_lookup` has no command-line spelling in LOSAT; a caller of `run_local` sets it.
+        "The limit_lookup option can only be used with word size >= 16".to_string()
     } else if args.off_diagonal_range.is_some_and(|range| range != 0)
         && super::coordination::determine_window_size(args) == 0
     {

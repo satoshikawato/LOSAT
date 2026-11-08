@@ -795,6 +795,37 @@ impl SeqDb {
         ))
     }
 
+    /// The order in which NCBI searches and numbers the volumes of a database
+    /// (`SeqDB_CompareVolume`, the sort at the end of `FindVolumePaths`): by file name (the
+    /// text after the last path separator), then by the whole path. For volumes in one
+    /// directory it is the byte order of the paths.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:190-197
+    /// ```c++
+    /// bool SeqDB_CompareVolume(const string & s1, const string & s2)
+    /// {
+    ///     string x1, x2;
+    ///     CSeqDB_Path(s1).FindBaseName().GetString(x1);
+    ///     CSeqDB_Path(s2).FindBaseName().GetString(x2);
+    ///     if (x1 != x2) return (x1 < x2);
+    ///     else return (s1 < s2);
+    /// }
+    /// ```
+    pub fn compare_volume_paths(a: &Path, b: &Path) -> std::cmp::Ordering {
+        fn bytes(path: &Path) -> &[u8] {
+            path.as_os_str().as_encoded_bytes()
+        }
+        fn base_name(path: &[u8]) -> &[u8] {
+            let separator = |byte: &u8| *byte == b'/' || (cfg!(windows) && *byte == b'\\');
+            match path.iter().rposition(separator) {
+                Some(at) => &path[at + 1..],
+                None => path,
+            }
+        }
+        let (a, b) = (bytes(a), bytes(b));
+        base_name(a).cmp(base_name(b)).then_with(|| a.cmp(b))
+    }
+
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
     pub fn volume_index(&self, ordinal: u32) -> Result<usize, SeqDbError> {
         self.find_volume(ordinal).map(|(volume, _)| volume)

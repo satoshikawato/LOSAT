@@ -59,11 +59,14 @@ use std::io::{self, Write};
 /// before the report of the batch that holds it. Queries without a record are NCBI's
 /// `Query is Empty!`.
 pub fn run_local(
-    args: BlastxArgs,
+    mut args: BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
     subject_records: &[fasta_reader::FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTX_TASK.check(&mut args.task)?;
     let requested = requested_formats(&args, outputs);
     // LOSAT Web registers records before it knows the options: they keep no ids of their
     // deflines. The library API's `read_inputs` reads them.
@@ -693,11 +696,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// refusal. An archive (outfmt 11) ends as the command line's does
 /// (`ReportOutputs::finish_archive`).
 pub fn run_local_database(
-    args: BlastxArgs,
+    mut args: BlastxArgs,
     query_records: &[fasta_reader::FastaRecord],
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
+    // parser has checked it, a caller of `run_local` has not.
+    super::args::BLASTX_TASK.check(&mut args.task)?;
     let requested = requested_formats(&args, outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
@@ -999,7 +1005,7 @@ fn check_resolutions(
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts(
         "blastx",
         &outfmts,
-        args.max_target_seqs.map(|n| n as usize),
+        super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
     )?;

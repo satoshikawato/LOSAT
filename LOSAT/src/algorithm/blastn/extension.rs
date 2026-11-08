@@ -106,7 +106,7 @@ fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
 /// counts worked out first (`x_ungap_count.rs`). The loop-for-loop port below stays as the
 /// reference of that module's unit test.
 #[inline(always)]
-pub fn extend_hit_ungapped_exact_ncbi(
+pub(crate) fn extend_hit_ungapped_exact_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
@@ -763,7 +763,7 @@ mod small_na_tests {
 ///    }
 /// }
 /// ```
-pub fn extend_hit_ungapped_approx_ncbi(
+pub(crate) fn extend_hit_ungapped_approx_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,

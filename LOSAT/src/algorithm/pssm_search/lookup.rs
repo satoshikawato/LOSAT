@@ -359,7 +359,7 @@ fn finalize(
         if chain.len() <= AA_HITS_PER_CELL {
             backbone[i].entries[..chain.len()].copy_from_slice(&chain);
         } else {
-            backbone[i].entries[0] = overflow_cursor as i32;
+            backbone[i].set_cursor(overflow_cursor);
             overflow[overflow_cursor..overflow_cursor + chain.len()].copy_from_slice(&chain);
             overflow_cursor += chain.len();
         }

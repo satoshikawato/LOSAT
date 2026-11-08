@@ -177,7 +177,7 @@ pub(crate) fn x_scan_one_range_bf(
                         };
                     }
                 } else {
-                    let src = overflow.add(cell.entries[0] as usize);
+                    let src = overflow.add(cell.cursor());
                     for i in 0..numhits as usize {
                         *d.add(i) = BlastOffsetPair {
                             q_off: *src.add(i) as u32,

@@ -1121,6 +1121,92 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
     assert!(files_named(&tmp.0, "e").contains(&format!("{}.pdb", "e".repeat(246))));
 }
 
+/// makeblastdb removes the names of an existing database with `CFile(name).Remove()`, which
+/// removes a directory with its contents (`CDirEntry::Remove(eRecursive)`), and gives a volume
+/// file its final name with `CDirEntry::Rename(fRF_Overwrite)`, which removes what is there the
+/// same way (makeblastdb 2.17.0, the official Linux x64 release, probe of 2026-11-08, cases
+/// `*_dir_full_2seq`, `pdb_symlink_dir_2seq`): a directory with contents, read-only parts
+/// included, at the LMDB names `db.pdb`, `db.pdb-lock`, `db.ptf-lock` (removals that make the
+/// log say "Deleted existing ..."), at `db.00.pdb` (an LMDB name of a volume, not counted) or
+/// at the volume name `db.pin` (no database is found there; the rename removes it) is gone and
+/// the build ends normally. A symbolic link at `db.pdb` is removed and its target kept.
+#[test]
+fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
+    let tail = "Maximum file size: 3000000000B\nAdding sequences from FASTA; added 2 sequences in \
+                <S> seconds.\n\n\n";
+    let built = [
+        "db.pdb", "db.phr", "db.pin", "db.pjs", "db.pot", "db.psq", "db.ptf", "db.pto",
+    ];
+    let mut cases = vec![
+        ("db.pdb", true, false),
+        ("db.pdb-lock", true, false),
+        ("db.ptf-lock", true, false),
+        ("db.00.pdb", false, false),
+        ("db.pin", false, false),
+    ];
+    if cfg!(unix) {
+        cases.push(("db.pdb", true, true));
+    }
+    for (name, deleted, link) in cases {
+        let tmp = TempDir::new("dirname");
+        let two = tmp.0.join("two.fa");
+        std::fs::write(
+            &two,
+            ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n>seq2 second\nMKKLLPTAAAGLLLLAAQPAMA\n",
+        )
+        .unwrap();
+        let dir = if link {
+            tmp.0.join("target")
+        } else {
+            tmp.0.join(name)
+        };
+        std::fs::create_dir_all(dir.join("inner").join("deeper")).unwrap();
+        std::fs::write(dir.join("inner").join("deeper").join("f"), b"x").unwrap();
+        std::fs::write(dir.join("a"), b"a").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: PathBuf, mode| {
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
+            };
+            if link {
+                std::os::unix::fs::symlink("target", tmp.0.join(name)).unwrap();
+            } else {
+                mode(dir.join("a"), 0o444);
+                mode(dir.join("inner"), 0o555);
+                mode(dir.clone(), 0o555);
+            }
+        }
+        let (status, log, messages) =
+            makedb_version(&two.to_string_lossy(), &tmp.base("db"), "3GB", b"", 5);
+        assert_eq!((status, messages.as_str()), (0, ""), "{name}");
+        let head = if deleted {
+            LOG_HEAD.replace(
+                "Keep MBits",
+                &format!(
+                    "Deleted existing Protein BLAST database named {}\nKeep MBits",
+                    logged_db_name(&log)
+                ),
+            )
+        } else {
+            LOG_HEAD.to_string()
+        };
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            format!("{head}{tail}"),
+            "{name}"
+        );
+        assert_eq!(files_named(&tmp.0, "db"), built, "{name}");
+        for file in built {
+            let meta = std::fs::symlink_metadata(tmp.0.join(file)).unwrap();
+            assert!(meta.file_type().is_file(), "{name}: {file}");
+        }
+        if link {
+            assert!(dir.join("a").is_file() && dir.join("inner/deeper/f").is_file());
+        }
+    }
+}
+
 /// The directory of the output name is made as makeblastdb makes it
 /// (2.17.0): `-out sub/` is the database `sub` and makes no directory;
 /// missing directories are made; and for `-out nodir/../db` makeblastdb makes

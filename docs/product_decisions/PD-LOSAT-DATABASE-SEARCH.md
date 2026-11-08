@@ -254,9 +254,10 @@ Removal of an existing database and the paths of the output:
 
 - An output path with a space or a double quote in its absolute form (for example a build
   inside a directory `my data`). makeblastdb reads the path as a list of names when it looks
-  for the volumes of an existing database: it removes only that database's LMDB files (`.pdb`,
-  `.pot`, `.ptf`, `.pto`, and logs "Deleted existing ..."), keeps its volume files, writes the
-  new files over or beside them and ends with exit status 2 when it opens the result. LOSAT
+  for the volumes of an existing database: it removes only that database's LMDB files
+  (`.pdb`, `.pos`, `.pot`, `.ptf`, `.pto`, and logs "Deleted existing ..."), keeps its volume
+  files, writes the new files over or beside them and ends with exit status 2 when it opens
+  the result. LOSAT
   takes the path as one name, removes the whole database, replaces it and ends with 0; a build
   that fails after the removal (a `-max_file_sz` that is no size) leaves none of the old
   database, where makeblastdb leaves its volume files. (`-out` itself may not contain a space,
@@ -265,7 +266,10 @@ Removal of an existing database and the paths of the output:
   (`./db.00.*`). NCBI looks for a volume in the current directory first, so makeblastdb
   removes the files of the current directory. LOSAT removes the volumes beside the alias
   file. Other behaviour of makeblastdb is kept: the existing database is removed before the
-  input is read, so a failing build also removes it.
+  input is read, so a failing build also removes it; a directory at one of the names removed
+  is removed with its contents, read-only parts included, and a symbolic link is removed, not
+  followed (`CDirEntry::Remove`); a volume file's final name is cleared the same way before
+  the volume is renamed to it (a directory `NAME.pin` that is no database is removed then).
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
   `.ncbirc` is not removed (`losat makeblastdb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
@@ -284,12 +288,16 @@ Version 5 and the options added to the writer:
   that removes what the earlier files added; makeblastdb skips it without a word.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
   of a database; one left at the path is removed, makeblastdb's final state after a build; a
-  build that fails after LMDB has opened leaves them in makeblastdb, not in LOSAT). A lock file
-  that LMDB cannot create stops LOSAT where it stops makeblastdb: an output name of 247 bytes
-  or more, whose `NAME.pdb-lock` passes the file-name limit of 255 bytes, ends with "BLAST
-  Database error: LMDB runtime error: mdb_env_open: File name too long" (exit status 2) when
-  the second sequence is added, or that creation error (exit status 1) for one sequence, with
-  no file written, in both programs.
+  build that fails after LMDB has opened leaves them in makeblastdb, not in LOSAT). On Unix a
+  lock file that LMDB cannot create stops LOSAT where it stops makeblastdb: an
+  output name of 247 bytes or more, whose `NAME.pdb-lock` passes the file-name limit of 255
+  bytes, ends with "BLAST Database error: LMDB runtime error: mdb_env_open: File name too
+  long" (exit status 2) when the second sequence is added, or that creation error (exit status
+  1) for one sequence, with no file written, in both programs; a directory of a lock file's
+  name that the removal of the old database could not remove (it holds a directory that cannot
+  be read) ends the same way with "Is a directory". On Windows these cases have not been
+  compared with a makeblastdb run: LOSAT's paths are not bound by `MAX_PATH`, which binds
+  LMDB's `CreateFileW`, and LOSAT does not check a directory of the lock file's name.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
@@ -327,7 +335,9 @@ Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1
 - A `-taxid_map` line of white space only (makeblastdb crashes).
 - Version 5 with `-parse_seqids`: `LMDB_SPLIT_CHUNK_SIZE` or `LMDB_MIN_SPLIT_SIZE` that is not
   a number of the range of `unsigned int` (makeblastdb aborts in its LMDB writer, after the
-  volumes are written, and leaves the whole database and the lock files); LOSAT stops with
+  volumes are written, and leaves `NAME.pdb`, `NAME.pos`, `NAME.phr`, `NAME.pin`, `NAME.pog`,
+  `NAME.psq`, `NAME.ptf` and the two lock files, without `NAME.pot`, `NAME.pto` and
+  `NAME.pjs`); LOSAT stops with
   `BLAST Database creation error: Cannot convert string '<value>' to ...` (exit status 1),
   removes the volumes and leaves `NAME.pos` and `NAME.ptf`.
 - `-in ""` (no name): makeblastdb reads the first name of an empty list after the log line

@@ -401,7 +401,7 @@ impl DbFilterArgs {
         let invalid = || options_error("Invalid taxidlist file ");
         let mut tax_ids = BTreeSet::new();
         for id in &ids {
-            if crate::seqid::parse::is_blank(id) {
+            if crate::ncbi_str::is_blank(id) {
                 continue;
             }
             let taxid = string_to_int(id).ok_or_else(invalid)?;

@@ -20,3 +20,13 @@
 - Changed: `losat makeblastdb -in ""` is refused where makeblastdb crashes on it, after the head
   of the log, the removal of an existing database of the output name and the `-max_file_sz` and
   `-taxid_map` checks.
+- Fixed: `losat makeblastdb` removes a directory at a name of the database it replaces
+  (`NAME.pdb`, `NAME.pdb-lock`, `NAME.pin`, ...) with its contents, read-only parts included, as
+  makeblastdb does, and builds the database; it used to stop with `Is a directory` (exit status
+  255) or to leave the directory beside the new database.
+- Fixed: the `-taxids` and `-taxidlist` lists of the search programs read an entry with a
+  vertical tab, a carriage return or a NUL byte as NCBI BLAST+ does; 9 of 20 such lists tried
+  used to stop with `Invalid taxidlist file` where NCBI BLAST+ searches.
+- Fixed: `losat makeblastdb -parse_seqids` stores a GI id with a NUL byte in it as makeblastdb
+  does (`>gi|12<NUL>x t1` is GI 12 titled `t1`); it used to warn `Bad char [0x0]` and write the
+  title `#x t1`.

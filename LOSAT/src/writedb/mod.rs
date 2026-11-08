@@ -28,6 +28,7 @@ pub mod build_db;
 pub mod convert;
 pub mod data_size;
 pub mod deflines;
+pub(crate) mod dir_entry;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;

@@ -16,7 +16,7 @@ use super::model::{
     TextseqId, SEQ_ID_ALTERNATIVES,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::ncbi_str::is_space;
+use crate::ncbi_str::{is_blank, is_space};
 
 /// A `CSeqIdException` (`eFormat`): where NCBI throws it and its message.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,11 +73,6 @@ pub fn truncate_spaces(s: &[u8]) -> &[u8] {
         .rposition(|&c| !is_space(c))
         .map_or(start, |end| end + 1);
     &s[start..end.max(start)]
-}
-
-/// `NStr::IsBlank(s)`.
-pub fn is_blank(s: &[u8]) -> bool {
-    s.iter().all(|&c| is_space(c))
 }
 
 /// `NStr::StringToNonNegativeInt(str)`: the value, or -1.

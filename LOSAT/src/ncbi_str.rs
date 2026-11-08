@@ -37,6 +37,24 @@ pub(crate) fn is_space(c: u8) -> bool {
     c == b' ' || (b'\t'..=b'\r').contains(&c)
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:106-115
+// ```c++
+// bool NStr::IsBlank(const CTempString str, SIZE_TYPE pos)
+// {
+//     SIZE_TYPE len = str.length();
+//     for (SIZE_TYPE idx = pos; idx < len; ++idx) {
+//         if (!isspace((unsigned char) str[idx])) {
+//             return false;
+//         }
+//     }
+//     return true;
+// }
+// ```
+/// `NStr::IsBlank(s)`: every byte is a C `isspace` space (an empty string included).
+pub(crate) fn is_blank(s: &[u8]) -> bool {
+    s.iter().all(|&c| is_space(c))
+}
+
 /// A throw of `S2N_CONVERT_ERROR` in `NStr::<function>` at `line` of ncbistr.cpp.
 const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
     ThrowSite {
@@ -714,5 +732,16 @@ mod tests {
                 "19".to_string()
             )
         );
+    }
+
+    /// `NStr::IsBlank` is C `isspace` over the whole string: the six spaces of the C locale
+    /// (vertical tab and form feed included), and an empty string, are blank; NUL is not.
+    #[test]
+    fn is_blank_takes_the_spaces_of_c_isspace() {
+        assert!(is_blank(b""));
+        assert!(is_blank(b" \t\n\x0b\x0c\r"));
+        for text in [&b"\0"[..], b" 9 ", b"\x85", b"\xa0"] {
+            assert!(!is_blank(text), "{text:?}");
+        }
     }
 }

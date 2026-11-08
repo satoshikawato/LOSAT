@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use super::deflines;
+use super::dir_entry;
 use super::fasta_source::{FastaBioseqSource, Warn};
 use super::platform::Platform;
 use super::taxid_set::TaxIdSet;
@@ -657,8 +658,8 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //   directory. NCBI takes a volume of the same name in the current directory
 //   first, and so removes files that do not belong to the database being
 //   replaced.
-/// `DeleteBlastDb`: removes the files of the database `dbpath`; `true` when
-/// a file was removed.
+/// `DeleteBlastDb`: removes the files of the database `dbpath` (and a directory
+/// of one of their names, with its contents); `true` when one was removed.
 fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
     let letter = if is_protein { 'p' } else { 'n' };
     let seqtype = if is_protein {
@@ -678,9 +679,12 @@ fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError>
         Err(_) => (Vec::new(), Vec::new()),
     };
 
+    // `CFile(fname).Remove()` is `CDirEntry::Remove(eRecursive)` (`super::dir_entry`): a
+    // directory of the name is removed with its contents, a symbolic link is removed and its
+    // target kept.
     let mut num_files_removed = 0;
     let mut remove = |name: &str| {
-        let removed = std::fs::remove_file(name).is_ok();
+        let removed = dir_entry::remove(Path::new(name));
         num_files_removed += u32::from(removed);
         removed
     };
@@ -688,13 +692,11 @@ fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError>
         if !remove(&format!("{dbpath}.{letter}{lmdb}")) {
             let mut index = 0u32;
             // The removals of the volume files are not counted by NCBI.
-            while std::fs::remove_file(format!(
+            while dir_entry::remove(Path::new(&format!(
                 "{dbpath}.{}{}.{letter}{lmdb}",
                 index / 10,
                 index % 10
-            ))
-            .is_ok()
-            {
+            ))) {
                 index += 1;
             }
         }
@@ -1148,8 +1150,9 @@ impl<'a> BuildDatabase<'a> {
             let _ = writeln!(self.log, "No volumes were created.");
             success = false;
         } else if erase {
+            // `CFile(*iterf).Remove()`: `CDirEntry::Remove(eRecursive)`.
             for file in &files {
-                let _ = std::fs::remove_file(file);
+                let _ = dir_entry::remove(Path::new(file));
             }
         }
         let _ = writeln!(self.log);

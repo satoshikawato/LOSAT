@@ -162,18 +162,6 @@ fn search_records(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
-    // Before the subjects' warnings, as the command line's read of the query file
-    // (`native::run_inner`).
-    if archive.is_some() {
-        check_archive_titles(
-            query_records,
-            args.lcase_masking,
-            query_range,
-            batch_size,
-            &resolved[0],
-            &subjects,
-        )?;
-    }
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // The environment of a search of subject records, after the subjects' warnings
     // (`native::run_inner`).
@@ -318,39 +306,6 @@ fn reader_batches(
     Ok(())
 }
 
-/// LOSAT's refusal of a title the archive cannot write, before its first byte (as
-/// `native::run_inner`): the queries of the reader batches that NCBI writes
-/// (`archive::check_batch_titles` of `reader_batches`), and the subjects when it writes one (the
-/// error archive of a run that no batch completes holds no sequence). A batch size of 0 reads no
-/// query: nothing is checked.
-fn check_archive_titles(
-    query_records: &[fasta_reader::FastaRecord],
-    lowercase: bool,
-    query_range: Option<SequenceRange>,
-    batch_size: usize,
-    options: &ResolvedOptions,
-    subjects: &[FastaRecord],
-) -> Result<()> {
-    if batch_size == 0 {
-        return Ok(());
-    }
-    let written = archive::check_batch_titles(options, &mut |deliver| {
-        reader_batches(
-            query_records,
-            lowercase,
-            query_range,
-            batch_size,
-            true,
-            deliver,
-            &mut |_| Ok(()),
-        )
-    })?;
-    if written {
-        archive::check_titles(subjects, "subject")?;
-    }
-    Ok(())
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
 // ```c++
 //         formatter.PrintProlog();
@@ -389,10 +344,39 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .iter()
         .map(|format| format.sink.side_files().cloned())
         .collect();
-    let mut writers = formats
+    let writers = formats
         .iter_mut()
         .map(|format| format.sink.open())
         .collect::<io::Result<Vec<_>>>()?;
+    // The archive (outfmt 11) refuses a title where it writes the batch, after its search
+    // (`archive::check_batch_titles`, below): when a batch that the search may write has a query
+    // title it cannot write (`archive::batches_may_refuse`, on the records in memory) or the
+    // subjects have one, every format is held in order from its prolog on (`archive::ArchiveHold`),
+    // so that the refusal follows no byte, as on the command line.
+    let hold = (archive.is_some()
+        && batch_size > 0
+        && (archive::batches_may_refuse(&resolved[0], &mut |deliver| {
+            reader_batches(
+                query_records,
+                lowercase,
+                query_range,
+                batch_size,
+                true,
+                deliver,
+                &mut |_| Ok(()),
+            )
+        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err())))
+    .then(archive::ArchiveHold::new);
+    let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
+        Some(hold) => {
+            hold.hold();
+            writers
+                .into_iter()
+                .map(|writer| Box::new(hold.writer(writer)) as Box<dyn Write + '_>)
+                .collect()
+        }
+        None => writers,
+    };
     // The writer of each XML2 or JSON document (outfmt 13 to 16), which the run keeps across the
     // query batches (`native::run_inner`). The side files of 13 and 14 go next to `out` or to the
     // caller's receiver.
@@ -489,6 +473,17 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             )?),
             None => None,
         };
+        // The archive (outfmt 11) of this batch, which NCBI writes once its search and the read of
+        // its definition lines have not failed: the titles it cannot write are refused before any
+        // format of the batch (`archive::check_batch_titles`; the outputs are the caller's, so the
+        // batches before are written).
+        if archive.is_some() {
+            archive::check_batch_titles(
+                queries,
+                database.is_none().then_some(subjects),
+                queries_before == 0,
+            )?;
+        }
         let hits = match made_hits {
             true => Some(
                 report::pairwise_hits(
@@ -643,7 +638,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         search_error,
         &mut render,
     )
-    .map_err(input_error)?;
+    .map_err(input_error)
+    .inspect_err(|error| {
+        // What the hold kept: NCBI's when one of its own errors stops the run (the error
+        // archive follows, `ReportOutputs::finish_archive`), dropped after LOSAT's refusal.
+        if let Some(hold) = &hold {
+            hold.end_with(error);
+        }
+    })?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
     // ```c++
     //         formatter.PrintEpilog(opt);
@@ -666,6 +668,10 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         )
         .map_err(report_error)?;
         writer.flush().map_err(output_error)?;
+    }
+    // What the hold kept: every format of the run, in order.
+    if let Some(hold) = &hold {
+        hold.release().map_err(output_error)?;
     }
     if let Some(sink) = hits_sink {
         sink(std::sync::Arc::new(run_hits));
@@ -799,16 +805,6 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
-    if archive.is_some() {
-        check_archive_titles(
-            query_records,
-            args.lcase_masking,
-            query_range,
-            batch_size,
-            &resolved[0],
-            &[],
-        )?;
-    }
     app::check_search_environment("BLASTX", false, outputs.only_archive())?;
     let pairwise = database.pairwise_database();
     let no_reported = ReportedSubjects::default();

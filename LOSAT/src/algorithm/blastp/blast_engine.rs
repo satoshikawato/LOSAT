@@ -6391,24 +6391,9 @@ fn search(
     if !batches.starts.is_empty() {
         check_identity_compressed_lookup_of(&args)?;
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
-    // ```c++
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //     ...
-    //             if (fmt_args->ArchiveFormatRequested(args)) {
-    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
-    // ```
-    // The BLAST archive (outfmt 11) of each batch that NCBI completes holds its queries and,
-    // with `-subject`, every subject; the batch that stops the run (a reader error, `Empty
-    // CBlastQueryVector`, a batch of queries without letters) writes neither, and the error
-    // archive holds no sequence. So the refusal of a title the archive cannot write looks at
-    // the queries of the batches before the stop, and at the subjects when there is one; it
-    // comes before the first byte (the reports are written after the batches are read).
-    if args.archive.is_some() && batches.searched_done > 0 {
-        super::archive::check_titles(&searched_queries[..batches.searched_done], "query")?;
-        super::archive::check_titles(&subjects.records, "subject")?;
-    }
+    // The titles that the BLAST archive (outfmt 11) cannot write are refused where the archive
+    // of the searched batches is written (`run_resolved_in_pool`), after their search: the batch
+    // that stops the run here, and one whose search fails, write no archive.
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
     // one search per round per query (`psi_round`).
@@ -7019,6 +7004,15 @@ fn x_query_block_plan(
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
         || batches.input_done != queries.len()
+    {
+        return None;
+    }
+    // A title that the archive cannot write is refused where the archive of the searched batches
+    // is written, after their search (`run_resolved_in_pool`): a block's archive would come before
+    // the refusal of a later block's title, so such a run takes the search of all queries.
+    if args.archive.is_some()
+        && (super::archive::check_titles(queries, "query").is_err()
+            || super::archive::check_titles(subject_source.fasta_records(), "subject").is_err())
     {
         return None;
     }
@@ -12110,6 +12104,30 @@ fn run_resolved_in_pool(
         }),
         _ => None,
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //     ...
+    //                 results = lcl_blast.Run();
+    //     ...
+    //             if (fmt_args->ArchiveFormatRequested(args)) {
+    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
+    // ```
+    // The BLAST archive (outfmt 11) of each batch that NCBI completes holds its queries and,
+    // with `-subject`, every subject. The batch that stops the run writes neither: a reader
+    // error, `Empty CBlastQueryVector` or a batch of queries without letters (`search`), and a
+    // batch whose search fails (the sequence file that its preliminary search cannot read,
+    // `preliminary_search_error`, or a header file that its definition lines cannot be read
+    // from, above: `search` searches the batches before again); the error archive holds no
+    // sequence. So a title the archive cannot write is refused here, where the call's batches
+    // have been searched and their definition lines read, and before the first byte of any
+    // report. (The block search, which writes each block's archive, does not run when a title
+    // could be refused, `x_query_block_plan`.)
+    if args.archive.is_some() {
+        super::archive::check_titles(query_records, "query")?;
+        super::archive::check_titles(subject_records, "subject")?;
+    }
     #[allow(clippy::type_complexity)]
     let (subject_records, subject_titles, shown_subjects): (
         &[FastaRecord],

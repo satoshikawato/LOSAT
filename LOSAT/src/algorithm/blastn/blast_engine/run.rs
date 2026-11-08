@@ -18604,9 +18604,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                         (list, [s1, s2, s3, s4, s5], edit_lengths, alignment_lengths)
                     },
                 );
-                // Each query's list is sorted by score (`traceback_final_list`), so the lists go to the
-                // hit lists as they are, in query order (`SubjectHits::ByQuery`), not joined into
-                // the subject's list and split by query again.
+                // Each query's list is sorted by score (`traceback_final_list`), so the lists go to
+                // the hit lists as they are, in query order (`SubjectHits::ByQuery`), not joined
+                // into the subject's list and split by query again.
                 let mut lists: Vec<Vec<BlastnHsp>> = Vec::new();
                 let mut steps = [0usize; 5];
                 for (list, step_counts, edit_lengths, alignment_lengths) in

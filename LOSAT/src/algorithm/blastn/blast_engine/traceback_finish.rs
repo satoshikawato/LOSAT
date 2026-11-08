@@ -66,7 +66,7 @@ pub(super) struct TracebackCtx<'a> {
 /// one query's (LOSAT_X_QGROUPPAR). Returns the list and its lengths after each step (for the
 /// debug line).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:635-668
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:635-669
 /// (`Blast_TracebackFromHSPList`, from the first purge to the second), which calls
 /// `Blast_HSPListPurgeHSPsWithCommonEndpoints` (c++/src/algo/blast/core/blast_hits.c:2455-2535),
 /// `Blast_HSPReevaluateWithAmbiguitiesGapped` (blast_hits.c:479-647),

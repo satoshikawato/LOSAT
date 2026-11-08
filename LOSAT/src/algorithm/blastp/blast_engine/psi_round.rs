@@ -31,7 +31,8 @@ use crate::algorithm::psiblast::pssm::{
     QueryPssm,
 };
 use crate::algorithm::psiblast::rounds::{
-    InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome, SetKey,
+    HandleIndex, InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome,
+    SetKey,
 };
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::QueryContext;
@@ -408,8 +409,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 /// alignments, its inclusion set, and where NCBI makes one the next round's PSSM (an error of
 /// the engine is kept for after the round's report). Returns, when the previous round's set is
 /// not empty, whether each subject of the round (by subject index, a database's by rank) is in
-/// it, for the two-part description table (`psiblast_round::ReportRound`). Refuses keys that
-/// NCBI's handles can take for one (`SetKey::check_handles`).
+/// it, for the two-part description table (`psiblast_round::ReportRound`, `FoundBefore`).
+/// Refuses keys of the inclusion sets that NCBI's handles can take for one (`HandleIndex`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-566
 // ```c++
 // double GetLowestEvalue(const objects::CDense_seg::TScores& scores,
@@ -450,8 +451,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // name it by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple
 // alignment counts its rows by the same keys and joins following Seq-aligns whose ids `Match`
 // (`pssm::input_msa`). Keys that differ but that NCBI's handles can take for one are refused
-// before the round's report (`SetKey::check_handles`, over the previous set and the round's
-// subjects).
+// where NCBI compares them (`rounds::HandleIndex`): in the inclusion sets before the round's
+// report, a shown subject against the previous set before the outfmt 0 table (`FoundBefore`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509 (quoted at
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
 /// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,
@@ -475,7 +476,7 @@ pub(super) fn round_outcome(
     contexts: &[QueryContext],
     gapped: &KarlinParams,
     keys: SubjectKeys<'_>,
-) -> Result<Option<Vec<bool>>> {
+) -> Result<Option<FoundBefore>> {
     let key = |s_idx: u32| keys.key(s_idx);
     let hsps: Vec<&crate::algorithm::blastp::hsp::BlastpHsp> = hit_lists
         .first()
@@ -490,31 +491,35 @@ pub(super) fn round_outcome(
         .unwrap_or_default();
     let has_alignments = !hsps.is_empty();
     let previous = io.state.previously_found();
-    // The keys that the round compares: those of its inclusion set and PSSM rows, and after a
-    // round with a set every subject's, which the two-part table looks up in that set.
-    let compared: std::collections::BTreeSet<SetKey> = hsps
-        .iter()
-        .filter(|hsp| !previous.is_empty() || included(hsp.e_value, args.inclusion_ethresh))
-        .map(|hsp| key(hsp.s_idx))
-        .collect();
-    SetKey::check_handles(previous.iter().chain(&compared))?;
     let set: InclusionSet = hsps
         .iter()
         .filter(|hsp| included(hsp.e_value, args.inclusion_ethresh))
         .map(|hsp| key(hsp.s_idx))
         .collect();
-    let found_before = (!previous.is_empty()).then(|| {
+    // The handles that NCBI compares: the inclusion set and the PSSM's rows among themselves and
+    // with the previous set (convergence); the two-part table looks the shown subjects up in the
+    // previous set (`FoundBefore::unsure`, refused where it shows them).
+    HandleIndex::new(previous.iter().chain(&set))?;
+    let found_before = if previous.is_empty() {
+        None
+    } else {
+        let earlier = HandleIndex::new(previous)?;
         let subjects = hsps
             .iter()
             .map(|hsp| hsp.s_idx as usize + 1)
             .max()
             .unwrap_or(0);
         let mut found = vec![false; subjects];
+        let mut unsure = std::collections::BTreeMap::new();
         for hsp in &hsps {
-            found[hsp.s_idx as usize] = previous.contains(&key(hsp.s_idx));
+            let subject = key(hsp.s_idx);
+            found[hsp.s_idx as usize] = previous.contains(&subject);
+            if let Some(other) = earlier.unsure(&subject) {
+                unsure.insert(hsp.s_idx, (other.clone(), subject));
+            }
         }
-        found
-    });
+        Some(FoundBefore { found, unsure })
+    };
     // NCBI makes the next PSSM after `Advance` when another round follows or the last PSSM is
     // saved (`itr || GetSaveLastPssm()`), and after a round with alignments only.
     let makes_next = if has_alignments {
@@ -542,6 +547,33 @@ pub(super) fn round_outcome(
         next,
     });
     Ok(found_before)
+}
+
+/// What the two-part description table of a round after one with an inclusion set reads of the
+/// previous set (`round_outcome`).
+pub(super) struct FoundBefore {
+    /// Whether each subject (by subject index) is in the previous round's set.
+    pub(super) found: Vec<bool>,
+    /// The subjects whose keys a key of the previous set differs from but can be one handle with
+    /// (`HandleIndex::unsure`), with the two keys: refused where the table shows them
+    /// (`refuse_unsure_shown`).
+    pub(super) unsure: std::collections::BTreeMap<u32, (SetKey, SetKey)>,
+}
+
+impl FoundBefore {
+    /// LOSAT's refusal of a subject of `shown` (subject indices of the outfmt 0 report) that the
+    /// two-part table cannot place as NCBI does (`unsure`).
+    pub(super) fn refuse_unsure_shown(&self, shown: impl IntoIterator<Item = usize>) -> Result<()> {
+        for s_idx in shown {
+            if let Some((earlier, subject)) = u32::try_from(s_idx)
+                .ok()
+                .and_then(|s_idx| self.unsure.get(&s_idx))
+            {
+                return Err(SetKey::refuse_pair(earlier, subject));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The keys of the subjects of a search's hit lists (`rounds::SetKey`, by subject index; a

@@ -114,8 +114,8 @@ weakbatch (psiblast's rounds read the sequences before the cut for the next PSSM
 `wkb_p1.faa` (the same with `gb|FFF00043|` a weak hit above -inclusion_ethresh and `gb|WWW00001.1|` before it), for the
 query `wkb_qy.faa`. `--weakbatch-only` builds only these. Line DBID pssmrows (psiblast's PSSM rows follow the
 Seq-align ids): the databases `psr_*` from the FASTA of the same names (copies of one record, ids that `CSeq_id::Match`
-and their controls, for the query `psr_q.faa`) and the aliases `psr_cp.pal`, `psr_cbxp.pal`, `psr_jx.pal`, `psr_cul.pal`
-and `psr_cue.pal`. `--pssmrows-only` builds only these.
+and their controls, for the query `psr_q.faa`) and the aliases `psr_cp.pal`, `psr_cbxp.pal`, `psr_jx.pal`, `psr_cul.pal`,
+`psr_cue.pal` and `psr_k.pal`. `--pssmrows-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -249,13 +249,13 @@ def build_weakbatch(args: argparse.Namespace) -> None:
 
 def build_pssmrows(args: argparse.Namespace) -> None:
     for name in ("psr_cpa", "psr_cpb", "psr_cbx", "psr_jm", "psr_jn", "psr_jx1", "psr_jx2", "psr_jctl", "psr_self",
-                 "psr_cu", "psr_cl", "psr_ce"):
+                 "psr_cu", "psr_cl", "psr_ce", "psr_ka", "psr_kb", "psr_gim"):
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.faa"), "-dbtype", "prot", "-parse_seqids",
              "-blastdb_version", "5", "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
     for alias, names in (("psr_cp", "psr_cpa psr_cpb"), ("psr_cbxp", "psr_cbx psr_cpb"), ("psr_jx", "psr_jx1 psr_jx2"),
-                         ("psr_cul", "psr_cu psr_cl"), ("psr_cue", "psr_cu psr_ce")):
+                         ("psr_cul", "psr_cu psr_cl"), ("psr_cue", "psr_cu psr_ce"), ("psr_k", "psr_ka psr_kb")):
         (args.out / f"{alias}.pal").write_text(
             f"#\n# Alias file of line DBID, pssmrows\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
             f"DBLIST {names}\n")

@@ -623,7 +623,12 @@ leaves the second out); `psr_jn` the same with `sp||NAMEH` and `sp|P00009.1|NAME
 pair in two databases (`-num_iterations 3`); `psr_jctl` the same letters under ids that never Match (the control: another
 PSSM); `psr_self` a Match pair both identical to the query, purged as self hits (the empty row). `psr_cul.pal` (`gb|ABC00001.1|`,
 then `gb|abc00001.1|`) and `psr_cue.pal` (`gb|ABC00001.1|`, then `emb|ABC00001.1|`) are handles that NCBI can take for one
-sequence and LOSAT refuses (`db.id.psr.case.i2.6.reject`, `db.id.psr.gbemb.i2.6.reject`).
+sequence and LOSAT refuses (`db.id.psr.case.i2.6.reject`, `db.id.psr.gbemb.i2.6.reject`). `psr_k.pal` (`psr_ka`:
+`gb|SSS00001.1|` identical to the query, `gb|AAA00001.1|`, `gb|ABC00001.1|`; `psr_kb`: `emb|ABC00001.1|`) puts that pair in
+a search where neither is included in the PSSM nor shown, so NCBI's handles never compare them and LOSAT does not refuse
+(`db.id.psr.k.i2.6`, `-inclusion_ethresh 1e-150 -max_target_seqs 1`). `psr_gim` holds `gim|123` (a giim id) in front of
+`gb|BBB00001.1|` and `gb|CCC00001.1|`: NCBI's handles never take a giim id for one with an equal id, so NCBI writes
+`Unknown` for it and does not converge in 4 rounds, and LOSAT refuses (`db.id.psr.gim.i4.6.reject`).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

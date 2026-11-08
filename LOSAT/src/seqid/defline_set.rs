@@ -1160,8 +1160,8 @@ pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
 // ```
 // No NCBI counterpart: LOSAT's sets of `CSeq_id_Handle` (psiblast's inclusion sets and the rows
 // of its PSSM, `algorithm::psiblast::rounds::SetKey`) take two ids for one where they are equal
-// (`ParsedSeqId`'s `Eq`, which the handle of each id follows) and refuse two other ids that share
-// this key, where the handles can be one or two.
+// (`ParsedSeqId`'s `Eq`, which the handle of each id follows, but for a `giim` id, which those
+// sets refuse) and refuse two other ids that share this key, where the handles can be one or two.
 /// Adds to `out` the key of `id` that every id which NCBI's `CSeq_id_Handle` takes for the same
 /// sequence shares: a text Seq-id's accession and name in upper case, its version and release,
 /// with GenBank, EMBL and DDBJ as one alternative (their tree; an accession that packs is one

@@ -131,49 +131,106 @@ impl SetKey {
         }
     }
 
-    /// The key's Seq-align id as FASTA, for LOSAT's messages.
+    /// The key's Seq-align id as FASTA, for LOSAT's messages (an ordinal key named as such).
     fn label(&self) -> String {
         let mut out = Vec::new();
         match self {
-            SetKey::Index(index) => crate::seqid::label::fasta(&Self::ordinal_id(*index), &mut out),
+            SetKey::Index(index) => {
+                crate::seqid::label::fasta(&Self::ordinal_id(*index), &mut out);
+                out.extend_from_slice(b" (a sequence without parsed Seq-ids)");
+            }
             SetKey::Id(id) => crate::seqid::label::fasta(id, &mut out),
         }
         String::from_utf8_lossy(&out).into_owned()
     }
 
-    /// LOSAT's refusal of two keys of `keys` that differ but that NCBI's `CSeq_id_Handle` can take
-    /// for one sequence (`seqid::defline_set::handle_superset_key`: ids that differ in letter
-    /// case, or one accession under `gb`, `emb` and `dbj`): their inclusion sets, the two-part
-    /// description table and the rows of the PSSM would rest on handles that LOSAT does not
-    /// model. `keys` are those that one round compares: its previous set and the subjects of its
-    /// Seq-aligns.
-    pub(crate) fn check_handles<'a>(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<()> {
-        let mut seen: std::collections::BTreeMap<Vec<u8>, &SetKey> =
-            std::collections::BTreeMap::new();
-        for key in keys {
-            let mut superset = Vec::new();
-            match key {
-                SetKey::Index(index) => crate::seqid::defline_set::handle_superset_key(
-                    &Self::ordinal_id(*index),
-                    &mut superset,
-                ),
-                SetKey::Id(id) => crate::seqid::defline_set::handle_superset_key(id, &mut superset),
+    /// LOSAT's refusal of the keys `a` and `b`, which differ but which NCBI's handles can take for
+    /// one sequence (`HandleIndex`).
+    pub(crate) fn refuse_pair(a: &SetKey, b: &SetKey) -> anyhow::Error {
+        anyhow::anyhow!(
+            "the Seq-align ids {} and {} of two database sequences that psiblast compares (in its inclusion sets, the rows of its PSSM or its two-part description table), which NCBI BLAST+'s Seq-id handles can take for one sequence (ids that differ only in letter case, one accession under gb, emb and dbj, and other ids that LOSAT does not tell apart as NCBI's handles do), are not supported by LOSAT's PSIBLAST",
+            a.label(),
+            b.label()
+        )
+    }
+
+    /// `handle_superset_key` of the key's Seq-align id.
+    fn superset(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        match self {
+            SetKey::Index(index) => {
+                crate::seqid::defline_set::handle_superset_key(&Self::ordinal_id(*index), &mut out)
             }
-            match seen.entry(superset) {
+            SetKey::Id(id) => crate::seqid::defline_set::handle_superset_key(id, &mut out),
+        }
+        out
+    }
+
+    /// LOSAT's refusal of two keys of `keys` that differ but that NCBI's handles can take for
+    /// one sequence, and of a `giim` key (`HandleIndex::new`).
+    pub(crate) fn check_handles<'a>(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<()> {
+        HandleIndex::new(keys).map(|_| ())
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2938
+// ```c++
+// CSeq_id_Info* CSeq_id_Giim_Tree::x_FindInfo(const CGiimport_id& gid) const
+// {
+//     TIdMap::const_iterator id_it = m_IdMap.find(gid.GetId());
+//     if (id_it == m_IdMap.end())
+//         return 0;
+//     ITERATE (TGiimList, dbr_it, id_it->second) {
+//         CConstRef<CSeq_id> id = (*dbr_it)->GetSeqId();
+//         const CGiimport_id& gid2 = id->GetGiim();
+//         // Both Db and Release must be equal
+//         if ( !gid.Equals(gid2) ) {
+//             return *dbr_it;
+//         }
+//     }
+// ```
+// A giim id is never one handle with an equal id (`FindOrCreate` makes a new one each time), so
+// NCBI's inclusion sets never find it again, every included HSP of it counts as a row, and its
+// scope never finds its Bioseq (review 1 of line DBID pssmrows, H1): LOSAT refuses a giim key
+// that psiblast compares.
+/// The keys that one round of psiblast compares by NCBI's handles (`CSeq_id_Handle`), by their
+/// `seqid::defline_set::handle_superset_key`: building it refuses two keys that differ but share
+/// that key (NCBI's handles can be one or two) and a `giim` key; `unsure` then names a key of the
+/// index that another key differs from but can be one handle with.
+pub(crate) struct HandleIndex<'a> {
+    by_superset: std::collections::BTreeMap<Vec<u8>, &'a SetKey>,
+}
+
+impl<'a> HandleIndex<'a> {
+    pub(crate) fn new(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<Self> {
+        let mut by_superset = std::collections::BTreeMap::new();
+        for key in keys {
+            if let SetKey::Id(crate::seqid::model::ParsedSeqId::Giim(_)) = key {
+                anyhow::bail!(
+                    "the Seq-align id {} of a database sequence that psiblast compares (in its inclusion sets, the rows of its PSSM or its two-part description table), a giim id, which NCBI BLAST+'s Seq-id handles never take for one sequence with an equal id, is not supported by LOSAT's PSIBLAST",
+                    key.label()
+                );
+            }
+            match by_superset.entry(key.superset()) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(key);
                 }
                 std::collections::btree_map::Entry::Occupied(entry) if *entry.get() != key => {
-                    anyhow::bail!(
-                        "the Seq-align ids {} and {} of two database sequences that a round of psiblast compares (its inclusion sets, the rows of its PSSM), which NCBI BLAST+ can take for one sequence (they differ in letter case or are one accession under gb, emb and dbj), are not supported by LOSAT's PSIBLAST",
-                        entry.get().label(),
-                        key.label()
-                    );
+                    return Err(SetKey::refuse_pair(entry.get(), key));
                 }
                 std::collections::btree_map::Entry::Occupied(_) => {}
             }
         }
-        Ok(())
+        Ok(Self { by_superset })
+    }
+
+    /// The key of the index that `key` differs from but that NCBI's handles can take for one
+    /// with it; `None` where `key` is in the index or shares its superset key with none.
+    pub(crate) fn unsure(&self, key: &SetKey) -> Option<&'a SetKey> {
+        self.by_superset
+            .get(&key.superset())
+            .copied()
+            .filter(|indexed| *indexed != key)
     }
 }
 
@@ -509,15 +566,37 @@ mod tests {
             let error = SetKey::check_handles(&[id(a), id("gb|X1.1|"), id(b)]).unwrap_err();
             assert_eq!(
                 error.to_string(),
-                format!("the Seq-align ids {a} and {b} of two database sequences that a round of psiblast compares (its inclusion sets, the rows of its PSSM), which NCBI BLAST+ can take for one sequence (they differ in letter case or are one accession under gb, emb and dbj), are not supported by LOSAT's PSIBLAST")
+                format!("the Seq-align ids {a} and {b} of two database sequences that psiblast compares (in its inclusion sets, the rows of its PSSM or its two-part description table), which NCBI BLAST+'s Seq-id handles can take for one sequence (ids that differ only in letter case, one accession under gb, emb and dbj, and other ids that LOSAT does not tell apart as NCBI's handles do), are not supported by LOSAT's PSIBLAST")
             );
         }
         let error = SetKey::check_handles(&[SetKey::Index(5), id("gnl|BL_ORD_ID|5")]).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("gnl|BL_ORD_ID|5 and gnl|BL_ORD_ID|5"),
+            error.to_string().contains(
+                "gnl|BL_ORD_ID|5 (a sequence without parsed Seq-ids) and gnl|BL_ORD_ID|5 of"
+            ),
             "{error}"
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2938 (quoted at
+    // `HandleIndex`): a giim id is never one handle with an equal one.
+    #[test]
+    fn a_giim_key_is_refused() {
+        let error = SetKey::check_handles(&[id("gb|X1.1|"), id("gim|123")]).unwrap_err();
+        assert!(error.to_string().contains("gim|123"), "{error}");
+        assert!(error.to_string().contains("a giim id"), "{error}");
+    }
+
+    // Review 1 of line DBID pssmrows, M1: a key outside the index is unsure only where it shares
+    // its superset key with an indexed key that differs.
+    #[test]
+    fn a_key_is_unsure_against_a_previous_set_only_where_the_handles_can_be_one() {
+        let previous = [id("gb|ABC12.1|"), id("gb|X1.1|")];
+        let index = HandleIndex::new(&previous).unwrap();
+        assert_eq!(index.unsure(&id("gb|abc12.1|")), Some(&previous[0]));
+        assert_eq!(index.unsure(&id("emb|ABC12.1|")), Some(&previous[0]));
+        assert_eq!(index.unsure(&id("gb|ABC12.1|")), None);
+        assert_eq!(index.unsure(&id("gb|X1|")), None);
+        assert_eq!(index.unsure(&id("gb|Y1.1|")), None);
     }
 }

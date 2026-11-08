@@ -3281,8 +3281,8 @@ fn psiblast_pssms(
         h: gapped.h,
     };
     // The rows of each query's PSSM are the handles of the Seq-align ids that it takes
-    // (`SubjectKeys`): keys that NCBI's handles can take for one are refused before any PSSM is
-    // made.
+    // (`SubjectKeys`): keys that NCBI's handles can take for one, and giim ids, are refused before
+    // any PSSM is made (`rounds::HandleIndex`).
     for hit_list in hit_lists.iter().flatten() {
         let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
         let rows: std::collections::BTreeSet<crate::algorithm::psiblast::rounds::SetKey> = hit_list
@@ -12294,7 +12294,7 @@ fn run_resolved_in_pool(
     // psiblast's rounds: the round's outcome (its inclusion set and the next round's PSSM, from
     // the same Seq-aligns), and the subjects of the previous round's set for its two-part table
     // (`psi_round::round_outcome`).
-    let psi_found_before: Option<Vec<bool>> = match reports.psi_round {
+    let psi_found_before: Option<psi_round::FoundBefore> = match reports.psi_round {
         Some(io) => psi_round::round_outcome(
             &args,
             io,
@@ -13390,6 +13390,11 @@ fn run_resolved_in_pool(
                     )?,
                     None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
                 }
+                // psiblast's two-part table looks each shown subject up in the previous round's
+                // set by its handle: LOSAT refuses one that it cannot place as NCBI does.
+                if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {
+                    found.refuse_unsure_shown(shown.iter().copied())?;
+                }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
                 // ```c++
                 //     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
@@ -13435,7 +13440,9 @@ fn run_resolved_in_pool(
                         reports.x_prolog,
                         crate::report::pairwise::psiblast_round::ReportRound {
                             number: io.state.number(),
-                            found_before: psi_found_before.as_deref(),
+                            found_before: psi_found_before
+                                .as_ref()
+                                .map(|found| found.found.as_slice()),
                         },
                     )?;
                     return Ok(());

@@ -6,10 +6,8 @@ pub mod spouge;
 pub mod sum_statistics;
 pub mod tables;
 
-pub use karlin::*;
 pub use karlin_calc::*;
 pub use length_adjustment::*;
-pub use search_space::*;
 pub use spouge::*;
 pub use sum_statistics::*;
 pub use tables::*;

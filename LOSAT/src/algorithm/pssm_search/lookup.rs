@@ -479,7 +479,7 @@ mod tests {
     fn debruijn_pssm_cells_hold_the_brute_force_neighbours() {
         let sequence = debruijn3();
         assert_eq!(sequence.len(), BLASTAA_SIZE.pow(3) + 2);
-        let matrix = |q: usize, s: usize| crate::core::blast_util::blosum62_score(q as u8, s as u8);
+        let matrix = |q: usize, s: usize| crate::utils::matrix::blosum62_score(q as u8, s as u8);
         let rows = pssm(
             sequence
                 .iter()

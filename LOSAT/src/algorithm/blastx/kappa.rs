@@ -502,8 +502,6 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
     calc_lambda: Some(redo_calc_lambda),
     get_range,
     redo_one_alignment: redo_alignment,
-    new_xdrop_align: None,
-    free_align_traceback: None,
 };
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803
 // ```c++

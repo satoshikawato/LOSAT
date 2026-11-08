@@ -4129,29 +4129,6 @@ pub fn write_pairwise<W: Write>(
     writer.flush()
 }
 
-/// Write hits in pairwise format (simplified version for Hit without sequences)
-///
-/// This is a convenience function when only Hit structures are available
-/// without the extended sequence data.
-pub fn write_pairwise_simple<W: Write>(
-    hits: &[Hit],
-    writer: &mut W,
-    config: &PairwiseConfig,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
-    context: &ReportContext,
-) -> io::Result<()> {
-    let pairwise_hits: Vec<PairwiseHit> = hits.iter().cloned().map(PairwiseHit::from).collect();
-    write_pairwise(
-        &pairwise_hits,
-        writer,
-        config,
-        query_ids,
-        subject_ids,
-        context,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4604,47 +4581,6 @@ mod tests {
             Ok(())
         })
         .unwrap();
-    }
-
-    #[test]
-    fn test_write_pairwise_simple() {
-        let hits = vec![make_hit()];
-        let config = PairwiseConfig::default();
-        let context = ReportContext {
-            program: "tblastx".to_string(),
-            query_name: Some("test_query".to_string()),
-            query_length: Some(100),
-            subject_name: Some("test_db".to_string()),
-            database_name: Some("test_db".to_string()),
-            database_num_sequences: Some(1),
-            database_total_letters: Some(100),
-        };
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
-        let query_ids = vec![Arc::<str>::from("query1")];
-        let subject_ids = vec![Arc::<str>::from("subject1")];
-
-        let mut output = Vec::new();
-        write_pairwise_simple(
-            &hits,
-            &mut output,
-            &config,
-            &query_ids,
-            &subject_ids,
-            &context,
-        )
-        .unwrap();
-        let output_str = String::from_utf8(output).unwrap();
-
-        assert!(output_str.contains("TBLASTX"));
-        assert!(output_str.contains("Query= test_query"));
-        assert!(output_str.contains("> subject1"));
     }
 }
 

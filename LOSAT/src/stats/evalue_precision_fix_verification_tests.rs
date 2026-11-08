@@ -2,7 +2,7 @@
 //!
 //! This test verifies that the weight_divisor handling matches NCBI's behavior exactly.
 
-use crate::stats::sum_statistics::{large_gap_sum_e, small_gap_sum_e};
+use crate::stats::sum_statistics::{ncbi_large_gap_sum_e, small_gap_sum_e};
 
 /// Test that weight_divisor handling matches NCBI's behavior
 /// NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
@@ -44,14 +44,14 @@ fn test_weight_divisor_handling() {
 /// Test large_gap_sum_e weight_divisor handling
 #[test]
 fn test_large_gap_sum_e_weight_divisor() {
-    let result1 = large_gap_sum_e(1, 10.0, 100, 1000, 1_000_000, 0.0);
+    let result1 = ncbi_large_gap_sum_e(1, 10.0, 100, 1000, 1_000_000, 0.0);
     assert_eq!(
         result1,
         i32::MAX as f64,
         "weight_divisor == 0.0 should return i32::MAX"
     );
 
-    let result2 = large_gap_sum_e(1, 10.0, 100, 1000, 1_000_000, 1.0);
+    let result2 = ncbi_large_gap_sum_e(1, 10.0, 100, 1000, 1_000_000, 1.0);
     assert!(
         result2 > 0.0 && result2.is_finite(),
         "Normal case should return finite positive value"

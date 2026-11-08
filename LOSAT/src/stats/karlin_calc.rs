@@ -257,10 +257,6 @@ impl ScoreFreqProfile {
             score_min,
         }
     }
-
-    pub fn sprob(&self) -> &[f64] {
-        &self.sprob
-    }
 }
 
 /// Build a score frequency profile from already-combined score probabilities.

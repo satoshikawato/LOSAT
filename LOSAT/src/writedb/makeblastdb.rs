@@ -979,27 +979,11 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 /// `err`; `stdin` is read when `-in` is `-`. `now` is the local time for the
 /// database's date (`None` where the platform has no clock), `platform` the
 /// platform whose makeblastdb the files follow ([`Platform::host`] for a build).
-pub fn build_database(
-    args: &MakedbArgs,
-    now: Option<&LocalTime>,
-    platform: Platform,
-    stdin: &mut dyn Read,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> Result<(), MakedbError> {
-    let mut end_message = None;
-    let result =
-        build_database_with_log(args, now, platform, stdin, out, err, None, &mut end_message);
-    if let Some(message) = end_message {
-        let _ = writeln!(err, "{message}");
-    }
-    result
-}
-
-/// [`build_database`]; `logfile_error` is the error of a `-logfile` that could
-/// not be opened, raised where makeblastdb opens the file. `end_message` gets the
-/// message of `~CBuildDatabase` (`-taxid_map` matched no sequence), which makeblastdb
-/// posts after everything else, the error of the build included.
+///
+/// `logfile_error` is the error of a `-logfile` that could not be opened, raised where
+/// makeblastdb opens the file. `end_message` gets the message of `~CBuildDatabase`
+/// (`-taxid_map` matched no sequence), which makeblastdb posts after everything else,
+/// the error of the build included.
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,

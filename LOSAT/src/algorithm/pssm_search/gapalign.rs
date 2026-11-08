@@ -1251,7 +1251,7 @@ mod tests {
                 .map(|&q| {
                     let mut row = [0i32; BLASTAA_SIZE];
                     for (s, cell) in row.iter_mut().enumerate() {
-                        *cell = crate::core::blast_util::blosum62_score(q, s as u8);
+                        *cell = crate::utils::matrix::blosum62_score(q, s as u8);
                     }
                     row
                 })

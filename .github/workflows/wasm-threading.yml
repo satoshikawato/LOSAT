@@ -90,6 +90,16 @@ jobs:
           0dac09bed17043dfdf93ad71d50e6e177f273d5311897b9e653e45142bb3ef80  ncbi-blast-2.17.0+/bin/blastx
           CHECKSUMS
           sha256sum --check executables.sha256
+      # No NCBI counterpart: guards the benchmark runner's evidence rules (a run whose bytes do
+      # not match is PARITY_FAIL, a bad command is FAIL, a stale output file is refused), so a
+      # mismatching run is never timed.
+      - name: Benchmark runner evidence test
+        run: |
+          export BLASTN_BIN="$PWD/.tmp/threading/oracle/ncbi-blast-2.17.0+/bin/blastn"
+          node LOSAT/tests/test_benchmark_wasi_reuse.js .tmp/threading/artifacts/losat-threaded-command.wasm threaded-command
+          if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
+            node LOSAT/tests/test_benchmark_wasi_reuse.js .tmp/threading/artifacts/losat-serial-command.wasm serial-command
+          fi
       - name: Real command and reactor matrix
         run: |
           # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180

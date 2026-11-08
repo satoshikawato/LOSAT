@@ -702,16 +702,15 @@ impl XAaSpares {
         karlin_params: &KarlinParams,
         check_ideal: bool,
         matrix: ScoringMatrix,
+        word_length: usize,
     ) -> (BlastAaLookupTable, Vec<QueryContext>) {
         let _ = karlin_params;
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix);
+        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
-        match self.x_on_block_spare::<BackboneCell>(prepared, threshold, matrix) {
+        match self.x_on_block_spare::<BackboneCell>(prepared, threshold, matrix, word_length) {
             Ok(table) => (table, contexts),
-            Err(prepared) => {
-                build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH)
-            }
+            Err(prepared) => build_lookup_from_prepared(prepared, threshold, matrix, word_length),
         }
     }
 
@@ -732,6 +731,7 @@ impl XAaSpares {
         prepared: PreparedLookupQuery,
         threshold: i32,
         matrix: ScoringMatrix,
+        word_length: usize,
     ) -> std::result::Result<BlastAaLookupTable<C>, PreparedLookupQuery> {
         let mut room = std::mem::take(&mut *x_locked(&self.block));
         room.grow = true;
@@ -740,7 +740,7 @@ impl XAaSpares {
                 prepared,
                 threshold,
                 matrix,
-                LOOKUP_WORD_LENGTH,
+                word_length,
                 &mut memo.borrow_mut(),
                 Some(&mut room),
                 false,
@@ -775,26 +775,28 @@ impl XAaSpares {
         threshold: i32,
         check_ideal: bool,
         matrix: ScoringMatrix,
+        word_length: usize,
     ) -> (XBpLookup, Vec<QueryContext>) {
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix);
+        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         let prepared = if x_bplk16_fits(&prepared) {
-            match self.x_on_block_spare::<BackboneCell16>(prepared, threshold, matrix) {
+            match self.x_on_block_spare::<BackboneCell16>(prepared, threshold, matrix, word_length)
+            {
                 Ok(table) => {
-                    x_bplk16_shadow(queries, threshold, check_ideal, matrix, &table);
+                    x_bplk16_shadow(queries, threshold, check_ideal, matrix, word_length, &table);
                     return (XBpLookup::Narrow(table), contexts);
                 }
                 Err(prepared) => prepared,
             }
         } else {
-            match self.x_on_block_spare::<BackboneCell>(prepared, threshold, matrix) {
+            match self.x_on_block_spare::<BackboneCell>(prepared, threshold, matrix, word_length) {
                 Ok(table) => return (XBpLookup::Wide(table), contexts),
                 Err(prepared) => prepared,
             }
         };
         let (table, contexts) =
-            build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH);
+            build_lookup_from_prepared(prepared, threshold, matrix, word_length);
         (XBpLookup::Wide(table), contexts)
     }
 
@@ -927,9 +929,10 @@ impl XAaSpares {
         karlin_params: &KarlinParams,
         check_ideal: bool,
         matrix: ScoringMatrix,
+        word_length: usize,
     ) -> Option<(BlastAaLookupTable, Vec<QueryContext>)> {
         let _ = karlin_params;
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix);
+        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         let mut room = std::mem::take(&mut *x_locked(&self.ahead));
@@ -938,7 +941,7 @@ impl XAaSpares {
             prepared,
             threshold,
             matrix,
-            LOOKUP_WORD_LENGTH,
+            word_length,
             &mut memo,
             Some(&mut room),
             false,
@@ -971,8 +974,9 @@ impl XAaSpares {
         threshold: i32,
         check_ideal: bool,
         matrix: ScoringMatrix,
+        word_length: usize,
     ) -> Option<(XBpLookup, Vec<QueryContext>)> {
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix);
+        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         let narrow = x_bplk16_fits(&prepared);
@@ -983,7 +987,7 @@ impl XAaSpares {
                 prepared,
                 threshold,
                 matrix,
-                LOOKUP_WORD_LENGTH,
+                word_length,
                 &mut memo,
                 Some(&mut room),
                 false,
@@ -996,7 +1000,7 @@ impl XAaSpares {
                 prepared,
                 threshold,
                 matrix,
-                LOOKUP_WORD_LENGTH,
+                word_length,
                 &mut memo,
                 Some(&mut room),
                 false,
@@ -1010,7 +1014,7 @@ impl XAaSpares {
         match built {
             Ok(Some(table)) => {
                 if let XBpLookup::Narrow(narrow) = &table {
-                    x_bplk16_shadow(queries, threshold, check_ideal, matrix, narrow);
+                    x_bplk16_shadow(queries, threshold, check_ideal, matrix, word_length, narrow);
                 }
                 Some((table, contexts))
             }
@@ -1051,6 +1055,7 @@ fn x_bplk16_shadow(
     threshold: i32,
     check_ideal: bool,
     matrix: ScoringMatrix,
+    word_length: usize,
     narrow: &BlastAaLookupTable<BackboneCell16>,
 ) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -1058,10 +1063,10 @@ fn x_bplk16_shadow(
         return;
     }
     let (wide, _) = build_lookup_from_prepared(
-        x_bp_prepared_query(queries, check_ideal, matrix),
+        x_bp_prepared_query(queries, check_ideal, matrix, word_length),
         threshold,
         matrix,
-        LOOKUP_WORD_LENGTH,
+        word_length,
     );
     x_assert_narrow_same_as_wide("LOSAT_X_BPLK16SHADOW:", narrow, &wide);
 }
@@ -2872,17 +2877,18 @@ pub(super) fn x_bp_build_lookup(
 /// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_lookup`] with the width of the table's hits chosen by
 /// the build: with `narrow`, `u16` hits where the lookup query is at most 65,535 letters
 /// ([`x_bplk16_fits`]) and the in-place builder applies; otherwise `Int4` hits, the table
-/// [`x_bp_build_lookup`] builds. The words are those of the search's `matrix` (the table of
-/// another matrix than BLOSUM62 with `narrow` false is the one `x_bp_build_lookup` would build
-/// with that matrix).
+/// [`x_bp_build_lookup`] builds. The words are those of the search's `matrix` and `word_length`
+/// (the table of another matrix than BLOSUM62, or of `-word_size 2` (item SC3), with `narrow` false
+/// is the one `x_bp_build_lookup` would build with that matrix and word size).
 pub(super) fn x_bp_build_lookup_as(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     check_ideal: bool,
     narrow: bool,
     matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (XBpLookup, Vec<QueryContext>) {
-    let prepared = x_bp_prepared_query(queries, check_ideal, matrix);
+    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
     let prepared = if narrow && x_bplk16_fits(&prepared) {
@@ -2891,7 +2897,7 @@ pub(super) fn x_bp_build_lookup_as(
                 prepared,
                 threshold,
                 matrix,
-                LOOKUP_WORD_LENGTH,
+                word_length,
                 &mut memo.borrow_mut(),
                 None,
                 false,
@@ -2902,7 +2908,7 @@ pub(super) fn x_bp_build_lookup_as(
         });
         match built {
             Ok(table) => {
-                x_bplk16_shadow(queries, threshold, check_ideal, matrix, &table);
+                x_bplk16_shadow(queries, threshold, check_ideal, matrix, word_length, &table);
                 return (XBpLookup::Narrow(table), contexts);
             }
             Err(prepared) => prepared,
@@ -2911,11 +2917,11 @@ pub(super) fn x_bp_build_lookup_as(
         prepared
     };
     // As x_build_direct_or_reference with BLASTP's direct builder.
-    match x_bp_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+    match x_bp_build_direct(prepared, threshold, matrix, word_length) {
         Ok(table) => (XBpLookup::Wide(table), contexts),
         Err(prepared) => {
             let (table, contexts) =
-                build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH);
+                build_lookup_from_prepared(prepared, threshold, matrix, word_length);
             (XBpLookup::Wide(table), contexts)
         }
     }
@@ -2984,14 +2990,15 @@ fn x_tbx_build_direct(
     })
 }
 
-/// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., matrix,
-/// LOOKUP_WORD_LENGTH)` prepares it ([`x_build_direct_or_reference`] and
+/// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., matrix, word_length)`
+/// prepares it (`word_length`: the search's word size, 3 or, item SC3, 2) ([`x_build_direct_or_reference`] and
 /// [`XAaSpares::x_build_ahead`]): the contexts' Karlin blocks of the matrix's scores, bounds and
 /// ideal block.
 fn x_bp_prepared_query(
     queries: &[Vec<QueryFrame>],
     check_ideal: bool,
     matrix: ScoringMatrix,
+    word_length: usize,
 ) -> PreparedLookupQuery {
     // The arguments of build_ncbi_lookup_for_profile.
     let bounds = if matrix == ScoringMatrix::Blosum62 {
@@ -3003,7 +3010,7 @@ fn x_bp_prepared_query(
         queries,
         ideal_karlin_params_for_matrix(matrix, bounds),
         &compute_std_aa_composition(),
-        LOOKUP_WORD_LENGTH,
+        word_length,
         check_ideal,
         matrix,
         bounds,
@@ -3050,7 +3057,7 @@ fn x_build_direct_or_reference(
     build_direct: XBuildDirect,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let matrix = ScoringMatrix::Blosum62;
-    let prepared = x_bp_prepared_query(queries, check_ideal, matrix);
+    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, LOOKUP_WORD_LENGTH);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
     match build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
@@ -3805,7 +3812,14 @@ mod tests {
         };
         let kept = addresses(&x_locked(&spares.ahead));
         let built = spares
-            .x_build_ahead(&queries, 11, &params, false, ScoringMatrix::Blosum62)
+            .x_build_ahead(
+                &queries,
+                11,
+                &params,
+                false,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+            )
             .expect("room for the table");
         // Built on the kept vectors (the build allocates none of them) with the kept lists, which
         // it gives back (this thread still has none).
@@ -3844,7 +3858,14 @@ mod tests {
         assert!(x_locked(&spares.ahead).overflow.capacity() >= overflow * 8);
         let other = bp_queries(&mut seed);
         let built = spares
-            .x_build_ahead(&other, 11, &params, false, ScoringMatrix::Blosum62)
+            .x_build_ahead(
+                &other,
+                11,
+                &params,
+                false,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+            )
             .expect("room for the table");
         assert_same_bp(&built, &other);
         // Home: the lists go back to a thread without any (not over its own), and with `release`
@@ -3890,8 +3911,14 @@ mod tests {
             ]
         };
         let spare = XAaSpares::default();
-        let first =
-            spare.x_build_on_block_spare(&queries, 11, &params, false, ScoringMatrix::Blosum62);
+        let first = spare.x_build_on_block_spare(
+            &queries,
+            11,
+            &params,
+            false,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+        );
         assert!(
             !first.0.overflow.is_empty(),
             "the fixture must reach the overflow array"
@@ -3909,20 +3936,38 @@ mod tests {
         table.pv.fill(u32::MAX);
         let given = table_addresses(&table);
         spare.give(table);
-        let again =
-            spare.x_build_on_block_spare(&queries, 11, &params, false, ScoringMatrix::Blosum62);
+        let again = spare.x_build_on_block_spare(
+            &queries,
+            11,
+            &params,
+            false,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+        );
         assert_eq!(table_addresses(&again.0), given);
         assert!(x_locked(&spare.block).is_empty());
         assert_same_bp(&again, &queries);
         spare.give(again.0);
-        let smaller =
-            spare.x_build_on_block_spare(&small, 11, &params, false, ScoringMatrix::Blosum62);
+        let smaller = spare.x_build_on_block_spare(
+            &small,
+            11,
+            &params,
+            false,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+        );
         assert_eq!(table_addresses(&smaller.0), given);
         assert_same_bp(&smaller, &small);
         // A larger table: the overflow vector grows to its size.
         spare.give(smaller.0);
-        let grown =
-            spare.x_build_on_block_spare(&large, 11, &params, false, ScoringMatrix::Blosum62);
+        let grown = spare.x_build_on_block_spare(
+            &large,
+            11,
+            &params,
+            false,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+        );
         assert!(grown.0.overflow.len() > overflow);
         assert_same_bp(&grown, &large);
     }
@@ -3957,10 +4002,130 @@ mod tests {
                 "{before:?}"
             );
             assert!(spares
-                .x_build_ahead(&queries, 11, &params, false, ScoringMatrix::Blosum62)
+                .x_build_ahead(
+                    &queries,
+                    11,
+                    &params,
+                    false,
+                    ScoringMatrix::Blosum62,
+                    LOOKUP_WORD_LENGTH
+                )
                 .is_none());
             assert_eq!(capacities(&spares), before);
             assert!(x_locked(&spares.memo).is_some());
+        }
+    }
+
+    /// Item SC3: blastp's tables of word size 2 (blastp-short and `-word_size 2`). The in-place
+    /// build in both widths, the build on a block spare (given back and built again) and the
+    /// builds ahead hold the reference builder's table of the words of 2, with the same contexts,
+    /// for BLOSUM62 and PAM30 at thresholds that reach the overflow array.
+    #[test]
+    fn word_size_two_tables_are_the_reference_builders() {
+        let mut seed = 59u64;
+        let queries = bp_queries(&mut seed);
+        let params = blosum62_ideal_karlin_params();
+        for (matrix, threshold) in [
+            (ScoringMatrix::Blosum62, 11),
+            (ScoringMatrix::Blosum62, 6),
+            (ScoringMatrix::Pam30, 16),
+            (ScoringMatrix::Pam30, 9),
+        ] {
+            let name = format!("{matrix:?} threshold {threshold}:");
+            let (want, want_contexts) = build_lookup_from_prepared(
+                x_bp_prepared_query(&queries, false, matrix, 2),
+                threshold,
+                matrix,
+                2,
+            );
+            assert_eq!(want.word_length, 2, "{name}");
+            assert!(
+                want.longest_chain as usize > AA_HITS_PER_CELL && !want.overflow.is_empty(),
+                "{name} the fixture must reach the overflow array"
+            );
+            let same_contexts = |got: &[QueryContext]| {
+                assert_eq!(got.len(), want_contexts.len(), "{name}");
+                for (a, b) in got.iter().zip(&want_contexts) {
+                    assert!(
+                        a.q_idx == b.q_idx
+                            && a.aa_seq == b.aa_seq
+                            && a.frame_base == b.frame_base
+                            && a.is_valid == b.is_valid
+                            && format!("{:?}", a.karlin_params) == format!("{:?}", b.karlin_params),
+                        "{name} context {} differs",
+                        a.q_idx
+                    );
+                }
+            };
+            let wide_of = |built: XBpLookup| match built {
+                XBpLookup::Wide(table) => table,
+                XBpLookup::Narrow(_) => panic!("{name} a 32-bit table was asked for"),
+            };
+            let narrow_of = |built: XBpLookup| match built {
+                XBpLookup::Narrow(table) => table,
+                XBpLookup::Wide(_) => panic!("{name} the block fits 16-bit hits"),
+            };
+            let (built, contexts) =
+                x_bp_build_lookup_as(&queries, threshold, false, false, matrix, 2);
+            x_assert_same_table_as(&name, &wide_of(built), &want);
+            same_contexts(&contexts);
+            let (built, contexts) =
+                x_bp_build_lookup_as(&queries, threshold, false, true, matrix, 2);
+            x_assert_narrow_same_as_wide(&name, &narrow_of(built), &want);
+            same_contexts(&contexts);
+            // On a block spare: the vectors given back from a table of words of 3, then from the
+            // table just built.
+            let spare = XAaSpares::default();
+            spare.give(x_bp_build_lookup(&queries, 11, false).0);
+            for _ in 0..2 {
+                let (table, contexts) =
+                    spare.x_build_on_block_spare(&queries, threshold, &params, false, matrix, 2);
+                x_assert_same_table_as(&name, &table, &want);
+                same_contexts(&contexts);
+                spare.give(table);
+            }
+            let (built, contexts) =
+                spare.x_build_on_block_spare16(&queries, threshold, false, matrix, 2);
+            let narrow = narrow_of(built);
+            x_assert_narrow_same_as_wide(&name, &narrow, &want);
+            same_contexts(&contexts);
+            // On the 16-bit vectors given back from a table of words of 3.
+            let three = narrow_of(
+                x_bp_build_lookup_as(
+                    &queries,
+                    11,
+                    false,
+                    true,
+                    ScoringMatrix::Blosum62,
+                    LOOKUP_WORD_LENGTH,
+                )
+                .0,
+            );
+            spare.give16(three);
+            let (built, contexts) =
+                spare.x_build_on_block_spare16(&queries, threshold, false, matrix, 2);
+            x_assert_narrow_same_as_wide(&name, &narrow_of(built), &want);
+            same_contexts(&contexts);
+            // Ahead, on the room made for it.
+            let spares = XAaSpares::default();
+            spares.x_make_room(want.backbone.len(), want.pv.len(), want.overflow.len(), 0);
+            let (table, contexts) = spares
+                .x_build_ahead(&queries, threshold, &params, false, matrix, 2)
+                .expect("the room made holds the table");
+            x_assert_same_table_as(&name, &table, &want);
+            same_contexts(&contexts);
+            spares.x_make_room16(
+                narrow.backbone.len(),
+                narrow.pv.len(),
+                narrow.overflow.len(),
+                0,
+            );
+            let (built, contexts) = spares
+                .x_build_ahead16(&queries, threshold, false, matrix, 2)
+                .expect("the room made holds the table");
+            x_assert_narrow_same_as_wide(&name, &narrow_of(built), &want);
+            same_contexts(&contexts);
+            spares.x_home(true);
         }
     }
 
@@ -4025,8 +4190,14 @@ mod tests {
         ];
         let mut overflow_seen = false;
         for threshold in [0, 11, 13, 1000] {
-            let (built, contexts) =
-                x_bp_build_lookup_as(&queries, threshold, false, true, ScoringMatrix::Blosum62);
+            let (built, contexts) = x_bp_build_lookup_as(
+                &queries,
+                threshold,
+                false,
+                true,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+            );
             let XBpLookup::Narrow(narrow) = built else {
                 panic!("a small block takes 16-bit hits (threshold {threshold})");
             };
@@ -4039,7 +4210,15 @@ mod tests {
         assert!(overflow_seen, "the fixture must reach the overflow array");
         // Not asked for: the table of 32-bit hits.
         assert!(matches!(
-            x_bp_build_lookup_as(&queries, 11, false, false, ScoringMatrix::Blosum62).0,
+            x_bp_build_lookup_as(
+                &queries,
+                11,
+                false,
+                false,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH
+            )
+            .0,
             XBpLookup::Wide(_)
         ));
         // The choice at 65,535 letters: the lookup query's length is the last context's frame_base
@@ -4048,22 +4227,42 @@ mod tests {
             &[vec![frame(residues(&mut seed, 50), vec![], 1)]],
             false,
             ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
         )
         .contexts[0]
             .frame_base as usize;
         for (length, narrow) in [(65_535 - base, true), (65_536 - base, false)] {
             let block = vec![vec![frame(residues(&mut seed, length), vec![], 1)]];
             assert_eq!(
-                x_bplk16_fits(&x_bp_prepared_query(&block, false, ScoringMatrix::Blosum62)),
+                x_bplk16_fits(&x_bp_prepared_query(
+                    &block,
+                    false,
+                    ScoringMatrix::Blosum62,
+                    LOOKUP_WORD_LENGTH
+                )),
                 narrow,
                 "{length} letters"
             );
-            match x_bp_build_lookup_as(&block, 11, false, true, ScoringMatrix::Blosum62).0 {
+            match x_bp_build_lookup_as(
+                &block,
+                11,
+                false,
+                true,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+            )
+            .0
+            {
                 XBpLookup::Narrow(table) => {
                     assert!(narrow, "{length} letters took 16-bit hits");
                     assert_eq!(table.query_length, 65_535);
                     let reference = build_lookup_from_prepared(
-                        x_bp_prepared_query(&block, false, ScoringMatrix::Blosum62),
+                        x_bp_prepared_query(
+                            &block,
+                            false,
+                            ScoringMatrix::Blosum62,
+                            LOOKUP_WORD_LENGTH,
+                        ),
                         11,
                         ScoringMatrix::Blosum62,
                         LOOKUP_WORD_LENGTH,
@@ -4108,7 +4307,13 @@ mod tests {
         for block in &blocks {
             let table = narrow_of(
                 spares
-                    .x_build_on_block_spare16(block, 11, false, ScoringMatrix::Blosum62)
+                    .x_build_on_block_spare16(
+                        block,
+                        11,
+                        false,
+                        ScoringMatrix::Blosum62,
+                        LOOKUP_WORD_LENGTH,
+                    )
                     .0,
             );
             let wide = x_bp_build_lookup(block, 11, false).0;
@@ -4118,14 +4323,26 @@ mod tests {
         // The build ahead on the room made for the next table, from the table before it.
         let first = narrow_of(
             spares
-                .x_build_on_block_spare16(&blocks[0], 11, false, ScoringMatrix::Blosum62)
+                .x_build_on_block_spare16(
+                    &blocks[0],
+                    11,
+                    false,
+                    ScoringMatrix::Blosum62,
+                    LOOKUP_WORD_LENGTH,
+                )
                 .0,
         );
         spares.x_make_room16(first.backbone.len(), first.pv.len(), 1 << 16, 1 << 17);
         spares.give16(first);
         for block in &blocks {
             let (built, _) = spares
-                .x_build_ahead16(block, 11, false, ScoringMatrix::Blosum62)
+                .x_build_ahead16(
+                    block,
+                    11,
+                    false,
+                    ScoringMatrix::Blosum62,
+                    LOOKUP_WORD_LENGTH,
+                )
                 .expect("the room made holds the table");
             let table = narrow_of(built);
             let wide = x_bp_build_lookup(block, 11, false).0;
@@ -4134,12 +4351,26 @@ mod tests {
         }
         // A table of 32-bit hits built ahead takes room of its own width, not the 16-bit vectors.
         assert!(spares
-            .x_build_ahead(&blocks[0], 11, &params, false, ScoringMatrix::Blosum62)
+            .x_build_ahead(
+                &blocks[0],
+                11,
+                &params,
+                false,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH
+            )
             .is_none());
         let wide = x_bp_build_lookup(&blocks[0], 11, false).0;
         spares.x_make_room(wide.backbone.len(), wide.pv.len(), 1 << 16, 1 << 17);
         let (table, _) = spares
-            .x_build_ahead(&blocks[0], 11, &params, false, ScoringMatrix::Blosum62)
+            .x_build_ahead(
+                &blocks[0],
+                11,
+                &params,
+                false,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+            )
             .expect("the room made holds the table");
         x_assert_same_table(&table, &wide);
     }

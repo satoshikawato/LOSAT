@@ -527,7 +527,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       await expect(validation).toHaveAttribute('data-state', 'ok');
     }
   };
-  for (const [id, tasks] of [['blastp', ['blastp', 'blastp-fast']], ['blastx', ['blastx', 'blastx-fast']]] as const) {
+  for (const [id, tasks] of [['blastp', ['blastp', 'blastp-fast', 'blastp-short']], ['blastx', ['blastx', 'blastx-fast']]] as const) {
     await program(page, id);
     for (const name of tasks) {
       await task(page, name);
@@ -1210,6 +1210,9 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   );
   await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp-fast') })).toHaveText(
     'Quick BLASTP (blastp-fast)',
+  );
+  await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp-short') })).toHaveText(
+    'Short sequences (blastp-short)',
   );
   await expect(line).toHaveText('Search protein subjects with BLASTP, task blastp (protein-protein BLAST).');
   await expect(form.locator('.section-legend')).toHaveText(['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters']);

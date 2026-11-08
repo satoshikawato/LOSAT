@@ -9,12 +9,6 @@ use crate::config::{ProteinScoringSpec, ScoringMatrix};
 pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
 use crate::blastinput::value_parsers::*;
 
-/// The message for `-task blastp-short`, which the search entrance printed for the task's
-/// word size (`blast_engine::check_options`) and which is now printed when the arguments
-/// are parsed.
-const BLASTP_SHORT_UNSUPPORTED: &str =
-    "-word_size 2 (the lookup table) is not supported by LOSAT's BLASTP";
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-876
 // ```c
 // switch (comp_stat_string[0]) {
@@ -382,17 +376,16 @@ pub struct BlastpArgs {
     //         retval.insert("blastp-short");
     //         retval.insert("blastp-fast");
     // ```
-    // `blastp-short` (word size 2, PAM30 9/1) is an NCBI task that LOSAT's BLASTP does not
-    // implement: it fails when the arguments are parsed, as the search entrance did
-    // (`blast_engine::check_options`).
-    #[arg(long, default_value = "blastp", value_parser = task_parser(&["blastp", "blastp-fast"], &[("blastp-short", BLASTP_SHORT_UNSUPPORTED)]))]
+    // `blastp-short` (word size 2, PAM30 9/1, `BlastpTaskOptions::create`) runs the lookup table
+    // of word size 2 (item SC3).
+    #[arg(long, default_value = "blastp", value_parser = task_parser(&["blastp", "blastp-fast", "blastp-short"], &[]))]
     pub task: String,
     // An omitted value keeps the default of the task (10).
-    #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
+    #[arg(long, value_parser = blastp_real, help = "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]")]
     pub evalue: Option<f64>,
-    #[arg(long, value_parser = blastp_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast]")]
+    #[arg(long, value_parser = blastp_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast; 16 (PAM30's) for blastp-short]")]
     pub threshold: Option<f64>,
-    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast]")]
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]")]
     pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
@@ -453,11 +446,14 @@ pub struct BlastpArgs {
     pub culling_limit: Option<i32>,
     #[arg(long)]
     pub ungapped: bool,
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion; 15 (PAM30's) for blastp-short]")]
     pub window_size: Option<i32>,
-    #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
+    #[arg(
+        long,
+        help = "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]"
+    )]
     pub matrix: Option<String>,
-    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11, or the matrix's best value]")]
+    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11, or the matrix's best value; 9 for blastp-short]")]
     pub gap_open: Option<i32>,
     #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1, or the matrix's best value]")]
     pub gap_extend: Option<i32>,
@@ -670,7 +666,7 @@ impl BlastpTaskOptions {
                 options.lookup_table_type = BlastpLookupTableType::CompressedAaLookupTable;
                 options.chaining = true;
             }
-            _ => bail!("unsupported blastp task '{task}': expected one of blastp, blastp-fast"),
+            _ => bail!("unsupported blastp task '{task}': expected one of blastp, blastp-fast, blastp-short"),
         }
         Ok(options)
     }
@@ -1391,20 +1387,7 @@ mod tests {
         for value in ["false", "F", "0", "no", "off"] {
             assert!(!resolve(&["-soft_masking", value]), "{value}");
         }
-        // `-task blastp-short` stops at the command line, so the task is set by hand.
-        let TestCommand::Blastp(mut args) = parse_cli([
-            "losat",
-            "blastp",
-            "-query",
-            "q.faa",
-            "-subject",
-            "s.faa",
-            "-soft_masking",
-            "true",
-        ])
-        .command;
-        args.task = "blastp-short".into();
-        assert!(args.resolve().expect("resolved blastp args").soft_masking);
+        assert!(resolve(&["-task", "blastp-short", "-soft_masking", "true"]));
         assert!(resolve(&[
             "-task",
             "blastp-fast",
@@ -1461,9 +1444,17 @@ mod tests {
         // NCBI api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
         // compressed lookup and BLAST_WORD_THRESHOLD_BLASTP_FAST (20), which is kept
         // because (int)20 is not BLASTP's default threshold (blast_args.cpp:586-600).
-        let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
+        let cli = parse_cli([
+            "losat",
+            "blastp",
+            "-query",
+            "q.faa",
+            "-subject",
+            "s.faa",
+            "-task",
+            "blastp-short",
+        ]);
         let TestCommand::Blastp(mut args) = cli.command;
-        args.task = "blastp-short".into();
         let resolved = args.resolve().expect("resolved blastp-short args");
         assert_eq!(resolved.task, "blastp-short");
         assert_eq!(resolved.evalue, 20000.0);

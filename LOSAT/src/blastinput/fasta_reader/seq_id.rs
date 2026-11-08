@@ -12,8 +12,6 @@
 //! formats is rejected without the lookup (`SeqIdLine::GuideFormat`), which also rejects
 //! some lines that the guide does not know and NCBI reads as FASTA (`ZZ123456`).
 
-use super::ReaderConfig;
-
 /// What `CSeq_id(line, fParse_AnyRaw | fParse_ValidLocal)` and its retry make of a line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SeqIdLine {
@@ -616,14 +614,17 @@ pub(super) fn classify(line: &[u8]) -> SeqIdLine {
 /// ```
 /// Every line that `classify` does not call FASTA is rejected: NCBI fetches it, skips it
 /// (a query whose ID is not found, or another rethrown exception) or fails (a subject).
-pub(super) fn reject_seq_id_line(line: &[u8], config: &ReaderConfig) -> Option<anyhow::Error> {
+/// `line` is the line as read (`classify` trims it); `program` and `role` name the reader in
+/// the rejection. Both readers ask here: the shared reader (`reader::read_one_seq`, with its
+/// data loaders on) and BLASTX's command line reader (`algorithm::blastx::input`,
+/// `FastaStream::seq_id_role`). BLASTX's web ABI v1 (`algorithm::blastx::web`, frozen) does not:
+/// it reads such a line as data, as before.
+pub(crate) fn reject_seq_id_line(line: &[u8], program: &str, role: &str) -> Option<anyhow::Error> {
     if classify(line) == SeqIdLine::Fasta {
         return None;
     }
     Some(anyhow::anyhow!(
         "the first line of the {role} ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's {program} (start the {role} with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)",
-        String::from_utf8_lossy(line),
-        role = config.role,
-        program = config.program,
+        String::from_utf8_lossy(super::stream::trim_input_space(line)),
     ))
 }

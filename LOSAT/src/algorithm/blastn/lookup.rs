@@ -3559,3 +3559,7 @@ mod encode_kmer_bounds_tests {
         assert_eq!(encode_kmer(&[0u8, 1], 0, 2), Some(1));
     }
 }
+
+#[cfg(test)]
+#[path = "lookup_tests.rs"]
+mod lookup_tests;

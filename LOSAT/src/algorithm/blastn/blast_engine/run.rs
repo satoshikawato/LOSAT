@@ -18991,10 +18991,9 @@ fn search_query_chunks(
         return Ok(None);
     };
     // With an overlap close to the chunk size NCBI's setup of a chunk would split it again
-    // and stop with a CCoreException that names its build's files
-    // (`query_split::chunk_would_be_split`). LOSAT searches each chunk once, as NCBI does
-    // for every overlap that does not split a chunk again (approved exception 1 of
-    // PD-LOSAT-NCBI-DEFECTS).
+    // and stop with a CCoreException that names its build's files. LOSAT searches each chunk
+    // once, as NCBI does for every overlap that does not split a chunk again (approved
+    // exception 1 of PD-LOSAT-NCBI-DEFECTS).
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.count());
     merged.resize_with(queries.count(), || None);
     // No NCBI counterpart (memory placement only, `x_query_sentinels`): the chunks' query buffer,

@@ -231,6 +231,7 @@ impl TaxDb {
     }
 
     /// Whether NCBI treats the database as missing (`IsMissingTaxInfo`): every lookup finds nothing.
+    #[cfg(test)]
     pub fn is_missing(&self) -> bool {
         self.files.is_none()
     }
@@ -752,6 +753,7 @@ impl LazyTaxDb {
     }
 
     /// Whether the database has been opened (a name has been asked for).
+    #[cfg(test)]
     pub fn is_open(&self) -> bool {
         self.db.get().is_some()
     }

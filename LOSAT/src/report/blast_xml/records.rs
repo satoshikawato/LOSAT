@@ -151,6 +151,7 @@ pub enum HitTaxonomy {
 }
 
 /// The `taxonomy` of a hit without a taxonomy lookup.
+#[cfg(test)]
 pub const UNNAMED: &HitTaxonomy = &HitTaxonomy::Unnamed;
 
 /// A masked region of the query in NCBI's form (`CSeqLocInfo`): inclusive 0-based positions in

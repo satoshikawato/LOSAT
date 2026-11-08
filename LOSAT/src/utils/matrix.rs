@@ -717,6 +717,7 @@ pub fn standard_protein_matrix(matrix: ScoringMatrix) -> ProteinScoreMatrix {
     }
 }
 
+#[cfg(test)]
 #[inline(always)]
 pub fn protein_defscore(matrix: ScoringMatrix) -> i32 {
     standard_protein_matrix(matrix).defscore

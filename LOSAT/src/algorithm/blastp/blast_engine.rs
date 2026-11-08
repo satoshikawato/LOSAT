@@ -3283,9 +3283,12 @@ fn psiblast_pssms(
         }
         let ordinal = ranges.query_input.ordinal(query);
         let record = &ranges.input_records[ordinal];
-        let id = format!(
-            "Query_{}",
-            args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
+        let id = crate::report::serial::pssm::ObjectId::Str(
+            format!(
+                "Query_{}",
+                args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
+            )
+            .into_bytes(),
         );
         let ungapped = &contexts[query].karlin_params;
         let ungapped = KarlinBlk {
@@ -5460,6 +5463,21 @@ fn search_cli(
     if let Some(psi) = resolved.psi_search.clone() {
         crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, &psi)?;
         let records = vec![psi.query().clone()];
+        // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's below.
+        if let Some(request) = resolved
+            .psi_rounds
+            .as_deref()
+            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
+        {
+            crate::algorithm::psiblast::pssm::check_pssm_files(
+                request,
+                records.len(),
+                resolved
+                    .out
+                    .as_deref()
+                    .filter(|path| path.as_os_str() != "-"),
+            )?;
+        }
         let choice_to_standard_output = resolved
             .out
             .as_deref()

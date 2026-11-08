@@ -48,7 +48,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   changes which function is called: glibc picks its variant (for example `__log_fma` on an
   FMA-capable CPU) when it is loaded, from the CPU, not from LOSAT's target CPU. Do not
   replace these calls by another implementation (LOSAT does not depend on the `libm` crate, and
-  `LOSAT/tests/check_fp_contract.py` rejects a call to one).
+  `LOSAT/tests/check_fp_contract.py` rejects a call into it, `libm::<fn>`).
 - **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
   (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the
   baseline CPU of the target; the AVX2 kernels are chosen at run time

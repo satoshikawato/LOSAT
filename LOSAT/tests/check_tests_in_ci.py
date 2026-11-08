@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when a Python test file of the repository is run by no workflow that runs on its own.
+"""Fail when a Python or Node test file of the repository is run by no workflow that runs on its own.
 
 No NCBI counterpart: this checks LOSAT's own CI wiring, not ported behavior.
 
@@ -7,15 +7,22 @@ The SWEBOK audit of 2026-11-04 (KA5) found five `test_*.py` files with 35 tests
 that no workflow ran (`test_audit_blastp_v010.py`, `test_audit_tblastx_v010.py`,
 `test_benchmark_wasm_threading.py`, `test_certify_blastn_v010.py`,
 `test_compare_blastn_parity.py`), so a change to the tools they test could break
-them unseen. The workflows name the test files they run one by one
-(`unittest discover -s LOSAT/tests -p 'test_x.py'`, `unittest LOSAT/tests/test_x.py`),
-so this check fails when the file name of a `test_*.py` file appears in the
-`run:` commands of no workflow that runs without a person: one started by
+them unseen. The review of this check on 2026-11-07 found
+`LOSAT/tests/test_benchmark_wasi_reuse.js` (the test of the Wasm benchmark runner) unrun;
+`wasm-threading.yml`, which the nightly workflow calls, has run it since 2026-11-08, and
+this check reads `test_*.js` files too. The workflows name the test files they run one by
+one (`unittest discover -s LOSAT/tests -p 'test_x.py'`, `unittest LOSAT/tests/test_x.py`,
+`node LOSAT/tests/test_x.js`), so this check fails when the file name of a `test_*.py` or
+`test_*.js` file appears in the `run:` commands of no workflow that runs without a person: one started by
 push, pull_request(_target), merge_group or schedule, or one such a workflow
 calls (`uses: ./.github/workflows/<file>`). A name only in a `paths:` filter, in
 a comment, or in a workflow that runs only when dispatched (release readiness,
 platform certification) does not count. A file name shared by two directories
 counts as named for both.
+
+Only files named `test_*.py` and `test_*.js` are test files here. web/app's vitest and
+Playwright files (`*.test.ts`, `*.spec.ts`) are run by web.yml as suites and are out of
+scope, as is any other `*.test.js` file.
 
 `python/tests/` is pylosat's pytest suite, which `python.yml` runs as a directory
 (`pytest tests`, working directory `python`): its files are run while that
@@ -30,10 +37,10 @@ parser), with these limits:
   `if:` is not read: a job that runs only when dispatched, in a workflow that
   push or pull_request starts, counts.
 The first two can only report a file as not run. The search walks the
-directory, so a local untracked `test_*.py` file is reported too; CI checks a
+directory, so a local untracked `test_*.py` or `test_*.js` file is reported too; CI checks a
 clean checkout.
 
-Usage: python3 LOSAT/tests/check_python_tests_in_ci.py --root .
+Usage: python3 LOSAT/tests/check_tests_in_ci.py --root .
 """
 
 from __future__ import annotations
@@ -46,7 +53,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 SKIPPED_DIRS = frozenset({".git", ".worktrees", "target", "node_modules", ".venv", "__pycache__"})
-TEST_FILE_RE = re.compile(r"^test_.*\.py$")
+TEST_FILE_RE = re.compile(r"^test_.*\.(py|js)$")
 # A YAML comment: `#` at the start of a line or after a space (`'#'` inside a value is not one).
 YAML_COMMENT_RE = re.compile(r"(^|\s)#.*$")
 # Events that start a workflow without a person.
@@ -59,7 +66,7 @@ DIRECTORY_SUITES = {"python/tests": ("python.yml", re.compile(r"\bpytest tests(?
 
 
 def test_files(root: Path) -> Iterable[str]:
-    """The repository-relative paths (with `/`) of the `test_*.py` files under `root`."""
+    """The repository-relative paths (with `/`) of the `test_*.py` and `test_*.js` files under `root`."""
     for directory, subdirs, files in os.walk(root):
         subdirs[:] = sorted(d for d in subdirs if d not in SKIPPED_DIRS)
         for name in sorted(files):
@@ -141,7 +148,8 @@ def is_run(path: str, workflows: dict[str, str]) -> bool:
         if path.startswith(directory + "/") and command.search(workflows.get(workflow, "")):
             return True
     name = path.rsplit("/", 1)[-1]
-    return any(name in text for text in workflows.values())
+    token = re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w.])")
+    return any(token.search(text) for text in workflows.values())
 
 
 def not_run(root: Path) -> tuple[list[str], list[str]]:
@@ -162,15 +170,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         files, missing = not_run(root)
     except (OSError, ValueError) as error:
-        print(f"python-tests-in-CI error: {error}", file=sys.stderr)
+        print(f"tests-in-CI error: {error}", file=sys.stderr)
         return 2
     for path in missing:
         print(
             f"NOT RUN\t{path}\tno workflow that runs on push, pull request or schedule runs it: add a "
-            "step (ci.yml `rust lint` for a quick test of a tool), or delete the test with the tool "
+            "step (ci.yml `rust lint` for a quick test of a tool, wasm-threading.yml for one that needs the Wasm artifacts), or delete the test with the tool "
             "it tests",
         )
-    print(f"python tests in CI\tfiles={len(files)}\tnot_run={len(missing)}")
+    print(f"tests in CI\tfiles={len(files)}\tnot_run={len(missing)}")
     return 0 if not missing else 1
 
 

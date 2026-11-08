@@ -329,7 +329,10 @@ impl Rule {
 
 /// The first reading: the loop of `read_queries` (`GetNextSeqBatch` until `End()`), each record's
 /// length kept and the record dropped, and how the reading ended (with the warnings of the record
-/// whose reading failed, as `read_queries` keeps them).
+/// whose reading failed, as `read_queries` keeps them). With `archive` (outfmt 11), also whether a
+/// record has a title that the archive cannot write (`check_titles`), which the batch loop
+/// refuses in the batch NCBI completes with it (`run.rs` `run_in_pool`) and which keeps the
+/// reports after the loop (`x_rpt_stream::Off::ArchiveTitle`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
 /// ```c++
@@ -347,15 +350,13 @@ impl Rule {
 ///             throw;
 ///         }
 /// ```
-fn scan<R: Read>(
-    source: &mut FastaInputSource<R>,
-    archive: bool,
-) -> Result<(Vec<usize>, QueryEnd)> {
+fn scan<R: Read>(source: &mut FastaInputSource<R>, archive: bool) -> (Vec<usize>, QueryEnd, bool) {
     let mut lengths = Vec::new();
     let encoding = crate::report::archive::ArchiveEncoding::from_env();
+    let mut archive_title = false;
     loop {
         if source.end() {
-            return Ok((lengths, QueryEnd::Input));
+            return (lengths, QueryEnd::Input, archive_title);
         }
         let mut warnings = Vec::new();
         match source.next_sequence(&mut |message: &[u8]| {
@@ -363,21 +364,14 @@ fn scan<R: Read>(
             Ok(())
         }) {
             Ok(record) => {
-                if archive {
-                    crate::report::archive::check_titles_for(
-                        encoding,
-                        std::slice::from_ref(&record),
-                        "query",
-                        "BLASTN",
-                    )?;
-                }
+                archive_title |= archive && !encoding.writes_text(&record.title);
                 lengths.push(record.sequence.len());
             }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
                 ..
-            }) => return Ok((lengths, QueryEnd::EofError)),
-            Err(error) => return Ok((lengths, QueryEnd::Error { error, warnings })),
+            }) => return (lengths, QueryEnd::EofError, archive_title),
+            Err(error) => return (lengths, QueryEnd::Error { error, warnings }, archive_title),
         }
     }
 }
@@ -394,6 +388,8 @@ struct Acting {
     query_input: QueryInput,
     /// The searched length of each searched query.
     lengths: Vec<usize>,
+    /// The BLAST archive (outfmt 11): a record has a title that it cannot write (`scan`).
+    archive_title: bool,
     ranged: bool,
     scan: Duration,
     /// The first reading took the parts' lengths (`x_query_scan_par.rs`).
@@ -495,8 +491,7 @@ impl Store {
             .again
             .expect("LOSAT_X_QSTREAM reads a file it can read again");
         let started = Instant::now();
-        // The BLAST archive (outfmt 11) refuses a query title it cannot write before the
-        // first byte: this reading sees every record.
+        // The BLAST archive (outfmt 11): this reading sees every record's title (`scan`).
         // The lengths read in parts on the search's threads, from the second handle at the position
         // the source starts from; where the parts are not taken, the source reads them (its
         // position is where it was: the parts read at offsets).
@@ -509,11 +504,12 @@ impl Store {
             None
         };
         let scan_par = parts.is_some();
-        let (input_lengths, spans, end) = match parts {
-            Some(parts) => (parts.lengths, Some(parts.spans), QueryEnd::Input),
+        // (The parts are not read for the archive, which keeps the deflines.)
+        let (input_lengths, spans, end, archive_title) = match parts {
+            Some(parts) => (parts.lengths, Some(parts.spans), QueryEnd::Input, false),
             None => {
-                let (lengths, end) = scan(source, config.keep_defline)?;
-                (lengths, None, end)
+                let (lengths, end, archive_title) = scan(source, config.keep_defline);
+                (lengths, None, end, archive_title)
             }
         };
         let scan = started.elapsed();
@@ -546,6 +542,7 @@ impl Store {
                 ranged: range.is_some(),
                 query_input,
                 lengths,
+                archive_title,
                 scan,
                 scan_par,
                 state: Mutex::new(State {
@@ -991,6 +988,19 @@ impl<'a> Queries<'a> {
             }
             Queries::Streamed(store) => store.acting().lengths.clone(),
             Queries::Taken(store) => store.lengths().to_vec(),
+        }
+    }
+
+    /// Whether an input record has a title that the BLAST archive (outfmt 11) cannot write
+    /// (`check_titles`; the records of a LOSAT_X_BNQPACK `Store` are never the archive's, whose
+    /// queries' letters the reports read: `x_query_drop::Rule`).
+    pub(super) fn archive_title(&self) -> bool {
+        match self {
+            Queries::Records { input, .. } => {
+                crate::report::archive::check_titles(input, "query", "BLASTN").is_err()
+            }
+            Queries::Streamed(store) => store.acting().archive_title,
+            Queries::Taken(_) => false,
         }
     }
 
@@ -1859,7 +1869,7 @@ mod tests {
             let old = old(&file.0);
             let mut source = FastaInputSource::from_file(File::open(&file.0).unwrap(), config());
             assert!(!source.stream_is_empty());
-            let (lengths, end) = scan(&mut source, false).unwrap();
+            let (lengths, end, _) = scan(&mut source, false);
             let old_lengths: Vec<usize> = old.records.iter().map(|r| r.seq().len()).collect();
             assert_eq!(lengths, old_lengths, "seed {seed}");
             assert_eq!(end_text(&end), end_text(&old.end), "seed {seed}");

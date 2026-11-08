@@ -1099,7 +1099,7 @@ pub(super) fn x_partial_ranges(
     x_partial_ranges_padded(spans, length, x_tb_range_pad())
 }
 
-/// EXPERIMENT (LOSAT_X_BNTBRANGEPAD=<bases>, a test knob): NCBI's 1024 of `x_partial_ranges`
+/// EXPERIMENT (`LOSAT_X_BNTBRANGEPAD=<bases>`, a test knob): NCBI's 1024 of `x_partial_ranges`
 /// (both the widening and the gap), 16 to 1,048,576; a small one makes the traceback meet
 /// fences, so that the tests reach the whole sequence's second traceback. Not below 16: the
 /// start of a gapped alignment is found by reading up to 12 bases on each side of the seed
@@ -1279,6 +1279,7 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .first()
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(),
+        one_by_one: shared::prefetch_may_be_off(),
     }
 }
 
@@ -1368,26 +1369,23 @@ pub(super) fn reported_subjects(
         .collect();
     ordinals.sort_unstable();
     ordinals.dedup();
-    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
-    // batch whose prefetch is on reports (`prefetch`: a batch whose Seq-aligns outnumber a
-    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them); where the prefetch fails, the
-    // batch writes NCBI's warning (`BlastnDatabase::batch_prefetch`).
-    // `prefetched` is `None` where every batch prefetches.
-    let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
-    if shown.prefetched && prefetched.is_some() {
-        let lists = hit_lists
+    // What the batches read of each subject (`prefetch`: a batch whose Seq-aligns outnumber a
+    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read
+    // them one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
+    // NCBI's warning (`BlastnDatabase::batch_prefetch`).
+    let reads = prefetch.reads(
+        hit_lists
             .iter()
             .enumerate()
-            .filter(|&(query, _)| prefetch.query(query))
-            .filter_map(|(_, hit_list)| hit_list.as_ref())
-            .flat_map(|hit_list| hit_list.hsplist_array.iter())
-            .filter(|hsp_list| !hsp_list.hsps.is_empty());
-        for hsp_list in lists {
-            if let Some(prefetched) = &mut prefetched {
-                prefetched.insert(hsp_list.oid);
-            }
-        }
-    }
+            .filter_map(|(query, hit_list)| Some((query, hit_list.as_ref()?)))
+            .flat_map(|(query, hit_list)| {
+                hit_list
+                    .hsplist_array
+                    .iter()
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(move |hsp_list| (query, hsp_list.oid))
+            }),
+    );
     let rank = |ordinal: u32| -> u32 {
         ordinals
             .binary_search(&ordinal)
@@ -1422,11 +1420,7 @@ pub(super) fn reported_subjects(
             }
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
-                let shown = shown.prefetched_if(
-                    prefetched
-                        .as_ref()
-                        .is_none_or(|prefetched| prefetched.contains(&ordinal)),
-                );
+                let shown = reads.shown(shown, ordinal);
                 shared::check_reported_parsed(db, subject, shown, false, taxdb, ordinal, PROGRAM)?;
                 (subject.first_title().to_vec(), Some(Arc::clone(subject)))
             }

@@ -508,24 +508,15 @@ pub(crate) fn reported_subjects(
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
     ordinals.dedup();
-    // Where only the batches' prefetch reads the subjects (`shown.prefetched`), those that a
-    // batch whose prefetch is on reports (`prefetch`: a batch whose Seq-aligns outnumber a
-    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them); where the prefetch fails, the
-    // batch writes NCBI's warning (`batch_prefetch`).
-    // `prefetched` is `None` where every batch prefetches.
-    let mut prefetched = prefetch.counts().then(std::collections::HashSet::new);
-    if shown.prefetched && prefetched.is_some() {
-        let mut previous = None;
-        for hsp in ordered.iter() {
-            let run = (hsp.hit.q_idx, hsp.hit.s_idx);
-            if previous.replace(run) == Some(run) || !prefetch.query(hsp.hit.q_idx as usize) {
-                continue;
-            }
-            if let Some(prefetched) = &mut prefetched {
-                prefetched.insert(hsp.hit.s_idx);
-            }
-        }
-    }
+    // What the batches read of each subject (`prefetch`: a batch whose Seq-aligns outnumber a
+    // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them
+    // one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
+    // NCBI's warning (`batch_prefetch`).
+    let reads = prefetch.reads(
+        ordered
+            .iter()
+            .map(|hsp| (hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+    );
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)
@@ -555,11 +546,7 @@ pub(crate) fn reported_subjects(
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
-                    shown.prefetched_if(
-                        prefetched
-                            .as_ref()
-                            .is_none_or(|prefetched| prefetched.contains(&ordinal)),
-                    ),
+                    reads.shown(shown, ordinal),
                     false,
                     taxdb,
                     ordinal,

@@ -1295,11 +1295,46 @@ impl ListedTitles<'_> {
     /// from the Seq-aligns of `hit_lists` before the formatter's cut to `-max_target_seqs`: NCBI
     /// reads the letters of each by its Seq-align id, as the formats that read the subject do
     /// (`ParsedSubject::fetched`), also for those beyond the cut that no report shows; where
-    /// that read fails it drops the letters with a warning.
-    pub(super) fn check_pssm_subjects(&self, hit_lists: &[Option<BlastpHitList>]) -> Result<()> {
-        for rank in Self::reported(hit_lists) {
+    /// that read fails it drops the letters with a warning; following subjects whose Seq-align ids
+    /// match are refused (`shared::refuse_pssm_joined_hits`). Only the subjects with a Seq-align
+    /// below `inclusion_ethresh` are read (`psi_round::included`). `prefetch`: whether each query's
+    /// batch prefetches (the round's), which reads them all by their own ids before the PSSM;
+    /// one whose prefetch is off reads them one by one (`ParsedSubject::fetched`'s
+    /// `one_by_one`).
+    pub(super) fn check_pssm_subjects(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        prefetch: &shared::BatchPrefetch,
+        inclusion_ethresh: f64,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        let included = |hsp_list: &crate::algorithm::blastp::hsp::BlastpHspList| {
+            hsp_list
+                .hsps
+                .iter()
+                .any(|hsp| super::psi_round::included(hsp.e_value, inclusion_ethresh))
+        };
+        let queries = || {
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(query, hit_list)| {
+                    let hit_list = hit_list.as_ref()?;
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    Some((query, &hit_list.hsplist_array[..count]))
+                })
+        };
+        let read: std::collections::BTreeSet<usize> = queries()
+            .flat_map(|(_, lists)| lists.iter())
+            .filter(|hsp_list| included(hsp_list))
+            .map(|hsp_list| hsp_list.oid as usize)
+            .collect();
+        let reads = Self::batch_reads(hit_lists, prefetch);
+        for rank in read {
             if let Some(subject) = self.parsed_subject(rank) {
-                subject.fetched(false).map_err(|reason| {
+                subject.fetched(false, reads.one_by_one(rank as u32)).map_err(|reason| {
                     shared::parsed_refusal(
                         self.listed.ordinals[rank],
                         &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
@@ -1307,6 +1342,22 @@ impl ListedTitles<'_> {
                     )
                 })?;
             }
+        }
+        // The PSSM's multiple alignment joins following subjects whose Seq-align ids match. The
+        // reads above come first: a subject whose letters NCBI reads from another sequence is
+        // refused for that, also where it joins its neighbour.
+        for (query, lists) in queries() {
+            shared::refuse_pssm_joined_hits(
+                query,
+                lists.iter().map(|hsp_list| {
+                    let rank = hsp_list.oid as usize;
+                    let subject = self
+                        .parsed_subject(rank)
+                        .map(|subject| (self.listed.ordinals[rank], subject));
+                    (subject, included(hsp_list))
+                }),
+                self.program,
+            )?;
         }
         Ok(())
     }
@@ -1337,6 +1388,18 @@ impl ListedTitles<'_> {
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
     fn reported(hit_lists: &[Option<BlastpHitList>]) -> std::collections::BTreeSet<usize> {
         Self::reported_ranks(hit_lists).collect()
+    }
+
+    /// What the batches read of the subjects with rows in `hit_lists`, by rank: `prefetch`
+    /// tells by query whether the query's batch prefetches (`shared::BatchPrefetch::reads`).
+    fn batch_reads(
+        hit_lists: &[Option<BlastpHitList>],
+        prefetch: &shared::BatchPrefetch,
+    ) -> shared::BatchReads {
+        prefetch.reads(hit_lists.iter().enumerate().flat_map(|(query, hit_list)| {
+            Self::reported_ranks(std::slice::from_ref(hit_list))
+                .map(move |rank| (query, rank as u32))
+        }))
     }
 
     /// The rank of the subject of each row of `hit_lists`, in the order of the lists.
@@ -1509,10 +1572,13 @@ impl ListedTitles<'_> {
     /// `shared::refuse_joined_hits`), and a word of a title made from the taxids that a table
     /// prints (`words`, `ParsedSubject::check_printed_word`). `taxonomy`: whether a format
     /// writes the subjects' taxids or their names (13 to 16, a table of taxonomy fields).
-    /// `hit_lists` are in the order of the reports.
+    /// `hit_lists` are in the order of the reports; `prefetch` tells by query whether its
+    /// batch prefetches, else its reports read the subjects one by one
+    /// (`ParsedSubject::fetched`'s `one_by_one`).
     pub(super) fn check_parsed_reports(
         &self,
         hit_lists: &[Option<BlastpHitList>],
+        prefetch: &shared::BatchPrefetch,
         fetched: bool,
         joined: bool,
         taxonomy: bool,
@@ -1522,11 +1588,18 @@ impl ListedTitles<'_> {
             return Ok(());
         }
         if fetched {
+            let reads = Self::batch_reads(hit_lists, prefetch);
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
-                    subject.fetched(taxonomy).map_err(|reason| {
-                        shared::parsed_refusal(self.listed.ordinals[rank], &reason, self.program)
-                    })?;
+                    subject
+                        .fetched(taxonomy, reads.one_by_one(rank as u32))
+                        .map_err(|reason| {
+                            shared::parsed_refusal(
+                                self.listed.ordinals[rank],
+                                &reason,
+                                self.program,
+                            )
+                        })?;
                     subject.check_printed_word(true, words).map_err(|problem| {
                         shared::parsed_refusal(
                             self.listed.ordinals[rank],

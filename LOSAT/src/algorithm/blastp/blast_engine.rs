@@ -12111,8 +12111,26 @@ fn run_resolved_in_pool(
     // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
     // reports (below `output_result`). A refusal between here and the reports (the database
     // titles below) or a report write error drops them: no PSSM file has changed (`PssmFiles`).
+    // Whether each query's batch prefetches (`shared::BatchPrefetch`), by the Seq-aligns of its
+    // results, one for each HSP (psiblast's before the cut, as `psiblast_hits_found` below): a
+    // batch whose prefetch is off reads its subjects one by one, for the PSSM too. The rounds of
+    // one psiblast query share NCBI's scope, but every subject that a round whose prefetch is off
+    // reads one by one is refused there (its reports and its PSSM, below), so no weak match
+    // reaches a later round (review 2 of line DBID weakbatch, L1).
+    let batch_ranges: Vec<std::ops::Range<usize>> = query_batches
+        .iter()
+        .map(|batch| batch.searched.clone())
+        .collect();
+    let batch_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+        hit_lists.len(),
+        0,
+        &batch_ranges,
+        |span| blastp_hit_list_hsp_count(&hit_lists[span]),
+    );
+    // `-out_pssm`'s PSSM, before it is made (a later query's PSSM error reruns the search without
+    // the files, review 2 of line DBID weakbatch H2).
     if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
-        titles.check_pssm_subjects(&hit_lists)?;
+        titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
     }
     let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
@@ -12148,6 +12166,14 @@ fn run_resolved_in_pool(
         ),
         None => None,
     };
+    // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,
+    // H1: psiblast_app.cpp:291-309 `ComputePssmForNextIteration`) reads the letters of the
+    // subjects before the cut by their Seq-align ids.
+    if let (Some(io), Some(titles)) = (reports.psi_round, listed_titles.as_ref()) {
+        if io.makes_next() {
+            titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
+        }
+    }
     let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
         hit_lists
             .iter_mut()
@@ -12437,6 +12463,7 @@ fn run_resolved_in_pool(
         // subject by its Seq-align id, as those formats do (review 1 of line DBID tabfields, H1).
         titles.check_parsed_reports(
             &hit_lists,
+            &batch_prefetch,
             format_plans.iter().any(|outfmt| outfmt.reads_subjects())
                 || args.psi_pssm.is_some()
                 || reports.psi_round.is_some(),

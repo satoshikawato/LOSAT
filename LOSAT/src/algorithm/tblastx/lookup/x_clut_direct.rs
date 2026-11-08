@@ -101,8 +101,8 @@
 //! So for n >= 6 the offset o_k with k >= 3 lies in the g-th overflow cell of the cell, g = (k - 3) >> 2,
 //! at slot s = (k - 3) & 3, the list runs from the newest cell (g = G - 1) to the first (g = 0, whose
 //! `next` is NULL), G = ceil((n - 3) / 4) = floor(n / 4) cells, and the newest holds
-//! m = n - 3 - 4 (G - 1) offsets, 1 <= m <= 4. The scan (above) writes o_0 at dest[0]; for n <= 5 it
-//! writes o_k at dest[k]. For n >= 6 it writes o_1, o_2 at dest[1], dest[2], then
+//! m = n - 3 - 4 (G - 1) offsets, 1 <= m <= 4. The scan (above) writes o_0 at `dest[0]`; for n <= 5 it
+//! writes o_k at `dest[k]`. For n >= 6 it writes o_1, o_2 at `dest[1]`, `dest[2]`, then
 //! f = (n - 3) & 3 slots of the head; n - 3 = m (mod 4), so f = m when f != 0, and the walk then moves
 //! to the next cell, while for f = 0 (m = 4) the walk starts at the head: either way the head's m
 //! slots come first, then cells G - 2, ..., 0 with 4 slots each. Hence the emission position of o_k:

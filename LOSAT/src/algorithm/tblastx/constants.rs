@@ -86,7 +86,7 @@ pub const GAP_TRIGGER_BIT_SCORE: f64 = 22.0;
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_std.h:181
 ///   #define NULLB '\0'
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1579
-///   matrix[i][j] = BLAST_SCORE_MIN;
+///   `matrix[i][j] = BLAST_SCORE_MIN;`
 pub const SENTINEL_BYTE: u8 = 0;
 
 /// Historical alias retained for diagnostics/documentation.

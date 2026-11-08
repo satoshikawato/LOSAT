@@ -333,7 +333,7 @@ pub(crate) enum BxLookup {
 }
 
 /// The standard lookup table with 16-bit hits and its companion (`XKeptPresence`: the build
-/// number, the context table, whether the table goes back to the pool); see [`BxLookup`].
+/// number, the context table, whether the table goes back to the pool); see `BxLookup`.
 pub struct NarrowLookup {
     pub(crate) table: BlastAaLookupTable<BackboneCell16>,
     pub(crate) kept: x_seed_scan::XKeptPresence,

@@ -355,8 +355,9 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // (`archive::check_batch_titles`, below): when a batch that the search may write has a query
     // title it cannot write (`archive::batches_may_refuse`, on the records in memory) or the
     // subjects have one, every format is held in order from its prolog on (`archive::ArchiveHold`),
-    // so that the refusal follows no byte, as on the command line.
-    let hold = (archive.is_some()
+    // so that the refusal follows no byte, as on the command line. Otherwise no batch's check can
+    // refuse, and the batches are not checked again (`titles_may_refuse`).
+    let titles_may_refuse = archive.is_some()
         && batch_size > 0
         && (archive::batches_may_refuse(&resolved[0], &mut |deliver| {
             reader_batches(
@@ -368,8 +369,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 deliver,
                 &mut |_| Ok(()),
             )
-        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err())))
-    .then(archive::ArchiveHold::new);
+        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
+    let hold = titles_may_refuse.then(archive::ArchiveHold::new);
     let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
         Some(hold) => {
             hold.hold();
@@ -479,8 +480,9 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         // The archive (outfmt 11) of this batch, which NCBI writes once its search and the read of
         // its definition lines have not failed: the titles it cannot write are refused before any
         // format of the batch (`archive::check_batch_titles`; the outputs are the caller's, so the
-        // batches before are written).
-        if archive.is_some() {
+        // batches before are written); only a run whose read before the search found such a
+        // title can refuse (`titles_may_refuse`).
+        if titles_may_refuse {
             archive::check_batch_titles(
                 queries,
                 database.is_none().then_some(subjects),

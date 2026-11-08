@@ -6403,7 +6403,13 @@ fn search(
     }
     // The titles that the BLAST archive (outfmt 11) cannot write are refused where the archive
     // of the searched batches is written (`run_resolved_in_pool`), after their search: the batch
-    // that stops the run here, and one whose search fails, write no archive.
+    // that stops the run here, and one whose search fails, write no archive. The titles are read
+    // once here: only when a searched query or a subject has such a title does a call check its
+    // own (`BlastpReports::titles_may_refuse`).
+    let titles_may_refuse = args.archive.is_some()
+        && (super::archive::check_titles(&searched_queries[..batches.searched_done], "query")
+            .is_err()
+            || super::archive::check_titles(subject_source.fasta_records(), "subject").is_err());
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
     // one search per round per query (`psi_round`).
@@ -6418,6 +6424,7 @@ fn search(
             subject_source,
             subject_label,
             outputs,
+            titles_may_refuse,
         );
     }
     // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
@@ -6482,6 +6489,7 @@ fn search(
             x_queries_before: 0,
             x_xml2_carry: None,
             psi_round: None,
+            titles_may_refuse,
         };
         run_resolved_in_pool(
             args,
@@ -6573,6 +6581,7 @@ fn search(
         subject_source,
         outputs,
         batch_size,
+        titles_may_refuse,
     );
     if x_plan.is_none() {
         super::x_query_blocks::x_reach_block_search(false);
@@ -6827,6 +6836,7 @@ fn search(
                                     .contains(&XBlockReport::Xml2)
                                     .then_some(&x_xml2_carry),
                                 psi_round: None,
+                                titles_may_refuse,
                             },
                             x_block,
                         )
@@ -6999,6 +7009,7 @@ fn x_query_block_plan(
     subject_source: BlastpSubjectSource<'_>,
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
+    titles_may_refuse: bool,
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
@@ -7019,11 +7030,9 @@ fn x_query_block_plan(
     }
     // A title that the archive cannot write is refused where the archive of the searched batches
     // is written, after their search (`run_resolved_in_pool`): a block's archive would come before
-    // the refusal of a later block's title, so such a run takes the search of all queries.
-    if args.archive.is_some()
-        && (super::archive::check_titles(queries, "query").is_err()
-            || super::archive::check_titles(subject_source.fasta_records(), "subject").is_err())
-    {
+    // the refusal of a later block's title, so such a run takes the search of all queries
+    // (`titles_may_refuse`, `search`).
+    if titles_may_refuse {
         return None;
     }
     // Several outputs, the hit records or an observer. Each
@@ -7696,6 +7705,10 @@ struct BlastpReports<'a> {
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
     psi_round: Option<&'a crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    /// With the BLAST archive (outfmt 11): a searched query or a subject that `search` read has a
+    /// title the archive cannot write, so the call checks its own queries and subjects where it
+    /// writes the archive (`run_resolved_in_pool`); without such a title no call can refuse.
+    titles_may_refuse: bool,
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
@@ -7889,6 +7902,8 @@ fn search_split_query_batches(
                     x_queries_before: 0,
                     x_xml2_carry: None,
                     psi_round: None,
+                    // The call of the whole query writes the archive.
+                    titles_may_refuse: false,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
             )?;
@@ -12160,8 +12175,9 @@ fn run_resolved_in_pool(
     // sequence. So a title the archive cannot write is refused here, where the call's batches
     // have been searched and their definition lines read, and before the first byte of any
     // report. (The block search, which writes each block's archive, does not run when a title
-    // could be refused, `x_query_block_plan`.)
-    if args.archive.is_some() {
+    // could be refused, `x_query_block_plan`.) Only a run whose read found such a title can
+    // refuse (`BlastpReports::titles_may_refuse`).
+    if reports.titles_may_refuse {
         super::archive::check_titles(query_records, "query")?;
         super::archive::check_titles(subject_records, "subject")?;
     }

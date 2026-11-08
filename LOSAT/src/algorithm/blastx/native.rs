@@ -849,28 +849,30 @@ fn run_inner(
     // title is refused with the first batch), and the run then holds its output and diagnostics
     // in order (`archive::ArchiveHold`) until the refusal drops them; a run that stops with an
     // error of NCBI's own before that batch writes them (`run`), and one that ends writes them
-    // after its epilog.
-    if archive.is_some() {
-        if !query_is_regular {
-            archive::refuse_irregular_query()?;
+    // after its epilog. When that read finds no such title, no batch's check can refuse, and the
+    // batches are not checked again (`titles_may_refuse`).
+    let titles_may_refuse = match &archive {
+        Some(_) => {
+            if !query_is_regular {
+                archive::refuse_irregular_query()?;
+            }
+            let refusable = archive::prescan_query_titles(
+                query_prescan
+                    .as_ref()
+                    .expect("the second handle of a regular query"),
+                &query_settings,
+                args.lcase_masking,
+                &options,
+                batch_size,
+                query_range.as_ref(),
+            )? || archive::check_titles(&subjects, "subject").is_err();
+            if let (true, Some(hold)) = (refusable, &hold) {
+                hold.hold();
+            }
+            refusable
         }
-        let refusable = archive::prescan_query_titles(
-            query_prescan
-                .as_ref()
-                .expect("the second handle of a regular query"),
-            &query_settings,
-            args.lcase_masking,
-            &options,
-            batch_size,
-            query_range.as_ref(),
-        )?;
-        if let (true, Some(hold)) = (
-            refusable || archive::check_titles(&subjects, "subject").is_err(),
-            &hold,
-        ) {
-            hold.hold();
-        }
-    }
+        None => false,
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // ```c++
     //         catch(CBlastException & e ) {
@@ -1068,8 +1070,11 @@ fn run_inner(
                 };
             // The batch's search and the read of its definition lines have not failed: NCBI
             // writes its archive, whose titles LOSAT refuses before any byte (what the run held
-            // is dropped, `run`).
-            archive::check_batch_titles(queries, subject_records, queries_before == 0)?;
+            // is dropped, `run`); only a run whose read before the search found such a title can
+            // refuse (`titles_may_refuse`).
+            if titles_may_refuse {
+                archive::check_batch_titles(queries, subject_records, queries_before == 0)?;
+            }
             return archive::write_blastx_archive(
                 &archive::ArchiveCall {
                     handle,

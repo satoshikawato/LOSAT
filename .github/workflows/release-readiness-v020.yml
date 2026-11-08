@@ -7,16 +7,20 @@ name: Release Readiness v0.2.0
 # (LOSAT/tests/verify_release_archive_v020.py: sha256 against the sidecar, extract, `losat --version`, five
 # smokes), and aggregated into one exact-SHA handoff.
 #
-# Dispatch (a workflow_dispatch workflow must exist on the default branch `main`) with the filled
-# contract committed on R:
-#   gh workflow run release-readiness-v020.yml --repo satoshikawato/LOSAT --ref main -f candidate_sha=<R>
-# The assembler refuses an unfilled contract and a candidate that changes a runtime input after the
-# certified candidate C. Nothing here tags, releases, publishes to a registry, code-signs or notarizes a
-# binary, or uses a self-hosted runner; the integrated certification (set A) runs locally per the plan.
+# Dispatch with the filled contract committed on R, on the branch whose head is R (a workflow_dispatch
+# workflow must also exist on the default branch `main` to be dispatchable):
+#   gh workflow run release-readiness-v020.yml --repo satoshikawato/LOSAT --ref release/0.2 -f candidate_sha=<R>
+# The build provenance names the dispatched ref and its head as the source, so job `quality` refuses a
+# run whose head is not R. The assembler refuses an unfilled contract and a candidate that changes a
+# runtime input after the certified candidate C. Nothing here tags, releases, publishes to a registry,
+# code-signs or notarizes a binary, or uses a self-hosted runner; the integrated certification (set A)
+# runs locally per the plan.
 # Job `handoff` adds the CycloneDX SBOM of the crate's dependencies (LOSAT-0.2.0.cdx.json: every target
-# and feature, so one SBOM covers the eight artifacts) and signs two GitHub artifact attestations
-# (Sigstore, keyless) for every file in SHA256SUMS: the build provenance and the SBOM. A user checks a
-# downloaded file with
+# and feature, so one SBOM covers the eight artifacts) and creates two GitHub artifact attestations
+# (Sigstore-signed, keyless): the build provenance of the eight files in SHA256SUMS and of the SBOM,
+# and the SBOM attestation of the eight files. Every dispatch writes them to the repository's
+# attestations and to the public Sigstore transparency log, also for a candidate that does not get GO;
+# the log cannot be edited. A user checks a downloaded file with
 #   gh attestation verify <file> --repo satoshikawato/LOSAT
 #   gh attestation verify <file> --repo satoshikawato/LOSAT --predicate-type https://cyclonedx.org/bom
 
@@ -76,6 +80,11 @@ jobs:
         run: |
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          # The attestations of job `handoff` name GITHUB_SHA as the source commit.
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::dispatch on the branch whose head is R (--ref release/0.2): $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
 
       # The contract must be filled and R must descend from the certified candidate C with no
       # runtime-input change; checked here first so that a bad candidate fails in seconds, not after
@@ -503,9 +512,11 @@ jobs:
 
       # The dependencies in LOSAT/Cargo.lock for every target and feature (CycloneDX 1.5, JSON), so one
       # SBOM covers the five native archives, the two Wasm archives and the crate. SOURCE_DATE_EPOCH =
-      # the commit time of R fixes the timestamp and drops the random serial number: the same R and
-      # tool version give the same bytes. Added after the assembler, so SHA256SUMS and RC-HANDOFF keep
-      # the eight contract files; the SBOM attestation below signs the same document.
+      # the commit time of R fixes the timestamp and drops the random serial number, so a rerun on R
+      # gives the same bytes (the root's bom-ref is Cargo's package id, which holds the checkout path).
+      # Added after the assembler, so SHA256SUMS and RC-HANDOFF keep the eight contract files; the SBOM
+      # attestation below carries the same document. The provenance subjects are the eight files and
+      # the SBOM, so the published SBOM file verifies like the archives.
       - name: CycloneDX SBOM of the release dependencies
         run: |
           SOURCE_DATE_EPOCH="$(git log -1 --format=%ct "$CANDIDATE_SHA")"
@@ -515,11 +526,13 @@ jobs:
             --override-filename LOSAT-0.2.0.cdx
           git diff --exit-code -- Cargo.lock
           mv LOSAT-0.2.0.cdx.json ../.tmp/release-readiness/handoff/
+          cd ../.tmp/release-readiness/handoff
+          { cat SHA256SUMS; sha256sum LOSAT-0.2.0.cdx.json; } > ../provenance-subjects.txt
 
-      - name: Build provenance attestation of every file in SHA256SUMS
+      - name: Build provenance attestation of the eight files and the SBOM
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-checksums: .tmp/release-readiness/handoff/SHA256SUMS
+          subject-checksums: .tmp/release-readiness/provenance-subjects.txt
 
       - name: SBOM attestation of every file in SHA256SUMS
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

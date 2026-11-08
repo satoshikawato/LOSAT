@@ -1088,10 +1088,20 @@ class ThreadedGuardTests(unittest.TestCase):
 
 class WorkflowTests(unittest.TestCase):
     @unittest.skipUnless(WORKFLOW_PATH.exists(), "PR 3 adds the workflow")
-    def test_release_workflow_is_manual_read_only_and_non_publishing(self) -> None:
+    def test_release_workflow_is_manual_non_publishing_and_only_handoff_attests(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("contents: read", workflow)
+        # Only job `handoff` (the last job) may write: the OIDC token and the attestations.
+        before_handoff, handoff = workflow.split("\n  handoff:\n", 1)
+        for grant in ("id-token: write", "attestations: write"):
+            self.assertNotIn(grant, before_handoff)
+            self.assertEqual(handoff.count(grant), 1)
+        self.assertNotIn("contents: write", workflow)
+        self.assertIn("actions/attest-build-provenance@", handoff)
+        self.assertIn("sbom-path: .tmp/release-readiness/handoff/LOSAT-0.2.0.cdx.json", handoff)
+        # The provenance names GITHUB_SHA as the source, so a run whose head is not R must stop.
+        self.assertIn('if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then', before_handoff)
         self.assertNotIn("actions/create-release", workflow)
         self.assertNotIn("softprops/action-gh-release", workflow)
         self.assertNotIn("cargo publish\n", workflow)

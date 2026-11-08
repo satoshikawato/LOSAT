@@ -10,7 +10,8 @@
 // reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7).
 //
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
-// exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well. A
+// exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well, for a
+// search with `"frozen_prefix"` after the frozen path prefix is put back (`toFrozen`). A
 // search marked `"expect": "failure"` must fail in the CLI and in the ABI with the same
 // error. A search with `"outfmt"` (a format besides 0, 6 and 7, or 6 or 7 with fields) runs
 // with that -outfmt: its output, stream 4, is compared with the CLI's run of the same argv,
@@ -56,6 +57,27 @@ function withoutCl(document) {
   const end = document.indexOf(Buffer.from("\tPN:blastn\n"), start);
   if (end < 0) return document;
   return Buffer.concat([document.subarray(0, start), document.subarray(end)]);
+}
+
+// The bytes of a run as the frozen run wrote them, before their frozen hash is compared: every
+// `prefix.run` that does not follow a character of `prefix.not_after` is `prefix.frozen` (the
+// search's `"frozen_prefix"`, LOSAT/tests/frozen_paths.py `to_frozen`). Without one, the bytes.
+function toFrozen(bytes, prefix) {
+  if (!prefix) return bytes;
+  const [run, frozen, notAfter] = [Buffer.from(prefix.run), Buffer.from(prefix.frozen), Buffer.from(prefix.not_after)];
+  const parts = [];
+  let from = 0, at = bytes.indexOf(run);
+  while (at >= 0) {
+    if (at === 0 || !notAfter.includes(bytes[at - 1])) {
+      parts.push(bytes.subarray(from, at), frozen);
+      from = at + run.length;
+      at = bytes.indexOf(run, from);
+    } else {
+      at = bytes.indexOf(run, at + 1);
+    }
+  }
+  parts.push(bytes.subarray(from));
+  return Buffer.concat(parts);
 }
 
 // The CRC-32 of ZIP (ISO-HDLC).
@@ -505,7 +527,7 @@ async function main() {
           const want = expected.outputs.get(format);
           assert.equal(sha256(actual), sha256(want), `${label}: outfmt ${format}`);
           row.formats[format] = sha256(actual);
-          if (search.frozen[format]) row.frozen[format] = sha256(actual) === search.frozen[format];
+          if (search.frozen[format]) row.frozen[format] = sha256(toFrozen(actual, search.frozen_prefix)) === search.frozen[format];
         }
         if (search.files) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
@@ -523,8 +545,8 @@ async function main() {
             assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: -outfmt ${search.outfmt} ${name}`);
           }
           row.formats.custom = sha256(sent);
-          const master = sha256(entries[entries.length - 1][1]);
-          const sides = entries.slice(0, -1).map(([, bytes]) => sha256(bytes)).join(",");
+          const master = sha256(toFrozen(entries[entries.length - 1][1], search.frozen_prefix));
+          const sides = entries.slice(0, -1).map(([, bytes]) => sha256(toFrozen(bytes, search.frozen_prefix))).join(",");
           if (search.frozen.custom) row.frozen.custom = master === search.frozen.custom;
           if (search.frozen.sides !== undefined) row.frozen.sides = sides === search.frozen.sides;
         } else if (search.outfmt !== undefined) {
@@ -533,7 +555,7 @@ async function main() {
           const cli = expected.outputs.get(CUSTOM_STREAM);
           assert.equal(sha256(actual), sha256(search.sam ? withoutCl(cli) : cli), `${label}: -outfmt ${search.outfmt}`);
           row.formats.custom = sha256(actual);
-          if (search.frozen.custom) row.frozen.custom = sha256(actual) === search.frozen.custom;
+          if (search.frozen.custom) row.frozen.custom = sha256(toFrozen(actual, search.frozen_prefix)) === search.frozen.custom;
         } else {
           assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without -outfmt`);
         }

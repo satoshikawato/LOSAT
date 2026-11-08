@@ -71,6 +71,10 @@ jobs:
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v020.py LOSAT/tests/test_verify_release_archive_v020.py
       - name: Regression tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
+      # No NCBI counterpart: the one replacement of a checkout-path prefix (Owner 2026-11-05): the
+      # Stage G runs pass a run root of the frozen prefix's length, which outputs get back as the prefix.
+      - name: Frozen path prefix tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_frozen_paths.py'
       - name: Drop-in corpus tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_dropin_corpus.py'
       # No NCBI counterpart: the merge of the coverage shards of nightly.yml (a report).
@@ -312,13 +316,6 @@ jobs:
       - name: Floating-point contract (release binary)
         if: steps.select.outputs.programs != 'none'
         run: python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/losat
-      # Frozen outfmt 0/7 bytes print the input paths of the runs that froze them
-      # (TLOSAN Stage G); capture_outputs.py checks the bytes behind each path.
-      - name: Link the frozen input paths
-        if: steps.select.outputs.programs != 'none'
-        run: |
-          sudo mkdir -p /mnt/c/Users/genom/GitHub
-          sudo ln -sfn "$GITHUB_WORKSPACE" /mnt/c/Users/genom/GitHub/LOSAT
       - name: Output hashes, frozen hashes and outfmt 0 fixtures
         if: steps.select.outputs.programs != 'none'
         # LOSAT_X_REACH (LOSAT/src/utils/xreach.rs): every run records which side its conditional

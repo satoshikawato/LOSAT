@@ -75,8 +75,6 @@ pub fn calculate_evalue_alignment_length(
     let effective_space = aln_space.max(min_space);
 
     let search_space = SearchSpace {
-        effective_query_len: effective_space.sqrt(),
-        effective_db_len: effective_space.sqrt(),
         effective_space,
         length_adjustment: 0,
     };

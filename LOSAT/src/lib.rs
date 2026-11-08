@@ -13,8 +13,7 @@
 
 #[doc(hidden)]
 pub mod algorithm;
-#[doc(hidden)]
-pub mod common;
+pub(crate) mod common;
 pub(crate) mod sequence;
 #[doc(hidden)]
 pub mod utils;
@@ -23,15 +22,13 @@ pub mod utils;
 pub mod config;
 #[doc(hidden)]
 pub mod report;
-#[doc(hidden)]
-pub mod stats;
+pub(crate) mod stats;
 
 // NCBI api/, blastinput/ and core/ layers.
 pub mod api;
 #[doc(hidden)]
 pub mod blastinput;
-#[doc(hidden)]
-pub mod core;
+pub(crate) mod core;
 // NCBI objtools/blast/seqdb_reader (CSeqDB): reader of BLAST database volumes.
 #[doc(hidden)]
 pub mod seqdb;
@@ -40,11 +37,9 @@ pub mod seqdb;
 pub(crate) mod seqid;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
-#[doc(hidden)]
-pub mod writedb;
+pub(crate) mod writedb;
 // NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
-#[doc(hidden)]
-pub mod blastdbcmd;
+pub(crate) mod blastdbcmd;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_api;

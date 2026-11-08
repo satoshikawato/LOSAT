@@ -56,8 +56,12 @@ fn test_effective_search_space_variation() {
 
         // But still positive
         assert!(ss2.effective_space > 0.0);
-        assert!(ss2.effective_query_len > 0.0);
-        assert!(ss2.effective_db_len > 0.0);
+
+        // The space is (m - adj) * (n - N * adj), as the constructor computes it
+        let adj = ss2.length_adjustment as f64;
+        let expected_m = (q_len as f64 - adj).max(1.0);
+        let expected_n = (db_len as f64 - adj * db_num_seqs as f64).max(1.0);
+        assert_eq!(ss2.effective_space, expected_m * expected_n);
 
         // Length adjustment should be reasonable (not larger than sequence length)
         assert!(ss2.length_adjustment >= 0);

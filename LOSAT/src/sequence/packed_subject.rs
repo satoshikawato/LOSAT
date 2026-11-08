@@ -285,6 +285,7 @@ impl PackedNucleotide {
     /// So the letters, ncbi4na and blastna codes are those of NCBI's traceback, and the packed
     /// bytes those of its preliminary stage. A run may hold the code of `A`, `C`, `G` or `T`
     /// (another letter than the stored base); it is kept, as the letters show it.
+    #[cfg(test)]
     pub fn from_stored(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
         Self::from_stored_box(packed.into(), length, runs)
     }
@@ -327,6 +328,7 @@ impl PackedNucleotide {
     }
 
     /// True for a record without letters.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.length == 0
     }
@@ -351,12 +353,6 @@ impl PackedNucleotide {
         self.packed.len()
             + std::mem::size_of_val(&*self.ambiguity)
             + std::mem::size_of_val(&*self.lowercase)
-    }
-
-    /// The 2-bit code (0-3) of base `index` as packed (an ambiguous base as resolved).
-    #[inline]
-    fn code(&self, index: usize) -> u8 {
-        self.view().code(index)
     }
 
     /// Clears `out` and writes one byte per base from the packed codes through `map`.
@@ -388,14 +384,9 @@ impl PackedNucleotide {
         self.view().letters_into(from, to, out)
     }
 
-    /// `letters_into` of the letters `[from, from + out.len())`, into `out`.
-    #[inline]
-    pub fn letters_to(&self, from: usize, out: &mut [u8]) {
-        self.view().letters_to(from, out)
-    }
-
     /// The 2-bit codes (0 `A`, 1 `C`, 2 `G`, 3 `T`; an ambiguous base as resolved) of the bases
     /// `[from, from + out.len())`.
+    #[cfg(test)]
     pub fn codes_into(&self, from: usize, out: &mut [u8]) {
         assert!(from + out.len() <= self.length, "codes out of the subject");
         // the bases before the first whole byte, the whole bytes, the bases after them
@@ -403,7 +394,7 @@ impl PackedNucleotide {
         let head = ((4 - from % 4) % 4).min(out.len());
         let (head_out, rest) = out.split_at_mut(head);
         for (slot, code) in head_out.iter_mut().enumerate() {
-            *code = self.code(from + slot);
+            *code = self.view().code(from + slot);
         }
         let whole = from + head;
         let mut bytes = rest.chunks_exact_mut(4);
@@ -413,7 +404,7 @@ impl PackedNucleotide {
         let tail = bytes.into_remainder();
         let tail_from = to - tail.len();
         for (slot, code) in tail.iter_mut().enumerate() {
-            *code = self.code(tail_from + slot);
+            *code = self.view().code(tail_from + slot);
         }
     }
 
@@ -425,6 +416,7 @@ impl PackedNucleotide {
     }
 
     /// The ncbi4na code of every base (`iupacna_to_ncbi4na` of each letter).
+    #[cfg(test)]
     pub fn ncbi4na_into(&self, out: &mut Vec<u8>) {
         self.unpack_into(out, [1, 2, 4, 8]);
         let codes: [u8; 16] = std::array::from_fn(|code| code as u8);
@@ -466,7 +458,7 @@ impl PackedNucleotide {
                     }
                 });
             for (slot, base) in tail.iter_mut().enumerate() {
-                base.write(self.code(whole * 4 + slot));
+                base.write(self.view().code(whole * 4 + slot));
             }
             // SAFETY: the pieces wrote bytes `[0, whole * 4)` and the loop above
             // `[whole * 4, self.length)`, within the capacity reserved above.
@@ -483,6 +475,7 @@ impl PackedNucleotide {
     /// The bases as packed, one `A`, `C`, `G` or `T` per base: every ambiguous base resolved as
     /// NCBI's subject set-up resolves it (the draws the live TBLASTN subject translation makes
     /// for a record's letters, `x_subject_ncbi2na`).
+    #[cfg(test)]
     pub fn resolved_letters_into(&self, out: &mut Vec<u8>) {
         self.unpack_into(out, *b"ACGT");
     }
@@ -513,11 +506,6 @@ impl<'a> PackedRef<'a> {
     /// The number of bases.
     pub fn len(&self) -> usize {
         self.length
-    }
-
-    /// True for a sequence without bases.
-    pub fn is_empty(&self) -> bool {
-        self.length == 0
     }
 
     /// The runs of letters other than `A`, `C`, `G`, `T`, in order, each of one ncbi4na code.
@@ -697,11 +685,6 @@ impl<'a> SubjectNt<'a> {
             Self::Letters(letters) => letters.len(),
             Self::Packed(store) => store.len(),
         }
-    }
-
-    /// True for a subject without bases.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// The letters `[from, to)`: the record's own, or made in upper case in `buffer`.

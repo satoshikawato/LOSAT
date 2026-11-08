@@ -85,7 +85,7 @@ fn fate(bioseq: &Bioseq) -> Fate {
 /// Reads `input` to its end as `CBuildDatabase::AddFasta` does: the source, `fate` for
 /// each sequence, and `No sequences added` (build_db.cpp:1410-1412).
 fn run<R: Read>(input: R, protein: bool) -> Outcome {
-    let mut source = FastaBioseqSource::new(input, protein);
+    let mut source = FastaBioseqSource::with_parse_ids(input, protein, false);
     let mut outcome = Outcome {
         warnings: Vec::new(),
         ignored: Vec::new(),
@@ -284,7 +284,7 @@ fn makeblastdb_cases_match() {
 }
 
 fn one(input: &[u8], protein: bool) -> Bioseq {
-    let mut source = FastaBioseqSource::new(input, protein);
+    let mut source = FastaBioseqSource::with_parse_ids(input, protein, false);
     let bioseq = source
         .next_bioseq(&mut |_| ())
         .expect("no error")
@@ -380,7 +380,8 @@ fn seq_data_choice_and_bytes() {
 /// The local IDs count the records of the input from 1, the empty ones too.
 #[test]
 fn local_ids_and_titles() {
-    let mut source = FastaBioseqSource::new(&b">a one\nMKV\n>b two\n>\nGG\n"[..], true);
+    let mut source =
+        FastaBioseqSource::with_parse_ids(&b">a one\nMKV\n>b two\n>\nGG\n"[..], true, false);
     let mut read = Vec::new();
     while let Some(bioseq) = source.next_bioseq(&mut |_| ()).unwrap() {
         read.push((bioseq.local_id, bioseq.title, bioseq.is_aa, bioseq.length));
@@ -666,7 +667,8 @@ impl Read for FailingRead<'_> {
 
 #[test]
 fn read_error_ends_the_reading() {
-    let mut source = FastaBioseqSource::new(FailingRead(b">a\nMKV\n>b\nGG\n"), true);
+    let mut source =
+        FastaBioseqSource::with_parse_ids(FailingRead(b">a\nMKV\n>b\nGG\n"), true, false);
     let first = source.next_bioseq(&mut |_| ());
     assert_eq!(
         first,
@@ -741,7 +743,7 @@ fn fasta_files_match_their_makeblastdb_databases() {
         let (name, protein) = (columns[0], columns[1] == "prot");
         let started = std::time::Instant::now();
         let file = std::fs::File::open(columns[2]).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let mut source = FastaBioseqSource::new(file, protein);
+        let mut source = FastaBioseqSource::with_parse_ids(file, protein, false);
         let seqtype = if protein {
             SeqType::Protein
         } else {

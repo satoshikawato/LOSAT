@@ -8930,8 +8930,6 @@ fn run_resolved_in_pool(
                 // ```
                 exact_search_spaces.push(Some(options_searchsp));
                 return Ok(SearchSpace {
-                    effective_query_len: ctx.aa_len as f64,
-                    effective_db_len: eff_db_length as f64,
                     effective_space: options_searchsp as f64,
                     length_adjustment: if ctx.aa_len > 0 {
                         crate::stats::length_adjustment::compute_length_adjustment_ncbi(
@@ -8949,8 +8947,6 @@ fn run_resolved_in_pool(
             if eff_db_length == 0 {
                 exact_search_spaces.push(None);
                 return Ok(SearchSpace {
-                    effective_query_len: ctx.aa_len as f64,
-                    effective_db_len: 0.0,
                     effective_space: 0.0,
                     length_adjustment: 0,
                 });

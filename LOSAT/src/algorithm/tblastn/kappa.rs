@@ -522,8 +522,6 @@ const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks 
     calc_lambda: Some(redo_calc_lambda),
     get_range: translated_subject_get_range,
     redo_one_alignment: tblastn_redo_one_alignment_callback,
-    new_xdrop_align: None,
-    free_align_traceback: None,
 };
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:770-803,3577-3639

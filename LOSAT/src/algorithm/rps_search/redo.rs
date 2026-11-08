@@ -148,7 +148,8 @@ impl RpsTraceback<'_> {
                 self.x_drop_final,
                 matrix,
                 std::mem::take(&mut scratch.gap),
-            );
+            )
+            .with_bound_check();
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redone = RedoMatch {
                 info: &info,
@@ -158,14 +159,10 @@ impl RpsTraceback<'_> {
                 rps_roles: true,
             }
             .redo_match(&mut run, list.oid, &hsps, query);
+            let exceeded = run.bound_exceeded();
             let (matrix, gap) = run.into_buffers();
-            // The same bound for the matrix the last adjustment left.
-            let bound: i64 = matrix
-                .rows
-                .iter()
-                .map(|row| i64::from(row.iter().copied().max().unwrap_or(0).max(0)))
-                .sum();
-            if bound > i64::from(i32::MAX) {
+            // The bound of every matrix the adjustments built (`RedoRun::with_bound_check`).
+            if let Some(bound) = exceeded {
                 anyhow::bail!(
                     "a profile whose composition-adjusted scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's RPSBLAST"
                 );

@@ -129,6 +129,10 @@ pub(crate) struct RedoRun<'a> {
     /// The PSSM of NCBI's thread-local copy: what the last adjustment left.
     matrix: QueryPssm,
     scratch: PssmGapScratch,
+    /// RPS-BLAST: whether each adjusted matrix is checked against `INT4_MAX` (the sum of its
+    /// rows' best scores), and the first sum that was above it.
+    bound_check: bool,
+    bound_exceeded: Option<i64>,
 }
 
 /// `BlastCompo_Alignment`: an incoming (preliminary) alignment, scaled, or a redone one with its
@@ -243,7 +247,22 @@ impl<'a> RedoRun<'a> {
                 / lambda,
             matrix,
             scratch,
+            bound_check: false,
+            bound_exceeded: None,
         }
+    }
+
+    /// Checks every matrix the composition adjustment builds: an alignment uses each row once,
+    /// so the sum of the rows' best scores bounds its score, and above `INT4_MAX` NCBI's 32-bit
+    /// scores overflow (undefined behavior in C).
+    pub(crate) fn with_bound_check(mut self) -> Self {
+        self.bound_check = true;
+        self
+    }
+
+    /// The first sum of best row scores above `INT4_MAX` that an adjusted matrix had.
+    pub(crate) fn bound_exceeded(&self) -> Option<i64> {
+        self.bound_exceeded
     }
 
     /// The matrix and the alignment scratch, for the next run (RPS-BLAST redoes one profile
@@ -769,6 +788,17 @@ impl RedoMatch<'_> {
                             self.info,
                             &subject_composition.prob,
                         );
+                        if run.bound_check && run.bound_exceeded.is_none() {
+                            let bound: i64 = run
+                                .matrix
+                                .rows
+                                .iter()
+                                .map(|row| i64::from(row.iter().copied().max().unwrap_or(0).max(0)))
+                                .sum();
+                            if bound > i64::from(i32::MAX) {
+                                run.bound_exceeded = Some(bound);
+                            }
+                        }
                     }
                     num_adjustments += 1;
                 }

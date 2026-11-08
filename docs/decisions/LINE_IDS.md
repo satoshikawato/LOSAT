@@ -157,6 +157,7 @@ and `docs/`. State: 142 done, 12 in progress, 0 stopped.
 | `PS5a` | PS stage 5a: psiblast's rounds of FASTA queries (-num_iterations N, convergence, the two-part description table, the PSSM files of every round) and -comp_based_stats 0, with -subject or -db, for outfmt 0, 6, 7, 10 and 20, byte for byte as NCBI BLAST+ 2.17.0. | in progress | none | changelog entry `feature-ps-ps5` |
 | `PS11` | PS stage 11 (series PR): `losat rpsblast`, NCBI BLAST+ 2.17.0 rpsblast against profile databases (makeprofiledb -dbtype rps); split into PS11a and PS11b. | in progress | none | changelog entry `feature-ps-ps11` |
 | `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11` |
+| `PS11b` | PS stage 11b: `losat rpsblast` with composition-based statistics 1, 2 and 3 (the default 1; `.freq` ratios, the PSSM redo), databases of several volumes (merged per query as NCBI does), `-dbsize` and the 32-bit score bound, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11b` |
 
 ### RL: the v0.2.0 release
 

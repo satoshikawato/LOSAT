@@ -14555,10 +14555,18 @@ mod tests {
                         .unwrap_or_else(|err| panic!("{name} {gap_open}/{gap_extend}: {err}"));
                 }
             }
-            // psiblast keeps BLOSUM62 11/1 (its later rounds are not ported).
+            // psiblast keeps BLOSUM62 11/1 (its later rounds are not ported); IDENTITY is NCBI's
+            // error there (psiblast takes the standard matrices only, blast_options.c:913-917).
             let mut args = make_blastp_args();
             args.app = BlastpApp::Psiblast;
             args.matrix = Some(matrix.ncbi_name().to_string());
+            if matrix == ScoringMatrix::Identity {
+                let err = args.resolve().expect_err("psiblast IDENTITY");
+                assert!(err
+                    .to_string()
+                    .contains("IDENTITY is not a supported matrix"));
+                continue;
+            }
             let resolved = args.resolve().expect("resolved psiblast args");
             let result = validate_requested_blastp_support(&resolved);
             if matrix == ScoringMatrix::Blosum62 {

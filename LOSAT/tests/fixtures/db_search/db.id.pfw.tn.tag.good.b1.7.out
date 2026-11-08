@@ -1,0 +1,15 @@
+# TBLASTN 2.17.0+
+# Query: qa part of the sequence with the text tag
+# Database: tests/db_search/ids/ntag_t5
+# Fields: query id, evalue
+# 1 hits found
+qa	2.95e-66
+# TBLASTN 2.17.0+
+# Query: qb part of the other sequence
+# Database: tests/db_search/ids/ntag_t5
+# Fields: query id, evalue
+# 3 hits found
+qb	5.33e-77
+qb	0.41
+qb	6.7
+# BLAST processed 2 queries

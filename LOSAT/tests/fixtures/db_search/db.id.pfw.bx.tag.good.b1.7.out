@@ -1,0 +1,34 @@
+# BLASTX 2.17.0+
+# Query: qn1 query protein one, back-translated
+# Database: tests/db_search/ids/pshare_t5
+# Fields: query id, evalue
+# 11 hits found
+qn1	0.48
+qn1	2.8
+qn1	1.6
+qn1	1.8
+qn1	8.2
+qn1	9.3
+qn1	3.1
+qn1	7.6
+qn1	6.5
+qn1	7.5
+qn1	7.9
+# BLASTX 2.17.0+
+# Query: qn2 unrelated protein, back-translated
+# Database: tests/db_search/ids/pshare_t5
+# Fields: query id, evalue
+# 9 hits found
+qn2	0.12
+qn2	0.52
+qn2	0.41
+qn2	6.5
+qn2	0.57
+qn2	2.4
+qn2	6.7
+qn2	6.9
+qn2	10.0
+# BLASTX 2.17.0+
+# Query: qnnone no hits
+# Database: tests/db_search/ids/pshare_t5
+# BLAST processed 3 queries

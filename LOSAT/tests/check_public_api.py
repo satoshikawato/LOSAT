@@ -4,7 +4,8 @@
 No NCBI counterpart: this checks the library's own surface (docs/losat_library_surface_plan.md
 §14), not ported behavior.
 
-Only `api` is public: `lib.rs` hides every other module with `#[doc(hidden)]`. cargo-public-api
+Only `api` is public: `lib.rs` hides the other modules with `#[doc(hidden)]` or keeps them
+`pub(crate)`. cargo-public-api
 lists that surface from rustdoc JSON, one line per item, and this check fails when the listing
 differs from `public_api.txt`. A change of the surface is then a line in the pull request's diff
 that a reviewer reads. After a deliberate change, run `update` and commit the file; when the check

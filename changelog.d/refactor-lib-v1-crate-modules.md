@@ -1,0 +1,1 @@
+- Library: the engine modules `sequence` and `seqid`, and the Web ABI v1 module `web_api` (wasm32), are private to the crate (`pub(crate)`) instead of public and hidden from the docs, so no other crate can call their functions (line LIB, P-V1). The ABI v1 exports of the wasm modules and the command line's output are unchanged.

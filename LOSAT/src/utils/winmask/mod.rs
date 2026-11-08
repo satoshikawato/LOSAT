@@ -66,7 +66,7 @@ pub struct MaskerParams {
 /// the caller adds NCBI's framing (the exception chain or the BLAST error line).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WinMaskError {
-    /// `CSeqMaskerIstatFactory::eOpen`: "could not open <name>"
+    /// `CSeqMaskerIstatFactory::eOpen`: "could not open `<name>`"
     /// (`seq_masker_istat_factory.cpp:171`).
     Open { name: String },
     /// An exception of a reader (`eFormat`, `eBadParam`, `eBadHashParam`) at `site`; the

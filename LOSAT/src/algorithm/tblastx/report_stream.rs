@@ -285,6 +285,7 @@ fn database_check(
         words: format.printed_ids(),
         prefetched: format.prefetches_subjects()
             && !crate::algorithm::common::database::prefetch_always_off(),
+        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();

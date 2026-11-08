@@ -828,7 +828,7 @@ mod tests {
 
     #[test]
     fn a_panic_in_an_early_batch_is_raised_on_the_loop() {
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let plan = vec![0..2, 2..4, 4..6];
             let running = AtomicUsize::new(0);
             let most = AtomicUsize::new(0);

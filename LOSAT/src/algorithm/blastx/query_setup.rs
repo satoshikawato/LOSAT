@@ -370,14 +370,14 @@ pub(crate) fn prepare_unit_queries(
     // ```
     // `qinfo` is the query batch's: a unit of a reader batch (`batch`) fails only when no
     // context of the reader batch is valid, with the messages of all its empty queries.
-    let (valid, empty) = match batch {
-        Some(batch) => (batch.valid, batch.empty_queries),
-        None => (
-            contexts.iter().any(|c| c.is_valid),
-            records.iter().filter(|q| q.sequence.is_empty()).count(),
-        ),
+    let (fails, empty) = match batch {
+        Some(batch) => (batch.set_up_fails(), batch.empty_queries),
+        None => {
+            let empty = records.iter().filter(|q| q.sequence.is_empty()).count();
+            (!contexts.iter().any(|c| c.is_valid) && empty > 0, empty)
+        }
     };
-    if !valid && empty > 0 {
+    if fails {
         anyhow::bail!("{}", "Warning: Sequence contains no data ".repeat(empty));
     }
     let nomask = buffer.clone();

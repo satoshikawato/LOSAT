@@ -583,9 +583,9 @@ struct BufferPools {
 /// * `query_contexts` - Query context information
 /// * `subject_frame_bases` - Subject frame base offsets
 /// * `length_adj_per_context` - Pre-computed length adjustment per context
-///   (NCBI: query_info->contexts[ctx].length_adjustment)
+///   (NCBI: `query_info->contexts[ctx].length_adjustment`)
 /// * `eff_searchsp_per_context` - Pre-computed effective search space per context
-///   (NCBI: query_info->contexts[ctx].eff_searchsp)
+///   (NCBI: `query_info->contexts[ctx].eff_searchsp`)
 ///
 /// NCBI Parity Note:
 /// In NCBI, length_adjustment and eff_searchsp are calculated once per context

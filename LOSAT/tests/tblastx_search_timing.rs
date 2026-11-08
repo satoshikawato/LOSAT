@@ -21,7 +21,7 @@ fn fixture(name: &str) -> PathBuf {
 
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// The lines `LOSAT_TIMING` printed for a TBLASTX batch before the stage lines were added, in
 /// their order.
@@ -310,17 +310,17 @@ fn the_stage_lines_follow_the_old_lines_and_add_up() {
 }
 
 // No NCBI counterpart (a timer). The paths a subject can take all reach the stage lines: the
-// default (the reference frame loop at one thread, the unit path at four), `LOSAT_X_PAIRPARGATE=0`
-// (the unit path at one thread too), the debugging output `LOSAT_DEBUG_CUTOFFS` (the one path whose
-// linking calls take the reference body, which is not timed), and several subject records with one
-// too short to search (counted as a subject, all of it in the last stage). The linking lines count
-// the calls of the in-place linking path, whichever seed stage ran before it, and are all zero with
-// `LOSAT_DEBUG_CUTOFFS`. The report does not depend on the timer. At one thread the cost rule sends
-// the subject to the reference frame loop (`[X_STATS] PAIRPAR units=0`; not with
-// `LOSAT_X_PAIRPARGATE=0`, which turns the cost rule off). The `LOSAT_DEBUG_CUTOFFS` arm is the
-// only search of this file whose linking calls take the reference body, so the report of each other
-// arm is also compared with the default path's report of the same subject and thread count (the
-// debug lines are on stderr).
+// default (the reference frame loop at one thread, the unit path at four, eight and sixteen),
+// `LOSAT_X_PAIRPARGATE=0` (the unit path at one thread too), the debugging output
+// `LOSAT_DEBUG_CUTOFFS` (the one path whose linking calls take the reference body, which is not
+// timed), and several subject records with one too short to search (counted as a subject, all of it
+// in the last stage). The linking lines count the calls of the in-place linking path, whichever
+// seed stage ran before it, and are all zero with `LOSAT_DEBUG_CUTOFFS`. The report does not depend
+// on the timer. At one thread the cost rule sends the subject to the reference frame loop
+// (`[X_STATS] PAIRPAR units=0`; not with `LOSAT_X_PAIRPARGATE=0`, which turns the cost rule off).
+// The `LOSAT_DEBUG_CUTOFFS` arm is the only search of this file whose linking calls take the
+// reference body, so the report of each other arm is also compared with the default path's report
+// of the same subject and thread count (the debug lines are on stderr).
 #[test]
 fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
     let single = fixture("short_hsp.subject.fna");

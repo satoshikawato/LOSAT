@@ -257,7 +257,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
     many_queries(&query, None);
     fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "blastx",
             "-query",
@@ -641,7 +641,7 @@ fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
                 (s2_title, OTHER_PROTEIN_LONG.as_bytes()),
             ],
         );
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             for to_file in [false, true] {
                 let out = dir.join(format!("out_{label}_{threads}.xml"));
                 let mut args = vec![

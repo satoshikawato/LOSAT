@@ -461,7 +461,7 @@ fn a_subject_without_a_first_defline_ends_with_the_input_error_of_get_all_seqs()
                 "BLAST query/options error: Query input doesn't start with a defline or comment, \
                  line {line}\0\nPlease refer to the BLAST+ user manual.\n"
             );
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 for query in [&clean_query, &bad_query] {
                     let got = search(query, subject, "6", threads);
                     assert_eq!(

@@ -48,10 +48,10 @@ use crate::blastinput::value_parsers::*;
 // statistics arguments without the matrix, the gap costs, the word size and threshold (the
 // profile database holds them), with RPS-BLAST's thread arguments. LOSAT runs the search with
 // blastp's driver (`BlastpApp::Rpsblast`) and the RPS engine (`algorithm::rps_search`).
-// Composition-based statistics (modes 1 to 3, the default 1) are item PS11b's and refused until
-// then, unless the database has no frequency ratios (NCBI then searches without them); the
-// arguments that LOSAT does not run are refused by the parser (`cli.rs`
-// `is_unported_rpsblast_arg`).
+// Composition-based statistics (modes 1 to 3, the default 1) run the redo of `rps_search::redo`
+// with the database's frequency ratios, or without them where the database has none (NCBI then
+// searches with mode 0); the arguments that LOSAT does not run (item PS11c) are refused by the
+// parser (`cli.rs` `is_unported_rpsblast_arg`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {
@@ -73,6 +73,16 @@ pub struct RpsblastArgs {
     pub out: Option<PathBuf>,
     #[arg(long, value_parser = rpsblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2036-2042
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
+    //                                 "Effective length of the database ",
+    //                                 CArgDescriptions::eInt8);
+    // ```
+    /// `-dbsize`: replaces the database's length in every statistic (`x_AdjustDbSize` then keeps
+    /// the volumes' own sequence counts, `rps_hooks::rps_search`).
+    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
+    pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // ```c++
     //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
@@ -81,7 +91,7 @@ pub struct RpsblastArgs {
     #[arg(
         long,
         default_value = "1",
-        help = "Use composition-based statistics: D or d default (as 0 for RPS-BLAST), 0 or F or f simplified, 1 or T or t composition-based statistics (LOSAT runs 0)"
+        help = "Use composition-based statistics: D or d default (as 0 for RPS-BLAST), 0 or F or f simplified, 1 or T or t composition-based statistics, 2 and 3 as 1 with a larger preliminary e-value"
     )]
     pub comp_based_stats: String,
     #[arg(long, default_value = "0", value_name = "SPEC")]
@@ -229,7 +239,7 @@ impl RpsblastArgs {
             subject: None,
             db: self.db,
             db_filter: Default::default(),
-            dbsize: None,
+            dbsize: self.dbsize,
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,
             id_scope: None,
@@ -251,7 +261,8 @@ impl RpsblastArgs {
             evalue: self.evalue,
             threshold: None,
             word_size: None,
-            // `-num_threads 0`: one thread per volume (NCBI's "auto"); PS11a's databases have one.
+            // `-num_threads 0`: one thread per volume of the database (NCBI's "auto"), set once
+            // the database is open (`RpsSearch::auto_threads`).
             num_threads: usize::try_from(self.num_threads.max(1)).unwrap_or(1),
             mt_mode: None,
             out: self.out,
@@ -267,9 +278,9 @@ impl RpsblastArgs {
             matrix: None,
             gap_open: None,
             gap_extend: None,
-            // The mode the search runs (0); the requested one is the RPS search's
-            // (`RpsSearch::requested_cbs`, checked against the database's frequency ratios).
-            comp_based_stats: "0".to_string(),
+            // The requested mode; `rps_hooks::check_freq_ratio_file` sets it to 0 where the
+            // database has no frequency ratios.
+            comp_based_stats: requested_cbs.to_string(),
             seg: None,
             soft_masking: None,
             lcase_masking: false,
@@ -286,6 +297,7 @@ impl RpsblastArgs {
                 max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
                 query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
                 requested_cbs,
+                auto_threads: self.num_threads == 0,
             }),
         })
     }
@@ -402,7 +414,6 @@ mod tests {
         }
         for name in [
             "line_length",
-            "dbsize",
             "searchsp",
             "sum_stats",
             "use_sw_tback",

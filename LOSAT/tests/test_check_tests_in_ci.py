@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the Python-tests-in-CI check (`check_python_tests_in_ci.py`).
+"""Tests for the tests-in-CI check (`check_tests_in_ci.py`).
 
 No NCBI counterpart: the checker reads LOSAT's own workflow files.
 """
@@ -15,8 +15,8 @@ import unittest
 from pathlib import Path
 
 
-CHECKER_PATH = Path(__file__).with_name("check_python_tests_in_ci.py")
-SPEC = importlib.util.spec_from_file_location("python_tests_in_ci", CHECKER_PATH)
+CHECKER_PATH = Path(__file__).with_name("check_tests_in_ci.py")
+SPEC = importlib.util.spec_from_file_location("tests_in_ci", CHECKER_PATH)
 assert SPEC is not None and SPEC.loader is not None
 checker = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = checker
@@ -63,7 +63,7 @@ def workflow(on: str, run_lines: str) -> str:
     return f"on: {on}\njobs:\n  a:\n    steps:\n{run_lines}"
 
 
-class PythonTestsInCiTests(unittest.TestCase):
+class TestsInCiTests(unittest.TestCase):
     def test_trigger_forms(self) -> None:
         self.assertEqual(checker.triggers(["on: push"]), {"push"})
         self.assertEqual(checker.triggers(["on: [push, schedule]"]), {"push", "schedule"})
@@ -109,6 +109,52 @@ class PythonTestsInCiTests(unittest.TestCase):
             self.assertIn("NOT RUN\tLOSAT/tests/test_other.py\t", out)
             self.assertIn("NOT RUN\tscripts/test_script.py\t", out)
             self.assertNotIn("test_tool.py\t", out)
+
+    def test_a_node_test_file_counts_when_a_run_command_names_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, ".github/workflows/ci.yml", CI + "      - run: node LOSAT/tests/test_node_tool.js x.wasm\n")
+            write(root, "LOSAT/tests/test_tool.py")
+            write(root, "LOSAT/tests/test_node_tool.js")
+            code, out = run(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn("files=2\tnot_run=0", out)
+            write(root, "LOSAT/tests/test_unnamed.js")
+            code, out = run(root)
+            self.assertEqual(code, 1)
+            self.assertIn("NOT RUN\tLOSAT/tests/test_unnamed.js\t", out)
+            self.assertNotIn("test_node_tool.js\t", out)
+
+    def test_other_js_and_ts_names_are_not_test_files_for_this_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, ".github/workflows/ci.yml", CI)
+            write(root, "LOSAT/tests/test_tool.py")
+            for rel in ("LOSAT/tests/tool.test.js", "web/app/src/x.test.ts", "web/app/src/test_x.ts",
+                        "LOSAT/tests/helper_test.js", "LOSAT/tests/test_data.json"):
+                write(root, rel)
+            code, out = run(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn("files=1\tnot_run=0", out)
+
+    def test_the_file_name_must_be_a_whole_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, "LOSAT/tests/test_x.py")
+            write(root, "LOSAT/tests/test_x.js")
+            for text in ("      - run: cat LOSAT/tests/test_x.json LOSAT/tests/test_x.pyc\n",
+                         "      - run: cat LOSAT/tests/my-test_x.py LOSAT/tests/test_x.js.map\n"):
+                write(root, ".github/workflows/ci.yml", CI.replace("      - name: Tool tests\n", "")
+                      .split("        run:")[0] + text)
+                code, out = run(root)
+                self.assertEqual(code, 1, out)
+                self.assertIn("NOT RUN\tLOSAT/tests/test_x.py\t", out)
+                self.assertIn("NOT RUN\tLOSAT/tests/test_x.js\t", out)
+            write(root, ".github/workflows/ci.yml", CI.split("      - name: Tool tests")[0]
+                  + "      - run: python3 -m unittest discover -s LOSAT/tests -p 'test_x.py'\n"
+                  "      - run: node LOSAT/tests/test_x.js a.wasm\n")
+            code, out = run(root)
+            self.assertEqual(code, 0, out)
 
     def test_a_name_outside_a_run_command_does_not_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

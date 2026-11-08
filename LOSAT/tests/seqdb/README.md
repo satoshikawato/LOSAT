@@ -56,7 +56,13 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   volumes that give the same algorithms different ids; `mask_nucl_plain` has no column),
   `mask_nucl_colon` (id 31, options `-x a:b`) and `mask_nucl_colon_id` (id 100, name `c:id` from
   `-mask_id c:id`): a `:` in a printed field is stored as 0x01 and restored by NCBI.
-  A column is the files `.?aa` (index), `.?ab` (big-endian data) and `.?ac` (little-endian data).
+  A column is the files `.?aa` (index), `.?ab` (big-endian data) and `.?ac` (little-endian data);
+  NCBI reads the `.?ac` when it exists, else the `.?ab` (the ranges of masks then come out with the
+  bytes of each number reversed).
+- `db/user-column-db.{pin,psq,phr,paa,pab}`: a copy of NCBI's
+  `c++/src/algo/blast/unit_tests/seqdb_reader/data/user-column-db` (598d8ae6; written by NCBI's
+  `CWriteDB::CreateUserColumn` in 2007): six proteins and the user column `comedy`, whose data
+  file is the big-endian `.pab` alone; no masks. Its ISAM files are left out.
 - `expected/mask_*.algorithms.txt`: the table that NCBI prints for the algorithms of the
   database (`GetAvailableMaskAlgorithmDescriptions`, with its leading empty line).
 - `expected/mask_*.masks.tsv`: rows `algorithm<TAB>oid<TAB>ranges` from

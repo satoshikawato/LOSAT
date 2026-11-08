@@ -897,8 +897,12 @@ fn refuse_other_first_columns(volumes: &[Volume]) -> Result<(), SeqDbError> {
     Ok(())
 }
 
-/// `s_ReadRanges<SReadInt4>`: the ranges of `vol_algo` in a mask blob. The pairs are
-/// little-endian `u32` (the `.?xc` file). Every read is checked against the blob.
+/// `s_ReadRanges<SReadInt4>`: the ranges of `vol_algo` in a mask blob. The pairs are copied as
+/// they are into `TSeqPos` (`ranges.append`, a `memcpy`), so they read in the host's order:
+/// little-endian on every host of NCBI BLAST+ 2.17.0 and of LOSAT. A blob of the `.?xc` file
+/// (`WriteInt4_LE`) gives the stored ranges; one of a `.?xb` file read alone
+/// (`column::open_all`; `WriteInt4`) gives each number with its bytes reversed, as NCBI reads
+/// it. Every read is checked against the blob.
 fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)>, SeqDbError> {
     let format = |message: String| SeqDbError::Format {
         path: path.to_path_buf(),
@@ -921,6 +925,27 @@ fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)
         if algo == vol_algo {
             // `ReadRaw(n*8)`: a negative count is NCBI's "hit end of data".
             let bytes = blob.read_raw(i64::from(num_pairs) * 8).map_err(format)?;
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1418-1423
+            // ```c++
+            //             ITERATE(TPairVector, r2, r1->offsets) {
+            //                 blob.WriteInt4(r2->first);
+            //                 blob.WriteInt4(r2->second);
+            //                 blob2.WriteInt4_LE(r2->first);
+            //                 blob2.WriteInt4_LE(r2->second);
+            //             }
+            // ```
+            // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:302-306
+            // ```c++
+            //         void append(const void *src, size_type num_elements) {
+            //             reserve(_size + num_elements);
+            //             memcpy(&_data[1+ 2*_size], src, num_elements * sizeof(value_type));
+            //             _size += num_elements;
+            //         }
+            // ```
+            // `blob` goes to `.?xb`, `blob2` to `.?xc`. The copy keeps the bytes; on a
+            // little-endian host they are the numbers of `blob2`, and those of `blob`
+            // byte-reversed (`blastdbcmd -outfmt %m` of a column without its `.?xc`, line BDC's
+            // probe M784: 120-161 prints as 2013265920-2701131776).
             for pair in bytes.chunks_exact(8) {
                 let start = u32::from_le_bytes([pair[0], pair[1], pair[2], pair[3]]);
                 let end = u32::from_le_bytes([pair[4], pair[5], pair[6], pair[7]]);

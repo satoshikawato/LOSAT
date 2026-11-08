@@ -1,7 +1,7 @@
 # Product Decision: blastdbcmd outputs that NCBI gets wrong
 
 - Decision ID: `PD-LOSAT-BLASTDBCMD-DEVIATIONS`
-- Version: 1.4
+- Version: 1.5
 - Date: 2026-10-30 (this record; items 1 and 2 served by `losat blastdbcmd` from the pull
   request of line BDC's BDC2a). 1.1, 2026-11-01 (BDC2c): the evidence of items 1 and 2 on
   version 4 databases with parsed ids, whose ids `losat blastdbcmd` now looks up; the
@@ -16,6 +16,11 @@
   1.4, 2026-11-02 (BDC4, several names in `-db`, drop-in survey `DECISIONS.md` 34): the items hold
   on a list of names; item 6 covers one accession on two sequences, a widening the Owner
   approved on 2026-11-02 ("差 6 の拡張を承認", drop-in survey `DECISIONS.md` 34).
+  1.5, 2026-11-08 (session SW8, item c): a column with its big-endian data file alone is no
+  longer an explicit rejection. NCBI reads it through the same index (its offsets are
+  big-endian on every host), a user column as it was written, and the ranges of the mask column
+  with the bytes of each number reversed (probe M782-M790): a deterministic result, which LOSAT
+  reproduces. The six items are unchanged.
 - Status: Accepted (approved deviations).
 
 ## Scope
@@ -47,10 +52,10 @@ a list of names in which an alias and another name give the same volume, refused
 as the search programs refuse it: NCBI's `-info` and `-metadata` count its sequences twice, 39 for
 21 (BDC4: N389, N393, N1627), while its other options answer (N391, N395), a list whose volumes
 carry different dates, one of which NCBI's `CTime` does not read, where NCBI ends with an exception
-that prints its build path after what it wrote (BDC4: N525-N548), a volume with the big-endian data file of a
-column alone, whose offsets NCBI reads as little-endian (M784), another column before the masks,
+that prints its build path after what it wrote (BDC4: N525-N548), another column before the masks,
 which NCBI reads as the masks (M824), and `-outfmt %s` without a range on a stored mask outside
-the sequence, where NCBI crashes (M786, M886, M896). `-taxids
+the sequence, where NCBI crashes (M886, M896; M786: the byte-reversed ranges of a column read
+from its big-endian data file, 1.5). `-taxids
 1` follows [`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) exception 5.
 
 ## Decision

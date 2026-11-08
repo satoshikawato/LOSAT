@@ -544,8 +544,28 @@ fn two_columns_with_one_title_are_refused() {
     );
 }
 
+/// The text of a row of `expected/<db>.masks.tsv` with the bytes of each number reversed: the
+/// ranges NCBI reads from the big-endian data file of a column (`s_ReadRanges` copies them
+/// in the order of its little-endian host).
+fn byte_reversed(ranges: &str) -> String {
+    if ranges == "none" {
+        return ranges.to_string();
+    }
+    ranges
+        .split_terminator(';')
+        .map(|range| {
+            let (start, end) = range.split_once('-').unwrap();
+            let reversed = |n: &str| n.parse::<u32>().unwrap().swap_bytes();
+            format!("{}-{};", reversed(start), reversed(end))
+        })
+        .collect()
+}
+
+/// The data file `x_OpenAllColumns` reads: none without data files; the little-endian `.nac`
+/// when it exists; else the big-endian `.nab`, whose ranges NCBI reads with the bytes of each
+/// number reversed (line BDC's probe M784: `120-161` is `2013265920-2701131776`).
 #[test]
-fn column_data_files_are_little_endian_or_refused() {
+fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
     // An index file without any data file is skipped.
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa"]);
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
@@ -555,20 +575,153 @@ fn column_data_files_are_little_endian_or_refused() {
         MaskRanges::Ranges(Vec::new())
     );
 
-    // Only the big-endian data file: NCBI would read its ranges as little-endian.
+    // Only the big-endian data file: the algorithms of the index, the ranges byte-reversed.
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa", "nab"]);
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
-    let error = db.mask_algorithms().unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. }
-            if message.contains("no little-endian data file mask_nucl_v4.nac")),
-        "{error}"
+    let algorithms = db.mask_algorithms().unwrap();
+    assert_eq!(algorithms.ids(), [11, 30]);
+    assert_eq!(
+        algorithms.descriptions().unwrap(),
+        read_expected("mask_nucl_v4.algorithms.txt")
     );
+    let column = db.volumes()[0].mask_column().unwrap().unwrap();
+    assert!(column.data_path().ends_with("mask_nucl_v4.nab"));
+    assert_eq!(
+        db.mask_ranges(0, 11).unwrap(),
+        MaskRanges::Ranges(vec![(199u32.swap_bytes(), 281u32.swap_bytes())])
+    );
+    for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
+        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        assert_eq!(text, byte_reversed(&expected), "{algo} {oid}");
+    }
 
-    // Only the little-endian data file is used; the big-endian one is not read.
+    // Only the little-endian data file: the ranges as stored.
     let dir = copy_v4(&["nin", "nsq", "nhr", "naa", "nac"]);
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
     assert_eq!(db.mask_algorithms().unwrap().ids(), [11, 30]);
+    for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
+        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        assert_eq!(text, expected, "{algo} {oid}");
+    }
+
+    // Both: the big-endian file is not read, even when it holds other bytes.
+    let dir = copy_v4(&V4_ALL);
+    let big = dir.path("mask_nucl_v4.nab");
+    let length = std::fs::metadata(&big).unwrap().len() as usize;
+    std::fs::write(&big, vec![0xa5; length]).unwrap();
+    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    assert!(db.volumes()[0].columns().unwrap()[0]
+        .data_path()
+        .ends_with("mask_nucl_v4.nac"));
+    for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
+        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        assert_eq!(text, expected, "{algo} {oid}");
+    }
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:3698-3783 UserDefinedColumns
+/// NCBI's `data/user-column-db` (a copy in `db/`, its `.pin .psq .phr .paa .pab`): a user
+/// column has the big-endian data file alone, which NCBI reads (`x_OpenAllColumns`). The
+/// column of the volume, its title, metadata and blobs are those that the case asserts; the
+/// database has no masks. LOSAT has no database-wide `ListColumns`, `GetColumnId` or
+/// `GetColumnValue`, and no `CSeqDB_ColumnReader` of a lone column: no LOSAT program reads
+/// a user column's values.
+#[test]
+fn ncbi_s_user_column_reads_from_its_big_endian_data_file() {
+    let db = SeqDb::open_with_masks(&db_name("user-column-db"), SeqType::Protein).unwrap();
+    let columns = db.volumes()[0].columns().unwrap();
+    assert_eq!(columns.len(), 1);
+    let column = &columns[0];
+    assert_eq!(column.title(), b"comedy");
+    assert!(column.data_path().ends_with("user-column-db.pab"));
+    let metadata: Vec<(&[u8], &[u8])> = column
+        .metadata()
+        .iter()
+        .map(|(key, value)| (key.as_slice(), value.as_slice()))
+        .collect();
+    assert_eq!(
+        metadata,
+        [
+            (b"created-by".as_slice(), b"unit test".as_slice()),
+            (b"format".as_slice(), b"text".as_slice()),
+            (b"purpose".as_slice(), b"none".as_slice()),
+        ]
+    );
+    let mut seinfeld = b"Jerry Seinfeld".to_vec();
+    seinfeld[5] = 0;
+    let column_data: [&[u8]; 6] = [
+        b"Groucho Marx",
+        b"Charlie Chaplain",
+        b"",
+        b"Abbott and Costello",
+        b"Jackie Gleason",
+        seinfeld.as_slice(),
+    ];
+    assert_eq!(db.num_seqs(), 6);
+    assert_eq!(column.num_oids(), 6);
+    for (oid, text) in column_data.iter().enumerate() {
+        assert_eq!(column.blob(oid as u32).unwrap(), *text, "{oid}");
+    }
+    // The database has no mask column.
+    assert!(db.volumes()[0].mask_column().unwrap().is_none());
+    assert!(db.mask_algorithms().unwrap().ids().is_empty());
+    assert_eq!(db.mask_algorithms().unwrap().descriptions().unwrap(), "");
+}
+
+/// A user column with its big-endian data file alone after the mask column (NCBI's
+/// `x_OpenAllColumns` opens both; this session's probe X01, X02: `-info` and `%m11` as without
+/// it).
+#[test]
+fn a_user_column_beside_the_masks_reads_its_big_endian_data_file() {
+    let dir = copy_v4(&V4_ALL);
+    let blobs: Vec<Vec<u8>> = (0..8)
+        .map(|oid| format!("row {oid}").into_bytes())
+        .collect();
+    write_column(
+        &dir,
+        "mask_nucl_v4",
+        'b',
+        "comedy",
+        &[("format", "text")],
+        &blobs,
+    );
+    std::fs::rename(dir.path("mask_nucl_v4.nbc"), dir.path("mask_nucl_v4.nbb")).unwrap();
+    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    let columns = db.volumes()[0].columns().unwrap();
+    assert_eq!(columns.len(), 2);
+    assert!(columns[0].data_path().ends_with("mask_nucl_v4.nac"));
+    assert_eq!(columns[1].title(), b"comedy");
+    assert!(columns[1].data_path().ends_with("mask_nucl_v4.nbb"));
+    assert_eq!(columns[1].blob(7).unwrap(), b"row 7");
+    let algorithms = db.mask_algorithms().unwrap();
+    assert_eq!(
+        algorithms.descriptions().unwrap(),
+        read_expected("mask_nucl_v4.algorithms.txt")
+    );
+    for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
+        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        assert_eq!(text, expected, "{algo} {oid}");
+    }
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:3841-3848 CheckColumnFailureCleanup
+/// NCBI's `data/broken-mask-data-db` has an empty `.paa` beside a `.pab` alone, and the case
+/// asserts that `GetAvailableMaskAlgorithms` throws: the empty index is opened (the
+/// big-endian data file is enough) and fails NCBI's `SEQDB_FILE_ASSERT(m_Length >= end)`,
+/// whose text names NCBI's source line, so LOSAT's error is its own. Rust has no cleanup to
+/// check.
+#[test]
+fn an_empty_index_beside_a_big_endian_data_file_fails() {
+    let dir = copy_v4(&["nin", "nsq", "nhr", "naa", "nab"]);
+    truncate(&dir.path("mask_nucl_v4.naa"), 0);
+    let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
+    for _ in 0..2 {
+        let error = db.mask_algorithms().unwrap_err();
+        assert_eq!(
+            format_message(&error),
+            "the column index file has 0 bytes, fewer than its 32 fixed bytes"
+        );
+    }
 }
 
 #[test]

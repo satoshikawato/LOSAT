@@ -6,6 +6,12 @@
 //! (`seqdbblob.cpp`); a volume opens all its columns the first time one is asked for
 //! (`CSeqDBVol::x_OpenAllColumns`). This module does the same with positioned reads.
 //!
+//! The integers of the index file are big-endian on every host; the data file holds the
+//! blobs as they were written. The two data files of a column differ only inside the
+//! blobs of the mask column, whose ranges NCBI writes big-endian to `.?xb` and
+//! little-endian to `.?xc`; NCBI writes a user column (`CWriteDB::CreateUserColumn`) to
+//! `.?xb` alone.
+//!
 //! Errors: where NCBI throws a `CSeqDBException` with a fixed text, the text is NCBI's, in
 //! [`SeqDbError::Format`]. Where NCBI fails a `SEQDB_FILE_ASSERT` (its text names a source
 //! line) or reads past its mapping, the error is LOSAT's, in plain words.
@@ -746,8 +752,43 @@ impl Column {
 //     m_HaveColumns = true;
 // }
 // ```
-// NCBI uses the big-endian data file (`.?xb`) when the little-endian one (`.?xc`) does not
-// exist, and reads its ranges as little-endian numbers. LOSAT refuses that case.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:311-318
+// ```c++
+//     for(int col_i = 0; col_i < (int)m_Columns.size(); col_i++) {
+//         _ASSERT(col_i * 2 < (int) blobs.size());
+//         if (col_i == maskcol_id) {
+//              m_Columns[col_i]->AddBlob(*blobs[col_i * 2], *blobs[col_i * 2 + 1]);
+//         } else {
+//              m_Columns[col_i]->AddBlob(*blobs[col_i * 2]);
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:93-107
+// ```c++
+// void CWriteDB_Column::AddBlob(const CBlastDbBlob & blob)
+// {
+//     // Note that data size is the size *after* the blob has been
+//     // written.  The initial (zero) offset is written during file
+//     // creation.
+//
+//     Int8 data_size = m_DFile->WriteBlob(blob);
+//     m_IFile->WriteBlobIndex(data_size);
+// }
+//
+// void CWriteDB_Column::AddBlob(const CBlastDbBlob & blob, const CBlastDbBlob & blob2)
+// {
+//     AddBlob(blob);
+//     if (m_UseBothByteOrder) m_DFile2->WriteBlob(blob2);
+// }
+// ```
+// The index file holds the offsets of the `.?xb` blobs (`WriteInt4`, big-endian), and the
+// `.?xc` blob of a sequence has the size of its `.?xb` blob, so one index serves either
+// data file. Only the mask column writes a `.?xc` (`blob2`, its ranges `WriteInt4_LE`); a
+// user column has `.?xb` alone. NCBI's test `ptr[0] == 0x11` holds on the little-endian
+// hosts of NCBI BLAST+ 2.17.0 (Linux x64 and arm64, macOS x64 and arm64, Windows x64) and of
+// LOSAT (x86-64, aarch64, wasm32): the `.?xc` when it exists, else the `.?xb`, read through
+// the same index. A blob is the file's bytes either way (`GetBlob`); `mask::read_ranges`
+// reads the ranges of a `.?xb` as NCBI's copy in host order does.
 /// Opens every column of the volume `base` (`CSeqDBVol::x_OpenAllColumns`): for the letters
 /// `a` to `z`, the columns whose index file exists, in letter order. `volume_oids` is the
 /// number of sequences of the volume.
@@ -770,20 +811,8 @@ pub(super) fn open_all(
         if !(big || small) {
             continue;
         }
-        if !small {
-            let name = small_path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            return Err(SeqDbError::Unsupported {
-                path: big_path,
-                message: format!(
-                    "the column has no little-endian data file {name}; NCBI would read \
-                     big-endian offsets as little-endian"
-                ),
-            });
-        }
-        let column = Column::open(&index_path, &small_path)?;
+        let data_path = if small { small_path } else { big_path };
+        let column = Column::open(&index_path, &data_path)?;
 
         let mut message = String::new();
         let mut argument = String::new();

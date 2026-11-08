@@ -2,20 +2,24 @@ name: Python
 
 # The Python binding of the library API (python/): its Rust checks and its tests, which compare
 # reports and rows with the losat executable of the same commit. The binding is not published yet
-# and this check is not required (docs/losat_library_surface_plan.md §12).
+# and this check is not required (docs/losat_library_surface_plan.md §12). It runs for every change
+# under LOSAT/src, not only api/: `pylosat.describe`, from which python/pylosat/_options.pyi is
+# generated and checked, reads the whole command line (`Cli::command()`, api/describe.rs), whose
+# options and help texts live in cli.rs and the programs' args.rs (#937 changed BLASTP's and left
+# the stubs behind).
 on:
   push:
     branches: [main, dev]
     paths:
       - 'python/**'
-      - 'LOSAT/src/api/**'
+      - 'LOSAT/src/**'
       - 'LOSAT/Cargo.toml'
       - 'LOSAT/Cargo.lock'
       - '.github/workflows/python.yml'
   pull_request:
     paths:
       - 'python/**'
-      - 'LOSAT/src/api/**'
+      - 'LOSAT/src/**'
       - 'LOSAT/Cargo.toml'
       - 'LOSAT/Cargo.lock'
       - '.github/workflows/python.yml'

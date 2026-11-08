@@ -281,8 +281,10 @@ Errors that makeblastdb does not detect, or detects elsewhere:
   opened: makeblastdb does not test its streams and ends with exit status 0 and a damaged
   or missing database. LOSAT removes the files of the build and ends with
   `Error: <path>: <system error>` and exit status 255.
-- An output directory that exists but is not writable: makeblastdb stops before its log;
-  LOSAT stops when it creates the first file, after the first lines of the log.
+- An output directory that exists but is not writable, on Windows: makeblastdb stops before
+  its log (it reads the directory's access rights); LOSAT stops when it creates the first
+  file, after the first lines of the log. On Unix LOSAT stops before the log with
+  makeblastdb's message (2026-11-08).
 - `-max_file_sz` that is no size or is 4 GiB or more: LOSAT checks it before it removes an
   existing database or writes the log; makeblastdb after. The exit status is the same.
 - Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without

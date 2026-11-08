@@ -1001,6 +1001,44 @@ fn directories_of_the_output_name() {
     }
 }
 
+/// An output directory that exists and cannot be written to stops the build before the
+/// log, with makeblastdb's message, exit status 255 and no file, as in NCBI's
+/// `CBuildDatabase_WriteToInvalidPathUnix` (`/dev/null`, whose directory is `/dev`).
+// NCBI unit test (598d8ae6): c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp:2511-2522 CBuildDatabase_WriteToInvalidPathUnix
+#[cfg(unix)]
+#[test]
+fn an_existing_directory_without_write_permission_stops_the_build_before_the_log() {
+    use std::os::unix::fs::PermissionsExt;
+    let fasta = prot_fasta();
+    let tmp = TempDir::new("rodir");
+    let ro = tmp.0.join("ro");
+    std::fs::create_dir(&ro).unwrap();
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // The superuser passes every access test (euidaccess too): nothing to test then.
+    if std::fs::File::create(ro.join("probe")).is_ok() {
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    for (out, name) in [
+        (ro.join("db").to_string_lossy().into_owned(), "ro"),
+        ("/dev/null".to_string(), "dev"),
+    ] {
+        let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
+        assert_eq!(
+            (status, log.as_str(), messages),
+            (
+                255,
+                "",
+                format!("Error: You do not have write permissions on '{name}'\n")
+            ),
+            "{out}"
+        );
+    }
+    assert!(files_named(&ro, "").is_empty());
+    assert!(!Path::new("/dev/null.pin").exists() && !Path::new("/dev/null.pal").exists());
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 /// More than 100 volumes are renamed with leading zeros when the database
 /// is closed. The names are makeblastdb's (2.17.0, 1,001 volumes): the
 /// volumes below 100 get four digits, those from 100 to 999 keep their three

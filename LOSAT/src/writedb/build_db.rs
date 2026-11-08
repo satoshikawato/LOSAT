@@ -440,17 +440,15 @@ fn create_path(dir: &str) -> bool {
 // `CreatePath` makes the normalized path, but `CheckAccess` then tests the
 // path as it was given: with `-out nodir/../db` and no `nodir`, the current
 // directory "is created" (it exists), `nodir/..` does not resolve, and
-// makeblastdb stops with the write-permission message. LOSAT reproduces that
-// part of `CheckAccess`: a path that does not resolve.
+// makeblastdb stops with the write-permission message.
 //
-// Not reproduced: the test of the write permission itself (`euidaccess`
-// with `W_OK`). The standard library has no call that asks for it, and a
-// trial file would touch the directory. A directory that exists and cannot
-// be written to therefore does not stop LOSAT here, before the log, with
-// "You do not have write permissions on ..."; LOSAT goes on, writes the log
-// header, removes what it can of an existing database (nothing, in such a
-// directory), and fails when it creates the first file of the first volume,
-// with the system's message for that file and the same exit status 255.
+// On Unix LOSAT asks the question of `euidaccess(path, W_OK)` (`check_access_write`):
+// a path that does not resolve and a directory that exists and cannot be written to
+// both stop it here, before the log. On Windows NCBI reads the effective rights of the
+// directory's ACL (`CWinSecurity::GetFilePermissions`), which LOSAT does not: it stops
+// here only for a path that does not resolve, and for a directory it cannot write to
+// it goes on, writes the log header and fails when it creates the first file of the
+// first volume, with the system's message for that file and the same exit status 255.
 /// `CBuildDatabase::CreateDirectories`.
 fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
@@ -464,12 +462,49 @@ fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
             "Failed to create directory '{name}'"
         )));
     }
-    if std::fs::metadata(d).is_err() {
+    if !check_access_write(d) {
         return Err(WriteDbError::Other(format!(
             "You do not have write permissions on '{name}'"
         )));
     }
     Ok(())
+}
+
+/// `CDirEntry::CheckAccess(fWrite)` of the path as it was given: `euidaccess(path,
+/// F_OK | W_OK)`, which `faccessat(AT_FDCWD, path, W_OK, AT_EACCESS)` asks with the
+/// effective user and group ids, as euidaccess does. Linux before 5.8 has no `faccessat2`;
+/// there rustix answers `ENOSYS` for a set-user-ID or set-group-ID process, and LOSAT then
+/// tests only that the path resolves (as on Windows) rather than refuse a directory it may
+/// write to.
+#[cfg(unix)]
+fn check_access_write(path: &str) -> bool {
+    use rustix::fs::{accessat, Access, AtFlags, CWD};
+    match accessat(CWD, path, Access::WRITE_OK, AtFlags::EACCESS) {
+        Ok(()) => true,
+        Err(rustix::io::Errno::NOSYS) => std::fs::metadata(path).is_ok(),
+        Err(_) => false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1722-1732
+// ```c++
+// #if defined(NCBI_OS_MSWIN)
+//     // Try to get effective access rights on this file object for
+//     // the current process owner.
+//     ACCESS_MASK mask = 0;
+//     if ( CWinSecurity::GetFilePermissions(GetPath(), &mask) ) {
+//         TMode perm = ( (mask & FILE_READ_DATA  ? fRead    : 0) |
+//                        (mask & FILE_WRITE_DATA ? fWrite   : 0) |
+//                        (mask & FILE_EXECUTE    ? fExecute : 0) );
+//         return (access_mode & perm) > 0;
+//      }
+//      return false;
+// ```
+/// `CDirEntry::CheckAccess(fWrite)` without the rights of the ACL (see
+/// `create_directories`): only whether the path resolves.
+#[cfg(not(unix))]
+fn check_access_write(path: &str) -> bool {
+    std::fs::metadata(path).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2629-2641

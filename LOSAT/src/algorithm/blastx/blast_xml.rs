@@ -738,12 +738,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // ```
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
     // report data of the first query (`BLAST engine error:`, exit 3), before any byte of it.
+    // (`native::report_error` writes it as NCBI's engine error.)
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: "BLAST engine error: unsupported score matrix\n".to_string(),
-        }
-        .into());
+        anyhow::bail!("unsupported score matrix");
     };
     let (db_name, db_num, db_len) = match shown {
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),

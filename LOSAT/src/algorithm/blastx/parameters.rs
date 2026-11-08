@@ -116,6 +116,16 @@ fn score_block_of(batch: &PreparedQueryBatch, matrix: ScoringMatrix) -> Vec<Cont
     let std = compute_std_aa_composition();
     let ideal = ideal_karlin_params_of(matrix);
     let (low, high) = matrix_score_bounds(matrix);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3127-3130 (the alpha and
+    // beta of an ungapped search, which the length adjustment reads, blast_setup.c:815)
+    // ```c
+    //    else if (num_values > 0) {
+    //      (*alpha) = alpha_arr[0];
+    //      (*beta) = beta_arr[0];
+    // ```
+    // The matrix's ungapped row (BLOSUM62's are the computed block's defaults), as TBLASTX's
+    // contexts take them (`tblastx/blast_engine/run_impl.rs`).
+    let row = crate::stats::tables::lookup_protein_params_ungapped(matrix);
     batch
         .contexts
         .iter()
@@ -125,9 +135,12 @@ fn score_block_of(batch: &PreparedQueryBatch, matrix: ScoringMatrix) -> Vec<Cont
             seq.push(0);
             let comp = compute_aa_composition(&seq, c.length);
             let profile = compute_score_freq_profile_for_matrix(&comp, &std, low, high, matrix);
-            let ka = compute_karlin_params_ungapped(&profile)
-                .ok()
-                .map(|p| apply_check_ideal(p, ideal));
+            let ka = compute_karlin_params_ungapped(&profile).ok().map(|p| {
+                let mut ka = apply_check_ideal(p, ideal);
+                ka.alpha = row.alpha;
+                ka.beta = row.beta;
+                ka
+            });
             ContextParameters {
                 valid: c.is_valid && ka.is_some(),
                 ungapped: ka.unwrap_or_default(),

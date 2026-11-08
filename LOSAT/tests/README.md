@@ -403,7 +403,13 @@ selected from the changed paths against the S02 baseline and the frozen hashes,
 the `-subject` fixtures of `outfmt0_manifest.tsv` (`check_losat.py`) and the `-db` fixtures of the five programs
 (`db_search_fixtures.py`), and the command lines of the downstream tools and each program's common forms
 (`dropin_corpus.py`, inputs and provenance in `dropin_corpus/README.md`), without NCBI executables (TBLASTX runs only its short
-cases; `--all-cases` runs all of them nightly). Both manifests freeze NCBI's
+cases; `--all-cases` runs all of them nightly). The comparisons normalize no output, with one
+exception (Owner 2026-11-05): the TBLASTN Stage G cases froze NCBI's outfmt 0/7 bytes of inputs
+named under the developer machine's checkout `/mnt/c/Users/genom/GitHub/LOSAT`, so
+`capture_outputs.py` runs them from the repository root with the relative run root of
+`frozen_paths.py` in its place (of the same length, so outfmt 0 wraps its `Database:` lines at the
+same columns) and puts the prefix back into the output and stderr before hashing; no link to that
+path is needed. Both manifests freeze NCBI's
 outfmt 0/6/7 and, in the rows `sa.*` and `db.sa.*`, outfmt 8 (Seq-annot, ASN.1 text),
 12 (Seq-annot, JSON) and 9 (Seq-annot, binary ASN.1; the ids ending `.9`, a subset of the 8
 rows' searches) of all five programs (the BLASTX `-subject` rows are 8, 9 and 12 only);

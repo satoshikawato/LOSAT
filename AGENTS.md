@@ -124,6 +124,13 @@ authoritative, current guidance for agent behavior in LOSAT.
 8. Correct timing, order, and context.
    - Call algorithms at the exact same timing and order as NCBI.
    - Input/output data must match NCBI exactly.
+   - Frozen outputs are compared byte for byte, without normalization, with one
+     exception (Owner 2026-11-05): the TBLASTN Stage G cases name inputs under
+     the developer machine's checkout `/mnt/c/Users/genom/GitHub/LOSAT`, so they
+     run with a relative run root of the same length (outfmt 0 wraps the path at
+     68 columns) and the run root in their output and stderr is replaced by that
+     prefix before hashing (`LOSAT/tests/frozen_paths.py`). Add no other
+     replacement.
 
 9. Algorithmic fidelity over aesthetics.
    - Do not refactor for readability if it changes logic.

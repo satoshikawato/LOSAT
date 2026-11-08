@@ -17,11 +17,16 @@ Case sources (reused, not copied):
 Where frozen expected hashes exist they are checked too: Gate A
 (the certification driver's manifest, LOSAT/tests/platform_native_v011_canonical.tsv) for the BLASTN, BLASTP and TBLASTX
 manifest cases, and the Stage G expected hashes for TBLASTN. Output formats 0 and 7
-print the input paths, so inputs are passed with the path strings used when those
-hashes were frozen: the Gate A lexical fixture root of certify_platform_native_v010
-(HISTORICAL_LEXICAL_ROOT) and the absolute paths recorded by Stage G. Before a case
-runs, every input read through such a path must be byte-identical to the file in this
-checkout; otherwise the capture stops.
+print the input paths. Gate A inputs are passed with the path strings used when those
+hashes were frozen, the lexical fixture root of certify_platform_native_v010
+(HISTORICAL_LEXICAL_ROOT); before a case runs, every input read through it must be
+byte-identical to the file in this checkout, otherwise the capture stops. Stage G recorded
+absolute paths under the developer machine's checkout (frozen_paths.FROZEN_PREFIX): its
+commands keep them (the S02 baseline's `command` column), and they run from the checkout
+root with frozen_paths.RUN_ROOT in their place, a relative path of the same length, so
+outfmt 0 wraps its `Database:` lines where NCBI did. Before hashing, every output and
+standard error gets the frozen prefix back (frozen_paths.to_frozen, the one replacement:
+Owner 2026-11-05).
 
 Usage:
   capture_outputs.py run --losat BIN --out DIR [--programs blastn,blastp,...] [--jobs N]
@@ -47,6 +52,7 @@ import audit_blastp_v010  # noqa: E402
 import audit_tblastx_v010  # noqa: E402
 import certify_platform_native_v010 as certify  # noqa: E402
 import compare_blastn_parity  # noqa: E402
+import frozen_paths  # noqa: E402
 
 PROGRAMS = ("blastn", "blastp", "tblastx", "tblastn", "blastx")
 FIELDS = [
@@ -147,15 +153,12 @@ def tblastx_cases(expected: dict[tuple[str, str], str]) -> list[Case]:
 
 
 def tblastn_cases() -> list[Case]:
-    prefix = "/mnt/c/Users/genom/GitHub/LOSAT/"
+    """The Stage G matrix, with its recorded commands (run_case runs them with frozen_paths.to_run)."""
     cases = []
     with open(REPO / "docs/evidence/tlosan_stage_g/matrix_162.jsonl") as handle:
         for line in handle:
             row = json.loads(line)
             command = row["losat_command"][1:]
-            for arg in command:
-                if arg.startswith(prefix):
-                    require_same_file(arg, REPO / arg.removeprefix(prefix))
             case_id = f"{row['case']}.fmt{row['outfmt']}.n{row['threads']}.r{row['repetition']}"
             cases.append(Case("tblastn", case_id, command, REPO, row["expected_sha256"], "tlosan_stage_g"))
     return cases
@@ -187,13 +190,15 @@ def all_cases(programs: set[str]) -> list[Case]:
 def run_case(case: Case, losat: Path, out_dir: Path) -> dict[str, str]:
     output = out_dir / "outputs" / case.program / f"{case.case_id}.out"
     output.parent.mkdir(parents=True, exist_ok=True)
-    argv = [str(losat)] + [str(output) if arg == "{OUT}" else arg for arg in case.command]
+    argv = [str(losat)] + [str(output) if arg == "{OUT}" else frozen_paths.to_run(arg) for arg in case.command]
     result = subprocess.run(argv, cwd=case.cwd, capture_output=True)
     uses_file = "{OUT}" in case.command
     data = output.read_bytes() if uses_file and output.exists() else (b"" if uses_file else result.stdout)
     if not uses_file:
         output.write_bytes(result.stdout)
+    data = frozen_paths.to_frozen(data)
     stderr = result.stderr.replace(str(output).encode(), b"{OUT}").replace(str(losat).encode(), b"{LOSAT}")
+    stderr = frozen_paths.to_frozen(stderr)
     digest = sha256_bytes(data)
     return {
         "program": case.program,

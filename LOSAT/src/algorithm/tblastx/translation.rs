@@ -20,10 +20,10 @@ pub struct QueryFrame {
     ///
     /// Layout: [SENTINEL_BYTE, aa_0, aa_1, ..., aa_n-1, SENTINEL_BYTE]
     /// - `aa_seq[0]` = SENTINEL_BYTE (0) - NCBI NULLB
-    /// - aa_seq[1..len-1] = actual amino acids (encoded in NCBISTDAA 1-27)
-    /// - aa_seq[len-1] = SENTINEL_BYTE (0) - NCBI NULLB
+    /// - `aa_seq[1..len-1]` = actual amino acids (encoded in NCBISTDAA 1-27)
+    /// - `aa_seq[len-1]` = SENTINEL_BYTE (0) - NCBI NULLB
     ///
-    /// When accessing amino acid at logical position i, use aa_seq[i + 1].
+    /// When accessing amino acid at logical position i, use `aa_seq[i + 1]`.
     /// When reporting coordinates, subtract 1 from the raw position.
     ///
     /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453

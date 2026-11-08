@@ -177,7 +177,7 @@ fn the_switch_merges_the_lists_and_gives_ncbis_report() {
 #[test]
 fn the_switch_follows_its_variable() {
     let expected = ncbi_report();
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let what = format!("{SWITCH_OFF:?} threads {threads}");
         let (report, stderr) = pair(threads, &[STATS, SWITCH_OFF]);
         assert_eq!(report, expected, "{what}");
@@ -276,7 +276,7 @@ fn tied_hsps_of_two_queries_give_the_report_of_the_switch_off() {
     let chunks = ("LOSAT_TBLASTX_TEST_CHUNK_SIZE", "700");
     let (chunked, _) = tblastx(&query, &subject, 1, &[chunks, SWITCH_OFF]);
     assert!(!chunked.is_empty(), "no hits with chunks");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let what = format!("chunks, threads {threads}");
         let (report, stderr) = tblastx(&query, &subject, threads, &[STATS, chunks]);
         assert_eq!(report, chunked, "{what}");

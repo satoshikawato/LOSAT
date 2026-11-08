@@ -132,7 +132,7 @@ fn equals_frozen_in(
                 "{name}: the frozen status"
             );
             let [flag, value] = mode_args(mode, db);
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 for switch in [None, Some(("LOSAT_X_RPTSTREAM", "0"))] {
                     let mut vars = env.to_vec();
                     vars.extend(switch);
@@ -274,7 +274,7 @@ fn the_error_sites_flush_the_document_with_a_stored_title_that_no_hit_reads() {
 fn a_title_refusal_in_a_later_batch_writes_nothing() {
     let dir = fixtures();
     for format in ["17", "17 SQ SR"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastn",
                 "-query",
@@ -341,7 +341,7 @@ fn a_header_file_that_cannot_be_read_writes_nothing() {
             .trim()
             .parse()
             .unwrap();
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 &dir,
                 &[

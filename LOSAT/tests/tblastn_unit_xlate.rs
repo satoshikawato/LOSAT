@@ -173,9 +173,10 @@ fn unit_residues(length: usize) -> u64 {
 const OFF: (&str, &str) = ("LOSAT_X_TBNUNITXLATE", "0");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (above). The
-// default and `=0` give the same report at one and four threads. By default the long subject's
-// plan has no residues and its six units (one chunk per frame) translate their frames, and the
-// short subject's plan keeps its frames; with `=0` no plan is made so.
+// default at one, four, eight and sixteen threads and `=0` at one and four give the same report.
+// By default the long subject's plan has no residues and its six units (one chunk per frame)
+// translate their frames, and the short subject's plan keeps its frames; with `=0` no plan is made
+// so.
 #[test]
 fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
     let long = inputs().2;
@@ -187,7 +188,7 @@ fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
         "the search must report hits in the long subject"
     );
     assert_eq!(stats(&stderr), None);
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = tblastn(threads, &[]);
         assert!(
             report == expected,
@@ -228,8 +229,8 @@ fn database() -> &'static PathBuf {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (above). A `-db`
-// search gives the report of `=0` at one and four threads; the long sequence's plan has no
-// residues and its six units translate their frames.
+// search gives the report of `=0` at one, four, eight and sixteen threads; the long sequence's plan
+// has no residues and its six units translate their frames.
 #[test]
 fn a_database_search_translates_in_its_units() {
     let long = inputs().2;
@@ -241,7 +242,7 @@ fn a_database_search_translates_in_its_units() {
             .any(|line| line.split('\t').nth(1) == Some("long")),
         "the search must report hits in the long sequence"
     );
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = tblastn_of(db, threads, &[]);
         assert!(report == expected, "{threads} threads: the report");
         assert_eq!(

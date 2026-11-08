@@ -4,12 +4,12 @@
 //! The stream graduated on 2026-10-27 (the switch was `LOSAT_X_TBNDBSTREAM`, with a shadow mode
 //! that compared every read with a copy of the database; the copy and the shadow are deleted, and
 //! the frozen NCBI `-db` fixtures hold the reports). The properties under test are LOSAT's own: the
-//! reports of the search at four threads are those of the search at one thread, with
-//! composition-based statistics (the redo reads its subjects) and without (`-comp_based_stats 0`:
-//! the traceback reads them), in one query batch and in several (`BATCH_SIZE`: the plans kept
-//! between batches are not read again), on a database of several volumes with ambiguity codes and
-//! a subject long enough to be split into units across the threads; the stages that let a subject
-//! go after its last match (`LOSAT_X_TBNSTAGEDROP`) give the reports of those that hold it to their
+//! reports of the search at four, eight and sixteen threads are those of the search at one thread,
+//! with composition-based statistics (the redo reads its subjects) and without (`-comp_based_stats
+//! 0`: the traceback reads them), in one query batch and in several (`BATCH_SIZE`: the plans kept
+//! between batches are not read again), on a database of several volumes with ambiguity codes and a
+//! subject long enough to be split into units across the threads; the stages that let a subject go
+//! after its last match (`LOSAT_X_TBNSTAGEDROP`) give the reports of those that hold it to their
 //! end; and a database that cannot be read fails with the same error.
 
 use std::path::{Path, PathBuf};
@@ -130,7 +130,7 @@ fn the_reports_do_not_depend_on_the_threads_or_the_query_batches() {
         for batch in [None, Some("2000")] {
             let batch_env: Vec<(&str, &str)> =
                 batch.map(|b| ("BATCH_SIZE", b)).into_iter().collect();
-            for threads in [1, 4] {
+            for threads in [1, 4, 8, 16] {
                 let run = tblastn(&query, &db, args, threads, &batch_env);
                 assert!(
                     run == reference,
@@ -144,8 +144,8 @@ fn the_reports_do_not_depend_on_the_threads_or_the_query_batches() {
 
 /// `LOSAT_X_TBNSTAGEDROP`: the redo and the traceback of `-comp_based_stats 0` let a subject go
 /// after its last match; the reports are those of the stages that hold every subject until they
-/// end, at one and four threads. The 27 queries align with the same subjects, so most subjects
-/// have several matches.
+/// end, at one, four, eight and sixteen threads. The 27 queries align with the same subjects, so
+/// most subjects have several matches.
 #[test]
 fn a_stage_lets_a_subject_go_after_its_last_match_with_the_same_reports() {
     let dir = temp_dir("stagedrop");
@@ -154,7 +154,7 @@ fn a_stage_lets_a_subject_go_after_its_last_match_with_the_same_reports() {
         &["-outfmt", "6"][..],
         &["-outfmt", "6", "-comp_based_stats", "0"][..],
     ] {
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let held = tblastn(&query, &db, args, threads, &[("LOSAT_X_TBNSTAGEDROP", "0")]);
             assert_eq!(held.0, Some(0), "{}", held.2);
             let dropped = tblastn(&query, &db, args, threads, &[]);

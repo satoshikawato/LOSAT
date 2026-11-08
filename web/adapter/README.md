@@ -42,6 +42,6 @@ Gate A regression cases and needs the Gate A lexical root described in
 Its TBLASTN Stage G searches run from the repository root with the run root of
 `LOSAT/tests/frozen_paths.py` and carry `frozen_prefix`, with which `v_abi.js` puts
 the frozen path prefix back into an output before comparing its frozen hash (the
-one replacement of the frozen comparisons, Owner 2026-11-05).
+one replacement of a checkout-path prefix, Owner 2026-11-05).
 Its genome-scale TBLASTX searches take a long time in one serial reactor, so gate records
 run it with `tools/run_v_abi_parallel.py` (same options as `v_abi.js`, plus `--jobs`).

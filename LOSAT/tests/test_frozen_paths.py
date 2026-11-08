@@ -2,6 +2,7 @@
 """Tests for frozen_paths.py (no LOSAT binary is run)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -33,13 +34,17 @@ class ToRunTests(unittest.TestCase):
                     f"/x{FROZEN_PREFIX}/{SUBJECT}", f"{REPO}/{SUBJECT}"):
             self.assertEqual(to_run(arg), arg)
 
-    def test_every_stage_g_input_is_a_file_of_this_checkout(self):
+    def test_every_stage_g_input_is_the_file_stage_g_recorded(self):
         rewritten = 0
         with open(STAGE_G / "matrix_162.jsonl") as handle:
             for line in handle:
-                for arg in json.loads(line)["losat_command"][1:]:
+                row = json.loads(line)
+                recorded = {row["query"]: row["query_sha256"], row["subject"]: row["subject_sha256"]}
+                for arg in row["losat_command"][1:]:
                     if arg.startswith(FROZEN_PREFIX + "/"):
-                        self.assertTrue((REPO / to_run(arg)).is_file(), arg)
+                        local = REPO / to_run(arg)
+                        self.assertEqual(hashlib.sha256(local.read_bytes()).hexdigest(), recorded[arg],
+                                         f"{row['case']}: {local.relative_to(REPO)}")
                         rewritten += 1
         self.assertEqual(rewritten, 324)  # -query and -subject of 162 rows
 

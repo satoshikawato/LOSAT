@@ -71,7 +71,7 @@ jobs:
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v020.py LOSAT/tests/test_verify_release_archive_v020.py
       - name: Regression tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
-      # No NCBI counterpart: the one replacement of the frozen comparisons (Owner 2026-11-05): the
+      # No NCBI counterpart: the one replacement of a checkout-path prefix (Owner 2026-11-05): the
       # Stage G runs pass a run root of the frozen prefix's length, which outputs get back as the prefix.
       - name: Frozen path prefix tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_frozen_paths.py'

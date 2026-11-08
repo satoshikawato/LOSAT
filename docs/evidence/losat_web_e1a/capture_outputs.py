@@ -24,9 +24,11 @@ byte-identical to the file in this checkout, otherwise the capture stops. Stage 
 absolute paths under the developer machine's checkout (frozen_paths.FROZEN_PREFIX): its
 commands keep them (the S02 baseline's `command` column), and they run from the checkout
 root with frozen_paths.RUN_ROOT in their place, a relative path of the same length, so
-outfmt 0 wraps its `Database:` lines where NCBI did. Before hashing, every output and
-standard error gets the frozen prefix back (frozen_paths.to_frozen, the one replacement:
-Owner 2026-11-05).
+outfmt 0 wraps its `Database:` lines where NCBI did; each input must have the SHA-256 that
+Stage G recorded, otherwise the capture stops. Before hashing, the output and standard error
+of those runs get the frozen prefix back (frozen_paths.to_frozen, the one replacement of a
+checkout-path prefix: Owner 2026-11-05), and the saved output is those bytes. The stderr of
+every case has the `-out` path and the binary's path as {OUT} and {LOSAT}.
 
 Usage:
   capture_outputs.py run --losat BIN --out DIR [--programs blastn,blastp,...] [--jobs N]
@@ -159,6 +161,10 @@ def tblastn_cases() -> list[Case]:
         for line in handle:
             row = json.loads(line)
             command = row["losat_command"][1:]
+            for side in ("query", "subject"):
+                local = REPO / frozen_paths.to_run(row[side])
+                if sha256_bytes(local.read_bytes()) != row[f"{side}_sha256"]:
+                    raise SystemExit(f"Stage G {row['case']}: {local.relative_to(REPO)} is not the {side} it recorded")
             case_id = f"{row['case']}.fmt{row['outfmt']}.n{row['threads']}.r{row['repetition']}"
             cases.append(Case("tblastn", case_id, command, REPO, row["expected_sha256"], "tlosan_stage_g"))
     return cases
@@ -190,15 +196,18 @@ def all_cases(programs: set[str]) -> list[Case]:
 def run_case(case: Case, losat: Path, out_dir: Path) -> dict[str, str]:
     output = out_dir / "outputs" / case.program / f"{case.case_id}.out"
     output.parent.mkdir(parents=True, exist_ok=True)
-    argv = [str(losat)] + [str(output) if arg == "{OUT}" else frozen_paths.to_run(arg) for arg in case.command]
+    command = [frozen_paths.to_run(arg) for arg in case.command]
+    argv = [str(losat)] + [str(output) if arg == "{OUT}" else arg for arg in command]
     result = subprocess.run(argv, cwd=case.cwd, capture_output=True)
     uses_file = "{OUT}" in case.command
     data = output.read_bytes() if uses_file and output.exists() else (b"" if uses_file else result.stdout)
-    if not uses_file:
-        output.write_bytes(result.stdout)
-    data = frozen_paths.to_frozen(data)
     stderr = result.stderr.replace(str(output).encode(), b"{OUT}").replace(str(losat).encode(), b"{LOSAT}")
-    stderr = frozen_paths.to_frozen(stderr)
+    if command != case.command:  # Stage G: the run root back to the recorded prefix
+        data, stderr = frozen_paths.to_frozen(data), frozen_paths.to_frozen(stderr)
+        if uses_file and output.exists():
+            output.write_bytes(data)
+    if not uses_file:
+        output.write_bytes(data)
     digest = sha256_bytes(data)
     return {
         "program": case.program,

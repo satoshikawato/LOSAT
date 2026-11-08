@@ -19,13 +19,17 @@ NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5228
 So where the wrapped lines break depends on the path's length and on those characters, and
 replacing a checkout path of another length after the run does not give the frozen bytes.
 
-Owner 2026-11-05 (SWEBOK line SW8 item 6, question Q5, answer "(b) 比較する時に、接頭辞を置き換える"):
-frozen outputs are compared wherever the repository is checked out by replacing the prefix at
-comparison time; the frozen files stay unchanged and nothing else is normalized. The runs pass
-RUN_ROOT instead of FROZEN_PREFIX (to_run): a relative path of the same length with none of the
-break characters, with the checkout root as the working directory, so every line breaks where
-NCBI's did. Before hashing, the output and the standard error get FROZEN_PREFIX back
-(to_frozen). This is the only replacement, the same for every output format.
+The Owner's answer (2026-11-05, SWEBOK line SW8 item 6, question Q5) was
+"(b) 比較する時に、接頭辞を置き換える": replace the prefix when comparing, so that the comparisons pass
+wherever the repository is checked out, without a link to FROZEN_PREFIX. How (SW8 DECISIONS 29, Owner-delegated): the runs
+pass RUN_ROOT instead of FROZEN_PREFIX (to_run), a relative path of the same length with none of
+the break characters, with the checkout root as the working directory, so every line breaks where
+NCBI's did; before hashing, the output and the standard error of a run whose arguments to_run
+changed get FROZEN_PREFIX back (to_frozen), the same for every output format. The frozen files
+stay unchanged. This is the one replacement of a checkout-path prefix and adds no other rule; the
+comparisons' existing rules (the SAM @PG CL tag, db_search_fixtures.strip_sam_cl; check_losat.py
+normalize_database_lines; dropin_corpus.py's <RUNDIR> and report_without_time; capture_outputs.py's
+{OUT} and {LOSAT} in stderr) are their tools' own.
 """
 from __future__ import annotations
 

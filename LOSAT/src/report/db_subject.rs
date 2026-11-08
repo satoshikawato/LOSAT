@@ -45,6 +45,9 @@ pub struct ParsedSubject {
     /// What NCBI's lookup of the Seq-align id in the database finds where that is not this
     /// sequence (`found_instead`, `fetched`).
     found_instead: Option<FoundInstead>,
+    /// Another sequence that NCBI's scope can show for this one by a weak match where its
+    /// formatters read the batch's sequences one by one (`weak_match`, `fetched`).
+    weak_match: Option<WeakMatch>,
     /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
     show_gis: bool,
     /// Whether NCBI makes the subject Bioseq's title from its source with the taxonomy database
@@ -112,14 +115,6 @@ pub enum FoundInstead {
     /// Such a sequence, also with the same taxids in another volume, that every report that
     /// reads the Bioseq can show apart, for the reason given.
     CopyApart(u32, CopyApart),
-    /// Where NCBI's formatters may read the reported sequences one by one
-    /// (`PRE_FETCH_SEQS_LIMIT`), another sequence of the database, by ordinal id, that holds an id
-    /// the Seq-align id matches weakly (`seqid::id_scope::weak_keys`): where that one is read
-    /// first, NCBI's scope shows it for the subject.
-    WeaklyHeld(u32),
-    /// The same for a Seq-align id with weak keys that a version 5 database cannot look up: one
-    /// with a name, or a `pir` or `prf` one (`weakly_held`).
-    WeakUnlisted,
     /// No sequence.
     Nothing,
     /// The lookup fails on a file of the database, with this message: NCBI's formatters, and its
@@ -130,6 +125,21 @@ pub enum FoundInstead {
     /// formatters stop, its prefetch catches the exception with its warning
     /// (`ParsedSubject::prefetch_fails`).
     ThrowsOnId(String),
+}
+
+/// What NCBI's scope can show for a subject by a weak match where its formatters read the
+/// reported sequences of a batch one by one (`PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch
+/// off; the prefetch loads each by its own id): `ParsedSubject::weak_match`, refused by
+/// `fetched` with `one_by_one`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WeakMatch {
+    /// Another sequence of the database, by ordinal id, that holds an id the Seq-align id
+    /// matches weakly (`seqid::id_scope::weak_keys`): where that one is read first, NCBI's scope
+    /// shows it for the subject.
+    Held(u32),
+    /// A Seq-align id with weak keys that a version 5 database cannot look up: one with a name,
+    /// or a `pir` or `prf` one (`common::database::HeaderReader::weakly_held`).
+    Unlisted,
 }
 
 /// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
@@ -242,6 +252,7 @@ impl ParsedSubject {
             target,
             unfetchable,
             found_instead: None,
+            weak_match: None,
             show_gis: false,
             taxonomy_title: false,
             record: false,
@@ -287,6 +298,7 @@ impl ParsedSubject {
             target: 0,
             unfetchable: false,
             found_instead: None,
+            weak_match: None,
             show_gis: false,
             taxonomy_title: false,
             record: true,
@@ -351,6 +363,13 @@ impl ParsedSubject {
     /// none), which the formats that read the subject's Bioseq refuse (`fetched`).
     pub fn found_instead(mut self, found: Option<FoundInstead>) -> Self {
         self.found_instead = found;
+        self
+    }
+
+    /// The subject with `weak`, what NCBI's scope can show for it by a weak match where its
+    /// formatters read the batch's sequences one by one (`fetched`'s `one_by_one`).
+    pub fn weak_match(mut self, weak: Option<WeakMatch>) -> Self {
+        self.weak_match = weak;
         self
     }
 
@@ -494,8 +513,29 @@ impl ParsedSubject {
     /// or their names (outfmt 13 to 16, the tabular `staxid`, `staxids` and the names), which
     /// alone refuse a sequence found as the same record with other taxids
     /// (`FoundInstead::OtherTaxids`; also where a generated title can be made from them, which
-    /// the reports that show it refuse, `generated_title_fetched`).
-    pub fn fetched(&self, taxonomy: bool) -> Result<(), String> {
+    /// the reports that show it refuse, `generated_title_fetched`). `one_by_one`: whether NCBI's
+    /// formatters may read the subject one by one (a batch that reports it has its prefetch
+    /// off, `common::database::ParsedShown::one_by_one`), which alone refuses a sequence that
+    /// another can stand for by a weak match (`WeakMatch`), after what the lookup finds.
+    pub fn fetched(&self, taxonomy: bool, one_by_one: bool) -> Result<(), String> {
+        self.found_fetched(taxonomy)?;
+        let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        match self.weak_match.as_ref().filter(|_| one_by_one) {
+            None => Ok(()),
+            Some(WeakMatch::Held(ordinal)) => Err(format!(
+                "has the Seq-align id {}, which can match an id of database sequence {ordinal} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it can write that sequence's names and letters for it",
+                id()
+            )),
+            Some(WeakMatch::Unlisted) => Err(format!(
+                "has the Seq-align id {}, which ids of other sequences can match weakly in any letter case (a name with or without an accession, a pir or prf accession as a name) and which a version 5 database does not look up: in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
+                id()
+            )),
+        }
+    }
+
+    /// `fetched` but for the weak matches: what the lookup of the Seq-align id finds
+    /// (`found_instead`), whatever the batch's prefetch.
+    fn found_fetched(&self, taxonomy: bool) -> Result<(), String> {
         let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match (self.unfetchable, &self.found_instead) {
             (false, None) => Ok(()),
@@ -526,14 +566,6 @@ impl ParsedSubject {
             )),
             (false, Some(FoundInstead::AlsoHeld(ordinal))) => Err(format!(
                 "has the Seq-align id {}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)",
-                id()
-            )),
-            (false, Some(FoundInstead::WeaklyHeld(ordinal))) => Err(format!(
-                "has the Seq-align id {}, which can match an id of database sequence {ordinal} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): with PRE_FETCH_SEQS_LIMIT, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it can write that sequence's names and letters for it",
-                id()
-            )),
-            (false, Some(FoundInstead::WeakUnlisted)) => Err(format!(
-                "has the Seq-align id {}, which ids of other sequences can match weakly in any letter case (a name with or without an accession, a pir or prf accession as a name) and which a version 5 database does not look up: with PRE_FETCH_SEQS_LIMIT, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
                 id()
             )),
             (
@@ -578,7 +610,7 @@ impl ParsedSubject {
     // sequence holds loads that sequence, whose taxids it looks up.
     /// What NCBI's prefetch reads for this subject where no report shows it (`Prefetched`).
     pub fn prefetched(&self) -> Prefetched {
-        let reason = || self.fetched(false).err().unwrap_or_default();
+        let reason = || self.found_fetched(false).err().unwrap_or_default();
         // The loader reads the blob of a subject whose definition line the formatters do not
         // find (`unfetchable`) and looks its taxids up (review 2 of DBID P1: `lcl|777` before
         // `gi|777`, `bad_magic`).
@@ -587,12 +619,9 @@ impl ParsedSubject {
         }
         match &self.found_instead {
             None
-            | Some(
-                FoundInstead::OtherTaxids(_)
-                | FoundInstead::CopyApart(_, CopyApart::Title)
-                | FoundInstead::WeaklyHeld(_)
-                | FoundInstead::WeakUnlisted,
-            ) => Prefetched::Itself,
+            | Some(FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(_, CopyApart::Title)) => {
+                Prefetched::Itself
+            }
             Some(FoundInstead::Nothing) => Prefetched::Nothing,
             // The prefetch catches the exception of a failed lookup and writes its warning, or
             // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
@@ -1902,7 +1931,7 @@ mod tests {
         ] {
             let subject = ParsedSubject::new(one_defline(vec![id])).unwrap();
             assert!(!subject.unfetchable(), "{subject:?}");
-            assert!(subject.fetched(false).is_ok());
+            assert!(subject.fetched(false, true).is_ok());
         }
         // A local id that alone decides the definition line of the Bioseq: no lookup finds it.
         let shown = lines(vec![
@@ -1910,14 +1939,17 @@ mod tests {
             vec![ParsedSeqId::Gi(777)],
         ]);
         assert!(shown.unfetchable());
-        let error = shown.fetched(false).unwrap_err();
+        let error = shown.fetched(false, true).unwrap_err();
         assert!(
             error.contains("Seq-align id gi|777, by which NCBI BLAST+'s formatters do not find"),
             "{error}"
         );
         // A GI in the set makes the GI the Seq-align id.
         let with_gi = one_defline(vec![ParsedSeqId::Gibbsq(123), ParsedSeqId::Gi(7)]);
-        assert!(ParsedSubject::new(with_gi).unwrap().fetched(false).is_ok());
+        assert!(ParsedSubject::new(with_gi)
+            .unwrap()
+            .fetched(false, true)
+            .is_ok());
         let replaced = DeflineSet {
             deflines: vec![BlastDefline {
                 ids: vec![ParsedSeqId::Gi(7)],
@@ -1932,11 +1964,15 @@ mod tests {
     #[test]
     fn a_seq_align_id_by_which_ncbi_finds_another_sequence_or_none() {
         let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
-        assert!(subject.clone().found_instead(None).fetched(false).is_ok());
+        assert!(subject
+            .clone()
+            .found_instead(None)
+            .fetched(false, true)
+            .is_ok());
         let error = subject
             .clone()
             .found_instead(Some(FoundInstead::Sequence(4)))
-            .fetched(false)
+            .fetched(false, true)
             .unwrap_err();
         assert!(
             error.contains("lookup gives database sequence 4 first"),
@@ -1945,19 +1981,48 @@ mod tests {
         let error = subject
             .clone()
             .found_instead(Some(FoundInstead::Nothing))
-            .fetched(false)
+            .fetched(false, true)
             .unwrap_err();
         assert!(error.contains("do not find the sequence"), "{error}");
         let error = subject
             .found_instead(Some(FoundInstead::Failed(
                 "DB contains no accession info.".into(),
             )))
-            .fetched(false)
+            .fetched(false, true)
             .unwrap_err();
         assert!(
             error.contains("whose lookup in the database fails (DB contains no accession info.;"),
             "{error}"
         );
+    }
+
+    // Line DBID weakbatch (probe w0): NCBI's scope matches a Seq-align id weakly only where the
+    // formatters read the batch's subjects one by one, its prefetch off; the prefetch loads each
+    // subject by its own id.
+    #[test]
+    fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+        for weak in [WeakMatch::Held(4), WeakMatch::Unlisted] {
+            let subject = subject.clone().weak_match(Some(weak.clone()));
+            assert!(subject.fetched(true, false).is_ok(), "{weak:?}");
+            let error = subject.fetched(false, true).unwrap_err();
+            assert!(
+                error.contains("in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off"),
+                "{error}"
+            );
+            assert_eq!(subject.prefetched(), Prefetched::Itself, "{weak:?}");
+            // What the lookup finds is refused whatever the batch: a copy with other taxids in
+            // the reports of taxids, before the weak match.
+            let copy = subject.found_instead(Some(FoundInstead::OtherTaxids(2)));
+            assert!(copy.fetched(false, false).is_ok());
+            assert!(copy
+                .fetched(true, false)
+                .unwrap_err()
+                .contains("other taxids"));
+            assert!(copy.fetched(false, true).unwrap_err().contains("weakly"));
+        }
+        let other = subject.found_instead(Some(FoundInstead::AlsoHeld(4)));
+        assert!(other.fetched(false, false).is_err());
     }
 
     // Line DBID P1: what NCBI's prefetch reads for a subject that no report shows (psiblast's
@@ -1971,8 +2036,6 @@ mod tests {
             None,
             Some(FoundInstead::OtherTaxids(2)),
             Some(FoundInstead::CopyApart(2, CopyApart::Title)),
-            Some(FoundInstead::WeaklyHeld(2)),
-            Some(FoundInstead::WeakUnlisted),
         ] {
             assert_eq!(prefetched(itself.clone()), Prefetched::Itself, "{itself:?}");
         }
@@ -2024,8 +2087,8 @@ mod tests {
         let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
             .unwrap()
             .found_instead(title_apart.clone());
-        assert!(subject.fetched(false).is_ok());
-        let error = subject.fetched(true).unwrap_err();
+        assert!(subject.fetched(false, true).is_ok());
+        let error = subject.fetched(true, true).unwrap_err();
         assert!(error.contains("database sequence 3 also holds"), "{error}");
         assert!(error.contains("taxids and their names for it"), "{error}");
         assert!(subject.check_tabular_ids(true).is_ok());
@@ -2117,12 +2180,12 @@ mod tests {
         let texts = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
             .unwrap()
             .found_instead(Some(FoundInstead::CopyApart(3, CopyApart::TaxonomyTexts)));
-        assert!(texts.fetched(false).is_err());
+        assert!(texts.fetched(false, true).is_err());
         assert!(texts.generated_title_fetched().is_ok());
         let taxids = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
             .unwrap()
             .found_instead(Some(FoundInstead::OtherTaxids(3)));
-        assert!(taxids.fetched(false).is_ok());
+        assert!(taxids.fetched(false, true).is_ok());
         assert!(taxids.generated_title_fetched().is_ok());
     }
 

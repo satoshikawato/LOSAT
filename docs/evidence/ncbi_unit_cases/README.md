@@ -46,8 +46,7 @@ magicblast, rmblast_blasthits, rmblast_traceback, remote_blast, search_strategy;
 `algo/blast/proteinkmer/unit_test/`, `objtools/blast/services/unit_test/`), of NCBI's mock
 sequence sources (api mockseqsrc1, mockseqsrc2), and of the object manager's BLAST database data
 loader (`algo/blast/unit_tests/blastdb/bdbloader_unit_test.cpp`,
-`algo/blast/blastinput/unit_test/blast_scope_src_unit_test.cpp`). The rps module is in scope
-although `dev` has no rpsblast yet, so that its port finds the cases here.
+`algo/blast/blastinput/unit_test/blast_scope_src_unit_test.cpp`).
 
 ## Columns
 
@@ -89,7 +88,7 @@ although `dev` has no rpsblast yet, so that its port finds the cases here.
 | `partial` | a LOSAT test exercises the case but asserts less | a citation line, a `path::fn` test, or the evidence in `note` |
 | `e2e` | only fixtures, frozen hashes or oracle comparisons cover it | the fixture in `losat_test` or `note` |
 | `to-port` | LOSAT has ported the function, but no test checks this case | the LOSAT function in `note` |
-| `n-a` | LOSAT has no such feature (object manager, sequences fetched by id from GenBank or a BLAST database, RPS/PHI, an option LOSAT refuses, ...) or NCBI compiles the case out | the reason in `note` (for a refused option, the `path:line` of the refusal) |
+| `n-a` | LOSAT has no such feature (object manager, sequences fetched by id from GenBank or a BLAST database, PHI-BLAST, DELTA-BLAST, an option LOSAT refuses, ...) or NCBI compiles the case out | the reason in `note` (for a refused option, the `path:line` of the refusal) |
 | `superseded` | another LOSAT test or fixture checks more than the NCBI case | the reason in `note` |
 
 ## Adding a row (porting a case)
@@ -185,8 +184,9 @@ formatter, and the api tests of PSI-BLAST, the PSSM engine, RPS-BLAST, the seque
 preliminary search, the setup factory, uniform search and the version and reference strings:
 405 cases (`NCBI_CASES.tsv` 696 -> 1,101), 62 of which NCBI compiles out. Each compiled case was
 graded against the NCBI case and the LOSAT code, and a second reader checked every row above
-`n-a`. The new rows: 55 `ported`, 80 `partial`, 12 `e2e`, 15 `to-port`, 15 `superseded` and
-228 `n-a` (the 62 compiled out; the others need GI or alias-file lists, the object manager,
+`n-a`. The new rows: 55 `ported`, 80 `partial`, 13 `e2e`, 16 `to-port`, 15 `superseded` and
+226 `n-a` (the 62 compiled out; the others need GI or alias-file lists, the object manager,
 sequences fetched by id, an option or program LOSAT refuses such as `-in_msa`, deltablast or
-rpsblast, or are C++ API plumbing with no LOSAT counterpart). Notes that cite LOSAT lines start
-with `evidence (a20ad436):`.
+rpstblastn, or are C++ API plumbing with no LOSAT counterpart). Notes that cite LOSAT lines start
+with `evidence (a20ad436):`; the six rps rows were graded on `dev` c513a3046, which added rpsblast,
+and start with `evidence (c513a304):`.

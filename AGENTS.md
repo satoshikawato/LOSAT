@@ -374,7 +374,7 @@ cd LOSAT && cargo fmt
   Do not add integration-test files under `LOSAT/tests/` for unit tests (an integration test sees
   only `pub` items, and each file adds to its suite's build) and do not make private items `pub`
   for a test. Cases that need the object manager, sequences fetched by id (GenBank, or a BLAST
-  database as a data loader), or a program or option LOSAT refuses (RPS, PHI, ...) are `n-a`;
+  database as a data loader), or a program or option LOSAT refuses (PHI, DELTA, ...) are `n-a`;
   whole-search cases (bl2seq) become fixture rows, not unit tests.
 - A new integration-test file `LOSAT/tests/<file>.rs` goes into its suite: its program's (`blastn`,
   `blastp`, `blastx`, `tblastn`, `tblastx`) or `common` (the command line, the output formats and

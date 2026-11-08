@@ -3255,6 +3255,7 @@ fn psiblast_pssms(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
+    keys: psi_round::SubjectKeys<'_>,
 ) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
     use crate::algorithm::psiblast::pssm::{
         ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord,
@@ -3279,6 +3280,20 @@ fn psiblast_pssms(
         k: gapped.k,
         h: gapped.h,
     };
+    // The rows of each query's PSSM are the handles of the Seq-align ids that it takes
+    // (`SubjectKeys`): keys that NCBI's handles can take for one are refused before any PSSM is
+    // made.
+    for hit_list in hit_lists.iter().flatten() {
+        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+        let rows: std::collections::BTreeSet<crate::algorithm::psiblast::rounds::SetKey> = hit_list
+            .hsplist_array[..count]
+            .iter()
+            .flat_map(|hsp_list| &hsp_list.hsps)
+            .filter(|hsp| psi_round::included(hsp.e_value, args.inclusion_ethresh))
+            .map(|hsp| keys.key(hsp.s_idx))
+            .collect();
+        crate::algorithm::psiblast::rounds::SetKey::check_handles(&rows)?;
+    }
     let mut files = PssmFiles::new(request);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
@@ -3331,6 +3346,7 @@ fn psiblast_pssms(
             },
             &alignments,
             &subject,
+            &|s_idx| keys.key(s_idx),
             ancillary,
         )
         .and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
@@ -12253,6 +12269,14 @@ fn run_resolved_in_pool(
     if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
         titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
     }
+    let subject_keys = psi_round::SubjectKeys {
+        listed_ordinals: listed_subjects
+            .as_ref()
+            .map(|listed| listed.ordinals.as_slice()),
+        parsed: listed_titles
+            .as_ref()
+            .map_or(&[][..], |titles| titles.parsed.as_slice()),
+    };
     let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
             Some(request) => Some(psiblast_pssms(
@@ -12263,6 +12287,7 @@ fn run_resolved_in_pool(
                 shown_subjects,
                 &contexts,
                 &gapped_params,
+                subject_keys,
             )?),
             None => None,
         };
@@ -12278,13 +12303,8 @@ fn run_resolved_in_pool(
             shown_subjects,
             &contexts,
             &gapped_params,
-            listed_subjects
-                .as_ref()
-                .map(|listed| listed.ordinals.as_slice()),
-            listed_titles
-                .as_ref()
-                .map_or(&[][..], |titles| titles.parsed.as_slice()),
-        ),
+            subject_keys,
+        )?,
         None => None,
     };
     // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,

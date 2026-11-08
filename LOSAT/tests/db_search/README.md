@@ -603,11 +603,27 @@ that prefetches beside one of 3 that does not). The psiblast rows `db.id.wkb.ps.
 each round that makes the next round's PSSM reads the sequences before the cut by their Seq-align ids, so
 `pir|S12347|` beyond `-max_target_seqs 1` (`pweak_r_v5`) is refused where the round's prefetch is off, and two
 following hits whose Seq-align ids `Match` (`gb|FFF00043.1|` and `gb|FFF00043|` of `pweak_v5`), which NCBI puts in one
-row of the PSSM's multiple alignment, are refused also without the variable. `ids/wkb_e3_v5` (`make_ids.py
+row of the PSSM's multiple alignment, make that PSSM as NCBI does (`db.id.wkb.ps.join.i2.6`, NCBI's bytes since line DBID
+pssmrows; weakbatch refused it). `ids/wkb_e3_v5` (`make_ids.py
 --weakbatch-only`, from `ids/wkb_e3.faa`) holds `gb|FFF00043.1|`, `gb|ZZZ00001.1|` and then `gb|FFF00043|`, which the
 lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, refused without the variable
 (`db.id.wkb.ps.e3.i2.7.reject`); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
 `gb|WWW00001.1|`, which the PSSM does not read (`db.id.wkb.ps.p1.i2.7`, NCBI's bytes); the query is `ids/wkb_qy.faa`.
+
+Rows `db.id.psr.*` (line DBID, pssmrows; databases `ids/psr_*` from `ids/psr_*.faa` by `make_ids.py --pssmrows-only`, all
+version 5, query `ids/psr_q.faa`, a random protein of 250 letters; `ids/psr_cpa` holds three variants of the query with 62, 72 and
+82 substitutions): psiblast counts the rows of the PSSM's multiple alignment by Seq-align id handles, and a
+Seq-align whose id `CSeq_id::Match`es the previous one's joins that row. `psr_cp.pal` (`psr_cpa`, then `psr_cpb`, a copy
+of its first record) puts two copies of one record after each other: one row, as NCBI (`db.id.psr.cp.*`, round 2 and the
+ASCII PSSM); `psr_cbxp.pal` puts another subject between the copies, where NCBI writes round 1's report and crashes
+(SIGSEGV, rc 139) and LOSAT refuses after the same report (`db.id.psr.cbx.i2.6.reject`, stdout frozen from NCBI).
+`psr_jm` (`gb|HHH00001|`, `gb|HHH00001.1|`, a third record) holds a Match pair whose second record fills only the cells
+after the first's alignment (`db.id.psr.jm.*`: round 2, the ASCII and ASN.1 PSSMs, and `-inclusion_ethresh 1e-90`, which
+leaves the second out); `psr_jn` the same with `sp||NAMEH` and `sp|P00009.1|NAMEH`; `psr_jx.pal` (`psr_jx1`, `psr_jx2`) the
+pair in two databases (`-num_iterations 3`); `psr_jctl` the same letters under ids that never Match (the control: another
+PSSM); `psr_self` a Match pair both identical to the query, purged as self hits (the empty row). `psr_cul.pal` (`gb|ABC00001.1|`,
+then `gb|abc00001.1|`) and `psr_cue.pal` (`gb|ABC00001.1|`, then `emb|ABC00001.1|`) are handles that NCBI can take for one
+sequence and LOSAT refuses (`db.id.psr.case.i2.6.reject`, `db.id.psr.gbemb.i2.6.reject`).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

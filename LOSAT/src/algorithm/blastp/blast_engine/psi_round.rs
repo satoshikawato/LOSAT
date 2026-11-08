@@ -408,7 +408,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 /// alignments, its inclusion set, and where NCBI makes one the next round's PSSM (an error of
 /// the engine is kept for after the round's report). Returns, when the previous round's set is
 /// not empty, whether each subject of the round (by subject index, a database's by rank) is in
-/// it, for the two-part description table (`psiblast_round::ReportRound`).
+/// it, for the two-part description table (`psiblast_round::ReportRound`). Refuses keys that
+/// NCBI's handles can take for one (`SetKey::check_handles`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-566
 // ```c++
 // double GetLowestEvalue(const objects::CDense_seg::TScores& scores,
@@ -444,12 +445,13 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // ```c
 // #define BLAST_EXPECT_VALUE 10.0 /**< by default, alignments whose expect
 // ```
-// The Seq-id of a subject is its key (`rounds::SetKey`): a `-subject` record's index
-// (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists name it
-// by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple alignment
-// keeps its rows by subject (`pssm::input_msa`): two Seq-aligns of one id there are copies of one
-// record (line DBID admits shared ids for such copies only), which NCBI's PSSM puts in one row
-// (review 2 of line DBID weakbatch, H1; line DBID's next item).
+// The Seq-id of a subject is its key (`rounds::SetKey`, `SubjectKeys`): a `-subject` record's
+// index (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists
+// name it by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple
+// alignment counts its rows by the same keys and joins following Seq-aligns whose ids `Match`
+// (`pssm::input_msa`). Keys that differ but that NCBI's handles can take for one are refused
+// before the round's report (`SetKey::check_handles`, over the previous set and the round's
+// subjects).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509 (quoted at
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
 /// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,
@@ -472,22 +474,9 @@ pub(super) fn round_outcome(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
-    listed_ordinals: Option<&[u32]>,
-    parsed: &[Option<Arc<ParsedSubject>>],
-) -> Option<Vec<bool>> {
-    let key = |s_idx: u32| -> SetKey {
-        match listed_ordinals {
-            None => SetKey::Index(s_idx),
-            Some(ordinals) => match parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                Some(subject) => {
-                    let mut id = Vec::new();
-                    crate::seqid::label::fasta(subject.alignment_id(), &mut id);
-                    SetKey::Id(id)
-                }
-                None => SetKey::Index(ordinals[s_idx as usize]),
-            },
-        }
-    };
+    keys: SubjectKeys<'_>,
+) -> Result<Option<Vec<bool>>> {
+    let key = |s_idx: u32| keys.key(s_idx);
     let hsps: Vec<&crate::algorithm::blastp::hsp::BlastpHsp> = hit_lists
         .first()
         .and_then(Option::as_ref)
@@ -500,12 +489,20 @@ pub(super) fn round_outcome(
         })
         .unwrap_or_default();
     let has_alignments = !hsps.is_empty();
+    let previous = io.state.previously_found();
+    // The keys that the round compares: those of its inclusion set and PSSM rows, and after a
+    // round with a set every subject's, which the two-part table looks up in that set.
+    let compared: std::collections::BTreeSet<SetKey> = hsps
+        .iter()
+        .filter(|hsp| !previous.is_empty() || included(hsp.e_value, args.inclusion_ethresh))
+        .map(|hsp| key(hsp.s_idx))
+        .collect();
+    SetKey::check_handles(previous.iter().chain(&compared))?;
     let set: InclusionSet = hsps
         .iter()
         .filter(|hsp| included(hsp.e_value, args.inclusion_ethresh))
         .map(|hsp| key(hsp.s_idx))
         .collect();
-    let previous = io.state.previously_found();
     let found_before = (!previous.is_empty()).then(|| {
         let subjects = hsps
             .iter()
@@ -527,14 +524,47 @@ pub(super) fn round_outcome(
     } else {
         false
     };
-    let next =
-        makes_next.then(|| next_pssm(args, io, &hsps, ranges, shown_subjects, contexts, gapped));
+    let next = makes_next.then(|| {
+        next_pssm(
+            args,
+            io,
+            &hsps,
+            ranges,
+            shown_subjects,
+            contexts,
+            gapped,
+            keys,
+        )
+    });
     *io.outcome.lock().expect("the round's outcome") = Some(RoundOutcome {
         has_alignments,
         set,
         next,
     });
-    found_before
+    Ok(found_before)
+}
+
+/// The keys of the subjects of a search's hit lists (`rounds::SetKey`, by subject index; a
+/// database's subjects by rank): the inclusion sets of psiblast's rounds and the rows of its
+/// PSSMs (`round_outcome`, `next_pssm`, `psiblast_pssms`).
+#[derive(Clone, Copy)]
+pub(super) struct SubjectKeys<'a> {
+    /// The ordinal ids of a database's listed subjects (`None` for `-subject` records).
+    pub(super) listed_ordinals: Option<&'a [u32]>,
+    /// The parsed Seq-ids of a database's subjects by rank (empty without them).
+    pub(super) parsed: &'a [Option<Arc<ParsedSubject>>],
+}
+
+impl SubjectKeys<'_> {
+    pub(super) fn key(&self, s_idx: u32) -> SetKey {
+        match self.listed_ordinals {
+            None => SetKey::Index(s_idx),
+            Some(ordinals) => match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                Some(subject) => SetKey::Id(subject.alignment_id().clone()),
+                None => SetKey::Index(ordinals[s_idx as usize]),
+            },
+        }
+    }
 }
 
 /// `ComputePssmForNextIteration` of the round's Seq-aligns `hsps` (`psiblast_pssms`' PSSM of the
@@ -556,6 +586,7 @@ pub(super) fn round_outcome(
 //                                             m_AncillaryData, diags);
 // }
 // ```
+#[allow(clippy::too_many_arguments)]
 fn next_pssm(
     args: &ResolvedBlastpArgs,
     io: &PsiRoundIo,
@@ -564,6 +595,7 @@ fn next_pssm(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
+    keys: SubjectKeys<'_>,
 ) -> Result<QueryPssm> {
     let subject = |s_idx: u32| -> Vec<u8> {
         match shown_subjects.letters(s_idx as usize) {
@@ -628,6 +660,7 @@ fn next_pssm(
         },
         &alignments,
         &subject,
+        &|s_idx| keys.key(s_idx),
         ancillary,
     )
 }

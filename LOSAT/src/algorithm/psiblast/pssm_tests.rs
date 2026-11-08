@@ -179,7 +179,7 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
         alignment(1, 1.0, 0, 0, 3, None),
         alignment(2, 0.0, 3, 0, 3, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, 0.002).unwrap();
+    let msa = input_msa(&query, &alignments, &subject, &SetKey::Index, 0.002).unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(row_letters(&msa.rows[0]), query.map(Some).to_vec());
     // HSP 1 at query 0: 11 12, a gap in the subject at query 2, the subject's 13 14 skipped,
@@ -207,11 +207,11 @@ fn an_alignment_past_the_last_row_is_refused() {
         alignment(1, 1.0, 0, 0, 3, None),
         alignment(0, 1e-10, 0, 0, 3, None),
     ];
-    let error = input_msa(&query, &alignments, &subject, 0.002).unwrap_err();
+    let error = input_msa(&query, &alignments, &subject, &SetKey::Index, 0.002).unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
     assert_eq!(
         error.to_string(),
-        "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
+        "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
     );
     // A counted subject first keeps every later counted subject in its row.
     let alignments = [
@@ -219,9 +219,100 @@ fn an_alignment_past_the_last_row_is_refused() {
         alignment(1, 1.0, 0, 0, 3, None),
         alignment(2, 1e-10, 0, 0, 3, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, 0.002).unwrap();
+    let msa = input_msa(&query, &alignments, &subject, &SetKey::Index, 0.002).unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(row_letters(&msa.rows[2]), vec![Some(4), Some(5), Some(6)]);
+}
+
+fn key_of(ids: &'static [&'static str]) -> impl Fn(u32) -> SetKey {
+    use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
+    move |s_idx: u32| {
+        let ids = crate::seqid::parse::parse_ids(
+            ids[s_idx as usize].as_bytes(),
+            PARTIAL_OK | ANY_LOCAL | RAW_TEXT,
+            &mut |_| {},
+        )
+        .unwrap();
+        SetKey::Id(ids.into_iter().next().unwrap().unwrap())
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:178-184 and 310-320
+// (quoted at `input_msa`): the rows are the handles of the counted Seq-align ids, and a
+// Seq-align whose id `Match`es the previous one's takes its row (review 2 of line DBID
+// weakbatch, H1 and P2-P3; weakbatch DECISIONS 43 (4)).
+#[test]
+fn following_seq_aligns_whose_ids_match_share_a_row() {
+    let query = [1, 2, 3, 4];
+    let subjects: [&[u8]; 4] = [
+        &[5, 6, 7, 8],
+        &[5, 6, 7, 8],
+        &[9, 10, 11, 12],
+        &[13, 14, 15, 16],
+    ];
+    let subject = |s_idx: u32| subjects[s_idx as usize].to_vec();
+    // Copies of one record (subjects 0 and 1): one handle, one row; the copy fills only the
+    // cells that the first left unaligned.
+    let key = key_of(&[
+        "gb|AAA00001.1|",
+        "gb|AAA00001.1|",
+        "gb|BBB00002.1|",
+        "gb|BBB00002|",
+    ]);
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 2, None),
+        alignment(1, 1e-9, 1, 1, 3, None),
+        alignment(2, 1e-8, 0, 0, 4, None),
+    ];
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap();
+    assert_eq!(msa.rows.len(), 3);
+    assert_eq!(
+        row_letters(&msa.rows[1]),
+        vec![Some(5), Some(6), Some(7), Some(8)]
+    );
+    assert_eq!(
+        row_letters(&msa.rows[2]),
+        vec![Some(9), Some(10), Some(11), Some(12)]
+    );
+    // `gb|BBB00002.1|` and `gb|BBB00002|` `Match` but are two handles: two rows, the second
+    // one left empty.
+    let alignments = [
+        alignment(2, 1e-10, 0, 0, 2, None),
+        alignment(3, 1e-9, 2, 2, 2, None),
+    ];
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap();
+    assert_eq!(msa.rows.len(), 3);
+    assert_eq!(
+        row_letters(&msa.rows[1]),
+        vec![Some(9), Some(10), Some(15), Some(16)]
+    );
+    assert_eq!(row_letters(&msa.rows[2]), vec![None; 4]);
+    // Such ids with another subject between them take two rows of their own.
+    let alignments = [
+        alignment(2, 1e-10, 0, 0, 2, None),
+        alignment(0, 1e-9, 0, 0, 4, None),
+        alignment(3, 1e-8, 2, 2, 2, None),
+    ];
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap();
+    assert_eq!(msa.rows.len(), 4);
+    assert_eq!(
+        row_letters(&msa.rows[3]),
+        vec![None, None, Some(15), Some(16)]
+    );
+    // A copy after another subject: one handle for two rows, past the last row (NCBI BLAST+
+    // 2.17.0 crashes, review 2 P3).
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 4, None),
+        alignment(2, 1e-9, 0, 0, 4, None),
+        alignment(1, 1e-8, 0, 0, 4, None),
+    ];
+    let error = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .starts_with("an alignment past the last row of the PSSM's multiple alignment"),
+        "{error}"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-547
@@ -244,6 +335,7 @@ fn an_e_value_from_10_on_counts_as_10() {
             &query,
             &[alignment(0, e_value, 0, 0, 2, None)],
             &subject,
+            &SetKey::Index,
             threshold,
         )
         .unwrap();
@@ -387,6 +479,7 @@ fn run_query_pssm(
         },
         alignments,
         subject,
+        &SetKey::Index,
         ANCILLARY,
     )
 }
@@ -410,7 +503,7 @@ fn an_o_in_the_query_prints_as_x() {
     let query = crate::algorithm::blastp::encoding::encode_protein_sequence(&record);
     let query = &query.aa_seq[1..=query.aa_len];
     assert_eq!(query[29], ncbistdaa::X);
-    let msa = input_msa(query, &alignments, &subject, 0.002).unwrap();
+    let msa = input_msa(query, &alignments, &subject, &SetKey::Index, 0.002).unwrap();
     let sbp = score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap();
     let pssm =
         psi::create_pssm_with_diagnostics(&msa, 0, &sbp, PsiDiagnosticsRequest::new_ex(true))

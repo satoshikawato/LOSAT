@@ -95,14 +95,86 @@ impl PsiRoundPlan {
     }
 }
 
-/// The key of a subject in the inclusion sets (`CSeq_id_Handle` of its Seq-align id, DESIGN_ps5
-/// §2): the index of a `-subject` record (`lcl|Subject_N`), the ordinal id of a database sequence
-/// without parsed Seq-ids (`gnl|BL_ORD_ID|oid`), or the FASTA string of a parsed Seq-align id
-/// (copies of one record that the reports join share it).
+/// The key of a subject in the inclusion sets and the rows of the PSSM's multiple alignment
+/// (`CSeq_id_Handle` of its Seq-align id, DESIGN_ps5 §2): the index of a `-subject` record
+/// (`lcl|Subject_N`), the ordinal id of a database sequence without parsed Seq-ids
+/// (`gnl|BL_ORD_ID|oid`), or a parsed Seq-align id (copies of one record share it). Two parsed ids
+/// are one key where they are equal; others that NCBI's handles can take for one are refused
+/// (`check_handles`), so the keys are the handles of the runs LOSAT accepts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SetKey {
     Index(u32),
-    Id(Vec<u8>),
+    Id(crate::seqid::model::ParsedSeqId),
+}
+
+impl SetKey {
+    /// The Seq-align id of an ordinal key (`gnl|BL_ORD_ID|oid`, as NCBI names a database sequence
+    /// without parsed Seq-ids; a `-subject` record's key is never compared with a parsed id:
+    /// psiblast has no `-parse_deflines`).
+    fn ordinal_id(index: u32) -> crate::seqid::model::ParsedSeqId {
+        use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
+        ParsedSeqId::General(Dbtag {
+            db: b"BL_ORD_ID".to_vec(),
+            tag: ObjectId::Id(index as i32),
+        })
+    }
+
+    /// `CSeq_id::Match` of the two keys' Seq-align ids (`Compare(..) == e_YES`).
+    pub(crate) fn matches(&self, other: &SetKey) -> bool {
+        use crate::seqid::defline_set::{compare, Sic};
+        match (self, other) {
+            (SetKey::Index(a), SetKey::Index(b)) => a == b,
+            (SetKey::Id(a), SetKey::Id(b)) => compare(a, b) == Sic::Yes,
+            (SetKey::Index(index), SetKey::Id(id)) | (SetKey::Id(id), SetKey::Index(index)) => {
+                compare(&Self::ordinal_id(*index), id) == Sic::Yes
+            }
+        }
+    }
+
+    /// The key's Seq-align id as FASTA, for LOSAT's messages.
+    fn label(&self) -> String {
+        let mut out = Vec::new();
+        match self {
+            SetKey::Index(index) => crate::seqid::label::fasta(&Self::ordinal_id(*index), &mut out),
+            SetKey::Id(id) => crate::seqid::label::fasta(id, &mut out),
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    /// LOSAT's refusal of two keys of `keys` that differ but that NCBI's `CSeq_id_Handle` can take
+    /// for one sequence (`seqid::defline_set::handle_superset_key`: ids that differ in letter
+    /// case, or one accession under `gb`, `emb` and `dbj`): their inclusion sets, the two-part
+    /// description table and the rows of the PSSM would rest on handles that LOSAT does not
+    /// model. `keys` are those that one round compares: its previous set and the subjects of its
+    /// Seq-aligns.
+    pub(crate) fn check_handles<'a>(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<()> {
+        let mut seen: std::collections::BTreeMap<Vec<u8>, &SetKey> =
+            std::collections::BTreeMap::new();
+        for key in keys {
+            let mut superset = Vec::new();
+            match key {
+                SetKey::Index(index) => crate::seqid::defline_set::handle_superset_key(
+                    &Self::ordinal_id(*index),
+                    &mut superset,
+                ),
+                SetKey::Id(id) => crate::seqid::defline_set::handle_superset_key(id, &mut superset),
+            }
+            match seen.entry(superset) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(key);
+                }
+                std::collections::btree_map::Entry::Occupied(entry) if *entry.get() != key => {
+                    anyhow::bail!(
+                        "the Seq-align ids {} and {} of two database sequences that a round of psiblast compares (its inclusion sets, the rows of its PSSM), which NCBI BLAST+ can take for one sequence (they differ in letter case or are one accession under gb, emb and dbj), are not supported by LOSAT's PSIBLAST",
+                        entry.get().label(),
+                        key.label()
+                    );
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A round's inclusion set (`CPsiBlastIterationState::TSeqIds`).
@@ -379,12 +451,73 @@ mod tests {
         assert!(state.has_converged(), "converged on the last allowed round");
     }
 
+    fn id(text: &str) -> SetKey {
+        use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
+        use crate::seqid::parse::parse_ids;
+        let ids = parse_ids(
+            text.as_bytes(),
+            PARTIAL_OK | ANY_LOCAL | RAW_TEXT,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(ids.len(), 1, "{text}");
+        SetKey::Id(ids.into_iter().next().unwrap().unwrap())
+    }
+
     #[test]
     fn keys_of_records_and_ids_differ() {
-        let ids: InclusionSet = [SetKey::Index(3), SetKey::Id(b"gb|X1.1|".to_vec())]
-            .into_iter()
-            .collect();
+        let ids: InclusionSet = [SetKey::Index(3), id("gb|X1.1|")].into_iter().collect();
         assert!(ids.contains(&SetKey::Index(3)));
-        assert!(!ids.contains(&SetKey::Id(b"3".to_vec())));
+        assert!(ids.contains(&id("gb|X1.1|")));
+        assert!(!ids.contains(&id("gb|X1|")));
+        assert!(!ids.contains(&id("lcl|3")));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-320 (quoted at
+    // `pssm::input_msa`): following Seq-aligns whose ids `Match` share a row.
+    #[test]
+    fn keys_match_as_their_seq_align_ids() {
+        assert!(id("gb|X1|").matches(&id("gb|X1.1|")));
+        assert!(id("gb|X1.1|").matches(&id("emb|x1.1|")));
+        assert!(!id("gb|X1.1|").matches(&id("gb|X1.2|")));
+        assert!(id("sp||NAMEY").matches(&id("sp|P00042.1|NAMEY")));
+        assert!(SetKey::Index(5).matches(&SetKey::Index(5)));
+        assert!(!SetKey::Index(5).matches(&SetKey::Index(6)));
+        assert!(SetKey::Index(5).matches(&id("gnl|BL_ORD_ID|5")));
+        assert!(!id("gnl|BL_ORD_ID|5").matches(&SetKey::Index(6)));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1064-1095 (quoted at
+    // `seqid::defline_set::handle_superset_key`): a handle compares a text id's accession
+    // without case.
+    #[test]
+    fn keys_that_ncbis_handles_can_take_for_one_are_refused() {
+        let keys = [
+            id("gb|X1|"),
+            id("gb|X1.1|"),
+            id("gb|X1.1|"),
+            id("sp||NAMEY"),
+        ];
+        SetKey::check_handles(&keys).unwrap();
+        SetKey::check_handles(&[id("pdb|1ABC|A"), id("pdb|1ABC|a"), id("pdb|1ABC|B")]).unwrap();
+        for (a, b) in [
+            ("gb|ABC12.1|", "gb|abc12.1|"),
+            ("gb|ABC12.1|", "emb|ABC12.1|"),
+            ("lcl|seqA", "lcl|SEQA"),
+            ("gnl|MyDb|tagX", "gnl|MYDB|TAGX"),
+        ] {
+            let error = SetKey::check_handles(&[id(a), id("gb|X1.1|"), id(b)]).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!("the Seq-align ids {a} and {b} of two database sequences that a round of psiblast compares (its inclusion sets, the rows of its PSSM), which NCBI BLAST+ can take for one sequence (they differ in letter case or are one accession under gb, emb and dbj), are not supported by LOSAT's PSIBLAST")
+            );
+        }
+        let error = SetKey::check_handles(&[SetKey::Index(5), id("gnl|BL_ORD_ID|5")]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("gnl|BL_ORD_ID|5 and gnl|BL_ORD_ID|5"),
+            "{error}"
+        );
     }
 }

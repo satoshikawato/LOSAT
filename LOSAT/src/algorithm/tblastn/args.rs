@@ -22,6 +22,10 @@ use crate::config::ScoringMatrix;
 //     arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
 //     m_Args.push_back(arg);
 // ```
+/// TBLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
+pub(crate) const TBLASTN_TASK: TaskParser =
+    task_parser("TBLASTN", &["tblastn", "tblastn-fast"], &[]);
+
 // NCBI reference: c++/src/algo/blast/api/tblastn_options.cpp:54-85
 // ```c++
 // SetWordThreshold(BLAST_WORD_THRESHOLD_TBLASTN);
@@ -116,7 +120,7 @@ pub struct TblastnArgs {
     #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
     // `tblastn-fast`: word size 5, the compressed lookup table and threshold 20 (`resolve`).
-    #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn", "tblastn-fast"], &[]))]
+    #[arg(long, default_value = "tblastn", value_parser = TBLASTN_TASK)]
     pub task: String,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,

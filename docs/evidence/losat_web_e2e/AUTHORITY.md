@@ -27,7 +27,7 @@ NCBI のソースは固定 commit `598d8ae6`（`/mnt/c/Users/genom/GitHub/ncbi-b
 | `ncbiargs.cpp:489-497` | 真偽値は `NStr::StringToBool`（`true/t/yes/y/on/1` と否定、大文字小文字を区別しない） | `ncbi_boolean`（TBLASTN の `-soft_masking`・`-sum_stats`） |
 | `blast_args.cpp:387-408` | `-seg` は filtering の handler が読む。`no`・`yes` 以外は 1 つの空白で 3 つに分け、数でなければ `Invalid input for filtering parameters`、3 つでなければ `Invalid number of arguments to filtering option`（終了コード 1） | `app.rs` の `parse_seg_option`（3 つの program が共有。TBLASTN・TBLASTX の既定値は `12 2.2 2.5`） |
 | `blast_args.cpp:834-892` | `-comp_based_stats` は最初の文字だけで決める（`0Ff` 0、`1` 1、`2DdTt` 2、`3` 3、それ以外は 0）。blastp だけ 2 文字目の `u`・`U` で unified P。`-ungapped` と 0 以外の組は `Composition-adjusted searched are not supported with an ungapped search…` | `app.rs` の `parse_comp_based_stats` |
-| `blast_args.cpp:3158-3163` | `-task` は大文字小文字を区別する集合（blastp・blastp-fast・blastp-short、tblastn・tblastn-fast） | clap の `value_parser`（構文の誤りは承認済みの例外 1） |
+| `blast_args.cpp:105` | `-task` は大文字小文字を区別する集合（blastp・blastp-fast・blastp-short、tblastn・tblastn-fast） | clap の `value_parser`（構文の誤りは承認済みの例外 1） |
 | `ncbiargs.cpp:2866-2872` | `--` の後は位置の引数（BLAST の program には無い）。最後の `--` は何もせず、後ろに語があれば USAGE の誤り | `cli.rs` の `try_parse_from` が BLASTN・BLASTP・TBLASTN・TBLASTX の最後の `--` を落とす（S08+b、第 2 回の監査 R2c-2）。後ろの語は引数の誤り（承認済みの例外 1）。BLASTX は変えない |
 | `tabular.cpp:70-99,1393-1408`、`format_flags.cpp:41-195` | custom の field は 1 つの空白で分け、名前に完全に一致するものだけを足す（`std` は既定の 12、`-<名前>` は消す）。知らない名前は黙って捨て、何も残らなければ既定 | BLASTP の `parse_blastp_tabular_fields`・`blastp_tabular_field`。NCBI が書き LOSAT が書かない field（`qgi`・`sallseqid`・`staxid`・`qcovs` など 20）と `delim=` は明示的な拒否。TBLASTN・TBLASTX は custom の指定を拒否する（S08 から） |
 

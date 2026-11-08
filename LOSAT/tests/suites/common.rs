@@ -46,6 +46,8 @@ mod outfmt11_blastx;
 mod outfmt11_tblastn;
 #[path = "../outfmt11_tblastx.rs"]
 mod outfmt11_tblastx;
+#[path = "../outfmt11_titles.rs"]
+mod outfmt11_titles;
 #[path = "../outfmt13_14_files.rs"]
 mod outfmt13_14_files;
 #[path = "../outfmt16_blastn.rs"]

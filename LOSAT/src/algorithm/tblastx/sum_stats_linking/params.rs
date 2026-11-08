@@ -25,8 +25,8 @@ pub struct LinkHspCutoffs {
 /// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455;
 /// c++/src/algo/blast/core/link_hsps.c:468-493
 /// CalculateLinkHSPCutoffs(..., db_length, subject->length);
-/// cutoff[0] = link_hsp_params->cutoff_small_gap;
-/// cutoff[1] = link_hsp_params->cutoff_big_gap;
+/// `cutoff[0] = link_hsp_params->cutoff_small_gap;`
+/// `cutoff[1] = link_hsp_params->cutoff_big_gap;`
 /// Per-subject state computed before search and shared by both linking passes.
 #[derive(Debug, Clone)]
 pub struct LinkingParams {

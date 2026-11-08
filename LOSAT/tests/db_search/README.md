@@ -581,7 +581,8 @@ pir accession-only id by the name-only id; not the other way. The queries `ids/p
 `ids/pweak_q<k>.faa`, `ids/pweak_q8.fna`, `ids/nweak_q1.fna` and `.faa` hit record k (the second of a pair also hits
 the first) and are run with `PRE_FETCH_SEQS_LIMIT=N` in `extra_args`, an environment variable of both programs (NCBI
 reads the reported sequences one by one when N is 0 or below the batch's Seq-align count and then writes the names of
-the sequence it read first). LOSAT refuses both cases and every N but 2147483647 (it does not count the Seq-aligns);
+the sequence it read first). LOSAT refuses both cases, the second in a batch above N (line DBID weakbatch, rows
+`db.id.wkb.*` below);
 in a version 5 database LOSAT does not reproduce NCBI's lookup and refuses every Seq-align id with a name and every pir or prf id
 without it, in version 4 the lookup of the id decides (a name alone with no other holder is written as NCBI does:
 `db.id.blastp.weak.v4.pf.alone.6`, `v4.pf.none.6`). The `ncbi` rows are the searches without the variable or at 2147483647, the
@@ -591,6 +592,22 @@ with `sp||NAME_R` for `sp|P00051.1|name_r` (another letter case), `gb|FFF00053.1
 `tpg|FFF00052.1|NAME_S`, `gb|FFF00054.1|` with `prf||PIRW3` for `pir|PIRW3|`, `gb|FFF00055.1|` with `emb|S12347.1|` for
 `pir|S12347|`; queries `ids/pweak_r_q<k>.faa` are T's letters; rows `db.id.blastp.weak.r.*` and `.v4.r.*`: NCBI writes T's names
 for S at `PRE_FETCH_SEQS_LIMIT=0` in both versions, and both its own rows without the variable).
+
+Rows `db.id.wkb.*` (line DBID weakbatch): NCBI counts a positive `PRE_FETCH_SEQS_LIMIT` against each query batch's
+Seq-aligns. A batch at or below it prefetches its sequences, each by its own id, and shows each pair of the rows above as
+two sequences (the `ncbi` rows, in all six programs, versions 4 and 5, outfmt 0 and 5); a batch above it reads them one by
+one and shows T for S (the rejection rows). `ids/wkb_q8x2.faa` and `ids/wkb_n1x2.fna` are `pweak_q8.faa` and
+`nweak_q1.fna` twice, joined by 30 `X` and 40 `N` (two HSPs a subject, so 4 Seq-aligns in a gapped search), and
+`ids/wkb_q0_q4x3.faa` is `pweak_q0.faa` followed by `pweak_q4.faa` three times (with `BATCH_SIZE=1`, a batch of 1 Seq-align
+that prefetches beside one of 3 that does not). The psiblast rows `db.id.wkb.ps.*` run rounds (`-num_iterations 2`):
+each round that makes the next round's PSSM reads the sequences before the cut by their Seq-align ids, so
+`pir|S12347|` beyond `-max_target_seqs 1` (`pweak_r_v5`) is refused where the round's prefetch is off, and two
+following hits whose Seq-align ids `Match` (`gb|FFF00043.1|` and `gb|FFF00043|` of `pweak_v5`), which NCBI puts in one
+row of the PSSM's multiple alignment, are refused also without the variable. `ids/wkb_e3_v5` (`make_ids.py
+--weakbatch-only`, from `ids/wkb_e3.faa`) holds `gb|FFF00043.1|`, `gb|ZZZ00001.1|` and then `gb|FFF00043|`, which the
+lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, refused without the variable
+(`db.id.wkb.ps.e3.i2.7.reject`); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
+`gb|WWW00001.1|`, which the PSSM does not read (`db.id.wkb.ps.p1.i2.7`, NCBI's bytes); the query is `ids/wkb_qy.faa`.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
@@ -970,7 +987,7 @@ most 9 in BLOSUM62).
       makeblastdb -in "pa1 pb1 pc1 pd1" -input_type blastdb -dbtype prot -blastdb_version 4 -title "nz reppo" \
           -out $D/nz_reppo
 
-## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a)
+## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a and PS11b)
 
 - `rps_mini` (version 5), `rps_mini4` (version 4) and `rps_mini26` (version 4, a 26-column `.rps` with the 26-letter
   magic `0x1e16` in `.rps` and `.loo`, its `.freq` left at 28 columns, as NCBI's own test database `rpstest_le`):
@@ -980,6 +997,12 @@ most 9 in BLOSUM62).
   scale 100 (as CDD's). `rps/build.sh NCBI_BIN OUT_DIR` records how they were made with NCBI BLAST+ 2.17.0; makeprofiledb
   writes the date into the index files, so the committed `.gz` files are the fixtures (a rebuild differs).
   `rps_pam30.aux` is `rps_mini.aux` with `PAM30` and gap costs 9/1 (row `db.rps.rej.matrix`).
+- `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
+  `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
+  the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one
+  volume (the merge, the per-volume hit list size, outfmt 7's `# N hits found` before the cut, volume 0's K). A row
+  `rps-gz:rps_mini3v!01.freq` leaves one volume's `.freq` out (`!00.freq`: the first, which NCBI answers with its
+  warning and mode 0).
 - `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE]` with the files
   `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place), `BLASTDB` set
   to that directory and `-db "NAME NAME2"`; a row whose `covers` cell has `path: {db_dir}` keeps that directory as

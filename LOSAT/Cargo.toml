@@ -102,13 +102,15 @@ ruzstd = "0.9"
 # (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's
 # alignment through `mmap` and `mprotect` on Linux, which needs neither /proc nor
 # the C library), and the read-only mappings of the RPS-BLAST profile files
-# (`utils::mapped_file`, as NCBI's `CMemoryFile`). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# (`utils::mapped_file`, as NCBI's `CMemoryFile`), and `fs` for the write-permission
+# test of makeblastdb's output directory (`access`, which NCBI's `euidaccess` calls,
+# `writedb::build_db::check_access_write`). No BLAST behavior, foreign algorithm, NCBI runtime/build
 # dependency or libc-auxv feature (the pure-Rust runtime boundary,
 # tests/check_pure_rust_runtime_boundary.py, allows no direct libc call). A caret requirement
 # like every other dependency: Cargo.lock fixes the exact version for every build from this
 # repository (CI and the release with --locked), and Dependabot moves it.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm", "fs"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
 # `IsIStreamEmpty` (`input_files::has_stream_position`), and the read-only file mappings of the

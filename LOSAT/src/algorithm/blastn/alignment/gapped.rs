@@ -159,8 +159,8 @@ pub struct GapAlignScratch {
     trace_offsets: Vec<usize>,
     trace_rows_used: usize,
     // No NCBI counterpart: empty vectors that the SIMD kernel's traceback fills with one
-    // direction's operations (`x_ops_vec`). `extend_gapped_heuristic_with_traceback` copies the two
-    // directions into the HSP's own list and gives them back here. Reuse only.
+    // direction's operations (`x_ops_vec`). `extend_gapped_heuristic_with_traceback_with_scratch`
+    // copies the two directions into the HSP's own list and gives them back here. Reuse only.
     x_spare_ops: Vec<Vec<GapEditOp>>,
 }
 

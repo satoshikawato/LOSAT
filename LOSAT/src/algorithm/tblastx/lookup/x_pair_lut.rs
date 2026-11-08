@@ -178,8 +178,8 @@ fn x_group_capacity<T>(elements: usize, mapped: bool) -> usize {
 
 /// No NCBI counterpart: `vec![0; elements]` with `x_group_capacity`; `calloc` touches none of a
 /// mapped block.
-fn x_group_zeroed(elements: usize, mapped: bool) -> Vec<u32> {
-    let mut zeroed = vec![0u32; x_group_capacity::<u32>(elements, mapped)];
+fn x_group_zeroed<T: Copy + Default>(elements: usize, mapped: bool) -> Vec<T> {
+    let mut zeroed = vec![T::default(); x_group_capacity::<T>(elements, mapped)];
     zeroed.truncate(elements);
     zeroed
 }
@@ -513,8 +513,9 @@ impl XPairLutQuery {
                 Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
             overflow.resize(overflow_size, 0);
             // Where the fill pass writes each cell's next offset: 0 in the cell, the start of its
-            // run in the overflow array.
-            let mut next: Vec<u32> = x_group_zeroed(backbone_size, mapped);
+            // run in the overflow array (a `usize`: a position of an array of 2^32 entries or
+            // more, which a `u32` wrapped).
+            let mut next: Vec<usize> = x_group_zeroed(backbone_size, mapped);
             let mut overflow_cursor = 0usize;
             let mut kept = 0usize;
             for (idx, &count) in counts.iter().enumerate() {
@@ -531,8 +532,8 @@ impl XPairLutQuery {
                 };
                 backbone[at].num_used = count as i32;
                 if count as usize > AA_HITS_PER_CELL {
-                    backbone[at].entries[0] = overflow_cursor as i32;
-                    next[idx] = overflow_cursor as u32;
+                    backbone[at].set_cursor(overflow_cursor);
+                    next[idx] = overflow_cursor;
                     overflow_cursor += count as usize;
                 }
             }
@@ -547,14 +548,14 @@ impl XPairLutQuery {
                 let list = lists[idx].as_deref().expect("listed in the count pass");
                 for &w in list {
                     let w = w as usize;
-                    let at = next[w] as usize;
+                    let at = next[w];
                     if counts[w] as usize <= AA_HITS_PER_CELL {
                         let cell = if compact { slot[w] as usize } else { w };
                         backbone[cell].entries[at..at + offsets.len()].copy_from_slice(offsets);
                     } else {
                         overflow[at..at + offsets.len()].copy_from_slice(offsets);
                     }
-                    next[w] += offsets.len() as u32;
+                    next[w] += offsets.len();
                 }
             }
 
@@ -929,7 +930,7 @@ mod tests {
             if chain.len() <= AA_HITS_PER_CELL {
                 table.backbone[idx].entries[..chain.len()].copy_from_slice(&chain);
             } else {
-                table.backbone[idx].entries[0] = table.overflow.len() as i32;
+                table.backbone[idx].set_cursor(table.overflow.len());
                 table.overflow.extend_from_slice(&chain);
             }
             table.longest_chain = table.longest_chain.max(chain.len() as i32);

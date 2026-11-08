@@ -1,0 +1,1025 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35",
+          "Subject_36",
+          "Subject_37",
+          "Subject_38",
+          "Subject_39",
+          "Subject_40",
+          "Subject_41",
+          "Subject_42",
+          "Subject_43",
+          "Subject_44",
+          "Subject_45",
+          "Subject_46",
+          "Subject_47",
+          "Subject_48",
+          "Subject_49",
+          "Subject_50",
+          "Subject_51",
+          "Subject_52",
+          "Subject_53",
+          "Subject_54",
+          "Subject_55",
+          "Subject_56",
+          "Subject_57",
+          "Subject_58",
+          "Subject_59",
+          "Subject_60",
+          "Subject_61",
+          "Subject_62",
+          "Subject_63",
+          "Subject_64",
+          "Subject_65",
+          "Subject_66",
+          "Subject_67",
+          "Subject_68",
+          "Subject_69",
+          "Subject_70",
+          "Subject_71",
+          "Subject_72",
+          "Subject_73",
+          "Subject_74",
+          "Subject_75",
+          "Subject_76",
+          "Subject_77",
+          "Subject_78",
+          "Subject_79",
+          "Subject_80",
+          "Subject_81",
+          "Subject_82",
+          "Subject_83",
+          "Subject_84",
+          "Subject_85",
+          "Subject_86"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]",
+            "query_len": 897,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63565.1",
+                    "title": "BDT63565.1 wsv078-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 514,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 31.9574,
+                    "score": 71,
+                    "evalue": 0.00944727,
+                    "identity": 27,
+                    "positive": 44,
+                    "query_from": 637,
+                    "query_to": 735,
+                    "hit_from": 316,
+                    "hit_to": 397,
+                    "align_len": 99,
+                    "gaps": 17,
+                    "qseq": "ATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANATTTGNCIPAYSVITATITNFDECDDDDNDDTVTATPTTTTTTTTTTTTTTTTTNANA",
+                    "hseq": "ANPRASATTSTSPPHLSTLTASISEGVTFANPRASATTSTSP-------PHLSTPTASIS----------EGVTFANPRTSATTSTSPPHLSTPTAYNS",
+                    "midline": "A   A+ TT+T+    +T T + +   T  N  A+ATT+ +        P  S  TA+I+          +    A P T+ TT+T+    +T T  N+"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT63551.1",
+                    "title": "BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 815,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 27.7202,
+                    "score": 60,
+                    "evalue": 0.200962,
+                    "identity": 15,
+                    "positive": 18,
+                    "query_from": 639,
+                    "query_to": 673,
+                    "hit_from": 118,
+                    "hit_to": 152,
+                    "align_len": 35,
+                    "gaps": 0,
+                    "qseq": "ATATTTTTTTTTTTTTTTTTTTTTTTTTNANANAT",
+                    "hseq": "AEASLTVTGVTTSSHRTTTDTVATPLKNKANMNHT",
+                    "midline": "A A+ T T  TT++  TTT T  T     AN N T"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 25.409,
+                    "score": 54,
+                    "evalue": 1.08965,
+                    "identity": 20,
+                    "positive": 36,
+                    "query_from": 782,
+                    "query_to": 856,
+                    "hit_from": 121,
+                    "hit_to": 200,
+                    "align_len": 80,
+                    "gaps": 5,
+                    "qseq": "TTTTTTTTTSTTSTTTTVAATATSTVDCIDNVKAVPISSDTPNRQRHHKVRFKSHHLEL-----IKKIFQRNILNKRIVT",
+                    "hseq": "SLTVTGVTTSSHRTTTDTVATPLKNKANMNHTIVGPFSNKASSSNKMVKQKTYSPHPKVTCRRPLSRHFNNNSHSKKIIT",
+                    "midline": "+ T T  TTS+  TTT   AT       +++    P S+   +  +  K +  S H ++     + + F  N  +K+I+T"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 25.0238,
+                    "score": 53,
+                    "evalue": 1.492,
+                    "identity": 13,
+                    "positive": 15,
+                    "query_from": 709,
+                    "query_to": 738,
+                    "hit_from": 123,
+                    "hit_to": 152,
+                    "align_len": 30,
+                    "gaps": 0,
+                    "qseq": "TVTATPTTTTTTTTTTTTTTTTTNANANAT",
+                    "hseq": "TVTGVTTSSHRTTTDTVATPLKNKANMNHT",
+                    "midline": "TVT   T++  TTT T  T     AN N T"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 25.0238,
+                    "score": 53,
+                    "evalue": 1.66618,
+                    "identity": 13,
+                    "positive": 16,
+                    "query_from": 637,
+                    "query_to": 669,
+                    "hit_from": 118,
+                    "hit_to": 150,
+                    "align_len": 33,
+                    "gaps": 0,
+                    "qseq": "ATATATTTTTTTTTTTTTTTTTTTTTTTTTNAN",
+                    "hseq": "AEASLTVTGVTTSSHRTTTDTVATPLKNKANMN",
+                    "midline": "A A+ T T  TT++  TTT T  T      N N"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 23.8682,
+                    "score": 50,
+                    "evalue": 3.79746,
+                    "identity": 11,
+                    "positive": 16,
+                    "query_from": 630,
+                    "query_to": 656,
+                    "hit_from": 115,
+                    "hit_to": 141,
+                    "align_len": 27,
+                    "gaps": 0,
+                    "qseq": "TVTATATATATATTTTTTTTTTTTTTT",
+                    "hseq": "SLVAEASLTVTGVTTSSHRTTTDTVAT",
+                    "midline": "++ A A+ T T  TT++  TTT T  T"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 22.7126,
+                    "score": 47,
+                    "evalue": 6.59496,
+                    "identity": 13,
+                    "positive": 16,
+                    "query_from": 712,
+                    "query_to": 747,
+                    "hit_from": 120,
+                    "hit_to": 155,
+                    "align_len": 36,
+                    "gaps": 0,
+                    "qseq": "ATPTTTTTTTTTTTTTTTTTNANANATTNANATTTG",
+                    "hseq": "ASLTVTGVTTSSHRTTTDTVATPLKNKANMNHTIVG",
+                    "midline": "A+ T T  TT++  TTT T         N N T  G"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 22.7126,
+                    "score": 47,
+                    "evalue": 7.8157,
+                    "identity": 12,
+                    "positive": 15,
+                    "query_from": 635,
+                    "query_to": 667,
+                    "hit_from": 118,
+                    "hit_to": 150,
+                    "align_len": 33,
+                    "gaps": 0,
+                    "qseq": "ATATATATTTTTTTTTTTTTTTTTTTTTTTTTN",
+                    "hseq": "AEASLTVTGVTTSSHRTTTDTVATPLKNKANMN",
+                    "midline": "A A+ T T  TT++  TTT T  T        N"
+                  },
+                  {
+                    "num": 8,
+                    "bit_score": 22.7126,
+                    "score": 47,
+                    "evalue": 8.50835,
+                    "identity": 15,
+                    "positive": 19,
+                    "query_from": 638,
+                    "query_to": 682,
+                    "hit_from": 114,
+                    "hit_to": 155,
+                    "align_len": 45,
+                    "gaps": 3,
+                    "qseq": "TATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANATTTG",
+                    "hseq": "TSLVAEASLTVTGVTTSSHRTTTDTVATPLKN---KANMNHTIVG",
+                    "midline": "T+     + T T  TT++  TTT T  T   N     N N T  G"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT63564.1",
+                    "title": "BDT63564.1 wsv079-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 788,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 25.0238,
+                    "score": 53,
+                    "evalue": 1.57815,
+                    "identity": 34,
+                    "positive": 85,
+                    "query_from": 624,
+                    "query_to": 806,
+                    "hit_from": 413,
+                    "hit_to": 607,
+                    "align_len": 195,
+                    "gaps": 12,
+                    "qseq": "DNDN------DDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANATTT-----GNCIPAYSVITATITNFDECDDDDNDDTVTATPTTTTTTTTTTTTTTTTTNANANATTNANATTTGNCIPAYSVITATITNFDECDD-DDNDDTVTATPTTTTTTTTTTTSTTSTTTTVAATATST",
+                    "hseq": "DNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRSYLTCSTISSTPSTIRSRSNSSSSSSSSSSSCSSSSSCSSSFSSSSSSSSSSSSSSSSFQFNKKETSTKSQNKKEMEEARKTHFPGCIHAHRSNTSKVIHHNKKSKLSLKNNKIGGVPSNSNLTSSTILSTPSTSTAFVVDSKTS",
+                    "midline": "DNDN        T+T       T++TT+  T +  T +T ++T +T  + +    +T ++  +T      +   + S  ++  ++        +  + +++ ++++++       T+T + N      A  T    CI A+   T+ + + ++       ++ +   P+ +  T++T  ST ST+T     + ++"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "BDT63556.1",
+                    "title": "BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1890,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 25.0238,
+                    "score": 53,
+                    "evalue": 1.6847,
+                    "identity": 16,
+                    "positive": 30,
+                    "query_from": 573,
+                    "query_to": 632,
+                    "hit_from": 262,
+                    "hit_to": 321,
+                    "align_len": 60,
+                    "gaps": 0,
+                    "qseq": "RDYKAMQRDHDALHTANRLSKILRDRLEQKTSGENALSAITATTANFDEYDDNDNDDTVT",
+                    "hseq": "RQNSAVVEDNNSGVQFKKQNNIKQNTQDQKSVSEKANNAIEDSDKNVATADDQELEDTST",
+                    "midline": "R   A+  D+++     + + I ++  +QK+  E A +AI  +  N    DD + +DT T"
+                  }
+                ]
+              },
+              {
+                "num": 5,
+                "description": [
+                  {
+                    "id": "BDT63533.1",
+                    "title": "BDT63533.1 wsv289-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1527,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 24.6386,
+                    "score": 52,
+                    "evalue": 1.94323,
+                    "identity": 19,
+                    "positive": 45,
+                    "query_from": 773,
+                    "query_to": 869,
+                    "hit_from": 1183,
+                    "hit_to": 1289,
+                    "align_len": 107,
+                    "gaps": 10,
+                    "qseq": "DTVTATPTTTTTTTTTTTSTTSTTTTVAATATSTVDCIDNVKAVPISSDTPNRQRHHKVRFKS----------HHLELIKKIFQRNILNKRIVTVKKIDERRNELQE",
+                    "hseq": "DTLRYAVTGRIFISKGDNSTSLLNEQLAAAPNELRTLFERLRSIGEQQSIPSQQKQNNVGNNCRPSTTTQEVIHHNEQMKKIKDSSLLTAKLLSLIRDDTKRDRITK",
+                    "midline": "DT+    T     +    ST+     +AA         + ++++      P++Q+ + V              HH E +KKI   ++L  +++++ + D +R+ + +"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 73,
+              "eff_space": 49819040,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35",
+          "Subject_36",
+          "Subject_37",
+          "Subject_38",
+          "Subject_39",
+          "Subject_40",
+          "Subject_41",
+          "Subject_42",
+          "Subject_43",
+          "Subject_44",
+          "Subject_45",
+          "Subject_46",
+          "Subject_47",
+          "Subject_48",
+          "Subject_49",
+          "Subject_50",
+          "Subject_51",
+          "Subject_52",
+          "Subject_53",
+          "Subject_54",
+          "Subject_55",
+          "Subject_56",
+          "Subject_57",
+          "Subject_58",
+          "Subject_59",
+          "Subject_60",
+          "Subject_61",
+          "Subject_62",
+          "Subject_63",
+          "Subject_64",
+          "Subject_65",
+          "Subject_66",
+          "Subject_67",
+          "Subject_68",
+          "Subject_69",
+          "Subject_70",
+          "Subject_71",
+          "Subject_72",
+          "Subject_73",
+          "Subject_74",
+          "Subject_75",
+          "Subject_76",
+          "Subject_77",
+          "Subject_78",
+          "Subject_79",
+          "Subject_80",
+          "Subject_81",
+          "Subject_82",
+          "Subject_83",
+          "Subject_84",
+          "Subject_85",
+          "Subject_86"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "nohit a query without hits",
+            "query_len": 12,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 800856,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35",
+          "Subject_36",
+          "Subject_37",
+          "Subject_38",
+          "Subject_39",
+          "Subject_40",
+          "Subject_41",
+          "Subject_42",
+          "Subject_43",
+          "Subject_44",
+          "Subject_45",
+          "Subject_46",
+          "Subject_47",
+          "Subject_48",
+          "Subject_49",
+          "Subject_50",
+          "Subject_51",
+          "Subject_52",
+          "Subject_53",
+          "Subject_54",
+          "Subject_55",
+          "Subject_56",
+          "Subject_57",
+          "Subject_58",
+          "Subject_59",
+          "Subject_60",
+          "Subject_61",
+          "Subject_62",
+          "Subject_63",
+          "Subject_64",
+          "Subject_65",
+          "Subject_66",
+          "Subject_67",
+          "Subject_68",
+          "Subject_69",
+          "Subject_70",
+          "Subject_71",
+          "Subject_72",
+          "Subject_73",
+          "Subject_74",
+          "Subject_75",
+          "Subject_76",
+          "Subject_77",
+          "Subject_78",
+          "Subject_79",
+          "Subject_80",
+          "Subject_81",
+          "Subject_82",
+          "Subject_83",
+          "Subject_84",
+          "Subject_85",
+          "Subject_86"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "BDT63075.1 wsv226-like protein [Sicyonia whispovirus]",
+            "query_len": 1142,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63562.1",
+                    "title": "BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1101,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 502.671,
+                    "score": 1293,
+                    "evalue": 1.36444e-161,
+                    "identity": 335,
+                    "positive": 538,
+                    "query_from": 125,
+                    "query_to": 1140,
+                    "hit_from": 76,
+                    "hit_to": 1097,
+                    "align_len": 1085,
+                    "gaps": 132,
+                    "qseq": "ETALEAEADLYEQEIRRNVSEFVAGLPHVTGDYAEAERFGAPYLPPGKRRKETYRFWASKDFRAQYLGHLAGNRWIGEFVRGEIDATTCVGMLRSVATAYGCGPIIRIALSCLNTLASGYSNSNNFEVKREDLVASINPPWRATRPLSMHPEALNATNPSKVVSKLLGEKTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTAEMILSTEGKMEQHVLRKQGMQ-----------PPIERVELLKQKSVLCAIHSLTQYFSGPVRDSDVNDDDRTRRGVPSGKHLFAAPLRLPPFDAHPVVNLENHPLFTTDPLSTDGNPLRVLASVSTPAHSAVALKHRSGRRP-------------------KKLLGLSKNGIELHVL--PALKDTGSRRRKKKVVRSDVMTNR----QRDPLLHMATKEPPVFVRNVLAVAGNYGWFALIVGYMSSPDVLFNKTNCDGLFAPDLIRKYRSEQITTTPLRNRRIDTRFEGLELVDAMGHTSGFRIRPASLSDDHCGGDSDDG------GLGVIGARDNPFYTKTNRPAWYSDASLEDLFGR--VTLEQHVRAFDDRIGVFEDLLEG---DDRWLVNLQDKKDVLDRCKLALTFLLEAQTVMLLNVHGLSEQEVRDAIRDLKSATPMLTTLGKEDEDPAARKILATETRR-RELCSTAE-SLIEMVPLHSLVEDRPEGEGHVRKARLSFPAPVRDSPHDLMEDMKKTFLSIDLCQFMLQSCEENKVRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHRPFDAPAHRALAGVPRCKMSRLLSCIEKSSGTNPLPTVAVAAGKEVLTLPSLMCLSTRAITPKPVRHTLLELMYGTRAAATISTLTCLSWINWCMEA--DPKRFYGPVYESVMEIKCPRRPELLGMP-----------PRGTKRKMCQHLEQLSDAQKISCWLKDDIRCHPF-----RVCFPKFRKAASKIDALRPHSRGESEAESEVGSGSGYP--AGTAAKDDVFVFKSIYSNITAPPRQKPLFGEKKSTGRMGFKDIYAVALISLPSTLDQETKDIAADLGIETDI",
+                    "hseq": "ETNTKQEDALYID----NDKNFINQLPHITGVCEDAVKYGRPYLPTNEMAKIVDGYWNTNNRKKKYLGYLCGNFAINAFVSNTIDATTCIGFLRSRATAFGYPGLKCLAEMCLST-----SSNNSFTVPRKQMMAATFPEEMRRRPSTIQ----QMSETCQVYKKLANKNTVCVTMDWSEASKKINYDYSRKVCLLQNLIVIILLPAYTMDVILDTDRELERYVLASVGQQDDRDKYKYNQQTKEEKKNLLDDLCVLSAMSYLYTFFSG-----DGKDDKSI--------HLYNAPLRLPPFDDHPVINLHECPYFSD---CGETARRKVVASISTPSQSMVTLNHRVQRTPLNNVNGCKDDKEQTSDNTYNKLIGVTNSGIEVRVVKKPTATQSSCLRKKKREVKHSRLAQKLGEITRDPVTHMNRRERPLFLRSMLALCGSYGWFSIVLGYNPTLDVLFMGNDHDGLFSPHWIRRFRKRYVSMTPMRNRKIDLRFHGLELADTPGNACAFRIRPASLCNSNDVYQTSPKTVKKRWTLNVLQGNRNPFFTRLLNFNWYNPSCMSDIFGDQPIYMEQHVAVFDNCLDMFSNLVRGTANENRWKANLLDKREVFNSCIFSLIIRLKCFCQCLHKKH--KDIEIKKKLKNVRQLRGLRA------------QTLCRETKQLKKLCTKVESSIIGAMEFNRNMGNEKEYNTNKNKKR-----KVISDKKLLQKTVASDMDALSVCYMLYDECDMNYQRFEDAEVRETAFEMVREMYRVSARLHLKDLLMRGTKMSLTWQKPYNPVAEATMSNIPRCRIPWIVHRFENRTLNEKMSTLQI--------------LETRDQVYRPIRHTLLQLVFGEKMANYVSVVTCFQWMDWCLNGVNKPEEYYWDVNRLVDSRKKNQNNNCLDTDIDNKRRNNKRNRDDLTRESEIEITNMSDIEIINMWLNNDTKDLPYGTLNGSIINKHWRRKKSSSSGDSDDDLYENE-NCNGGRKSKVPVVGGDFINYVIDSDDSSNTNETQQLKGKVHKHNKRNTGRMGFRDVYMICLISLPVVIHEKCKKIIRELYLETSL",
+                    "midline": "ET  + E  LY      N   F+  LPH+TG   +A ++G PYLP  +  K    +W + + + +YLG+L GN  I  FV   IDATTC+G LRS ATA+G   +  +A  CL+T     S++N+F V R+ ++A+  P     RP ++       +   +V  KL  + T CV +DW + S+++ +  SR V +L NLI  I +PAYT ++IL T+ ++E++VL   G Q              E+  LL    VL A+  L  +FSG     D  DD           HL+ APLRLPPFD HPV+NL   P F+      +    +V+AS+STP+ S V L HR  R P                    KL+G++ +GIE+ V+  P    +   R+KK+ V+   +  +     RDP+ HM  +E P+F+R++LA+ G+YGWF++++GY  + DVLF   + DGLF+P  IR++R   ++ TP+RNR+ID RF GLEL D  G+   FRIRPASL + +    +          L V+    NPF+T+     WY+ + + D+FG   + +EQHV  FD+ + +F +L+ G   ++RW  NL DK++V + C  +L   L+     L   H   + E++  +++++    +              + L  ET++ ++LC+  E S+I  +  +  + +  E   +  K R      V      L + +     ++ +C  +   C+ N  RF   E RE A E +RE+YR +AR H+KD  +RGT++ LTW +P++  A   ++ +PRC++  ++   E  +    + T+ +              L TR    +P+RHTLL+L++G + A  +S +TC  W++WC+     P+ +Y  V   V   K  +    L                   R+    +  +SD + I+ WL +D +  P+      +    +R+  S           E+E     G  S  P   G      +    S  +N T   + K     K++TGRMGF+D+Y + LISLP  + ++ K I  +L +ET +"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT63548.1",
+                    "title": "BDT63548.1 wsv419-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 99,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 23.8682,
+                    "score": 50,
+                    "evalue": 1.49844,
+                    "identity": 8,
+                    "positive": 10,
+                    "query_from": 344,
+                    "query_to": 358,
+                    "hit_from": 37,
+                    "hit_to": 51,
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "MEQHVLRKQGMQPPI",
+                    "hseq": "MYEHVCRDMAMQPPM",
+                    "midline": "M +HV R   MQPP+"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT63580.1",
+                    "title": "BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 6062,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 25.0238,
+                    "score": 53,
+                    "evalue": 1.81953,
+                    "identity": 11,
+                    "positive": 20,
+                    "query_from": 1104,
+                    "query_to": 1137,
+                    "hit_from": 5136,
+                    "hit_to": 5169,
+                    "align_len": 34,
+                    "gaps": 0,
+                    "qseq": "GRMGFKDIYAVALISLPSTLDQETKDIAADLGIE",
+                    "hseq": "GRVIVNELAGVVAKSVPKTVYENTKDMINQLGVD",
+                    "midline": "GR+   ++  V   S+P T+ + TKD+   LG++"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "BDT63571.1",
+                    "title": "BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 507,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 23.8682,
+                    "score": 50,
+                    "evalue": 4.49619,
+                    "identity": 10,
+                    "positive": 17,
+                    "query_from": 16,
+                    "query_to": 42,
+                    "hit_from": 198,
+                    "hit_to": 224,
+                    "align_len": 27,
+                    "gaps": 0,
+                    "qseq": "STALTLEQVVQHSLGELAFDFSDIKIE",
+                    "hseq": "TNEMTIEEVLAFSEGTAATGFSDLYVE",
+                    "midline": "+  +T+E+V+  S G  A  FSD+ +E"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 75,
+              "eff_space": 64327296,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35",
+          "Subject_36",
+          "Subject_37",
+          "Subject_38",
+          "Subject_39",
+          "Subject_40",
+          "Subject_41",
+          "Subject_42",
+          "Subject_43",
+          "Subject_44",
+          "Subject_45",
+          "Subject_46",
+          "Subject_47",
+          "Subject_48",
+          "Subject_49",
+          "Subject_50",
+          "Subject_51",
+          "Subject_52",
+          "Subject_53",
+          "Subject_54",
+          "Subject_55",
+          "Subject_56",
+          "Subject_57",
+          "Subject_58",
+          "Subject_59",
+          "Subject_60",
+          "Subject_61",
+          "Subject_62",
+          "Subject_63",
+          "Subject_64",
+          "Subject_65",
+          "Subject_66",
+          "Subject_67",
+          "Subject_68",
+          "Subject_69",
+          "Subject_70",
+          "Subject_71",
+          "Subject_72",
+          "Subject_73",
+          "Subject_74",
+          "Subject_75",
+          "Subject_76",
+          "Subject_77",
+          "Subject_78",
+          "Subject_79",
+          "Subject_80",
+          "Subject_81",
+          "Subject_82",
+          "Subject_83",
+          "Subject_84",
+          "Subject_85",
+          "Subject_86"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_4",
+            "query_title": "BDT63076.1 hypothetical protein [Sicyonia whispovirus]",
+            "query_len": 109,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63501.1",
+                    "title": "BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1023,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 21.557,
+                    "score": 44,
+                    "evalue": 1.27227,
+                    "identity": 9,
+                    "positive": 12,
+                    "query_from": 17,
+                    "query_to": 42,
+                    "hit_from": 797,
+                    "hit_to": 822,
+                    "align_len": 26,
+                    "gaps": 0,
+                    "qseq": "NTMSMLNKTYNLFVLFNFLLLKFSGK",
+                    "hseq": "NEKTFLNKNENLFIFSNLFAKNLVGE",
+                    "midline": "N  + LNK  NLF+  N       G+"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT63580.1",
+                    "title": "BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 6062,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 20.0162,
+                    "score": 40,
+                    "evalue": 4.06669,
+                    "identity": 15,
+                    "positive": 26,
+                    "query_from": 26,
+                    "query_to": 94,
+                    "hit_from": 147,
+                    "hit_to": 215,
+                    "align_len": 69,
+                    "gaps": 0,
+                    "qseq": "YNLFVLFNFLLLKFSGKKGADPSREAKRNHNITSSLCRVLGCRHLARLYHSAPPCSATLLIPATRRGSM",
+                    "hseq": "YNAYSSKNLIPLFMAGNKHNEFGAKVIRQSNLRSCFLRQNAVESLLKDFQRMKTNAAKAFIDAVKEKSV",
+                    "midline": "YN +   N + L  +G K  +   +  R  N+ S   R      L + +      +A   I A +  S+"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT63519.1",
+                    "title": "BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1516,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 20.0162,
+                    "score": 40,
+                    "evalue": 4.26345,
+                    "identity": 8,
+                    "positive": 13,
+                    "query_from": 42,
+                    "query_to": 63,
+                    "hit_from": 972,
+                    "hit_to": 993,
+                    "align_len": 22,
+                    "gaps": 0,
+                    "qseq": "KKGADPSREAKRNHNITSSLCR",
+                    "hseq": "KAGTYADRYSNNSISITSAICR",
+                    "midline": "K G    R +  + +ITS++CR"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "BDT63521.1",
+                    "title": "BDT63521.1 wsv023-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 279,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 19.631,
+                    "score": 39,
+                    "evalue": 5.14584,
+                    "identity": 8,
+                    "positive": 11,
+                    "query_from": 5,
+                    "query_to": 27,
+                    "hit_from": 33,
+                    "hit_to": 55,
+                    "align_len": 23,
+                    "gaps": 0,
+                    "qseq": "MADPPWRSTASMNTMSMLNKTYN",
+                    "hseq": "VADPPQNLIIDTNESLSANESYN",
+                    "midline": "+ADPP       N     N++YN"
+                  }
+                ]
+              },
+              {
+                "num": 5,
+                "description": [
+                  {
+                    "id": "BDT63579.1",
+                    "title": "BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 4023,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 19.631,
+                    "score": 39,
+                    "evalue": 5.61282,
+                    "identity": 7,
+                    "positive": 10,
+                    "query_from": 10,
+                    "query_to": 28,
+                    "hit_from": 1641,
+                    "hit_to": 1659,
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "WRSTASMNTMSMLNKTYNL",
+                    "hseq": "WRKTRQEHQETKTNTTFNL",
+                    "midline": "WR T   +  +  N T+NL"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 54,
+              "eff_space": 3415170,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

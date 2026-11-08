@@ -519,6 +519,122 @@ fn run_local_outputs(
     (sinks, diagnostics, result)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1318
+// ```c
+//     if (options->word_size <= 0)
+//     {
+//         if ( !Blast_ProgramIsRpsBlast(program_number)) {
+//             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+//                                      "Word-size must be greater than zero");
+//             return BLASTERR_OPTION_VALUE_INVALID;
+// ```
+// The command line's `-word_size` is at least 2 (clap's `protein_word_size`); a caller of
+// `run_local` that sets the field itself gets the error of NCBI's core. A word size of 0 with
+// `-lcase_masking` and a lowercase subject took the reference scan, whose loop over the first
+// `word_length - 1` letters wrapped and read past the subject.
+#[test]
+fn a_word_size_of_zero_is_ncbis_core_error() {
+    let a = fixture_sequence("LC738884.fasta");
+    let query = TempFasta::new("tblastx_word0_query.fna", &[("q", &a[0..3_000])]);
+    let lower = a[1_000..6_000].to_ascii_lowercase();
+    let subject = TempFasta::new("tblastx_word0_subject.fna", &[("s", &lower[..])]);
+    let (q, s) = (
+        query.0.display().to_string(),
+        subject.0.display().to_string(),
+    );
+    let cli: Cli = try_parse_from([
+        "losat",
+        "tblastx",
+        "-query",
+        &q,
+        "-subject",
+        &s,
+        "-outfmt",
+        "6",
+        "-lcase_masking",
+    ])
+    .expect("tblastx argv");
+    let Commands::Tblastx(mut args) = cli.command else {
+        unreachable!("tblastx subcommand")
+    };
+    args.word_size = Some(0);
+    let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+    let result = {
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt: "6",
+                sink: OutputSink::Writer(&mut sink),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        run_local_tblastx(
+            args,
+            &queries(&query.0),
+            &subjects(&subject.0),
+            &mut outputs,
+        )
+    };
+    let (_, message) = native_error(result);
+    assert!(
+        message.contains("Word-size must be greater than zero"),
+        "{message}"
+    );
+    assert!(sink.is_empty());
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1325 (quoted above):
+// NCBI's core refuses a word size of 0 or less, and below 4 only for a nucleotide comparison,
+// which TBLASTX (translated, `Blast_ProgramIsNucleotide`, blast_program.c:82-84) is not. So a
+// caller of `run_local` that sets a word size of 1 (the command line's `-word_size` is at least 2)
+// gets a search: through the reference scan (`-lcase_masking` and a lowercase subject), the
+// default one and at two threads. A debug build checks the unchecked reads' preconditions.
+#[test]
+fn a_word_size_of_one_searches() {
+    let a = fixture_sequence("LC738884.fasta");
+    let query = TempFasta::new("tblastx_word1_query.fna", &[("q", &a[0..1_500])]);
+    let lower = a[1_000..3_000].to_ascii_lowercase();
+    let subject = TempFasta::new(
+        "tblastx_word1_subject.fna",
+        &[("s_lower", &lower[..]), ("s", &a[2_000..4_000])],
+    );
+    let (q, s) = (
+        query.0.display().to_string(),
+        subject.0.display().to_string(),
+    );
+    for extra in [&[][..], &["-lcase_masking"], &["-num_threads", "2"]] {
+        let mut argv = vec![
+            "losat", "tblastx", "-query", &q, "-subject", &s, "-outfmt", "6",
+        ];
+        argv.extend_from_slice(extra);
+        let cli: Cli = try_parse_from(argv).expect("tblastx argv");
+        let Commands::Tblastx(mut args) = cli.command else {
+            unreachable!("tblastx subcommand")
+        };
+        args.word_size = Some(1);
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut sink),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            run_local_tblastx(
+                args,
+                &queries(&query.0),
+                &subjects(&subject.0),
+                &mut outputs,
+            )
+        };
+        result.unwrap_or_else(|error| panic!("{extra:?}: {error:#}"));
+    }
+}
+
 /// The exit code and the message of NCBI's error that a run ended with.
 fn native_error(result: anyhow::Result<()>) -> (i32, String) {
     let error = result.expect_err("the run fails");

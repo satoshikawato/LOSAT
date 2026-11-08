@@ -33,6 +33,10 @@ const BLASTN_TASKS: &[&str] = &["megablast", "dc-megablast", "blastn", "blastn-s
 /// The message for `-task rmblastn`, the NCBI task that LOSAT's BLASTN does not implement.
 const RMBLASTN_UNSUPPORTED: &str = "the task rmblastn is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)";
 
+/// BLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
+pub(crate) const BLASTN_TASK: TaskParser =
+    task_parser(BLASTN_TASKS, &[("rmblastn", RMBLASTN_UNSUPPORTED)]);
+
 /// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
 /// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a
 /// chunk context of `None` (`kInvalidContext`).
@@ -210,7 +214,7 @@ pub struct BlastnArgs {
     pub searchsp: Option<i64>,
     // The help texts name the tasks (the Web form shows the short one), so the help does not
     // repeat clap's list of them; `describe` and the parse errors list `BLASTN_TASKS`.
-    #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = task_parser(BLASTN_TASKS, &[("rmblastn", RMBLASTN_UNSUPPORTED)]), hide_possible_values = true)]
+    #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = BLASTN_TASK, hide_possible_values = true)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
     // ```c

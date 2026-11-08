@@ -743,6 +743,64 @@ fn check_options_fails_as_a_run_does() {
     assert_eq!(failed, 12);
 }
 
+/// The values that the command line's parser refuses and a caller of `run_local` can set itself get
+/// NCBI's errors of the options where NCBI's core checks them (blast_options.c:1312-1348 for the
+/// word size, :1510-1516 for the hit list size; blast_aux.cpp:662-673 for the task), else LOSAT's
+/// refusal of what it does not run: nothing is searched with a value the command line cannot give.
+#[test]
+fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
+    let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
+    let queries = queries(&Inputs::path(&inputs.query)).unwrap();
+    let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
+    let cases: [(&str, fn(&mut BlastxArgs)); 9] = [
+        ("Word-size must be greater than zero", |a| {
+            a.word_size = Some(0)
+        }),
+        (
+            "Word-size must be less than 8 for a tblastn, blastp or blastx search",
+            |a| a.word_size = Some(8),
+        ),
+        ("unsupported BLASTX word_size: use 3 or 5", |a| {
+            a.word_size = Some(4)
+        }),
+        ("No hits are being saved", |a| a.max_target_seqs = Some(-1)),
+        (
+            "unsupported BLASTX composition-based statistics mode 1: use 0 or 2",
+            |a| a.comp_based_stats = 1,
+        ),
+        ("'blastp' is not a supported task", |a| {
+            a.task = "blastp".into()
+        }),
+        ("Argument \"strand\". Illegal value", |a| {
+            a.strand = "up".into()
+        }),
+        ("-evalue requires a finite real value", |a| {
+            a.evalue = f64::INFINITY
+        }),
+        ("SEG requires finite cutoffs", |a| a.seg.locut = f64::NAN),
+    ];
+    for (message, set) in cases {
+        let mut args = blastx_args(&inputs.query, &inputs.subject, &[]);
+        set(&mut args);
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut sink),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            run_local_blastx(args, &queries, &subjects, &mut outputs)
+        };
+        let error = format!("{:#}", result.expect_err(message));
+        assert!(error.contains(message), "{message}: {error}");
+        assert!(sink.is_empty(), "{message}");
+    }
+}
+
 /// A query whose first batch ends on its first record only when the batch counts the whole record:
 /// 10,050 letters (9,950 in the range `101-20000`), then 200 (100 in the range) and 50 (skipped).
 /// Counting the cut letters would put the first two in one batch and leave the third alone, an

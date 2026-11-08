@@ -1243,6 +1243,20 @@ fn check_ncbi_options(
     if args.word_threshold() <= 0.0 {
         return Err(options_error("Non-zero threshold required"));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1318
+    // ```c
+    //     if (options->word_size <= 0)
+    //     {
+    //         if ( !Blast_ProgramIsRpsBlast(program_number)) {
+    //             Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //                                      "Word-size must be greater than zero");
+    //             return BLASTERR_OPTION_VALUE_INVALID;
+    // ```
+    // The command line's `-word_size` is at least 2 (`protein_word_size`); a caller of
+    // `run_local` sets the field itself.
+    if args.word_size() <= 0 {
+        return Err(options_error("Word-size must be greater than zero"));
+    }
     if args.word_size() > 4 {
         return Err(options_error(
             "Word-size must be less than 6 for protein comparison",

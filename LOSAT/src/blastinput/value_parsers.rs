@@ -1302,11 +1302,44 @@ pub struct TaskParser {
     rejected: &'static [(&'static str, &'static str)],
 }
 
-pub fn task_parser(
+pub const fn task_parser(
     accepted: &'static [&'static str],
     rejected: &'static [(&'static str, &'static str)],
 ) -> TaskParser {
     TaskParser { accepted, rejected }
+}
+
+impl TaskParser {
+    /// The check of a task that a caller of `run_local` set itself (the command line's parser
+    /// makes it at parsing): a task of `accepted`, the message of a `rejected` one, or the error
+    /// of NCBI's options factory for any other name. A name NCBI knows for another program gets
+    /// that error too: a program's `run_local` runs that program's tasks only.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:662-673
+    /// ```c++
+    /// void ThrowIfInvalidTask(const string& task)
+    /// {
+    ///     set<string> valid_tasks;
+    ///     if (valid_tasks.empty()) {
+    ///         valid_tasks = CBlastOptionsFactory::GetTasks();
+    ///     }
+    ///
+    ///     if (valid_tasks.find(task) == valid_tasks.end()) {
+    ///         ostringstream os;
+    ///         os << "'" << task << "' is not a supported task";
+    ///         NCBI_THROW(CBlastException, eInvalidArgument, os.str());
+    ///     }
+    /// }
+    /// ```
+    pub fn check(&self, task: &str) -> anyhow::Result<()> {
+        if self.accepted.contains(&task) {
+            return Ok(());
+        }
+        if let Some(&(_, message)) = self.rejected.iter().find(|(name, _)| *name == task) {
+            anyhow::bail!("{message}");
+        }
+        anyhow::bail!("'{task}' is not a supported task")
+    }
 }
 
 impl clap::builder::TypedValueParser for TaskParser {

@@ -66,10 +66,10 @@ jobs:
           #   LOSAT/.cargo/**
           #   LOSAT/tests/wasi_*.js
           #   LOSAT/tests/outfmt0_manifest.tsv
-          #   LOSAT/tests/fixtures/web_v1_tblastn/** (the vector of the Web API v1 tests)
+          #   LOSAT/tests/fixtures/web_v1_*/** (the vectors of the Web API v1 tests)
           #   docs/assets/losat-logo*.svg (the README's logos; tests/unit/logo.test.ts reads them)
           #   .github/workflows/web.yml
-          pattern='^(web/.*|LOSAT/src/.*|LOSAT/build\.rs|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/\.cargo/.*|LOSAT/tests/wasi_[^/]*\.js|LOSAT/tests/outfmt0_manifest\.tsv|LOSAT/tests/fixtures/web_v1_tblastn/.*|docs/assets/losat-logo[^/]*\.svg|\.github/workflows/web\.yml)$'
+          pattern='^(web/.*|LOSAT/src/.*|LOSAT/build\.rs|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/\.cargo/.*|LOSAT/tests/wasi_[^/]*\.js|LOSAT/tests/outfmt0_manifest\.tsv|LOSAT/tests/fixtures/web_v1_[^/]*/.*|docs/assets/losat-logo[^/]*\.svg|\.github/workflows/web\.yml)$'
           files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
           echo "Changed files:"
           printf '%s\n' "$files"

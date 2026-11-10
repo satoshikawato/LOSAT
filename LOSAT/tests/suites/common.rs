@@ -88,5 +88,7 @@ mod seq_id_first_line;
 mod seqalign_samples;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
+#[path = "../web_v1_search_space.rs"]
+mod web_v1_search_space;
 #[path = "../x_reach_directory.rs"]
 mod x_reach_directory;

@@ -222,6 +222,52 @@ fn parse_num_threads_arg(value: &str, flag: &str) -> Result<usize, String> {
         .map_err(|err| format!("{flag} parse error: {err}"))
 }
 
+/// `-searchsp` and `-dbsize` of ABI v1's BLASTN, TBLASTX and BLASTP, as the CLI reads them (added
+/// on gbdraw's request, 2026-11-10: a comparison's E-values take the scale of its genomes). The
+/// value is the CLI's own parser's, in the two spellings of the other options of ABI v1 (the next
+/// word, or joined with `=`), and goes to the same field of the args structure as on the CLI.
+/// `Ok(true)` when the word at `index` was one of them (the value is consumed); `Ok(false)` for
+/// any other word.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+/// ```c++
+///     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+///                             "Effective length of the search space",
+///                             CArgDescriptions::eInt8);
+///     arg_desc.SetConstraint(kArgEffSearchSpace,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
+/// ```c++
+///     if (args[kArgDbSize]) {
+///         opt.SetDbLength(args[kArgDbSize].AsInt8());
+///     }
+/// ```
+fn take_search_space_arg(
+    args: &[&str],
+    index: &mut usize,
+    searchsp: &mut Option<i64>,
+    dbsize: &mut Option<i64>,
+) -> Result<bool, String> {
+    use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+    let flag = args[*index];
+    let (name, joined) = match flag.split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (flag, None),
+    };
+    let (target, parse): (&mut Option<i64>, fn(&str) -> Result<i64, String>) = match name {
+        "-searchsp" => (searchsp, nonnegative_ncbi_int8),
+        "-dbsize" => (dbsize, ncbi_int8),
+        _ => return Ok(false),
+    };
+    let value = match joined {
+        Some(value) => value,
+        None => next_arg(args, index, flag)?,
+    };
+    *target = Some(parse(value).map_err(|err| format!("{name} parse error: {err}"))?);
+    Ok(true)
+}
+
 fn parse_blastn_args(
     extra_args: &[&str],
     query: PathBuf,
@@ -314,6 +360,10 @@ fn parse_blastn_args(
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
+        if take_search_space_arg(extra_args, &mut index, &mut args.searchsp, &mut args.dbsize)? {
+            index += 1;
+            continue;
+        }
         if let Some(value) = flag.strip_prefix("-task=") {
             args.task = value.to_string();
         } else if flag == "-task" {
@@ -434,6 +484,10 @@ fn parse_tblastx_args(
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
+        if take_search_space_arg(extra_args, &mut index, &mut args.searchsp, &mut args.dbsize)? {
+            index += 1;
+            continue;
+        }
         if flag == "-query_gencode" {
             args.query_gencode = next_arg(extra_args, &mut index, flag)?
                 .parse()
@@ -606,6 +660,10 @@ fn parse_blastp_args(
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
+        if take_search_space_arg(extra_args, &mut index, &mut args.searchsp, &mut args.dbsize)? {
+            index += 1;
+            continue;
+        }
         if let Some(value) = flag.strip_prefix("-task=") {
             args.task = value.to_string();
         } else if flag == "-task" {
@@ -1541,5 +1599,126 @@ mod tests {
             .insert(1, "query2".to_string(), b">q2\nACGT\n".to_vec())
             .expect("stored handle after clear");
         assert_eq!(next, 1);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238 and 2570-2572
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    //     if (args[kArgDbSize]) {
+    //         opt.SetDbLength(args[kArgDbSize].AsInt8());
+    // ```
+    // `-searchsp` and `-dbsize` (added on gbdraw's request, 2026-11-10, so that a comparison's
+    // E-values have the scale of its genomes): `losat_web_run_pair` returns the bytes of the shared
+    // vector (`tests/fixtures/web_v1_search_space/`), which `tests/web_v1_search_space.rs` holds to
+    // the CLI; BLASTP's handles return them too.
+    #[test]
+    fn search_space_and_database_size_give_the_cli_bytes_of_the_shared_vector() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/web_v1_search_space");
+        let read = |name: &str| {
+            let path = dir.join(name);
+            std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+        };
+        let cases = String::from_utf8(read("cases.tsv")).expect("UTF-8 cases");
+        let mut count = 0;
+        for line in cases.lines().filter(|line| !line.starts_with('#')) {
+            let [name, program, query, subject, outfmt, extra] =
+                line.split('\t').collect::<Vec<_>>()[..]
+            else {
+                panic!("six columns: {line:?}");
+            };
+            let (query, subject) = (read(query), read(subject));
+            let extra = extra.split_whitespace().collect::<Vec<_>>().join("\0");
+            let expected = Ok(read(&format!("{name}.out")));
+            assert_eq!(
+                run_pair(
+                    program,
+                    std::str::from_utf8(&query).expect("UTF-8 query"),
+                    std::str::from_utf8(&subject).expect("UTF-8 subject"),
+                    outfmt,
+                    &extra
+                ),
+                expected,
+                "{name} (run_pair)"
+            );
+            if program == "blastp" {
+                let store = |bytes: &Vec<u8>, label: &str| {
+                    fasta_store()
+                        .lock()
+                        .expect("store")
+                        .insert(
+                            count_stored_records(bytes).expect("records"),
+                            label.to_string(),
+                            bytes.clone(),
+                        )
+                        .expect("handle")
+                };
+                let (query, subject) = (store(&query, "query"), store(&subject, "subject"));
+                assert_eq!(
+                    run_pair_handles("blastp", query, subject, outfmt, &extra),
+                    expected,
+                    "{name} (run_pair_handles)"
+                );
+                fasta_store().lock().expect("store").clear();
+            }
+            count += 1;
+        }
+        assert_eq!(count, 12);
+    }
+
+    // The two values are NCBI's `CArg_Int8` (`-dbsize`) and `CArg_Int8` of at least 0
+    // (`-searchsp`), read by the CLI's value parsers; an invalid one is refused with the parser's
+    // message, in the words of the other options of ABI v1 (`<flag> parse error: <detail>`).
+    #[test]
+    fn invalid_search_space_and_database_size_are_refused_as_the_cli_refuses_them() {
+        use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+        let no_path = || (PathBuf::new(), PathBuf::new(), PathBuf::new());
+        let parse = |program: &str, words: &[&str]| -> Result<(Option<i64>, Option<i64>), String> {
+            let (query, subject, out) = no_path();
+            match program {
+                "blastn" => parse_blastn_args(words, query, subject, out)
+                    .map(|args| (args.searchsp, args.dbsize)),
+                "tblastx" => parse_tblastx_args(words, query, subject, out)
+                    .map(|args| (args.searchsp, args.dbsize)),
+                _ => parse_blastp_args(words, query, subject, out)
+                    .map(|args| (args.searchsp, args.dbsize)),
+            }
+        };
+        for program in ["blastn", "tblastx", "blastp"] {
+            for (flag, parser) in [
+                (
+                    "-searchsp",
+                    nonnegative_ncbi_int8 as fn(&str) -> Result<i64, String>,
+                ),
+                ("-dbsize", ncbi_int8 as fn(&str) -> Result<i64, String>),
+            ] {
+                for value in ["-1", "abc", "", "1.5", "0x", "9223372036854775808"] {
+                    let joined = format!("{flag}={value}");
+                    for words in [vec![flag, value], vec![joined.as_str()]] {
+                        let expected = parser(value)
+                            .err()
+                            .map(|detail| format!("{flag} parse error: {detail}"));
+                        let got = parse(program, &words).err();
+                        assert_eq!(got, expected, "{program} {words:?}");
+                    }
+                }
+                let error = parse(program, &[flag]).unwrap_err();
+                assert_eq!(error, format!("{flag} requires a value"), "{program}");
+            }
+            // The values that NCBI reads: a sign, hexadecimal, 64 bits; 0 is no search space.
+            assert_eq!(
+                parse(program, &["-searchsp", "0x10", "-dbsize=-3000000000"]),
+                Ok((Some(16), Some(-3_000_000_000))),
+                "{program}"
+            );
+            assert_eq!(
+                parse(program, &["-searchsp=9223372036854775807"]),
+                Ok((Some(i64::MAX), None)),
+                "{program}"
+            );
+            assert_eq!(parse(program, &[]), Ok((None, None)), "{program}");
+        }
     }
 }

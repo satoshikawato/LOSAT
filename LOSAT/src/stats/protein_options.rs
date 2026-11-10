@@ -300,6 +300,8 @@ pub enum SuggestionProgram {
     Protein,
     /// tblastn, tblastx: the subject is translated.
     TranslatedSubject,
+    /// blastx: only the query is translated.
+    TranslatedQuery,
 }
 
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:1174-1209
@@ -331,8 +333,6 @@ pub enum SuggestionProgram {
 ///     else if (Blast_QueryIsTranslated(program_number) == TRUE)
 ///         *threshold += 1;
 /// ```
-/// LOSAT has no counterpart of the `+= 1` branch (blastx, a translated query): LOSAT's blastx does
-/// not call this function, so the program is not a `SuggestionProgram` (P-V3b).
 pub fn suggested_threshold(program: SuggestionProgram, matrix_name: &str) -> f64 {
     let is = |name: &str| matrix_name.eq_ignore_ascii_case(name);
     let mut threshold = if is("BLOSUM62") {
@@ -354,6 +354,7 @@ pub fn suggested_threshold(program: SuggestionProgram, matrix_name: &str) -> f64
     };
     match program {
         SuggestionProgram::TranslatedSubject => threshold += 2.0,
+        SuggestionProgram::TranslatedQuery => threshold += 1.0,
         SuggestionProgram::Protein => {}
     }
     threshold

@@ -12,4 +12,6 @@
   exports of ABI v2 (`losat_web2_inflate_begin`, `losat_web2_inflate_chunk`,
   `losat_web2_inflate_end`; the inflated bytes on stream 5; the version stays 2), and the engine's
   name rule gives the compression and the name of the inflated file. A `.bz2` source is still
-  refused by the web app.
+  refused by the web app. A downloaded Example set takes the same path (the engine's decoders in the
+  Data worker instead of the browser's `DecompressionStream`): a set served as several gzip members,
+  which every browser refused, now loads, and a damaged one fails with the engine's sentence.

@@ -3,16 +3,18 @@
 // keeps the saved copies of Example sets (OPFS examples/, line WF-2).
 // Only this worker uses OPFS synchronous access handles. It holds its own instance of the
 // serial reactor, separate from the Engine worker's, for the index scan, the inflation of
-// compressed sources (src/infra/reactor/inflater.ts) and the engine's describe/validate
-// (src/infra/reactor/control.ts). This module is the worker's composition root.
+// compressed sources and of downloaded Example sets (src/infra/reactor/inflater.ts) and the
+// engine's describe/validate (src/infra/reactor/control.ts). This module is the worker's
+// composition root.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import type { ExampleStore } from '../../ports/example';
-import type { FileInflater } from '../../ports/inflate';
+import type { FileInflater, WholeFileInflater } from '../../ports/inflate';
 import type { InputChecker } from '../../ports/input-check';
 import type { RecordScanner } from '../../ports/scan';
 import { sha256Hex } from '../browser/platform';
 import { DataService } from '../data/data-service';
 import { opfsExampleStore } from '../data/example-store';
+import { inflateFile } from '../data/inflate';
 import { opfsAccess } from '../data/opfs-block-store';
 import { startDataSession, type SessionLocks } from '../data/session';
 import { FakeInputChecker, FakeScanner } from '../fake/fake-fasta';
@@ -30,13 +32,16 @@ const locks = 'locks' in navigator ? (navigator.locks as unknown as SessionLocks
 
 let scanner: RecordScanner;
 let inflater: FileInflater;
+let whole: WholeFileInflater;
 let checker: InputChecker;
 let control: EngineControl;
 if (ENGINE_ASSETS === null) {
   // A build without the engine (build/reactors.ts): the development build's fakes. Without the
-  // engine's decoders every file is read as it is, whatever its name.
+  // engine's decoders every source is read as it is, whatever its name, and a downloaded Example
+  // set that is compressed cannot be read.
   scanner = new FakeScanner();
   inflater = { open: async () => undefined };
+  whole = { inflateFile: () => Promise.reject(new Error('this build has no engine')) };
   checker = new FakeInputChecker();
   control = {
     describe: () => Promise.reject(new Error('this build has no engine')),
@@ -58,7 +63,10 @@ if (ENGINE_ASSETS === null) {
   };
   const reactor: () => Promise<ReactorAbi> = reopening(async () => (await instantiateSerial(await module())).abi);
   scanner = new ReactorScanner(reactor);
-  inflater = new ReactorInflater(reactor);
+  const reactorInflater = new ReactorInflater(reactor);
+  inflater = reactorInflater;
+  // A downloaded Example set takes the path of a source (inflate.ts), on the same reactor.
+  whole = { inflateFile: (file, maxBytes) => inflateFile(file, reactorInflater, maxBytes) };
   checker = new ReactorInputChecker(reactor);
   control = reactorControl(reactor);
 }
@@ -102,6 +110,7 @@ const endpoint = Promise.all([service, examples]).then(
   ([data, saved]): DataWorkerApi => ({
     ...delegate(data, DATA_GATEWAY_METHODS),
     ...delegate(saved, EXAMPLE_STORE_METHODS),
+    inflateFile: (file, maxBytes) => whole.inflateFile(file, maxBytes),
     describe: (program) => control.describe(program),
     validate: (argv) => control.validate(argv),
   }),

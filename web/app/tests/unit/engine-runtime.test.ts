@@ -14,6 +14,7 @@ import { instantiateSerial, loadReactor } from '../../src/infra/reactor/instance
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
 import { ReactorInflater } from '../../src/infra/reactor/inflater';
 import { inflateFile } from '../../src/infra/data/inflate';
+import { INFLATED_TOO_LARGE } from '../../src/ports/inflate';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
 import type { FastaParserKind } from '../../src/domain/dataset';
@@ -590,6 +591,13 @@ describe.skipIf(reactors === undefined)("the serial reactor inflates sources wit
     expect(await failure('', 'e.fa.zst')).toBe(sentence('e.fa.zst', '.zst', 'zstd', 'the file is empty'));
     // The web app's own refusal of bzip2 (line GZ decision 11).
     expect(await failure(A, 'a.fa.bz2')).toBe("'a.fa.bz2' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)");
+    expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
+  });
+
+  it('stops a downloaded Example set past its limit of inflated bytes, and goes on', async () => {
+    const big = new File([gzipSync('>r\n' + 'ACGT'.repeat(1 << 20))], 'set.fna.gz');
+    await expect(inflateFile(big, inflater, 1_000_000)).rejects.toMatchObject({ name: INFLATED_TOO_LARGE });
+    expect((await inflateFile(big, inflater, 5 * 1024 * 1024)).size).toBe(3 + 4 * (1 << 20));
     expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
   });
 });

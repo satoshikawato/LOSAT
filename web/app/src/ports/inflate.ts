@@ -5,7 +5,8 @@
 // copy of it.
 //
 // The real implementation is the adapter's serial reactor inside the Data worker; a build without
-// the engine reads every file as it is.
+// the engine reads every file as it is. The page reaches it through the Data worker
+// (`WholeFileInflater`): a downloaded Example set is inflated by the same path as a source.
 
 /** The formats that the engine inflates, as `inflate_begin` names them. */
 export type Compression = 'gzip' | 'bzip2' | 'zstd';
@@ -33,4 +34,17 @@ export interface Inflation {
 export interface FileInflater {
   /** The inflation of the file named `name`, whose bytes go to `sink`, or undefined when the name is plain. */
   open(name: string, sink: InflatedSink): Promise<Inflation | undefined>;
+}
+
+/** The name of the error of an inflation that gave more than its limit of bytes (it survives the worker's RPC). */
+export const INFLATED_TOO_LARGE = 'InflatedTooLargeError';
+
+/** A whole file that the page holds (a downloaded Example set), inflated in the Data worker. */
+export interface WholeFileInflater {
+  /**
+   * `file` inflated under its plain name by the engine (`FileInflater`, as `addSource` inflates a
+   * source), or `file` itself when its name is plain. Rejects with the engine's sentence, or with an
+   * error named INFLATED_TOO_LARGE once more than `maxBytes` bytes have come out.
+   */
+  inflateFile(file: File, maxBytes?: number): Promise<File>;
 }

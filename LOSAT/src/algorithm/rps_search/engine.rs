@@ -39,7 +39,9 @@ use anyhow::Result;
 use super::prelim::{RpsPrelim, RpsPrelimScratch};
 use super::redo::RpsRedoParams;
 use super::scan::{RpsBuckets, RpsTable};
-use super::traceback::{filter_results, RpsTraceScratch, RpsTraceback, RpsTraced};
+use super::traceback::{
+    filter_results, formatter_identities, RpsTraceScratch, RpsTraceback, RpsTraced,
+};
 use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
 use super::{RpsRows, RPS_K_MULT};
 use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
@@ -82,6 +84,10 @@ pub(crate) struct RpsQuery<'a> {
     /// score block that the composition-based redo copies, which stays where the profile has no
     /// score frequencies.
     pub(crate) batch_kbp: KarlinParams,
+    /// The query's letters as read (between two sentinels) where the searched ones differ (SEG,
+    /// lower-case masks, `Blast_MaskUnsupportedAA`): the reports' identities count on them
+    /// (`traceback::formatter_identities`).
+    pub(crate) aa_seq_nomask: Option<&'a [u8]>,
 }
 
 /// What the search of every query of a volume reads besides the volume.
@@ -497,6 +503,10 @@ impl RpsRun<'_> {
                 &query.batch_kbp,
                 &mut scratch.1,
             )?;
+            if let (Some(hit_list), Some(nomask)) = (traced.hit_list.as_mut(), query.aa_seq_nomask)
+            {
+                formatter_identities(hit_list, &nomask[1..nomask.len() - 1], consensus, offsets);
+            }
             if let Some(hit_list) = traced.hit_list.as_mut() {
                 finish_volume_list(
                     hit_list,
@@ -817,6 +827,67 @@ mod tests {
         });
         hsp.e_value = e_value;
         hsp
+    }
+
+    // tabular.cpp:973-1007 and showalign.cpp:2120-2135 (quoted at `formatter_identities`): the
+    // reports count the identities on the query as read and the profile's consensus, across the
+    // gaps of the edit script (after `swap_roles`: Del steps the profile, Ins the query).
+    #[test]
+    fn the_reports_identities_count_the_letters_as_read() {
+        use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
+        use crate::common::GapEditOp;
+        // Profile 1 starts at 6 of the concatenated consensus (profile 0 holds 5 letters + 1).
+        let enc = |text: &str| -> Vec<u8> {
+            text.bytes()
+                .map(crate::utils::matrix::aa_char_to_ncbistdaa)
+                .collect()
+        };
+        let mut consensus = enc("AAAAA");
+        consensus.push(0);
+        consensus.extend(enc("MKTAYWWIAKQ"));
+        let offsets = [0, 6, 18];
+        // The query as read (its searched letters could have had X over KTAY, a lower-case run;
+        // the traceback's count of 5 below is that of the masked letters).
+        let query = enc("GMKTAYIAKQ");
+        // Query 2..10 against profile 1..11: MKTAY / MKTAY, a gap of WW in the query, IAKQ / IAKQ.
+        let mut aligned = hsp(1, 1e-5, 2, 10);
+        aligned.s_start = 1;
+        aligned.s_end = 11;
+        aligned.length = 11;
+        aligned.num_ident = 5;
+        aligned.mismatch = 4;
+        aligned.gap_info = Some(vec![
+            GapEditOp::Sub(5),
+            GapEditOp::Del(2),
+            GapEditOp::Sub(4),
+        ]);
+        let mut hit_list = BlastpHitList::new(10);
+        hit_list.update(BlastpHspList {
+            oid: 1,
+            query_index: 0,
+            hsps: vec![aligned],
+            best_evalue: 1e-5,
+        });
+        formatter_identities(&mut hit_list, &query, &consensus, &offsets);
+        let counted = &hit_list.hsplist_array[0].hsps[0];
+        assert_eq!(counted.num_ident, 9);
+        assert_eq!(counted.mismatch, 0);
+        assert_eq!(counted.identity, 900.0 / 11.0);
+        // An Ins steps the query alone.
+        let mut inserted = hsp(1, 1e-5, 1, 6);
+        inserted.s_start = 1;
+        inserted.s_end = 5;
+        inserted.length = 6;
+        inserted.gap_info = Some(vec![GapEditOp::Ins(1), GapEditOp::Sub(5)]);
+        let mut hit_list = BlastpHitList::new(10);
+        hit_list.update(BlastpHspList {
+            oid: 1,
+            query_index: 0,
+            hsps: vec![inserted],
+            best_evalue: 1e-5,
+        });
+        formatter_identities(&mut hit_list, &query, &consensus, &offsets);
+        assert_eq!(hit_list.hsplist_array[0].hsps[0].num_ident, 5);
     }
 
     #[test]

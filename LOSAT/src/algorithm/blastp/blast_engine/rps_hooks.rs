@@ -569,6 +569,12 @@ pub(super) fn rps_search(
                     kbp_std: ctx.karlin_params,
                     first_query_length: first,
                     batch_kbp,
+                    // The letters as read where the searched ones are masked: before SEG and the
+                    // lower-case masks (`aa_seq_nomask`), else before the 26-column mask.
+                    aa_seq_nomask: ctx
+                        .aa_seq_nomask
+                        .as_deref()
+                        .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice())),
                 })
                 .collect(),
             gapped: *run.gapped_params,

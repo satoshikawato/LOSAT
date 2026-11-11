@@ -946,8 +946,9 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 // (two bytes a row for the blastn task's bands of about 80 cells, whose first column moves
 // forward), else both as `u32` (the step as a two's complement, so a step back is written too)
 // and a last byte of 255 (`X_ROW_BYTES`), so that the record is read from its end back (`x_rec`:
-// a last byte below 255 ends a record of two bytes). Writing and reading a record take one test
-// and one store or load, and no call in the kernels. The kernels write a row and its record
+// a last byte below 255 ends a record of two bytes; little-endian on every target). A record of
+// two bytes is written with one test and one store and read with one load and one test, the long
+// form with three stores or loads; no call in the kernels. The kernels write a row and its record
 // through one pointer (`XTrace::wp`), and the walk, which goes from the best row up one row at a
 // time, finds each row's record just before the row below it (or at the used end of the chunk
 // before) and the row's first column from the one below it; the kernels mark the record of the
@@ -1177,11 +1178,12 @@ impl XTrace {
             debug_assert!(p as usize <= self.wend as usize);
             let p = if cells < 0xff && step < 0xff {
                 // the usual band: one store
-                (p as *mut u16).write_unaligned(u16::from_le_bytes([cells as u8, step as u8]));
+                (p as *mut u16)
+                    .write_unaligned(u16::from_le_bytes([cells as u8, step as u8]).to_le());
                 p.add(2)
             } else {
-                (p as *mut u32).write_unaligned(cells as u32);
-                (p.add(4) as *mut u32).write_unaligned(step as u32);
+                (p as *mut u32).write_unaligned((cells as u32).to_le());
+                (p.add(4) as *mut u32).write_unaligned((step as u32).to_le());
                 *p.add(8) = 0xff;
                 p.add(X_ROW_BYTES)
             };
@@ -1230,14 +1232,15 @@ impl XTrace {
         // `end`.
         unsafe {
             // the last byte is the step below 255, or 255 after the long form
-            let w = (end.sub(2) as *const u16).read_unaligned();
+            let w = u16::from_le((end.sub(2) as *const u16).read_unaligned());
             if w < 0xff00 {
                 let [cells, step] = w.to_le_bytes();
                 (step as usize, cells as usize, end.sub(2))
             } else {
                 let p = end.sub(X_ROW_BYTES);
-                let cells = (p as *const u32).read_unaligned() as usize;
-                let step = (p.add(4) as *const u32).read_unaligned() as i32 as isize as usize;
+                let cells = u32::from_le((p as *const u32).read_unaligned()) as usize;
+                let step = u32::from_le((p.add(4) as *const u32).read_unaligned()) as i32 as isize
+                    as usize;
                 (step, cells, p)
             }
         }
@@ -4603,12 +4606,12 @@ mod tests {
     // No NCBI counterpart: the rows in chunks (`XTrace`, NCBI `s_GapGetState`). With chunks of
     // 512 bytes, rows (each followed by its record: cells, then the step of the first column, one
     // byte each below 255, else the long form of nine bytes) are written whole into the free part
-    // of the chunk being filled, a row
-    // that does not fit there goes to the next chunk, a row longer than a chunk to a chunk of its
-    // own of `length + length/3` bytes, the scratch's own chunk keeps its rows and the best row's
-    // record when it grows, the walk passes from a chunk's first row to the last row of the chunk
-    // before, long records (600 cells, steps back) are read back, and a purge keeps only the scratch's
-    // own chunk, emptied, and starts the steps from column 0 again.
+    // of the chunk being filled, a row that does not fit there goes to the next chunk, a row
+    // longer than a chunk to a chunk of its own of `length + length/3` bytes, the scratch's own
+    // chunk keeps its rows and the best row's record when it grows, the walk passes from a chunk's
+    // first row to the last row of the chunk before, long records (600 cells, steps back, a step
+    // of 300 forward) are read back, and a purge keeps only the scratch's own chunk, emptied, and
+    // starts the steps from column 0 again.
     #[test]
     fn rows_that_do_not_fit_go_to_the_next_chunk() {
         X_TEST_SHIFT.with(|c| c.set(Some(9)));
@@ -4688,6 +4691,16 @@ mod tests {
         assert!(t.x_test_empty() && t.t[0].is_empty() && t.x_walk_start().is_none());
         row(&mut t, 300, 300, 6);
         assert_eq!(t.x_test_layout(false), vec![(0, 0, 6, 300)]);
+        // a step of 255 or more forward takes the long form too
+        let p = t.x_row(10);
+        // SAFETY: `x_row` gave room for 10 bytes at `p`.
+        unsafe { std::ptr::write_bytes(p, 7, 10) };
+        t.x_row_done(false, 306, 10);
+        assert_eq!(
+            t.x_test_layout(false),
+            vec![(0, 0, 6, 300), (0, 309, 306, 10)]
+        );
+        assert_eq!(t.x_test_used(), vec![328]);
     }
 
     // No NCBI counterpart: the rows in chunks (`XTrace`). Long tracebacks (both scores of the

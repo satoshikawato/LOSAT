@@ -159,6 +159,20 @@ pub fn main_entry() -> Result<()> {
         print!("{text}");
         return Ok(());
     }
+    // NCBI reads the other words of that scan there too (`ncbi_environment::preparse`): a full
+    // version is printed, and a `-conffile` file is loaded in place of `<program>.ini`. LOSAT
+    // refuses both (`cli::ncbi_toolkit_word_error`) before the configuration load.
+    if let Some(program) = program {
+        use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+        let refused = match preparse(&argv[2..]) {
+            Preparsed::Refused(word) => Some(word),
+            Preparsed::Words { conffile: true, .. } => Some("-conffile"),
+            _ => None,
+        };
+        if let Some(word) = refused {
+            exit_on_parse_error(&crate::cli::ncbi_toolkit_word_error(program, word));
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`: the
     // configuration is loaded before the arguments are read; quoted at
     // `ncbi_environment::ApplicationStart`). Its messages go where the diagnostics go, and a
@@ -175,15 +189,7 @@ pub fn main_entry() -> Result<()> {
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match crate::cli::try_parse_from(argv) {
         Ok(cli) => cli,
-        Err(error) => {
-            let message = crate::cli::render_message(&error);
-            if error.use_stderr() {
-                eprint!("{message}");
-            } else {
-                print!("{message}");
-            }
-            std::process::exit(error.exit_code());
-        }
+        Err(error) => exit_on_parse_error(&error),
     };
     if startup_trace {
         eprintln!("[startup] after clap parse");
@@ -452,4 +458,16 @@ pub fn main_entry() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     crate::utils::xtiming::print();
     Ok(())
+}
+
+/// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
+/// refusals (`cli::ncbi_toolkit_word_error`), written as clap writes it, and its exit status.
+fn exit_on_parse_error(error: &clap::Error) -> ! {
+    let message = crate::cli::render_message(error);
+    if error.use_stderr() {
+        eprint!("{message}");
+    } else {
+        print!("{message}");
+    }
+    std::process::exit(error.exit_code());
 }

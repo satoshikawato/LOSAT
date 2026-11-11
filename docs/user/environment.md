@@ -49,7 +49,7 @@ A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_
 `[NCBI] DONT_USE_NCBIRC` (in `<program>.ini` it skips `.ncbirc`), which LOSAT reads as NCBI
 BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
 and `BLASTMAT`, `BLASTDB_NUCL_DATA_LOADER`, `BLASTDB_PROT_DATA_LOADER`, `IGDATA`,
-`BLAST_USAGE_REPORT` (a Boolean) and `[NCBI] DATA`, which change no output of LOSAT's programs. A
+`BLAST_USAGE_REPORT` (see the table above) and `[NCBI] DATA`, which change no output of LOSAT's programs. A
 file with any other entry stops the run, and so does an `NCBI_CONFIG__<SECTION>__<NAME>` variable
 for another entry. LOSAT reads the files as NCBI BLAST+ 2.17.0 does: comments, sections, entries
 before the first section (left out), a value continued on the next line after a backslash, quotes
@@ -62,10 +62,13 @@ starts (before `-version` answers; not with `BLAST_USAGE_REPORT` set to a false 
 `.ncbirc` turned off) and when it loads its configuration (after `<program>.ini`, before the
 options are read, `-h` included). The program then goes on with the entries above the line it
 reports. A malformed `<program>.ini` ends the program with exit status 2 and NCBI BLAST+'s
-messages, before the options are read. The messages go to the standard error stream, and with
-`-logfile` (blastdbcmd and makeblastdb) as in NCBI BLAST+: those of the start to the standard
-error stream and into the file, the others into the file; `-logfile /dev/null` and `-logfile ""`
-discard the others. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+messages, before the options are read: its report, then every message so far again. The messages
+go to the standard error stream, and with `-logfile` as in NCBI BLAST+: those of the start to the
+standard error stream and into the file, the others into the file (`-logfile /dev/null` and
+`-logfile ""` discard them), except that blastn, blastp, blastx, tblastn and psiblast write the
+messages again to the standard error stream. (The search programs then refuse `-logfile` as they
+read their options.) `-conffile`, which would load another file in place of `<program>.ini`, is
+refused before the configuration is loaded. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
 a file that NCBI BLAST+ reports.
 
@@ -110,7 +113,8 @@ giving a different output.
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` | the search programs, with a `-db` built with `-parse_seqids` | Changes which id of a sequence is shown. |
 | `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` (a non-empty value) | makeblastdb | Stores other titles for some FASTA definition lines (with a tab, a Ctrl-A, or white space at their ends). |
 | `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`, `[BLAST] MAX_SEQID_LENGTH` (a value other than 0 that NCBI converts) | `makeblastdb -parse_seqids` | Sets the longest Seq-id that makeblastdb parses. |
-| `BLAST_USAGE_REPORT` with a value that is not a Boolean | every program | Aborts. (A Boolean is accepted; LOSAT reports no usage.) |
+| `BLAST_USAGE_REPORT` with a value that is not a Boolean | every program, also for `-version` and `-h` | Aborts. (A Boolean is accepted; LOSAT reports no usage.) |
+| `NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT`, or else `[BLAST] BLAST_USAGE_REPORT` of `.ncbirc`, with a value that is not a Boolean, unless `BLAST_USAGE_REPORT` is false (for `.ncbirc` also unless `.ncbirc` is turned off in the environment) | every program, also for `-version` and `-h` | Aborts. |
 | `DIAG_*` (any), `ABORT_ON_THROW`, `DEBUG_STACK_TRACE_LEVEL`, `EXCEPTION_STACK_TRACE_LEVEL`, `NCBI_ABORT_ON_COBJECT_THROW`, `NCBI_ABORT_ON_NULL`, `LOG_TRUNCATE`, `LOG_NOCREATE`, `LOG_PERFLOGGING`, `THREAD_STACK_SIZE` | every program | Parameters of NCBI's diagnostics, error handling and threads, which can change its messages or exit status (some only on an error). |
 | `NCBI_CONFIG_*` other than `NCBI_CONFIG_PATH` and the entries listed above | every program | Set entries of NCBI's configuration. |
 

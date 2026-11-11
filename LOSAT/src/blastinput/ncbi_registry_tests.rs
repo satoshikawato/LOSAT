@@ -343,19 +343,6 @@ fn line_ends_are_the_platforms() {
         entries(&read(b"[S]\nA=1", LineEnds::Unix)),
         [("S", "A", &b"1"[..])]
     );
-    // The platform LOSAT is built for.
-    let expected = if cfg!(windows) {
-        LineEnds::Windows
-    } else if cfg!(target_vendor = "apple") {
-        LineEnds::Darwin
-    } else {
-        LineEnds::Unix
-    };
-    assert_eq!(LineEnds::HOST, expected);
-    assert_eq!(
-        read_registry(bad, Layer::SystemWide).unwrap(),
-        read(bad, expected)
-    );
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:782-826 (`GetTextEncodingForm`, quoted

@@ -623,6 +623,49 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
     )
 }
 
+/// LOSAT's refusal of the NCBI C++ Toolkit option `-name` in `program` (decision D9).
+fn toolkit_option_error(program: &str, name: &str) -> clap::Error {
+    let shown = match program {
+        "makeblastdb" => program.to_string(),
+        _ => program.to_ascii_uppercase(),
+    };
+    clap::Error::raw(
+        ErrorKind::InvalidValue,
+        format!("the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {shown}"),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-1022 (the full versions are printed,
+// and a `-conffile` file is checked and later loaded in place of `<program>.ini`, before the
+// configuration load)
+// ```c++
+//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
+//                 delete[] v;
+//                 // Print full VERSION
+//                 cout << GetFullVersion().Print( appname );
+//                 diag_context.DiscardMessages();
+//                 return 0;
+//     ...
+//         if (conf_arg) {
+//             if (CFile(conf_arg).Exists()) {
+//                 conf = conf_arg;
+//             }
+//             else {
+//                 ERR_POST_X(23, Critical << "Registry file \"" << conf_arg << "\" not found, aborting.");
+//                 Abort();
+//             }
+//         }
+// ```
+/// LOSAT's refusal of `word` (`-conffile`, or a full version word: `ncbi_environment::preparse`)
+/// in `program`, which the command line's entry gives before the configuration load, where NCBI
+/// reads another registry file or prints its build details (NCBI BLAST+ 2.17.0 `blastn -conffile
+/// other.ini` with a malformed `blastn.ini`: rc 0, the `.ini` never read; env parity review G F2).
+pub fn ncbi_toolkit_word_error(program: &str, word: &str) -> clap::Error {
+    let name = word.trim_start_matches('-');
+    let name = name.split_once('=').map_or(name, |(key, _)| key);
+    toolkit_option_error(program, name)
+}
+
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
@@ -690,13 +733,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     .find(|program| scope.get_name() == *program)
     .filter(|_| is_ncbi_toolkit_arg(name))
     {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!(
-                "the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {}",
-                program.to_ascii_uppercase()
-            ),
-        );
+        return toolkit_option_error(program, name);
     }
     if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
         return clap::Error::raw(
@@ -719,9 +756,10 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
 /// The text `-version` prints for `argv` (`losat <program> ... -version ...`), or `None` when
 /// `argv` has no such request.
 ///
-/// NCBI's application reads `-version` before its arguments (`ncbi_preparsed_toolkit_word`,
+/// NCBI's application reads `-version` before its arguments (`ncbi_environment::preparse`,
 /// ncbiapp.cpp:926-1001): anywhere before `--`, in an option's value place too
-/// (`blastn -out -version` prints the version), and also when other arguments are invalid.
+/// (`blastn -out -version` prints the version) but not as the value of `-logfile` or
+/// `-conffile`, and also when other arguments are invalid.
 /// The text is the two lines of `fVersionInfo | fPackageShort`:
 /// the program name and version, then the package. NCBI's second line names its own
 /// package and build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
@@ -757,21 +795,18 @@ where
         "makeblastdb" => "makeblastdb",
         _ => return None,
     };
-    for token in &tokens[2..] {
-        match token.to_str().unwrap_or("") {
-            "--" => return None,
-            "-version" => {
-                return Some(format!(
-                    "{name}: {}\n Package: LOSAT {}, output compatible with blast {}\n",
-                    crate::NCBI_BLAST_VERSION,
-                    env!("CARGO_PKG_VERSION"),
-                    crate::NCBI_BLAST_RELEASE
-                ));
-            }
-            _ => {}
-        }
+    // NCBI's reading of the words before the arguments (`ncbi_environment::preparse`): not
+    // after `--`, nor as the value of `-logfile` or `-conffile` (`blastn -logfile -version`
+    // logs to the file `-version`).
+    match crate::blastinput::ncbi_environment::preparse(&tokens[2..]) {
+        crate::blastinput::ncbi_environment::Preparsed::Version => Some(format!(
+            "{name}: {}\n Package: LOSAT {}, output compatible with blast {}\n",
+            crate::NCBI_BLAST_VERSION,
+            env!("CARGO_PKG_VERSION"),
+            crate::NCBI_BLAST_RELEASE
+        )),
+        _ => None,
     }
-    None
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001

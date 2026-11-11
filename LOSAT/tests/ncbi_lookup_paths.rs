@@ -540,7 +540,8 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
     // A search program answers `-version` after the file is made too (NCBI 2.17.0 `blastn
     // -version -logfile log.txt`: the file is made, with the usage report's message when
     // `.ncbirc` is malformed); LOSAT refuses `-logfile` only when it reads the arguments.
-    fs::remove_file(&log).unwrap();
+    // (`logged` has removed the file.)
+    assert!(!log.exists());
     fs::write(dir.join(NCBIRC), "garbage\n").unwrap();
     let version = run_in(
         losat,
@@ -552,5 +553,128 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
     assert_eq!(text(&version.stderr), critical(1));
     assert!(text(&version.stdout).starts_with("blastn: 2.17.0+\n"));
     assert_eq!(logged(), critical(1));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1181-1187 (quoted at
+// `ncbi_environment::replays_to_stderr`). NCBI BLAST+ 2.17.0, the official Linux x64 release
+// (env parity review G, F1; g_reg probe_h of 2026-11-12): with a malformed `<program>.ini` and a
+// `-logfile` target, blastn, blastp, blastx, tblastn and psiblast post the report to the target
+// and give the collected messages to stderr when they end; tblastx (like rpsblast, makeblastdb and
+// blastdbcmd) gives them to the target.
+#[cfg(unix)]
+#[test]
+fn a_malformed_ini_with_a_logfile_is_replayed_where_ncbi_replays_it() {
+    let dir = scratch("replay");
+    let losat = Path::new(BIN);
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let log = dir.join("log.txt");
+    let logged = || {
+        let content = fs::read_to_string(&log).unwrap_or_default();
+        let _ = fs::remove_file(&log);
+        content
+    };
+    let section = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    let u = critical(1);
+    fs::write(dir.join(NCBIRC), "garbage\n").unwrap();
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "psiblast", "tblastx",
+    ] {
+        let ini = dir.join(format!("{program}.ini"));
+        fs::write(&ini, "[x\n").unwrap();
+        let to_stderr = program != "tblastx";
+        let run = |words: &[&str], envs: &[(&str, &str)]| {
+            let mut args = vec![program];
+            args.extend_from_slice(words);
+            run_in(losat, &args, &dir, envs, b"")
+        };
+        let file = run(&["-query", "q.fa", "-logfile", "log.txt"], &[]);
+        assert_eq!(file.status.code(), Some(2), "{program}: {file:?}");
+        assert!(file.stdout.is_empty());
+        if to_stderr {
+            assert_eq!(text(&file.stderr), format!("{u}{u}{section}"), "{program}");
+            assert_eq!(logged(), format!("{u}{section}"), "{program}");
+        } else {
+            assert_eq!(text(&file.stderr), u, "{program}");
+            assert_eq!(logged(), format!("{u}{section}").repeat(2), "{program}");
+        }
+        let nowhere = run(&["-query", "q.fa", "-logfile", "/dev/null"], &[]);
+        assert_eq!(nowhere.status.code(), Some(2));
+        let expected = if to_stderr {
+            format!("{u}{u}{section}")
+        } else {
+            u.clone()
+        };
+        assert_eq!(text(&nowhere.stderr), expected, "{program}");
+        let quiet = run(
+            &["-query", "q.fa", "-logfile", "log.txt"],
+            &[("BLAST_USAGE_REPORT", "0")],
+        );
+        assert_eq!(quiet.status.code(), Some(2));
+        if to_stderr {
+            assert_eq!(text(&quiet.stderr), section, "{program}");
+            assert_eq!(logged(), section, "{program}");
+        } else {
+            assert!(quiet.stderr.is_empty(), "{program}");
+            assert_eq!(logged(), section.repeat(2), "{program}");
+        }
+        // Without `-logfile` every program writes the same.
+        let plain = run(&["-query", "q.fa"], &[]);
+        assert_eq!(
+            text(&plain.stderr),
+            format!("{u}{section}").repeat(2),
+            "{program}"
+        );
+        fs::remove_file(&ini).unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1022 (quoted at
+// `ncbi_environment::preparse` and `cli::ncbi_toolkit_word_error`) and
+// c++/src/algo/blast/api/blast_usage_report.cpp:195-206 (quoted at
+// `ncbi_environment::usage_report_reads_ncbirc`). NCBI BLAST+ 2.17.0 (env parity review G, F2-F4):
+// `-conffile other.ini` loads that file in place of a malformed `blastn.ini` (LOSAT refuses it
+// before the configuration load); `BLAST_USAGE_REPORT=abc` aborts before `-version` (LOSAT
+// refuses there); `-logfile -version` logs to the file `-version` and prints no version.
+#[cfg(unix)]
+#[test]
+fn the_words_before_the_arguments_are_read_as_ncbi_reads_them() {
+    let dir = scratch("prescan");
+    let losat = Path::new(BIN);
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    fs::write(dir.join("blastn.ini"), "[x\n").unwrap();
+    fs::write(dir.join("other.ini"), "[BLAST]\n").unwrap();
+    for conffile in [&["-conffile", "other.ini"][..], &["-conffile=other.ini"]] {
+        let mut args = vec!["blastn"];
+        args.extend_from_slice(conffile);
+        args.extend(["-query", "q.fa"]);
+        let refused = run_in(losat, &args, &dir, &[], b"");
+        let stderr = text(&refused.stderr);
+        assert_ne!(refused.status.code(), Some(0));
+        assert!(
+            stderr.contains(
+                "the NCBI C++ Toolkit option -conffile is not supported by LOSAT's BLASTN"
+            ) && !stderr.contains("Application's initialization failed"),
+            "{stderr}"
+        );
+    }
+    fs::remove_file(dir.join("blastn.ini")).unwrap();
+    for words in [&["blastn", "-version"][..], &["blastn", "-h"]] {
+        let aborts = run_in(losat, words, &dir, &[("BLAST_USAGE_REPORT", "abc")], b"");
+        assert_eq!(aborts.status.code(), Some(1), "{aborts:?}");
+        assert!(aborts.stdout.is_empty());
+        assert!(text(&aborts.stderr)
+            .contains("the environment variable BLAST_USAGE_REPORT has the value \"abc\""));
+    }
+    fs::write(dir.join(NCBIRC), "garbage\n").unwrap();
+    let logged = run_in(losat, &["blastn", "-logfile", "-version"], &dir, &[], b"");
+    assert!(logged.stdout.is_empty(), "{logged:?}");
+    assert_ne!(logged.status.code(), Some(0));
+    assert_eq!(text(&logged.stderr[..critical(1).len()]), critical(1));
+    assert_eq!(
+        fs::read_to_string(dir.join("-version")).unwrap(),
+        critical(1).repeat(2)
+    );
     let _ = fs::remove_dir_all(&dir);
 }

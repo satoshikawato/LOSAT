@@ -26,7 +26,7 @@ use std::fs::File;
 use std::io::Write;
 
 use crate::blastinput::ncbi_environment::{
-    application_start_of_process, diag_target, log_file, DiagTarget,
+    application_start_of_process, diag_target, log_file, preparse, DiagTarget, Preparsed,
 };
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
@@ -117,130 +117,6 @@ impl Diag<'_> {
         let mut line = message.to_vec();
         line.push(b'\n');
         self.target.write_text(&line, self.stderr);
-    }
-}
-
-/// What NCBI's application reads before the arguments (`CNcbiApplicationAPI::AppMain`).
-enum Preparsed {
-    /// `-version`: print the version, exit status 0.
-    Version,
-    /// The words left for the argument reader, and whether there were words that LOSAT
-    /// refuses although NCBI goes on reading: `-conffile FILE` (NCBI reads that registry file
-    /// before the arguments) and `-dryrun` (NCBI reads the arguments, then runs nothing).
-    Words {
-        words: Vec<String>,
-        conffile: bool,
-        dryrun: bool,
-    },
-    /// A word LOSAT refuses where NCBI stops reading (`-version-full`, ...).
-    Refused(&'static str),
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015
-// ```c++
-//         for (int i = 1;  i < argc;  i++) {
-//             if ( !argv[i] ) {
-//                 continue;
-//             }
-//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
-//                 skip = true;
-//             }
-//             if (skip) {
-//                 v[real_arg_index++] = argv[i];
-//                 continue;
-//             }
-//             // Log file - ignore if diag is eDS_User - the user wants to
-//             // take care about logging.
-//             if ( diag != eDS_User  &&
-//                 NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 v[real_arg_index++] = argv[i - 1];
-//                 v[real_arg_index++] = argv[i];
-//                 // Configuration file
-//             } else if ( NStr::strcmp(argv[i], s_ArgCfgFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 v[real_arg_index++] = argv[i - 1];
-//                 v[real_arg_index++] = argv[i];
-//                 conf_arg = argv[i];
-//
-//             }
-//             else if (NStr::StartsWith(argv[i], s_ArgCfgFile)) {
-//                 v[real_arg_index++] = argv[i];
-//                 const char* a = argv[i] + strlen(s_ArgCfgFile);
-//                 if (*a == '=') {
-//                     conf_arg = ++a;
-//                 }
-//
-//                 // Version
-//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
-//                 delete[] v;
-//                 // Print VERSION
-//                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-//
-//                 // Full version
-//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
-//                 ...
-//             } else if ( NStr::strcmp(argv[i], s_ArgDryRun) == 0 ) {
-//                 m_DryRun = true;
-//
-//                 // Save real argument
-//             } else {
-//                 v[real_arg_index++] = argv[i];
-//             }
-//         }
-// ```
-/// The words NCBI's application takes before its argument reader: `-version` anywhere before
-/// `--` (but not as the value of `-logfile` or `-conffile`), the full versions, `-dryrun` and
-/// `-conffile`. A `-logfile` or `-conffile` without a value is dropped. LOSAT refuses
-/// `-conffile` (another registry file) and `-dryrun` (NCBI then runs nothing), as the search
-/// programs do (line CLI DECISIONS 4), and the full versions (NCBI's build details).
-fn preparse(words: &[String]) -> Preparsed {
-    let mut kept = Vec::with_capacity(words.len());
-    let mut conffile = false;
-    let mut dryrun = false;
-    let mut skip = false;
-    let mut at = 0;
-    while at < words.len() {
-        let word = words[at].as_str();
-        if word == "--" {
-            skip = true;
-        }
-        if skip {
-            kept.push(words[at].clone());
-            at += 1;
-            continue;
-        }
-        match word {
-            "-logfile" | "-conffile" => {
-                at += 1;
-                if let Some(value) = words.get(at) {
-                    kept.push(word.to_string());
-                    kept.push(value.clone());
-                    conffile |= word == "-conffile";
-                }
-            }
-            "-version" => return Preparsed::Version,
-            "-version-full" => return Preparsed::Refused("-version-full"),
-            "-version-full-xml" => return Preparsed::Refused("-version-full-xml"),
-            "-version-full-json" => return Preparsed::Refused("-version-full-json"),
-            "-dryrun" => dryrun = true,
-            _ => {
-                conffile |= word.starts_with("-conffile=");
-                kept.push(words[at].clone());
-            }
-        }
-        at += 1;
-    }
-    Preparsed::Words {
-        words: kept,
-        conffile,
-        dryrun,
     }
 }
 
@@ -727,10 +603,6 @@ fn write_info_volumes(out: &mut Vec<u8>, volumes: &[String]) {
 mod tests {
     use super::*;
 
-    fn words(line: &[&str]) -> Vec<String> {
-        line.iter().map(|word| word.to_string()).collect()
-    }
-
     #[test]
     fn commas_group_three_digits() {
         assert_eq!(with_commas(0), "0");
@@ -759,40 +631,5 @@ mod tests {
              descriptions of command line arguments\n"
         ));
         assert_eq!(HELP.len(), 9450);
-    }
-
-    #[test]
-    fn preparse_takes_ncbi_s_words() {
-        let kept = |line: &[&str]| match preparse(&words(line)) {
-            Preparsed::Words {
-                words,
-                conffile,
-                dryrun,
-            } => (words, conffile, dryrun),
-            Preparsed::Version => panic!("version"),
-            Preparsed::Refused(word) => panic!("refused {word}"),
-        };
-        assert!(matches!(
-            preparse(&words(&["-db", "-version"])),
-            Preparsed::Version
-        ));
-        // The value of `-logfile` is not read as `-version`; a last `-logfile` is dropped.
-        assert_eq!(
-            kept(&["-info", "-logfile", "-version"]).0,
-            words(&["-info", "-logfile", "-version"])
-        );
-        assert_eq!(kept(&["-info", "-logfile"]).0, words(&["-info"]));
-        assert_eq!(kept(&["--", "-version"]).0, words(&["--", "-version"]));
-        assert_eq!(
-            kept(&["-info", "-dryrun"]),
-            (words(&["-info"]), false, true)
-        );
-        assert!(kept(&["-dryrun", "-conffile", "x"]).1);
-        assert!(kept(&["-conffile=x"]).1);
-        assert!(!kept(&["-info", "-conffile"]).1);
-        assert!(matches!(
-            preparse(&words(&["-version-full", "-version"])),
-            Preparsed::Refused("-version-full")
-        ));
     }
 }

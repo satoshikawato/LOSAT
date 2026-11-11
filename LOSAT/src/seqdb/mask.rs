@@ -7,8 +7,8 @@
 //! each volume ([`super::column`]): its metadata maps the volume's algorithm ids to
 //! descriptions; the blob of a sequence holds, per algorithm, a list of ranges.
 //!
-//! The reader of `losat blastdbcmd`; LOSAT's searches do not call it. A database is opened with
-//! [`SeqDb::open_in_with_masks`] to read it.
+//! The reader of `losat blastdbcmd`; LOSAT's searches do not call it, as NCBI's searches do not
+//! without `-db_soft_mask` or `-db_hard_mask`. The columns are opened on first use.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -969,8 +969,7 @@ fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)
 impl SeqDb {
     /// The filtering algorithms of the database, built from the mask columns of its
     /// volumes the first time they are asked for (`x_BuildMaskAlgorithmList`). Empty for a
-    /// database without mask data. A database opened with [`SeqDb::open`] has no columns;
-    /// open it with [`SeqDb::open_in_with_masks`].
+    /// database without mask data.
     pub fn mask_algorithms(&self) -> Result<&MaskAlgorithms, SeqDbError> {
         if let Some(table) = self.mask_algorithms.get() {
             return Ok(table);

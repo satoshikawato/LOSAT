@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_jx1",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_jx1 (parsed Seq-ids)",
+  "number-of-letters": 400,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-08T20:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49926,
+  "bytes-to-cache": 523,
+  "files": [
+    "psr_jx1.pdb",
+    "psr_jx1.phr",
+    "psr_jx1.pin",
+    "psr_jx1.pog",
+    "psr_jx1.pos",
+    "psr_jx1.pot",
+    "psr_jx1.psq",
+    "psr_jx1.ptf",
+    "psr_jx1.pto"
+  ]
+}

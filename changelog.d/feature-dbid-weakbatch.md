@@ -12,7 +12,3 @@
   also skips the others. Before, a sequence there that NCBI BLAST+ 2.17.0 reads
   as another one (an accession without a version that the lookup finds as a versioned sequence
   first, or a weak match with the prefetch off) gave later rounds that differ from NCBI's.
-  Following hits whose Seq-align ids NCBI takes for one sequence (`gb|X|` and `gb|X.1|`) but that
-  are not copies of one record are now refused where psiblast makes a PSSM and the later one is
-  below `-inclusion_ethresh`: NCBI puts their alignments in one row of the PSSM's multiple
-  alignment.

@@ -1086,7 +1086,7 @@
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 20 for blastx-fast; 19.3 for -word_size 5]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]",
     "takes_value": true
    },
    {
@@ -1347,7 +1347,23 @@
      }
     },
     "-word_size": {
+     "2": {
+      "blastx": {
+       "-threshold": "12"
+      },
+      "blastx-fast": {
+       "-threshold": "20"
+      }
+     },
      "3": {
+      "blastx": {
+       "-threshold": "12"
+      },
+      "blastx-fast": {
+       "-threshold": "20"
+      }
+     },
+     "4": {
       "blastx": {
        "-threshold": "12"
       },
@@ -1361,6 +1377,22 @@
       },
       "blastx-fast": {
        "-threshold": "19.3"
+      }
+     },
+     "6": {
+      "blastx": {
+       "-threshold": "21"
+      },
+      "blastx-fast": {
+       "-threshold": "21"
+      }
+     },
+     "7": {
+      "blastx": {
+       "-threshold": "20.25"
+      },
+      "blastx-fast": {
+       "-threshold": "20.25"
       }
      }
     }

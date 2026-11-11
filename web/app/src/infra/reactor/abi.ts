@@ -1,7 +1,7 @@
 // The ABI v2 binding (docs/web/abi_v2.md) over one reactor instance: memory for the
 // arguments (§6), the error text of a failed call (§4), and the `losat_host.emit` stream
-// receiver (§5). The Engine worker (searches) and the Data worker (index scan, inflation,
-// describe, validate) both use it.
+// receiver (§5). The Engine worker (searches) and the Data worker (index scan, input check,
+// describe, validate, and one instance for each inflation) both use it.
 //
 // Pointers and lengths are unsigned 32-bit values (ABI v2 §6). JavaScript receives a Wasm
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer

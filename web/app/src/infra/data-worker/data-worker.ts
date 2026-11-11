@@ -2,10 +2,10 @@
 // and the temporary storage of one working session, and it outlives Engine workers. It also
 // keeps the saved copies of Example sets (OPFS examples/, line WF-2).
 // Only this worker uses OPFS synchronous access handles. It holds its own instance of the
-// serial reactor, separate from the Engine worker's, for the index scan, the inflation of
-// compressed sources and of downloaded Example sets (src/infra/reactor/inflater.ts) and the
-// engine's describe/validate (src/infra/reactor/control.ts). This module is the worker's
-// composition root.
+// serial reactor, separate from the Engine worker's, for the index scan, the input check and the
+// engine's describe/validate (src/infra/reactor/control.ts); the inflation of compressed sources
+// and of downloaded Example sets (src/infra/reactor/inflater.ts) runs on an instance of its own
+// for each file, dropped at its end. This module is the worker's composition root.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import type { ExampleStore } from '../../ports/example';
 import type { FileInflater, WholeFileInflater } from '../../ports/inflate';
@@ -61,11 +61,15 @@ if (ENGINE_ASSETS === null) {
     }
     return compiled;
   };
-  const reactor: () => Promise<ReactorAbi> = reopening(async () => (await instantiateSerial(await module())).abi);
+  const instantiate = async (): Promise<ReactorAbi> => (await instantiateSerial(await module())).abi;
+  // The shared instance serves the scanner, the checker and the control calls. An inflation takes
+  // an instance of its own, from the same compiled module, and lets it go at its end: what it grew
+  // in the linear memory (a zstd window of up to 128 MiB) cannot shrink, and goes with it.
+  const reactor: () => Promise<ReactorAbi> = reopening(instantiate);
   scanner = new ReactorScanner(reactor);
-  const reactorInflater = new ReactorInflater(reactor);
+  const reactorInflater = new ReactorInflater(reactor, instantiate);
   inflater = reactorInflater;
-  // A downloaded Example set takes the path of a source (inflate.ts), on the same reactor.
+  // A downloaded Example set takes the path of a source (inflate.ts), on an instance of its own.
   whole = { inflateFile: (file, maxBytes) => inflateFile(file, reactorInflater, maxBytes) };
   checker = new ReactorInputChecker(reactor);
   control = reactorControl(reactor);

@@ -75,13 +75,30 @@ impl Compression {
     /// other. A fault of the compressed data (not this format, cut short, an empty file) is an
     /// error of the read that meets it; for gzip, that is what makeblastdb fails on
     /// (`GzipMembers`), and a file that is neither gzip nor zlib data fails at the first read.
-    /// The reader runs this format's `Inflater` on 64 KiB blocks of `input` (`PullInflater`).
+    /// The reader runs this format's `Inflater` on blocks of `input` (`PullInflater`,
+    /// `read_block`).
     pub fn decoder<'a>(self, input: impl Read + 'a) -> Box<dyn Read + 'a> {
         Box::new(PullInflater {
-            source: io::BufReader::with_capacity(1 << 16, input),
+            source: io::BufReader::with_capacity(self.read_block(), input),
             inflater: self.inflater(),
             ended: false,
         })
+    }
+
+    /// The size of the blocks in which the command line's reader reads a file of this format.
+    /// 64 KiB for gzip and bzip2. 256 KiB for zstd: a block of the largest size (128 KiB, with
+    /// its 3-byte header and the frame's 4-byte checksum) then mostly lies inside one read
+    /// block, and ruzstd decodes it there instead of from a copy (`ZstdFrames::gather`); the
+    /// output of each read does not hang on the size, which only says when a whole block is at
+    /// hand. A gzip read does hang on it where the data is damaged (an `inflate()` call that
+    /// fails gives none of its output, so the size decides how many inflated bytes reach the
+    /// reader before the error), and bzip2 reads through `BZIP2_WINDOW` windows, which are the
+    /// same at any multiple of 8 KiB; both keep the size they had.
+    fn read_block(self) -> usize {
+        match self {
+            Compression::Gzip | Compression::Bzip2 => 1 << 16,
+            Compression::Zstd => 1 << 18,
+        }
     }
 
     /// The inflater of a file of this format, to be fed its bytes in pieces (`Inflater::step`).
@@ -1143,6 +1160,15 @@ impl Bzip2Streams {
     }
 }
 
+/// Where `ZstdFrames::gather` found the next unit whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Whole {
+    /// In the piece of input, from the bytes taken so far: so many bytes.
+    Input(usize),
+    /// In `ZstdFrames::unit`.
+    Gathered,
+}
+
 /// Where `ZstdFrames` is in the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ZstdState {
@@ -1161,11 +1187,12 @@ enum ZstdState {
 /// `Frame_Content_Size` (`check_frame`), which ruzstd reads but does not compare.
 ///
 /// The input is pushed (`step`); ruzstd reads from a `Read`. Each call of ruzstd is made on a
-/// slice that holds its whole unit, gathered in `unit` from the pieces of input: a frame header
-/// (`FrameDecoder::reset`) or a block with, after the frame's last block, the frame's
-/// `Content_Checksum` (`FrameDecoder::decode_blocks` with `UptoBlocks(1)`), sized from their
-/// first bytes (`frame_header_len`, `block_len`). At the end of the input a unit that is not
-/// whole is given as it is, so that ruzstd fails on it as it failed on a source at its end.
+/// slice that holds its whole unit: a frame header (`FrameDecoder::reset`) or a block with,
+/// after the frame's last block, the frame's `Content_Checksum` (`FrameDecoder::decode_blocks`
+/// with `UptoBlocks(1)`), sized from their first bytes (`frame_header_len`, `block_len`). The
+/// slice is the piece of input itself where it holds the whole unit, else the unit gathered in
+/// `unit` from the pieces (`gather`, `decode_unit`). At the end of the input a unit that is
+/// not whole is given as it is, so that ruzstd fails on it as it failed on a source at its end.
 /// (`FrameDecoder::decode_from_to`, ruzstd's own decoder of slices, waits on a block cut short
 /// instead of failing.)
 ///
@@ -1195,7 +1222,8 @@ enum ZstdState {
 struct ZstdFrames {
     decoder: ruzstd::decoding::FrameDecoder,
     state: ZstdState,
-    /// The bytes taken for the unit that ruzstd decodes next.
+    /// The bytes taken for the unit that ruzstd decodes next, where no piece of input held it
+    /// whole.
     unit: Vec<u8>,
     /// The current frame ends with a `Content_Checksum`.
     checksum: bool,
@@ -1303,28 +1331,65 @@ impl ZstdFrames {
         Ok(())
     }
 
-    /// Moves input into `unit` until it holds the whole unit, whose length `len` reads from the
-    /// unit's first bytes; false while it waits for more input (at the end of the input the unit
-    /// is given as it is).
+    /// Where the next unit is whole, or `None` while it waits for more input. Where nothing of
+    /// the unit is gathered yet and the piece of input holds all of it, it is there
+    /// (`Whole::Input`, its length from `taken`); else the input is moved into `unit` until that
+    /// holds the whole unit (`Whole::Gathered`; at the end of the input, the unit as it is).
+    /// `len` reads the unit's length from its first bytes.
     fn gather(
         &mut self,
         input: &[u8],
         taken: &mut usize,
         at_end: bool,
         len: impl Fn(&[u8]) -> usize,
-    ) -> bool {
+    ) -> Option<Whole> {
+        if self.unit.is_empty() {
+            let rest = &input[*taken..];
+            let want = len(rest);
+            if rest.len() >= want {
+                return Some(Whole::Input(want));
+            }
+        }
         loop {
             let want = len(&self.unit);
             if self.unit.len() >= want {
-                return true;
+                return Some(Whole::Gathered);
             }
             let count = (want - self.unit.len()).min(input.len() - *taken);
             if count == 0 {
-                return at_end;
+                return at_end.then_some(Whole::Gathered);
             }
             self.unit.extend_from_slice(&input[*taken..*taken + count]);
             *taken += count;
         }
+    }
+
+    /// The one call of ruzstd (`decode`) on the next unit, on the slice where `gather` found it
+    /// whole; the bytes ruzstd read are then taken from there. `None` while the unit waits for
+    /// more input.
+    fn decode_unit<T>(
+        &mut self,
+        input: &[u8],
+        taken: &mut usize,
+        at_end: bool,
+        len: impl Fn(&[u8]) -> usize,
+        decode: impl FnOnce(&mut ruzstd::decoding::FrameDecoder, &mut &[u8]) -> T,
+    ) -> Option<T> {
+        let whole = self.gather(input, taken, at_end, len)?;
+        let bytes: &[u8] = match whole {
+            Whole::Input(unit_len) => &input[*taken..*taken + unit_len],
+            Whole::Gathered => &self.unit,
+        };
+        let mut rest = bytes;
+        let result = decode(&mut self.decoder, &mut rest);
+        let used = bytes.len() - rest.len();
+        match whole {
+            Whole::Input(_) => *taken += used,
+            Whole::Gathered => {
+                self.unit.drain(..used);
+            }
+        }
+        Some(result)
     }
 
     /// One `Inflater::step` of a `.zst` file: the frames, skippable frames and blocks up to the
@@ -1361,14 +1426,18 @@ impl ZstdFrames {
                             Progress::more(taken)
                         });
                     }
-                    if !self.gather(input, &mut taken, at_end, frame_header_len) {
+                    let Some((result, descriptor)) = self.decode_unit(
+                        input,
+                        &mut taken,
+                        at_end,
+                        frame_header_len,
+                        |decoder, bytes| {
+                            let descriptor = bytes.get(4).copied().unwrap_or(0);
+                            (decoder.reset(bytes), descriptor)
+                        },
+                    ) else {
                         return Ok(Progress::more(taken));
-                    }
-                    let mut rest: &[u8] = &self.unit;
-                    let result = self.decoder.reset(&mut rest);
-                    let used = self.unit.len() - rest.len();
-                    let descriptor = self.unit.get(4).copied().unwrap_or(0);
-                    self.unit.drain(..used);
+                    };
                     match result {
                         Ok(()) => {
                             self.state = ZstdState::Frame;
@@ -1396,16 +1465,20 @@ impl ZstdFrames {
                         continue;
                     }
                     let checksum = self.checksum;
-                    if !self.gather(input, &mut taken, at_end, |unit| block_len(unit, checksum)) {
+                    let Some(result) = self.decode_unit(
+                        input,
+                        &mut taken,
+                        at_end,
+                        |unit| block_len(unit, checksum),
+                        |decoder, bytes| {
+                            decoder.decode_blocks(
+                                bytes,
+                                ruzstd::decoding::BlockDecodingStrategy::UptoBlocks(1),
+                            )
+                        },
+                    ) else {
                         return Ok(Progress::more(taken));
-                    }
-                    let mut rest: &[u8] = &self.unit;
-                    let result = self.decoder.decode_blocks(
-                        &mut rest,
-                        ruzstd::decoding::BlockDecodingStrategy::UptoBlocks(1),
-                    );
-                    let used = self.unit.len() - rest.len();
-                    self.unit.drain(..used);
+                    };
                     result.map_err(invalid_zstd)?;
                 }
             }

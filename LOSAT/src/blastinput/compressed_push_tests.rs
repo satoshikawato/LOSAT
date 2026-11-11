@@ -10,7 +10,7 @@
 //! GZ, DECISIONS 5).
 
 use super::test_data::{assert_pushed_as_read, bzip2_streams, pushed, read, zstd_frames, PIECES};
-use super::{Compression, PushInflater};
+use super::{block_len, frame_header_len, Compression, PushInflater, Whole, ZstdFrames};
 use std::io::Write;
 
 fn fixture(path: &str) -> Vec<u8> {
@@ -153,6 +153,64 @@ fn zstd_pieces_inflate_as_the_reader_reads() {
     assert!(checked(Compression::Zstd, &frame(5, &block_header(3, 5)[..3])).is_err());
     let oversize = frame(5, &[&block_header(0, 200_000)[..3], b"ACGTA"].concat());
     assert!(checked(Compression::Zstd, &oversize).is_err());
+}
+
+// A zstd unit (a frame header, a block) that one piece of input holds whole is decoded in that
+// piece; one that crosses pieces is gathered first (`ZstdFrames::gather`). Pushed in two pieces
+// cut inside and between units, the frames give the reader's bytes, and so does the reader on
+// frames larger than its 256 KiB read blocks.
+#[test]
+fn a_zstd_unit_is_decoded_in_its_piece_or_gathered_across_pieces() {
+    let text: &[u8] = b">q1\nACGTACGTAC\n";
+    // Each frame: a skippable frame (12 bytes), the header (9), one raw block (3 + 15).
+    let frames = zstd_frames(&[text, text]);
+    let (header_at, block_at) = (12, 21);
+    let header = &frames[header_at..block_at];
+    let block = &frames[block_at..block_at + 3 + text.len()];
+    let mut core = ZstdFrames::new();
+    let mut taken = 0;
+    assert_eq!(
+        core.gather(header, &mut taken, false, frame_header_len),
+        Some(Whole::Input(9))
+    );
+    assert_eq!((taken, core.unit.len()), (0, 0));
+    assert_eq!(
+        core.gather(block, &mut taken, false, |unit| block_len(unit, false)),
+        Some(Whole::Input(block.len()))
+    );
+    let mut taken = 0;
+    assert_eq!(
+        core.gather(&header[..6], &mut taken, false, frame_header_len),
+        None
+    );
+    assert_eq!(taken, 6);
+    let mut taken = 0;
+    assert_eq!(
+        core.gather(&header[6..], &mut taken, false, frame_header_len),
+        Some(Whole::Gathered)
+    );
+    assert_eq!((taken, core.unit.as_slice()), (3, header));
+    let whole = read(Compression::Zstd, &frames);
+    assert_eq!(whole, Ok([text, text].concat()));
+    for cut in [
+        header_at + 4,
+        block_at,
+        block_at + 2,
+        block_at + 10,
+        block_at + 18,
+        frames.len() - 1,
+    ] {
+        let mut inflater = PushInflater::new(Compression::Zstd);
+        let mut out = Vec::new();
+        let mut sink = |inflated: &[u8]| out.extend_from_slice(inflated);
+        inflater.push(&frames[..cut], &mut sink).unwrap();
+        inflater.push(&frames[cut..], &mut sink).unwrap();
+        inflater.finish(&mut sink).unwrap();
+        assert_eq!(Ok(out), whole, "cut at {cut}");
+    }
+    // Raw blocks of 128 KiB: some lie inside the reader's 256 KiB read blocks, some cross them.
+    let big = fasta(8, 120_000);
+    assert_eq!(checked(Compression::Zstd, &zstd_frames(&[&big])), Ok(big));
 }
 
 // Every single-bit flip of the zstd CLI's files: the pieces give what the reader gives (the

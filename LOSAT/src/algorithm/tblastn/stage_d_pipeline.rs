@@ -1253,16 +1253,6 @@ fn run_local_search_with_pool(
     //     else prelim_hitlist_size = hitlist_size*2 + 50;
     // }
     // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:1839-1846;
-    // c++/src/algo/blast/core/blast_hspstream.c:816-864:
-    // if (ADAPTIVE_CBS_ENV && compositionBasedStats && hitlist_size < 1000)
-    //     BlastHSPCBSStreamClose(hsp_stream, hitlist_size);
-    // That close can trim the preliminary stream, so this internal path
-    // rejects the environment mode until the close operation is ported.
-    ensure!(
-        !compo_adjust_mode.is_enabled() || std::env::var_os("ADAPTIVE_CBS").is_none(),
-        "the environment variable ADAPTIVE_CBS, which makes NCBI BLAST+ close its preliminary stream of composition-adjusted HSPs early, is not supported by LOSAT's TBLASTN"
-    );
     // NCBI c++/src/algo/blast/core/blast_hits.c:43-70:
     // if (compositionBasedStats) ... 1050 or 2*hitlist+50;
     // else if (gapped_calculation)
@@ -1323,6 +1313,24 @@ fn run_local_search_with_pool(
             pool,
         )?,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
+    // ```c
+    //     if((ADAPTIVE_CBS_ENV != NULL) && (ext_options->compositionBasedStats) && (hit_options->hitlist_size < 1000)) {
+    //     	BlastHSPCBSStreamClose(hsp_stream, hit_options->hitlist_size);
+    //
+    //     }
+    // ```
+    // `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
+    // (`core::blast_hspstream`).
+    let mut preliminary_hitlists = preliminary_hitlists;
+    if crate::core::blast_hspstream::adaptive_cbs_close(
+        compo_adjust_mode.is_enabled(),
+        profile.max_target_seqs,
+    ) {
+        for hitlist in preliminary_hitlists.iter_mut().flatten() {
+            hitlist.cbs_close_trim(profile.max_target_seqs);
+        }
+    }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
     // Blast_HSPResultsReverseSort(results); stream reads from the end.
     let mut preliminary_lists: Vec<_> = preliminary_hitlists

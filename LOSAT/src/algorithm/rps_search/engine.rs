@@ -357,6 +357,10 @@ impl RpsRun<'_> {
             lambda: self.gapped.lambda / scale,
             ..self.gapped
         };
+        // `ADAPTIVE_CBS`: the close of the volume's stream trims each query's preliminary hit
+        // list (`BlastHSPCBSStreamClose`, blast_traceback.c:1839-1846; `core::blast_hspstream`).
+        let cbs_close =
+            crate::core::blast_hspstream::adaptive_cbs_close(self.cbs > 0, self.hitlist_size);
         let new_scratch = || {
             let mut diag = RpsDiagTable::new();
             diag.reset_for(rows.len() as i32, self.window);
@@ -401,9 +405,12 @@ impl RpsRun<'_> {
                 query_index: q_idx as u32,
             };
             let subject_seq = &query.aa_seq[1..];
-            let Some(lists) = prelim.search_query(&mut scratch.0, subject_seq)? else {
+            let Some(mut lists) = prelim.search_query(&mut scratch.0, subject_seq)? else {
                 return Ok(none);
             };
+            if cbs_close {
+                lists.cbs_close_trim(self.hitlist_size);
+            }
             let letters = &query.aa_seq[1..query.aa_seq.len() - 1];
             let mut traced = traceback.trace_query(
                 lists,

@@ -2352,23 +2352,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
     // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
     // A hit list size whose preliminary size is not positive crashes NCBI.
-    if crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
         args.max_target_seqs,
+        args.max_target_seqs_given,
         args.comp_based_stats.is_enabled(),
         true,
-    ) < 1
-    {
-        if args.max_target_seqs_given {
-            bail!(
-                "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}",
-                args.max_target_seqs
-            );
-        }
-        bail!(
-            "a hit list size of {} (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}",
-            args.max_target_seqs
-        );
-    }
+        program,
+    )?;
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:113
     // ```c
     // const string kArgUseSWTraceback(\"use_sw_tback\");
@@ -10784,6 +10774,31 @@ fn run_resolved_in_pool(
         &mut x_compact_hit_lists,
         reports.x_prolog,
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
+    // ```c
+    //     if((ADAPTIVE_CBS_ENV != NULL) && (ext_options->compositionBasedStats) && (hit_options->hitlist_size < 1000)) {
+    //     	BlastHSPCBSStreamClose(hsp_stream, hit_options->hitlist_size);
+    //
+    //     }
+    // ```
+    // `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
+    // (`core::blast_hspstream`) before the subjects of the lists are read. RPSBLAST's engine
+    // trims each volume's lists itself (`rps_search::engine`); PSIBLAST's traceback size is its
+    // preliminary size, 1500 or more here, so it never trims.
+    if args.rps_search.is_none()
+        && crate::core::blast_hspstream::adaptive_cbs_close(
+            args.comp_based_stats.is_enabled(),
+            args.traceback_hitlist_size(),
+        )
+    {
+        let hitlist_size = args.traceback_hitlist_size();
+        for hit_list in preliminary_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+    }
 
     // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
     // and stand for the subject set in the redo; the hit lists name them by their rank

@@ -2250,6 +2250,9 @@ fn write_tblastx_outputs(
             );
         }
     }
+    // Every structured format of the call is XML2 or JSON: none writes the report that a
+    // `-subject` document holds back (`blast_xml::write_tblastx_xml`).
+    let xml_only_xml2 = !output_formats.contains(&report::TblastxOutputFormat::Xml);
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(&output_formats).enumerate()
     {
@@ -2522,6 +2525,7 @@ fn write_tblastx_outputs(
             report::TblastxOutputFormat::Xml => super::super::blast_xml::write_tblastx_xml(
                 &mut crate::report::blast_xml::BlastXmlWriter::new(0),
                 false,
+                xml_only_xml2,
                 &mut writer,
                 &hits,
                 run,
@@ -2538,6 +2542,7 @@ fn write_tblastx_outputs(
                     side_sink.as_ref(),
                 ),
                 true,
+                xml_only_xml2,
                 &mut writer,
                 &hits,
                 run,

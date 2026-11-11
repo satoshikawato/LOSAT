@@ -170,11 +170,12 @@ fn search(
 
 const REFUSAL: &str = "not supported by LOSAT";
 
-/// The reports that a run wrote: the documents of outfmt 15 and 16 on the output, the side files
-/// of 13 and 14.
+/// The reports that a run wrote: the Iterations of outfmt 5, the documents of outfmt 15 and 16 on
+/// the output, the side files of 13 and 14.
 fn reports(run: &Run, outfmt: &str) -> usize {
     let stdout = String::from_utf8_lossy(&run.stdout);
     match outfmt {
+        "5" => stdout.matches("<Iteration>").count(),
         "16" => stdout.matches("\n<BlastOutput2>").count(),
         "15" => stdout.matches("\"report\": {").count(),
         _ => run.side_files.len(),
@@ -228,6 +229,12 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
         ));
         let late = file("batch_title_late", query_kind);
         let first = file("batch_title_first", query_kind);
+        let queries = Records::of(query_kind);
+        let last = write(
+            &dir.0,
+            &format!("{program}.last"),
+            &format!(">qa plain\n{}\n>qb caf\u{e9}\n{}\n", queries.a, queries.b),
+        );
         for outfmt in ["13", "14", "15", "16"] {
             for threads in ["1", "4"] {
                 let what = |case: &str| format!("{program} {case} outfmt {outfmt} n{threads}");
@@ -246,8 +253,8 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
                     &dir.0,
                 );
                 refused(&what("first each"), &result);
-                // A run that reads to the end of the file writes every report in the epilog: the
-                // second record's title (`batch_title.s` read as the query) is refused.
+                // Without an error: record 2's report (`batch_title.s` read as the query) is
+                // written when record 3's results arrive, and the last record's in the epilog.
                 let result = run(
                     search(
                         program,
@@ -259,7 +266,13 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
                     outfmt,
                     &dir.0,
                 );
-                refused(&what("last record, no error"), &result);
+                refused(&what("a later record, no error"), &result);
+                let result = run(
+                    search(program, &last, &subject, &[("BATCH_SIZE", each)], threads),
+                    outfmt,
+                    &dir.0,
+                );
+                refused(&what("the last record, no error"), &result);
             }
         }
     }
@@ -429,6 +442,24 @@ fn the_title_before_a_last_batch_without_letters_is_not_refused() {
                 );
                 not_refused(&what, &result, outfmt, 3, NO_DATA, 1);
             }
+        }
+        // A title in the batch that fails (`batch_title_lastempty`: records 5 to 7 without
+        // letters, record 7 with `café`) is never written by any format: outfmt 5 writes records
+        // 1 to 4 and the error.
+        for outfmt in ["5", "16"] {
+            let result = run(
+                search(
+                    program,
+                    &file("batch_title_lastempty", query_kind),
+                    &subject,
+                    &[("BATCH_SIZE", each)],
+                    "1",
+                ),
+                outfmt,
+                &dir.0,
+            );
+            let what = format!("{program} title in the failing batch, outfmt {outfmt}");
+            not_refused(&what, &result, outfmt, 3, NO_DATA, 4);
         }
     }
 }

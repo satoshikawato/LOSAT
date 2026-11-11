@@ -6551,6 +6551,12 @@ fn post_process_hits_and_write(
     }
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warning_lines = Some(query_warnings);
+    // Every structured format of the call is XML2 or JSON: none writes the report that a
+    // `-subject` document holds back (`blast_xml::write_blastn_xml`).
+    let xml_only_xml2 = output_formats
+        .iter()
+        .filter(|format| format.is_structured_xml())
+        .all(|format| format.xml2_kind().is_some());
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
     {
@@ -6963,6 +6969,7 @@ fn post_process_hits_and_write(
                 taxdb_notes: xml_taxdb_notes,
                 letters: report.subjects,
                 epilog: report.epilog,
+                only_xml2: xml_only_xml2,
             };
             match xml2_kind {
                 None => super::super::blast_xml::write_blastn_xml(

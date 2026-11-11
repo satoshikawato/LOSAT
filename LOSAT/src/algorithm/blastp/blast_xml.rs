@@ -67,6 +67,9 @@ pub(crate) struct BlastpXml<'a> {
     /// Whether the run stops after this call: no epilog and no later report call (the block
     /// search's next block) follow it (`written_queries`).
     pub stops: bool,
+    /// Every structured format of the call is XML2 or JSON (outfmt 5, which writes every report,
+    /// is not among them; the library takes several formats).
+    pub only_xml2: bool,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -85,10 +88,15 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     // Everything NCBI cannot write is refused before the first byte of the document: the
     // database name, and for the reports that the document writes each query's definition line
     // and message and the names of the subjects with hits. A run that stops never writes the
-    // `-subject` report of its last query, which NCBI holds back (`written_queries`).
+    // `-subject` report of its last query, which NCBI holds back, unless another format of the
+    // call (outfmt 5) writes it (`written_queries`).
     names::check_text(xml.run.db_name)
         .map_err(|refusal| refusal.error(program, "a database name"))?;
-    let reports = written_queries(hit_lists.len(), xml.stops, document.holds_back());
+    let reports = written_queries(
+        hit_lists.len(),
+        xml.stops,
+        xml.only_xml2 && document.holds_back(),
+    );
     let has_hits = |q_idx: usize| {
         hit_lists[q_idx].as_ref().is_some_and(|list| {
             list.hsplist_array

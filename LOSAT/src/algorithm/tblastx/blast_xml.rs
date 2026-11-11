@@ -182,6 +182,7 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
 pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     document: &mut W,
     all_masks: bool,
+    only_xml2: bool,
     writer: &mut dyn Write,
     hits: &[TblastxHsp],
     run: &TblastxReportRun<'_>,
@@ -266,8 +267,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     // hits, made (and refused) before the first byte, for the reports that the document writes:
     // a run that stops (the one report call without the epilog: the XML formats are not streamed,
     // `report_stream`) never writes the `-subject` report of its last query, which NCBI holds
-    // back (`written_queries`).
-    let reports = written_queries(queries.len(), !run.epilog, document.holds_back());
+    // back, unless another format of the call (outfmt 5) writes it (`written_queries`; `only_xml2`:
+    // every structured format of the call is XML2 or JSON).
+    let reports = written_queries(
+        queries.len(),
+        !run.epilog,
+        only_xml2 && document.holds_back(),
+    );
     let texts = queries[..reports]
         .iter()
         .enumerate()

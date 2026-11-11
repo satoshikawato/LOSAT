@@ -12932,6 +12932,9 @@ fn run_resolved_in_pool(
             observer.query_stats(q_idx, stats);
         }
     }
+    // Every structured format of the call is XML2 or JSON: none writes the report that a
+    // `-subject` document holds back (`blast_xml::write_blastp_xml`).
+    let xml_only_xml2 = !format_plans.contains(&BlastpReport::Xml);
     for (format_index, (format, &outfmt)) in outputs
         .formats
         .iter_mut()
@@ -13278,6 +13281,7 @@ fn run_resolved_in_pool(
                     program: "BLASTP",
                     epilog: reports.epilog,
                     stops: !reports.epilog && reports.last_call,
+                    only_xml2: xml_only_xml2,
                 };
                 // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
                 // reads their letters query by query and formats them serially, so a window of

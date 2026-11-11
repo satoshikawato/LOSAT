@@ -165,6 +165,15 @@ fn search_records(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size("BLASTX", BATCH_SIZE as u32)? as usize;
+    let xml_scan = scan_xml_titles(
+        &resolved,
+        query_records,
+        args.lcase_masking,
+        query_range,
+        batch_size,
+        archive.is_some(),
+        true,
+    )?;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // The environment of a search of subject records, after the subjects' warnings
     // (`native::run_inner`).
@@ -206,6 +215,7 @@ fn search_records(
             archive,
             out: args.out.as_deref(),
             search_error: &search_error,
+            xml_scan,
         },
         outputs,
     )
@@ -240,6 +250,49 @@ struct RunReports<'a> {
     /// The file of `api::run_to_file`, next to which outfmt 13 and 14 write their side files.
     out: Option<&'a std::path::Path>,
     search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
+    /// The read of the queries before the search of BLAST XML and the XML2 and JSON documents
+    /// (`scan_xml_titles`).
+    xml_scan: super::blast_xml::QueryScan,
+}
+
+/// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI cannot write before
+/// the first byte, in the reports that they write; a `-subject` XML2 or JSON document never writes
+/// the last query of a run that stops at a later batch (`blast_xml::scan_queries`, on the records
+/// in memory, read into the search's reader batches as the command line's `prescan_queries` reads
+/// the file, and at the same place: before the subjects' warnings). With outfmt 5 among the
+/// formats every report is written. `keep_whole`: the search keeps the whole letters of a cut
+/// record (the archive's).
+#[allow(clippy::too_many_arguments)]
+fn scan_xml_titles(
+    resolved: &[ResolvedOptions],
+    query_records: &[fasta_reader::FastaRecord],
+    lowercase: bool,
+    query_range: Option<SequenceRange>,
+    batch_size: usize,
+    keep_whole: bool,
+    subject_set: bool,
+) -> Result<super::blast_xml::QueryScan> {
+    let structured: Vec<u8> = resolved
+        .iter()
+        .map(|options| options.outfmt)
+        .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
+        .collect();
+    if structured.is_empty() || batch_size == 0 {
+        return Ok(super::blast_xml::QueryScan::default());
+    }
+    let holds_back = subject_set && !structured.contains(&5);
+    super::blast_xml::scan_queries(&resolved[0], holds_back, &mut |deliver| {
+        reader_batches(
+            query_records,
+            lowercase,
+            query_range,
+            batch_size,
+            keep_whole,
+            deliver,
+            &mut |_| Ok(()),
+        )
+    })
+    .map_err(report_error)
 }
 
 /// The subjects as the reports of a query batch show them: `shown`, or a database's sequences of
@@ -335,6 +388,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         archive,
         out,
         search_error,
+        ref xml_scan,
     } = run;
     let ReportOutputs {
         formats,
@@ -370,38 +424,13 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 &mut |_| Ok(()),
             )
         }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
-    // BLAST XML and the XML2 and JSON documents refuse a query title that NCBI cannot write
-    // before the first byte, in the reports that they write; a `-subject` XML2 or JSON document
-    // never writes the last query of a run that stops at a later batch
-    // (`blast_xml::scan_queries`, on the records in memory, as the command line's read before
-    // the search). With outfmt 5 among the formats every report is written.
-    let structured: Vec<u8> = resolved
-        .iter()
-        .map(|options| options.outfmt)
-        .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
-        .collect();
-    let xml_scan = if structured.is_empty() || batch_size == 0 {
-        super::blast_xml::QueryScan::default()
-    } else {
-        let holds_back = database.is_none() && !structured.contains(&5);
-        super::blast_xml::scan_queries(&resolved[0], holds_back, &mut |deliver| {
-            reader_batches(
-                query_records,
-                lowercase,
-                query_range,
-                batch_size,
-                archive.is_some(),
-                deliver,
-                &mut |_| Ok(()),
-            )
-        })
-        .map_err(report_error)?
-    };
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
     // holds every format in order, as the archive's titles do and as the command line holds its
     // document (`blast_xml::HeldOutput`), so that the refusal follows no byte.
-    let xml_may_refuse = !structured.is_empty()
+    let xml_may_refuse = resolved
+        .iter()
+        .any(|options| matches!(options.outfmt, 5 | 13..=16))
         && (xml_scan.messages_may_be_refused
             || (database.is_none() && super::blast_xml::subjects_may_be_refused(subjects)));
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
@@ -875,6 +904,15 @@ fn search_database(
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         database_search_error(error, stream.as_ref(), &unreadable)
     };
+    let xml_scan = scan_xml_titles(
+        &resolved,
+        query_records,
+        args.lcase_masking,
+        query_range,
+        batch_size,
+        archive.is_some(),
+        false,
+    )?;
     report_batches(
         &RunReports {
             lowercase: args.lcase_masking,
@@ -894,6 +932,7 @@ fn search_database(
             archive,
             out: args.out.as_deref(),
             search_error: &search_error,
+            xml_scan,
         },
         outputs,
     )

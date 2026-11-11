@@ -1018,23 +1018,23 @@ fn x_shift_lanes<T: Copy + Default>(v: &mut [T], d: usize, n: usize) {
 // the chunk before) and the row's first column from the one below it; the kernels mark the record
 // of the best row (`XTrace::x_best`), whose first column is kept (`best_start`), where the walk
 // starts. (A record of two `u32` was a sixth of the trace of Sakai x EDL933 `-subject` blastn at
-// 16 threads: 3.6 million rows of 80 cells in flight when its 16 longest tracebacks start.) NCBI keeps every chunk in
-// its `gap_align` until the search ends; here a scratch keeps its first chunk (it grows as
-// `Vec::reserve` does, up to one chunk, so a scratch that only ran short tracebacks holds what they
-// needed), and the chunks after it come from one pool that every scratch of the process shares
-// (`X_CHUNKS`) and go back to it when the traceback call ends (`XdropScratch::x_trace_release`) or
-// the next call starts (`reset`). Any thread takes any chunk given back, so long tracebacks never
-// grow a buffer by copying it to one twice its size, and the pool holds the most chunks in use at
-// one time. The pool is freed when the last scratch goes (`X_SCRATCHES`). Rows go forward only
-// (NCBI looks for room from the head of its list again for each row), and the kernels write and the
-// walk reads the same cells either way.
+// 16 threads: 3.6 million rows of 80 cells in flight when its 16 longest tracebacks start.)
+// NCBI keeps every chunk in its `gap_align` until the search ends; here a scratch keeps its first
+// chunk (it grows as `Vec::reserve` does, up to one chunk, so a scratch that only ran short
+// tracebacks holds what they needed), and the chunks after it come from one pool that every
+// scratch of the process shares (`X_CHUNKS`) and go back to it when the traceback call ends
+// (`XdropScratch::x_trace_release`) or the next call starts (`reset`). Any thread takes any chunk
+// given back, so long tracebacks never grow a buffer by copying it to one twice its size, and the
+// pool holds the most chunks in use at one time. The pool is freed when the last scratch goes
+// (`X_SCRATCHES`). Rows go forward only (NCBI looks for room from the head of its list again for
+// each row), and the kernels write and the walk reads the same cells either way.
 //
 // The chunk size: 64 KiB, a sixteenth of NCBI's `CHUNKSIZE` (2,097,152) cells in the four-bit rows
-// (`LOSAT_X_DPNIBBLE`), the layout of every scratch of a search on two threads or more, where chunks
-// pass between threads. The chunks in use are the pool's high-water mark, and each traceback in
-// flight leaves on average half a chunk of its last chunk unused (with 1 MiB chunks, 8 MiB of the
-// 98 MiB of Sakai x EDL933 at 16 threads); a chunk holds about 1,300 rows of 80 cells, so taking the
-// next one (`x_row_room`, cold) stays rare. A power of two (`x_chunk_shift`).
+// (`LOSAT_X_DPNIBBLE`), the layout of every scratch of a search on two threads or more, where
+// chunks pass between threads. The chunks in use are the pool's high-water mark, and each
+// traceback in flight leaves on average half a chunk of its last chunk unused (with 1 MiB chunks,
+// 5 to 8 MiB of the 97 MiB of Sakai x EDL933 at 16 threads); a chunk holds about 1,300 rows of 80
+// cells, so taking the next one (`x_row_room`, cold) stays rare. A power of two (`x_chunk_shift`).
 const X_CHUNK: usize = 1 << 16;
 const _: () = assert!(X_CHUNK.is_power_of_two() && X_CHUNK >= 64 * X_ROW_BYTES);
 // No NCBI counterpart: the most bytes of a row record (`x_row_done`: cells below 2^35 and a step
@@ -1232,7 +1232,7 @@ impl XTrace {
         let step = start.wrapping_sub(self.last) as isize;
         let zz = ((step << 1) ^ (step >> (isize::BITS - 1))) as usize;
         debug_assert!(
-            cells >> 35 == 0 && zz >> 35 == 0,
+            (cells as u64) >> 35 == 0 && (zz as u64) >> 35 == 0,
             "row record past X_ROW_BYTES"
         );
         self.last = start;
@@ -1320,8 +1320,8 @@ impl XTrace {
         debug_assert!(chunk.len() >= 2);
         let base = chunk.as_ptr();
         // SAFETY: `chunk.len()` is the chunk's used part, which ends with a record (two bytes or
-        // more): the walk comes here from a row above row 0 (`a_index
-        // > 0`), and the rows 0 ..= `a_off` are in the chunks in order, each chunk before the one
+        // more): the walk comes here from a row above row 0 (`a_index > 0`), and the rows
+        // 0 ..= `a_off` are in the chunks in order, each chunk before the one
         // being filled was left (`x_row_room`) only after a row and its record were written to it,
         // except that chunk 0 stays empty when row 0 is longer than a chunk and goes to chunk 1,
         // which the walk never leaves upward (`a_index` is 0 there). The pointer comes from the
@@ -1386,7 +1386,8 @@ impl XTrace {
             let mut end = end;
             while end > 0 {
                 let base = self.t[c].as_ptr();
-                // SAFETY: the end of the record of the chunk's last row not read yet (`x_row_done`).
+                // SAFETY: the end of the record of the chunk's last row not read yet
+                // (`x_row_done`).
                 let (step, cells, rec) = unsafe { Self::x_rec(base.add(end)) };
                 end = rec as usize - base as usize - trace_bytes(nib, cells);
                 chunk.push((c, end, step, cells));

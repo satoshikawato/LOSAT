@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use super::support::{
-    assert_observer_ranges, field, read_records, reader_records, run_formats, run_formats_with,
-    temp_path, Run, TempFasta,
+    assert_observer_ranges, assert_tabular_ranges, field, read_records, reader_records,
+    run_formats, run_formats_with, temp_path, Run, TempFasta,
 };
 use crate::algorithm::blastp::BlastpArgs;
 use crate::api::local_blast::{run_local_blastp, FormatOutput, OutputSink, ReportOutputs};
@@ -553,4 +553,78 @@ fn window_options(threads: usize) -> Vec<String> {
     .iter()
     .map(|option| option.to_string())
     .collect()
+}
+
+/// The queries of the test below: the 89 SicyWSV proteins three times (192,207 letters), so
+/// that the blastp search in blocks (`LOSAT_X_BPQBLOCK`, on by default with blocks of 50,000
+/// letters, closed at a batch end of 10,000 letters) would make four blocks, and the subjects.
+/// The switch and `BATCH_SIZE` must be unset: the test reads them and changes nothing.
+fn block_inputs() -> (TempFasta, PathBuf) {
+    assert!(
+        std::env::var_os("LOSAT_X_BPQBLOCK").is_none() && std::env::var_os("BATCH_SIZE").is_none(),
+        "the tests assume the default block size and batch size"
+    );
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+    let records = read_records(&fixture.join("SicyWSV.faa"));
+    let named: Vec<(String, Vec<u8>)> = (0..3)
+        .flat_map(|copy| {
+            records
+                .iter()
+                .enumerate()
+                .map(move |(index, record)| (format!("c{copy}q{index}"), record.seq().to_vec()))
+        })
+        .collect();
+    let letters: usize = named.iter().map(|(_, seq)| seq.len()).sum();
+    // A block closes at the first batch end that reaches 50,000 letters, so it holds at most
+    // 50,000 plus one batch (10,000 letters, and a query that passes the end) and three closed
+    // blocks need less than 3 * 60,000 letters.
+    assert!(letters >= 3 * 60_000, "{letters} letters make three blocks");
+    let records: Vec<(&str, &[u8])> = named
+        .iter()
+        .map(|(id, seq)| (id.as_str(), seq.as_slice()))
+        .collect();
+    (
+        TempFasta::new("blocks_query.faa", &records),
+        fixture.join("PajaWSV.faa"),
+    )
+}
+
+// No NCBI counterpart: the block search of blastp (`x_query_blocks.rs`) declines a call whose
+// observer comes without the hit records (`x_query_block_plan`), because each block would number
+// its HSPs again from 0. Over queries that would make four blocks, the observer's ranges of
+// outfmt 0, 6 and 7 count the HSPs over the whole search and tile the outputs, and the outputs
+// are those of the call with writers alone.
+// (The decline of a call whose outputs are `OutputSink::File` sinks has no test: with it removed the
+// block search writes the same files, so no output tells the two paths apart.)
+#[test]
+fn an_observer_without_hit_records_numbers_the_hsps_over_the_whole_search() {
+    let (query, subject) = block_inputs();
+    let (queries, subjects) = (queries(&query.0), subjects(&subject));
+    let formats = ["0", "6", "7"];
+    let call = |observe: bool| {
+        run_formats_with(&formats, observe, false, |outputs| {
+            let args = blastp_args(&query.0, &subject, &["-evalue", "0.001"]);
+            run_local_blastp(args, &queries, &subjects, "", "", outputs)
+        })
+    };
+    let (observed, plain) = (call(true), call(false));
+    assert!(observed.hits.is_empty());
+    let rows = assert_tabular_ranges(&observed, 1, Some(2), "observer without records");
+    assert!(rows > 0, "the fixture must produce hits");
+    let sections = &observed.ranges[0];
+    assert_eq!(sections.len(), rows, "outfmt 0 sections");
+    let mut end = 0;
+    for (expected, &(hsp, start, section_end)) in sections.iter().enumerate() {
+        assert_eq!(hsp, expected, "outfmt 0 sections in HSP index order");
+        assert!(start >= end, "section {hsp} in write order");
+        assert!(
+            observed.outputs[0][start..].starts_with(b" Score ="),
+            "section {hsp}"
+        );
+        end = section_end;
+    }
+    assert!(
+        observed.outputs == plain.outputs,
+        "the observer changes no output"
+    );
 }

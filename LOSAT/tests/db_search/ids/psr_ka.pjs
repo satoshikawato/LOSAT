@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_ka",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_ka (parsed Seq-ids)",
+  "number-of-letters": 750,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-08T21:52:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50402,
+  "bytes-to-cache": 882,
+  "files": [
+    "psr_ka.pdb",
+    "psr_ka.phr",
+    "psr_ka.pin",
+    "psr_ka.pog",
+    "psr_ka.pos",
+    "psr_ka.pot",
+    "psr_ka.psq",
+    "psr_ka.ptf",
+    "psr_ka.pto"
+  ]
+}

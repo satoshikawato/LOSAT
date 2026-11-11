@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_vm",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_vm (parsed Seq-ids)",
+  "number-of-letters": 750,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-08T23:06:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50389,
+  "bytes-to-cache": 882,
+  "files": [
+    "psr_vm.pdb",
+    "psr_vm.phr",
+    "psr_vm.pin",
+    "psr_vm.pog",
+    "psr_vm.pos",
+    "psr_vm.pot",
+    "psr_vm.psq",
+    "psr_vm.ptf",
+    "psr_vm.pto"
+  ]
+}

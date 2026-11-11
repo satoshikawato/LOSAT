@@ -1585,53 +1585,6 @@ pub(crate) fn refuse_joined_hits<'a>(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-320
-// ```c++
-//         if (evalue < m_Opts.inclusion_ethresh) {
-//             // Increment msa_index (if appropriate) after all CDense_seg for a
-//             // given target sequence have been processed.
-//             if (last_sid && !current_sid->Match(*last_sid)) {
-//                 msa_index++;
-//             }
-//             _ASSERT(msa_index < GetNumAlignedSequences() + 1);
-//             const CDense_seg& seg = (*itr)->GetSegs().GetDenseg();
-//             x_ProcessDenseg(seg, msa_index, evalue, bit_score);
-//         }
-//         last_sid = current_sid;
-// ```
-/// LOSAT's refusal of two parsed subjects that follow each other in the hit list of query
-/// `query` that psiblast's PSSM reads (the round's Seq-aligns before the formatter's cut), whose
-/// Seq-align ids match (`report::db_subject::joined_in_reports`, `CSeq_id::Match`), the later one
-/// with a Seq-align below `-inclusion_ethresh`, and that are not copies of one record: NCBI puts
-/// the later one's alignments in the earlier one's row of the PSSM's multiple alignment, whose
-/// rows it counts by the hit ids, which LOSAT's PSSM keeps apart (`psiblast::pssm::input_msa`;
-/// probe of line DBID weakbatch, `blastdb-ids-20261021/R/weakbatch/pssm/`). Copies of one record
-/// are left to the PSSM, which keeps them apart too (review 2 of line DBID weakbatch, H1: NCBI
-/// puts them in one row; line DBID's next item). `subjects` gives each HSP list of the hit list
-/// as `refuse_joined_hits` takes it, with whether it has a Seq-align below the threshold.
-pub(crate) fn refuse_pssm_joined_hits<'a>(
-    query: usize,
-    subjects: impl IntoIterator<
-        Item = (
-            Option<(u32, &'a crate::report::db_subject::ParsedSubject)>,
-            bool,
-        ),
-    >,
-    program: &str,
-) -> Result<()> {
-    let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
-    for (subject, included) in subjects {
-        if let Some((before, ordinal)) = joined_apart(previous, subject).filter(|_| included) {
-            return Err(anyhow::Error::new(ParsedRefusal(format!(
-                "database sequences {before} and {ordinal} follow each other in the hits of query {} that psiblast's PSSM reads and have Seq-align ids that NCBI BLAST+ takes for one sequence (it puts their alignments in one row of the PSSM's multiple alignment) but are not copies of one record; this is not supported by LOSAT's {program}",
-                query + 1
-            ))));
-        }
-        previous = subject;
-    }
-    Ok(())
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1025-1033
 // ```c++
 //         } else {
@@ -2557,36 +2510,6 @@ mod tests {
                     .unwrap()
             })
             .collect()
-    }
-
-    // Line DBID weakbatch: psiblast's PSSM puts following hits whose Seq-align ids match in one
-    // row (psi_pssm_input.cpp x_ExtractAlignmentData), where the later one is included.
-    #[test]
-    fn a_pssm_refuses_following_hits_whose_seq_align_ids_match() {
-        // tests/db_search/ids/pweak_v5: 7 `gb|FFF00043|`, 8 `gb|FFF00043.1|`, 4 `gb|FFF00041.1|`.
-        let s = parsed_subjects("pweak_v5");
-        let run = |hits: &[(Option<u32>, bool)]| {
-            refuse_pssm_joined_hits(
-                0,
-                hits.iter()
-                    .map(|&(ordinal, included)| (ordinal.map(|o| (o, &s[o as usize])), included)),
-                "PSIBLAST",
-            )
-        };
-        let error = run(&[(Some(8), true), (Some(7), true)])
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("database sequences 8 and 7 follow each other"),
-            "{error}"
-        );
-        assert!(run(&[(Some(7), true), (Some(8), true)]).is_err());
-        // The later one below no threshold: NCBI leaves it out of the PSSM.
-        assert!(run(&[(Some(8), true), (Some(7), false)]).is_ok());
-        // Another hit between them, a sequence without parsed Seq-ids, or ids that do not match.
-        assert!(run(&[(Some(8), true), (Some(4), true), (Some(7), true)]).is_ok());
-        assert!(run(&[(Some(8), true), (None, true), (Some(7), true)]).is_ok());
-        assert!(run(&[(Some(8), true), (Some(4), true)]).is_ok());
     }
 
     // Line DBID N3 review 1 M1: the joined copies' letters are the same because `copy_of` reads

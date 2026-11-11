@@ -16,7 +16,8 @@ use crate::run::Program;
 /// `-outfmt` of its own, whose other formats and 6 or 7 with fields add an output,
 /// `run::parse_run`) and the thread count, and the
 /// options of NCBI's command line that the application has no control for (`-mt_mode`,
-/// which needs `-num_threads` and has no effect; `-use_index`, whose only value is false;
+/// which needs `-num_threads` and has no effect; `-use_index`, which a search of records ignores
+/// as NCBI ignores it with `-subject`;
 /// `-parse_deflines`, since a record is read before the options of a run are known).
 /// `-num_descriptions` and `-num_alignments` are described: a run searches once for each
 /// distinct hit list size of its formats (`run::search_groups`).

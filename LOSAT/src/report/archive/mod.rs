@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::report::diag_log::{DiagLog, Message, ERROR};
+use crate::report::diag_log::{DiagLog, Message, ERROR, WARNING};
 use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
@@ -347,6 +347,22 @@ impl ArchiveHandle {
     /// Saves a message (the error lines of an aborted run).
     pub fn post(&self, severity: i32, line: &[u8]) {
         self.with_state(|state| state.log.post(severity, line));
+    }
+
+    /// Writes `text`, one warning whose text has several lines (an `ERR_POST` of an
+    /// exception's `what()`), to `diagnostics`, and saves it as one message, as NCBI's handler
+    /// saves one `SDiagMessage` (`diag_log`); the diagnostics stream (`DiagTee`) would save
+    /// each line. Nothing is saved while the handle is muted.
+    pub fn write_warning(&self, diagnostics: &mut dyn Write, text: &[u8]) -> std::io::Result<()> {
+        let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
+        let written = diagnostics.write_all(text);
+        self.with_state(|state| {
+            state.muted = muted;
+            if !muted {
+                state.log.post(WARNING, text);
+            }
+        });
+        written
     }
 
     /// Whether messages are saved since the last archive.

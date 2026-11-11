@@ -14,6 +14,7 @@ use super::mdb::{
 };
 use super::platform::LmdbPlatform;
 use super::WriteDbError;
+use crate::ncbi_str::{string_to_int, string_to_uint, string_to_uint8};
 use crate::seqid::{label, ParsedSeqId};
 
 // The default map sizes (`DEFAULT_LMDB_MAP_SIZE`, `DEFAULT_TAXID_MAP_SIZE`) depend on the
@@ -46,17 +47,24 @@ const TAXID2OFFSET_STR: &str = "taxid2offset";
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LmdbEnvSettings {
     /// `MAX_LMDB_TXN_ENTRY` (both writers' constructors).
-    pub max_lmdb_txn_entry: Option<String>,
+    pub max_lmdb_txn_entry: Option<Vec<u8>>,
     /// `LMDB_MIN_SPLIT_SIZE` (`CWriteDB_LMDB::x_CommitTransaction`).
-    pub lmdb_min_split_size: Option<String>,
+    pub lmdb_min_split_size: Option<Vec<u8>>,
     /// `LMDB_SPLIT_CHUNK_SIZE` (`CWriteDB_LMDB::x_CommitTransaction`).
-    pub lmdb_split_chunk_size: Option<String>,
+    pub lmdb_split_chunk_size: Option<Vec<u8>>,
+}
+
+/// The bytes of the environment variable `name`, as `getenv` gives them to NCBI: those of Unix
+/// and WASI; on Windows the variable's WTF-8 form (its ASCII is the same; NCBI's `getenv` gives
+/// the ANSI code page's bytes), as LOSAT reads the other variables NCBI reads.
+fn getenv(name: &str) -> Option<Vec<u8>> {
+    std::env::var_os(name).map(|v| v.as_encoded_bytes().to_vec())
 }
 
 impl LmdbEnvSettings {
     /// The variables of this process's environment.
     pub(crate) fn from_env() -> Self {
-        let get = |name: &str| std::env::var_os(name).map(|v| v.to_string_lossy().into_owned());
+        let get = getenv;
         LmdbEnvSettings {
             max_lmdb_txn_entry: get("MAX_LMDB_TXN_ENTRY"),
             lmdb_min_split_size: get("LMDB_MIN_SPLIT_SIZE"),
@@ -79,94 +87,10 @@ impl LmdbEnvSettings {
 /// `BLASTDB_LMDB_MAP_SIZE` as `CWriteDB_Impl::x_Publish` reads it: 0 when unset (the
 /// writers then take their default map sizes).
 pub(crate) fn lmdb_map_size_from_env() -> Result<u64, WriteDbError> {
-    match std::env::var_os("BLASTDB_LMDB_MAP_SIZE") {
+    match getenv("BLASTDB_LMDB_MAP_SIZE") {
         None => Ok(0),
-        Some(v) => string_to_uint8(&v.to_string_lossy()).map_err(WriteDbError::Other),
+        Some(v) => string_to_uint8(&v).map_err(WriteDbError::Exception),
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-874 (NStr::StringToInt8, flags 0,
-// base 10)
-// ```c++
-//     // Determine sign
-//     bool sign = false;
-//     switch (str[pos]) {
-//     case '-':
-//         sign = true;
-//         /*FALLTHRU*/
-//     case '+':
-//         pos++;
-//         break;
-//     ...
-//     while (char ch = str[pos]) {
-//         ...
-//         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
-//             break;
-//         }
-//         // Overflow check
-//         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
-//             S2N_CONVERT_ERROR_OVERFLOW(Int8);
-//         }
-//         n *= base;
-//         n += delta;
-//         pos++;
-//     }
-//     // Last checks
-//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-//         S2N_CONVERT_ERROR_INVAL(Int8);
-//     }
-//     ...
-//     n = sign ? -n : n;
-//     CHECK_ENDPTR(Int8);
-// ```
-// StringToUInt8 (876-985) takes no '-'; StringToInt and StringToUInt (635-660) convert with
-// the 8-byte functions and fail with ", overflow" outside int / unsigned int.
-fn parse_digits(s: &str, allow_minus: bool, ty: &str) -> Result<(bool, u128), String> {
-    let invalid = || format!("Cannot convert string '{s}' to {ty}");
-    let b = s.as_bytes();
-    let mut pos = 0;
-    let mut neg = false;
-    if pos < b.len() && (b[pos] == b'+' || (allow_minus && b[pos] == b'-')) {
-        neg = b[pos] == b'-';
-        pos += 1;
-    }
-    let start = pos;
-    let mut n: u128 = 0;
-    while pos < b.len() && b[pos].is_ascii_digit() {
-        n = n * 10 + (b[pos] - b'0') as u128;
-        if n > u64::MAX as u128 + 1 {
-            return Err(format!("{}, overflow", invalid()));
-        }
-        pos += 1;
-    }
-    if pos == start || pos != b.len() {
-        return Err(invalid());
-    }
-    Ok((neg, n))
-}
-
-fn string_to_int8(s: &str) -> Result<i64, String> {
-    let (neg, n) = parse_digits(s, true, "Int8")?;
-    let v: i128 = if neg { -(n as i128) } else { n as i128 };
-    if v < i64::MIN as i128 || v > i64::MAX as i128 {
-        return Err(format!("Cannot convert string '{s}' to Int8, overflow"));
-    }
-    Ok(v as i64)
-}
-
-fn string_to_int(s: &str) -> Result<i32, String> {
-    let v = string_to_int8(s)?;
-    i32::try_from(v).map_err(|_| format!("Cannot convert string '{s}' to int, overflow"))
-}
-
-fn string_to_uint8(s: &str) -> Result<u64, String> {
-    let (_, n) = parse_digits(s, false, "Uint8")?;
-    u64::try_from(n).map_err(|_| format!("Cannot convert string '{s}' to Uint8, overflow"))
-}
-
-fn string_to_uint(s: &str) -> Result<u32, String> {
-    let v = string_to_uint8(s)?;
-    u32::try_from(v).map_err(|_| format!("Cannot convert string '{s}' to unsigned int, overflow"))
 }
 
 /// `m_MaxEntryPerTxn` from `MAX_LMDB_TXN_ENTRY`.
@@ -182,9 +106,58 @@ fn string_to_uint(s: &str) -> Result<u32, String> {
 fn max_entry_per_txn(settings: &LmdbEnvSettings) -> Result<u32, WriteDbError> {
     match &settings.max_lmdb_txn_entry {
         None => Ok(DEFAULT_MAX_ENTRY_PER_TXN),
-        Some(v) => string_to_int(v)
+        Some(v) => string_to_int(v, 0)
             .map(|n| n as u32)
-            .map_err(WriteDbError::Other),
+            .map_err(WriteDbError::Exception),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:103-110
+// ```c++
+//         try {
+//             m_Env.open(m_Filename.c_str(), MDB_NOSUBDIR , 0664);
+//         }
+//         catch (lmdb::error& e) {
+//             NCBI_THROW(CSeqDBException, eFileErr, "LMDB runtime error: " + (string)e.what());
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:356-365
+// ```c++
+// static inline void
+// lmdb::env_open(MDB_env* const env,
+//                const char* const path,
+//                const unsigned int flags,
+//                const mode mode) {
+//   const int rc = ::mdb_env_open(env, path, flags, mode);
+//   if (rc != MDB_SUCCESS) {
+//     error::raise("mdb_env_open", rc);
+//   }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:130-139
+// ```c++
+//   virtual const char* what() const LMDB_NOEXCEPT {
+//   ...
+// 	 LMDB_SNPRINTF(buffer, sizeof(buffer),
+// 		"%s: %s", origin(), ::mdb_strerror(code()));
+// ```
+// Every failure of `mdb_env_open` (the lock file or the data file that cannot be created, the
+// map) is this `CSeqDBException`. makeblastdb 2.17.0 with an output name of 247 to 251 bytes:
+// `BLAST Database error: LMDB runtime error: mdb_env_open: File name too long` (exit status 2)
+// from the second sequence, the creation error of it (exit status 1) with one, no file left.
+/// The error of an LMDB environment that does not open (`Env::create`).
+fn env_open_error(e: LmdbError) -> WriteDbError {
+    let code = match &e {
+        LmdbError::Mdb { code, .. } => Some(*code),
+        LmdbError::Io { source, .. } => source.raw_os_error(),
+        LmdbError::Unreachable(_) => None,
+    };
+    match code {
+        Some(code) => WriteDbError::Database(format!(
+            "LMDB runtime error: mdb_env_open: {}",
+            LmdbError::strerror(code)
+        )),
+        None => lmdb_error(e),
     }
 }
 
@@ -473,7 +446,7 @@ impl WriteDbLmdb {
         platform: &LmdbPlatform,
         settings: &LmdbEnvSettings,
     ) -> Result<Self, WriteDbError> {
-        let env = Env::create(dbname, map_size, platform).map_err(lmdb_error)?;
+        let env = Env::create(dbname, map_size, platform).map_err(env_open_error)?;
         let max_entry_per_txn = max_entry_per_txn(settings)?;
         Ok(WriteDbLmdb {
             db: dbname.to_path_buf(),
@@ -892,7 +865,10 @@ impl WriteDbLmdb {
     // sort gives the order `std::sort` gives (`cmp_key` orders by id, then by the bytes of the
     // OID; ties are equal in both), but with a chunk size of 0 or 1 `x_Split` recurses without
     // end (a range of one element is split into itself): LOSAT refuses those settings where
-    // NCBI takes that path.
+    // NCBI takes that path. A value `StringToUInt` cannot convert throws in `~CWriteDB_LMDB`,
+    // which makeblastdb 2.17.0 does not survive (`std::terminate`, SIGABRT, after the volumes
+    // are written); LOSAT's close makes the exception a creation error, as `EndBuild` does for
+    // an exception of `Close` (`build_db::BuildDatabase::end_build`).
     fn commit_transaction(&mut self) -> Result<(), WriteDbError> {
         if self.list.is_empty() {
             return Ok(());
@@ -900,10 +876,10 @@ impl WriteDbLmdb {
         let mut min_split_size = DEFAULT_MIN_SPLIT_SORT_SIZE;
         let mut chunk_size = DEFAULT_MIN_SPLIT_CHUNK_SIZE;
         if let Some(v) = &self.settings.lmdb_split_chunk_size {
-            chunk_size = string_to_uint(v).map_err(WriteDbError::Other)?;
+            chunk_size = string_to_uint(v).map_err(WriteDbError::Exception)?;
         }
         if let Some(v) = &self.settings.lmdb_min_split_size {
-            min_split_size = string_to_uint(v).map_err(WriteDbError::Other)?;
+            min_split_size = string_to_uint(v).map_err(WriteDbError::Exception)?;
         }
         let n = self.list.len();
         let split = !(n < min_split_size as usize || n < chunk_size.wrapping_mul(2) as usize);
@@ -1170,7 +1146,7 @@ impl WriteDbTaxId {
         platform: &LmdbPlatform,
         settings: &LmdbEnvSettings,
     ) -> Result<Self, WriteDbError> {
-        let env = Env::create(dbname, map_size, platform).map_err(lmdb_error)?;
+        let env = Env::create(dbname, map_size, platform).map_err(env_open_error)?;
         let max_entry_per_txn = max_entry_per_txn(settings)?;
         Ok(WriteDbTaxId {
             db: dbname.to_path_buf(),

@@ -91,6 +91,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.window_size = args.window_size;
     inputs.no_greedy = args.no_greedy;
+    inputs.mb_index_name = args.megablast_index_name().map(str::to_string);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)

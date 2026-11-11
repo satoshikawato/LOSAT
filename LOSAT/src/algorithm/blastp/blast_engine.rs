@@ -6123,6 +6123,23 @@ fn resolve_for_formats(
 ///         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
 ///         	exit_code = BLAST_DATABASE_ERROR;                               \
 /// ```
+/// A database whose sequence file cannot be opened fails the first read of the preliminary
+/// search of a valid query in the same way: psiblast's `CBlastPrelimSearch` runs without
+/// `CLocalBlast`, whose catch makes it `Database memory map file error` for blastp
+/// (local_blast.cpp:229-252, quoted at `seqdb::SeqDbError`), so the reader's own text reaches
+/// the application (`BLAST Database error: Error: File (<path>.psq) not found.`, exit 2, after
+/// the prolog; NCBI 2.17.0, probe `y.g.ps.tk.nopsq.0` of the PS5c review; line PS DECISIONS 31).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
+/// ```c++
+///     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
+///         //m_Atlas.Unlock(locked);
+///
+///         string msg = string("Error: File (") + m_FileName + ") not found.";
+///
+///         NCBI_THROW(CSeqDBException, eFileErr, msg);
+///     }
+/// ```
 fn psiblast_stop_at_invalid_query(
     args: &ResolvedBlastpArgs,
     searched_queries: &[FastaRecord],
@@ -6151,7 +6168,21 @@ fn psiblast_stop_at_invalid_query(
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
-    let first_stop = if empty_database {
+    // A sequence file that cannot be opened stops the first batch when its query is valid (the
+    // first read of the preliminary search; volumes in the order NCBI reads them).
+    let unreadable = match (database, contexts.first()) {
+        (Some(database), Some(context))
+            if !empty_database && context.is_valid && kbp_psi_valid(context) =>
+        {
+            database
+                .seqdb()
+                .volumes()
+                .iter()
+                .find_map(|volume| volume.open_sequence_file().err())
+        }
+        _ => None,
+    };
+    let first_stop = if empty_database || unreadable.is_some() {
         Some(0)
     } else {
         contexts
@@ -6169,6 +6200,10 @@ fn psiblast_stop_at_invalid_query(
             message: "BLAST Database error: OID not found\n".to_string(),
         }
         .into(),
+        _ if unreadable.is_some() => crate::algorithm::common::database::database_error(
+            unreadable.expect("the sequence file's error"),
+            args.app.name(),
+        ),
         // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`

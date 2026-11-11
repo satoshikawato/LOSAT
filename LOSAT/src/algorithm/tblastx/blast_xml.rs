@@ -53,8 +53,8 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    filter, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    XmlSubjects, REFERENCE_GAPPED_BLAST,
+    filter, written_queries, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery,
+    XmlRun, XmlStats, XmlSubjects, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{QueryWarnings, EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
@@ -128,7 +128,7 @@ fn query_messages(query: &FastaRecord, searched: bool, filtered_empty: bool) -> 
 /// ```
 /// The search keeps that context's block, search space and length, not its length adjustment: it
 /// is computed again here with the search's own function (`try_compute_eff_lengths_tblastx`,
-/// the call of `search_query_batch` with the same subject set), and the search space it gives
+/// the call of `context_cutoffs` with the same subject set), and the search space it gives
 /// must be the kept one.
 pub(crate) fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlStats {
     let Some(karlin) = &stats.karlin else {
@@ -182,6 +182,7 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
 pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     document: &mut W,
     all_masks: bool,
+    only_xml2: bool,
     writer: &mut dyn Write,
     hits: &[TblastxHsp],
     run: &TblastxReportRun<'_>,
@@ -263,8 +264,17 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     }
     debug_assert_eq!(next, hits.len(), "the final list is in query order");
     // The definition line and message of every query, and the names of the subjects with
-    // hits, made (and refused) before the first byte.
-    let texts = queries
+    // hits, made (and refused) before the first byte, for the reports that the document writes:
+    // a run that stops (the one report call without the epilog: the XML formats are not streamed,
+    // `report_stream`) never writes the `-subject` report of its last query, which NCBI holds
+    // back, unless another format of the call (outfmt 5) writes it (`written_queries`; `only_xml2`:
+    // every structured format of the call is XML2 or JSON).
+    let reports = written_queries(
+        queries.len(),
+        !run.epilog,
+        only_xml2 && document.holds_back(),
+    );
+    let texts = queries[..reports]
         .iter()
         .enumerate()
         .map(|(q_idx, query)| {
@@ -300,7 +310,10 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     };
     let mut cache = SubjectNameCache::new(&subjects);
     let mut last_subject = None;
-    for hsp in hits {
+    let written_hits = query_hits
+        .get(reports)
+        .map_or(hits.len(), |range| range.start);
+    for hsp in &hits[..written_hits] {
         if last_subject != Some(hsp.hit.s_idx) {
             last_subject = Some(hsp.hit.s_idx);
             cache.get(hsp.hit.s_idx as usize, PROGRAM)?;
@@ -317,6 +330,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
+        }
+        if q_idx == reports {
+            // The held report that is never written (`written_queries`).
+            document.unwritten(&mut buf)?;
+            writer.write_all(&buf)?;
+            buf.clear();
+            break;
         }
         let text = &texts[q_idx];
         let searched_length = query.seq().len();

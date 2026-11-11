@@ -1,44 +1,10 @@
 //! NCBI's exception reports for the errors of the counts files, as blastn prints them: the
-//! `NCBI C++ Exception:` text of `CException::what()` with one `T0` line per exception of the
-//! chain.
-//!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:370-384
-//! ```c
-//! string CException::ReportAll(TDiagPostFlags flags) const
-//! {
-//!     // invert the order
-//!     stack<const CException*> pile;
-//!     const CException* pex;
-//!     for (pex = this; pex; pex = pex->GetPredecessor()) {
-//!         pile.push(pex);
-//!     }
-//!     CNcbiOstrstream os;
-//!     os << "NCBI C++ Exception:" << '\n';
-//!     for (; !pile.empty(); pile.pop()) {
-//!         //indentation
-//!         os << "    ";
-//!         os << pile.top()->ReportThis(flags) << '\n';
-//!     }
-//! ```
-//! A line is `T0 "<file>", line <n>: Error: (<class>::<error code>) <function>() - <message>`
-//! (`CException::ReportStd`); the file is the path of the source file in NCBI's build tree.
+//! exceptions of the readers and of `CSeqMaskerIstatFactory`, whose `what()`
+//! ([`NcbiException::what`]) is the `NCBI C++ Exception:` text with one `T0` line per exception
+//! of the chain.
 
 use super::WinMaskError;
-
-/// The build tree that NCBI's reports name: that of the official Linux x64 release of BLAST+
-/// 2.17.0 (`ncbi-blast-2.17.0+-x64-linux.tar.gz`). Other builds of 2.17.0 name their own tree
-/// and print the same text around it (line NP, M/DECISIONS.md 14).
-pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
-
-/// One `T0` line of the report of an exception thrown in `src/algo/winmask/<file>`.
-fn throw_line(file: &str, line: u32, code: &str, function: Option<&str>, message: &str) -> String {
-    let function = function
-        .map(|name| format!("{name}() - "))
-        .unwrap_or_default();
-    format!(
-        "    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/{file}\", line {line}: Error: (Exception::{code}) {function}{message}\n"
-    )
-}
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:165-172
 /// ```c
@@ -51,14 +17,14 @@ fn throw_line(file: &str, line: u32, code: &str, function: Option<&str>, message
 ///         NCBI_THROW( Exception, eOpen, string( "could not open " ) + name );
 ///     }
 /// ```
-fn open_line(name: &str) -> String {
-    throw_line(
-        "seq_masker_istat_factory.cpp",
-        171,
-        "open failed",
-        Some("ncbi::CSeqMaskerIstatFactory::DiscoverStatType"),
-        &format!("could not open {name}"),
-    )
+fn open_exception(name: &str) -> NcbiException {
+    const OPEN: ThrowSite = ThrowSite {
+        file: "src/algo/winmask/seq_masker_istat_factory.cpp",
+        line: 171,
+        kind: "Exception::open failed",
+        function: Some("ncbi::CSeqMaskerIstatFactory::DiscoverStatType"),
+    };
+    NcbiException::new(OPEN, format!("could not open {name}"))
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:355-366
@@ -75,24 +41,28 @@ fn open_line(name: &str) -> String {
 ///                     e.what() );
 ///     }
 /// ```
-fn create_line(line: u32, message: &str) -> String {
-    throw_line(
-        "seq_masker_istat_factory.cpp",
+const fn create_site(line: u32) -> ThrowSite {
+    ThrowSite {
+        file: "src/algo/winmask/seq_masker_istat_factory.cpp",
         line,
-        "creation failure",
-        Some("ncbi::CSeqMaskerIstatFactory::create"),
-        message,
-    )
+        kind: "Exception::creation failure",
+        function: Some("ncbi::CSeqMaskerIstatFactory::create"),
+    }
 }
 
 const CREATE_FAIL: &str = "could not create a unit counts container";
+
+/// The factory's rethrow of the exception of a reader (line 358).
+fn rethrown(e: NcbiException) -> NcbiException {
+    e.rethrow(create_site(358), CREATE_FAIL)
+}
 
 impl WinMaskError {
     /// The report (`what()`) of the exception of `DiscoverStatType` when it cannot open the
     /// file; `None` for the other errors (which `DiscoverStatType` does not throw).
     pub fn discover_report(&self) -> Option<String> {
         match self {
-            Self::Open { name } => Some(format!("NCBI C++ Exception:\n{}", open_line(name))),
+            Self::Open { name } => Some(open_exception(name).what()),
             _ => None,
         }
     }
@@ -110,25 +80,16 @@ impl WinMaskError {
     /// 			default: NCBI_THROW(Exception, eCreateFail, "unrecognized unit counts format");
     /// ```
     pub fn create_report(&self) -> Option<String> {
-        let lines = match self {
-            Self::Open { name } => format!("{}{}", open_line(name), create_line(358, CREATE_FAIL)),
+        let exception = match self {
+            Self::Open { name } => rethrown(open_exception(name)),
             Self::Format { site, .. } => {
-                let (file, line, code, function) = site.throw_site();
-                format!(
-                    "{}{}",
-                    throw_line(file, line, code, function, site.message()),
-                    create_line(358, CREATE_FAIL)
-                )
+                rethrown(NcbiException::new(site.throw_site(), site.message()))
             }
             Self::CreateFail { message } if message.starts_with(CREATE_FAIL) => {
-                create_line(363, message)
+                NcbiException::new(create_site(363), message.as_str())
             }
             Self::CreateFail { message } => {
-                format!(
-                    "{}{}",
-                    create_line(340, message),
-                    create_line(358, CREATE_FAIL)
-                )
+                rethrown(NcbiException::new(create_site(340), message.as_str()))
             }
             Self::UnsupportedFormat(_)
             | Self::WindowSize { .. }
@@ -136,7 +97,7 @@ impl WinMaskError {
             | Self::SequenceTooLong { .. }
             | Self::BadIndex { .. } => return None,
         };
-        Some(format!("NCBI C++ Exception:\n{lines}"))
+        Some(exception.what())
     }
 
     /// The warnings that NCBI posts while it reads the file, before the error.
@@ -151,6 +112,7 @@ impl WinMaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ncbi_exception::NCBI_BUILD_ROOT;
     use crate::utils::winmask::FormatSite;
 
     // The texts of NCBI BLAST+ 2.17.0 (the official Linux x64 release) blastn

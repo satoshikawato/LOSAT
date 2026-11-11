@@ -28,6 +28,7 @@ pub mod build_db;
 pub mod convert;
 pub mod data_size;
 pub mod deflines;
+pub(crate) mod dir_entry;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
@@ -51,6 +52,8 @@ mod tests;
 
 use std::path::PathBuf;
 
+use crate::ncbi_exception::NcbiException;
+
 pub use platform::Platform;
 
 /// Error of the database writer.
@@ -65,8 +68,18 @@ pub enum WriteDbError {
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
-    /// Another NCBI exception that ends makeblastdb: the text it prints after
-    /// "Error: ".
+    /// An exception of NCBI's C++ Toolkit that makeblastdb reports through the `CException`
+    /// clause of its general handler: "Error: " and the exception's report
+    /// (`CException::what()`), exit status 255.
+    Exception(NcbiException),
+    /// NCBI's `CSeqDBException` (the LMDB environment that could not be opened, `CBlastEnv`):
+    /// the text makeblastdb prints after "BLAST Database error: ", exit status 2. At the close
+    /// it is a creation error, as `EndBuild` makes every exception of `Close`.
+    Database(String),
+    /// LOSAT's own refusals (an input on which makeblastdb crashes, does not end or cannot be
+    /// followed), printed after "Error: " with exit status 255, and the errors of the LMDB
+    /// layer after its environment is open (`lmdb::error`, NCBI's `CSeqDBException` texts of
+    /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors.
     Other(String),
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".
@@ -119,6 +132,10 @@ impl std::fmt::Display for WriteDbError {
                 String::from_utf8_lossy(message)
             ),
             WriteDbError::Options(message) => write!(f, "BLAST options error: {message}"),
+            WriteDbError::Database(message) => write!(f, "BLAST Database error: {message}"),
+            // `what()` ends with a line feed and the message gets one more: the report ends
+            // with an empty line.
+            WriteDbError::Exception(e) => write!(f, "Error: {}", e.what()),
             WriteDbError::Other(message) => write!(f, "Error: {message}"),
             WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),
             WriteDbError::Io { path, source } => {

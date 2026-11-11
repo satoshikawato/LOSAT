@@ -267,6 +267,22 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
 //      virtual bool Verify(const string& value) const {
 //          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
 // ```
+/// The error of a query batch with a `-matrix` that NCBI's tables do not have
+/// (`ResolvedOptions::unknown_matrix`): NCBI's (`unknown_matrix_message`), or LOSAT's refusal when
+/// NCBI reads a file for the name (`ResolvedOptions::matrix_file`): NCBI 2.17.0 reads it where it
+/// sets up the batch, and aborts after a matrix or fails on another file (`matrix_file_refusal`).
+/// A run without a batch reads no file.
+pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOptions) -> String {
+    match &options.matrix_file {
+        Some(file) => crate::blastinput::ncbi_environment::matrix_file_refusal(
+            &options.matrix,
+            file,
+            "BLASTX",
+        ),
+        None => unknown_matrix_message(records),
+    }
+}
+
 /// NCBI's error of a query batch whose score block cannot load the `-matrix` of an ungapped search
 /// (a name its matrix loader does not know, `args.rs` `unknown_matrix`): the message of each query
 /// of the batch, a query without letters with its own after it.
@@ -426,7 +442,7 @@ pub(crate) fn prepare_unit_queries(
         };
         anyhow::bail!(
             "{}",
-            message.unwrap_or_else(|| unknown_matrix_message(records))
+            message.unwrap_or_else(|| matrix_error_message(records, options))
         );
     }
     let nomask = buffer.clone();

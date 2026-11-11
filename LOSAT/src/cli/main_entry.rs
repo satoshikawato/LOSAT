@@ -139,14 +139,16 @@ pub fn main_entry() -> Result<()> {
     //         CDiagContext::SetupDiag(diag, 0, eDCM_NoChange, m_LogFile);
     // ```
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
-    // (`ncbi_environment::log_file`), opened before `-version`; of LOSAT's programs here only
-    // makeblastdb takes it (the search programs refuse it as they read their arguments).
+    // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
+    // makes F, with the usage report's messages. Of LOSAT's programs here only makeblastdb runs
+    // with it; the search programs refuse it as they read their arguments (decision D9), after
+    // the file is made, as NCBI makes it.
     let mut target = match program {
-        Some("makeblastdb") => {
+        Some(_) => {
             use crate::blastinput::ncbi_environment::{diag_target, log_file};
             diag_target(log_file(&argv[2..]))
         }
-        _ => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+        None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
     if let Some(start) = start {
         start.write_log_setup(&mut target);

@@ -537,5 +537,20 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
     assert!(version.stderr.is_empty());
     assert!(log.is_file());
     assert_eq!(logged(), "");
+    // A search program answers `-version` after the file is made too (NCBI 2.17.0 `blastn
+    // -version -logfile log.txt`: the file is made, with the usage report's message when
+    // `.ncbirc` is malformed); LOSAT refuses `-logfile` only when it reads the arguments.
+    fs::remove_file(&log).unwrap();
+    fs::write(dir.join(NCBIRC), "garbage\n").unwrap();
+    let version = run_in(
+        losat,
+        &["blastn", "-version", "-logfile", "log.txt"],
+        &dir,
+        &[],
+        b"",
+    );
+    assert_eq!(text(&version.stderr), critical(1));
+    assert!(text(&version.stdout).starts_with("blastn: 2.17.0+\n"));
+    assert_eq!(logged(), critical(1));
     let _ = fs::remove_dir_all(&dir);
 }

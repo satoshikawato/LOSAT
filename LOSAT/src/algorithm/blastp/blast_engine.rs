@@ -7709,7 +7709,7 @@ struct BlastpReports<'a> {
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
 /// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`), `OLD_FSC` in PSIBLAST and RPSBLAST (BLASTP reads it) and query split
+/// archive (`archive`), `OLD_FSC` in RPSBLAST (BLASTP and PSIBLAST read it) and query split
 /// values that NCBI cannot convert. Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
@@ -7724,8 +7724,8 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
         fasta_subjects,
         archive && app == BlastpApp::Blastp,
     )?;
-    // BLASTP reads OLD_FSC as `-searchsp` (`ResolvedBlastpArgs::old_fsc`).
-    if app != BlastpApp::Blastp {
+    // BLASTP and PSIBLAST read OLD_FSC as `-searchsp 0` (`ResolvedBlastpArgs::old_fsc`).
+    if app == BlastpApp::Rpsblast {
         app::check_old_fsc(app_name)?;
     }
     app::check_query_split_environment(app_name, false)??;
@@ -8910,15 +8910,37 @@ fn run_resolved_in_pool(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
-    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
-    // length is too short"; LOSAT refuses the search instead.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+    // ```c
+    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+    //         new_msg->message = strdup("The average subject length is too short");
+    //         new_msg->severity = eBlastSevFatal;
+    // ```
+    // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
+    // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
+    // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). A first batch
+    // of invalid queries only, which NCBI does not search, would put the error after a later
+    // batch's report: that is refused.
     if args.old_fsc
         && contexts.iter().any(|ctx| ctx.is_valid)
         && total_db_len / num_subjects.max(1) == 0
     {
-        anyhow::bail!(
-            "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTP"
-        );
+        if !(chunk_prelim.is_some() || query_batch_skipped.first() == Some(&false)) {
+            anyhow::bail!(
+                "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter, after a first query batch that NCBI BLAST+ does not search, is not supported by LOSAT's {}",
+                args.app.name()
+            );
+        }
+        return Err(preliminary_search_error(
+            &args,
+            subject_source,
+            subject_label,
+            outputs,
+            reports,
+            true,
+            "",
+            "The average subject length is too short",
+        ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-945
     // ```c
@@ -10522,6 +10544,7 @@ fn run_resolved_in_pool(
                 contexts: &contexts,
                 gapped_params: &gapped_params,
                 gumbel: gapped_gumbel.as_ref(),
+                exact_search_spaces: &exact_search_spaces,
                 cutoff_subject_length,
                 prelim_evalue,
                 window,
@@ -10900,6 +10923,7 @@ fn run_resolved_in_pool(
             subjects,
             &gapped_params,
             gapped_gumbel.as_ref(),
+            &exact_search_spaces,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,

@@ -32,6 +32,7 @@ use crate::algorithm::blastp::encoding::EncodedProtein;
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
+use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::lookup::build_pssm_lookup;
 use crate::algorithm::pssm_search::prelim::{PssmPrelim, PssmSubjectScratch};
 use crate::algorithm::pssm_search::redo1;
@@ -47,7 +48,7 @@ use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
-use crate::stats::{blast_spouge_etos, BlastGumbelBlk, KarlinParams};
+use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 /// The lookup table of the PSSM and the query's contexts (with `kbp_std`, the query's
 /// composition with BLOSUM62, and its validity).
@@ -88,12 +89,37 @@ pub(super) struct PsiKarlin {
     pub(super) gapped: KarlinParams,
 }
 
-/// The Gumbel block of a PSSM search (`sbp->gbp`), which the e-values and the hit-saving cutoff
-/// read (Spouge's finite-size correction). blastp's search has none only with `-searchsp`, which
-/// LOSAT's psiblast does not take (its parser refuses it, and `PsiblastArgs` sets
-/// `BlastpArgs::searchsp` to `None`), so a PSSM search always has one.
-fn psi_gumbel(gumbel: Option<&BlastGumbelBlk>) -> &BlastGumbelBlk {
-    gumbel.expect("a psiblast search has a Gumbel block (LOSAT's psiblast takes no -searchsp)")
+/// What the e-values and the hit-saving cutoff of a PSSM search read (`EvalueStats`): the Gumbel
+/// block (`sbp->gbp`, Spouge's finite-size correction), and without it (`-searchsp`, `OLD_FSC`:
+/// `ResolvedBlastpArgs::old_fsc`) the effective search space of the query's one context,
+/// `exact_search_spaces[0]`, which `run_resolved_in_pool` computed for blastp.
+///
+/// Called for a valid context only (`pssm_prelim`, `pssm_traceback`): without the Gumbel block
+/// the space is then exact (`exact_search_space` holds with `old_fsc`), and its one `None`, a
+/// subject set without letters, has been NCBI's engine error before the search ("The average
+/// subject length is too short").
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1885-1889
+/// ```c
+///           /* Get effective search space from the query information block */
+///           hsp->evalue =
+///               BLAST_KarlinStoE_simple(score, kbp[kbp_context],
+///                                query_info->contexts[hsp->context].eff_searchsp);
+/// ```
+fn psi_stats<'a>(
+    gumbel: Option<&'a BlastGumbelBlk>,
+    exact_search_spaces: &[Option<i64>],
+) -> EvalueStats<'a> {
+    match gumbel {
+        // Nothing of a psiblast search reads the space with the block (`-use_sw_tback` is
+        // refused), and a `-subject` search has no exact one then.
+        Some(gumbel) => EvalueStats::spouge(gumbel),
+        None => EvalueStats::new(
+            None,
+            exact_search_spaces[0]
+                .expect("a valid context's search space without the Gumbel block is exact"),
+        ),
+    }
 }
 
 /// `kbp_psi[0]` from the query's `kbp_std[0]` and `kbp_gap_psi[0]` from `kbp_gap_std[0]` (the
@@ -119,8 +145,10 @@ thread_local! {
 pub(super) struct PssmPrelimRun<'a> {
     pub(super) contexts: &'a [QueryContext],
     pub(super) gapped_params: &'a KarlinParams,
-    /// `sbp->gbp` (`psi_gumbel`).
+    /// `sbp->gbp` (`psi_stats`).
     pub(super) gumbel: Option<&'a BlastGumbelBlk>,
+    /// Each context's effective search space where it is exact (`psi_stats`).
+    pub(super) exact_search_spaces: &'a [Option<i64>],
     pub(super) cutoff_subject_length: i32,
     pub(super) prelim_evalue: f64,
     pub(super) window: i32,
@@ -213,11 +241,12 @@ pub(super) fn pssm_prelim(
     }
     let karlin = psi_karlin(psi, run.contexts, run.gapped_params);
     let x_dropoff = x_drop_raw_score(X_DROP_UNGAPPED_BITS, &karlin.ungapped, 1.0);
-    let gumbel = psi_gumbel(run.gumbel);
-    let hit_cutoff = blast_spouge_etos(
+    let stats = psi_stats(run.gumbel, run.exact_search_spaces);
+    // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_resolved_in_pool`,
+    // blast_parameters.c:931-939).
+    let hit_cutoff = stats.hit_cutoff(
         run.prelim_evalue,
         &karlin.gapped,
-        gumbel,
         ctx.aa_len as i32,
         run.cutoff_subject_length,
     );
@@ -239,7 +268,7 @@ pub(super) fn pssm_prelim(
             karlin.gapped.lambda,
         ),
         karlin: &karlin.gapped,
-        gumbel,
+        stats,
         prelim_evalue: run.prelim_evalue,
     };
     let diag_mask = run.diag_mask;
@@ -341,6 +370,7 @@ pub(super) fn pssm_traceback(
     subjects: XRedoSubjects<'_>,
     gapped_params: &KarlinParams,
     gumbel: Option<&BlastGumbelBlk>,
+    exact_search_spaces: &[Option<i64>],
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -349,6 +379,12 @@ pub(super) fn pssm_traceback(
         .psi_search
         .as_deref()
         .expect("the traceback of a PSSM search");
+    // A query whose Karlin-Altschul parameters cannot be computed has no preliminary list
+    // (`pssm_prelim`).
+    if !contexts[0].is_valid {
+        return Ok(preliminary_hit_lists.iter().map(|_| None).collect());
+    }
+    let stats = psi_stats(gumbel, exact_search_spaces);
     let karlin = psi_karlin(psi, contexts, gapped_params);
     let x_drop_gapped =
         blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_PRELIM as f64, karlin.gapped.lambda);
@@ -364,7 +400,7 @@ pub(super) fn pssm_traceback(
             gapped_params,
             &karlin,
             x_drop_final,
-            psi_gumbel(gumbel),
+            stats,
             preliminary_hit_lists,
             compact_hit_lists,
         );
@@ -378,7 +414,7 @@ pub(super) fn pssm_traceback(
         gap_extend: args.scoring.gap_extend,
         x_drop_final,
         karlin: &karlin.gapped,
-        gumbel: psi_gumbel(gumbel),
+        stats,
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),
     }
@@ -418,7 +454,7 @@ fn pssm_redo(
     gapped_params: &KarlinParams,
     karlin: &PsiKarlin,
     x_drop_final: i32,
-    gumbel: &BlastGumbelBlk,
+    stats: EvalueStats<'_>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
 ) -> Result<Vec<Option<BlastpHitList>>> {
@@ -469,7 +505,7 @@ fn pssm_redo(
         gap_extend: args.scoring.gap_extend,
         karlin: &karlin.gapped,
         x_drop_final,
-        gumbel,
+        stats,
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),
         inclusion_ethresh: args.inclusion_ethresh,

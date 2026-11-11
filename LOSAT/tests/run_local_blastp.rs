@@ -550,6 +550,82 @@ fn subjects_without_residues_only_give_reports_without_hits() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+// ```c
+//    if (sbp->gbp) {
+//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+//        ...
+//    } else {
+//        min_subject_length = (Int4) (total_length/num_seqs);
+//    }
+//
+//    if(min_subject_length <=0) {
+// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+//    }
+// ```
+// Without the Gumbel block (`-searchsp`, `OLD_FSC`) a subject set of fewer letters than sequences
+// stops blastp and psiblast in the first batch's setup, after the subjects' warnings and the
+// outfmt 0 prolog (NCBI 2.17.0 blastp and psiblast, `-subject` of `M`, ``, ``: exit 3, probes
+// `x.subjshort.{sp,ofsc}.0` of line PS, item PS5c, and their blastp twins; the outfmt 6 and 7
+// reports write nothing).
+#[test]
+fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbel_block() {
+    let query = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/psiblast/tk.faa");
+    let subject = TempFasta::new(
+        "blastp_avg_short_subject.faa",
+        &[("s1 one letter", b"M"), ("s2 empty", b""), ("s3 empty", b"")],
+    );
+    for (program, title, prolog_end) in [
+        ("blastp", "BLASTP 2.17.0+", " 3 sequences; 1 total letters\n\n"),
+        (
+            "psiblast",
+            "PSIBLAST 2.17.0+",
+            "Database: User specified sequence set.\n           3 sequences; 1 total letters\n\n",
+        ),
+    ] {
+        for (args, env) in [
+            (&["-searchsp", "1000", "-outfmt", "0"][..], None),
+            (&["-outfmt", "0"][..], Some(("OLD_FSC", "1"))),
+            (&["-searchsp", "1000", "-outfmt", "7"][..], None),
+        ] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+            command
+                .arg(program)
+                .arg("-query")
+                .arg(&query)
+                .arg("-subject")
+                .arg(&subject.0)
+                .args(args)
+                .env_remove("LOSAT_TIMING")
+                .env_remove("BATCH_SIZE")
+                .env_remove("OLD_FSC");
+            if let Some((name, value)) = env {
+                command.env(name, value);
+            }
+            let output = command.output().expect("run LOSAT CLI");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(output.status.code(), Some(3), "{program} {args:?}: {stdout}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr),
+                format!(
+                    "Warning: [{program}] Subject_2 s2 empty: Subject sequence contains no data\n\
+                     Warning: [{program}] Subject_3 s3 empty: Subject sequence contains no data\n\
+                     BLAST engine error: The average subject length is too short\n"
+                ),
+                "{program} {args:?}"
+            );
+            if args.last() == Some(&"0") {
+                assert!(
+                    stdout.starts_with(title) && stdout.ends_with(prolog_end),
+                    "{program} {args:?}: {stdout}"
+                );
+            } else {
+                assert!(stdout.is_empty(), "{program} {args:?}: {stdout}");
+            }
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
 // ```c
 //     // Validate that at least one query context is valid

@@ -126,6 +126,27 @@ pub struct PsiblastArgs {
     // ```
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    //     arg_desc.SetConstraint(kArgEffSearchSpace,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
+    // ```c++
+    //     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
+    //         CNcbiEnvironment env;
+    //         env.Set("OLD_FSC", "true");
+    //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
+    //     }
+    // ```
+    // psiblast's arguments include `CGenericSearchArgs` (psiblast_args.cpp:66-67). The value is
+    // blastp's (`BlastpArgs::searchsp`): every round, those of `-in_pssm` too, then runs without
+    // the Gumbel block (`ResolvedBlastpArgs::old_fsc`).
+    #[arg(long, value_parser = nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, value_parser = psiblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
     #[arg(long, value_parser = psiblast_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion]")]
@@ -411,7 +432,7 @@ impl PsiblastArgs {
             show_gis: false,
             parse_deflines: false,
             id_scope: None,
-            searchsp: None,
+            searchsp: self.searchsp,
             // PSIBLAST's parser refuses `-lcase_masking` (line NP ported it to BLASTP).
             lcase_masking: false,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
@@ -557,6 +578,35 @@ mod tests {
         let resolved = blastp.resolve().unwrap();
         assert_eq!(resolved.traceback_hitlist_size(), 500);
         assert_eq!(resolved.inclusion_ethresh, 0.002);
+    }
+
+    // blast_args.cpp:234-238 and 303-307, ncbiargs.cpp:118-129: `-searchsp` takes NCBI's `Int8`
+    // forms (a sign, hex, leading zeros) at 0 or above, and at any value (0 too) the search runs
+    // without the Gumbel block (NCBI 2.17.0 probes `x.sp.{plus,hex,lead0}`, `err.sp.*` and
+    // `x.sp.{space,trail}` of line PS, item PS5c).
+    #[test]
+    fn searchsp_takes_ncbis_int8_forms_and_drops_the_gumbel_block() {
+        for (value, space) in [
+            ("+1000000000", 1_000_000_000),
+            ("0x3B9ACA00", 1_000_000_000),
+            ("0001000000000", 1_000_000_000),
+            ("9223372036854775807", i64::MAX),
+            ("0", 0),
+        ] {
+            let args = parse(&["-searchsp", value]).unwrap();
+            assert_eq!(args.searchsp, Some(space), "{value}");
+            let resolved = args.into_blastp_args().unwrap().resolve().unwrap();
+            assert_eq!(resolved.searchsp, Some(space), "{value}");
+            assert!(resolved.old_fsc, "{value}");
+        }
+        let blastp = parse(&[]).unwrap().into_blastp_args().unwrap();
+        assert_eq!(blastp.searchsp, None);
+        for value in [" 1", "1 ", "1e6", "1.5", "", "-1", "9223372036854775808"] {
+            assert!(
+                parse(&["-searchsp", value]).is_err(),
+                "-searchsp {value:?} is refused"
+            );
+        }
     }
 
     // psiblast_app.cpp:246-321 (`rounds.rs`): the rounds of a FASTA query run (0: until

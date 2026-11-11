@@ -130,7 +130,8 @@ impl NcbiException {
         }
     }
 
-    /// Where the exception was thrown.
+    /// Where the exception was thrown (for the tests; the report reads the field in `report_this`).
+    #[cfg(test)]
     pub fn site(&self) -> ThrowSite {
         self.site
     }

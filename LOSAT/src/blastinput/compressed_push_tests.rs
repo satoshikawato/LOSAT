@@ -213,6 +213,124 @@ fn a_zstd_unit_is_decoded_in_its_piece_or_gathered_across_pieces() {
     assert_eq!(checked(Compression::Zstd, &zstd_frames(&[&big])), Ok(big));
 }
 
+/// A step of a fresh zstd core on `unit` cut one byte short, not at the end: it waits for input.
+fn waits_one_byte_short(unit: &[u8], len: impl Fn(&[u8]) -> usize) -> bool {
+    let mut taken = 0;
+    ZstdFrames::new()
+        .gather(&unit[..unit.len() - 1], &mut taken, false, len)
+        .is_none()
+}
+
+// `frame_header_len` and `block_len` against what ruzstd 0.9.1 reads: every
+// Frame_Header_Descriptor value, with Window_Descriptor, Dictionary_ID and Frame_Content_Size
+// bytes of several values; skippable and wrong magic numbers; blocks of each type, last or not,
+// in frames with and without a Content_Checksum and with a window of 2 MiB or 1 KiB, of sizes
+// around 0, 1 KiB, 128 KiB and up to 2^21 - 1. A unit that ruzstd decodes is as long as the
+// length says, one it refuses was not read past that length (a header refused from its 3 bytes
+// is 3 bytes long), every shorter prefix asks for more bytes, and one byte short the unit waits
+// for input and does not decode.
+#[test]
+fn the_unit_lengths_are_what_ruzstd_reads() {
+    use ruzstd::decoding::{BlockDecodingStrategy, FrameDecoder};
+    for descriptor in 0..=255u8 {
+        for fill in [0x00u8, 0x01, 0x58, 0xFF] {
+            let mut unit = 0xFD2F_B528u32.to_le_bytes().to_vec();
+            unit.push(descriptor);
+            unit.extend(std::iter::repeat_n(fill, 30));
+            let want = frame_header_len(&unit);
+            let mut rest: &[u8] = &unit;
+            let _ = FrameDecoder::new().reset(&mut rest);
+            let case = format!("descriptor {descriptor:#04x}, fill {fill:#04x}");
+            assert_eq!(unit.len() - rest.len(), want, "{case}");
+            for short in 0..want {
+                let len = frame_header_len(&unit[..short]);
+                assert!(
+                    short < len && len <= want,
+                    "{case}: {short} bytes ask for {len}"
+                );
+            }
+            let mut rest: &[u8] = &unit[..want - 1];
+            assert!(FrameDecoder::new().reset(&mut rest).is_err(), "{case}");
+            assert!(
+                waits_one_byte_short(&unit[..want], frame_header_len),
+                "{case}"
+            );
+        }
+    }
+    for magic in [0x184D_2A50u32, 0x184D_2A5F, 0x1234_5678] {
+        let unit = [&magic.to_le_bytes()[..], &[9; 20]].concat();
+        let want = frame_header_len(&unit);
+        let mut rest: &[u8] = &unit;
+        let _ = FrameDecoder::new().reset(&mut rest);
+        assert_eq!(unit.len() - rest.len(), want, "magic {magic:#x}");
+        assert!(waits_one_byte_short(&unit[..want], frame_header_len));
+    }
+    let sizes = [
+        0u32,
+        1,
+        2,
+        5,
+        1023,
+        1024,
+        1025,
+        131_071,
+        131_072,
+        131_073,
+        200_000,
+        (1 << 21) - 1,
+    ];
+    for checksum in [false, true] {
+        for window in [0x58u8, 0x00] {
+            let header = [
+                &0xFD2F_B528u32.to_le_bytes()[..],
+                &[if checksum { 0x04 } else { 0x00 }, window],
+            ]
+            .concat();
+            for block_type in 0u32..4 {
+                for last in 0u32..2 {
+                    for size in sizes {
+                        let case = format!(
+                            "checksum {checksum}, window {window:#04x}, type {block_type}, last {last}, size {size}"
+                        );
+                        let block_header = last | (block_type << 1) | (size << 3);
+                        let mut unit = block_header.to_le_bytes()[..3].to_vec();
+                        unit.resize(3 + size as usize + 64, 0);
+                        let len = |unit: &[u8]| block_len(unit, checksum);
+                        let want = len(&unit);
+                        let decode = |bytes: &[u8]| {
+                            let mut decoder = FrameDecoder::new();
+                            let mut frame_header: &[u8] = &header;
+                            decoder.reset(&mut frame_header).unwrap();
+                            let mut rest = bytes;
+                            let result = decoder
+                                .decode_blocks(&mut rest, BlockDecodingStrategy::UptoBlocks(1));
+                            (result.is_ok(), bytes.len() - rest.len())
+                        };
+                        let (decoded, used) = decode(&unit);
+                        if decoded {
+                            assert_eq!(used, want, "{case}");
+                        } else {
+                            assert!(used <= want, "{case}: ruzstd read {used} of {want}");
+                        }
+                        if block_type == 3 || size > 128 * 1024 {
+                            assert_eq!((decoded, used, want), (false, 3, 3), "{case}");
+                        }
+                        for short in (0..want.min(8)).chain([want - 1]) {
+                            let asked = len(&unit[..short]);
+                            assert!(short < asked && asked <= want, "{case}: {short} bytes");
+                        }
+                        assert!(
+                            !decode(&unit[..want - 1]).0,
+                            "{case}: decoded one byte short"
+                        );
+                        assert!(waits_one_byte_short(&unit[..want], len), "{case}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Every single-bit flip of the zstd CLI's files: the pieces give what the reader gives (the
 // intact bytes, or the same error).
 #[test]

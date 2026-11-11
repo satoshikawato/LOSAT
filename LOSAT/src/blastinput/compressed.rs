@@ -220,6 +220,12 @@ pub struct Inflater {
     failed: Option<(io::ErrorKind, String)>,
 }
 
+/// The error of a step that, given input or at the end of the input, took none of it, wrote
+/// nothing and did not end: a decoder that would make a reader or a push loop wait forever. No
+/// decoder does so on any input known; the check keeps a fault of one from hanging the command
+/// line or a browser tab.
+const STALLED: &str = "the decoder neither took input nor gave output";
+
 /// The decoder of each format, on pushed input.
 enum Core {
     Gzip(GzipMembers),
@@ -232,8 +238,10 @@ impl Inflater {
     /// follows `input`. A step writes no output and does not end only where it needs more input
     /// than it was given: it has then taken all of `input` (a unit that must be whole before it
     /// is decoded, such as a zstd block or the 4 KiB of a gzip header check, is kept inside),
-    /// and it is never so at the end. An empty `out` takes and gives nothing (NCBI's
-    /// `eStatus_Overflow`). After an error, every step gives the same error.
+    /// and it is never so at the end. A step that, given input or at the end, neither takes,
+    /// writes nor ends is an error (`STALLED`), so that a loop of steps always ends, whatever a
+    /// decoder does. An empty `out` takes and gives nothing (NCBI's `eStatus_Overflow`). After
+    /// an error, every step gives the same error.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1358-1361
     /// ```c++
@@ -267,6 +275,12 @@ impl Inflater {
                 Core::Zstd(core) => core.step(input, at_end, out),
             }
         };
+        let result = result.and_then(|progress| {
+            if progress == Progress::default() && (at_end || !input.is_empty()) {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, STALLED));
+            }
+            Ok(progress)
+        });
         if let Err(error) = &result {
             self.failed = Some((error.kind(), error.to_string()));
         }
@@ -328,6 +342,8 @@ impl<R: Read> Read for PullInflater<R> {
         if buf.is_empty() || self.ended {
             return Ok(0);
         }
+        // Each step takes input, writes, ends or fails (`Inflater::step`, `STALLED`), and an
+        // empty block from the source is its end: the loop ends.
         loop {
             let input = self.source.fill_buf()?;
             let at_end = input.is_empty();
@@ -343,8 +359,13 @@ impl<R: Read> Read for PullInflater<R> {
 
 /// The inflater of LOSAT Web's adapter: the pieces of a compressed file go in as they are read
 /// (`push`), the inflated bytes come out through a sink in pieces of up to `OUTPUT_SIZE` bytes,
-/// and `finish` ends the file. The same `Inflater` as the command line's reader, so the bytes and
-/// the errors are the command line's. After an error the value gives that error again.
+/// and `finish` ends the file. It runs the same `Inflater` as the command line's reader: a file
+/// that the reader inflates gives the reader's bytes, and one that the reader refuses fails
+/// with the reader's error (kind and words). After an error the value gives that error again.
+/// The bytes the sink got before an error are not the reader's bytes before it: how far a
+/// decoder gets before it meets the fault hangs on the sizes of the pieces (a failing
+/// `inflate()` call gives none of its output, for one), so the caller drops them; LOSAT Web's
+/// adapter refuses the whole file.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/compress/api/streambuf.cpp:469-496
 /// ```c++
@@ -401,14 +422,14 @@ impl PushInflater {
     }
 
     /// Inflates all of `chunk`, the next bytes of the file, and gives `sink` every inflated
-    /// byte the inflater has released.
+    /// byte the inflater has released. On an error, what the sink got from this file is to be
+    /// dropped (see `PushInflater`).
     pub fn push(&mut self, mut chunk: &[u8], sink: &mut dyn FnMut(&[u8])) -> io::Result<()> {
         while !chunk.is_empty() && !self.ended {
             let progress = self
                 .inflater
                 .step(chunk, false, &mut self.out[self.filled..])?;
-            // A step that needs more input has taken all it was given.
-            debug_assert!(progress.taken > 0 || progress.written > 0 || progress.ended);
+            // A step given input takes, writes, ends or fails (`STALLED`): the loop ends.
             chunk = &chunk[progress.taken..];
             self.keep(progress, sink);
         }
@@ -417,7 +438,8 @@ impl PushInflater {
     }
 
     /// The end of the file: gives `sink` the rest of the inflated bytes, or the error of data
-    /// cut short (or of an empty file).
+    /// cut short (or of an empty file); on an error, what the sink got from this file is to be
+    /// dropped (see `PushInflater`).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/compress/api/streambuf.cpp:238-240, 277-279
     /// ```c++
@@ -434,8 +456,7 @@ impl PushInflater {
             let progress = self
                 .inflater
                 .step(&[], true, &mut self.out[self.filled..])?;
-            // At the end a step writes, ends or fails.
-            debug_assert!(progress.written > 0 || progress.ended);
+            // At the end a step writes, ends or fails (`STALLED`): the loop ends.
             self.keep(progress, sink);
         }
         self.flush(sink);
@@ -497,7 +518,7 @@ const Z_DEFLATED: u8 = 8;
 /// the header CRC, which is not checked. A name or comment without its NUL ends at the end of
 /// `buf` (so a name longer than `buf` makes a header of all of `buf`).
 ///
-/// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:151-209
+/// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:151-211
 /// ```c++
 /// static
 /// size_t s_CheckGZipHeader(const void* src_buf, size_t src_len,
@@ -645,7 +666,7 @@ enum GzipState {
 /// refuses some that zlib waits on. A host whose `libz.so.1` is another inflater (zlib-ng in its
 /// zlib-compatible build) could in principle differ from zlib where the data is damaged.
 ///
-/// NCBI reference (598d8ae6): c++/src/util/compress/api/stream_util.cpp:47, 166-177
+/// NCBI reference (598d8ae6): c++/src/util/compress/api/stream_util.cpp:47, 166-178
 /// ```c++
 ///     const ICompression::TFlags kDefault_GZipFile            = CZipCompression::fGZip;
 /// ...
@@ -703,7 +724,7 @@ impl GzipMembers {
 
     /// Looks for a header in the next `MAX_HEADER_SIZE` bytes and starts the inflater.
     ///
-    /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1412-1468
+    /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1412-1469
     /// ```c++
     ///             if ( m_NeedCheckHeader ) {
     ///                 if (!x_in_buf  &&  !m_Cache.size()) {
@@ -781,7 +802,7 @@ impl GzipMembers {
     /// The deflate data ended (`Z_STREAM_END`): a member's trailer follows, then another header
     /// check; a zlib stream ends the reading.
     ///
-    /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1513-1526, 1555-1563
+    /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1513-1526, 1555-1564
     /// ```c++
     ///             // Concatenated file? Try to process next .gz chunk, if present
     ///             if ((errcode == Z_STREAM_END)  &&  m_IsGZ) {
@@ -820,7 +841,7 @@ impl GzipMembers {
     /// Skips up to `left` bytes of a member's trailer, from the cache, then from the input; false
     /// while more input is to be skipped.
     ///
-    /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1382-1403
+    /// NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1382-1404
     /// ```c++
     ///         if ( m_SkipInput ) {
     ///             // Skip from cache if present
@@ -1199,7 +1220,7 @@ enum ZstdState {
 /// No NCBI counterpart: makeblastdb's `CZstdDecompressor` inflates with libzstd's
 /// `ZSTD_decompressStream` and ends the data at the first frame's end; LOSAT reads the frames
 /// after it (`PD-LOSAT-NCBI-DEFECTS`, makeblastdb exception; line GZ, DECISIONS 9).
-/// NCBI reference (598d8ae6): c++/src/util/compress/api/zstd.cpp:937-966
+/// NCBI reference (598d8ae6): c++/src/util/compress/api/zstd.cpp:937-967
 /// ```c++
 ///         // Set I/O buffers for zstd stream.
 ///         ZSTD_inBuffer  m_In  = { in_buf, in_len, 0 };
@@ -1265,13 +1286,21 @@ fn frame_header_len(unit: &[u8]) -> usize {
     5 + window + dictionary_id + content_size
 }
 
+/// ruzstd's largest Block_Size (`MAX_BLOCK_SIZE`, 128 KiB): a block header that declares more is
+/// refused from its 3 bytes.
+const ZSTD_MAX_BLOCK_SIZE: usize = 128 * 1024;
+
 /// The bytes of the block at the start of `unit`, as far as its first bytes tell: the 3-byte
 /// Block_Header, the Block_Content (Block_Size bytes for a raw or compressed block, 1 for an
-/// RLE block, none for the reserved type, which ruzstd refuses from the header), then the
-/// frame's 4-byte Content_Checksum after its last block where the frame has one.
+/// RLE block), then the frame's 4-byte Content_Checksum after its last block where the frame has
+/// one. A header that ruzstd refuses from its 3 bytes, of the reserved type or with a Block_Size
+/// over `ZSTD_MAX_BLOCK_SIZE`, is a unit of 3 bytes: it is refused as soon as it is whole, with
+/// the error of a source that held the rest, without waiting for up to 2 MiB of input.
 ///
 /// ruzstd 0.9.1 reference: src/decoding/block_decoder.rs:214-260 (`read_block_header`:
-/// `content_size` = Block_Size for raw and compressed, 1 for RLE, 0 for reserved),
+/// `content_size` = Block_Size for raw and compressed, 1 for RLE), 224-231 (the 3 bytes read,
+/// then the reserved type and `block_content_size` refused), 283-290 (`block_content_size`:
+/// `val > MAX_BLOCK_SIZE`), src/common/mod.rs:21 (`MAX_BLOCK_SIZE: u32 = 128 * 1024`),
 /// src/decoding/frame_decoder.rs:347-358 (the checksum after the last block, in the same
 /// `decode_blocks`); RFC 8878 3.1.1.2.
 fn block_len(unit: &[u8], checksum: bool) -> usize {
@@ -1281,11 +1310,11 @@ fn block_len(unit: &[u8], checksum: bool) -> usize {
     let header = u32::from(header[0]) | (u32::from(header[1]) << 8) | (u32::from(header[2]) << 16);
     let last = header & 1 == 1;
     let block_size = (header >> 3) as usize;
-    let content = match (header >> 1) & 3 {
-        0 | 2 => block_size,
-        1 => 1,
-        _ => 0,
-    };
+    let block_type = (header >> 1) & 3;
+    if block_type == 3 || block_size > ZSTD_MAX_BLOCK_SIZE {
+        return 3;
+    }
+    let content = if block_type == 1 { 1 } else { block_size };
     3 + content + if last && checksum { 4 } else { 0 }
 }
 
@@ -1553,6 +1582,10 @@ pub(crate) mod test_data {
             Ok(bytes) => Ok(bytes.clone()),
             Err(error) => Err((error.kind(), error.to_string())),
         };
+        assert!(
+            !matches!(&read, Err((_, words)) if words == super::STALLED),
+            "{compression:?}: the reader stalled"
+        );
         for piece in PIECES {
             let pushed = pushed(compression, bytes, piece);
             assert!(
@@ -2169,7 +2202,7 @@ mod tests {
             ok("zlib_hdr_only", &[0x78, 0x9c], b"");
         }
 
-        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1443-1447 and 1489
+        // NCBI reference (598d8ae6): c++/src/util/compress/api/zlib.cpp:1444-1447, 1489
         // ```c++
         //                 Z(inflateEnd)(STREAM);
         //                 int errcode = Z(inflateInit2_)(

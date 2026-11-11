@@ -72,16 +72,19 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = Some(args.soft_masking);
-    inputs.seg = Some(if !args.seg.enabled {
-        Filter::No
-    } else if args.seg.yes {
-        Filter::Yes
-    } else {
-        Filter::Seg {
-            window: args.seg.window,
-            locut: args.seg.locut,
-            hicut: args.seg.hicut,
-        }
+    // An archive is written only for a `-seg` that `resolve` read.
+    inputs.seg = args.seg_spec().ok().map(|seg| match seg {
+        crate::blastinput::value_parsers::SegSpec::No => Filter::No,
+        crate::blastinput::value_parsers::SegSpec::Yes => Filter::Yes,
+        crate::blastinput::value_parsers::SegSpec::WindowLocutHicut {
+            window,
+            locut,
+            hicut,
+        } => Filter::Seg {
+            window,
+            locut,
+            hicut,
+        },
     });
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
@@ -831,8 +834,8 @@ mod tests {
         }
     }
 
-    /// The inputs of a command line that LOSAT's `blastx` refuses (a word size, X-dropoff or
-    /// `-use_sw_tback` it does not search with): the options model must still write the list NCBI
+    /// The inputs of a command line that LOSAT's `blastx` parser refuses (an X-dropoff or
+    /// `-use_sw_tback`, which it does not search with): the options model must still write the list NCBI
     /// wrote for it. The options LOSAT takes come from its arguments, the refused ones are set by
     /// hand.
     fn refused_inputs(extra: &[&str]) -> OptionInputs {
@@ -934,8 +937,10 @@ mod tests {
             );
         }
         // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
-        // matrix and composition mode since series SC, SC6: 8 of the 80 are refused).
-        assert!(refused >= 5 && CASES.len() - refused > 60, "{refused}");
+        // matrix and composition mode since series SC, SC6; the word sizes LOSAT does not search
+        // with since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them):
+        // 4 of the 80 are refused (`-xdrop_*`, `-use_sw_tback`).
+        assert!(refused >= 4 && CASES.len() - refused > 60, "{refused}");
     }
 
     #[test]

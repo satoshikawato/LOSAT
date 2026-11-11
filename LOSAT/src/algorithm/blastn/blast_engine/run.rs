@@ -8323,6 +8323,119 @@ enum SearchQueries<'a> {
     Taken(&'a x_query_drop::Store),
 }
 
+/// What `-use_index true` found (`megablast_index`).
+enum MegablastIndex {
+    /// NCBI does not ask for an index (`BlastnArgs::megablast_index_name`), or asked, found
+    /// none, warned and searches without one.
+    NotAsked,
+    /// A file of the database's index: NCBI searches with the index, which LOSAT does not.
+    Found(std::path::PathBuf),
+    /// A `-db` value with a comma, which NCBI's loader of old-style indices reads as a range of
+    /// index volumes (`blast_dbindex.cpp:964-995`) that LOSAT does not read.
+    VolumeRange,
+}
+
+impl MegablastIndex {
+    /// LOSAT's refusal of a search that NCBI runs with a MegaBLAST database index.
+    fn check(&self) -> Result<()> {
+        match self {
+            Self::NotAsked => Ok(()),
+            Self::Found(file) => anyhow::bail!(
+                "-use_index true with a database that has a MegaBLAST index ({}) is not supported by LOSAT's BLASTN",
+                file.display()
+            ),
+            Self::VolumeRange => anyhow::bail!(
+                "-use_index true with a -db value that has a comma (old-style index volumes) is not supported by LOSAT's BLASTN"
+            ),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:216-221
+// ```c++
+//         // Initialize the megablast database index now so we can know whether an indexed search will be run.
+//         // This is only important for the reference in the report, but would be done anyway.
+//         if (opt.GetUseIndex() && !m_CmdLineArgs->ExecuteRemotely()) {
+//             CRef<CBlastOptions> my_options(&(m_OptsHndl->SetOptions()));
+//             CSetupFactory::InitializeMegablastDbIndex(my_options);
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:447-459
+// ```c++
+//     else {
+//         errstr = DbIndexInit(
+//                 options->GetIndexName(),
+//                 options->GetIsOldStyleMBIndex(), partial, options->GetWordSize() );
+//     }
+//
+//     if( errstr != "" ) {
+//             ERR_POST_EX(1, 1, Warning << errstr << " Database index will not be used." );
+//             options->SetUseIndex( false );
+//             return;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1145-1168
+// ```c++
+//         catch( CException & e ) {
+//             ERR_POST( Info << "new style index failed to load" );
+//             result = e.what();
+//         }
+// ...
+//     catch( CException & e ) {
+//         ERR_POST( Info << "old style index failed to load" );
+//         result += "\n";
+//         result += e.what();
+//     }
+// ```
+/// `-use_index true` of a megablast search of `-db` (`BlastnArgs::megablast_index_name`): NCBI
+/// looks for the database's MegaBLAST index (new style, then old style). Without one it writes
+/// the two loaders' exceptions as one warning, with the source paths of the official Linux x64
+/// build as LOSAT's other NCBI exceptions (`NCBI_BUILD_ROOT`), and searches as without
+/// `-use_index`; the archive records the name (`report::archive::options`). With one, NCBI
+/// searches with the index, which LOSAT refuses (`MegablastIndex::check`).
+fn megablast_index(
+    args: &BlastnArgs,
+    database: &database::BlastnDatabase,
+    diagnostics: &mut (dyn std::io::Write + Send),
+) -> Result<MegablastIndex> {
+    let Some(index_name) = args.megablast_index_name() else {
+        return Ok(MegablastIndex::NotAsked);
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:440-446
+    // ```c++
+    //     if( options->GetProgramType() != eBlastTypeBlastn
+    //         && options->GetProgramType() != eBlastTypeMapping) {
+    //         errstr = "Database indexing is available for blastn only.";
+    //     }
+    //     else if( options->GetMBTemplateLength() > 0 ) {
+    //         errstr = "Database indexing is not available for discontiguous ";
+    //         errstr += "searches.";
+    //     }
+    // ```
+    // A megablast search with a template (`-template_type` and `-template_length`, which
+    // require each other) looks for no index.
+    let warning = if args.template_length.is_some() {
+        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".to_string()
+    } else {
+        if index_name.contains(',') {
+            return Ok(MegablastIndex::VolumeRange);
+        }
+        if let Some(file) = database.megablast_index_file(index_name) {
+            return Ok(MegablastIndex::Found(file));
+        }
+        let root = crate::utils::winmask::NCBI_BUILD_ROOT;
+        format!(
+        "Warning: (1.1) [blastn] NCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 795: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New() - no database volume has an index\n\nNCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 1026: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old() - no index file specified or index '{index_name}*' not found.\n Database index will not be used.\n"
+        )
+    };
+    // One diagnostic: the archive saves it as one message.
+    match &args.archive {
+        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
+        None => diagnostics.write_all(warning.as_bytes())?,
+    }
+    Ok(MegablastIndex::NotAsked)
+}
+
 fn search(
     args: BlastnArgs,
     queries: SearchQueries<'_>,
@@ -8349,6 +8462,13 @@ fn search(
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
+    // The database's MegaBLAST index that `-use_index true` asks for, after `Query is Empty!`
+    // and before the formatter (`megablast_index`); LOSAT's refusal of an index comes with its
+    // other limits below.
+    let megablast_index = match subjects {
+        Subjects::Database(database) => megablast_index(&args, database, outputs.diagnostics)?,
+        Subjects::Records(_) => MegablastIndex::NotAsked,
+    };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
     // ```c
     //     if(m_IsDbScan) {
@@ -8406,6 +8526,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
+    megablast_index.check()?;
     app::check_search_environment(
         "BLASTN",
         !matches!(subjects, Subjects::Database(_)),

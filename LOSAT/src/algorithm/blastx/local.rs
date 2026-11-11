@@ -147,6 +147,7 @@ fn search_records(
     if subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
+    check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
     for options in &mut resolved {
@@ -760,6 +761,7 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
+    check_filtering(args)?;
     let query_range = parse_query_range(args)?;
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
@@ -877,6 +879,7 @@ pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
     let (choices, resolutions) = read_options(args, &requested, false)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
+    check_filtering(args)?;
     parse_query_range(args)?;
     check_resolutions(args, &choices, resolutions, &mut io::sink()).map(|_| ())
 }
@@ -904,6 +907,27 @@ fn parse_subject_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 //                                      "Invalid specification of query location");
 //     }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:87-88,106-107
+// ```c++
+//     arg.Reset(new CFilteringArgs( !kQueryIsProtein ));
+//     m_Args.push_back(arg);
+// ...
+//     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
+//     arg.Reset(m_QueryOptsArgs);
+// ```
+/// The filtering handler (`CFilteringArgs`), which comes after the subjects are read and before
+/// the query options and formatting handlers: NCBI's error of `-seg` (`BlastxArgs::seg_spec`;
+/// `resolve_with_format` keeps it with the other deferred errors, LOSAT's refusal of a value that
+/// NCBI reads comes from `resolve_with_format`).
+pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
+    match args.seg_spec() {
+        Err(app::SegOptionError::Ncbi(message)) => {
+            Err(options_error(SemanticOptionsError::from(message).into()))
+        }
+        Ok(_) | Err(app::SegOptionError::Losat(_)) => Ok(()),
+    }
+}
+
 /// `-query_loc`, which the command line reads after the subjects, with the query options and
 /// before the formatting handler (`native::run_inner`).
 fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {

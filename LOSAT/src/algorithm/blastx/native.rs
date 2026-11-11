@@ -607,6 +607,9 @@ fn run_inner(
     // The query options handler comes before the genetic code and formatting handlers
     // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (clap's
     // value parsers, `resolve`).
+    // The filtering handler comes before the query options handler (blastx_args.cpp:87-107):
+    // NCBI's error of `-seg` first (`local::check_filtering`).
+    super::local::check_filtering(args)?;
     let query_range = crate::blastinput::seq_range::parse_optional_range(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,

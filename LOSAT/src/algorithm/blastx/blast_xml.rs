@@ -753,10 +753,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     check_database_name(&db_name)?;
     let filter = filter::filter_string(
         None,
-        options
-            .seg
-            .enabled
-            .then_some((options.seg.window, options.seg.locut, options.seg.hicut)),
+        options.seg.filter_options(),
         None,
         options.soft_masking,
     );

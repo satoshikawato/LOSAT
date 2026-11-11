@@ -44,7 +44,8 @@ class BlastnOptions(TypedDict, total=False):
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
     use_index: bool
-    """Use MegaBLAST database index (only false is supported) [default: false]"""
+    """Use MegaBLAST database index (a database that has one is not supported) [default:
+    false]"""
     evalue: float
     """Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)"""
     perc_identity: float

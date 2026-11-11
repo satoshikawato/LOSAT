@@ -522,7 +522,11 @@ impl TabularSpec {
     ///         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
     ///         x_IsFieldRequested(eSubjectStrand)) {
     /// ```
-    pub fn opens_counts(&self, num_ident: usize) -> bool {
+    /// Inline, and the count by reference so that it is read only where the condition reaches it:
+    /// `TabularWriter::row` evaluates it for every row as the expression it replaced (no NCBI
+    /// counterpart: code placement only).
+    #[inline]
+    pub fn opens_counts(&self, num_ident: &usize) -> bool {
         self.has_any(&[
             QueryStart,
             QueryEnd,
@@ -540,7 +544,7 @@ impl TabularSpec {
             QueryFrame,
             Btop,
             SubjectStrand,
-        ]) || (self.has(NumIdentical) && num_ident > 0)
+        ]) || (self.has(NumIdentical) && *num_ident > 0)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837 and 973-980
@@ -1208,7 +1212,7 @@ impl TabularWriter<'_> {
         let csv = spec.is_csv();
         // Only NCBI's alignment block (`TabularSpec::opens_counts`) sets the frames (`SetCounts`);
         // without one of its fields `frames` and `sframe` keep the 0 of `x_ResetFields`.
-        let counts_set = spec.opens_counts(hsp.num_ident);
+        let counts_set = spec.opens_counts(&hsp.num_ident);
         let frames = |hsp: &TabularHsp<'_>| {
             if counts_set {
                 (hsp.q_frame, hsp.s_frame)

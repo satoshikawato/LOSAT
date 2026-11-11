@@ -304,16 +304,16 @@ impl<'a> TabularSubjects<'a> {
 ///         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
 ///         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
 /// ```
-pub(super) fn needs_rows(spec: &TabularSpec, app: BlastpApp) -> bool {
-    spec.needs().rows
-        || (app == BlastpApp::Rpsblast
-            && [
-                TabularField::NumIdentical,
-                TabularField::PercentIdentical,
-                TabularField::Mismatches,
-            ]
-            .into_iter()
-            .any(|field| spec.has(field)))
+/// `rows` is `TabularNeeds::rows` of `spec`.
+pub(super) fn needs_rows(rows: bool, spec: &TabularSpec, app: BlastpApp) -> bool {
+    rows || (app == BlastpApp::Rpsblast
+        && [
+            TabularField::NumIdentical,
+            TabularField::PercentIdentical,
+            TabularField::Mismatches,
+        ]
+        .into_iter()
+        .any(|field| spec.has(field)))
 }
 
 /// The spec of a tabular report with a field list or a delimiter, or of outfmt 10 or 20, of a
@@ -441,8 +441,40 @@ pub(super) fn write_tabular_round_epilog(
 /// header line first when `tab.prolog` and outfmt 7's last line after the last query when
 /// `tab.epilog`. `probe` marks each row (the format observer). `rows` gives the rendered
 /// alignments of each query's HSPs, in the order of its lists, when a field shows them
-/// (`TabularNeeds::rows`).
+/// (`TabularNeeds::rows`; rpsblast's identities, `needs_rows`).
 pub(super) fn write_blastp_tabular(
+    tab: &BlastpTabular<'_>,
+    hit_lists: &[Option<BlastpHitList>],
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+    probe: Option<&mut FormatProbe<'_>>,
+    rows: Option<&mut QueryRows<'_>>,
+) -> Result<()> {
+    if tab.app == BlastpApp::Rpsblast {
+        return write_rpsblast_tabular(tab, hit_lists, writer, warnings, probe, rows);
+    }
+    write_tabular_rows::<false>(tab, hit_lists, writer, warnings, probe, rows)
+}
+
+/// rpsblast's report (`write_tabular_rows` with the gate of its rows on NCBI's alignment block,
+/// `needs_rows`). Cold and out of line (no NCBI counterpart: code placement only), so that
+/// blastp's and psiblast's writer keeps the default path's code.
+#[cold]
+#[inline(never)]
+fn write_rpsblast_tabular(
+    tab: &BlastpTabular<'_>,
+    hit_lists: &[Option<BlastpHitList>],
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+    probe: Option<&mut FormatProbe<'_>>,
+    rows: Option<&mut QueryRows<'_>>,
+) -> Result<()> {
+    write_tabular_rows::<true>(tab, hit_lists, writer, warnings, probe, rows)
+}
+
+/// `write_blastp_tabular`; `RPS`: rpsblast's report, whose rows are read for its identities and
+/// handed only to the HSPs whose alignment block opens (`needs_rows`).
+fn write_tabular_rows<const RPS: bool>(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
     writer: &mut dyn Write,
@@ -452,6 +484,11 @@ pub(super) fn write_blastp_tabular(
 ) -> Result<()> {
     let spec = tab.spec;
     let needs = spec.needs();
+    let rows_read = if RPS {
+        needs_rows(needs.rows, spec, tab.app)
+    } else {
+        needs.rows
+    };
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are made with them (`tabular_subject_ids`).
     if needs.all_deflines {
@@ -580,7 +617,7 @@ pub(super) fn write_blastp_tabular(
         // ```
         // The rows of the query's HSPs when a field shows them, and the next one's index.
         let query_rows: Option<&[PairwiseHit]> = match rows.as_deref_mut() {
-            Some(rows) if needs_rows(spec, tab.app) => Some(rows.query(q_idx)?),
+            Some(rows) if rows_read => Some(rows.query(q_idx)?),
             _ => None,
         };
         let mut row_index = 0usize;
@@ -646,11 +683,7 @@ pub(super) fn write_blastp_tabular(
                 let rows = match query_rows {
                     // rpsblast's identities: the rows inside NCBI's alignment block only (`nident`
                     // alone opens it on the engine's count, `needs_rows`).
-                    Some(_)
-                        if tab.app == BlastpApp::Rpsblast && !spec.opens_counts(hsp.num_ident) =>
-                    {
-                        None
-                    }
+                    Some(_) if RPS && !spec.opens_counts(&hsp.num_ident) => None,
                     Some(rows) => Some(hsp_rows(rows, row_index, hsp)?),
                     None => None,
                 };

@@ -31,6 +31,18 @@ run:
 | `NCBI_CONFIG_PATH`, `NCBI`, `HOME`, `NCBI_DONT_USE_LOCAL_CONFIG` | Where the configuration files are looked for: the directories of `NCBI_CONFIG_PATH` if it is set (an empty element stands for the default path, and an empty `NCBI_CONFIG_PATH` means no directory); otherwise the current directory, the home directory, `NCBI`, `/etc` (the Windows directory on Windows) and the program's directories. `NCBI_DONT_USE_LOCAL_CONFIG` leaves out the current directory and the home directory. |
 | `NCBI_DONT_USE_NCBIRC`, `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` | Do not read `.ncbirc`. |
 
+## WindowMasker files of `blastn -window_masker_taxid`
+
+`blastn -window_masker_taxid <taxid>` masks the queries with the counts file `<directory>/<taxid>/wmasker.obinary`. LOSAT finds the directory as NCBI BLAST+ does, in this order: the first one that is set (an empty value too) wins, and an empty value or none means the current directory. With the taxid 0, no WindowMasker is used and no file is needed.
+
+| Variable or entry | Effect |
+| :--- | :--- |
+| `NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH` | The directory, before every other source. |
+| `WINDOW_MASKER_PATH` | The directory, after the variable above. |
+| `[WINDOW_MASKER] WINDOW_MASKER_PATH` in `.ncbirc` | The directory, after both variables: the first `.ncbirc` on the search path, also when `<program>.ini` sets `[NCBI] DONT_USE_NCBIRC`; `NCBI_DONT_USE_NCBIRC` and `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` skip it. `<program>.ini`'s entry is not read. |
+
+A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search at the first query batch with NCBI's error (exit status 3). LOSAT refuses, before any output, a counts file in the ascii or optimized ascii format there (NCBI BLAST+ reads them), a `.ncbirc` that only this search reads and that LOSAT does not read as NCBI BLAST+ does (a syntax error, a value with a backslash or a quote inside, `[NCBI] .Inherits`), a directory or path that is not UTF-8, and a current directory it cannot read. LOSAT Web refuses `-window_masker_taxid` other than 0.
+
 The home directory is `HOME` (an empty `HOME` means no home directory), or without `HOME` the
 account's home directory; on Windows it is `APPDATA`, else `USERPROFILE`. Without `HOME` and without an account
 entry for the user, NCBI BLAST+ looks the account up by the login name, which LOSAT cannot do, so
@@ -43,15 +55,16 @@ directory or on `PATH` when it has no directory, so a `blastn` shim's directory)
 the `losat` executable when it is another one (on Windows the directory of the `losat`
 executable).
 
-A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_LOADERS`, and
-`[NCBI] DONT_USE_NCBIRC` (in `<program>.ini` it skips `.ncbirc`), which LOSAT reads as NCBI
-BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
+A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_LOADERS`,
+`[NCBI] DONT_USE_NCBIRC` (in `<program>.ini` it skips `.ncbirc`) and `[WINDOW_MASKER]
+WINDOW_MASKER_PATH` (see above), which LOSAT reads as NCBI BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
 and `BLASTMAT`, `BLASTDB_NUCL_DATA_LOADER`, `BLASTDB_PROT_DATA_LOADER`, `IGDATA`,
 `BLAST_USAGE_REPORT` (a Boolean) and `[NCBI] DATA`, which change no output of LOSAT's programs. A
 file with any other entry, one that LOSAT cannot read, or one that NCBI BLAST+ reports as
 malformed, stops the run, and so does an `NCBI_CONFIG__<SECTION>__<NAME>` variable for another
-entry. A value with a backslash or a quote inside stops every program for `DATA_LOADERS`, a run
-that opens a database for `BLASTDB`, and `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
+entry. A value with a backslash or a quote inside stops every program for `DATA_LOADERS` and
+`WINDOW_MASKER_PATH`, a run that opens a database for `BLASTDB`, and `makeblastdb -parse_seqids`
+for `MAX_SEQID_LENGTH`.
 
 ## Variables that change a search or a report
 

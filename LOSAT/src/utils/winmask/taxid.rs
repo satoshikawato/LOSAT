@@ -19,7 +19,7 @@ const STAT_FILE_NAME: &str = "wmasker.obinary";
 /// is read as one), unlike `-window_masker_db`. `Err` when the current directory is needed
 /// and cannot be read.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:388-414
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:389-408
 /// ```c++
 ///     if (retval == kEmptyStr) {
 ///         retval = CDir::GetCwd();

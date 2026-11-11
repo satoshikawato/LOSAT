@@ -190,6 +190,9 @@ fn runs_here(case: &Case) -> bool {
                 && std::fs::File::open(engine().join("target/winmask_blastn/unreadable.obinary"))
                     .is_err()
         }
+        // Windows has no `HOME` in NCBI's search path (`CDir::GetHome` reads `APPDATA` and
+        // `USERPROFILE`, ncbi_environment.rs `ncbi_home`).
+        "taxid_ncbirc" => cfg!(unix),
         "taxid_unreadable" => {
             cfg!(unix)
                 && std::fs::File::open(
@@ -202,38 +205,42 @@ fn runs_here(case: &Case) -> bool {
     }
 }
 
+/// `losat blastn` from LOSAT/ without the variables that change NCBI's batches, reports, registry
+/// or WindowMasker directory (a case sets its own).
+fn blastn() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    command.current_dir(engine()).arg("blastn");
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if text.starts_with("LOSAT_")
+            || text.starts_with("NCBI")
+            || matches!(
+                text.as_ref(),
+                "BATCH_SIZE"
+                    | "CHUNK_SIZE"
+                    | "OVERLAP_CHUNK_SIZE"
+                    | "BLASTDB"
+                    | "ARCHIVE_FORMAT"
+                    | "WINDOW_MASKER_PATH"
+            )
+        {
+            command.env_remove(name);
+        }
+    }
+    // The --all-features build's diagnostic probe needs its log at 2 threads and more.
+    command.env(
+        "LOSAT_BLASTX_WORKER_LOG",
+        std::env::temp_dir().join("losat_winmask_blastn_worker.log"),
+    );
+    command
+}
+
 fn check(threads: &str) {
     make_counts();
     let mut failures = Vec::new();
     for case in cases().iter().filter(|case| runs_here(case)) {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-        command
-            .current_dir(engine())
-            .arg("blastn")
-            .args(&case.args)
-            .args(["-num_threads", threads]);
-        for (name, _) in std::env::vars_os() {
-            let text = name.to_string_lossy();
-            if text.starts_with("LOSAT_")
-                || text.starts_with("NCBI")
-                || matches!(
-                    text.as_ref(),
-                    "BATCH_SIZE"
-                        | "CHUNK_SIZE"
-                        | "OVERLAP_CHUNK_SIZE"
-                        | "BLASTDB"
-                        | "ARCHIVE_FORMAT"
-                        | "WINDOW_MASKER_PATH"
-                )
-            {
-                command.env_remove(name);
-            }
-        }
-        // The --all-features build's diagnostic probe needs its log at 2 threads and more.
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat_winmask_blastn_worker.log"),
-        );
+        let mut command = blastn();
+        command.args(&case.args).args(["-num_threads", threads]);
         command.envs(case.env.iter().map(|(key, value)| (key, value)));
         let output = command.output().expect("run losat");
         let read =
@@ -276,12 +283,9 @@ fn the_cases_give_ncbis_bytes_at_one_and_four_threads() {
 #[test]
 fn ascii_counts_of_a_taxid_are_refused_before_any_output() {
     make_counts();
-    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .current_dir(engine())
+    let output = blastn()
         .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")
-        .env_remove("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH")
         .args([
-            "blastn",
             "-query",
             "tests/fixtures/blastn_regression/inputs/wm_query.fa",
             "-subject",
@@ -293,7 +297,7 @@ fn ascii_counts_of_a_taxid_are_refused_before_any_output() {
         ])
         .output()
         .expect("run losat");
-    assert_ne!(output.status.code(), Some(0));
+    assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

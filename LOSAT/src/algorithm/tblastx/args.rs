@@ -322,6 +322,11 @@ pub struct TblastxArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// The file that NCBI BLAST+ reads for a `-matrix` that its tables do not have
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line before
+    /// the search; `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub matrix_file: Option<std::path::PathBuf>,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.
@@ -367,7 +372,8 @@ impl TblastxArgs {
     /// The other names that the loader knows (`blosum` or `pam` and the exact digits) are the
     /// tables' names ignoring the case. A name that the loader does not know is looked for as
     /// a file (`BlastFindMatrixPath`, blast_stat.c:1631-1660); LOSAT reads no matrix file, and
-    /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3).
+    /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3), which LOSAT
+    /// refuses (`matrix_file`).
     pub fn scoring_matrix(&self) -> TblastxMatrix {
         let name = self.matrix_name();
         if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {

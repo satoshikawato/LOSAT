@@ -1,10 +1,9 @@
 //! RPSBLAST (Reverse Position-Specific BLAST): the user's protein queries against a database of
 //! profiles (`makeprofiledb -dbtype rps`).
 //!
-//! LOSAT runs the search without composition-based statistics (`-comp_based_stats 0`, F, f, D
-//! or d; or any mode when the database has no frequency ratios, as NCBI then runs it) on
-//! one-volume databases, with blastp's driver (`blastp::args::BlastpApp::Rpsblast`: the query
-//! batches, the database's statistics and reports) and the RPS engine
+//! LOSAT runs the search with and without composition-based statistics on databases of one or
+//! several volumes, with blastp's driver (`blastp::args::BlastpApp::Rpsblast`: the query
+//! batches and their masks, the database's statistics and reports) and the RPS engine
 //! (`algorithm::rps_search`).
 
 pub mod args;

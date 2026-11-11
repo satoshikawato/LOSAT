@@ -47,13 +47,15 @@ use crate::seqdb::rps::RpsVolumeFiles;
 use crate::stats::KarlinParams;
 
 /// What the redo of every profile reads besides the traceback's values: the volume's frequency
-/// ratios, BLOSUM62's score block (the matrix information of the position-based adjustment) and
-/// the `.aux` gap costs before the scale.
+/// ratios, BLOSUM62's score block (the matrix information of the position-based adjustment),
+/// the `.aux` gap costs before the scale and the final X-drop in bits
+/// (`options->gap_x_dropoff_final`: `-xdrop_gap_final`, or 25).
 pub(crate) struct RpsRedoParams<'a> {
     pub(crate) files: &'a RpsVolumeFiles,
     pub(crate) sbp: &'a PsiScoreBlk,
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
+    pub(crate) x_drop_final_bits: f64,
 }
 
 impl RpsTraceback<'_> {
@@ -140,6 +142,14 @@ impl RpsTraceback<'_> {
             matrix.rows.clear();
             matrix.rows.resize(length, [0; 28]);
             let k = RPS_K_MULT * self.karlin_k[oid];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2381-2383
+            // ```c
+            //     gapping_params->x_dropoff = (Int4)
+            //         MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
+            //             extendParams->gap_x_dropoff_final);
+            // ```
+            // `options->gap_x_dropoff_final` is the search's final X-drop in bits
+            // (`-xdrop_gap_final`; `RpsRun::gapped_x_drops` has checked the conversion).
             let mut run = RedoRun::new(
                 consensus,
                 consensus,
@@ -154,6 +164,7 @@ impl RpsTraceback<'_> {
                 matrix,
                 std::mem::take(&mut scratch.gap),
             )
+            .with_final_x_drop_bits(redo.x_drop_final_bits, self.x_drop_final)
             .with_bound_check();
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redone = RedoMatch {

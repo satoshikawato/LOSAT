@@ -568,6 +568,10 @@ pub struct BlastpArgs {
     /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
     #[arg(skip)]
     pub psiblast_pssm: Option<crate::algorithm::psiblast::pssm::PsiblastPssmOptions>,
+    /// The formatting handler's `-line_length`, `-sorthits` and `-sorthsps` (rpsblast's; none
+    /// for blastp and psiblast, whose parsers refuse them, `cli.rs` `is_unported_blastp_arg`).
+    #[arg(skip)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// rpsblast's options that its RPS engine applies (`algorithm::rps_search`); `None` for
     /// blastp and psiblast.
     #[arg(skip)]
@@ -730,6 +734,9 @@ pub struct ResolvedBlastpArgs {
     /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
     pub num_descriptions: usize,
     pub num_alignments: usize,
+    /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length` (rpsblast's),
+    /// or 60.
+    pub line_length: usize,
     /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
     pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
@@ -1077,12 +1084,13 @@ impl BlastpArgs {
         )?;
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings.
-        let (counts, warnings) = crate::blastinput::report_counts::run_report_counts(
+        let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
             self.app.ncbi_name(),
             &[choice.number],
             self.max_target_seqs,
             self.num_descriptions,
             self.num_alignments,
+            &self.formatting,
         )?;
         diagnostics.write_all(&warnings)?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
@@ -1183,6 +1191,8 @@ impl BlastpArgs {
             hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
+            // rpsblast's `-xdrop_ungap` (`RpsSearch`); blastp's and psiblast's parsers refuse it.
+            x_dropoff: self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits),
         })?;
         // `validate_protein_options` has refused a matrix that NCBI's tables do not know in a
         // gapped search (blast_options.c:907-940). An ungapped search takes any name, and NCBI
@@ -1277,6 +1287,14 @@ impl BlastpArgs {
             max_target_seqs: counts.hitlist_size,
             num_descriptions: counts.num_descriptions,
             num_alignments: counts.num_alignments,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2939-2941
+            // ```c++
+            //     	if (args[kArgLineLength]) {
+            //     	    m_LineLength = args[kArgLineLength].AsInteger();
+            //     	}
+            // ```
+            // (Read for the output formats up to 4, the others warn, `warnings_with`.)
+            line_length: self.formatting.line_length(),
             max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
             // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());

@@ -1,0 +1,21 @@
+# RPSBLAST 2.17.0+
+# Query: allx a query of X only
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: oj_tk TK-TMK with an O at 30 and a J at 60
+# Database: rps_mini
+# Fields: query id, subject id, evalue
+# 4 hits found
+oj_tk	gnl|CDD|101	3.09e-111
+oj_tk	gnl|CDD|102	0.30
+oj_tk	gnl|CDD|102	7.4
+oj_tk	gnl|CDD|102	7.9
+# RPSBLAST 2.17.0+
+# Query: rr_part ribonucleotide reductase residues 281-520
+# Database: rps_mini
+# Fields: query id, subject id, evalue
+# 2 hits found
+rr_part	gnl|CDD|102	2.63e-127
+rr_part	gnl|CDD|101	0.45
+# BLAST processed 3 queries

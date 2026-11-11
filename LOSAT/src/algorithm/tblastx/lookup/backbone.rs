@@ -2436,14 +2436,7 @@ fn build_ncbi_lookup_with(
     // kept vectors; the caller gives them back (`x_give_back_pooled`, `x_give_back_pooled16`) when
     // it drops the table, or the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(
-            prepared,
-            threshold,
-            matrix,
-            3,
-            parts,
-            narrow_cutoff,
-        )
+        x_lut_direct::x_build_direct_pooled(prepared, threshold, matrix, 3, parts, narrow_cutoff)
     } else {
         x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, 3, narrow_cutoff)
     };

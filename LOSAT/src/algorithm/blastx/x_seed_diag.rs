@@ -491,7 +491,7 @@ pub(crate) fn x_word_finder_diag<S: BxScoring>(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Option<Vec<InitHsp>>> {
     let Lookup::Standard(table, kept) = lookup else {
         if x_bxdiag_mode() != 2 {
@@ -591,7 +591,7 @@ pub(crate) fn x_word_finder_narrow<S: BxScoring>(
     subject: &[u8],
     lookup: &NarrowLookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
     let NarrowLookup { table, kept } = lookup;
     if options.window_size <= 0 || x_bxdiag_mode() != 1 {
@@ -644,8 +644,7 @@ fn x_add_counts(counts: [u64; 4]) {
 // No NCBI counterpart: chooses the instance of the fused loop; both give the reference's hits and
 // table.
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`], or with `sent` its instance with the
-/// sentinel walks, [`x_word_finder_fused_sent`] (one instance for every matrix: `sent` carries the
-/// matrix's keys).
+/// sentinel walks, [`x_word_finder_fused_sent`] (with the keys of the matrix of `sent`).
 #[allow(clippy::too_many_arguments)]
 fn x_word_finder_fused_or_sent<K: XCell, S: BxScoring>(
     scoring: S,
@@ -657,7 +656,7 @@ fn x_word_finder_fused_or_sent<K: XCell, S: BxScoring>(
     table: &BlastAaLookupTable<K>,
     kept: &XKeptPresence,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     match sent {
         Some(sent) => x_word_finder_fused_sent(
@@ -840,7 +839,7 @@ fn x_word_finder_fused<K: XCell, S: BxScoring>(
 // `x_word_finder_fused`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused_sent<K: XCell>(
+fn x_word_finder_fused_sent<K: XCell, S: BxScoring>(
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -849,7 +848,7 @@ fn x_word_finder_fused_sent<K: XCell>(
     table: &BlastAaLookupTable<K>,
     kept: &XKeptPresence,
     diagonals: &mut Diagonals,
-    sent: XSent<'_>,
+    sent: XSent<'_, S>,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     let word = options.word_size;
     let offset = diagonals.offset;
@@ -1161,14 +1160,18 @@ mod tests {
             assert!(fused.entries == reference.entries, "{run}");
             let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
             for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
-                let x = if matrix == ScoringMatrix::Blosum62 {
-                    XSent::for_test(&batch.sequence_start, &lead, shadow)
+                let (got, c2) = if matrix == ScoringMatrix::Blosum62 {
+                    let x = XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow);
+                    x_word_finder_fused_sent(
+                        mode, batch, params, options, subject, table, kept, table_sent, x,
+                    )
                 } else {
-                    XSent::for_test_of(matrix, &batch.sequence_start, &lead, shadow)
-                };
-                let (got, c2) = x_word_finder_fused_sent(
-                    mode, batch, params, options, subject, table, kept, table_sent, x,
-                )
+                    let x =
+                        XSent::for_test(MatrixBx::of(matrix), &batch.sequence_start, &lead, shadow);
+                    x_word_finder_fused_sent(
+                        mode, batch, params, options, subject, table, kept, table_sent, x,
+                    )
+                }
                 .unwrap();
                 assert_eq!(got, expected, "{run} sent shadow={shadow}");
                 assert_eq!(c2, c, "{run} sent shadow={shadow}");
@@ -1443,6 +1446,7 @@ mod tests {
             )
             .unwrap();
             let actual = crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_scan(
+                Blosum62Bx,
                 batch,
                 params,
                 options,
@@ -1503,11 +1507,9 @@ mod tests {
                         |_| {},
                     )
                     .unwrap();
-                    let lead: Vec<u8> =
-                        std::iter::once(0).chain(subject.iter().copied()).collect();
-                    let sent = with_sent.then(|| {
-                        XSent::for_test_of(options.scoring, &batch.sequence_start, &lead, false)
-                    });
+                    let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
+                    let sent = with_sent
+                        .then(|| XSent::for_test(scoring, &batch.sequence_start, &lead, false));
                     let actual = crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_matrix(
                         scoring,
                         &batch,

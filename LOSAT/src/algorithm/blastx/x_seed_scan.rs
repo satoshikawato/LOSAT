@@ -248,18 +248,21 @@ thread_local! {
 /// traces nothing).
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` (the subject and its batch on that path,
 /// `x_ungap_sent.rs`) the fused and the direct loops extend with the sentinel walks.
+/// The search calls it with BLOSUM62's type (`Blosum62Bx`), another matrix's goes through
+/// [`x_word_finder_matrix`].
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_word_finder_scan(
+pub(crate) fn x_word_finder_scan<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
     x_word_finder_scan_with(
-        Blosum62Bx, batch, parameters, options, subject, lookup, diagonals, sent,
+        scoring, batch, parameters, options, subject, lookup, diagonals, sent,
     )
 }
 
@@ -270,15 +273,15 @@ pub(crate) fn x_word_finder_scan(
 /// keep their code.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_word_finder_matrix(
-    scoring: MatrixBx,
+pub(crate) fn x_word_finder_matrix<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
     x_word_finder_scan_with(
         scoring, batch, parameters, options, subject, lookup, diagonals, sent,
@@ -297,7 +300,7 @@ fn x_word_finder_scan_with<S: BxScoring>(
     subject: &[u8],
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
     // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); every loop
     // below takes `sent`.
@@ -323,8 +326,6 @@ fn x_word_finder_scan_with<S: BxScoring>(
             return Ok(hits);
         }
     }
-    // The walks of `sent` carry their matrix's keys, so one instance serves every matrix (its
-    // one-hit argument is never called: `sent` exists only with a two-hit window).
     if let Some(sent) = sent {
         return x_word_finder_direct_sent(
             batch,
@@ -469,9 +470,11 @@ fn x_word_finder_direct(
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `x_word_finder_direct` with the extension of `sent`
 /// (`x_ungap_sent.rs`), in a function of its own so that the loops without it keep their code.
+/// With another matrix (item SC6b) the walks are its keys' and the one-hit argument is never
+/// called (`sent` exists only with a two-hit window).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_direct_sent(
+fn x_word_finder_direct_sent<S: BxScoring>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -480,7 +483,7 @@ fn x_word_finder_direct_sent(
     diagonals: &mut Diagonals,
     scan_byte: XScanByte,
     hit_bf: bool,
-    sent: XSent<'_>,
+    sent: XSent<'_, S>,
 ) -> Result<Vec<InitHsp>> {
     let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
     if hit_bf {
@@ -1088,7 +1091,7 @@ mod tests {
                             d,
                             scan_byte,
                             hit_bf,
-                            XSent::for_test(&batch.sequence_start, &lead, shadow),
+                            XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow),
                         )
                         .unwrap();
                         let arm = format!(

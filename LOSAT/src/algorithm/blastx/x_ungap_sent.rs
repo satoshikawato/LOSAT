@@ -29,7 +29,7 @@
 //!   parameters, which the batch does not hold; a candidate outside takes the reference, out of
 //!   line). A batch or a subject that fails a check runs the reference.
 //!
-//! Another matrix than BLOSUM62 (item SC6b of line NP, [`XSent::new_of`], [`query_fits_of`]) takes
+//! Another matrix than BLOSUM62 (item SC6b of line NP, `XSent<MatrixBx>`, [`query_fits_of`]) takes
 //! the same walks with the keys of its byte table (blastp's `x_ungapped_sent::keys_of`, item SC2c),
 //! which exist only where that table gives the sentinel -128 against every code and the matrix's
 //! largest score is at most 31; the argument above then holds with 31 for BLOSUM62's 11 (blastp's
@@ -37,6 +37,7 @@
 //! reference (a candidate whose X-drop is outside `1..=127`, and the shadow's comparison) is the
 //! matrix's (`extend_two_hit`).
 
+use super::BxScoring;
 use crate::algorithm::blastp::extension::{
     extend_two_hit, extend_two_hit_blosum62, BlastpTwoHitUngappedResult,
 };
@@ -151,56 +152,36 @@ pub(crate) fn print_shadow_stats() {
     }
 }
 
-/// One subject of one query batch made ready for [`XSent::two_hit`].
+/// One subject of one query batch made ready for [`XSent::two_hit`], with the matrix of the walks
+/// as a type (`BxScoring`): BLOSUM62's (`Blosum62Bx`, no bytes) or another matrix's (`MatrixBx`,
+/// item SC6b), whose reference walks a candidate off the path ([`XSent::reference`]).
 #[derive(Clone, Copy)]
-pub(crate) struct XSent<'a> {
+pub(crate) struct XSent<'a, S: BxScoring> {
     /// The batch's buffer, `[0, frames.., 0]`.
     query: &'a [u8],
     /// `[0, residues.., 0]`.
     subject: XSentSubject<'a>,
     keys: &'static KeyTable,
     shadow: bool,
-    /// The matrix of `keys`: its reference walks a candidate off the path ([`XSent::reference`]).
-    matrix: ScoringMatrix,
+    scoring: S,
 }
 
-impl<'a> XSent<'a> {
-    /// The pair of a query batch that [`query_fits`] passed (its buffer `query`) and a subject
-    /// buffer (`with_sentinels`, the residues between two sentinels); `None` when the switch is off
-    /// or `XSentSubject::new` refuses the subject.
+impl<'a, S: BxScoring> XSent<'a, S> {
+    /// The pair of a query batch that [`query_fits`] (another matrix: [`query_fits_of`]) passed (its
+    /// buffer `query`) and a subject buffer (`with_sentinels`, the residues between two sentinels),
+    /// with the keys of `scoring`'s matrix; `None` when the switch is off, the matrix has no keys or
+    /// `XSentSubject::new` refuses the subject.
     // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
     #[inline]
-    pub(crate) fn new(query: &'a [u8], with_sentinels: &'a [u8]) -> Option<Self> {
+    pub(crate) fn new(scoring: S, query: &'a [u8], with_sentinels: &'a [u8]) -> Option<Self> {
         let state = state();
-        let keys = state.keys.as_deref()?;
-        let subject = XSentSubject::new(with_sentinels)?;
-        if state.mode == 2 {
-            SHADOW_SUBJECTS.fetch_add(1, Ordering::Relaxed);
-        }
-        Some(Self {
-            query,
-            subject,
-            keys,
-            shadow: state.mode == 2,
-            matrix: ScoringMatrix::Blosum62,
-        })
-    }
-
-    /// [`XSent::new`] for another matrix than BLOSUM62, for a query batch that [`query_fits_of`]
-    /// passed: the walks take the matrix's keys (module header); `None` when the switch is off, the
-    /// matrix has no keys or `XSentSubject::new` refuses the subject.
-    // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-    #[inline]
-    pub(crate) fn new_of(
-        matrix: ScoringMatrix,
-        query: &'a [u8],
-        with_sentinels: &'a [u8],
-    ) -> Option<Self> {
-        let state = state();
-        if state.mode == 0 {
+        let keys = if S::BLOSUM62 {
+            state.keys.as_deref()?
+        } else if state.mode == 0 {
             return None;
-        }
-        let keys = keys_of(matrix)?;
+        } else {
+            keys_of(scoring.matrix())?
+        };
         let subject = XSentSubject::new(with_sentinels)?;
         if state.mode == 2 {
             SHADOW_SUBJECTS.fetch_add(1, Ordering::Relaxed);
@@ -210,39 +191,33 @@ impl<'a> XSent<'a> {
             subject,
             keys,
             shadow: state.mode == 2,
-            matrix,
+            scoring,
         })
     }
 
-    /// A pair for the tests of the seed loops, with or without the shadow's comparison.
+    /// A pair for the tests of the seed loops, with or without the shadow's comparison, with the
+    /// keys of `scoring`'s matrix (one that has them).
     #[cfg(test)]
-    pub(crate) fn for_test(query: &'a [u8], with_sentinels: &'a [u8], shadow: bool) -> Self {
-        static KEYS: OnceLock<Box<KeyTable>> = OnceLock::new();
-        assert!(query_on_path(query));
-        Self {
-            query,
-            subject: XSentSubject::new(with_sentinels).expect("a subject on the path"),
-            keys: KEYS.get_or_init(|| blosum62_keys().expect("BLOSUM62 fits a byte table")),
-            shadow,
-            matrix: ScoringMatrix::Blosum62,
-        }
-    }
-
-    /// [`XSent::for_test`] with another matrix's keys (one that has them).
-    #[cfg(test)]
-    pub(crate) fn for_test_of(
-        matrix: ScoringMatrix,
+    pub(crate) fn for_test(
+        scoring: S,
         query: &'a [u8],
         with_sentinels: &'a [u8],
         shadow: bool,
     ) -> Self {
-        assert!(query_on_path_within(query, MAX_QUERY_LEN_OF));
+        static KEYS: OnceLock<Box<KeyTable>> = OnceLock::new();
+        let keys: &'static KeyTable = if S::BLOSUM62 {
+            assert!(query_on_path(query));
+            KEYS.get_or_init(|| blosum62_keys().expect("BLOSUM62 fits a byte table"))
+        } else {
+            assert!(query_on_path_within(query, MAX_QUERY_LEN_OF));
+            keys_of(scoring.matrix()).expect("the matrix's table is on the path")
+        };
         Self {
             query,
             subject: XSentSubject::new(with_sentinels).expect("a subject on the path"),
-            keys: keys_of(matrix).expect("the matrix's table is on the path"),
+            keys,
             shadow,
-            matrix,
+            scoring,
         }
     }
 
@@ -305,9 +280,9 @@ impl<'a> XSent<'a> {
         q_right_off: usize,
         dropoff: i32,
     ) -> Option<BlastpTwoHitUngappedResult> {
-        if self.matrix != ScoringMatrix::Blosum62 {
+        if !S::BLOSUM62 {
             return extend_two_hit(
-                self.matrix,
+                self.scoring.matrix(),
                 &self.query[1..],
                 self.subject_raw(),
                 s_left_off,
@@ -431,28 +406,24 @@ mod tests {
             subject.extend((0..slen).map(|_| code(&mut rng, true)));
             subject.push(0);
             let query = query_buffer(&mut rng, &subject);
-            let sent = if matrix == ScoringMatrix::Blosum62 {
-                XSent::for_test(&query, &subject, false)
-            } else {
-                XSent::for_test_of(matrix, &query, &subject, false)
-            };
+            // The walks of BLOSUM62's type, or of another matrix's.
+            let blosum62 = (matrix == ScoringMatrix::Blosum62)
+                .then(|| XSent::for_test(super::super::Blosum62Bx, &query, &subject, false));
+            let other = (matrix != ScoringMatrix::Blosum62).then(|| {
+                XSent::for_test(super::super::MatrixBx::of(matrix), &query, &subject, false)
+            });
             let (q_ref, s_ref) = (&query[1..], &subject[1..]);
             for _ in 0..200 {
                 let q = rng.below(q_ref.len() as u64 + 2) as usize;
                 let s = rng.below(s_ref.len() as u64 + 2) as usize;
                 let s_left = rng.below(s as u64 + 4) as usize;
                 let dropoff = [1, 7, 16, 40, 127, 128, 300][rng.below(7) as usize];
-                let want = extend_two_hit(
-                    matrix,
-                    q_ref,
-                    s_ref,
-                    s_left,
-                    s,
-                    q,
-                    dropoff,
-                    3,
-                );
-                let got = sent.two_hit::<false>(s_left, s, q, dropoff);
+                let want = extend_two_hit(matrix, q_ref, s_ref, s_left, s, q, dropoff, 3);
+                let got = match (&blosum62, &other) {
+                    (Some(sent), _) => sent.two_hit::<false>(s_left, s, q, dropoff),
+                    (_, Some(sent)) => sent.two_hit::<false>(s_left, s, q, dropoff),
+                    _ => unreachable!(),
+                };
                 assert_eq!(
                     got, want,
                     "{matrix:?} round {round}: s_left={s_left} s={s} q={q} dropoff={dropoff}"

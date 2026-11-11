@@ -312,7 +312,7 @@ pub(super) fn write_blastx_tabular(
     // ```c++
     //     CAlignFormatUtil::GetAsciiProteinMatrix(m_MatrixName, m_ScoringMatrix);
     // ```
-    // BLASTX searches with BLOSUM62 only (`args.rs`).
+    // The search's matrix (`-matrix`, item SC6 of line NP).
     let table = TabularWriter {
         spec,
         program_version: PROGRAM_VERSION,

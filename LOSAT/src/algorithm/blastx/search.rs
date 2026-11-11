@@ -1843,31 +1843,18 @@ fn compute_subject_with<S: super::seed::BxScoring>(
             diagnostics.then_some(&mut seeds),
         )?
     } else if !diagnostics {
-        let x_sent = if !x_lead {
-            None
-        } else if S::BLOSUM62 {
-            super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
+        let x_sent = if x_lead {
+            super::seed::x_ungap_sent::XSent::new(scoring, &batch.sequence_start, &x_buffer)
         } else {
-            super::seed::x_ungap_sent::XSent::new_of(
-                options.scoring,
-                &batch.sequence_start,
-                &x_buffer,
-            )
+            None
         };
         if S::BLOSUM62 {
             super::seed::x_seed_scan::x_word_finder_scan(
-                batch, params, options, encoded, lookup, diagonals, x_sent,
+                scoring, batch, params, options, encoded, lookup, diagonals, x_sent,
             )?
         } else {
             super::seed::x_seed_scan::x_word_finder_matrix(
-                super::seed::MatrixBx::of(options.scoring),
-                batch,
-                params,
-                options,
-                encoded,
-                lookup,
-                diagonals,
-                x_sent,
+                scoring, batch, params, options, encoded, lookup, diagonals, x_sent,
             )?
         }
     } else if !S::BLOSUM62 {

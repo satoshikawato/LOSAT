@@ -36,6 +36,8 @@ pub use args::RpsbprocArgs;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufReader, Read, Write};
 
+use crate::ncbi_exception::{err_post_x, NcbiException};
+
 use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
 use args::TargetData;
 use data::{CddData, DataError, DataFiles};
@@ -189,9 +191,21 @@ pub(crate) fn write_stdout(text: &str) {
     }
 }
 
-/// The two lines of an exception that leaves rpsbproc's `Run` (`CNcbiApplication::x_TryMain`):
-/// the exception's own report, then the application's, exit 3. For the exceptions of `Init`
-/// (`initialization`) the application's line has code 15 and the exit is 2.
+/// `NCBI_USE_ERRCODE_X` of ncbiapp.cpp (`Corelib_App`), the error code of the application's
+/// reports.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:65
+// ```c++
+// #define NCBI_USE_ERRCODE_X   Corelib_App
+// ```
+// NCBI reference (598d8ae6): c++/include/corelib/error_codes.hpp:49
+// ```c++
+// NCBI_DEFINE_ERRCODE_X(Corelib_App,        106, 24);
+// ```
+const CORELIB_APP: u32 = 106;
+
+/// The report of an exception that leaves rpsbproc's `Run` (`CNcbiApplication::x_TryMain`):
+/// the exception's own line, then the application's, exit 3. For the exceptions of `Init`
+/// (`initialization`) the application's line has subcode 15 and the exit is 2.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:669-674,711-728
 // ```c++
 //             catch (const CException& e) {
@@ -209,20 +223,19 @@ pub(crate) fn write_stdout(text: &str) {
 //                 *exit_code = 3;
 //             }
 // ```
-// (The lines as NCBI's rpsbproc printed them: `Error: (CInvalidChoiceSelection::eFail) <message>`
-// and `Error: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail)
-// <message>` (probe 2, a database with `lcl|` ids); `Error: (CStringException::eConvert)
-// <message>` and `Error: (106.15) Application's initialization failed (CStringException::eConvert)
-// <message>` (probe 4, data files with numbers that do not convert).)
-fn report_exception(exception: &str, message: &str, initialization: bool) -> i32 {
-    let (code, what, status) = if initialization {
-        ("106.15", "initialization", 2)
+// (rpsbproc sets no diagnostic flags, so the report is `NcbiException::report_default_ex`'s; the
+// lines as NCBI's rpsbproc printed them: `Error: (CInvalidChoiceSelection::eFail) <message>` and
+// `Error: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) <message>`
+// (probe 2, a database with `lcl|` ids); `Error: (CStringException::eConvert) <message>` and
+// `Error: (106.15) Application's initialization failed (CStringException::eConvert) <message>`
+// (probe 4, data files with numbers that do not convert).)
+fn report_exception(exception: &NcbiException, initialization: bool) -> i32 {
+    let (subcode, title, status) = if initialization {
+        (15, "Application's initialization failed", 2)
     } else {
-        ("106.16", "execution", 3)
+        (16, "Application's execution failed", 3)
     };
-    write_stderr(&format!(
-        "Error: ({exception}) {message}\nError: ({code}) Application's {what} failed ({exception}) {message}\n"
-    ));
+    write_stderr(&exception.report_default_ex(CORELIB_APP, subcode, title));
     status
 }
 
@@ -963,11 +976,7 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
                     status = E_DATA_LOAD_ERROR;
                 }
                 Err(DataError::Conversion(error)) => {
-                    return Outcome::Exit(report_exception(
-                        "CStringException::eConvert",
-                        &error.message(),
-                        true,
-                    ));
+                    return Outcome::Exit(report_exception(&error, true));
                 }
                 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:675-679
                 // ```c++
@@ -981,8 +990,10 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
                 // `Init`; NCBI's rpsbproc printed `Error: (106.6) ...` with the `what()` of
                 // libstdc++, PS16a review oracle A4-1 cases `annot10`, `gen10` and `ct3`.)
                 Err(DataError::Std(what)) => {
-                    write_stderr(&format!(
-                        "Error: (106.6) Application's initialization failed: {what}\n"
+                    write_stderr(&err_post_x(
+                        CORELIB_APP,
+                        6,
+                        &format!("Application's initialization failed: {what}"),
                     ));
                     return Outcome::Exit(2);
                 }
@@ -1230,8 +1241,8 @@ fn run_sessions<R: Read>(
                 return Outcome::Exit(E_OK);
             }
             match error {
-                ProcessError::Exception(class, message) => {
-                    Outcome::Exit(report_exception(class, &message, false))
+                ProcessError::Exception(exception) => {
+                    Outcome::Exit(report_exception(&exception, false))
                 }
                 ProcessError::Unsupported(message) => Outcome::Refused(message),
             }

@@ -3,6 +3,17 @@
 
 use super::*;
 
+/// The text of a conversion error as rpsbproc reports it (the first of its two lines, after
+/// `Error: (CStringException::eConvert) `).
+fn message(e: NcbiException) -> String {
+    let report = e.report_default_ex(106, 15, "Application's initialization failed");
+    let first = report.lines().next().unwrap();
+    first
+        .strip_prefix("Error: (CStringException::eConvert) ")
+        .unwrap()
+        .to_string()
+}
+
 // PS16a probe 4: NCBI's rpsbproc on data files with numbers that do not convert printed
 // `Cannot convert string '12x' to Uint8 (m_Pos = 2)` (a PSSM-ID of cddid.tbl), `'abc' to Uint8
 // (m_Pos = 0)` (a length), `'abc' to double (m_Pos = 0)` (bitscore_specific.txt), `'x' to Int8
@@ -11,64 +22,62 @@ use super::*;
 #[test]
 fn conversions_fail_with_ncbis_messages() {
     assert_eq!(
-        string_to_uint(b"12x").unwrap_err().message(),
+        message(string_to_uint(b"12x").unwrap_err()),
         "Cannot convert string '12x' to Uint8 (m_Pos = 2)"
     );
     assert_eq!(
-        string_to_uint(b"abc").unwrap_err().message(),
+        message(string_to_uint(b"abc").unwrap_err()),
         "Cannot convert string 'abc' to Uint8 (m_Pos = 0)"
     );
     assert_eq!(
-        string_to_double(b"abc").unwrap_err().message(),
+        message(string_to_double(b"abc").unwrap_err()),
         "Cannot convert string 'abc' to double (m_Pos = 0)"
     );
     assert_eq!(
-        string_to_int(b"x").unwrap_err().message(),
+        message(string_to_int(b"x", 0).unwrap_err()),
         "Cannot convert string 'x' to Int8 (m_Pos = 0)"
     );
-    // ncbistr.cpp:884-918, 646-655 (quoted at `string_to_uint`).
+    // ncbistr.cpp:876-918, 646-655 (quoted at `ncbi_str::string_to_uint8`, `string_to_uint`).
     assert_eq!(string_to_uint(b"+42"), Ok(42));
     assert_eq!(
-        string_to_uint(b"").unwrap_err().message(),
+        message(string_to_uint(b"").unwrap_err()),
         "Cannot convert string '' to Uint8 (m_Pos = 0)"
     );
     assert_eq!(
-        string_to_uint(b"+").unwrap_err().message(),
+        message(string_to_uint(b"+").unwrap_err()),
         "Cannot convert string '+' to Uint8 (m_Pos = 1)"
     );
     assert_eq!(
-        string_to_uint(b"4294967296").unwrap_err().message(),
+        message(string_to_uint(b"4294967296").unwrap_err()),
         "Cannot convert string '4294967296' to unsigned int, overflow (m_Pos = 0)"
     );
     assert_eq!(
-        string_to_uint(b"18446744073709551616")
-            .unwrap_err()
-            .message(),
+        message(string_to_uint(b"18446744073709551616").unwrap_err()),
         "Cannot convert string '18446744073709551616' to Uint8 (m_Pos = 19)"
     );
-    // ncbistr.cpp:798-873, 635-643 (quoted at `string_to_int`).
-    assert_eq!(string_to_int(b"-17"), Ok(-17));
+    // ncbistr.cpp:798-873, 635-643 (quoted at `ncbi_str::string_to_int8`, `string_to_int`).
+    assert_eq!(string_to_int(b"-17", 0), Ok(-17));
     assert_eq!(
-        string_to_int(b"12 ").unwrap_err().message(),
+        message(string_to_int(b"12 ", 0).unwrap_err()),
         "Cannot convert string '12 ' to Int8 (m_Pos = 2)"
     );
     assert_eq!(
-        string_to_int(b"2147483648").unwrap_err().message(),
+        message(string_to_int(b"2147483648", 0).unwrap_err()),
         "Cannot convert string '2147483648' to int, overflow (m_Pos = 0)"
     );
     assert_eq!(
-        string_to_int(b"9223372036854775808").unwrap_err().message(),
+        message(string_to_int(b"9223372036854775808", 0).unwrap_err()),
         "Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)"
     );
-    // ncbistr.cpp:1309-1374 (quoted at `string_to_double`).
+    // ncbistr.cpp:1312-1375, 1386-1403 (quoted at `ncbi_str::string_to_double`).
     assert_eq!(string_to_double(b"55.5"), Ok(55.5));
     assert_eq!(string_to_double(b"-1e3"), Ok(-1000.0));
     assert_eq!(
-        string_to_double(b"12.5\r").unwrap_err().message(),
+        message(string_to_double(b"12.5\r").unwrap_err()),
         "Cannot convert string '12.5\\r' to double (m_Pos = 4)"
     );
     assert_eq!(
-        string_to_double(b"1e").unwrap_err().message(),
+        message(string_to_double(b"1e").unwrap_err()),
         "Cannot convert string '1e' to double (m_Pos = 1)"
     );
     // glibc's `strtod` reads the hexadecimal form; `0x` alone is the number 0 that ends before
@@ -77,45 +86,9 @@ fn conversions_fail_with_ncbis_messages() {
     assert_eq!(string_to_double(b"0x10"), Ok(16.0));
     assert_eq!(string_to_double(b"0X1p3"), Ok(8.0));
     assert_eq!(
-        string_to_double(b"0x").unwrap_err().message(),
+        message(string_to_double(b"0x").unwrap_err()),
         "Cannot convert string '0x' to double (m_Pos = 1)"
     );
-}
-
-// `LOSAT/tests/unit/rpsbproc_strtod_hex_vectors.tsv`: glibc 2.39's `strtod` of hexadecimal
-// texts (edge cases of rounding, subnormals, overflow and the ends of the form, then random
-// ones), made with `ctypes` by `psiblast-20261025/PR/tmp/impl16a/strtodhex.py`.
-#[test]
-fn hex_numbers_read_as_glibcs_strtod() {
-    let table = include_str!("../../tests/unit/rpsbproc_strtod_hex_vectors.tsv");
-    let mut rows = 0;
-    for row in table.lines().filter(|row| !row.starts_with('#')) {
-        let mut fields = row.split('\t');
-        let (text, bits, used) = (
-            fields.next().unwrap(),
-            fields.next().unwrap(),
-            fields.next().unwrap(),
-        );
-        let (value, end) = strtod_prefix(text.as_bytes());
-        assert_eq!(
-            (format!("{:016x}", value.to_bits()), end.to_string()),
-            (bits.to_string(), used.to_string()),
-            "{text:?}"
-        );
-        rows += 1;
-    }
-    assert_eq!(rows, 360);
-}
-
-// ncbistr.cpp (`s_PrintableString`, quoted at `printable_string`).
-#[test]
-fn printable_string_escapes_as_ncbi() {
-    assert_eq!(printable_string(b"a\tb"), "a\\tb");
-    assert_eq!(printable_string(b"'\"\\"), "\\'\\\"\\\\");
-    assert_eq!(printable_string(b"??x?"), "\\?\\?x?");
-    assert_eq!(printable_string(b"\x01x"), "\\1x");
-    assert_eq!(printable_string(b"\x017"), "\\0017");
-    assert_eq!(printable_string(&[0xc3, 0xa9]), "\\303\\251");
 }
 
 // basedata.cpp:120-140, 168-193 (quoted at `dom_acc_type` and `compute_pseudo_pssm_id`).
@@ -307,7 +280,7 @@ fn short_accessions_and_blank_lines_load_as_ncbi() {
         std::fs::write(dir.join("cddid.tbl"), format!("{table}{row}")).unwrap();
         match CddData::load(&fixture_files(dir.to_str().unwrap())) {
             Err(DataError::Conversion(error)) => assert_eq!(
-                error.message(),
+                message(error),
                 "Cannot convert string '' to Uint8 (m_Pos = 0)"
             ),
             other => panic!("{other:?}"),

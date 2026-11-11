@@ -21,6 +21,7 @@
 //! and those of the value being read are kept). The readers are generic over the source, so the
 //! slice reader is what it was before the stream existed.
 
+use crate::ncbi_str::is_space;
 use crate::utils::x87::X87;
 use std::io::Read;
 use std::ops::Range;
@@ -211,11 +212,6 @@ pub(crate) fn is_first_id_char(c: u8) -> bool {
 // ```
 pub(crate) fn is_id_char(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'.'
-}
-
-/// The C locale's `isspace`.
-pub(crate) fn is_c_space(c: u8) -> bool {
-    matches!(c, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
 }
 
 /// The reader of one ASN.1 text document (or of several from one stream).
@@ -1675,7 +1671,7 @@ pub(crate) fn string_to_double_posix(
     let mut ptr = 0usize;
     let mut c = at(ptr);
     ptr += 1;
-    while is_c_space(c) {
+    while is_space(c) {
         c = at(ptr);
         ptr += 1;
     }

@@ -27,6 +27,8 @@
 
 use std::io::{BufRead, BufReader};
 
+use crate::ncbi_exception::NcbiException;
+use crate::ncbi_str::{printable_string, string_to_double, string_to_int, string_to_uint};
 use crate::utils::std_sort::std_sort;
 
 /// `INVALIDPSSMID`.
@@ -97,7 +99,7 @@ pub(crate) enum DataError {
     /// unsuccessful: ...", exit 2).
     Missing(String),
     /// A number that NCBI's conversion refuses (rpsbproc: two `Error:` lines, exit 2).
-    Conversion(ConversionError),
+    Conversion(NcbiException),
     /// An exception of the C++ library that leaves `Init` (rpsbproc: one `Error: (106.6)` line
     /// with its `what()`, exit 2).
     Std(String),
@@ -243,580 +245,27 @@ fn ltrim(text: &[u8]) -> &[u8] {
     &text[start..]
 }
 
-/// A number that NCBI's `NStr::StringToNumeric` refuses: `CStringException` (`eConvert`), which
-/// `catch (CSimpleException e)` (rpsbproc_main.cpp:654) does not catch, so it leaves `Init` to
-/// the application's handler (ncbiapp.cpp:669-674: "Application's initialization failed",
-/// exit 2).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ConversionError {
-    /// The text converted.
-    text: Vec<u8>,
-    /// The type named in the message (`Uint8`, `unsigned int`, `Int8`, `int`, `double`).
-    to_type: &'static str,
-    /// The message's addition (`overflow`), empty for none.
-    detail: &'static str,
-    /// `m_Pos`.
-    pos: usize,
-}
-
-impl ConversionError {
-    /// The exception's message with its position, as NCBI's diagnostics print it.
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:545-558
-    // ```c++
-    // string CS2N_Guard::Message(const CTempString str, const char* to_type, const CTempString msg)
-    // {
-    //     string s;
-    //     s.reserve(str.length() + msg.length() + 50);
-    //     s += "Cannot convert string '";
-    //     s += NStr::PrintableString(str);
-    //     s += "' to ";
-    //     s += to_type;
-    //     if ( !msg.empty() ) {
-    //         s += ", ";
-    //         s += msg;
-    //     }
-    //     return s;
-    // }
-    // ```
-    // (NCBI's two lines, `(CStringException::eConvert) <message> (m_Pos = <pos>)`, were seen with
-    // NCBI's rpsbproc on data files with `12x`, `abc` and `x` in number fields, PS16a probe 4.)
-    pub(crate) fn message(&self) -> String {
-        let mut text = String::from("Cannot convert string '");
-        text.push_str(&printable_string(&self.text));
-        text.push_str("' to ");
-        text.push_str(self.to_type);
-        if !self.detail.is_empty() {
-            text.push_str(", ");
-            text.push_str(self.detail);
-        }
-        text.push_str(&format!(" (m_Pos = {})", self.pos));
-        text
-    }
-}
-
-/// `NStr::PrintableString(str)` (`fNewLine_Quote | fNonAscii_Passthru`, C escapes).
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3732-3845 (`s_PrintableString`)
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3582-3593
 // ```c++
-//         switch (c) {
-//         case '\a':
-//             if (lang == eLanguage_C)
-//                 c = 'a';
-//             ...
-//         case '\b': c = 'b'; ... case '\f': ... case '\r': ... case '\t': ... case '\v': ...
-//         case '\n':
-//             if (!(mode & NStr::fNewLine_Passthru))
-//                 c = 'n';
-//             /*FALLTHRU*/
-//         case '\\':
-//         case '\'':
-//         case '"':
-//             break;
-//         case '&':
-//             if (lang == eLanguage_Javascript)
-//                 break;
-//             continue;
-//         case '?':
-//             if (lang == eLanguage_C) {
-//                 if (i  &&  str[i - 1] == '?')
-//                     break;
-//                 if (i < str.size() - 1  &&  str[i + 1] == '?')
-//                     break;
-//             }
-//             continue;
-//         default:
-//             if (!isascii((unsigned char) c)) {
-//                 if (mode & NStr::fNonAscii_Quote) {
-//                     octal = true;
-//                     break;
-//                 }
-//             }
-//             if (!isprint((unsigned char) c)) {
-//                 octal = true;
-//                 break;
-//             }
-//             continue;
-//         }
-//         ...
-//         out->put('\\');
-//         if (c == '\n') {
-//             out->write("n\\\n", 3);
-//         } else if (octal) {
-//             bool reduce;
-//             if (!(mode & NStr::fPrintable_Full)) {
-//                 reduce = (i == str.size() - 1  ||
-//                           str[i + 1] < '0' || '7' < str[i + 1] ? true : false);
-//             } ...
-//             v =  (unsigned char) c >> 6;
-//             if (v  ||  !reduce) {
-//                 val[k++] = char('0' + v);
-//                 reduce = false;
-//             }
-//             v = ((unsigned char) c >> 3) & 7;
-//             if (v  ||  !reduce) {
-//                 val[k++] = char('0' + v);
-//             }
-//             v =  (unsigned char) c       & 7;
-//             val[k++] = char('0' + v);
-// ```
-// (In the C locale `isprint` is false for the bytes from 0x80, so they are written in octal.)
-pub(crate) fn printable_string(text: &[u8]) -> String {
-    let mut out = String::new();
-    for (i, &c) in text.iter().enumerate() {
-        let escaped = match c {
-            0x07 => Some(b'a'),
-            0x08 => Some(b'b'),
-            0x0c => Some(b'f'),
-            b'\r' => Some(b'r'),
-            b'\t' => Some(b't'),
-            0x0b => Some(b'v'),
-            b'\n' => Some(b'n'),
-            b'\\' | b'\'' | b'"' => Some(c),
-            b'?' if (i > 0 && text[i - 1] == b'?') || text.get(i + 1) == Some(&b'?') => Some(c),
-            0x20..=0x7e => None,
-            _ => {
-                out.push('\\');
-                let reduce = text
-                    .get(i + 1)
-                    .is_none_or(|next| !(b'0'..=b'7').contains(next));
-                let mut reduce = reduce;
-                let high = c >> 6;
-                if high != 0 || !reduce {
-                    out.push(char::from(b'0' + high));
-                    reduce = false;
-                }
-                let middle = (c >> 3) & 7;
-                if middle != 0 || !reduce {
-                    out.push(char::from(b'0' + middle));
-                }
-                out.push(char::from(b'0' + (c & 7)));
-                continue;
-            }
-        };
-        match escaped {
-            Some(letter) => {
-                out.push('\\');
-                out.push(char::from(letter));
-            }
-            None => out.push(char::from(c)),
-        }
-    }
-    out
-}
-
-/// `NStr::StringToUInt(str)` (flags 0, base 10): `StringToUInt8`'s fast conversion (an
-/// optional `+` and decimal digits, the whole text), then the range of `unsigned int`.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:884-918
-// ```c++
-//     if ( base == 10  &&  (flags & slow_flags) == 0 ) {
-//         // fast conversion
-//
-//         // Current position in the string
-//         CTempString::const_iterator ptr = str.begin(), end = str.end();
-//
-//         // Determine sign
-//         if ( ptr != end && *ptr == '+' ) {
-//             ++ptr;
-//         }
-//         if ( ptr == end ) {
-//             S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, ptr-str.begin());
-//         }
-//
-//         // Begin conversion
-//         Uint8 n = 0;
-//
-//         const Uint8 limdiv = kMax_UI8/10;
-//         const int   limoff = int(kMax_UI8 % 10);
-//
-//         do {
-//             char ch = *ptr;
-//             int  delta = ch - '0';
-//             if ( unsigned(delta) >= 10 ) {
-//                 S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, ptr-str.begin());
-//             }
-//             // Overflow check
-//             if ( n >= limdiv && (n > limdiv || delta > limoff) ) {
-//                 S2N_CONVERT_ERROR(Uint8, kEmptyStr, ERANGE, ptr-str.begin());
-//             }
-//             n = n*10+delta;
-//         } while ( ++ptr != end );
-//
-//         return n;
+//     template <typename TNumeric>
+//     static typename enable_if< is_integral<TNumeric>::value && is_signed<TNumeric>::value && (sizeof(TNumeric) == sizeof(int) && !is_same<TNumeric, long>::value), TNumeric>::type
+//     x_StringToNumeric(const CTempString str, TStringToNumFlags flags, int base)
+//     {
+//         return StringToInt(str, flags, base);
+//     }
+//     template <typename TNumeric>
+//     static typename enable_if< is_integral<TNumeric>::value && is_unsigned<TNumeric>::value && (sizeof(TNumeric) == sizeof(unsigned int) && !is_same<TNumeric, unsigned long>::value), TNumeric>::type
+//     x_StringToNumeric(const CTempString str, TStringToNumFlags flags, int base)
+//     {
+//         return StringToUInt(str, flags, base);
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:646-655
-// ```c++
-// unsigned int
-// NStr::StringToUInt(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Uint8 value = StringToUInt8(str, flags, base);
-//     if ( value > kMax_UInt ) {
-//         S2N_CONVERT_ERROR(unsigned int, "overflow", ERANGE, 0);
-//     }
-//     return (unsigned int) value;
-// }
-// ```
-pub(crate) fn string_to_uint(text: &[u8]) -> Result<u32, ConversionError> {
-    let error = |to_type, detail, pos| ConversionError {
-        text: text.to_vec(),
-        to_type,
-        detail,
-        pos,
-    };
-    let mut ptr = usize::from(text.first() == Some(&b'+'));
-    if ptr == text.len() {
-        return Err(error("Uint8", "", ptr));
-    }
-    let (limdiv, limoff) = (u64::MAX / 10, u64::MAX % 10);
-    let mut n: u64 = 0;
-    while ptr < text.len() {
-        let delta = text[ptr].wrapping_sub(b'0');
-        if delta >= 10 {
-            return Err(error("Uint8", "", ptr));
-        }
-        let delta = u64::from(delta);
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return Err(error("Uint8", "", ptr));
-        }
-        n = n * 10 + delta;
-        ptr += 1;
-    }
-    u32::try_from(n).map_err(|_| error("unsigned int", "overflow", 0))
-}
-
-/// `NStr::StringToInt(str)` (flags 0, base 10): `StringToInt8` (an optional sign, decimal
-/// digits up to the first other byte, which must be the end), then the range of `int`.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-873
-// ```c++
-//     // Determine sign
-//     bool sign = false;
-//     switch (str[pos]) {
-//     case '-':
-//         sign = true;
-//         /*FALLTHRU*/
-//     case '+':
-//         pos++;
-//         break;
-//     default:
-//         if (flags & fMandatorySign) {
-//             S2N_CONVERT_ERROR_INVAL(Int8);
-//         }
-//         break;
-//     }
-//     SIZE_TYPE pos0 = pos;
-//     ...
-//     Int8 limdiv = base==10? kMax_I8 / 10: kMax_I8 / base;
-//     Int8 limoff = (base==10? kMax_I8 % 10: kMax_I8 % base) + (sign ? 1 : 0);
-//     ...
-//     while (char ch = str[pos]) {
-//         int  delta;   // corresponding numeric value of 'ch'
-//
-//         // Check on possible commas
-//         CHECK_COMMAS;
-//         // Sanity check
-//         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
-//             break;
-//         }
-//         // Overflow check
-//         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
-//             S2N_CONVERT_ERROR_OVERFLOW(Int8);
-//         }
-//         n *= base;
-//         n += delta;
-//         pos++;
-//     }
-//
-//     // Last checks
-//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-//         S2N_CONVERT_ERROR_INVAL(Int8);
-//     }
-//     ...
-//     n = sign ? -n : n;
-//     CHECK_ENDPTR(Int8);
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
-// ```c++
-// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Int8 value = StringToInt8(str, flags, base);
-//     if ( value < kMin_Int  ||  value > kMax_Int ) {
-//         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-//     }
-//     return (int) value;
-// }
-// ```
-// (`str[pos]` reads the string's terminating 0 at its end; a 0 byte inside the text ends the
-// number as the end does.)
-pub(crate) fn string_to_int(text: &[u8]) -> Result<i32, ConversionError> {
-    let error = |to_type, detail, pos| ConversionError {
-        text: text.to_vec(),
-        to_type,
-        detail,
-        pos,
-    };
-    let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
-    let mut pos = 0usize;
-    let sign = at(0) == b'-';
-    if matches!(at(0), b'-' | b'+') {
-        pos += 1;
-    }
-    let pos0 = pos;
-    let (limdiv, limoff) = (i64::MAX / 10, i64::MAX % 10 + i64::from(sign));
-    let mut n: i64 = 0;
-    while at(pos).is_ascii_digit() {
-        let delta = i64::from(at(pos) - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return Err(error("Int8", "overflow", pos));
-        }
-        // `n * 10 + delta` of `-kMin_I8` wraps as NCBI's arithmetic does (then negated back).
-        n = n.wrapping_mul(10).wrapping_add(delta);
-        pos += 1;
-    }
-    if pos == pos0 {
-        return Err(error("Int8", "", pos));
-    }
-    let n = if sign { n.wrapping_neg() } else { n };
-    if at(pos) != 0 {
-        return Err(error("Int8", "", pos));
-    }
-    i32::try_from(n).map_err(|_| error("int", "overflow", 0))
-}
-
-/// `NStr::StringToDouble(str)` (flags 0): the first byte must be a digit, the C locale's
-/// decimal point or a sign; `strtod` reads the number, which must end the text.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1312-1374
-// ```c++
-//     // For consistency make additional check on incorrect leading symbols.
-//     // Because strtod() may just skip such symbols.
-//     if (!(flags & NStr::fAllowLeadingSymbols)) {
-//         char c = str[pos];
-//         if ( !isdigit((unsigned char)c)  &&  !s_IsDecimalPoint(c,flags)  &&  c != '-'  &&  c != '+') {
-//             S2N_CONVERT_ERROR_INVAL(double);
-//         }
-//     }
-//     ...
-//         n = strtod(begptr, &endptr);
-//     ...
-//     if ( !endptr  ||  endptr == begptr ) {
-//         S2N_CONVERT_ERROR(double, kEmptyStr, EINVAL, s_DiffPtr(endptr, begptr) + pos);
-//     }
-//     // some libs set ERANGE, others do not
-//     // here, we do not consider ERANGE as error
-//     ...
-//     pos += s_DiffPtr(endptr, begptr);
-//     ...
-//     CHECK_ENDPTR(double);
-// ```
-// glibc's `strtod` of the decimal and hexadecimal forms and of `inf`, `infinity`, `nan` and
-// `nan(...)` (`strtod_prefix`).
-pub(crate) fn string_to_double(text: &[u8]) -> Result<f64, ConversionError> {
-    let error = |pos| ConversionError {
-        text: text.to_vec(),
-        to_type: "double",
-        detail: "",
-        pos,
-    };
-    let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
-    let c = at(0);
-    if !c.is_ascii_digit() && c != b'.' && c != b'-' && c != b'+' {
-        return Err(error(0));
-    }
-    let (value, used) = strtod_prefix(text);
-    if used == 0 {
-        return Err(error(0));
-    }
-    if at(used) != 0 {
-        return Err(error(used));
-    }
-    Ok(value)
-}
-
-/// glibc `strtod` of the start of `text` (no leading white space here) in the C locale and the
-/// default rounding: the value and the bytes read (0 when no number starts there).
-fn strtod_prefix(text: &[u8]) -> (f64, usize) {
-    let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
-    let mut pos = usize::from(matches!(at(0), b'+' | b'-'));
-    let negative = at(0) == b'-';
-    let lower = |pos: usize| at(pos).to_ascii_lowercase();
-    if lower(pos) == b'0' && lower(pos + 1) == b'x' {
-        if let Some((value, end)) = hex_prefix(text, pos + 2) {
-            return (if negative { -value } else { value }, end);
-        }
-        // `0x` without a hexadecimal digit reads as the number 0, which ends before the `x`.
-        return (if negative { -0.0 } else { 0.0 }, pos + 1);
-    }
-    if lower(pos) == b'i' && lower(pos + 1) == b'n' && lower(pos + 2) == b'f' {
-        let mut end = pos + 3;
-        if (0..5).all(|k| lower(end + k) == b"inity"[k]) {
-            end += 5;
-        }
-        return (
-            if negative {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            },
-            end,
-        );
-    }
-    if lower(pos) == b'n' && lower(pos + 1) == b'a' && lower(pos + 2) == b'n' {
-        let mut end = pos + 3;
-        if at(end) == b'(' {
-            let mut k = end + 1;
-            while at(k).is_ascii_alphanumeric() || at(k) == b'_' {
-                k += 1;
-            }
-            if at(k) == b')' {
-                end = k + 1;
-            }
-        }
-        return (f64::NAN, end);
-    }
-    let mut digits = 0;
-    while at(pos).is_ascii_digit() {
-        pos += 1;
-        digits += 1;
-    }
-    if at(pos) == b'.' {
-        pos += 1;
-        while at(pos).is_ascii_digit() {
-            pos += 1;
-            digits += 1;
-        }
-    }
-    if digits == 0 {
-        return (0.0, 0);
-    }
-    let mantissa_end = pos;
-    if matches!(at(pos), b'e' | b'E') {
-        let mut k = pos + 1;
-        if matches!(at(k), b'+' | b'-') {
-            k += 1;
-        }
-        if at(k).is_ascii_digit() {
-            while at(k).is_ascii_digit() {
-                k += 1;
-            }
-            pos = k;
-        }
-    }
-    let number = std::str::from_utf8(&text[..pos]).expect("an ASCII number");
-    let value: f64 = number
-        .parse()
-        .ok()
-        .or_else(|| number[..mantissa_end].parse().ok())
-        .expect("a decimal number parses");
-    (value, pos)
-}
-
-/// The hexadecimal number of glibc's `strtod` after its `0x`, from `start`: hexadecimal digits
-/// with an optional point, at least one digit, then an optional binary exponent `p` with an
-/// optional sign and decimal digits (a `p` without digits is not read); the value rounded once
-/// to the nearest double (ties to even), the infinity above the largest. `None` when no digit
-/// follows (`strtod` then reads the `0` alone). Its absolute value.
-// (The hexadecimal form of C's `strtod`, ISO C11 7.22.1.3, as glibc reads it in the C locale;
-// the unit test `hex_numbers_read_as_glibcs_strtod` holds glibc 2.39's values and ends for these
-// forms.)
-fn hex_prefix(text: &[u8], start: usize) -> Option<(f64, usize)> {
-    let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
-    let digit = |pos: usize| char::from(at(pos)).to_digit(16);
-    // The digits as an integer of at most 116 bits, the binary exponent of its last bit, and
-    // whether a digit that did not fit was not 0.
-    let (mut mantissa, mut exponent, mut sticky) = (0u128, 0i64, false);
-    let mut push = |value: u32, after_point: bool| {
-        if mantissa == 0 && value == 0 {
-            exponent -= if after_point { 4 } else { 0 };
-        } else if mantissa < 1 << 112 {
-            mantissa = mantissa * 16 + u128::from(value);
-            exponent -= if after_point { 4 } else { 0 };
-        } else {
-            sticky |= value != 0;
-            exponent += if after_point { 0 } else { 4 };
-        }
-    };
-    let mut pos = start;
-    let mut any = false;
-    while let Some(value) = digit(pos) {
-        push(value, false);
-        any = true;
-        pos += 1;
-    }
-    if at(pos) == b'.' && (any || digit(pos + 1).is_some()) {
-        pos += 1;
-        while let Some(value) = digit(pos) {
-            push(value, true);
-            any = true;
-            pos += 1;
-        }
-    }
-    if !any {
-        return None;
-    }
-    if matches!(at(pos), b'p' | b'P') {
-        let mut k = pos + 1;
-        let negative = at(k) == b'-';
-        if matches!(at(k), b'+' | b'-') {
-            k += 1;
-        }
-        if at(k).is_ascii_digit() {
-            let mut value = 0i64;
-            while at(k).is_ascii_digit() {
-                value = (value * 10 + i64::from(at(k) - b'0')).min(1 << 40);
-                k += 1;
-            }
-            exponent += if negative { -value } else { value };
-            pos = k;
-        }
-    }
-    Some((round_binary(mantissa, exponent, sticky), pos))
-}
-
-/// `mantissa * 2^exponent` (plus less than its last bit when `sticky`) rounded to the nearest
-/// double, ties to even: subnormal below 2^-1022, the infinity from 2^1024 on.
-fn round_binary(mantissa: u128, exponent: i64, sticky: bool) -> f64 {
-    if mantissa == 0 {
-        return 0.0;
-    }
-    let bits = i64::from(128 - mantissa.leading_zeros());
-    // The exponent of the leading bit, and the bits the double keeps from it.
-    let lead = exponent + bits - 1;
-    if lead > 1023 {
-        return f64::INFINITY;
-    }
-    let keep = if lead >= -1022 {
-        53
-    } else {
-        53 - (-1022 - lead)
-    };
-    if keep < 0 {
-        return 0.0;
-    }
-    let shift = bits - keep;
-    let mut kept = if shift <= 0 {
-        mantissa << (-shift)
-    } else {
-        let kept = mantissa >> shift;
-        let rest = mantissa & ((1u128 << shift) - 1);
-        let half = 1u128 << (shift - 1);
-        let up = rest > half || (rest == half && (sticky || kept & 1 == 1));
-        kept + u128::from(up)
-    };
-    let mut lead = lead;
-    if keep == 53 && kept == 1 << 53 {
-        kept >>= 1;
-        lead += 1;
-        if lead > 1023 {
-            return f64::INFINITY;
-        }
-    }
-    if keep == 53 {
-        f64::from_bits(((lead + 1023) as u64) << 52 | (kept as u64 & ((1 << 52) - 1)))
-    } else {
-        // A subnormal: its bits are the kept ones (2^52 is the smallest normal number).
-        f64::from_bits(kept as u64)
-    }
-}
+// The loader's `NStr::StringToNumeric<T>(text)` (flags 0, base 10) is `StringToUInt` for the
+// unsigned ids and lengths, `StringToInt` for the signed ones and `StringToDouble` for the bit
+// scores (ncbistr.hpp:3632-3637): `ncbi_str::string_to_uint`, `string_to_int` and
+// `string_to_double`. Their `CStringException` (`eConvert`) is not caught by
+// `catch (CSimpleException e)` (rpsbproc_main.cpp:654), so it leaves `Init` to the
+// application's handler (`DataError::Conversion`).
 
 /// `TDomSrcCount::ESrcIdx` and the signatures of the source databases.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:117-140
@@ -1214,7 +663,8 @@ impl CddData {
             // `tmp[i]` of a `std::string` is its terminating 0 at its length.
             let acc = |i: usize| accession.get(i).copied().unwrap_or(0);
             if acc(0) == b'c' && acc(1) == b'l' && acc(2).is_ascii_digit() {
-                let cluster_id = string_to_int(&accession[2..]).map_err(DataError::Conversion)?;
+                let cluster_id =
+                    string_to_int(&accession[2..], 0).map_err(DataError::Conversion)?;
                 pos0 = pos1.wrapping_add(1);
                 pos1 = line.find(b'\t', pos0);
                 let short_name = trim(line.substr(pos0, pos1.wrapping_sub(pos0))?);
@@ -1547,7 +997,7 @@ impl CddData {
             let sf_at = |i: usize| sf.get(i).copied().unwrap_or(0);
             if sf_at(0) == b'c' && sf_at(1) == b'l' {
                 let number = line.substr(pos0 + 2, pos1.wrapping_sub(pos0).wrapping_sub(2))?;
-                let cluster_id = string_to_int(number).map_err(DataError::Conversion)?;
+                let cluster_id = string_to_int(number, 0).map_err(DataError::Conversion)?;
                 if self.find_cluster(cluster_id).is_some() {
                     self.domains[dom].cluster_id = cluster_id;
                 }
@@ -1727,7 +1177,7 @@ impl CddData {
             } else {
                 index_text
             };
-            string_to_int(index_text).map_err(DataError::Conversion)?;
+            string_to_int(index_text, 0).map_err(DataError::Conversion)?;
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
             line.substr(pos0, pos1.wrapping_sub(pos0))?;
@@ -1748,11 +1198,12 @@ impl CddData {
             }
             let mut pos_c = line.find(b',', pos0);
             while pos_c < pos1 {
-                string_to_int(line.substr(pos0, pos_c - pos0)?).map_err(DataError::Conversion)?;
+                string_to_int(line.substr(pos0, pos_c - pos0)?, 0)
+                    .map_err(DataError::Conversion)?;
                 pos0 = pos_c + 1;
                 pos_c = line.find(b',', pos0);
             }
-            string_to_int(line.substr(pos0, pos1.wrapping_sub(pos0))?)
+            string_to_int(line.substr(pos0, pos1.wrapping_sub(pos0))?, 0)
                 .map_err(DataError::Conversion)?;
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
@@ -1761,7 +1212,7 @@ impl CddData {
             } else {
                 line.substr(pos0, pos1.wrapping_sub(pos0))?
             };
-            string_to_int(type_text).map_err(DataError::Conversion)?;
+            string_to_int(type_text, 0).map_err(DataError::Conversion)?;
             Ok(())
         })
     }

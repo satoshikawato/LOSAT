@@ -6,17 +6,18 @@
 use super::archive::{Align, Mask, MaskLocation, Query, Segs, SeqEntry};
 use super::data::{compute_pseudo_pssm_id, CddData};
 use super::domains::{calculate, parse_align, AlignIndex, DomAlign};
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// A failure while the queries of an archive are processed.
 #[derive(Debug)]
 pub(crate) enum ProcessError {
-    /// An exception of NCBI's serial objects thrown while a session is processed: its class and
-    /// code (`CInvalidChoiceSelection::eFail` from a getter of a CHOICE that holds another
-    /// variant, `CUnassignedMember::eGet` from a getter of an unset member) and its message
-    /// (rpsbproc: two `Error:` lines, exit 3).
-    Exception(&'static str, String),
+    /// An exception of NCBI's serial objects thrown while a session is processed
+    /// (`CInvalidChoiceSelection::eFail` from a getter of a CHOICE that holds another variant,
+    /// `CUnassignedMember::eGet` from a getter of an unset member; rpsbproc: two `Error:` lines,
+    /// exit 3).
+    Exception(NcbiException),
     /// What LOSAT does not reproduce (an explicit refusal).
     Unsupported(String),
 }
@@ -52,20 +53,22 @@ pub(crate) enum ProcessError {
 // `_`, the first letter and each one after `.` upper-cased)
 // (NCBI's rpsbproc printed `CSeq_id::GetGeneral(): Invalid choice selection:
 // NCBI-Seqloc::Seq-id.local` for a profile database with `lcl|` ids, PS16a probe 2.)
+// (The exception is thrown by the generated `C<type>_Base::ThrowInvalidSelection`, whose place
+// LOSAT does not have: `ThrowSite::generated`.)
 pub(crate) fn choice_selection(
     module: &str,
     type_name: &str,
     required: &str,
     current: &str,
 ) -> ProcessError {
-    ProcessError::Exception(
-        "CInvalidChoiceSelection::eFail",
+    ProcessError::Exception(NcbiException::new(
+        ThrowSite::generated("CInvalidChoiceSelection::eFail"),
         format!(
             "C{}::Get{}(): Invalid choice selection: {module}::{type_name}.{current}",
             identifier(type_name),
             identifier(required)
         ),
-    )
+    ))
 }
 
 /// `SPrintIdentifier` of a type or member name without `.`: `-` read as `_`, the first letter
@@ -114,15 +117,62 @@ fn identifier(name: &str) -> String {
 // (`x_GetVerifyData` is `eSerialVerifyData_Yes` unless `SERIAL_VERIFY_DATA_GET` says otherwise,
 // which LOSAT's rpsbproc rejects: `reader_variable`.)
 pub(crate) fn unassigned_member(module: &str, type_name: &str, member: &str) -> ProcessError {
-    ProcessError::Exception(
-        "CUnassignedMember::eGet",
+    ProcessError::Exception(NcbiException::new(
+        UNASSIGNED_MEMBER,
         format!(
             "C{}::Get{}(): Attempt to get unassigned member {module}::{type_name}.{member}",
             identifier(type_name),
             identifier(member)
         ),
-    )
+    ))
 }
+
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:317-320
+// ```c++
+// void CSerialObject::ThrowUnassigned(TMemberIndex index) const
+// {
+//     ThrowUnassigned(index, 0, 0);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
+// ```c++
+//                     code.Methods(inl) <<
+//                         "    if (!CanGet"<< mem_cName<<"()) {\n"
+//                         "        ThrowUnassigned("<<member_index;
+// #if 0
+//                     code.Methods(inl) << ", __FILE__, __LINE__";
+// #endif
+//                     code.Methods(inl) << ");\n"
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
+// ```c++
+// const char* find_match(char        lsep,
+//                        char        rsep,
+//                        const char* start,
+//                        const char* stop)
+// {
+//     if (*(stop - 1) != rsep) return stop;
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
+// ```c++
+//     const char* end_str = find_match('(', ')',
+//                                      m_CurrFunctName,
+//                                      m_CurrFunctName + len);
+//     if (end_str == m_CurrFunctName + len) {
+//         // Missing '('
+//         return;
+//     }
+// ```
+// The generated getters call `ThrowUnassigned(index)`, so the place is the `NCBI_THROW` of
+// serialobject.cpp:306 (`file_name` and `file_line` are 0). Its function is a `const` method,
+// whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
+// function then.
+const UNASSIGNED_MEMBER: ThrowSite = ThrowSite {
+    file: "src/serial/serialobject.cpp",
+    line: 306,
+    kind: "CUnassignedMember::eGet",
+    function: None,
+};
 
 /// A protein query of the output (`TDomQuery`) with its hits.
 #[derive(Debug)]
@@ -653,7 +703,7 @@ mod tests {
     #[test]
     fn choice_selection_messages() {
         let message = |error| match error {
-            ProcessError::Exception(_, message) => message,
+            ProcessError::Exception(exception) => exception.get_msg().to_string(),
             ProcessError::Unsupported(message) => panic!("{message}"),
         };
         assert_eq!(
@@ -684,14 +734,14 @@ mod tests {
     // query without `inst.length` (PS16a review oracle O3-9).
     #[test]
     fn unassigned_member_message() {
-        let ProcessError::Exception(class, message) =
+        let ProcessError::Exception(exception) =
             unassigned_member("NCBI-Sequence", "Seq-inst", "length")
         else {
             panic!("an exception");
         };
-        assert_eq!(class, "CUnassignedMember::eGet");
+        assert_eq!(exception.site().kind, "CUnassignedMember::eGet");
         assert_eq!(
-            message,
+            exception.get_msg(),
             "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length"
         );
     }

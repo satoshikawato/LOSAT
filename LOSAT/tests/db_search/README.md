@@ -1023,7 +1023,7 @@ most 9 in BLOSUM62).
       makeblastdb -in "pa1 pb1 pc1 pd1" -input_type blastdb -dbtype prot -blastdb_version 4 -title "nz reppo" \
           -out $D/nz_reppo
 
-## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a and PS11b)
+## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a, PS11b and PS11c-1)
 
 - `rps_mini` (version 5), `rps_mini4` (version 4) and `rps_mini26` (version 4, a 26-column `.rps` with the 26-letter
   magic `0x1e16` in `.rps` and `.loo`, its `.freq` left at 28 columns, as NCBI's own test database `rpstest_le`):
@@ -1045,8 +1045,15 @@ most 9 in BLOSUM62).
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
 - Queries: `tests/fasta/WSSV.faa` (177 records, 10 query batches; its long records share diagonals of the 1,024-entry
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt
-  0 K of each batch's first query) and `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30
-  and a J at 60, part of the ribonucleotide reductase).
+  0 K of each batch's first query), `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30
+  and a J at 60, part of the ribonucleotide reductase) and `tests/fasta/rps/mask.faa` (PS11c-1, the masks:
+  `YP_009220478.1` of `WSSV.faa` as it is, whose acidic low-complexity run SEG masks, and `YP_009220601.1`, the TK-TMK
+  record, as `tk_lc` with its residues 61-120 in lower case for `-lcase_masking`; lines of 60 letters, 819 bytes. Made
+  from `WSSV.faa` by taking the two records, renaming the second and lowering the case of its letters 61-120), and
+  `tests/fasta/rps/nident_gate.faa` (PS11c-1 review: record `BDT63522.1` of `tests/fasta/PajaWSV.faa`, lines of 60
+  letters, 1,563 bytes, with 401 of its 1,473 letters in lower case at random: Python's `random.seed(7)`, then one
+  `random.random() < 0.3` draw per letter over the first 30 records of `PajaWSV.faa` in file order, a letter lowered
+  where it is true; with `-lcase_masking` some of its HSPs have identities on masked letters only).
 
 ## outfmt 11 titles where NCBI's search fails (line NP, series SM, DECISIONS 25)
 

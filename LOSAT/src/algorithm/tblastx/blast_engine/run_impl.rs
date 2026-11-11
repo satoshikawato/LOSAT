@@ -788,6 +788,14 @@ pub fn run(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.id_scope = args.parse_deflines.then(Default::default);
+    // NCBI's score block looks for the file of a `-matrix` that its tables do not have when it
+    // sets up a batch (`ApplicationSettings::matrix_file`); the run refuses it there, as the
+    // name that NCBI aborts on (`run_in_pool`).
+    if args.scoring_matrix() == TblastxMatrix::Unknown {
+        args.matrix_file = settings
+            .matrix_file(args.matrix_name())
+            .map_err(anyhow::Error::msg)?;
+    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -2954,6 +2962,18 @@ fn run_in_pool(
         anyhow::bail!(
             "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's TBLASTX",
             args.matrix_name()
+        );
+    }
+    // The same abort after NCBI reads the file of a name that its tables do not have
+    // (`ApplicationSettings::matrix_file`, NCBI BLAST+ 2.17.0 with `BLASTMAT`: rc 134).
+    if let (false, Some(file)) = (no_batch, args.matrix_file.as_deref()) {
+        anyhow::bail!(
+            "{}",
+            crate::blastinput::ncbi_environment::matrix_file_refusal(
+                args.matrix_name(),
+                file,
+                "TBLASTX"
+            )
         );
     }
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:173

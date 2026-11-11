@@ -582,6 +582,11 @@ pub struct ResolvedOptions {
     /// An ungapped search's `-matrix` that NCBI's matrix loader does not know: NCBI's set-up of the
     /// first query batch fails with "Unknown error code -1" (`query_setup.rs`).
     pub unknown_matrix: bool,
+    /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found by the command line after
+    /// the options are resolved; `None` elsewhere. The first query batch is refused then
+    /// (`query_setup::matrix_error_message`).
+    pub matrix_file: Option<std::path::PathBuf>,
     pub gap_open: i32,
     pub gap_extend: i32,
     pub gapped: bool,
@@ -1104,6 +1109,7 @@ impl BlastxArgs {
             matrix: matrix_name,
             scoring: scoring.unwrap_or(crate::config::ScoringMatrix::Blosum62),
             unknown_matrix: scoring.is_none(),
+            matrix_file: None,
             gap_open,
             gap_extend,
             gapped: !self.ungapped,

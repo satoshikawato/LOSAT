@@ -157,7 +157,7 @@ impl ReaderBatchShape {
             redo_cutoff_min: None,
             matrix_error: options
                 .unknown_matrix
-                .then(|| super::query_setup::unknown_matrix_message(records).into()),
+                .then(|| super::query_setup::matrix_error_message(records, options).into()),
         }
     }
 

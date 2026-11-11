@@ -4467,8 +4467,11 @@ mod tests {
         ];
         let tiny = vec![vec![frame(residues(&mut seed, 6), vec![], 1)]];
         let masked = vec![vec![frame(residues(&mut seed, 50), vec![(0, 49)], 1)]];
-        let matrix = ScoringMatrix::Blosum62;
-        let build_with = |queries: &[Vec<QueryFrame>], threshold: i32, parts: usize, cutoff| {
+        let build_with = |queries: &[Vec<QueryFrame>],
+                          threshold: i32,
+                          parts: usize,
+                          cutoff,
+                          matrix: ScoringMatrix| {
             let built = if parts == 0 {
                 x_bx_build_direct(prepared(queries, matrix), threshold, matrix, 3, cutoff)
             } else {
@@ -4488,46 +4491,57 @@ mod tests {
         };
         let mut overflow_seen = false;
         let mut narrow_built = 0;
-        in_pool(|| {
-            for (queries, threshold) in [
-                (&large, 11),
-                (&small, 12),
-                (&large, 13),
-                (&large, 0),
-                (&tiny, 11),
-                (&masked, 11),
-            ] {
-                let reference = reference(queries, threshold, matrix);
-                overflow_seen |= !reference.overflow.is_empty();
-                let ratio = hundredths(&reference);
-                // `parts` 0: not pooled; 1: pooled, serial; above: partitioned.
-                for &parts in PARTS {
-                    // A cutoff of 0 chooses 16 bits wherever the query fits; none, 32 bits.
-                    for (cutoff, narrow) in [
-                        (Some(0), true),
-                        (Some(ratio), true),
-                        (Some(ratio + 1), false),
-                        (None, false),
-                    ] {
-                        let mut table = build_with(queries, threshold, parts, cutoff);
-                        let what =
-                            format!("threshold {threshold} parts {parts} cutoff {cutoff:?}:");
-                        assert_eq!(
-                            matches!(table, XBxTable::Narrow(_)),
-                            narrow,
-                            "{what} the width"
-                        );
-                        narrow_built += usize::from(narrow);
-                        assert_bx_table(&what, &table, &reference);
-                        if parts > 0 {
-                            give_back(&mut table);
+        // BLOSUM62's tables, then other matrices' (item SC6b of line NP: BLASTX builds them the same
+        // way), each after the pooled builds of the matrix before it (the shared neighbour lists are
+        // kept per matrix).
+        for matrix in [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Pam30,
+        ] {
+            in_pool(|| {
+                for (queries, threshold) in [
+                    (&large, 11),
+                    (&small, 12),
+                    (&large, 13),
+                    (&large, 0),
+                    (&tiny, 11),
+                    (&masked, 11),
+                ] {
+                    let reference = reference(queries, threshold, matrix);
+                    overflow_seen |= !reference.overflow.is_empty();
+                    let ratio = hundredths(&reference);
+                    // `parts` 0: not pooled; 1: pooled, serial; above: partitioned.
+                    for &parts in PARTS {
+                        // A cutoff of 0 chooses 16 bits wherever the query fits; none, 32 bits.
+                        for (cutoff, narrow) in [
+                            (Some(0), true),
+                            (Some(ratio), true),
+                            (Some(ratio + 1), false),
+                            (None, false),
+                        ] {
+                            let mut table = build_with(queries, threshold, parts, cutoff, matrix);
+                            let what = format!(
+                                "{matrix:?} threshold {threshold} parts {parts} cutoff {cutoff:?}:"
+                            );
+                            assert_eq!(
+                                matches!(table, XBxTable::Narrow(_)),
+                                narrow,
+                                "{what} the width"
+                            );
+                            narrow_built += usize::from(narrow);
+                            assert_bx_table(&what, &table, &reference);
+                            if parts > 0 {
+                                give_back(&mut table);
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
         assert!(overflow_seen, "the fixture must reach the overflow array");
         assert!(narrow_built > 50, "{narrow_built} tables of 16-bit hits");
+        let matrix = ScoringMatrix::Blosum62;
         // The width at 65,535 letters of lookup query: its length is the last context's frame_base
         // plus its aa_len.
         let base = prepared(&[vec![frame(residues(&mut seed, 50), vec![], 1)]], matrix).contexts[0]
@@ -4538,7 +4552,7 @@ mod tests {
             assert_eq!(reference.query_length, if narrow { 65_535 } else { 65_536 });
             in_pool(|| {
                 for parts in [0, 1, 3] {
-                    let mut table = build_with(&block, 13, parts, Some(0));
+                    let mut table = build_with(&block, 13, parts, Some(0), matrix);
                     let what = format!("{length} letters, parts {parts}:");
                     assert_eq!(matches!(table, XBxTable::Narrow(_)), narrow, "{what}");
                     assert_bx_table(&what, &table, &reference);

@@ -2416,6 +2416,61 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     parts: usize,
     narrow_cutoff: Option<u64>,
 ) -> XBxTable {
+    build_ncbi_lookup_with(
+        ScoringMatrix::Blosum62,
+        concat_query,
+        lookup_locations,
+        contexts,
+        threshold,
+        pooled,
+        parts,
+        narrow_cutoff,
+    )
+}
+
+/// [`build_ncbi_lookup_from_prepared`] with another matrix than BLOSUM62 (BLASTX's other matrices,
+/// items SC6 and SC6b of line NP): the same builds with the matrix's scores (the neighbour lists
+/// of the pooled build and of a thread's builds are kept per matrix, the key of `x_lut_direct.rs`'s
+/// memos). Not inlined, so that BLOSUM62's build keeps its code.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_ncbi_lookup_from_prepared_of(
+    matrix: ScoringMatrix,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+    pooled: bool,
+    parts: usize,
+    narrow_cutoff: Option<u64>,
+) -> XBxTable {
+    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+    build_ncbi_lookup_with(
+        matrix,
+        concat_query,
+        lookup_locations,
+        contexts,
+        threshold,
+        pooled,
+        parts,
+        narrow_cutoff,
+    )
+}
+
+/// The body of [`build_ncbi_lookup_from_prepared`] with the matrix `matrix`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn build_ncbi_lookup_with(
+    matrix: ScoringMatrix,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+    pooled: bool,
+    parts: usize,
+    narrow_cutoff: Option<u64>,
+) -> XBxTable {
     let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
     let prepared = PreparedLookupQuery {
         concat_query,
@@ -2441,58 +2496,15 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // kept vectors; the caller gives them back (`x_give_back_pooled`, `x_give_back_pooled16`) when
     // it drops the table, or the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(
-            prepared,
-            threshold,
-            ScoringMatrix::Blosum62,
-            3,
-            parts,
-            narrow_cutoff,
-        )
+        x_lut_direct::x_build_direct_pooled(prepared, threshold, matrix, 3, parts, narrow_cutoff)
     } else {
-        x_lut_direct::x_bx_build_direct(
-            prepared,
-            threshold,
-            ScoringMatrix::Blosum62,
-            3,
-            narrow_cutoff,
-        )
+        x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, 3, narrow_cutoff)
     };
     let prepared = match built {
         Ok(table) => return table,
         Err(prepared) => prepared,
     };
-    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0)
-}
-
-/// [`build_ncbi_lookup_from_prepared`] with another matrix than BLOSUM62 (BLASTX's other matrices,
-/// item SC6 of line NP): the in-place builder without the pool, the reference builder where it
-/// declines, and `Int4` hits only (the 16-bit table is the fused loop's, BLOSUM62's). Not inlined,
-/// so that BLOSUM62's build keeps its code.
-#[cold]
-#[inline(never)]
-pub(crate) fn build_ncbi_lookup_from_prepared_of(
-    matrix: ScoringMatrix,
-    concat_query: Vec<u8>,
-    lookup_locations: Vec<(i32, i32)>,
-    contexts: Vec<QueryContext>,
-    threshold: i32,
-) -> BlastAaLookupTable {
-    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
-    let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
-    let prepared = PreparedLookupQuery {
-        concat_query,
-        lookup_locations,
-        contexts,
-        frame_bases,
-        skipped_seg_mask: 0,
-    };
-    let prepared = match x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, 3, None) {
-        Ok(XBxTable::Wide(table)) => return table,
-        Ok(XBxTable::Narrow(_)) => unreachable!("a build without a cutoff takes Int4 hits"),
-        Err(prepared) => prepared,
-    };
-    build_lookup_from_prepared(prepared, threshold, matrix, 3).0
+    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, 3).0)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245

@@ -248,15 +248,64 @@ thread_local! {
 /// traces nothing).
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` (the subject and its batch on that path,
 /// `x_ungap_sent.rs`) the fused and the direct loops extend with the sentinel walks.
+/// With the matrix of `scoring`: another matrix than BLOSUM62 takes [`x_word_finder_matrix`], its
+/// instance out of line.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_word_finder_scan(
+pub(crate) fn x_word_finder_scan<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
+) -> Result<Vec<InitHsp>> {
+    if !S::BLOSUM62 {
+        return x_word_finder_matrix(
+            scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+        );
+    }
+    x_word_finder_scan_with(
+        scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+    )
+}
+
+/// `x_word_finder_scan` with another matrix than BLOSUM62 (items SC6 and SC6b of line NP): the same
+/// loops with the matrix's extensions (`MatrixBx`): the fused loop on the tables it pays for
+/// (LOSAT_X_BXDIAG, x_seed_diag.rs), the sentinel walks with the matrix's keys where `sent` is
+/// given (LOSAT_X_BXUNGAPSENT), the direct loop otherwise. Not inlined, so that BLOSUM62's loops
+/// keep their code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_matrix<S: BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_, S>>,
+) -> Result<Vec<InitHsp>> {
+    x_word_finder_scan_with(
+        scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+    )
+}
+
+/// The body of [`x_word_finder_scan`] with the matrix of `scoring`: BLOSUM62's direct loop without
+/// `sent` is `x_word_finder_direct`, another matrix's `x_word_finder_matrix_direct`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_scan_with<S: BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
     // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); every loop
     // below takes `sent`.
@@ -269,7 +318,7 @@ pub(crate) fn x_word_finder_scan(
         BxLookup::Wide(lookup) => lookup,
         BxLookup::Narrow(lookup) => {
             return super::x_seed_diag::x_word_finder_narrow(
-                batch, parameters, options, subject, lookup, diagonals, sent,
+                scoring, batch, parameters, options, subject, lookup, diagonals, sent,
             );
         }
     };
@@ -277,7 +326,7 @@ pub(crate) fn x_word_finder_scan(
     // not, the direct loop.
     if super::x_seed_diag::x_bxdiag_mode() != 0 {
         if let Some(hits) = super::x_seed_diag::x_word_finder_diag(
-            batch, parameters, options, subject, lookup, diagonals, sent,
+            scoring, batch, parameters, options, subject, lookup, diagonals, sent,
         )? {
             return Ok(hits);
         }
@@ -295,6 +344,11 @@ pub(crate) fn x_word_finder_scan(
             sent,
         );
     }
+    if !S::BLOSUM62 {
+        return x_word_finder_matrix_direct(
+            scoring, batch, parameters, options, subject, lookup, diagonals,
+        );
+    }
     x_word_finder_direct(
         batch,
         parameters,
@@ -307,27 +361,24 @@ pub(crate) fn x_word_finder_scan(
     )
 }
 
-/// `x_word_finder_scan` with another matrix than BLOSUM62 (item SC6 of line NP): the direct loop
-/// (`x_word_finder_direct_with`, the port of NCBI's loop) with the matrix's extensions
-/// (`MatrixBx`), on its tables of `Int4` hits (`Lookup::x_new_of` builds no 16-bit table for it);
-/// the fused loop (LOSAT_X_BXDIAG) and the sentinel walks (LOSAT_X_BXUNGAPSENT) are BLOSUM62's.
-/// Not inlined, so that BLOSUM62's loops keep their code.
-#[inline(never)]
+/// The direct loop of another matrix than BLOSUM62 (`x_word_finder_direct_with`, the port of NCBI's
+/// loop) with the matrix's extensions (`MatrixBx`): a subject without the sentinel walks.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_word_finder_matrix(
-    scoring: MatrixBx,
+fn x_word_finder_matrix_direct<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    lookup: &BxLookup,
+    lookup: &Lookup,
     diagonals: &mut Diagonals,
 ) -> Result<Vec<InitHsp>> {
-    let BxLookup::Wide(lookup) = lookup else {
-        anyhow::bail!("BLASTX builds no 16-bit table for another matrix than BLOSUM62");
-    };
     let scan_byte = x_bxscan_byte();
-    let acts = x_hitbf_acts(x_bxhitbf(), options, subject, diagonals);
+    let hit_bf = x_bxhitbf();
+    let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
+    if hit_bf {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);
+    }
     macro_rules! direct {
         ($hit_bf:literal) => {
             x_word_finder_direct_with::<$hit_bf, _, _>(
@@ -428,9 +479,11 @@ fn x_word_finder_direct(
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `x_word_finder_direct` with the extension of `sent`
 /// (`x_ungap_sent.rs`), in a function of its own so that the loops without it keep their code.
+/// With another matrix (item SC6b) the walks are its keys' and the one-hit argument is never
+/// called (`sent` exists only with a two-hit window).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_direct_sent(
+fn x_word_finder_direct_sent<S: BxScoring>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -439,8 +492,11 @@ fn x_word_finder_direct_sent(
     diagonals: &mut Diagonals,
     scan_byte: XScanByte,
     hit_bf: bool,
-    sent: XSent<'_>,
+    sent: XSent<'_, S>,
 ) -> Result<Vec<InitHsp>> {
+    // The one-hit argument below is BLOSUM62's; another matrix's `sent` exists only with a two-hit
+    // window (`query_fits_of`), where it is never called.
+    debug_assert!(S::BLOSUM62 || options.window_size > 0);
     let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
     if hit_bf {
         crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);
@@ -1047,7 +1103,7 @@ mod tests {
                             d,
                             scan_byte,
                             hit_bf,
-                            XSent::for_test(&batch.sequence_start, &lead, shadow),
+                            XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow),
                         )
                         .unwrap();
                         let arm = format!(

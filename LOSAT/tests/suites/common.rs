@@ -32,6 +32,8 @@ mod entry_names;
 mod library_api;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
+#[path = "../ncbi_lookup_paths.rs"]
+mod ncbi_lookup_paths;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]

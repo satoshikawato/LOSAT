@@ -4233,6 +4233,76 @@ mod tests {
         assert!(output_str.contains("Length=500"));
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1598-1626 (quoted at
+    // `write_sequence_row`): each row of `m_LineLen` columns; rpsblast's `-line_length` (1 or
+    // more) sets the width. A width of 1 prints one column per row with its own coordinates,
+    // the coordinates' column as wide as the HSP's widest coordinate.
+    #[test]
+    fn alignment_rows_of_one_column_step_one_letter() {
+        let hit = Hit {
+            length: 5,
+            q_start: 8,
+            q_end: 12,
+            s_start: 98,
+            s_end: 102,
+            ..make_hit()
+        };
+        let row_of = |line_length: usize| {
+            let config = PairwiseConfig {
+                line_length,
+                program: "rpsblast".to_string(),
+                show_frame: false,
+                ..PairwiseConfig::default()
+            };
+            let mut output = Vec::new();
+            write_alignment_with_sequences(&mut output, &hit, "ACDeF", "ACDEW", &[], &config)
+                .unwrap();
+            String::from_utf8(output).unwrap()
+        };
+        let one = row_of(1);
+        let queries: Vec<&str> = one.lines().filter(|l| l.starts_with("Query")).collect();
+        assert_eq!(
+            queries,
+            [
+                "Query  8    A  8",
+                "Query  9    C  9",
+                "Query  10   D  10",
+                "Query  11   e  11",
+                "Query  12   F  12"
+            ]
+        );
+        let subjects: Vec<&str> = one.lines().filter(|l| l.starts_with("Sbjct")).collect();
+        assert_eq!(subjects[0], "Sbjct  98   A  98");
+        assert_eq!(subjects[4], "Sbjct  102  W  102");
+        // The middle line reads the letters without case (the lower-case mask is a display).
+        assert_eq!(one.lines().nth(13).unwrap(), "            E");
+        // Widths at and above the HSP's length give the one row of the default.
+        assert_eq!(row_of(5), row_of(60));
+        assert_eq!(row_of(1000), row_of(60));
+        // A first row of one residue at 1 shows no coordinates (`j == 0 && start == 1 && end ==
+        // 1`), as NCBI's `-line_length 1` rows of a query that aligns from its first letter.
+        let hit = Hit {
+            length: 2,
+            q_start: 1,
+            q_end: 2,
+            s_start: 1,
+            s_end: 2,
+            ..make_hit()
+        };
+        let config = PairwiseConfig {
+            line_length: 1,
+            program: "rpsblast".to_string(),
+            show_frame: false,
+            ..PairwiseConfig::default()
+        };
+        let mut output = Vec::new();
+        write_alignment_with_sequences(&mut output, &hit, "MQ", "MQ", &[], &config).unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "Query     M  \n          M\nSbjct     M  \n\nQuery  2  Q  2\n          Q\nSbjct  2  Q  2\n\n"
+        );
+    }
+
     #[test]
     fn test_write_hsp_info() {
         let hit = PairwiseHit::from(make_hit());

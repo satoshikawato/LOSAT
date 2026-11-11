@@ -1027,11 +1027,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let lookup = if options.scoring == ScoringMatrix::Blosum62 {
-            Lookup::x_new_as(&batch, &params, &options, 1, narrow.then_some(0)).unwrap()
-        } else {
-            Lookup::x_new_of(&batch, &params, &options, 1, narrow.then_some(0)).unwrap()
-        };
+        let lookup = Lookup::x_new_for(&batch, &params, &options, 1, narrow.then_some(0)).unwrap();
         assert_eq!(matches!(lookup, BxLookup::Narrow(_)), narrow);
         parameters::subject_parameters(
             &batch,
@@ -1563,6 +1559,110 @@ mod tests {
             assert!(widths.iter().any(|w| !w.1), "{widths:?}");
         }
         eprintln!("16-bit tables: {widths:?}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-606 (as above), with the
+    // word length of the search's lookup table (`wordsize = lookup->word_length`).
+    // No NCBI counterpart (speed only): the seed stage of the word sizes other than 3 and 5 (item SC9)
+    // scans the tables the search builds (`Lookup::x_new_for` with `x_narrow_cutoff`: for 2 and 4
+    // the lookup table, of 16-bit hits where the fused loop takes it, and for 6 and 7 the
+    // compressed table), with BLOSUM62 and another matrix, two-hit and one-hit, to the reference's
+    // hits and diagonal table.
+    #[test]
+    fn every_word_size_s_seed_stage_gives_the_reference_hits() {
+        fn seed_stage<S: BxScoring>(
+            scoring: S,
+            search: &(PreparedQueryBatch, Vec<ContextParameters>, ResolvedOptions),
+            lookup: &BxLookup,
+            subjects: &[Vec<u8>],
+            run: &str,
+        ) -> usize {
+            let (batch, params, options) = search;
+            let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
+            let mut reference = Diagonals::new(length, options.window_size).unwrap();
+            let mut scanned = Diagonals::new(length, options.window_size).unwrap();
+            let mut hits = 0;
+            for subject in subjects {
+                let expected = word_finder_bx_of(
+                    scoring,
+                    batch,
+                    params,
+                    options,
+                    subject,
+                    lookup,
+                    &mut reference,
+                    |_| {},
+                )
+                .unwrap();
+                let actual = crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_scan(
+                    scoring,
+                    batch,
+                    params,
+                    options,
+                    subject,
+                    lookup,
+                    &mut scanned,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(actual, expected, "{run}");
+                assert!(
+                    scanned.offset == reference.offset && scanned.entries == reference.entries,
+                    "{run}"
+                );
+                hits += actual.len();
+            }
+            hits
+        }
+        let (query, subjects, mean) = other_matrix_inputs();
+        let mut tables = Vec::new();
+        // Each word size with BLOSUM62 and PAM30, two-hit or one-hit (a table of 4 letters
+        // takes seconds to build in a debug build).
+        for (matrix, word, window) in [
+            ("BLOSUM62", "2", 40),
+            ("BLOSUM62", "2", 0),
+            ("PAM30", "2", 40),
+            ("BLOSUM62", "4", 40),
+            ("PAM30", "4", 0),
+            ("BLOSUM62", "6", 40),
+            ("PAM30", "6", 0),
+            ("BLOSUM62", "7", 0),
+            ("PAM30", "7", 40),
+        ] {
+            let (batch, params, options, _) =
+                search_with(&query, window, mean, false, matrix, &["-word_size", word]);
+            let lookup =
+                Lookup::x_new_for(&batch, &params, &options, 1, x_narrow_cutoff(&options)).unwrap();
+            let kind = match &lookup {
+                BxLookup::Narrow(l) => ("16-bit", l.table.word_length),
+                BxLookup::Wide(Lookup::Standard(l, _)) => ("standard", l.word_length),
+                BxLookup::Wide(Lookup::Compressed(l)) => {
+                    ("compressed", x_compressed_word_length(l))
+                }
+            };
+            assert_eq!(kind.1.to_string(), word, "{matrix} {word}");
+            assert_eq!(kind.0 == "compressed", options.compressed_lookup());
+            let run = format!("{matrix} -word_size {word} window={window} {}", kind.0);
+            let search = (batch, params, options);
+            let hits = if matrix == "BLOSUM62" {
+                seed_stage(Blosum62Bx, &search, &lookup, &subjects, &run)
+            } else {
+                seed_stage(
+                    MatrixBx::of(search.2.scoring),
+                    &search,
+                    &lookup,
+                    &subjects,
+                    &run,
+                )
+            };
+            assert!(hits > 0, "{run}");
+            tables.push(run);
+        }
+        // Where the fused loop acts, the two-hit tables of 2 letters take 16-bit hits.
+        if x_bxdiag_mode() == 1 {
+            assert!(tables.iter().any(|t| t.contains("16-bit")), "{tables:?}");
+        }
+        eprintln!("tables: {tables:?}");
     }
 
     // No NCBI counterpart (speed only): the choice of the loop names a table by its build number,

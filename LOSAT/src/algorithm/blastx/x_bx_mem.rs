@@ -45,7 +45,7 @@
 //!   pool (`XCapRun`), so searches side by side in one process (lib tests, an embedding host) do
 //!   not see each other's batches; a search on a pool without them counts process-wide.
 //! - `LOSAT_X_BXCLUTCAP[=K]` (built-in K = 3; acts only with the compressed lookup table,
-//!   `-word_size 5` and `-task blastx-fast`): `LOSAT_X_BXUNITCAP`'s K is at most this K, or
+//!   `-word_size` 5 to 7 and `-task blastx-fast`): `LOSAT_X_BXUNITCAP`'s K is at most this K, or
 //!   `ceil(threads / subjects)` where that is more (K units of few subjects keep the threads busy
 //!   only with K x subjects tasks). This table's search gains nothing from a unit per thread where
 //!   the subjects fill the threads, and each unit's table and buffers stay alive while it is
@@ -170,7 +170,7 @@ fn clut_cap_k() -> Option<usize> {
 }
 
 /// No NCBI counterpart: the K a search keeps to: `cap_k`, and with the compressed lookup table
-/// (`-word_size 5`) at most `LOSAT_X_BXCLUTCAP`'s K (module comment). `subjects` is the number of
+/// (`-word_size` 5 to 7) at most `LOSAT_X_BXCLUTCAP`'s K (module comment). `subjects` is the number of
 /// subjects: K units of few subjects need K x subjects >= threads to keep every thread busy, so
 /// that K rises for them. Also the second value: whether `LOSAT_X_BXCLUTCAP`'s own K holds.
 fn search_cap_k(
@@ -179,7 +179,7 @@ fn search_cap_k(
     subjects: usize,
 ) -> Option<(usize, Option<bool>)> {
     let k = cap_k()?;
-    let clut = clut_cap_k().filter(|_| options.word_size == 5);
+    let clut = clut_cap_k().filter(|_| options.compressed_lookup());
     Some(clut.map_or((k, None), |clut| {
         let few = threads.div_ceil(subjects.max(1));
         (k.min(clut.max(few)), Some(few <= clut))

@@ -236,8 +236,8 @@ class BlastxOptions(TypedDict, total=False):
     matrix: str
     """Scoring matrix name [default: BLOSUM62]"""
     threshold: float
-    """Minimum word score such that the word is added to the BLAST lookup table [default: 12; 20
-    for blastx-fast; 19.3 for -word_size 5]"""
+    """Minimum word score such that the word is added to the BLAST lookup table [default: 12;
+    19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]"""
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]"""
     culling_limit: int

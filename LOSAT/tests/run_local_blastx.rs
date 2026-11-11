@@ -753,17 +753,13 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query)).unwrap();
     let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-    let cases: [(&str, fn(&mut BlastxArgs)); 11] = [
+    let cases: [(&str, fn(&mut BlastxArgs)); 10] = [
         ("Word-size must be greater than zero", |a| {
             a.word_size = Some(0)
         }),
         (
             "Word-size must be less than 8 for a tblastn, blastp or blastx search",
             |a| a.word_size = Some(8),
-        ),
-        (
-            "-word_size 4 is not supported by LOSAT's BLASTX (word sizes 3 and 5 are)",
-            |a| a.word_size = Some(4),
         ),
         ("No hits are being saved", |a| a.max_target_seqs = Some(-1)),
         (

@@ -586,12 +586,21 @@ mod tests {
                 program.name()
             );
         }
-        // BLASTX's parser reads word sizes 3 and 5 only.
+        // BLASTX reads NCBI's word sizes, 2 to 7 (item SC9 of line NP); above 4 each sets its
+        // threshold as BLASTP's (blast_args.cpp:288-300).
         let blastx = defaults(Program::Blastx).unwrap();
         assert_eq!(
             blastx.by["-word_size"].keys().collect::<Vec<_>>(),
-            ["3", "5"]
+            ["2", "3", "4", "5", "6", "7"]
         );
+        for (word_size, threshold) in [("6", "21"), ("7", "20.25")] {
+            for task in ["blastx", "blastx-fast"] {
+                assert_eq!(
+                    blastx.by["-word_size"][word_size][task]["-threshold"], threshold,
+                    "{word_size} {task}"
+                );
+            }
+        }
         // TBLASTX's threshold does not follow the word size.
         assert!(!defaults(Program::Tblastx)
             .unwrap()

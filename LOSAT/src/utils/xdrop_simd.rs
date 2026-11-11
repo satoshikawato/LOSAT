@@ -1254,7 +1254,7 @@ impl XTrace {
     #[inline(always)]
     pub(crate) fn x_best(&mut self, rec: *const u8) {
         debug_assert!(
-            rec == self.wp as *const u8,
+            std::ptr::eq(rec, self.wp),
             "x_best of a row before the last"
         );
         self.best = rec;

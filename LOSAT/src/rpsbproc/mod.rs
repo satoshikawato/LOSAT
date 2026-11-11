@@ -257,130 +257,17 @@ fn join(a: &OsStr, b: &str) -> OsString {
     out
 }
 
-/// `CDirEntry::NormalizePath(path)` (`eIgnoreLinks`, Unix): the path's `.` and empty
-/// components dropped and `..` taken back where possible, without its trailing `/`.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-972
+/// `CDirEntry::NormalizePath(path)` (`eIgnoreLinks`): the path's `.` and empty components
+/// dropped and `..` taken back where possible, without its trailing `/`
+/// (`ncbi_environment::normalize_path`, the Unix form, on every target).
+// NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:501-502
 // ```c++
-// string CDirEntry::NormalizePath(const string& path, EFollowLinks follow_links)
-// {
-//     if ( path.empty() ) {
-//         return path;
-//     }
-//     static const char kSep[] = { DIR_SEPARATOR, '\0' };
-//     std::list<string> head;       // already resolved to our satisfaction
-//     std::list<string> tail;       // to resolve afterwards
-//     string  current;              // to resolve next
-//     ...
-//     current = DeleteTrailingPathSeparator(path);
-// #  endif
-//     if ( current.empty() ) {
-//         // root dir
-//         return string(1, DIR_SEPARATOR);
-//     }
-//     ...
-//     while ( !current.empty()  ||  !tail.empty() ) {
-//         std::list<string> pretail;
-//         if ( !current.empty() ) {
-//             NStr::Split(current, kSep, pretail);
-//             current.erase();
-//             if (pretail.front().empty()
-//                 ...
-//                 ) {
-//                 // Absolute path
-//                 head.clear();
-//                 ...
-//             }
-//             tail.splice(tail.begin(), pretail);
-//         }
-//         string next;
-//         if (!tail.empty()) {
-//             next = tail.front();
-//             tail.pop_front();
-//         }
-//         if ( !head.empty() ) { // empty heads should accept anything
-//             string& last = head.back();
-//             if (last == DIR_CURRENT) {
-//                 if (!next.empty()) {
-//                     head.pop_back();
-//                 }
-//             ...
-//             } else if (next == DIR_CURRENT) {
-//                 // Leave out, since we already have content
-//                 continue;
-//             } else if (next.empty()) {
-//                 continue; // leave out empty components in most cases
-//             } else if (next == DIR_PARENT) {
-//                 ...
-//                 // Back up if possible, assuming existing path to be "physical"
-//                 if (last.empty()) {
-//                     // Already at the root; .. is a no-op
-//                     continue;
-//                 ...
-//                 } else if (last != DIR_PARENT) {
-//                     head.pop_back();
-//                     continue;
-//                 }
-//             }
-//         }
-//         ...
-//         // Normal case: just append the next element to head
-//         head.push_back(next);
-//     }
-//     // Special cases
-//     if ( (head.size() == 0)  ||
-//          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
-//         // current dir
-//         return DIR_CURRENT;
-//     }
-//     if (head.size() == 1  &&  head.front().empty()) {
-//         // root dir
-//         return string(1, DIR_SEPARATOR);
-//     }
-//     ...
-//     // Compose path
-//     return NStr::Join(head, string(1, DIR_SEPARATOR));
-// }
+//     static string NormalizePath(const string& path,
+//                                 EFollowLinks  follow_links = eIgnoreLinks);
 // ```
-// (`DeleteTrailingPathSeparator`, ncbifile.cpp:465-472, quoted at
-// `blastinput::value_parsers::ncbi_file_name_length`; `NStr::Split` with no flags keeps the
-// empty parts.)
 fn normalize_path(path: &[u8]) -> Vec<u8> {
-    if path.is_empty() {
-        return Vec::new();
-    }
-    let end = path.iter().rposition(|&b| b != b'/').map_or(0, |at| at + 1);
-    let current = &path[..end];
-    if current.is_empty() {
-        return b"/".to_vec();
-    }
-    let parts: Vec<&[u8]> = current.split(|&b| b == b'/').collect();
-    let mut head: Vec<&[u8]> = Vec::new();
-    for next in parts {
-        if let Some(&last) = head.last() {
-            if last == b"." {
-                if !next.is_empty() {
-                    head.pop();
-                }
-            } else if next == b"." || next.is_empty() {
-                continue;
-            } else if next == b".." {
-                if last.is_empty() {
-                    continue;
-                } else if last != b".." {
-                    head.pop();
-                    continue;
-                }
-            }
-        }
-        head.push(next);
-    }
-    if head.is_empty() || (head.len() == 2 && head[0] == b"." && head[1].is_empty()) {
-        return b".".to_vec();
-    }
-    if head.len() == 1 && head[0].is_empty() {
-        return b"/".to_vec();
-    }
-    head.join(&b'/')
+    crate::blastinput::ncbi_environment::normalize_path(path, None)
+        .expect("a path normalized without links has no link limit")
 }
 
 /// The paths where rpsbproc looks for its data without `-d`: the launch directory of the
@@ -1647,7 +1534,7 @@ fn print_cluster_line(report: &mut Report, record: &Record, query: &DomQuery, da
 mod tests {
     use super::*;
 
-    // ncbifile.cpp:820-972 (quoted at `normalize_path`).
+    // ncbifile.cpp:820-971 (quoted at `ncbi_environment::normalize_path`).
     #[test]
     fn normalize_path_as_ncbi() {
         for (path, normalized) in [

@@ -1,6 +1,6 @@
 //! The cutoffs of a TBLASTX query batch's contexts, set up before its subjects are searched: the
 //! check of the average subject length, the cutoff score, length adjustment and effective search
-//! space of every context with the smallest cutoff, the per-query statistics of the reports, and
+//! space of every context, the smallest cutoff, the per-query statistics of the reports, and
 //! the Karlin block of the smallest Lambda that the linking cutoffs read.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:887-999
@@ -26,8 +26,9 @@ use anyhow::{Context, Result};
 pub(super) struct CutoffInputs<'a> {
     pub(super) contexts_ref: &'a [QueryContext],
     pub(super) numbers: &'a SubjectSetNumbers,
-    /// The subject set's letters and sequences (`SubjectSetNumbers::total`, `count`).
+    /// The subject set's letters (`SubjectSetNumbers::total`).
     pub(super) db_length_nucl: i64,
+    /// The subject set's sequences (`SubjectSetNumbers::count`).
     pub(super) db_num_seqs: i64,
     pub(super) subjects: Subjects<'a>,
     pub(super) evalue_threshold: f64,

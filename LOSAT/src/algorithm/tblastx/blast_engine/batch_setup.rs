@@ -132,9 +132,13 @@ pub(super) fn batch_flags<S: TbxScore>(
     //         opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
     //     }
     // ```
-    // The codes' tables (`FindGeneticCode`) translate the queries
-    // (c++/src/algo/blast/api/blast_setup_cxx.cpp:553-561, `SetupQueries_OMF`) and the subjects
-    // (:801-808, `SetupSubjects_OMF`).
+    // Setting each code makes its table (`AddGeneticCode`, which calls `FindGeneticCode`,
+    // c++/src/algo/blast/api/blast_options_cxx.cpp:1478-1483 `SetQueryGeneticCode`, :2411-2416
+    // `SetDbGeneticCode`, c++/src/algo/blast/api/blast_aux.cpp:653-660). The queries are
+    // translated with theirs in `SetupQueries_OMF`
+    // (c++/src/algo/blast/api/blast_setup_cxx.cpp:554-562), the `-db` subjects in
+    // `BLAST_PreliminarySearchEngine` (c++/src/algo/blast/core/blast_engine.c:1458-1465), and
+    // `-subject` ones also in `SetupSubjects_OMF` (blast_setup_cxx.cpp:801-809).
     let query_code = GeneticCode::from_id(args.query_gencode);
     let db_code = GeneticCode::from_id(args.db_gencode);
     // LOSAT intentionally treats `--db-gencode` as the subject genetic code for
@@ -228,8 +232,8 @@ pub(super) struct QueryFrames {
 /// masked with SEG and, with `-lcase_masking`, the lower-case runs.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:484-658
-/// (`SetupQueries_OMF`), c++/src/algo/blast/core/blast_util.c:1045-1139
-/// (`BLAST_GetAllTranslations`) and c++/src/algo/blast/core/blast_filter.c:1261-1304
+/// (`SetupQueries_OMF`, which translates each context of a query with `BLAST_GetTranslation`
+/// at :576-588) and c++/src/algo/blast/core/blast_filter.c:1261-1304
 /// (`BlastSetUp_GetFilteringLocations`).
 pub(super) fn query_frames(
     args: &TblastxArgs,
@@ -253,17 +257,19 @@ pub(super) fn query_frames(
     //   }
     // Source: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:572-580
 
-    // NCBI reference (translate all 6 frames for tblastx queries):
-    // ncbi-blast/c++/src/algo/blast/core/blast_util.c:1076-1101
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:576-588 (the six
+    // contexts of a tblastx query, each translated with the query's genetic code)
     // ```c
-    // frame_offsets = (Uint4*) malloc((NUM_FRAMES+1)*sizeof(Uint4));
-    // frame_offsets[0] = 0;
-    // for (context = 0; context < NUM_FRAMES; ++context) {
-    //    frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    //    length = BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
-    //       nucl_length, frame, translation_buffer+offset, genetic_code);
-    //    offset += length + 1;
-    //    frame_offsets[context+1] = offset;
+    // for (unsigned int i = 0; i < kNumContexts; i++) {
+    //     if (qinfo->contexts[ctx_index + i].query_length <= 0) {
+    //         continue;
+    //     }
+    //     int offset = qinfo->contexts[ctx_index + i].query_offset;
+    //     BLAST_GetTranslation(sequence.data.get() + 1,
+    //                          seqbuf_rev,
+    //                          na_length,
+    //                          qinfo->contexts[ctx_index + i].frame,
+    //                          & buf.get()[offset], gc);
     // }
     // ```
     // Diagnostic (LOSAT_TIMING): the queries' six-frame translation for the common line

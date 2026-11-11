@@ -4101,8 +4101,10 @@ impl Drop for XEndBatch<'_> {
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// cutoffs, length adjustments and search spaces of the contexts: `context_cutoffs.rs`), then
-/// `process_subject` for every subject and the collection of their hits. TBLASTX has no
-/// traceback: these preliminary hit lists are the final ones.
+/// `process_subject` for every subject and the collection of their hits. These preliminary hit
+/// lists are the final ones: without gapped calculation NCBI's traceback stage aligns nothing,
+/// it only computes bit scores (c++/src/algo/blast/core/blast_traceback.c:1526, 1691-1696;
+/// `hit_collector.rs`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1607
 /// (`BLAST_PreliminarySearchEngine`), with the set-up of

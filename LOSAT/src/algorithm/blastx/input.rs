@@ -561,7 +561,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     let mut batch = ReaderBatch {
         range,
         keep_whole: keep_defline,
-        keep_records,
+        kept: keep_records.then(Vec::new),
         ..ReaderBatch::default()
     };
 
@@ -1050,9 +1050,10 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     // A last batch of records that the range skipped is delivered empty (NCBI's query factory
     // then refuses it).
     if batch.read > 0 {
-        deliver(&records[batch.start..])?;
+        deliver(&records)?;
     }
-    Ok(records)
+    batch.release(&mut records);
+    Ok(batch.kept.unwrap_or_default())
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
 // ```c++
@@ -1513,7 +1514,7 @@ fn emit_fasta_batch(
         }
     }
     if batch.length >= batch_size {
-        deliver(&records[batch.start..])?;
+        deliver(records)?;
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-261
         // ```c++
         //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -1533,12 +1534,7 @@ fn emit_fasta_batch(
         // ```
         // NCBI's batch is local to one turn of the loop: the batch read for the next turn
         // replaces it. A read that keeps no record drops the batch once delivered likewise.
-        if batch.keep_records {
-            batch.start = records.len();
-        } else {
-            batch.released += records.len();
-            records.clear();
-        }
+        batch.release(records);
         batch.length = 0;
         batch.read = 0;
     }
@@ -1552,14 +1548,11 @@ struct ReaderBatch<'r> {
     range: Option<&'r SequenceRange>,
     /// Whether a cut record keeps its whole letters (the archive, `FastaRecord::cut_in_place`).
     keep_whole: bool,
-    /// Whether the reader keeps the records of the batches it delivered (and returns them all);
-    /// otherwise it drops each batch once delivered, so that it holds one batch at a time.
-    keep_records: bool,
-    /// The records of the batches delivered and dropped (without `keep_records`).
+    /// The records of the batches delivered, when the reader keeps them (and returns them all);
+    /// `None` drops each batch once delivered, so that the reader holds one batch at a time.
+    kept: Option<Vec<FastaRecord>>,
+    /// The records of the batches delivered, kept or dropped.
     released: usize,
-    /// The first kept record of the batch (0 without `keep_records`, whose records are those of
-    /// the batch alone).
-    start: usize,
     /// The letters the batch has read (`size_read`).
     length: usize,
     /// The records the batch has read, kept or not.
@@ -1580,6 +1573,18 @@ impl ReaderBatch<'_> {
     /// every record read before it, kept, dropped once delivered, or skipped by the range.
     fn number(&self, records: &[FastaRecord]) -> usize {
         self.released + records.len() + self.skipped
+    }
+
+    /// Ends a delivered batch (`records`, the batch's records alone): they join the kept
+    /// records, or are dropped.
+    fn release(&mut self, records: &mut Vec<FastaRecord>) {
+        self.released += records.len();
+        match &mut self.kept {
+            // The first batch (the only one of a `-subject` file) moves without a copy.
+            Some(kept) if kept.is_empty() => std::mem::swap(kept, records),
+            Some(kept) => kept.append(records),
+            None => records.clear(),
+        }
     }
 }
 

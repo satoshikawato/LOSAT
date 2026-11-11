@@ -1,4 +1,4 @@
-// A source file named `.gz` or `.zst` is inflated when it is opened (DW-45, line GZ), by the
+// A source file named `.gz`, `.bz2` or `.zst` is inflated when it is opened (DW-45, line GZ), by the
 // engine's own decoders through the FileInflater port (swebok-improve SW8 D2): the command line and
 // the web app read such a file with the same code, so it inflates to the same bytes, or fails with
 // the same sentence (`'x.fa.zst' is named .zst but is not zstd data (…); …`). The engine's name rule
@@ -7,8 +7,9 @@
 // name. Every member, stream or frame of a concatenated file is read (bgzip, pzstd, `cat`). A
 // downloaded Example set (a gzip body) takes the same path in the Data worker, with its byte limit
 // (WholeFileInflater, ports/inflate.ts; infra/browser/example-downloader.ts).
-// A `.bz2` name is not read by the web app (decision 11, 2026-11-04): the pure-JS bzip2 decoder of
-// that time ran at 1.1 MB/s and held about 3x the inflated size; the command line reads it.
+// A `.bz2` name is read as well (Owner 2026-11-11, swebok-improve SW8 DECISIONS 51). It was refused
+// from 2026-11-04 (line GZ decision 11) because the pure-JS bzip2 decoder of that time ran at
+// 1.1 MB/s and held about 3x the inflated size; the engine's decoder has neither cost.
 import { INFLATED_TOO_LARGE, type FileInflater } from '../../ports/inflate';
 
 /** Bytes read from the file at once, and inflated bytes gathered into one Blob part. */
@@ -65,18 +66,15 @@ class PartCollector {
 
 /**
  * The file inflated under its plain name, or the file itself when its name is plain. Throws the
- * engine's sentence when the data is not of the named compression (or is cut short, or empty), the
- * web app's refusal of a `.bz2` name, and InflatedTooLargeError once more than `maxBytes` bytes
- * have come out (a downloaded Example set; a source has no limit).
+ * engine's sentence when the data is not of the named compression (or is cut short, or empty), and
+ * InflatedTooLargeError once more than `maxBytes` bytes have come out (a downloaded Example set; a
+ * source has no limit).
  */
 export async function inflateFile(file: File, inflater: FileInflater, maxBytes = Number.POSITIVE_INFINITY): Promise<File> {
   const collector = new PartCollector(maxBytes);
   const inflation = await inflater.open(file.name, (chunk) => collector.add(chunk));
   if (inflation === undefined) return file;
   try {
-    if (inflation.compression === 'bzip2') {
-      throw new Error(`'${file.name}' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)`);
-    }
     for (let start = 0; start < file.size; start += SLICE_BYTES) {
       const end = Math.min(start + SLICE_BYTES, file.size);
       await inflation.push(new Uint8Array(await file.slice(start, end).arrayBuffer()));
@@ -85,7 +83,7 @@ export async function inflateFile(file: File, inflater: FileInflater, maxBytes =
     await inflation.end();
     if (collector.over) throw new InflatedTooLargeError(maxBytes);
   } finally {
-    // An inflation that stopped early (a refused name, a file that could not be read) is freed.
+    // An inflation that stopped early (a file that could not be read, or over its limit) is freed.
     await inflation.cancel();
   }
   return new File(collector.finish(), inflation.plainName, { type: 'text/plain' });

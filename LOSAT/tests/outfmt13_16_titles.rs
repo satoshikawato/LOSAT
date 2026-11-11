@@ -559,3 +559,60 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes_before_the_first_byte() 
         }
     }
 }
+
+/// The library API takes several formats in one call. Outfmt 5 writes the report that a
+/// `-subject` XML2 or JSON document holds back, so with outfmt 5 among the formats that report's
+/// title is refused before either format writes a byte; with outfmt 16 alone it is not.
+/// (BLASTP's default batches of 10,000 letters make a batch of each 10,000-residue query; the
+/// last batch has no letters, which NCBI fails.)
+#[test]
+fn a_library_call_with_outfmt_5_refuses_the_held_title_before_any_format_writes() {
+    use LOSAT::api::{read_inputs, run, validate, Inputs, Program};
+    let proteins = random_proteins(3, 10_000);
+    let query = format!(
+        ">qa plain\n{}\n>qb caf\u{e9}\n{}\n>qc no letters\n",
+        proteins[0], proteins[1]
+    );
+    let subject = format!(">s1 plain\n{}\n", &proteins[0][..300]);
+    let search = validate(Program::Blastp, &[]).expect("blastp");
+    let (queries, subjects) =
+        read_inputs(&search, query.as_bytes(), subject.as_bytes()).expect("the records");
+    let call = |formats: &[&str]| {
+        let mut sinks: Vec<Vec<u8>> = vec![Vec::new(); formats.len()];
+        let mut diagnostics = Vec::new();
+        let result = {
+            let mut reports: Vec<(&str, &mut (dyn std::io::Write + Send))> = formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(&format, sink)| (format, sink as &mut (dyn std::io::Write + Send)))
+                .collect();
+            run(
+                &search,
+                Inputs::new(&queries, &subjects),
+                &mut reports,
+                &mut diagnostics,
+            )
+        };
+        (result, sinks)
+    };
+    let (result, sinks) = call(&["16"]);
+    let message = result.expect_err("NCBI's error").message().to_string();
+    assert!(message.contains("Sequence contains no data"), "{message}");
+    assert_eq!(
+        String::from_utf8_lossy(&sinks[0])
+            .matches("\n<BlastOutput2>")
+            .count(),
+        1,
+        "16 alone: qa's report"
+    );
+    for formats in [["16", "5"], ["5", "16"]] {
+        let (result, sinks) = call(&formats);
+        let message = result.expect_err("the refusal").message().to_string();
+        assert!(message.contains(REFUSAL), "{formats:?}: {message}");
+        assert!(
+            sinks.iter().all(Vec::is_empty),
+            "{formats:?}: wrote {:?} bytes",
+            sinks.iter().map(Vec::len).collect::<Vec<_>>()
+        );
+    }
+}

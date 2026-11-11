@@ -11274,10 +11274,10 @@ fn search_query_batch<const UNGAPPED: bool>(
     //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
     //                                         hit_options->min_diag_separation))
     // ```
-    // Look-ahead for the preliminary loop (above) and the traceback loop
-    // (`Blast_TracebackFromHSPList`, next block). The helper threads only evaluate the alignment call
-    // of an index ahead of the loop. The loops, their tree tests and their tree insertions stay on the
-    // calling thread in the NCBI order.
+    // Look-ahead for the preliminary loop (`prelim_hsp_list::gapped_score_list`) and the traceback
+    // loop (`Blast_TracebackFromHSPList`, next block). The helper threads only evaluate the
+    // alignment call of an index ahead of the loop. The loops, their tree tests and their tree
+    // insertions stay on the calling thread in the NCBI order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,404-405
     // ```c
     //    for (index=0; index < num_initial_hsps; index++) {
@@ -15196,6 +15196,21 @@ fn search_query_batch<const UNGAPPED: bool>(
             // (`prelim_hsp_list::gapped_score_list`) and one hit's extension
             // (`prelim_hsp_list::x_prelim_extend`) read, for the query group tasks and the
             // look-ahead helpers on the pool as for this thread.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3674
+            // ```c
+            // Int2 BLAST_GetGappedScore (EBlastProgramType program_number,
+            //         BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
+            //         BLAST_SequenceBlk* subject,
+            //         BlastGapAlignStruct* gap_align,
+            //         const BlastScoringParameters* score_params,
+            //         const BlastExtensionParameters* ext_params,
+            //         const BlastHitSavingParameters* hit_params,
+            //         const BlastInitialWordParameters* word_params,
+            //         BlastInitHitList* init_hitlist,
+            //         BlastHSPList** hsp_list_ptr, BlastGappedStats* gapped_stats,
+            //         Boolean * fence_hit)
+            // ```
+            // No NCBI counterpart: the look-ahead's schedule (scheduling only).
             let gapped = prelim_hsp_list::GappedPrelim {
                 blastn_trace_enabled,
                 verbose,

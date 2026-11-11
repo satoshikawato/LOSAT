@@ -1,6 +1,6 @@
 //! The preliminary HSP list of one blastn subject chunk, made from the chunk's initial (ungapped)
-//! hits once its word finder is done. A gapped search (`gapped_hsp_list`) sorts the hits by score,
-//! or groups them by query (`sort_ungapped_hits_for_gapped`), runs the loop of the gapped
+//! hits once its word finder is done. A gapped search sorts the hits by score, or groups them by
+//! query (`sort_ungapped_hits_for_gapped`), then (`gapped_hsp_list`) runs the loop of the gapped
 //! preliminary search over one list of them (`gapped_score_list`: each hit tested against the
 //! interval tree, extended score-only and, at or above its context's hit-saving cutoff, put into
 //! the tree and the list) per query on the pool (LOSAT_X_QGROUPPAR) or over the chunk's list, then
@@ -153,8 +153,9 @@ pub(super) fn ungapped_hsp_list(
 
 /// The initial hits of one subject chunk of a gapped search, sorted by score for the gapped loop
 /// or grouped by query for its query group tasks, and counted: returns `(x_counts, x_order,
-/// total_ungapped)`, where `x_counts` (the hits of each query) and `x_order` (the order of the
-/// tasks) are `Some` when the loop runs per query (LOSAT_X_QGROUPPAR).
+/// total_ungapped)`, where `x_counts` (the hits of each query) is `Some` when the hits are grouped
+/// by query (LOSAT_X_QGROUPPAR on, the owner's serial call), and `x_order` (the order of the tasks)
+/// is `Some` only when the loop then runs per query (`x_qgroup_par::plan`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1688-1692
 /// ```c
@@ -188,11 +189,6 @@ pub(super) fn sort_ungapped_hits_for_gapped(
     //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
     //           sizeof(BlastInitHSP), score_compare_match);
     // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:307-309
-    // ```c
-    // qsort(init_hsp_array, init_hitlist->total,
-    //       sizeof(BlastInitHSP), score_compare_match);
     // ```
     // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
     // compare equal keep the order in which they were saved. `sort_by`
@@ -248,8 +244,8 @@ pub(super) fn sort_ungapped_hits_for_gapped(
 /// What the gapped preliminary loop of one subject chunk (`gapped_score_list`) and one hit's
 /// extension (`x_prelim_extend`) read: the trace and verbose switches, the subject (its index, its
 /// trace id, its letters for the greedy aligner), the chunk (its offset, packed letters and
-/// length), the queries' contexts, the scoring, the call (the owner's or a query group task's) and
-/// the chunk's number of initial hits, and the look-ahead's schedule. Built once per chunk by
+/// length), the queries' contexts, the scoring, whether the chunk is the owner's serial call (not
+/// one of a chunk batch on the pool) and the chunk's number of initial hits, and the look-ahead's schedule. Built once per chunk by
 /// `collect_prelim_hits_for_chunk`, where the closures were; every field is a shared reference or
 /// a `Copy` value, so the struct is `Sync` for the query group tasks and the look-ahead helpers on
 /// the pool.
@@ -525,8 +521,8 @@ pub(super) fn gapped_score_list(
     // ```c
     //    for (index=0; index<init_hitlist->total; index++)
     // ...
-    //             status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
-    //                                     eQueryAndSubject);
+    //              status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+    //                                      eQueryAndSubject);
     // ```
     // `with_helpers` runs the closure on this thread. The closure is the port of this NCBI loop, in
     // NCBI order; the other threads of the pool only evaluate values ahead (`utils/xahead.rs`).
@@ -990,8 +986,8 @@ pub(super) fn gapped_score_list(
 }
 
 /// What the gapped HSP list of one subject chunk (`gapped_hsp_list`) reads besides
-/// `GappedPrelim`: the query groups' counts and order (`sort_ungapped_hits_for_gapped`; `None`
-/// unless the loop runs per query, LOSAT_X_QGROUPPAR), the batch's queries (their number), the
+/// `GappedPrelim`: the query groups' counts and order (`sort_ungapped_hits_for_gapped`; the order
+/// is `None` unless the loop runs per query, LOSAT_X_QGROUPPAR), the batch's queries (their number), the
 /// length that bounds a query group task's interval tree (the concatenated queries; the chunk's is
 /// `GappedPrelim::s_len`), the pool, the LOSAT_TIMING counters and the start of the gapped stage's
 /// clock.

@@ -10,6 +10,7 @@ use std::io::Write as _;
 
 use anyhow::Result;
 
+use super::rounds::SetKey;
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::core::psi::{
@@ -243,9 +244,9 @@ pub(crate) struct QueryPssm {
 /// The PSSM of one query (`ComputePssmForNextIteration`) and its files: the ASN.1 text
 /// (`x_PSIMatrix2Asn1`, `PsiBlastAddAncillaryPssmData` and `MSerial_AsnText`) and the ASCII
 /// PSSM (`PrintAsciiPssm`), as requested. The inputs are the query, its Seq-aligns, the letters
-/// of their subjects (`subject(s_idx)`: the record's letters in NCBIstdaa), the round's
-/// ancillary data, and the gapped block of the matrix and gap costs (`gapped`, the score block's
-/// `kbp_gap_std[0]`).
+/// of their subjects (`subject(s_idx)`: the record's letters in NCBIstdaa) and the keys of their
+/// Seq-align ids (`key(s_idx)`, `rounds::SetKey`), the round's ancillary data, and the gapped
+/// block of the matrix and gap costs (`gapped`, the score block's `kbp_gap_std[0]`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:110-150
 // ```c++
 //     CPSIBlastOptions opts;
@@ -401,13 +402,14 @@ pub(crate) fn query_pssm(
     query: PssmQueryRecord<'_>,
     alignments: &[PssmAlignment<'_>],
     subject: &dyn Fn(u32) -> Vec<u8>,
+    key: &dyn Fn(u32) -> SetKey,
     ancillary: PssmAncillary,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
     sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
     let encoded = crate::algorithm::blastp::encoding::encode_protein_sequence(query.letters);
     let letters = &encoded.aa_seq[1..=encoded.aa_len];
-    let msa = input_msa(letters, alignments, subject, inclusion_ethresh)?;
+    let msa = input_msa(letters, alignments, subject, key, inclusion_ethresh)?;
     if request.pseudocount < 0 {
         return Err(blast_options_error(
             "IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0",
@@ -842,12 +844,18 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
 //         last_sid = current_sid;
 //     }
 // ```
-// A Seq-align names its subject by its Seq-id; LOSAT's names it by the subject's index, which
-// the Seq-ids of different subjects do not share in the runs LOSAT accepts.
+// The rows are the handles of the counted Seq-align ids (`key`: `rounds::SetKey`, which is the
+// handle in the runs LOSAT accepts, `SetKey::check_handles`), and a Seq-align whose id `Match`es
+// the previous Seq-align's id takes the previous row (`SetKey::matches`). So copies of one record
+// that follow each other share a row (their later HSPs fill only cells left unaligned), and so do
+// ids of two handles that `Match` (`gb|X|` and `gb|X.1|`), which leave the last row empty (line
+// DBID weakbatch, review 2 H1 and DECISIONS 43 (4)).
 // `msa_index` also moves on after a subject that is not counted, so an HSP below the threshold
 // whose subject comes after one without such an HSP, before the first counted subject, can take
-// `msa_index` past the rows NCBI allocates (one per counted subject). NCBI then writes out of
-// bounds (`_ASSERT` only), a failure without a checkable result: LOSAT refuses the PSSM there.
+// `msa_index` past the rows NCBI allocates (one per counted handle), as can a copy of a record
+// after another subject (one handle, two rows; NCBI BLAST+ 2.17.0 crashes, review 2 P3). NCBI then
+// writes out of bounds (`_ASSERT` only), a failure without a checkable result: LOSAT refuses the
+// PSSM there.
 // The hit lists are sorted by their best e-value (`s_EvalueCompareHSPLists`), which puts the
 // counted subjects first, but two e-values below 1.0e-180 compare as equal and those lists are
 // then ordered by score, so with an inclusion threshold below 1.0e-180 the counted subjects are
@@ -874,6 +882,7 @@ fn input_msa(
     query: &[u8],
     alignments: &[PssmAlignment<'_>],
     subject: &dyn Fn(u32) -> Vec<u8>,
+    key: &dyn Fn(u32) -> SetKey,
     inclusion_ethresh: f64,
 ) -> Result<PsiMsa> {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
@@ -888,13 +897,11 @@ fn input_msa(
             BLAST_EXPECT_VALUE
         }
     };
-    let mut qualifying: Vec<u32> = alignments
+    let qualifying: std::collections::BTreeSet<SetKey> = alignments
         .iter()
         .filter(|alignment| lowest_evalue(alignment.e_value) < inclusion_ethresh)
-        .map(|alignment| alignment.subject)
+        .map(|alignment| key(alignment.subject))
         .collect();
-    qualifying.sort_unstable();
-    qualifying.dedup();
     let mut msa = PsiMsa::new(query.len(), qualifying.len());
     for (cell, &letter) in msa.rows[0].iter_mut().zip(query) {
         *cell = PsiMsaCell {
@@ -903,20 +910,24 @@ fn input_msa(
         };
     }
     let mut msa_index = 1;
-    let mut last_subject: Option<u32> = None;
+    let mut last_sid: Option<SetKey> = None;
     for alignment in alignments {
+        let current_sid = key(alignment.subject);
         if lowest_evalue(alignment.e_value) < inclusion_ethresh {
-            if last_subject.is_some_and(|last| last != alignment.subject) {
+            if last_sid
+                .as_ref()
+                .is_some_and(|last| !current_sid.matches(last))
+            {
                 msa_index += 1;
             }
             let Some(row) = msa.rows.get_mut(msa_index) else {
                 anyhow::bail!(
-                    "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
+                    "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
                 );
             };
             process_denseg(row, alignment, &subject(alignment.subject));
         }
-        last_subject = Some(alignment.subject);
+        last_sid = Some(current_sid);
     }
     Ok(msa)
 }

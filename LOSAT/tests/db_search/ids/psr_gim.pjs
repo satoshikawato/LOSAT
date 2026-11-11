@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_gim",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_gim (parsed Seq-ids)",
+  "number-of-letters": 750,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-08T21:52:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50377,
+  "bytes-to-cache": 882,
+  "files": [
+    "psr_gim.pdb",
+    "psr_gim.phr",
+    "psr_gim.pin",
+    "psr_gim.pog",
+    "psr_gim.pos",
+    "psr_gim.pot",
+    "psr_gim.psq",
+    "psr_gim.ptf",
+    "psr_gim.pto"
+  ]
+}

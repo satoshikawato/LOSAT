@@ -328,12 +328,6 @@ pub trait ResultsObserver {
     //                  q = p;
     //              } else {
     // ```
-    fn cull_compare(&mut self, _ao: usize, _a: &Hsp, _bo: usize, _b: &Hsp, _result: bool) {}
-    fn cull_delete(&mut self, _oid: usize, _hsp: &Hsp, _merit: i64) {}
-    fn cull_save(&mut self, _oid: usize, _hsp: &Hsp) {}
-    fn cull_saved(&mut self, _result: bool) {}
-    fn cull_fork(&mut self, _begin: i32, _end: i32) {}
-    fn cull_final(&mut self, _num_queries: usize) {}
     fn preliminary_call(&mut self, _oid: usize) {}
     fn numeric(&mut self, _stage: &str, _oid: usize, _hsps: &[PreliminaryHsp]) {}
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2008
@@ -1052,13 +1046,12 @@ impl HspStream {
     //         }
     // ```
     // NCBI's sum is an `Int4` that overflows for a limit of 2147483645 or more; LOSAT adds in
-    // `i64` (NCBI parity DECISIONS 17), as `core::hspfilter_culling::CullingForest::prelim_max`.
+    // `i64` (NCBI parity DECISIONS 17): `CullingForest::prelim_max`.
     pub fn with_culling(lengths: Vec<i32>, limit: i32, max: usize) -> Self {
         let mut stream = Self::new(lengths.len() / 6, max);
-        let limit = i64::from(limit);
         stream.culling = Some(super::culling::Culling::new(
             lengths,
-            if limit > 1 { limit + 3 } else { limit },
+            crate::core::hspfilter_culling::CullingForest::<Hsp>::prelim_max(limit),
         ));
         stream
     }
@@ -1180,7 +1173,7 @@ impl HspStream {
             "BLASTX HSP stream is finalized"
         );
         if let Some(culling) = &mut self.culling {
-            culling.write(oid, hsps, trace);
+            culling.write(oid, hsps)?;
             return Ok(Vec::new());
         }
         let mut lists: Vec<Vec<Hsp>> = (0..self.queries.len()).map(|_| Vec::new()).collect();
@@ -1273,9 +1266,8 @@ impl HspStream {
         if self.finalized {
             return;
         }
-        if let Some(culling) = &mut self.culling {
+        if let Some(culling) = self.culling.take() {
             self.queries = culling.finalize(self.queries.len(), self.max);
-            trace.cull_final(self.queries.len());
             for q in &self.queries {
                 for l in &q.lists {
                     trace.hsps("CULL_FINAL", l.oid, &l.hsps);

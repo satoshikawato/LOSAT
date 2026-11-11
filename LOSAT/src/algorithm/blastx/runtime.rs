@@ -2336,7 +2336,7 @@ impl PreliminarySink for Runtime<'_> {
                 self.options.culling_limit,
                 prelim_hitlist_size(self.options),
                 self.observer,
-            );
+            )?;
         }
         for query in &mut queries {
             for list in &mut query.lists {

@@ -1074,4 +1074,39 @@ mod tests {
         // which is sorted again.
         assert_eq!(out[1].1, vec![(4, vec![(9, 0), (6, 3)]), (2, vec![(7, 2)])]);
     }
+
+    // The dominance boundaries pinned for BLASTX's tree before it moved to this forest (the
+    // `C` rows of tests/unit/blastx_d_boundary_expected.tsv: q_start, q_end, score, OID and
+    // subject start of p, then of y, then s_DominateTest(p, y)): the 50 % overlap edge, the
+    // score/length criterion, the ties broken by score, OID and subject offset, an empty
+    // range, and scores near INT4_MAX (NCBI computes in Int8).
+    #[test]
+    fn pinned_dominance_boundaries() {
+        let golden = include_str!("../../tests/unit/blastx_d_boundary_expected.tsv");
+        let entry = |row: &[i32]| LinkedHsp {
+            hsp: 0,
+            sid: u32::try_from(row[3]).unwrap(),
+            begin: row[0],
+            end: row[1],
+            score: row[2],
+            subject_offset: i64::from(row[4]),
+            merit: 0,
+        };
+        let f = forest(1);
+        let mut count = 0;
+        for line in golden.lines().filter(|l| l.starts_with("C\t")) {
+            let row: Vec<i32> = line
+                .split('\t')
+                .skip(1)
+                .map(|s| s.parse().unwrap())
+                .collect();
+            assert_eq!(
+                f.dominate_test(&entry(&row[..5]), &entry(&row[5..10])),
+                row[10] != 0,
+                "{line}"
+            );
+            count += 1;
+        }
+        assert_eq!(count, 12);
+    }
 }

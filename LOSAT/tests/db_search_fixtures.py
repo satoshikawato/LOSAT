@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db`, `tblastx -db` and `psiblast -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
-LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
+LOSAT/tests/db_search_manifest/<program>.tsv (one file per program, read by `read_manifest`, which
+returns the rows in the order of `PROGRAMS`, then the order of each file; README.md there) lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
 master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
@@ -74,7 +75,7 @@ TESTS = ENGINE / "tests"
 sys.path.insert(0, str(TESTS))
 import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
 
-MANIFEST = TESTS / "db_search_manifest.tsv"
+MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each of PROGRAMS
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
@@ -92,25 +93,37 @@ ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHI
              "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS")
 
 
-def read_manifest() -> tuple[list[str], list[dict[str, str]]]:
-    comments, rows = [], []
-    header: list[str] = []
-    for line in MANIFEST.read_text().split("\n"):
-        if line.startswith("#"):
-            comments.append(line)
-        elif line and not header:
-            header = line.split("\t")
-            if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
-                raise SystemExit(f"{MANIFEST.name}: unexpected header {line!r}")
-        elif line:
-            cells = line.split("\t")
-            if not len(COLUMNS) <= len(cells) <= len(header):
-                raise SystemExit(f"{MANIFEST.name}: {len(cells)} cells in {line[:60]!r}")
-            row = {column: "" for column in header}
-            row.update(zip(header, cells))
-            if row["program"] not in PROGRAMS:
-                raise SystemExit(f"{MANIFEST.name}: unknown program {row['program']!r} in {row['row_id']}")
-            rows.append(row)
+def manifest_file(program: str) -> Path:
+    """The file of a program's rows."""
+    return MANIFEST / f"{program}.tsv"
+
+
+def read_manifest() -> tuple[dict[str, list[str]], list[dict[str, str]]]:
+    """The comment lines of each program's file (by program) and all rows: the programs in the order
+    of `PROGRAMS`, each file's rows in its order. A row in the file of another program is an error."""
+    comments: dict[str, list[str]] = {program: [] for program in PROGRAMS}
+    rows: list[dict[str, str]] = []
+    for program in PROGRAMS:
+        path = manifest_file(program)
+        if not path.exists():
+            continue
+        header: list[str] = []
+        for line in path.read_text().split("\n"):
+            if line.startswith("#"):
+                comments[program].append(line)
+            elif line and not header:
+                header = line.split("\t")
+                if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
+                    raise SystemExit(f"{path.name}: unexpected header {line!r}")
+            elif line:
+                cells = line.split("\t")
+                if not len(COLUMNS) <= len(cells) <= len(header):
+                    raise SystemExit(f"{path.name}: {len(cells)} cells in {line[:60]!r}")
+                row = {column: "" for column in header}
+                row.update(zip(header, cells))
+                if row["program"] != program:
+                    raise SystemExit(f"{path.name}: the row {row['row_id']} is a {row['program']!r} row")
+                rows.append(row)
     return comments, rows
 
 
@@ -128,9 +141,20 @@ def header_cells(rows: list[dict[str, str]]) -> list[str]:
     return COLUMNS + xinclude.FILES_COLUMNS if files else COLUMNS
 
 
-def write_manifest(comments: list[str], rows: list[dict[str, str]]) -> None:
-    lines = comments + ["\t".join(header_cells(rows))] + ["\t".join(row_cells(row)) for row in rows]
-    MANIFEST.write_text("\n".join(lines) + "\n")
+def write_manifest(comments: dict[str, list[str]], rows: list[dict[str, str]]) -> None:
+    """Write each program's file: its comment lines, the header (the `files` columns when some row of
+    any program has them, so the files keep one header) and its rows. A file whose text is the same is left alone."""
+    header = "\t".join(header_cells(rows))
+    MANIFEST.mkdir(exist_ok=True)
+    for program in PROGRAMS:
+        own = [row for row in rows if row["program"] == program]
+        if not own and not manifest_file(program).exists():
+            continue
+        lines = comments.get(program, []) + [header] + ["\t".join(row_cells(row)) for row in own]
+        text = "\n".join(lines) + "\n"
+        path = manifest_file(program)
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
 
 
 def extra_tokens(row: dict[str, str]) -> list[str]:

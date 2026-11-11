@@ -83,7 +83,7 @@ q2 = padded(rc(back(sp1[3:150])))
 (fixtures / "qnx_late.fna").write_text(fasta([("q1 no hits, 10003 bases of a repeat", ("ACGTTGCAAGCTTGCA" * 700)[:10003]), ("q2 plus frame, padded to 10003", padded(back(sp1)))], 70))
 
 # Two batches that both hit x16_taxid: the taxonomy database is opened and the volume asked in the first, the second asks for
-# each Hit only (tests/db_search_manifest.tsv: db.x16_bx_taxid.batches.*).
+# each Hit only (tests/db_search_manifest/blastx.tsv: db.x16_bx_taxid.batches.*).
 def pad(core: str) -> str:
     return core + "".join(rng.choice("ACGT") for _ in range(10003 - len(core)))
 

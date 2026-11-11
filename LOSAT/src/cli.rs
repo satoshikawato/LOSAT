@@ -519,8 +519,26 @@ pub fn render_message(error: &clap::Error) -> String {
 /// with long forms of two dashes (`--infile`, rpsbproc's `AddAlias`): only the one-letter
 /// arguments are written with one dash, and the long forms keep their two.
 pub fn render_rpsbproc_message(error: &clap::Error) -> String {
-    let mut message = error
-        .to_string()
+    let text = error.to_string();
+    // The word that `unknown_option_error` quotes is the one on the command line (`--i` stays
+    // `--i`); the rest is rendered.
+    const UNKNOWN: &str = "unknown option or argument '";
+    if let Some(start) = text.find(UNKNOWN).map(|at| at + UNKNOWN.len()) {
+        if let Some(len) = text[start..].find('\'') {
+            return format!(
+                "{}{}{}",
+                render_rpsbproc_text(&text[..start]),
+                &text[start..start + len],
+                render_rpsbproc_text(&text[start + len..])
+            );
+        }
+    }
+    render_rpsbproc_text(&text)
+}
+
+/// `render_rpsbproc_message` of a part of a message.
+fn render_rpsbproc_text(text: &str) -> String {
+    let mut message = text
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version");
     let command = Cli::command();
@@ -753,18 +771,21 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
         );
     }
     if let Some(program) = [
-        "blastn", "blastp", "tblastn", "tblastx", "psiblast", "rpsblast",
+        "blastn", "blastp", "tblastn", "tblastx", "psiblast", "rpsblast", "rpsbproc",
     ]
     .into_iter()
     .find(|program| scope.get_name() == *program)
     .filter(|_| is_ncbi_toolkit_arg(name))
     {
+        // The BLAST programs are named in capitals, rpsbproc as in its other refusals.
+        let program = if program == "rpsbproc" {
+            program.to_string()
+        } else {
+            program.to_ascii_uppercase()
+        };
         return clap::Error::raw(
             ErrorKind::InvalidValue,
-            format!(
-                "the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {}",
-                program.to_ascii_uppercase()
-            ),
+            format!("the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {program}"),
         );
     }
     if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {

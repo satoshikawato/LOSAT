@@ -40,7 +40,7 @@ pub enum AsnTextErrorKind {
 pub struct AsnTextError {
     pub line: usize,
     pub message: String,
-    pub kind: AsnTextErrorKind,
+    pub(crate) kind: AsnTextErrorKind,
 }
 
 impl std::fmt::Display for AsnTextError {
@@ -117,6 +117,9 @@ pub(crate) struct StreamSource<R: Read> {
     /// The position of `buf[0]`.
     base: usize,
     eof: bool,
+    /// The block each read fills before its bytes are appended to `buf` (allocated once, so a
+    /// short read costs only the bytes it gives).
+    scratch: Box<[u8]>,
 }
 
 /// The size of one read from the stream.
@@ -131,7 +134,14 @@ impl<R: Read> StreamSource<R> {
             buf: first.to_vec(),
             base: 0,
             eof: false,
+            scratch: vec![0; STREAM_BLOCK].into_boxed_slice(),
         }
+    }
+
+    /// The bytes kept.
+    #[cfg(test)]
+    pub(crate) fn buffered(&self) -> usize {
+        self.buf.len()
     }
 
     /// Reads blocks until `pos` is in the buffer or the stream ends. A read error ends the
@@ -144,16 +154,14 @@ impl<R: Read> StreamSource<R> {
             if self.eof {
                 return None;
             }
-            let start = self.buf.len();
-            self.buf.resize(start + STREAM_BLOCK, 0);
             let read = loop {
-                match self.input.read(&mut self.buf[start..]) {
+                match self.input.read(&mut self.scratch) {
                     Ok(read) => break read,
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(_) => break 0,
                 }
             };
-            self.buf.truncate(start + read);
+            self.buf.extend_from_slice(&self.scratch[..read]);
             if read == 0 {
                 self.eof = true;
             }
@@ -486,10 +494,71 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadMemberId(SkipWhiteSpace())` (objistrasn.cpp:343-364): a member or variant name.
+    /// `ReadMemberId(SkipWhiteSpace())`: a member or variant name, bare (from a lower-case letter)
+    /// or between `[` and `]` on one line (the positions of the text between them).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:343-363
+    // ```c++
+    // CTempString CObjectIStreamAsn::ReadMemberId(char c)
+    // {
+    //     if ( c == '[' ) {
+    //         for ( size_t i = 1; ; ++i ) {
+    //             switch ( m_Input.PeekChar(i) ) {
+    //             case '\r':
+    //             case '\n':
+    //                 ThrowError(fFormatError, "end of line: expected ']'");
+    //                 break;
+    //             case ']':
+    //                 {
+    //                     const char* ptr = m_Input.GetCurrentPos();
+    //                     m_Input.SkipChars(++i);
+    //                     return CTempString(ptr + 1, i - 2);
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     else {
+    //         return ScanEndOfId(islower((unsigned char) c) != 0);
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:394-397
+    // ```c++
+    //     if (!id.empty()  &&  isdigit((unsigned char) id[0])) {
+    //         idx = classType->GetMembers().Find
+    //             (CMemberId::TTag(NStr::StringToInt(id)), CAsnBinaryDefs::eContextSpecific);
+    //     }
+    // ```
+    // An id in brackets that starts with a digit names the member or variant by its tag
+    // (`GetMemberIndex`, and `GetChoiceIndex` at :431-433), which depends on the tags NCBI's
+    // generated type information gives each member; LOSAT's readers know the members by name
+    // only, so that form is an explicit refusal.
     pub(crate) fn member_id_range(&mut self) -> Result<Range<usize>> {
         let c = self.skip_white_space()?;
-        Ok(self.scan_end_of_id(c.is_ascii_lowercase()))
+        if c != b'[' {
+            return Ok(self.scan_end_of_id(c.is_ascii_lowercase()));
+        }
+        let mut i = 1;
+        loop {
+            let Some(c) = self.src.byte_at(self.pos + i) else {
+                return Err(self.end_of_text());
+            };
+            match c {
+                b'\r' | b'\n' => return Err(self.error("end of line: expected ']'")),
+                b']' => {
+                    let id = self.pos + 1..self.pos + i;
+                    self.pos += i + 1;
+                    if self
+                        .bytes(id.clone())
+                        .first()
+                        .is_some_and(u8::is_ascii_digit)
+                    {
+                        return Err(self.not_supported("a member or variant named by its tag"));
+                    }
+                    return Ok(id);
+                }
+                _ => i += 1,
+            }
+        }
     }
 
     /// The variant of a CHOICE whose variants are `names` (in module order), as its position;
@@ -701,8 +770,65 @@ impl<S: AsnSource> Reader<S> {
         Ok(self.integer(i32::MIN.into(), i32::MAX.into())? as i32)
     }
 
+    /// `ReadUint4`: `GetUint4` after `SkipWhiteSpace`, an optional `+` and digits; a `-` is not a
+    /// sign there (`'-' - '0'` is more than 9: "bad number", even for `-0`).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
+    // ```c++
+    // Uint4 CObjectIStreamAsn::ReadUint4(void)
+    // {
+    //     SkipWhiteSpace();
+    //     return m_Input.GetUint4();
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:672-700
+    // ```c++
+    //     char c = SkipWs();
+    //     if ( c == '+' )
+    //         c = GetChar();
+    //
+    //     Uint4 n = c - '0';
+    //     if ( n > 9 )
+    //         BadNumber();
+    //
+    //     // overflow limits
+    //     const Uint4 kMaxBeforeMul = kMax_UI4/10;
+    //     const Uint1 kMaxLimitAdd = Uint1(kMax_UI4%10);
+    //
+    //     for ( ;; ) {
+    //         Uint1 d = (Uint1)(PeekCharNoEOF() - '0');
+    //         if  ( d > 9 )
+    //             break;
+    //         SkipChar();
+    //
+    //         // check multiplication overflow
+    //         if ( n > kMaxBeforeMul || (n == kMaxBeforeMul && d > kMaxLimitAdd) )
+    //             NumberOverflow();
+    //
+    //         n = n * 10 + d;
+    //     }
+    //     return n;
+    // ```
     pub(crate) fn uint4(&mut self) -> Result<u32> {
-        Ok(self.integer(0, u32::MAX.into())? as u32)
+        let mut c = self.skip_white_space()?;
+        if c == b'+' {
+            self.pos += 1;
+            c = self.peek_at(0);
+        }
+        if !c.is_ascii_digit() {
+            return Err(self.error("bad number"));
+        }
+        let mut n: u32 = 0;
+        loop {
+            let c = self.peek_at(0);
+            if !c.is_ascii_digit() {
+                return Ok(n);
+            }
+            self.pos += 1;
+            n = n
+                .checked_mul(10)
+                .and_then(|n| n.checked_add(u32::from(c - b'0')))
+                .ok_or_else(|| self.error("number overflow"))?;
+        }
     }
 
     pub(crate) fn int8(&mut self) -> Result<i64> {
@@ -817,8 +943,27 @@ impl<S: AsnSource> Reader<S> {
         Ok(out)
     }
 
+    /// A UTF8String: `string` with any byte, as NCBI reads that type (`eFNP_Allow`).
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
+    // ```c++
+    // void CObjectIStreamAsn::ReadString(string& s, EStringType type)
+    // {
+    //     ReadStringValue(s, type == eStringTypeUTF8? eFNP_Allow: x_FixCharsMethod());
+    // }
+    // ```
+    pub(crate) fn utf8_string(&mut self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.string_value(&mut out, false)?;
+        Ok(out)
+    }
+
     /// `string`, appended to `out`.
     pub(crate) fn string_into(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        self.string_value(out, self.visible_only)
+    }
+
+    /// A string appended to `out`; `visible_only`: a byte outside the visible range is refused.
+    fn string_value(&mut self, out: &mut Vec<u8>, visible_only: bool) -> Result<()> {
         self.expect(b'"')?;
         let start_line = self.line;
         loop {
@@ -847,7 +992,7 @@ impl<S: AsnSource> Reader<S> {
                     //     return c >= ' ' && c <= '~';
                     // }
                     // ```
-                    if self.visible_only && !(b' '..=b'~').contains(&c) {
+                    if visible_only && !(b' '..=b'~').contains(&c) {
                         let error = self.not_supported(&format!(
                             "a string with the byte 0x{c:x} (NCBI replaces it by '#' and posts an error)"
                         ));

@@ -131,9 +131,9 @@ pub(crate) struct Query {
     pub(crate) ids: Vec<ParsedSeqId>,
     /// The first `title` descriptor.
     pub(crate) title: Option<Vec<u8>>,
-    /// The first descriptor that LOSAT does not read for this query: an `org` or `source`
-    /// descriptor (`CBioseq::GetTaxId` reads them), or a `CFastaReader` user object whose
-    /// `DefLine` field is not a string (`ObtainUserDeflineFromBioseq` asks for its string).
+    /// The first descriptor that LOSAT does not read for this query: a `CFastaReader` user
+    /// object whose `DefLine` field is not a string (`ObtainUserDeflineFromBioseq` asks for its
+    /// string).
     pub(crate) unread_descriptor: Option<&'static str>,
     /// Whether `annot` is set (`GetDescrTitleFromBioseq` looks there for a title when the
     /// descriptors have none).
@@ -594,6 +594,12 @@ impl<R: Read> ArchiveStream<R> {
                 .defer_refusals(),
             done: false,
         }
+    }
+
+    /// The bytes the stream keeps.
+    #[cfg(test)]
+    pub(crate) fn buffered(&self) -> usize {
+        self.reader.src.buffered()
     }
 
     /// The next object: `Ok(None)` when NCBI's reader fails at it (the end of the input), the
@@ -1250,8 +1256,9 @@ impl<R: Read> ArchiveStream<R> {
     //         NCBI_THROW(CSerialException, eInvalidData,
     //                    "empty Seq-descr is not allowed");
     // ```
-    // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless set in NCBI's environment or
-    // configuration file, which LOSAT rejects: `check_ncbi_application_settings`.)
+    // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless the environment sets it, which LOSAT's
+    // rpsbproc rejects (`reader_variable`), or a registry file does, which
+    // `check_ncbi_application_settings` rejects.)
     fn seq_descr(&mut self, query: &mut Query) -> Result<()> {
         let mut count = 0usize;
         let mut block_start = self.reader.start_block()?;
@@ -1266,20 +1273,10 @@ impl<R: Read> ArchiveStream<R> {
                     }
                 }
                 "user" => {
-                    if self.user_object()? && query.unread_descriptor.is_none() {
+                    if self.user_object(true)? && query.unread_descriptor.is_none() {
                         query.unread_descriptor =
                             Some("a CFastaReader user object whose DefLine is not a string");
                     }
-                }
-                name @ ("org" | "source") => {
-                    if query.unread_descriptor.is_none() {
-                        query.unread_descriptor = Some(if name == "org" {
-                            "an org descriptor"
-                        } else {
-                            "a source descriptor"
-                        });
-                    }
-                    self.skip_value()?;
                 }
                 _ => self.skip_value()?,
             }
@@ -1334,14 +1331,12 @@ impl<R: Read> ArchiveStream<R> {
     // 								const CUser_field::TData& fieldValue = (*iterUsrField)->GetData();
     // 								const string& fieldStrVal = fieldValue.GetStr();
     // ```
-    // The fields are read as the module has them, but the values of the fields are skipped:
-    // a `str` is a UTF8String, which NCBI reads with any byte (objistrasn.cpp:990), and LOSAT's
-    // skipping refuses a byte outside the visible range there.
-    fn user_object(&mut self) -> Result<bool> {
-        const FIELD_DATA: [&str; 12] = [
-            "str", "int", "real", "bool", "os", "object", "strs", "ints", "reals", "oss", "fields",
-            "objects",
-        ];
+    // The fields are read as the module has them; a `str` or `strs` is a UTF8String, which NCBI
+    // reads with any byte (`Reader::utf8_string`).
+    //
+    // `top`: the object is a descriptor's (whose `CFastaReader` DefLine rpsbproc reads). Returns
+    // whether it is a `CFastaReader` object with a `DefLine` field whose value is not a string.
+    fn user_object(&mut self, top: bool) -> Result<bool> {
         let mut members = self.reader.begin_members()?;
         let (mut fasta_reader, mut type_seen, mut data_seen, mut bad_defline) =
             (false, false, false, false);
@@ -1355,46 +1350,94 @@ impl<R: Read> ArchiveStream<R> {
                 }
                 1 => {
                     type_seen = true;
+                    let id = self.object_id()?;
                     fasta_reader =
-                        matches!(self.object_id()?, ObjectId::Str(text) if text == b"CFastaReader");
+                        top && matches!(id, ObjectId::Str(text) if text == b"CFastaReader");
                 }
                 _ => {
                     data_seen = true;
                     let mut block_start = self.reader.start_block()?;
                     while self.reader.next_element(&mut block_start)? {
-                        let mut members = self.reader.begin_members()?;
-                        let (mut defline, mut label, mut data) = (false, false, false);
-                        while let Some(index) = self
-                            .reader
-                            .next_member(&mut members, &["label", "num", "data"])?
-                        {
-                            match index {
-                                0 => {
-                                    label = true;
-                                    defline = matches!(self.object_id()?, ObjectId::Str(text) if text == b"DefLine");
-                                }
-                                1 => {
-                                    self.reader.int4()?;
-                                }
-                                _ => {
-                                    data = true;
-                                    let variant = self.reader.choice(&FIELD_DATA)?;
-                                    if fasta_reader && defline && variant != 0 {
-                                        bad_defline = true;
-                                    }
-                                    self.skip_value()?;
-                                }
-                            }
-                        }
-                        if !(label && data) {
-                            return Err(self.reader.error("a mandatory member is missing"));
-                        }
+                        bad_defline |= self.user_field(fasta_reader)?;
                     }
                     self.reader.end_block()?;
                 }
             }
         }
         if !(type_seen && data_seen) {
+            return Err(self.reader.error("a mandatory member is missing"));
+        }
+        Ok(bad_defline)
+    }
+
+    /// A `User-field` (`User-object` above); `fasta_reader`: the field is one of a descriptor's
+    /// `CFastaReader` object. Returns whether it is a `DefLine` field whose value is not a string.
+    fn user_field(&mut self, fasta_reader: bool) -> Result<bool> {
+        const FIELD_DATA: [&str; 12] = [
+            "str", "int", "real", "bool", "os", "object", "strs", "ints", "reals", "oss", "fields",
+            "objects",
+        ];
+        let mut members = self.reader.begin_members()?;
+        let (mut defline, mut label, mut data, mut bad_defline) = (false, false, false, false);
+        while let Some(index) = self
+            .reader
+            .next_member(&mut members, &["label", "num", "data"])?
+        {
+            match index {
+                0 => {
+                    label = true;
+                    defline =
+                        matches!(self.object_id()?, ObjectId::Str(text) if text == b"DefLine");
+                }
+                1 => {
+                    self.reader.int4()?;
+                }
+                _ => {
+                    data = true;
+                    let variant = self.reader.choice(&FIELD_DATA)?;
+                    bad_defline = fasta_reader && defline && variant != 0;
+                    match FIELD_DATA[variant] {
+                        "str" => {
+                            self.reader.utf8_string()?;
+                        }
+                        "int" => {
+                            self.reader.int4()?;
+                        }
+                        "real" => {
+                            self.real()?;
+                        }
+                        "bool" => {
+                            self.reader.boolean()?;
+                        }
+                        "os" => {
+                            self.reader.octets()?;
+                        }
+                        "object" => {
+                            self.user_object(false)?;
+                        }
+                        "strs" => self.reader.each(|reader| reader.utf8_string().map(drop))?,
+                        "ints" => self.reader.each(|reader| reader.int4().map(drop))?,
+                        "reals" => self.reader.each(|reader| reader.real().map(drop))?,
+                        "oss" => self.reader.each(|reader| reader.octets().map(drop))?,
+                        "fields" => {
+                            let mut block_start = self.reader.start_block()?;
+                            while self.reader.next_element(&mut block_start)? {
+                                self.user_field(false)?;
+                            }
+                            self.reader.end_block()?;
+                        }
+                        _ => {
+                            let mut block_start = self.reader.start_block()?;
+                            while self.reader.next_element(&mut block_start)? {
+                                self.user_object(false)?;
+                            }
+                            self.reader.end_block()?;
+                        }
+                    }
+                }
+            }
+        }
+        if !(label && data) {
             return Err(self.reader.error("a mandatory member is missing"));
         }
         Ok(bad_defline)

@@ -11,7 +11,7 @@ fn parse(text: &str) -> Vec<Seg> {
     text.split(',')
         .filter(|range| !range.is_empty())
         .map(|range| {
-            let mut fields = range.split(':').map(|field| field.parse::<i32>().unwrap());
+            let mut fields = range.split(':').map(|field| field.parse::<i64>().unwrap());
             Seg {
                 from: fields.next().unwrap(),
                 to: fields.next().unwrap(),

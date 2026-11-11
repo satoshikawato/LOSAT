@@ -30,17 +30,21 @@
 //! of the two sets as NCBI's list operations. `m_iFactor` is 1 in every set that PS16a's
 //! classification makes (it changes only for nucleotide queries, `Pr2NaConvert`).
 
-/// `TSeg_base`.
+/// `TSeg_base`. Its positions are `SeqPos_t` (`int`) in NCBI; LOSAT keeps them in `i64`, so
+/// the sums of the set algebra (`from - 1`, `to + 1`, the total residues) do not overflow where
+/// NCBI's do (positions near 2^31 of a crafted Dense-seg; undefined in C++, which LOSAT widens
+/// under the rule of 2026-10-10, as PD-LOSAT-NCBI-DEFECTS exception 4 does). The positions that
+/// come in are `int`s, so every result NCBI defines is the same.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Seg {
-    pub(crate) from: i32,
-    pub(crate) to: i32,
-    pub(crate) ori_from: i32,
+    pub(crate) from: i64,
+    pub(crate) to: i64,
+    pub(crate) ori_from: i64,
 }
 
 impl Seg {
     /// `TSeg_base(f, t)`: `ori_from` is `from`.
-    pub(crate) fn new(from: i32, to: i32) -> Self {
+    pub(crate) fn new(from: i64, to: i64) -> Self {
         Seg {
             from,
             to,
@@ -89,7 +93,7 @@ impl SegSet {
     }
 
     /// `AddSeg(f, t)`.
-    pub(crate) fn add(&mut self, from: i32, to: i32) {
+    pub(crate) fn add(&mut self, from: i64, to: i64) {
         self.add_seg(Seg::new(from, to));
     }
 
@@ -440,7 +444,7 @@ impl SegSet {
     // 	return iResult/abs(m_iFactor);
     // }
     // ```
-    pub(crate) fn total_residues(&self) -> i32 {
+    pub(crate) fn total_residues(&self) -> i64 {
         self.segs.iter().map(|seg| seg.to - seg.from + 1).sum()
     }
 }

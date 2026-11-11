@@ -61,8 +61,8 @@ fn conversions_fail_with_ncbis_messages() {
         "Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)"
     );
     // ncbistr.cpp:1309-1374 (quoted at `string_to_double`).
-    assert_eq!(string_to_double(b"55.5"), Ok(Some(55.5)));
-    assert_eq!(string_to_double(b"-1e3"), Ok(Some(-1000.0)));
+    assert_eq!(string_to_double(b"55.5"), Ok(55.5));
+    assert_eq!(string_to_double(b"-1e3"), Ok(-1000.0));
     assert_eq!(
         string_to_double(b"12.5\r").unwrap_err().message(),
         "Cannot convert string '12.5\\r' to double (m_Pos = 4)"
@@ -71,7 +71,40 @@ fn conversions_fail_with_ncbis_messages() {
         string_to_double(b"1e").unwrap_err().message(),
         "Cannot convert string '1e' to double (m_Pos = 1)"
     );
-    assert_eq!(string_to_double(b"0x10"), Ok(None));
+    // glibc's `strtod` reads the hexadecimal form; `0x` alone is the number 0 that ends before
+    // the `x` (NCBI's rpsbproc read `0x10` as 16 and `0X1p3` as 8 and refused `0x` at position
+    // 1, PS16a review oracle A4-1 cases `bs12`, `bs14`, `bs13`).
+    assert_eq!(string_to_double(b"0x10"), Ok(16.0));
+    assert_eq!(string_to_double(b"0X1p3"), Ok(8.0));
+    assert_eq!(
+        string_to_double(b"0x").unwrap_err().message(),
+        "Cannot convert string '0x' to double (m_Pos = 1)"
+    );
+}
+
+// `LOSAT/tests/unit/rpsbproc_strtod_hex_vectors.tsv`: glibc 2.39's `strtod` of hexadecimal
+// texts (edge cases of rounding, subnormals, overflow and the ends of the form, then random
+// ones), made with `ctypes` by `psiblast-20261025/PR/tmp/impl16a/strtodhex.py`.
+#[test]
+fn hex_numbers_read_as_glibcs_strtod() {
+    let table = include_str!("../../tests/unit/rpsbproc_strtod_hex_vectors.tsv");
+    let mut rows = 0;
+    for row in table.lines().filter(|row| !row.starts_with('#')) {
+        let mut fields = row.split('\t');
+        let (text, bits, used) = (
+            fields.next().unwrap(),
+            fields.next().unwrap(),
+            fields.next().unwrap(),
+        );
+        let (value, end) = strtod_prefix(text.as_bytes());
+        assert_eq!(
+            (format!("{:016x}", value.to_bits()), end.to_string()),
+            (bits.to_string(), used.to_string()),
+            "{text:?}"
+        );
+        rows += 1;
+    }
+    assert_eq!(rows, 360);
 }
 
 // ncbistr.cpp (`s_PrintableString`, quoted at `printable_string`).
@@ -145,13 +178,11 @@ fn fixture_data_loads_and_finds_its_rows() {
     assert!(matches!(missing, DataError::Missing(path) if path == "/nonexistent/cddid.tbl"));
 }
 
-// offl_sparcle_data.cpp:217-308 (quoted at `load_cdtrack`): the parent and the root of a domain,
-// and NCBI's root that is neither the parent nor the domain itself, which sets the parent.
-#[test]
-fn cdtrack_sets_parents_and_roots_as_ncbi() {
+/// A copy of the fixture data in a new directory of the system's temporary directory.
+fn fixture_copy(tag: &str) -> std::path::PathBuf {
     let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rpsbproc/data");
     let dir = std::env::temp_dir().join(format!(
-        "losat_rpsbproc_cdtrack_{}_{}",
+        "losat_rpsbproc_{tag}_{}_{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -163,43 +194,149 @@ fn cdtrack_sets_parents_and_roots_as_ncbi() {
         let entry = entry.unwrap();
         std::fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
     }
-    std::fs::write(
-        dir.join("cdtrack.txt"),
+    dir
+}
+
+// offl_sparcle_data.cpp:217-308 (quoted at `load_cdtrack`): the shapes of `cdtrack.txt` lines.
+// Whole lines load; a line of the accession alone reads `buf[npos]` (as 0) and then throws
+// libstdc++'s `out_of_range` (oracle A4-1 case `ct3`); a line that ends after a field the loader
+// skips completes after reading `buf[npos]` (case `ct1`, refused), and a line that ends in a
+// space reads past its terminating 0 (refused).
+#[test]
+fn cdtrack_lines_read_as_ncbi() {
+    let dir = fixture_copy("cdtrack");
+    let load = |text: &str| {
+        std::fs::write(dir.join("cdtrack.txt"), text).unwrap();
+        CddData::load(&fixture_files(dir.to_str().unwrap()))
+    };
+    load(
         "# Acc ShortName PssmId Parent Root\n\
          cd14498 DSP 350348 N/A cd14498 x\n\
          cd14527 DSP_bac 350376 cd14498 cd14498 x\n\
-         cd14504 DUSP23 350354 cd14504 cd14498 x\n",
+         cd14504 DUSP23 cd14504 cd14498\n\
+         unknown\n",
     )
     .unwrap();
+    match load("cd14498\n") {
+        Err(DataError::Std(what)) => assert_eq!(
+            what,
+            "basic_string::substr: __pos (which is 18446744073709551615) > this->size() (which is 7)"
+        ),
+        other => panic!("{other:?}"),
+    }
+    for refused in [
+        "cd14498 DSP 350348\n",
+        "cd14498 DSP 350348 N/A\n",
+        "cd14498 \n",
+    ] {
+        assert!(
+            matches!(load(refused), Err(DataError::Unsupported(_))),
+            "{refused:?}"
+        );
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// PD-LOSAT-NCBI-DEFECTS exception 8: PSSM-IDs of 2^31 and more are compared as signed values
+// without the overflow of NCBI's `int` difference. The rows are those of the PS16a review's
+// oracle A2 data `D2` (the fixture's `cddid.tbl` with eight PSSM-IDs near 2^31 among its domain
+// rows and 2^31 at the end), where a wrapping difference misses rows; every id is found.
+#[test]
+fn pssm_ids_from_2_to_the_31_are_found() {
+    assert_eq!(int_order(2_100_000_000, 3_000_000_000u32 as i32), 1);
+    assert_eq!(int_order(i32::MIN, i32::MAX), -1);
+    assert_eq!(int_order(-5, -5), 0);
+    let dir = fixture_copy("bigids");
+    let table = std::fs::read_to_string(dir.join("cddid.tbl")).unwrap();
+    let (clusters, domains): (Vec<&str>, Vec<&str>) = table.lines().partition(|line| {
+        line.split('\t')
+            .nth(1)
+            .is_some_and(|acc| acc.starts_with("cl"))
+    });
+    let probe = |id: u64, n: u32| format!("{id}\tpfam990{n:02}\tPROBE{n}\tprobe row\t100");
+    let inserts = [
+        (0, probe(2145012964, 1)),
+        (8, probe(2146536812, 2)),
+        (44, probe(2148697914, 3)),
+        (45, probe(2147941452, 4)),
+        (45, probe(2145856543, 5)),
+        (52, probe(2146191475, 6)),
+        (58, probe(2148253328, 7)),
+        (83, probe(2148091740, 8)),
+        (domains.len(), probe(2147483648, 90)),
+    ];
+    let mut lines: Vec<String> = clusters.iter().map(|line| line.to_string()).collect();
+    for at in 0..=domains.len() {
+        lines.extend(
+            inserts
+                .iter()
+                .filter(|(after, _)| *after == at)
+                .map(|(_, row)| row.clone()),
+        );
+        if let Some(line) = domains.get(at) {
+            lines.push(line.to_string());
+        }
+    }
+    std::fs::write(dir.join("cddid.tbl"), lines.join("\n") + "\n").unwrap();
     let data = CddData::load(&fixture_files(dir.to_str().unwrap())).unwrap();
-    let domain = |acc: &[u8]| &data.domains[data.find_domain_by_accession(acc).unwrap()];
-    assert_eq!(
-        (
-            domain(b"cd14498").hierarchy_parent,
-            domain(b"cd14498").hierarchy_root
-        ),
-        (0, 350348)
-    );
-    assert_eq!(
-        (
-            domain(b"cd14527").hierarchy_parent,
-            domain(b"cd14527").hierarchy_root
-        ),
-        (350348, 350348)
-    );
-    // The root is neither the parent nor the domain: NCBI sets the parent and leaves the root.
-    assert_eq!(
-        (
-            domain(b"cd14504").hierarchy_parent,
-            domain(b"cd14504").hierarchy_root
-        ),
-        (350348, 0)
-    );
-    // A line that ends after a field the loader skips is read past its end by NCBI.
-    std::fs::write(dir.join("cdtrack.txt"), "cd14498 DSP 350348\n").unwrap();
-    assert!(matches!(
-        CddData::load(&fixture_files(dir.to_str().unwrap())),
-        Err(DataError::Unsupported(_))
-    ));
+    assert_eq!(data.domains.len(), domains.len() + inserts.len());
+    for domain in &data.domains {
+        let found = data.find_domain(domain.pssm_id).unwrap();
+        assert_eq!(data.domains[found].pssm_id, domain.pssm_id);
+    }
+    for id in [488084, 2148253328, 2147483648] {
+        assert!(data.find_domain(id).is_some(), "{id}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// offl_sparcle_data.cpp:158-170 (quoted at `load_cddids`): an accession of 1 or 0 bytes sets no
+// flag (oracle A4-1 cases `acc1`, `acc0`: NCBI's output is that of the data without the row);
+// a blank line, or a lone CR, has the length `''` (cases `wsline`, `crline`).
+#[test]
+fn short_accessions_and_blank_lines_load_as_ncbi() {
+    let dir = fixture_copy("cddid");
+    let table = std::fs::read_to_string(dir.join("cddid.tbl")).unwrap();
+    for row in ["999999\tA\tx\ty\t100\n", "999999\t\tx\ty\t100\n"] {
+        std::fs::write(dir.join("cddid.tbl"), format!("{table}{row}")).unwrap();
+        let data = CddData::load(&fixture_files(dir.to_str().unwrap())).unwrap();
+        let domain = &data.domains[data.find_domain(999999).unwrap()];
+        assert!(!domain.curated && !domain.is_struct_dom);
+    }
+    for row in [" \n", "\r\n"] {
+        std::fs::write(dir.join("cddid.tbl"), format!("{table}{row}")).unwrap();
+        match CddData::load(&fixture_files(dir.to_str().unwrap())) {
+            Err(DataError::Conversion(error)) => assert_eq!(
+                error.message(),
+                "Cannot convert string '' to Uint8 (m_Pos = 0)"
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// offl_sparcle_data.cpp:479 and :586 (quoted at `load_sites`): a site line whose coordinates are
+// its last field asks `reserve` for more than a vector holds (oracle A4-1 cases `annot10`,
+// `gen10`).
+#[test]
+fn coordinates_at_the_end_of_a_site_line_throw_length_error() {
+    let dir = fixture_copy("sites");
+    for file in ["cddannot.dat", "cddannot_generic.dat"] {
+        let original = std::fs::read(dir.join(file)).unwrap();
+        let text = String::from_utf8_lossy(&original).into_owned();
+        let row = text
+            .lines()
+            .find(|line| !line.is_empty() && !line.starts_with('#'))
+            .unwrap();
+        let fields: Vec<&str> = row.split('\t').collect();
+        let cut = fields[..10].join("\t");
+        std::fs::write(dir.join(file), format!("{cut}\n")).unwrap();
+        match CddData::load(&fixture_files(dir.to_str().unwrap())) {
+            Err(DataError::Std(what)) => assert_eq!(what, "vector::reserve"),
+            other => panic!("{file}: {other:?}"),
+        }
+        std::fs::write(dir.join(file), &original).unwrap();
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

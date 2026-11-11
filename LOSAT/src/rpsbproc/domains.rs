@@ -17,7 +17,7 @@ use crate::utils::std_sort::std_sort;
 // {
 // 	static constexpr const SeqLen_t GAP_THRESHOLD = 35;
 // ```
-const GAP_THRESHOLD: i32 = 35;
+const GAP_THRESHOLD: i64 = 35;
 
 /// `TDomSeqAlignment`, with the members that the domain output reads.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1084-1123,1206-1221
@@ -224,11 +224,13 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
 // 	}
 // }
 // ```
+// (`(SeqPos_t)m_vecLens[i]` converts an `unsigned int` to `int`, which wraps in NCBI's build;
+// the `int` sums after it are computed in `i64`, `segset::Seg`.)
 fn master_gaps(align: &DomAlign) -> SegSet {
     let mut gaps = SegSet::new();
     for i in 0..align.lens.len().saturating_sub(1) {
-        let gap_start = align.m_starts[i].wrapping_add(align.lens[i] as i32);
-        let gap_len = align.m_starts[i + 1].wrapping_sub(gap_start);
+        let gap_start = i64::from(align.m_starts[i]) + i64::from(align.lens[i] as i32);
+        let gap_len = i64::from(align.m_starts[i + 1]) - gap_start;
         if gap_len >= GAP_THRESHOLD {
             gaps.add(gap_start, gap_start + gap_len - 1);
         }
@@ -507,7 +509,10 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
     });
     let segs_of = |facility: &Facility, aligns: &[DomAlign], gap_sets: &[SegSet]| {
         let mut segs = SegSet::new();
-        segs.add(aligns[facility.align].from, aligns[facility.align].to);
+        segs.add(
+            i64::from(aligns[facility.align].from),
+            i64::from(aligns[facility.align].to),
+        );
         if let Some(gaps) = facility.gaps {
             segs.clip(&gap_sets[gaps]);
         }
@@ -517,15 +522,15 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
     let mut source_counts: HashMap<i32, [i32; 7]> = HashMap::new();
     for facility in &non_multi {
         let this_segs = segs_of(facility, aligns, &gap_sets);
-        let this_length = f64::from(this_segs.total_residues());
+        let this_length = this_segs.total_residues() as f64;
         let mut overlaps = SegSet::new();
         let mut joined = false;
         for rep in &concise {
             let rep_segs = segs_of(rep, aligns, &gap_sets);
-            let rep_length = f64::from(rep_segs.total_residues());
+            let rep_length = rep_segs.total_residues() as f64;
             let mut overlap = this_segs.clone();
             overlap.cross(&rep_segs);
-            let overlap_length = f64::from(overlap.total_residues());
+            let overlap_length = overlap.total_residues() as f64;
             if overlap_length > 0.0
                 && (overlap_length / this_length > 0.5
                     || (overlap_length / rep_length > 0.5
@@ -542,7 +547,7 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
             overlaps.merge(&overlap);
         }
         if !joined {
-            let rep = f64::from(overlaps.total_residues()) / this_length < 0.5;
+            let rep = overlaps.total_residues() as f64 / this_length < 0.5;
             aligns[facility.align].rep = rep;
             if rep {
                 aligns[facility.align].region = concise.len() as i32;

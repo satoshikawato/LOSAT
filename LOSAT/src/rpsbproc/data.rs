@@ -16,9 +16,11 @@
 //! ```
 //!
 //! NCBI keeps a `TDomain` (or `TCluster`) per row with every column as a `std::string`; LOSAT
-//! keeps the columns that rpsbproc prints or decides by (the PSSM-ID, accession, short name,
-//! length, curated and structural flags, cluster, hierarchy, bit score threshold and the sites)
-//! with the texts in one buffer, and drops the definition lines, which rpsbproc never prints.
+//! keeps the columns that `-t doms` prints or decides by (the PSSM-ID, accession, short name,
+//! length, curated and structural flags, cluster and bit score threshold) with the texts in one
+//! buffer. The definition lines, the hierarchy (`cdtrack.txt`) and the sites (`cddannot*.dat`)
+//! are read as NCBI reads them, for their errors, but not kept: no byte of `-t doms` depends on
+//! them (item PS16b keeps what its outputs read).
 //! The lookups are NCBI's `CPtrMap`: the rows sorted by libstdc++'s `std::sort` with NCBI's
 //! comparison and searched by NCBI's binary search, so that a key held by two rows finds the row
 //! that NCBI finds.
@@ -58,9 +60,6 @@ pub(crate) struct Domain {
     pub(crate) length: u32,
     /// `m_iClusterId`: the superfamily, `INVALIDCLUSTERID` (-1) when none.
     pub(crate) cluster_id: i32,
-    /// `m_uiHierarchyRoot` and `m_uiHierarchyParent` (from `cdtrack.txt`).
-    pub(crate) hierarchy_root: u32,
-    pub(crate) hierarchy_parent: u32,
     /// `m_dMinBitScore` (from `bitscore_specific.txt`).
     pub(crate) min_bit_score: f64,
     /// `m_bCurated`: a `cd` accession.
@@ -84,10 +83,10 @@ pub(crate) struct CddData {
     text: Vec<u8>,
     pub(crate) domains: Vec<Domain>,
     pub(crate) clusters: Vec<Cluster>,
-    /// `CDomClusterIndex::m_pssmid2cd`, `m_acxn2cd`, `m_pssmid2fam`, `m_clid2fam`.
+    /// `CDomClusterIndex::m_pssmid2cd`, `m_acxn2cd`, `m_clid2fam` (the doms path never asks
+    /// `m_pssmid2fam`, `FindClusterByPssmId`, which is not kept).
     domain_by_pssm_id: Vec<u32>,
     domain_by_accession: Vec<u32>,
-    cluster_by_pssm_id: Vec<u32>,
     cluster_by_id: Vec<u32>,
 }
 
@@ -99,8 +98,10 @@ pub(crate) enum DataError {
     Missing(String),
     /// A number that NCBI's conversion refuses (rpsbproc: two `Error:` lines, exit 2).
     Conversion(ConversionError),
-    /// A line that LOSAT does not read (NCBI reads past the line or throws an exception of the
-    /// C++ library).
+    /// An exception of the C++ library that leaves `Init` (rpsbproc: one `Error: (106.6)` line
+    /// with its `what()`, exit 2).
+    Std(String),
+    /// A line that LOSAT does not read (NCBI reads outside the line).
     Unsupported(String),
 }
 
@@ -123,9 +124,19 @@ const NPOS: usize = usize::MAX;
 struct Line<'a> {
     bytes: &'a [u8],
     file: &'a str,
+    /// Whether `operator[]` read the byte before the line (`buf[npos]`, `at`).
+    read_before: std::cell::Cell<bool>,
 }
 
 impl<'a> Line<'a> {
+    fn new(bytes: &'a [u8], file: &'a str) -> Self {
+        Line {
+            bytes,
+            file,
+            read_before: std::cell::Cell::new(false),
+        }
+    }
+
     fn find(&self, byte: u8, from: usize) -> usize {
         if from >= self.bytes.len() {
             return NPOS;
@@ -136,29 +147,55 @@ impl<'a> Line<'a> {
             .map_or(NPOS, |at| from + at)
     }
 
-    /// `substr(pos, n)` (`n` clipped to the end; `pos` past the end throws `out_of_range`).
+    /// `substr(pos, n)`: `n` clipped to the end; `pos` past the end throws `out_of_range`.
+    // libstdc++ (GCC 13): bits/basic_string.h:385-393
+    // ```c++
+    //       size_type
+    //       _M_check(size_type __pos, const char* __s) const
+    //       {
+    // 	if (__pos > this->size())
+    // 	  __throw_out_of_range_fmt(__N("%s: __pos (which is %zu) > "
+    // 				       "this->size() (which is %zu)"),
+    // 				   __s, __pos, this->size());
+    // 	return __pos;
+    //       }
+    // ```
+    // (`substr` calls `_M_check(__pos, "basic_string::substr")`, bits/basic_string.h:3163-3165;
+    // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // basic_string::substr: __pos (which is 18446744073709551615) > this->size() (which is 10)`
+    // for a `cdtrack.txt` line of an accession alone, PS16a review oracle A4-1 case `ct3`.)
     fn substr(&self, pos: usize, n: usize) -> Result<&'a [u8], DataError> {
         if pos > self.bytes.len() {
-            return Err(self.unsupported("substr past its end"));
+            return Err(DataError::Std(format!(
+                "basic_string::substr: __pos (which is {pos}) > this->size() (which is {})",
+                self.bytes.len()
+            )));
         }
         let end = pos.saturating_add(n).min(self.bytes.len());
         Ok(&self.bytes[pos..end])
     }
 
-    /// `buf[pos]`: the byte, 0 at the end; reading past the end is undefined in C++.
+    /// `buf[pos]`: the byte, 0 at the end. Other reads outside the line are undefined in C++:
+    /// `buf[npos]`, the byte before the string's data, reads as 0 (the top byte of the string's
+    /// length in its own buffer, or of malloc's size word before a longer string's data) and is
+    /// noted (`read_before`); a read past the terminating 0 is refused.
     fn at(&self, pos: usize) -> Result<u8, DataError> {
         match pos.cmp(&self.bytes.len()) {
             std::cmp::Ordering::Less => Ok(self.bytes[pos]),
             std::cmp::Ordering::Equal => Ok(0),
+            std::cmp::Ordering::Greater if pos == NPOS => {
+                self.read_before.set(true);
+                Ok(0)
+            }
             std::cmp::Ordering::Greater => Err(self.unsupported("a read past its end")),
         }
     }
 
     fn unsupported(&self, what: &str) -> DataError {
         DataError::Unsupported(format!(
-            "a line of {} where NCBI's loader makes {what} is not supported by LOSAT's rpsbproc: {}",
+            "a line of {} where NCBI's loader makes {what} is not supported by LOSAT's rpsbproc: '{}'",
             self.file,
-            String::from_utf8_lossy(self.bytes)
+            printable_string(self.bytes)
         ))
     }
 }
@@ -571,9 +608,9 @@ pub(crate) fn string_to_int(text: &[u8]) -> Result<i32, ConversionError> {
 //     ...
 //     CHECK_ENDPTR(double);
 // ```
-// glibc's `strtod` of the decimal forms and of `inf`, `infinity`, `nan` and `nan(...)`; the
-// hexadecimal form (`0x`) is refused by LOSAT.
-pub(crate) fn string_to_double(text: &[u8]) -> Result<Option<f64>, ConversionError> {
+// glibc's `strtod` of the decimal and hexadecimal forms and of `inf`, `infinity`, `nan` and
+// `nan(...)` (`strtod_prefix`).
+pub(crate) fn string_to_double(text: &[u8]) -> Result<f64, ConversionError> {
     let error = |pos| ConversionError {
         text: text.to_vec(),
         to_type: "double",
@@ -585,41 +622,43 @@ pub(crate) fn string_to_double(text: &[u8]) -> Result<Option<f64>, ConversionErr
     if !c.is_ascii_digit() && c != b'.' && c != b'-' && c != b'+' {
         return Err(error(0));
     }
-    let Some((value, used)) = strtod_prefix(text) else {
-        return Ok(None);
-    };
+    let (value, used) = strtod_prefix(text);
     if used == 0 {
         return Err(error(0));
     }
     if at(used) != 0 {
         return Err(error(used));
     }
-    Ok(Some(value))
+    Ok(value)
 }
 
-/// glibc `strtod` of the start of `text` (no leading white space here): the value and the
-/// bytes read; `None` for a hexadecimal number, which LOSAT does not read.
-fn strtod_prefix(text: &[u8]) -> Option<(f64, usize)> {
+/// glibc `strtod` of the start of `text` (no leading white space here) in the C locale and the
+/// default rounding: the value and the bytes read (0 when no number starts there).
+fn strtod_prefix(text: &[u8]) -> (f64, usize) {
     let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
     let mut pos = usize::from(matches!(at(0), b'+' | b'-'));
     let negative = at(0) == b'-';
     let lower = |pos: usize| at(pos).to_ascii_lowercase();
     if lower(pos) == b'0' && lower(pos + 1) == b'x' {
-        return None;
+        if let Some((value, end)) = hex_prefix(text, pos + 2) {
+            return (if negative { -value } else { value }, end);
+        }
+        // `0x` without a hexadecimal digit reads as the number 0, which ends before the `x`.
+        return (if negative { -0.0 } else { 0.0 }, pos + 1);
     }
     if lower(pos) == b'i' && lower(pos + 1) == b'n' && lower(pos + 2) == b'f' {
         let mut end = pos + 3;
         if (0..5).all(|k| lower(end + k) == b"inity"[k]) {
             end += 5;
         }
-        return Some((
+        return (
             if negative {
                 f64::NEG_INFINITY
             } else {
                 f64::INFINITY
             },
             end,
-        ));
+        );
     }
     if lower(pos) == b'n' && lower(pos + 1) == b'a' && lower(pos + 2) == b'n' {
         let mut end = pos + 3;
@@ -632,7 +671,7 @@ fn strtod_prefix(text: &[u8]) -> Option<(f64, usize)> {
                 end = k + 1;
             }
         }
-        return Some((f64::NAN, end));
+        return (f64::NAN, end);
     }
     let mut digits = 0;
     while at(pos).is_ascii_digit() {
@@ -647,7 +686,7 @@ fn strtod_prefix(text: &[u8]) -> Option<(f64, usize)> {
         }
     }
     if digits == 0 {
-        return Some((0.0, 0));
+        return (0.0, 0);
     }
     let mantissa_end = pos;
     if matches!(at(pos), b'e' | b'E') {
@@ -662,12 +701,121 @@ fn strtod_prefix(text: &[u8]) -> Option<(f64, usize)> {
             pos = k;
         }
     }
-    let number = std::str::from_utf8(&text[..pos]).ok()?;
+    let number = std::str::from_utf8(&text[..pos]).expect("an ASCII number");
     let value: f64 = number
         .parse()
         .ok()
-        .or_else(|| number[..mantissa_end].parse().ok())?;
-    Some((value, pos))
+        .or_else(|| number[..mantissa_end].parse().ok())
+        .expect("a decimal number parses");
+    (value, pos)
+}
+
+/// The hexadecimal number of glibc's `strtod` after its `0x`, from `start`: hexadecimal digits
+/// with an optional point, at least one digit, then an optional binary exponent `p` with an
+/// optional sign and decimal digits (a `p` without digits is not read); the value rounded once
+/// to the nearest double (ties to even), the infinity above the largest. `None` when no digit
+/// follows (`strtod` then reads the `0` alone). Its absolute value.
+// (The hexadecimal form of C's `strtod`, ISO C11 7.22.1.3, as glibc reads it in the C locale;
+// the unit test `hex_numbers_read_as_glibcs_strtod` holds glibc 2.39's values and ends for these
+// forms.)
+fn hex_prefix(text: &[u8], start: usize) -> Option<(f64, usize)> {
+    let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
+    let digit = |pos: usize| char::from(at(pos)).to_digit(16);
+    // The digits as an integer of at most 116 bits, the binary exponent of its last bit, and
+    // whether a digit that did not fit was not 0.
+    let (mut mantissa, mut exponent, mut sticky) = (0u128, 0i64, false);
+    let mut push = |value: u32, after_point: bool| {
+        if mantissa == 0 && value == 0 {
+            exponent -= if after_point { 4 } else { 0 };
+        } else if mantissa < 1 << 112 {
+            mantissa = mantissa * 16 + u128::from(value);
+            exponent -= if after_point { 4 } else { 0 };
+        } else {
+            sticky |= value != 0;
+            exponent += if after_point { 0 } else { 4 };
+        }
+    };
+    let mut pos = start;
+    let mut any = false;
+    while let Some(value) = digit(pos) {
+        push(value, false);
+        any = true;
+        pos += 1;
+    }
+    if at(pos) == b'.' && (any || digit(pos + 1).is_some()) {
+        pos += 1;
+        while let Some(value) = digit(pos) {
+            push(value, true);
+            any = true;
+            pos += 1;
+        }
+    }
+    if !any {
+        return None;
+    }
+    if matches!(at(pos), b'p' | b'P') {
+        let mut k = pos + 1;
+        let negative = at(k) == b'-';
+        if matches!(at(k), b'+' | b'-') {
+            k += 1;
+        }
+        if at(k).is_ascii_digit() {
+            let mut value = 0i64;
+            while at(k).is_ascii_digit() {
+                value = (value * 10 + i64::from(at(k) - b'0')).min(1 << 40);
+                k += 1;
+            }
+            exponent += if negative { -value } else { value };
+            pos = k;
+        }
+    }
+    Some((round_binary(mantissa, exponent, sticky), pos))
+}
+
+/// `mantissa * 2^exponent` (plus less than its last bit when `sticky`) rounded to the nearest
+/// double, ties to even: subnormal below 2^-1022, the infinity from 2^1024 on.
+fn round_binary(mantissa: u128, exponent: i64, sticky: bool) -> f64 {
+    if mantissa == 0 {
+        return 0.0;
+    }
+    let bits = i64::from(128 - mantissa.leading_zeros());
+    // The exponent of the leading bit, and the bits the double keeps from it.
+    let lead = exponent + bits - 1;
+    if lead > 1023 {
+        return f64::INFINITY;
+    }
+    let keep = if lead >= -1022 {
+        53
+    } else {
+        53 - (-1022 - lead)
+    };
+    if keep < 0 {
+        return 0.0;
+    }
+    let shift = bits - keep;
+    let mut kept = if shift <= 0 {
+        mantissa << (-shift)
+    } else {
+        let kept = mantissa >> shift;
+        let rest = mantissa & ((1u128 << shift) - 1);
+        let half = 1u128 << (shift - 1);
+        let up = rest > half || (rest == half && (sticky || kept & 1 == 1));
+        kept + u128::from(up)
+    };
+    let mut lead = lead;
+    if keep == 53 && kept == 1 << 53 {
+        kept >>= 1;
+        lead += 1;
+        if lead > 1023 {
+            return f64::INFINITY;
+        }
+    }
+    if keep == 53 {
+        f64::from_bits(((lead + 1023) as u64) << 52 | (kept as u64 & ((1 << 52) - 1)))
+    } else {
+        // A subnormal: its bits are the kept ones (2^52 is the smallest normal number).
+        f64::from_bits(kept as u64)
+    }
 }
 
 /// `TDomSrcCount::ESrcIdx` and the signatures of the source databases.
@@ -854,10 +1002,10 @@ impl CddData {
     // 		}
     // 	};
     // ```
-    // (The `int` difference wraps in NCBI's build; `wrapping_sub` gives the same sign.)
+    // (The `int` difference is compared without its overflow: `int_order`.)
     pub(crate) fn find_domain(&self, pssm_id: u32) -> Option<usize> {
         let found = binary_search(&self.domain_by_pssm_id, |index| {
-            (pssm_id as i32).wrapping_sub(self.domains[index as usize].pssm_id as i32)
+            int_order(pssm_id as i32, self.domains[index as usize].pssm_id as i32)
         })?;
         Some(found as usize)
     }
@@ -888,7 +1036,7 @@ impl CddData {
     // ```
     pub(crate) fn find_cluster(&self, cluster_id: i32) -> Option<usize> {
         let found = binary_search(&self.cluster_by_id, |index| {
-            cluster_id.wrapping_sub(self.clusters[index as usize].cluster_id)
+            int_order(cluster_id, self.clusters[index as usize].cluster_id)
         })?;
         Some(found as usize)
     }
@@ -1049,7 +1197,7 @@ impl CddData {
             if bytes.is_empty() || bytes[0] == b'#' {
                 return Ok(());
             }
-            let line = Line { bytes, file: FILE };
+            let line = Line::new(bytes, FILE);
             let mut pos0 = 0usize;
             let mut pos1 = line.find(b'\t', pos0);
             let pssm_id_text = ltrim(line.substr(pos0, pos1.wrapping_sub(pos0))?);
@@ -1083,10 +1231,9 @@ impl CddData {
                 });
                 return Ok(());
             }
-            // `m_strAccession[2]` of an accession shorter than 2 bytes reads past its end.
-            if accession.len() < 2 {
-                return Err(line.unsupported("an accession of fewer than 2 bytes"));
-            }
+            // `m_strAccession[2]` of an accession shorter than 2 bytes reads past its end, which is
+            // undefined, but no flag can be set then: `[1]` of a 1-byte accession and `[0]` of an
+            // empty one are the terminating 0, never `d`, `c` or `s` (`acc` gives 0 there).
             let (mut curated, mut is_struct_dom) = (false, false);
             if acc(2).is_ascii_digit() && acc(1) == b'd' {
                 if acc(0) == b'c' {
@@ -1117,8 +1264,6 @@ impl CddData {
                 short_name,
                 length,
                 cluster_id: INVALID_CLUSTER_ID,
-                hierarchy_root: 0,
-                hierarchy_parent: 0,
                 min_bit_score: 0.0,
                 curated,
                 is_struct_dom,
@@ -1151,8 +1296,10 @@ impl CddData {
         let span = |s: Span| &text[s.start as usize..(s.start + s.len) as usize];
         let mut by_pssm: Vec<u32> = (0..domains.len() as u32).collect();
         std_sort(&mut by_pssm, &mut |&a: &u32, &b: &u32| {
-            (domains[a as usize].pssm_id as i32).wrapping_sub(domains[b as usize].pssm_id as i32)
-                < 0
+            int_order(
+                domains[a as usize].pssm_id as i32,
+                domains[b as usize].pssm_id as i32,
+            ) < 0
         });
         let mut by_acc: Vec<u32> = (0..domains.len() as u32).collect();
         std_sort(&mut by_acc, &mut |&a: &u32, &b: &u32| {
@@ -1161,21 +1308,15 @@ impl CddData {
                 span(domains[b as usize].accession),
             ) < 0
         });
-        let mut cl_by_pssm: Vec<u32> = (0..clusters.len() as u32).collect();
-        std_sort(&mut cl_by_pssm, &mut |&a: &u32, &b: &u32| {
-            (clusters[a as usize].pssm_id as i32).wrapping_sub(clusters[b as usize].pssm_id as i32)
-                < 0
-        });
         let mut cl_by_id: Vec<u32> = (0..clusters.len() as u32).collect();
         std_sort(&mut cl_by_id, &mut |&a: &u32, &b: &u32| {
-            clusters[a as usize]
-                .cluster_id
-                .wrapping_sub(clusters[b as usize].cluster_id)
-                < 0
+            int_order(
+                clusters[a as usize].cluster_id,
+                clusters[b as usize].cluster_id,
+            ) < 0
         });
         self.domain_by_pssm_id = by_pssm;
         self.domain_by_accession = by_acc;
-        self.cluster_by_pssm_id = cl_by_pssm;
         self.cluster_by_id = cl_by_id;
         Ok(())
     }
@@ -1266,9 +1407,19 @@ impl CddData {
     // 				}
     // 			}	//dfstream
     // ```
-    // A root that is neither the parent nor the domain sets the parent (NCBI's code; reproduced).
-    // The loops `while(buf[pos1] <= ' ')` compare a signed `char` and run past the line's end
-    // when the line ends in a field they skip, or start at `npos`: undefined in C++, refused.
+    // The parent and the root set only `m_uiHierarchyParent` and `m_uiHierarchyRoot`, which no
+    // output of `-t doms` reads (the doms path reads the length, threshold, flags, cluster,
+    // accession and short name of a domain), so LOSAT does not keep them; what this loader does
+    // for `-t doms` is what its `std::string` operations do on each line. A `find` that fails
+    // gives `npos`; the loops `while(buf[pos1] <= ' ')` (a signed `char`) then read `buf[npos]`,
+    // the byte before the string's data, which is undefined but 0 in NCBI's build (`Line::at`),
+    // and go on from position 0, and a `substr` from `npos` throws `std::out_of_range` (oracle
+    // A4-1 case `ct3`, a line of the accession alone: rpsbproc exits 2 with libstdc++'s message).
+    // A line that ends without an exception after reading `buf[npos]` (oracle A4-1 case `ct1`,
+    // `smart00421 HTH_LUXR 197715 N/A`, a line whose root is missing) is refused: its result
+    // rests on the undefined read. NCBI's published `cdtrack.txt` (the v3.23 preview, oracle A4-2:
+    // LOSAT's bytes and NCBI's agree on it) has no such line; a read past the terminating 0 is
+    // refused too.
     fn load_cdtrack(&mut self, path: &str) -> Result<(), DataError> {
         if !file_exists(path) {
             return Err(DataError::Missing(path.to_string()));
@@ -1279,72 +1430,40 @@ impl CddData {
             if bytes.is_empty() || bytes[0] == b'#' {
                 return Ok(());
             }
-            let line = Line { bytes, file: FILE };
+            let line = Line::new(bytes, FILE);
             let skip_le_space = |mut pos: usize| -> Result<usize, DataError> {
                 while is_trim_space(line.at(pos)?) {
-                    pos += 1;
+                    pos = pos.wrapping_add(1);
                 }
                 Ok(pos)
             };
             let mut pos1 = line.find(b' ', 0);
             let current = trim(line.substr(0, pos1)?);
-            let Some(dom) = self.find_domain_by_accession(current) else {
+            if self.find_domain_by_accession(current).is_none() {
                 return Ok(());
-            };
-            if pos1 == NPOS {
-                return Err(line.unsupported("a read past its end"));
             }
             pos1 = skip_le_space(pos1)?;
             let mut pos0 = pos1;
             pos1 = line.find(b' ', pos0);
-            if pos1 == NPOS {
-                return Err(line.unsupported("a read past its end"));
-            }
             while line.at(pos1)? == b' ' {
-                pos1 += 1;
+                pos1 = pos1.wrapping_add(1);
             }
             if line.at(pos1)?.is_ascii_digit() {
                 pos0 = pos1;
                 pos1 = line.find(b' ', pos0);
-                if pos1 == NPOS {
-                    return Err(line.unsupported("a read past its end"));
-                }
                 pos1 = skip_le_space(pos1)?;
             }
             pos0 = pos1;
             pos1 = line.find(b' ', pos0);
-            let parent = trim(line.substr(pos0, pos1.wrapping_sub(pos0))?);
-            let own_accession = self.text(self.domains[dom].accession);
-            let own_pssm_id = self.domains[dom].pssm_id;
-            let mut new_parent = None;
-            if parent != b"N/A" {
-                if parent == own_accession {
-                    new_parent = Some(own_pssm_id);
-                } else if let Some(found) = self.find_domain_by_accession(parent) {
-                    new_parent = Some(self.domains[found].pssm_id);
-                }
-            }
-            if pos1 == NPOS {
-                return Err(line.unsupported("a read past its end"));
-            }
+            // `parentAcc`
+            line.substr(pos0, pos1.wrapping_sub(pos0))?;
             pos1 = skip_le_space(pos1)?;
             pos0 = pos1;
             pos1 = line.find(b' ', pos0);
-            let root = trim(line.substr(pos0, pos1.wrapping_sub(pos0))?);
-            let parent_value = new_parent.unwrap_or(self.domains[dom].hierarchy_parent);
-            let mut new_root = None;
-            if root == parent {
-                new_root = Some(parent_value);
-            } else if root == own_accession {
-                new_root = Some(own_pssm_id);
-            } else if let Some(found) = self.find_domain_by_accession(root) {
-                new_parent = Some(self.domains[found].pssm_id);
-            }
-            if let Some(parent) = new_parent {
-                self.domains[dom].hierarchy_parent = parent;
-            }
-            if let Some(root) = new_root {
-                self.domains[dom].hierarchy_root = root;
+            // `rootAcc`
+            line.substr(pos0, pos1.wrapping_sub(pos0))?;
+            if line.read_before.get() {
+                return Err(line.unsupported("a read of the byte before the line (buf[npos])"));
             }
             Ok(())
         })
@@ -1412,7 +1531,7 @@ impl CddData {
             if bytes.is_empty() || bytes[0] == b'#' {
                 return Ok(());
             }
-            let line = Line { bytes, file: FILE };
+            let line = Line::new(bytes, FILE);
             let mut pos0 = 0usize;
             let mut pos1 = line.find(b'\t', pos0);
             let Some(dom) =
@@ -1559,8 +1678,21 @@ impl CddData {
     // ```
     // The generic file is read without the trims of the specific one (the line, the accession,
     // the index and the title keep their white space). A coordinates field at the line's end
-    // (`pos1` is `npos`) makes NCBI reserve `(npos - pos0) * 3` positions, which throws
-    // `std::length_error`: refused.
+    // (`pos1` is `npos`) makes NCBI reserve `(npos - pos0) * 3` positions, more than a
+    // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error`:
+    // libstdc++ (GCC 13): bits/vector.tcc:64-71
+    // ```c++
+    //   template<typename _Tp, typename _Alloc>
+    //     _GLIBCXX20_CONSTEXPR
+    //     void
+    //     vector<_Tp, _Alloc>::
+    //     reserve(size_type __n)
+    //     {
+    //       if (__n > this->max_size())
+    // 	__throw_length_error(__N("vector::reserve"));
+    // ```
+    // (NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // vector::reserve` and exited 2, PS16a review oracle A4-1 cases `annot10` and `gen10`.)
     fn load_sites(&mut self, path: &str, specific: bool) -> Result<(), DataError> {
         if !file_exists(path) {
             return Err(DataError::Missing(path.to_string()));
@@ -1575,7 +1707,7 @@ impl CddData {
             if bytes.is_empty() || bytes[0] == b'#' {
                 return Ok(());
             }
-            let line = Line { bytes, file };
+            let line = Line::new(bytes, file);
             let mut pos0;
             let mut pos1 = line.find(b'\t', 0);
             pos0 = pos1.wrapping_add(1);
@@ -1612,7 +1744,7 @@ impl CddData {
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
             if pos1 == NPOS {
-                return Err(line.unsupported("a reserve of (npos - pos0) * 3 positions"));
+                return Err(DataError::Std("vector::reserve".to_string()));
             }
             let mut pos_c = line.find(b',', pos0);
             while pos_c < pos1 {
@@ -1681,7 +1813,7 @@ impl CddData {
             if bytes.is_empty() || bytes[0] == b'#' {
                 return Ok(());
             }
-            let line = Line { bytes, file: FILE };
+            let line = Line::new(bytes, FILE);
             let mut pos0;
             let mut pos1 = line.find(b'\t', 0);
             pos0 = pos1.wrapping_add(1);
@@ -1698,12 +1830,21 @@ impl CddData {
             } else {
                 line.substr(pos0, pos1.wrapping_sub(pos0))?
             };
-            self.domains[dom].min_bit_score = string_to_double(text)
-                .map_err(DataError::Conversion)?
-                .ok_or_else(|| line.unsupported("a hexadecimal number"))?;
+            self.domains[dom].min_bit_score =
+                string_to_double(text).map_err(DataError::Conversion)?;
             Ok(())
         })
     }
+}
+
+/// The sign of NCBI's `int` difference `a - b` of two ids (`TSortByPssmId`, `TSortByClusterId`),
+/// computed without its overflow. PD-LOSAT-NCBI-DEFECTS exception 8 (version 1.12): two ids whose
+/// `int` values are 2^31 or more apart overflow NCBI's difference (undefined in C++); NCBI's
+/// binary sorts its maps by the signed values (GCC folds `a - b < 0` to `a < b`) but its search
+/// reads the wrapped difference, and can miss such an id (PS16a review oracle A2, run 2). LOSAT
+/// compares the signed values in both, the order NCBI's maps have.
+fn int_order(a: i32, b: i32) -> i32 {
+    (i64::from(a) - i64::from(b)).signum() as i32
 }
 
 /// `std::string::compare` as a sign: bytes compared as unsigned, a prefix first.

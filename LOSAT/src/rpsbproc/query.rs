@@ -12,9 +12,11 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 /// A failure while the queries of an archive are processed.
 #[derive(Debug)]
 pub(crate) enum ProcessError {
-    /// `CInvalidChoiceSelection` thrown by a getter of a CHOICE that holds another variant: the
-    /// exception's message (rpsbproc: two `Error:` lines, exit 3).
-    ChoiceSelection(String),
+    /// An exception of NCBI's serial objects thrown while a session is processed: its class and
+    /// code (`CInvalidChoiceSelection::eFail` from a getter of a CHOICE that holds another
+    /// variant, `CUnassignedMember::eGet` from a getter of an unset member) and its message
+    /// (rpsbproc: two `Error:` lines, exit 3).
+    Exception(&'static str, String),
     /// What LOSAT does not reproduce (an explicit refusal).
     Unsupported(String),
 }
@@ -56,25 +58,70 @@ pub(crate) fn choice_selection(
     required: &str,
     current: &str,
 ) -> ProcessError {
-    let identifier = |name: &str| {
-        let mut out = String::new();
-        let mut capitalize = true;
-        for c in name.chars() {
-            let c = if c == '-' { '_' } else { c };
-            if capitalize {
-                out.extend(c.to_uppercase());
-                capitalize = false;
-            } else {
-                out.push(c);
-            }
+    ProcessError::Exception(
+        "CInvalidChoiceSelection::eFail",
+        format!(
+            "C{}::Get{}(): Invalid choice selection: {module}::{type_name}.{current}",
+            identifier(type_name),
+            identifier(required)
+        ),
+    )
+}
+
+/// `SPrintIdentifier` of a type or member name without `.`: `-` read as `_`, the first letter
+/// upper-cased.
+fn identifier(name: &str) -> String {
+    let mut out = String::new();
+    let mut capitalize = true;
+    for c in name.chars() {
+        let c = if c == '-' { '_' } else { c };
+        if capitalize {
+            out.extend(c.to_uppercase());
+            capitalize = false;
+        } else {
+            out.push(c);
         }
-        out
-    };
-    ProcessError::ChoiceSelection(format!(
-        "C{}::Get{}(): Invalid choice selection: {module}::{type_name}.{current}",
-        identifier(type_name),
-        identifier(required)
-    ))
+    }
+    out
+}
+
+/// The `CUnassignedMember` exception of `C<type>::Get<member>()` on a SEQUENCE of
+/// `module::type` whose `member` is not set.
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:266-306
+// ```c++
+// void CSerialObject::ThrowUnassigned(TMemberIndex index,
+//                                     const char* file_name,
+//                                     int file_line) const
+// {
+//     if (x_GetVerifyData() == eSerialVerifyData_Yes) {
+//         ...
+//         CNcbiOstrstream s;
+//         if ( true ) {
+//             // make class name
+//             s << "C" << SPrintIdentifier(type->GetAccessName());
+//         }
+//         if ( !member_name.empty() ) {
+//             // make method name
+//             s << "::Get" << SPrintIdentifier(member_name) << "()";
+//         }
+//         s << ": Attempt to get unassigned member "
+//           << type->GetAccessModuleName() <<"::"<< type->GetAccessName() << '.';
+//         if ( !member_name.empty() ) {
+//             s << member_name;
+//         ...
+//         NCBI_THROW(CUnassignedMember,eGet,CNcbiOstrstreamToString(s));
+// ```
+// (`x_GetVerifyData` is `eSerialVerifyData_Yes` unless `SERIAL_VERIFY_DATA_GET` says otherwise,
+// which LOSAT's rpsbproc rejects: `reader_variable`.)
+pub(crate) fn unassigned_member(module: &str, type_name: &str, member: &str) -> ProcessError {
+    ProcessError::Exception(
+        "CUnassignedMember::eGet",
+        format!(
+            "C{}::Get{}(): Attempt to get unassigned member {module}::{type_name}.{member}",
+            identifier(type_name),
+            identifier(member)
+        ),
+    )
 }
 
 /// A protein query of the output (`TDomQuery`) with its hits.
@@ -291,20 +338,17 @@ fn query_accession(query: &Query) -> Vec<u8> {
 // 	if (rBioseq.IsSetAnnot() && rBioseq.CanGetAnnot())
 // 	{
 // ```
-// `Get1LetterSeqData` asks for `inst.length` whether it is set or not (`GetLength` of an unset
-// member throws), so a query without a length is refused; the residues serve the site output of
-// item PS16b. A query without a title descriptor but with `annot` takes its title from a
-// feature (refused), and the descriptors that `GetTaxId` and `ObtainUserDeflineFromBioseq` read
-// are refused when present (`Query::unread_descriptor`).
+// `Get1LetterSeqData` converts the residues, then asks for `inst.length` whether it is set or
+// not: `GetLength` of an unset member throws `CUnassignedMember`, which ends rpsbproc as NCBI's
+// does (exit 3, after the `SESSION` line). The residues serve the site output of item PS16b. A
+// query without a title descriptor but with `annot` takes its title from a feature (refused),
+// and a `CFastaReader` DefLine that is not a string is refused (`Query::unread_descriptor`).
+// `GetTaxId` (biodata_core.cpp:977) reads the `org` and `source` descriptors but never throws,
+// and the taxid is not printed, so those descriptors are only read past.
 fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32), ProcessError> {
-    let Some(length) = query.length else {
-        return Err(ProcessError::Unsupported(
-            "a query Bioseq without inst.length is not supported by LOSAT's rpsbproc".to_string(),
-        ));
-    };
     // `SeqDataTo1LtrSeq` (biodata_core.cpp:149-197) converts the protein encodings with
     // `CSeqportUtil::Convert`; LOSAT reads the one-letter ones and NCBIstdaa's 28 codes and
-    // refuses the others.
+    // refuses the others (before the length, as the conversion comes first).
     match &query.seq_data {
         None => {}
         Some(("ncbieaa" | "iupacaa", _)) => {}
@@ -315,13 +359,16 @@ fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32), ProcessError>
             )));
         }
     }
+    let Some(length) = query.length else {
+        return Err(unassigned_member("NCBI-Sequence", "Seq-inst", "length"));
+    };
     if let Some(what) = query.unread_descriptor {
         let local = query
             .ids
             .iter()
             .any(|id| matches!(id, ParsedSeqId::Local(_)));
         // `ObtainUserDeflineFromBioseq` runs for a query with a local id only.
-        if what.starts_with("an org") || what.starts_with("a source") || local {
+        if local {
             return Err(ProcessError::Unsupported(format!(
                 "a query Bioseq with {what} is not supported by LOSAT's rpsbproc"
             )));
@@ -425,9 +472,7 @@ fn process_cd_query(
         let Segs::Denseg(seg) = &align.segs else {
             unreachable!("the caller refuses other segments");
         };
-        if seg.ids.is_empty() {
-            continue;
-        }
+        // (`process_blast_results` refuses a Dense-seg without ids before this.)
         if seg.ids.len() < 2 || seg.starts.len() < 2 * seg.lens.len() {
             return Err(ProcessError::Unsupported(
                 "a Dense-seg with fewer than 2 ids or fewer starts than 2 per segment (NCBI reads past them) is not supported by LOSAT's rpsbproc".to_string(),
@@ -442,6 +487,12 @@ fn process_cd_query(
                 "a Seq-align whose {name} score has a value of another type is not supported by LOSAT's rpsbproc"
             )));
         }
+        // A NaN E-value is not ordered with the others: `TDomAlignOrderByEValue` is then no strict
+        // weak order, and NCBI's `std::sort` of the hits is undefined once it partitions (more
+        // than 16 hits; with 16 or fewer its insertion sort gives a defined order). The archives
+        // of rpsblast hold none (`NOT-A-NUMBER` is only a REAL's text form); LOSAT refuses every
+        // NaN E-value rather than keep two rules by the number of hits, and a NaN bit score,
+        // whose comparisons and printing it does not port.
         if align.e_value.is_some_and(f64::is_nan) || align.bit_score.is_some_and(f64::is_nan) {
             return Err(ProcessError::Unsupported(
                 "a Seq-align whose e_value or bit_score is not a number is not supported by LOSAT's rpsbproc".to_string(),
@@ -602,7 +653,7 @@ mod tests {
     #[test]
     fn choice_selection_messages() {
         let message = |error| match error {
-            ProcessError::ChoiceSelection(message) => message,
+            ProcessError::Exception(_, message) => message,
             ProcessError::Unsupported(message) => panic!("{message}"),
         };
         assert_eq!(
@@ -626,6 +677,22 @@ mod tests {
                 "int"
             )),
             "CSeq_loc::GetPacked_int(): Invalid choice selection: NCBI-Seqloc::Seq-loc.int"
+        );
+    }
+
+    // serialobject.cpp:266-306 (quoted at `unassigned_member`); NCBI's rpsbproc printed it for a
+    // query without `inst.length` (PS16a review oracle O3-9).
+    #[test]
+    fn unassigned_member_message() {
+        let ProcessError::Exception(class, message) =
+            unassigned_member("NCBI-Sequence", "Seq-inst", "length")
+        else {
+            panic!("an exception");
+        };
+        assert_eq!(class, "CUnassignedMember::eGet");
+        assert_eq!(
+            message,
+            "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length"
         );
     }
 

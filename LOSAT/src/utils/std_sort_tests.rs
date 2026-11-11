@@ -6,8 +6,11 @@
 //! comparison (`k1` ascending, then `k2` descending; `TDomAlignOrderByEValue`,
 //! RpsbProc/src/common/cdalignproc_base.hpp:62-70). The cases: random keys with many ties for
 //! every size from 0 to 200, random keys of a wide range, sorted, reversed and all-equal inputs,
-//! and McIlroy's adversarial inputs, which drive the introsort to its depth limit (the heap sort
-//! of `__partial_sort`), with distinct keys and with ties.
+//! McIlroy's adversarial inputs (`adversary*`), which drive the introsort to its depth limit (the
+//! heap sort of `__partial_sort`) with distinct keys, the same inputs with ties (`advties*`, which
+//! stay in the introsort), and `heapties200`, an adversarial input with 32 groups of ties that
+//! reaches the heap sort (made by the PS16a review, `heapties.py`, its permutation g++'s; a
+//! Python transcription of libstdc++, `pysort.py` there, finds these 5 rows reaching the heap).
 
 use super::std_sort;
 
@@ -60,12 +63,12 @@ fn std_sort_gives_libstdcxx_permutations() {
         let got: Vec<usize> = elements.iter().map(|element| element.index).collect();
         assert_eq!(got, expected, "{name}");
         cases += 1;
-        if name.starts_with("adv") {
+        if name.starts_with("adversary") || name.starts_with("heapties") {
             heap_cases += 1;
         }
     }
-    assert_eq!(cases, 271);
-    assert_eq!(heap_cases, 8);
+    assert_eq!(cases, 272);
+    assert_eq!(heap_cases, 5);
 }
 
 /// The adversarial inputs reach the heap sort: with the comparisons counted, a sort of an

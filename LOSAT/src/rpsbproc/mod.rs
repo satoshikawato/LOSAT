@@ -147,7 +147,7 @@ impl Report {
         if !self.quiet {
             self.flush();
             if self.failed.is_none() {
-                eprintln!("{text}");
+                log_post(text);
             }
         }
     }
@@ -161,7 +161,32 @@ impl Report {
 
 /// `LOG_POST_X`: rpsbproc's messages are its text alone on standard error.
 fn log_post(text: &str) {
-    eprintln!("{text}");
+    write_stderr(&format!("{text}\n"));
+}
+
+/// Writes `text` to standard error. A failed write (a reader that has closed its pipe) ends
+/// LOSAT at once with exit status 4 and no message, where NCBI's rpsbproc dies of SIGPIPE
+/// (exit status 141 from the shell; PS16a review oracle M1): PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+/// exception 9. The report is flushed before every line that rpsbproc writes to standard error
+/// (`Report::progress`, `Report::stopped`), so it holds no bytes then.
+pub(crate) fn write_stderr(text: &str) {
+    let mut stderr = std::io::stderr().lock();
+    if stderr.write_all(text.as_bytes()).is_err() {
+        std::process::exit(E_OUTPUT_FILE_OPEN_ERROR);
+    }
+}
+
+/// Writes `text` (help or version) to standard output; a failed write ends LOSAT as a failed
+/// write of the report does (exception 9).
+pub(crate) fn write_stdout(text: &str) {
+    let mut stdout = std::io::stdout().lock();
+    if let Err(error) = stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        write_stderr(&format!("rpsbproc failed to write output: {error}\n"));
+        std::process::exit(E_OUTPUT_FILE_OPEN_ERROR);
+    }
 }
 
 /// The two lines of an exception that leaves rpsbproc's `Run` (`CNcbiApplication::x_TryMain`):
@@ -195,8 +220,9 @@ fn report_exception(exception: &str, message: &str, initialization: bool) -> i32
     } else {
         ("106.16", "execution", 3)
     };
-    eprintln!("Error: ({exception}) {message}");
-    eprintln!("Error: ({code}) Application's {what} failed ({exception}) {message}");
+    write_stderr(&format!(
+        "Error: ({exception}) {message}\nError: ({code}) Application's {what} failed ({exception}) {message}\n"
+    ));
     status
 }
 
@@ -524,7 +550,7 @@ fn find_data_path(data_path: Option<&OsStr>) -> Option<OsString> {
 // ```
 // (`m_silent` is still false here: `-q` is read at main:677.)
 fn banner() {
-    eprint!(
+    write_stderr(&format!(
         "Post-RPSBLAST Processing Utility v{VERSION}\n\
          -------------------------------------------------------\n\
          Download:\n\
@@ -534,7 +560,7 @@ fn banner() {
          \tftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/\n\
          \n\
          For more information please refer to the README file\n"
-    );
+    ));
 }
 
 /// The header of the report.
@@ -601,6 +627,89 @@ fn header_tail(evalue: f64, mode: DataMode, show_families: bool) -> String {
     )
 }
 
+/// The first variable of `variables` that changes how NCBI's object stream reads an archive or
+/// what its objects give, with a value that changes it; `None` when there is none.
+// NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:57-68
+// ```c++
+// NCBI_PARAM_DECL(bool, OBJECTS, SEQ_DESCR_ALLOW_EMPTY);
+// NCBI_PARAM_DEF_EX(bool, OBJECTS, SEQ_DESCR_ALLOW_EMPTY, false,
+//                   eParam_NoThread, OBJECTS_SEQ_DESCR_ALLOW_EMPTY);
+// static CSafeStatic<NCBI_PARAM_TYPE(OBJECTS, SEQ_DESCR_ALLOW_EMPTY)> s_SeqDescrAllowEmpty;
+//
+// void CSeq_descr::PostRead(void) const
+// {
+//     if ( !s_SeqDescrAllowEmpty->Get() && Get().empty() ) {
+//         NCBI_THROW(CSerialException, eInvalidData,
+//                    "empty Seq-descr is not allowed");
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
+// ```c++
+// ESerialVerifyData CObjectIStream::x_GetVerifyDataDefault(void)
+// {
+//     ESerialVerifyData now = TSerialVerifyData::GetThreadDefault();
+//     if (now == eSerialVerifyData_Default) {
+//         now = TSerialVerifyData::GetDefault();
+//         if (now == eSerialVerifyData_Default) {
+// // this is to provide compatibility with old implementation
+//             const char* str = getenv(SERIAL_VERIFY_DATA_READ);
+//             if (str) {
+//                 if (NStr::CompareNocase(str,"YES") == 0) {
+//                     now = eSerialVerifyData_Yes;
+//                 } else if (NStr::CompareNocase(str,"NO") == 0) {
+//                     now = eSerialVerifyData_No;
+//                 } else if (NStr::CompareNocase(str,"NEVER") == 0) {
+//                     now = eSerialVerifyData_Never;
+//                 } else  if (NStr::CompareNocase(str,"ALWAYS") == 0) {
+//                     now = eSerialVerifyData_Always;
+//                 } else  if (NStr::CompareNocase(str,"DEFVALUE") == 0) {
+//                     now = eSerialVerifyData_DefValue;
+//                 } else  if (NStr::CompareNocase(str,"DEFVALUE_ALWAYS") == 0) {
+//                     now = eSerialVerifyData_DefValueAlways;
+//                 }
+//             }
+//         }
+//     }
+//     if (now != eSerialVerifyData_Default) {
+//         return now;
+//     }
+//     // change the default here, if you like
+//     return eSerialVerifyData_Yes;
+// }
+// ```
+// (`CSerialObject::x_GetVerifyData`, serialobject.cpp:180-221, reads `SERIAL_VERIFY_DATA_GET`
+// the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off: a missing
+// member is no longer a read error, and the getter of an unset member gives its default instead
+// of throwing `CUnassignedMember`. `YES`, `ALWAYS` and other values keep NCBI's default.)
+// `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` lets an empty `Seq-descr` read; LOSAT rejects it with any value.
+// The other parameters of the readers are registry entries (`NCBI_CONFIG__SERIAL__...`, which
+// `check_ncbi_application_settings` rejects) or change no result (`SERIAL_READ_MMAPBYTESOURCE`,
+// `SERIAL_DISABLE_DELAY_BUFFERS` and the binary ASN.1 ones); the gi parameters of the Seq-ids
+// are refused in `run_sessions`, where a query has a gi.
+fn reader_variable(variables: impl Iterator<Item = (OsString, OsString)>) -> Option<String> {
+    for (name, value) in variables {
+        let (Some(name), value) = (name.to_str(), value.to_string_lossy()) else {
+            continue;
+        };
+        let changes = match name {
+            "OBJECTS_SEQ_DESCR_ALLOW_EMPTY" => true,
+            "SERIAL_VERIFY_DATA_READ" | "SERIAL_VERIFY_DATA_GET" => {
+                ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
+                    .iter()
+                    .any(|off| value.eq_ignore_ascii_case(off))
+            }
+            _ => false,
+        };
+        if changes {
+            return Some(format!(
+                "the environment variable {name}={value}, which changes how NCBI's object stream reads an archive, is not supported by LOSAT's rpsbproc"
+            ));
+        }
+    }
+    None
+}
+
 /// Runs `losat rpsbproc` with `args` (NCBI's `Init` and `Run`).
 pub fn run(args: RpsbprocArgs) -> Outcome {
     // Refused before anything is read or written: the sites and motifs (item PS16b).
@@ -610,12 +719,32 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
             args.target_data
         ));
     }
+    // File names that are not UTF-8 are refused as the other programs refuse them (NCBI writes
+    // their bytes in its messages and the report's header).
+    for (role, name) in [
+        ("i", &args.infile),
+        ("o", &args.outfile),
+        ("d", &args.data_path),
+    ] {
+        if let Some(name) = name {
+            if let Err(error) = crate::blastinput::input_files::check_utf8_file_name(
+                std::path::Path::new(name),
+                role,
+                "rpsbproc",
+            ) {
+                return Outcome::Refused(error.to_string());
+            }
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044 (quoted at the BLAST
     // programs in `cli::main_entry`): the application layer reads its environment and its
     // registry files (`rpsbproc.ini`, `.ncbirc`) before `Init`.
-    if let Err(reason) =
-        crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpsbproc")
-    {
+    let settings =
+        match crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpsbproc") {
+            Ok(settings) => settings,
+            Err(reason) => return Outcome::Refused(reason),
+        };
+    if let Some(reason) = reader_variable(std::env::vars_os()) {
         return Outcome::Refused(reason);
     }
     banner();
@@ -766,10 +895,15 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
     let Some(first) = first else {
         return Outcome::Exit(E_INPUT_DATA_ERROR);
     };
+    // XML is refused only when NCBI's run would read it: after a failed `-i` or `-o` NCBI posts
+    // its warning, loads the data and ends with the status (PS16a review oracle M4).
     if first == b'<' {
-        return Outcome::Refused(
-            "the XML input of rpsblast -outfmt 5 (which NCBI's rpsbproc reads as deprecated) is not supported by LOSAT's rpsbproc, which reads the ASN.1 text archives of -outfmt 11".to_string(),
-        );
+        if status == E_OK {
+            return Outcome::Refused(
+                "the XML input of rpsblast -outfmt 5 (which NCBI's rpsbproc reads as deprecated) is not supported by LOSAT's rpsbproc, which reads the ASN.1 text archives of -outfmt 11".to_string(),
+            );
+        }
+        log_post("Warning: XML format support is deprecated!");
     }
     header.push(b'\n');
     header.extend_from_slice(b"#Annotation data at:");
@@ -835,6 +969,23 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
                         true,
                     ));
                 }
+                // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:675-679
+                // ```c++
+                //             catch (const exception& e) {
+                //                 ERR_POST_X(6, "Application's initialization failed: " << e.what());
+                //                 *got_exception = true;
+                //                 *exit_code = 2;
+                //             }
+                // ```
+                // (A `std::exception` of the loader is no `CSimpleException`, so it leaves
+                // `Init`; NCBI's rpsbproc printed `Error: (106.6) ...` with the `what()` of
+                // libstdc++, PS16a review oracle A4-1 cases `annot10`, `gen10` and `ct3`.)
+                Err(DataError::Std(what)) => {
+                    write_stderr(&format!(
+                        "Error: (106.6) Application's initialization failed: {what}\n"
+                    ));
+                    return Outcome::Exit(2);
+                }
                 Err(DataError::Unsupported(message)) => return Outcome::Refused(message),
             }
         }
@@ -860,13 +1011,14 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
         &data,
         args.mode(),
         args.show_families,
+        settings.seq_id_rank_variable,
     );
     // PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9 (version 1.10): the first failed write of
     // the report stops LOSAT with this message and exit 4, rpsbproc's code of the output file
     // (`e_OutputFileOpenError`); NCBI prints nothing for it.
     report.flush();
     if let Some(error) = report.failed {
-        eprintln!("rpsbproc failed to write output: {error}");
+        write_stderr(&format!("rpsbproc failed to write output: {error}\n"));
         return Outcome::Exit(E_OUTPUT_FILE_OPEN_ERROR);
     }
     outcome
@@ -1013,6 +1165,7 @@ fn run_sessions<R: Read>(
     data: &CddData,
     mode: DataMode,
     show_families: bool,
+    seq_id_rank_variable: Option<&'static str>,
 ) -> Outcome {
     report.write(header);
     report.line(&[b"DATA"]);
@@ -1043,6 +1196,18 @@ fn run_sessions<R: Read>(
                             .to_string(),
                     );
                 }
+                // `SEQ_ID_PREFER_ACCESSION_OVER_GI` and `SEQ_ID_AVOID_GI` change the rank of a gi
+                // (`ApplicationSettings::seq_id_rank_variable`, Seq_id.cpp:3064-3174), so the
+                // label of a query with a gi among its ids (`query_accession`).
+                if let Some(name) = seq_id_rank_variable {
+                    if entries.iter().any(|entry| {
+                        matches!(entry, SeqEntry::Seq(query) if query.ids.iter().any(|id| matches!(id, crate::seqid::model::ParsedSeqId::Gi(_))))
+                    }) {
+                        return Outcome::Refused(format!(
+                            "the environment variable {name}, which changes the Seq-id that NCBI's rpsbproc prints for a query with a gi, is not supported by LOSAT's rpsbproc"
+                        ));
+                    }
+                }
             }
         }
         report.progress(&format!("RPSBlast session {session} start..."));
@@ -1060,16 +1225,14 @@ fn run_sessions<R: Read>(
             report.write(b"\t");
             report.write(ident);
         }
-        let choice_failure = |report: &mut Report, error: ProcessError| -> Outcome {
+        let process_failure = |report: &mut Report, error: ProcessError| -> Outcome {
             if report.stopped() {
                 return Outcome::Exit(E_OK);
             }
             match error {
-                ProcessError::ChoiceSelection(message) => Outcome::Exit(report_exception(
-                    "CInvalidChoiceSelection::eFail",
-                    &message,
-                    false,
-                )),
+                ProcessError::Exception(class, message) => {
+                    Outcome::Exit(report_exception(class, &message, false))
+                }
                 ProcessError::Unsupported(message) => Outcome::Refused(message),
             }
         };
@@ -1079,7 +1242,7 @@ fn run_sessions<R: Read>(
                 report.write(database);
             }
             Subject::Other(name) => {
-                return choice_failure(
+                return process_failure(
                     report,
                     choice_selection("NCBI-Blast4", "Blast4-subject", "database", name),
                 );
@@ -1093,7 +1256,7 @@ fn run_sessions<R: Read>(
                     report.write(name);
                 }
                 Some(other) => {
-                    return choice_failure(
+                    return process_failure(
                         report,
                         choice_selection(
                             "NCBI-Blast4",
@@ -1111,13 +1274,13 @@ fn run_sessions<R: Read>(
                     report.write(format_g(*evalue).as_bytes());
                 }
                 Some(ParamValue::Cutoff(archive::Cutoff::RawScore)) => {
-                    return choice_failure(
+                    return process_failure(
                         report,
                         choice_selection("NCBI-Blast4", "Blast4-cutoff", "e-value", "raw-score"),
                     );
                 }
                 Some(other) => {
-                    return choice_failure(
+                    return process_failure(
                         report,
                         choice_selection(
                             "NCBI-Blast4",
@@ -1139,7 +1302,7 @@ fn run_sessions<R: Read>(
         };
         if let Some(masks) = &archive.results.masks {
             if let Err(error) = check_masks(masks) {
-                return choice_failure(report, error);
+                return process_failure(report, error);
             }
         }
         match &archive.results.alignments {
@@ -1155,7 +1318,7 @@ fn run_sessions<R: Read>(
                 report.progress("Calculating....");
                 let queries = match process_blast_results(entries, aligns, data) {
                     Ok(queries) => queries,
-                    Err(error) => return choice_failure(report, error),
+                    Err(error) => return process_failure(report, error),
                 };
                 for query in &queries {
                     print_dom_query(report, query, &session_text, data, mode, show_families);
@@ -1394,7 +1557,8 @@ fn print_incomplete(report: &mut Report, n_missing: f64, c_missing: f64) {
 //
 // }
 // ```
-// (`m_iFrom + COORDSBASE` is `int` arithmetic, which LOSAT wraps.)
+// (`m_iFrom + COORDSBASE` is `int` arithmetic, which overflows at `INT_MAX` (undefined in C++);
+// LOSAT adds in `i64`, as `segset::Seg` keeps its sums.)
 fn print_dom_line(
     report: &mut Report,
     kind: &[u8],
@@ -1411,8 +1575,8 @@ fn print_dom_line(
     };
     let numbers = format!(
         "\t{pssm_id}\t{}\t{}\t{}\t{}\t",
-        align.from.wrapping_add(1),
-        align.to.wrapping_add(1),
+        i64::from(align.from) + 1,
+        i64::from(align.to) + 1,
         format_g(align.e_value),
         format_g(align.bit_score)
     );
@@ -1454,8 +1618,8 @@ fn print_cluster_line(report: &mut Report, record: &Record, query: &DomQuery, da
     let cluster = &data.clusters[record.cluster.expect("a superfamily line has its cluster")];
     let numbers = format!(
         "Superfamily\t0\t{}\t{}\t{}\t{}\t",
-        align.from.wrapping_add(1),
-        align.to.wrapping_add(1),
+        i64::from(align.from) + 1,
+        i64::from(align.to) + 1,
         format_g(align.e_value),
         format_g(align.bit_score)
     );

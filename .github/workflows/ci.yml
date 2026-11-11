@@ -55,6 +55,12 @@ jobs:
         run: python3 LOSAT/tests/check_program_edges.py --root .
       - name: Program-edge ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_program_edges.py'
+      # No NCBI counterpart: LOSAT/tests/db_search_manifest/ keeps one fixture list per program; a file over
+      # 512 KiB is split by row family before it reaches the 1 MB limit on committed files.
+      - name: Manifest size check
+        run: python3 LOSAT/tests/check_manifest_sizes.py --root .
+      - name: Manifest size check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_manifest_sizes.py'
       # No NCBI counterpart: CI wiring. Every test_*.py and test_*.js file is named in a `run:`
       # command of a workflow that runs on push, pull request or schedule, or one it calls (SWEBOK
       # 2026-11-04 audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a

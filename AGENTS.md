@@ -66,7 +66,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      Rust runtime opens before `main`, so LOSAT discards the report and exits
      as the search ends; a `-query` or `-subject` whose name ends in `.gz`,
      `.bz2` or `.zst` is inflated before it is read (NCBI reads the file as
-     text and stops at its first line; exception 8). Errors raised after argument parsing, the outfmt 0 write
+     text and stops at its first line; exception 8); a failed write of `losat rpsbproc`'s
+     report, where NCBI's rpsbproc drops the writes and exits 0 (a closed pipe: SIGPIPE),
+     stops LOSAT with a message and exit 4 (exception 9). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
      file names, `.ncbirc` keys that change output, and NCBI C++ Toolkit

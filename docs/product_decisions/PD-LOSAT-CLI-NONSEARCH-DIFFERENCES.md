@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.9
+- Version: 1.10
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -13,7 +13,10 @@
   `.zst`, the Owner's ask of 2026-11-04); 1.8 2026-11-04 (exception 8: the inflated copy is
   made beside the input, the Owner's ask of 2026-11-04; the fallback to `TMPDIR` is
   Owner-delegated); 1.9 2026-11-08 (exception 8: a `.gz` file is read as makeblastdb's
-  decompressor reads it, its trailer and header CRC not checked; line GZ)
+  decompressor reads it, its trailer and header CRC not checked; line GZ); 1.10 2026-11-11
+  (`losat rpsbproc` in the scope, exception 9, a failed write of rpsbproc's report; line PS,
+  item PS16a, DECISIONS 27 of its task record; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -23,7 +26,8 @@
 ## Scope
 
 The command-line behaviour of every LOSAT program (BLASTN, BLASTP, TBLASTN, TBLASTX,
-BLASTX) that is not part of a search result: argument parsing, help text, thread
+BLASTX, and since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report takes the
+place of a search result) that is not part of a search result: argument parsing, help text, thread
 warnings, output-write failures and memory exhaustion. Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
 those errors remain under the root [`AGENTS.md`](../../AGENTS.md) bit-perfect rule.
@@ -136,6 +140,23 @@ BLAST+.
    `LOSAT/tests/cli_smoke.rs` (`compressed_query_and_subject_read_as_the_plain_files` and the
    tests after it), `LOSAT/src/blastinput/compressed.rs` and
    `LOSAT/src/blastinput/input_files.rs`.
+
+9. **Write failure in rpsbproc's report** (version 1.10, 2026-11-11, Owner-delegated; line PS,
+   item PS16a). NCBI's rpsbproc 0.5.1 writes its report to `cout` or the `-o` file through
+   iostreams (`RpsbProc/src/rpsbproc_main.cpp:727-917`) and never checks the stream: when a
+   write fails (a full disk, `-o /dev/full`), the stream sets its bad bit, the later writes
+   are dropped, the progress lines go on, and the run exits with 0; a write to a pipe whose
+   reader has closed ends it by SIGPIPE (exit status 141 from the shell, no message;
+   exception 5). LOSAT stops at the first failed write of the report (a closed pipe is such a
+   write) with `rpsbproc failed to write output: <error>` on standard error and exit code 4,
+   rpsbproc's own code for its output file (`e_OutputFileOpenError`, main:91-101), as the
+   search programs use their output-error code 6 for a failed write (exception 3). As in
+   exception 5 (version 1.2), a closed pipe that LOSAT's completed writes never reach ends
+   with exit code 0. Nothing is written to standard error after the failure (no progress
+   line). A successful run is identical to NCBI's. The function is `rpsbproc::run`
+   (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
+   write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
+   NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
 
 ## Decided handling that is not an exception
 

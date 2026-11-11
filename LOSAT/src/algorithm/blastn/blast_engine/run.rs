@@ -8446,7 +8446,7 @@ fn megablast_index(
         if let Some(file) = database.megablast_index_file(index_name) {
             return Ok(MegablastIndex::Found(file));
         }
-        let root = crate::utils::winmask::NCBI_BUILD_ROOT;
+        let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
         format!(
         "Warning: (1.1) [blastn] NCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 795: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New() - no database volume has an index\n\nNCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 1026: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old() - no index file specified or index '{index_name}*' not found.\n Database index will not be used.\n"
         )

@@ -668,15 +668,20 @@ the PSSM, also for the sequences of its longer list beyond `-max_target_seqs`: t
 alignment below `-inclusion_ethresh`, the only ones the PSSM reads (in a round whose prefetch
 `PRE_FETCH_SEQS_LIMIT` turns off, one by one). Each alignment reads its range of the sequence that
 NCBI's scope gets by that id: the sequence itself, or the other sequence that the lookup gives first
-where one of its ids compares equal to the Seq-align id (one accession under `gb`, `emb` or `dbj`);
-where it gets none (a `ref` or local id of the same text, an id found nowhere) or the range ends
-beyond that sequence's letters, LOSAT writes NCBI's `Warning: [psiblast] Failed to retrieve sequence`
-with the Seq-align id for the alignment, after the round's report (with one round, after the query's
+where one of its ids compares equal to the Seq-align id (one accession under `gb`, `emb`, `dbj`, `tpg`
+or `tpe`, another version) and the definition line that NCBI's reader keeps for that id holds it;
+where it gets none (a `ref` or local id of the same text, an id found nowhere, a lookup that throws on
+the id, a giim id, a sequence whose definition line the formatters do not find where the lookup gives
+itself, another sequence whose kept definition line does not hold the id) or the range ends beyond
+that sequence's letters, LOSAT writes NCBI's `Warning: [psiblast] Failed to retrieve sequence` with
+the Seq-align id for the alignment, after the round's report (with one round, after the query's
 report and before the next query's warnings), and the alignment's row of the multiple alignment
-becomes the query's letters, which the purge removes. A lookup that NCBI's scope can answer with
-either of two sequences (one that another reported sequence also holds), a lookup that fails, and
-in a round whose prefetch is off an id that another sequence's id matches weakly are refused as the
-lists that read the sequence refuse them.
+becomes the query's letters, which the purge removes. Refused: an id that another sequence also
+holds besides the one the lookup gives (NCBI's scope can read that one where it has read it before,
+and with the prefetch on as its memory layout falls), a lookup that fails on a file, the same record
+whose read writes taxonomy texts, in a batch whose prefetch is off an id that another sequence's id
+matches weakly, and in such a batch a read whose sequence's taxids the taxonomy database writes a
+text for (NCBI looks them up at that read).
 Its multiple alignment has a row for each handle of these Seq-align ids, and a Seq-align whose id
 `Match`es the previous Seq-align's id goes into the previous row, as NCBI's `CPsiBlastInputData`
 makes them: copies of one record that follow each other share a row, and so do two other sequences

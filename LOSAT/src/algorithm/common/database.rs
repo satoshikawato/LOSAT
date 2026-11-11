@@ -1089,8 +1089,12 @@ impl<'a> HeaderReader<'a> {
     /// weakly (`weakly_held`, `ParsedSubject::weak_match`), which the reports refuse where a
     /// batch that reports the subject has its prefetch off (`ParsedShown::one_by_one`), after
     /// what the lookup finds. A lookup that fails is kept for the formats that read the Bioseq;
-    /// the others never look the id up. A subject whose Bioseq NCBI's formatters do not find
-    /// whatever the lookup gives (`unfetchable`) is not looked up.
+    /// the others never look the id up. Where the lookup gives another sequence first or none
+    /// (`FoundInstead::Sequence`, `Nothing`), the scan for other holders and the weak match go on
+    /// (the third value: another sequence that holds a scope key of the Seq-align id, which
+    /// psiblast's PSSM read refuses, `ParsedSubject::pssm_read`). A subject whose Bioseq NCBI's
+    /// formatters do not find (`unfetchable`) is looked up too, for that read (its reports refuse
+    /// it whatever the lookup gives); a giim id never (NCBI's handles never take it again).
     fn found_instead(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
@@ -1098,16 +1102,18 @@ impl<'a> HeaderReader<'a> {
     ) -> (
         Option<crate::report::db_subject::FoundInstead>,
         Option<crate::report::db_subject::WeakMatch>,
+        Option<u32>,
     ) {
         use crate::report::db_subject::FoundInstead;
-        if subject.unfetchable() {
-            return (None, None);
+        if matches!(subject.alignment_id(), crate::seqid::ParsedSeqId::Giim(_)) {
+            return (None, None, None);
         }
         let failed = |error: SeqDbError| {
             (
                 Some(FoundInstead::Failed(
                     error.ncbi_message().unwrap_or_else(|| error.to_string()),
                 )),
+                None,
                 None,
             )
         };
@@ -1126,15 +1132,15 @@ impl<'a> HeaderReader<'a> {
             Ok(oids) => oids,
             Err(error) => {
                 return match lookup.throws_on_id(id) {
-                    Some(message) => (Some(FoundInstead::ThrowsOnId(message)), None),
+                    Some(message) => (Some(FoundInstead::ThrowsOnId(message)), None, None),
                     None => failed(error),
                 }
             }
         };
         let own = self.db.oid(ordinal);
-        let Some(&first) = oids.first() else {
-            return (Some(FoundInstead::Nothing), None);
-        };
+        let first = oids.first().copied();
+        // What the lookup gives instead, where the scan of the other holders goes on.
+        let mut given = first.is_none().then_some(FoundInstead::Nothing);
         // The first other sequence found that only the reports of taxids show apart, and the
         // first that those of a generated title also show apart, which those of taxids show
         // apart too (`ParsedSubject::fetched`).
@@ -1155,13 +1161,13 @@ impl<'a> HeaderReader<'a> {
                 RecordCopy::Apart(_) | RecordCopy::Differs => Some(copy),
             }
         };
-        if first != own {
+        if let Some(first) = first.filter(|&first| first != own) {
             let other = self.db.ordinal_of(first);
             match copy(other) {
                 Some(RecordCopy::Apart(cause)) => {
-                    return (Some(FoundInstead::CopyApart(other, cause)), None);
+                    return (Some(FoundInstead::CopyApart(other, cause)), None, None);
                 }
-                Some(_) => return (Some(FoundInstead::Sequence(other)), None),
+                Some(_) => given = Some(FoundInstead::Sequence(other)),
                 None => {}
             }
         }
@@ -1171,21 +1177,27 @@ impl<'a> HeaderReader<'a> {
         };
         let mut keys = Vec::new();
         crate::report::db_subject::scope_keys(subject, &mut keys);
-        // The first was compared above.
+        // The first was compared above. Besides a sequence given instead, any other holder
+        // (also a copy of the subject's record) is one the scope can read for it.
+        let mut also_held = None;
         for other in oids
             .iter()
             .chain(&folded)
-            .filter(|&&oid| oid != own && oid != first)
+            .filter(|&&oid| oid != own && Some(oid) != first)
             .map(|&oid| self.db.ordinal_of(oid))
         {
             if !self.holds_key(other, &keys, crate::seqid::defline_set::scope_keys) {
                 continue;
             }
+            if given.is_some() {
+                also_held = Some(other);
+                break;
+            }
             match copy(other) {
                 Some(RecordCopy::Apart(cause)) => {
-                    return (Some(FoundInstead::CopyApart(other, cause)), None);
+                    return (Some(FoundInstead::CopyApart(other, cause)), None, None);
                 }
-                Some(_) => return (Some(FoundInstead::AlsoHeld(other)), None),
+                Some(_) => return (Some(FoundInstead::AlsoHeld(other)), None, None),
                 None => {}
             }
         }
@@ -1201,12 +1213,14 @@ impl<'a> HeaderReader<'a> {
         } else {
             None
         };
-        let found = title_apart
-            .map(|other| {
-                FoundInstead::CopyApart(other, crate::report::db_subject::CopyApart::Title)
-            })
-            .or(other_taxids.map(FoundInstead::OtherTaxids));
-        (found, weak)
+        let found = given.or_else(|| {
+            title_apart
+                .map(|other| {
+                    FoundInstead::CopyApart(other, crate::report::db_subject::CopyApart::Title)
+                })
+                .or(other_taxids.map(FoundInstead::OtherTaxids))
+        });
+        (found, weak, also_held)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:128-135
@@ -1456,14 +1470,15 @@ fn reported_header(
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
                 .and_then(|subject| {
                     refuse_id_of_a_query(db, &subject, ordinal, program)?;
-                    let (found, weak) = headers.found_instead(&subject, ordinal);
+                    let (found, weak, also_held) = headers.found_instead(&subject, ordinal);
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
                             .with_taxonomy_title(|taxids| headers.source_named(taxids))
                             .showing_gis(db.reports_show_gis())
                             .under_positive_list(db.has_positive_list())
                             .found_instead(found)
-                            .weak_match(weak),
+                            .weak_match(weak)
+                            .also_held(also_held),
                     )))
                 })
         }
@@ -3538,14 +3553,7 @@ pub(crate) fn prefetch_reads_itself(
     if !texts {
         return Ok(Ok(false));
     }
-    let mut other_taxids: Vec<i32> = Vec::new();
-    for defline in &set.deflines {
-        if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
-            if !other_taxids.contains(&taxid) {
-                other_taxids.push(taxid);
-            }
-        }
-    }
+    let other_taxids = defline_set_taxids(&set);
     let own = subject.volume_taxids();
     let (choices, keep): (Vec<&[i32]>, bool) = if or_itself {
         (vec![&own, &other_taxids], true)
@@ -3635,6 +3643,20 @@ fn prefetch_gets_no_bioseq(
     })
 }
 
+/// The positive taxids of the definition lines `set`, each once, in their order (what NCBI looks
+/// up where it loads that sequence's blob).
+pub(crate) fn defline_set_taxids(set: &crate::seqid::DeflineSet) -> Vec<i32> {
+    let mut taxids: Vec<i32> = Vec::new();
+    for defline in &set.deflines {
+        if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+            if !taxids.contains(&taxid) {
+                taxids.push(taxid);
+            }
+        }
+    }
+    taxids
+}
+
 /// The sequence, by ordinal id, that NCBI's scope gets by the Seq-align id of `subject` where
 /// the lookup gives the sequence `other` first (`FoundInstead::Sequence`): that one where the
 /// data loader keeps it ([`loader_keeps`]), else none (a null handle: the prefetch reads nothing
@@ -3650,6 +3672,45 @@ pub(crate) fn loader_gives(
         .defline_set(other)
         .map_err(|error| database_error(error, program))?;
     Ok(loader_keeps(&set, subject).then_some(other))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1344-1354
+// ```c++
+//         if (seqid_target) {
+//             ...
+//                 if (s_SeqDB_SeqIdIn(seqids, *seqid_target)) {
+//                     filt->Set().push_back(*it);
+//                     break;
+//                 }
+// ```
+/// The sequence, by ordinal id, whose letters psiblast's PSSM reads by the Seq-align id of
+/// `subject` where the lookup gives the sequence `other` first (`ParsedSubject::pssm_read`'s
+/// `Another`): that one where the data loader keeps it ([`loader_gives`]) and the Bioseq that
+/// `GetBioseqNoData` builds for that id holds it (its definition-line filter keeps the line
+/// that `DeflineSet::bioseq_defline` names, and the scope finds the Bioseq by that line,
+/// `ParsedSubject::new`'s `unfetchable` test); else none: the filter keeps no line and throws
+/// (`oid headers do not contain target gi/seq_id`), or the Bioseq does not hold the id, and
+/// `x_GetSubjectSequence` warns (review 1 of line DBID pssmread, H3).
+pub(crate) fn pssm_bioseq(
+    db: &SeqDb,
+    subject: &crate::report::db_subject::ParsedSubject,
+    other: u32,
+    program: &str,
+) -> Result<Option<u32>> {
+    if loader_gives(db, subject, other, program)?.is_none() {
+        return Ok(None);
+    }
+    let set = db
+        .defline_set(other)
+        .map_err(|error| database_error(error, program))?;
+    let id = subject.alignment_id();
+    let Some(target) = set.bioseq_defline(id) else {
+        return Ok(None);
+    };
+    Ok((!set
+        .display_defline(id)
+        .is_some_and(|shown| shown.index != target))
+    .then_some(other))
 }
 
 /// Whether NCBI's data loader keeps the sequence of the definition lines `set` that the lookup of

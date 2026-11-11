@@ -662,6 +662,18 @@ compare equal to A's: the loader keeps none and NCBI warns; `db.id.prd.ar.r3`) a
 two warnings; `db.id.prd.t2.s1`). The `.err` files are frozen (the warning counts are 0 for `av` and `ad`, 1 for `s1`,
 `as1v4.s1`, `ip2` and `ar.r3`, 2 for `r3q2` and `t2.s1`, 3 for `s1q3` and `r2q3`, 4 for `s2q2`).
 
+Review 1 of pssmread (rows `db.id.prd.*` over `ids/prd_unf.pal`, `prd_zunf.pal`, `prd_otag`, `prd_otag_4`, `prd_wk5`, `prd_ah4`
+and `prd_txself`, query `ids/prd_q.faa`, all psiblast against the same single query): `unf.s1`, `unf.r3` read an unfetchable
+subject (`lcl|777` before `gi|777`) whose lookup gives Y (`prd_u0y`, listed first) first, so NCBI reads Y's letters and does
+not warn; `zunf.s1`, `zunf.r3` do the same where Y's kept definition line is `lcl|777` and does not hold the id, so NCBI warns
+`Failed to retrieve sequence gi|777`; `otag.s1`, `otag.pf0.s1` (`PRE_FETCH_SEQS_LIMIT=0`) and `otag4.s1` (version 4) store
+`gnl|BL_ORD_ID|0` with a text tag, whose lookup throws: NCBI writes `Error pre-fetching sequence data` (prefetch on) and
+`Failed to retrieve sequence gnl|BL_ORD_ID|0` and exits 0. Three `losat-rejection` rows (rc 1, with the `pssm` files kind: no
+PSSM file is written): `txself.pf0.reject` (A itself with taxid 99990 by `prd_txself.map`, `BLASTDB=tests/seqdb/taxdb/bad_magic`
+and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy database's text, which LOSAT does not model),
+`wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has read before: NCBI reads C's letters) and
+`ah4.reject` (another sequence that also holds A's id: NCBI's result depends on its reads and memory layout).
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`

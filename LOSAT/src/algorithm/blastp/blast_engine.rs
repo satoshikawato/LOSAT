@@ -6558,7 +6558,10 @@ fn search(
                     .map_or(input_done, |&(input, _)| input.min(input_done));
                 search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
                 // The warnings of the PSSMs' reads up to the failing query's, after the reports
-                // of the queries up to it (NCBI writes each after its query's report).
+                // of the queries up to it. NCBI writes each after its query's report, so a query
+                // warning of a later query of the rerun (O read as X) would come after them there;
+                // no PssmStop found so far reaches that order (each is LOSAT's own refusal or an
+                // error at a query without such a later warning; review 1 of line DBID pssmread, L1).
                 let mut files = stop.files;
                 for (_, warnings) in files.take_read_warnings() {
                     outputs.diagnostics.write_all(&warnings)?;

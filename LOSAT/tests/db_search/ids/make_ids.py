@@ -123,6 +123,15 @@ letter shorter than A's HSP: NCBI warns and the row is the query's) and its vers
 dbj|AAA00001.1|: read), `prd_ar` (Y as ref|AAA00001.1|, whose ids do not compare equal: the loader keeps none and NCBI
 warns), `prd_t2` (A in two HSPs over a short Y: two warnings), from the FASTA of the same names, for the queries
 `prd_q.faa`, `prd_q2.faa` (two queries), `prd_q3.faa` (three, the second with an O) and the PSSM query `prd_q.asn.gz`.
+Review 1 of that line: `prd_u0y` (Y `gi|777|gb|YYY00001.1|`) and `prd_ua` (`lcl|777` before `gi|777`, so that NCBI's
+formatters find no sequence by `gi|777` in its database, and B), read through the alias `prd_unf.pal` (`prd_u0y` first: NCBI reads Y's letters for the
+unfetchable subject and does not warn); `prd_zunf0y` (Y `lcl|777` before `gi|777`) and `prd_zunfa` (`gi|777` and B), read
+through `prd_zunf.pal` (the lookup gives Y, whose kept definition line does not hold `gi|777`: NCBI warns); `prd_otag`
+(`gnl|BL_ORD_ID|0` stored with a text tag, which makes the lookup throw: NCBI warns and goes on) and its version 4 copy
+`prd_otag_4`; `prd_wk5` (Y `ref|AAA00001.1|` kept by nothing, C `gb|AAA00001.2|` read first and matched weakly to A) and
+`prd_ah4` (Y `lcl|AAA00001.1`, A `gb|AAA00001.1|`, Z `gb|ZZZ00001.1|` with `emb|AAA00001.1|` in its second definition
+line: another sequence also holds A's id); `prd_txself` (A itself, `gb|AAA00001.1|`, with taxid 99990 by
+`-taxid_map prd_txself.map`, B without; the PSSM's own load reads the taxonomy database).
 `--pssmread-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
@@ -274,11 +283,21 @@ def build_pssmrows(args: argparse.Namespace) -> None:
 def build_pssmread(args: argparse.Namespace) -> None:
     for name, fasta, version in (("prd_av", "prd_av.faa", "5"), ("prd_as1", "prd_as1.faa", "5"),
                                  ("prd_ad", "prd_ad.faa", "5"), ("prd_ar", "prd_ar.faa", "5"),
-                                 ("prd_t2", "prd_t2.faa", "5"), ("prd_as1_4", "prd_as1.faa", "4")):
+                                 ("prd_t2", "prd_t2.faa", "5"), ("prd_as1_4", "prd_as1.faa", "4"),
+                                 ("prd_u0y", "prd_u0y.faa", "5"), ("prd_ua", "prd_ua.faa", "5"),
+                                 ("prd_zunf0y", "prd_zunf0y.faa", "5"), ("prd_zunfa", "prd_zunfa.faa", "5"),
+                                 ("prd_otag", "prd_otag.faa", "5"), ("prd_otag_4", "prd_otag.faa", "4"),
+                                 ("prd_wk5", "prd_wk5.faa", "5"), ("prd_ah4", "prd_ah4.faa", "5"),
+                                 ("prd_txself", "prd_txself.faa", "5")):
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", "prot", "-parse_seqids",
-             "-blastdb_version", version, "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
+             "-blastdb_version", version, "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)]
+            + (["-taxid_map", str(HERE / "prd_txself.map")] if name == "prd_txself" else []),
             check=True, stdout=subprocess.DEVNULL)
+    for alias, names in (("prd_unf", "prd_u0y prd_ua"), ("prd_zunf", "prd_zunf0y prd_zunfa")):
+        (args.out / f"{alias}.pal").write_text(
+            f"#\n# Alias file of line DBID, pssmread\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
+            f"DBLIST {names}\n")
 
 
 def build_join(args: argparse.Namespace) -> None:

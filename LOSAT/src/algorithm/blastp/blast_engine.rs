@@ -3318,7 +3318,7 @@ fn psiblast_pssms(
             ancillary,
             &mut unread,
         );
-        let mut warnings = Vec::new();
+        let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
         keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
         files.add_read_warnings(query, warnings);
         let made = made.and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
@@ -6467,13 +6467,15 @@ fn search(
         0
     };
     // The searches and reports of the batches up to the input record `input_done` and
-    // the searched query `searched_done`.
+    // the searched query `searched_done`; `stopped`: the PSSM files of a PSSM's stop at the last
+    // of them (`BlastpReports::stopped_pssms`).
     let search_batches_once = |args: ResolvedBlastpArgs,
                                outputs: &mut ReportOutputs<'_>,
                                pool: &crate::utils::threading::SearchPool<'_>,
                                input_done: usize,
                                searched_done: usize,
-                               epilog: bool|
+                               epilog: bool,
+                               stopped: Option<crate::algorithm::psiblast::pssm::PssmFiles>|
      -> Result<()> {
         let done_input = seq_range::QueryInput {
             placements: seq_range::Placements(
@@ -6496,6 +6498,7 @@ fn search(
             subject_placements: &subjects.placements,
             x_ordinal_base: 0,
         };
+        let stopped = std::sync::Mutex::new(stopped);
         let reports = BlastpReports {
             reader_warnings: &batches.warnings[..searched_done],
             identity_warned,
@@ -6505,6 +6508,7 @@ fn search(
             x_xml2_carry: None,
             last_call: true,
             psi_round: None,
+            stopped_pssms: Some(&stopped),
             titles_may_refuse,
         };
         run_resolved_in_pool(
@@ -6547,34 +6551,50 @@ fn search(
                           epilog: bool|
      -> Result<()> {
         if args.psi_pssm.is_none() {
-            return search_batches_once(args, outputs, pool, input_done, searched_done, epilog);
+            return search_batches_once(
+                args,
+                outputs,
+                pool,
+                input_done,
+                searched_done,
+                epilog,
+                None,
+            );
         }
-        let mut prefix_args = args.clone();
-        prefix_args.psi_pssm = None;
-        match search_batches_once(args, outputs, pool, input_done, searched_done, epilog) {
+        let again_args = args.clone();
+        match search_batches_once(args, outputs, pool, input_done, searched_done, epilog, None) {
             Err(error) if error.is::<crate::algorithm::psiblast::pssm::PssmStop>() => {
-                let stop = error
+                let crate::algorithm::psiblast::pssm::PssmStop {
+                    query,
+                    error,
+                    files,
+                } = error
                     .downcast::<crate::algorithm::psiblast::pssm::PssmStop>()
                     .expect("the error was checked to be a PssmStop");
                 let after = batches
                     .starts
-                    .partition_point(|&(_, searched)| searched <= stop.query);
+                    .partition_point(|&(_, searched)| searched <= query);
                 let input_end = batches
                     .starts
                     .get(after)
                     .map_or(input_done, |&(input, _)| input.min(input_done));
-                search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
-                // The warnings of the PSSMs' reads up to the failing query's, after the reports
-                // of the queries up to it. NCBI writes each after its query's report, so a query
-                // warning of a later query of the rerun (O read as X) would come after them there;
-                // no PssmStop found so far reaches that order (each is LOSAT's own refusal or an
-                // error at a query without such a later warning; review 1 of line DBID pssmread, L1).
-                let mut files = stop.files;
-                for (_, warnings) in files.take_read_warnings() {
-                    outputs.diagnostics.write_all(&warnings)?;
-                }
-                files.commit()?;
-                Err(stop.error)
+                // The queries up to the failing one, searched and reported again with the PSSMs
+                // made before it (`BlastpReports::stopped_pssms`): the reads of each PSSM (up to
+                // the failing query's) look their taxids up after the query's report, and their
+                // messages follow it, before the next query's warnings (the failing query's after
+                // its report), as where no PSSM stops (review 1 of line DBID pssmread, L1; review
+                // 3, H1). The files are written after the reports, then the run stops with the
+                // PSSM's error.
+                search_batches_once(
+                    again_args,
+                    outputs,
+                    pool,
+                    input_end,
+                    query + 1,
+                    false,
+                    Some(files),
+                )?;
+                Err(error)
             }
             other => other,
         }
@@ -6862,6 +6882,7 @@ fn search(
                                     .then_some(&x_xml2_carry),
                                 last_call: index + 1 == blocks.len(),
                                 psi_round: None,
+                                stopped_pssms: None,
                                 titles_may_refuse,
                             },
                             x_block,
@@ -7736,6 +7757,13 @@ struct BlastpReports<'a> {
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
     psi_round: Option<&'a crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    /// The PSSM files and read messages of the queries up to a psiblast PSSM's stop
+    /// (`psiblast::pssm::PssmStop`), for the search again of those queries (`search`): the call
+    /// takes them for its own (`psiblast_pssms` makes none), so the PSSMs' reads look their taxids
+    /// up after each query's report as NCBI's did (`ListedTitles::pssm_load_texts`) and their
+    /// messages come where a run that does not stop writes them. `None` (or empty) elsewhere.
+    stopped_pssms:
+        Option<&'a std::sync::Mutex<Option<crate::algorithm::psiblast::pssm::PssmFiles>>>,
     /// With the BLAST archive (outfmt 11): a searched query or a subject that `search` read has a
     /// title the archive cannot write, so the call checks its own queries and subjects where it
     /// writes the archive (`run_resolved_in_pool`); without such a title no call can refuse.
@@ -7934,6 +7962,7 @@ fn search_split_query_batches(
                     x_xml2_carry: None,
                     last_call: false,
                     psi_round: None,
+                    stopped_pssms: None,
                     // The call of the whole query writes the archive.
                     titles_may_refuse: false,
                 },
@@ -12389,6 +12418,7 @@ fn run_resolved_in_pool(
             &hit_lists,
             &batch_prefetch,
             args.inclusion_ethresh,
+            prefetch_taxids,
         )?,
         _ => database::PssmReads::default(),
     };
@@ -12404,8 +12434,14 @@ fn run_resolved_in_pool(
             .map_or(&[][..], |titles| titles.parsed.as_slice()),
         reads: &pssm_reads,
     };
+    // The search again of the queries up to a PSSM's stop takes the PSSMs made before it
+    // (`BlastpReports::stopped_pssms`).
+    let stopped_pssms = reports
+        .stopped_pssms
+        .and_then(|stopped| stopped.lock().expect("the stopped PSSMs").take());
     let mut psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
+            Some(_) if stopped_pssms.is_some() => stopped_pssms,
             Some(request) => Some(psiblast_pssms(
                 &args,
                 request,
@@ -12848,10 +12884,21 @@ fn run_resolved_in_pool(
                             open_for_rows(shown)?;
                         }
                         // The query's PSSM reads after its report (psiblast_app.cpp:283-308):
-                        // the blobs it loads first look their taxids up then
-                        // (`ListedTitles::check_pssm_loads`).
+                        // the blobs it loads first look their taxids up then, and NCBI writes
+                        // their texts among the PSSM's warnings (`ListedTitles::pssm_load_texts`).
                         if pssm_made {
-                            titles.check_pssm_loads(database, &pssm_reads, query)?;
+                            let texts = titles.pssm_load_texts(database, &pssm_reads, query)?;
+                            if texts.iter().any(|(_, text)| !text.is_empty()) {
+                                if let Some(files) = psiblast_pssms.as_mut() {
+                                    files.read_messages(query).add_load_texts(texts);
+                                } else if let Some(io) = reports.psi_round {
+                                    let mut outcome =
+                                        io.outcome.lock().expect("the round's outcome");
+                                    if let Some(outcome) = outcome.as_mut() {
+                                        outcome.next_warnings.add_load_texts(texts);
+                                    }
+                                }
+                            }
                         }
                     }
                     continue;

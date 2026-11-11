@@ -1014,3 +1014,59 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:302-321 and 440-450
+// (quoted at `input_msa`): each included Seq-align's subject is read in turn, the scope loading
+// its sequence (and looking its taxids up) before the letters, whose failure warns.
+#[test]
+fn a_reads_taxonomy_texts_come_before_its_warnings_and_after_those_before_it() {
+    let line = |text: &str| text.as_bytes().to_vec();
+    let mut messages = PssmReadMessages::default();
+    // Subject 3 fails (no sequence, so no load), subject 5 fails twice, subject 7 not at all.
+    messages.push(3, line("warn 3\n"));
+    messages.push(5, line("warn 5a\n"));
+    messages.push(5, line("warn 5b\n"));
+    messages.add_load_texts([
+        (2, line("text 2\n")),
+        (3, Vec::new()),
+        (5, line("text 5\n")),
+        (7, line("text 7\n")),
+    ]);
+    assert_eq!(
+        String::from_utf8(messages.bytes()).unwrap(),
+        "text 2\nwarn 3\ntext 5\nwarn 5a\nwarn 5b\ntext 7\n"
+    );
+    // Without warnings the texts are the messages.
+    let mut texts = PssmReadMessages::default();
+    texts.add_load_texts([(0, Vec::new()), (1, line("text 1\n"))]);
+    assert_eq!(texts.bytes(), line("text 1\n"));
+}
+
+#[test]
+fn a_querys_read_messages_keep_the_order_of_the_queries() {
+    let dir = scratch("read-messages");
+    let mut files = PssmFiles::new(&request(&dir.join("p.txt"), false));
+    let mut warning = PssmReadMessages::default();
+    warning.push(0, b"warn q1\n".to_vec());
+    files.add_read_warnings(1, warning);
+    files.add_read_warnings(2, PssmReadMessages::default());
+    // Texts of query 0, which has no warning, and of query 1, before its warning.
+    files
+        .read_messages(0)
+        .add_load_texts([(4, b"text q0\n".to_vec())]);
+    files
+        .read_messages(1)
+        .add_load_texts([(0, b"text q1\n".to_vec())]);
+    // An entry made for texts that are not there is not written.
+    let _ = files.read_messages(3);
+    assert_eq!(
+        files.take_read_warnings(),
+        vec![
+            (0, b"text q0\n".to_vec()),
+            (1, b"text q1\nwarn q1\n".to_vec())
+        ]
+    );
+    assert!(files.take_read_warnings().is_empty());
+    drop(files);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

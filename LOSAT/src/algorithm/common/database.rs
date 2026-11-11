@@ -889,6 +889,13 @@ impl BatchPrefetch {
         }
     }
 
+    /// Whether the batch of the call's query `query` may read the query's subjects one by one:
+    /// its prefetch is off, or the query is of no batch (taken both ways, as in
+    /// [`BatchPrefetch::reads`]).
+    pub(crate) fn reads_one_by_one(&self, query: usize) -> bool {
+        self.batch_of(query) != Some(true)
+    }
+
     /// What the batches read of the subjects of `reported`, the (query of the call, ordinal id)
     /// of each reported subject of each query: the subjects that a batch whose prefetch is on
     /// reports, and those that a batch whose prefetch is off reports (`BatchReads::shown`). The
@@ -2710,7 +2717,8 @@ mod tests {
 /// (`TaxDb::offset_error_taxid`), so the set gives NCBI's bytes unless a volume holds that taxid
 /// and another of its slot; such a run is refused where NCBI first fetches a subject: a prefetch
 /// ([`prefetch_messages`]) or, in the XML2 and JSON formats, a report with a subject that has a
-/// positive taxid ([`read_reported_taxonomy`]) ([`TaxdbRun::cache_collision`]).
+/// positive taxid ([`read_reported_taxonomy`]) ([`TaxdbRun::cache_collision`]), and where
+/// psiblast's PSSM loads a sequence with that taxid again ([`pssm_load_texts`]).
 ///
 /// It lives on the database of the search, so a `run_local` call that writes outfmt 15 and 16
 /// of one `-db` search shares it: the open and the volume-lookup messages are written for the
@@ -2911,6 +2919,15 @@ impl TaxdbRun {
         std::sync::Arc::clone(lazy.get_or_insert_with(|| {
             std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone()))
         }))
+    }
+
+    /// Whether the volume `volume` of the run's database has looked `taxid` up before in the run
+    /// ([`TaxdbRun::volume_lookups_of`]).
+    fn looked_up(&self, volume: usize, taxid: i32) -> bool {
+        self.volume_lookups
+            .lock()
+            .expect("the volume lookups")
+            .contains(&(volume, taxid))
     }
 
     /// The volume lookups of the positive taxids `taxids` where NCBI fetches the sequence
@@ -3292,38 +3309,21 @@ pub(crate) fn prefetch_messages<'s>(
         if !fetched.insert(ordinal) {
             continue;
         }
-        // `x_GetTaxonomy` asks for a positive taxid only (seqdbvol.cpp:1136); one definition
-        // line per sequence without parsed Seq-ids (`stored_title`).
         // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads`: the blob of
         // the sequence the scope gets, whose taxids its volume looks up). In
         // the formats that read the Bioseq, `ParsedSubject::fetched` refuses every subject that
         // is not itself, with the same reason (BLASTN and TBLASTX ask it after the batch loop, so
         // such a subject can be refused here first); psiblast's kept beyond its cut are itself
-        // (`prefetched_ranks`).
-        let (blob, volume_taxids): (u32, Vec<i32>) = match parsed {
+        // (`prefetched_ranks`). One without them is read by its ordinal id, its own blob.
+        let blob = match parsed {
             Some(subject) => match prefetch_reads(db, ordinal, subject, true, program)? {
-                Ok(Some(blob)) if blob == ordinal => (blob, subject.volume_taxids()),
-                Ok(Some(other)) => (
-                    other,
-                    defline_set_taxids(
-                        &db.defline_set(other)
-                            .map_err(|error| database_error(error, program))?,
-                    ),
-                ),
+                Ok(Some(blob)) => blob,
                 Ok(None) => continue,
                 Err(reason) => return Err(parsed_refusal(ordinal, &reason, program)),
             },
-            None => (
-                ordinal,
-                db.defline_taxids(ordinal)
-                    .map_err(|error| database_error(error, program))?
-                    .first()
-                    .copied()
-                    .filter(|&taxid| taxid > 0)
-                    .into_iter()
-                    .collect(),
-            ),
+            None => ordinal,
         };
+        let volume_taxids = blob_taxids(db, ordinal, parsed, blob, program)?;
         run.volume_lookups_of(db, &taxdb, blob, &volume_taxids, &lower, &mut text, program)?;
     }
     Ok(text.into_bytes())
@@ -3335,14 +3335,19 @@ pub(crate) fn prefetch_messages<'s>(
 // ```
 /// The texts of the taxonomy database where psiblast's PSSM of a query whose batch reads one by
 /// one loads the blob of the sequence `blob` by a Seq-align id, its positive taxids `taxids`
-/// (`ListedTitles::check_pssm_loads`): the volume's lookups of the taxids that the run has not
-/// looked up before in that volume ([`TaxdbRun`], as [`prefetch_messages`] for the reports'
-/// reads), the texts of opening with the run's first lookup. A blob that the scope read before
-/// in the query (its report; the scope keeps it for the query's rounds until
-/// `ResetScopeHistory`) had its taxids looked up then, so its lookups write nothing again. The
-/// lookups are the run's from then on. Empty without `taxdb.bti` on the search path. The cache
-/// collision of [`TaxdbRun::cache_collision`] is not asked: a repeated lookup of its taxid needs
-/// a lookup of it before, which writes the text (a refusal here) or was a report's, which asked it.
+/// ([`blob_taxids`]; `ListedTitles::pssm_load_texts`), which NCBI writes there, after the query's
+/// report: the volume's lookups of the taxids that the run has not looked up before in that
+/// volume ([`TaxdbRun`], as [`prefetch_messages`] for the reports' reads), the texts of opening
+/// with the run's first lookup. A blob that the scope read before in the query (its report; the
+/// scope keeps it for the query's rounds until `ResetScopeHistory`) had its taxids looked up
+/// then, so its lookups write nothing again. The lookups are the run's from then on. Empty
+/// without `taxdb.bti` on the search path.
+///
+/// The first lookup of a taxid in a volume writes its text in NCBI whatever its cache holds
+/// (an empty slot asks `GetTaxNames`); a repeated one writes the offset error again where
+/// another taxid of its cache slot was looked up in between ([`TaxdbRun::cache_collision`]), an
+/// order of the run's fetches that LOSAT does not model, so a repeated lookup of the offset
+/// error's taxid in a run with such a collision is refused here.
 pub(crate) fn pssm_load_texts(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -3356,6 +3361,18 @@ pub(crate) fn pssm_load_texts(
     let Some(search_path) = db.search_path() else {
         return Ok(Vec::new());
     };
+    if let Some(last) = run
+        .prefetch_texts(db)
+        .offset_error_taxid
+        .filter(|last| taxids.contains(last))
+    {
+        let volume = db
+            .volume_index(blob)
+            .map_err(|error| database_error(error, program))?;
+        if run.looked_up(volume, last) {
+            run.refuse_cache_collision(db, program)?;
+        }
+    }
     let taxdb = run.taxdb(search_path);
     let mut text = String::new();
     run.volume_lookups_of(
@@ -3763,6 +3780,50 @@ fn prefetch_gets_no_bioseq(
         ))),
         _ => Ok(Ok(!read.bioseq)),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1129-1140
+// ```c++
+//     for(TBDLLConstIter iter = dl.begin(); iter != dl.end(); iter ++) {
+//         TTaxId taxid = ZERO_TAX_ID;
+//
+//         if ((*iter)->CanGetTaxid()) {
+//             taxid = (*iter)->GetTaxid();
+//         }
+//         if (taxid <= ZERO_TAX_ID) {
+//             continue;
+//         }
+// ```
+/// The positive taxids that the volume looks up where NCBI loads the blob of the sequence `blob`
+/// for a read of the subject `ordinal` (`CSeqDBVol::x_GetTaxonomy`, of the definition lines of
+/// `x_GetTaxDefline`): the subject's own (`ParsedSubject::volume_taxids`, the target line first)
+/// where it has parsed Seq-ids (`parsed`) and the read loads its own blob, another sequence's
+/// lines where the read loads that one ([`defline_set_taxids`]), and for a subject without parsed
+/// Seq-ids, which has one definition line (`stored_title`) and is read by its ordinal id, the
+/// first positive taxid of that line. The one producer of these for the prefetch
+/// ([`prefetch_messages`]) and psiblast's PSSM ([`pssm_load_texts`]).
+pub(crate) fn blob_taxids(
+    db: &SeqDb,
+    ordinal: u32,
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    blob: u32,
+    program: &str,
+) -> Result<Vec<i32>> {
+    Ok(match parsed {
+        Some(subject) if blob == ordinal => subject.volume_taxids(),
+        Some(_) => defline_set_taxids(
+            &db.defline_set(blob)
+                .map_err(|error| database_error(error, program))?,
+        ),
+        None => db
+            .defline_taxids(blob)
+            .map_err(|error| database_error(error, program))?
+            .first()
+            .copied()
+            .filter(|&taxid| taxid > 0)
+            .into_iter()
+            .collect(),
+    })
 }
 
 /// The positive taxids of the definition lines `set`, each once, in their order (what NCBI looks

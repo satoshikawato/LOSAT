@@ -285,6 +285,7 @@ fn run_queries(
                     x_xml2_carry: None,
                     last_call: false,
                     psi_round: Some(&io),
+                    stopped_pssms: None,
                     titles_may_refuse,
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
@@ -325,7 +326,9 @@ fn run_queries(
             if state.go() || plan.save_last {
                 // The PSSM's warnings and the engine's error come here, after the round's report
                 // (no epilog).
-                outputs.diagnostics.write_all(&outcome.next_warnings)?;
+                outputs
+                    .diagnostics
+                    .write_all(&outcome.next_warnings.bytes())?;
                 pssm = Some(
                     outcome
                         .next
@@ -596,7 +599,7 @@ pub(super) fn round_outcome(
     if makes_next {
         HandleIndex::new(&set)?;
     }
-    let mut next_warnings = Vec::new();
+    let mut next_warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
     let next = makes_next.then(|| {
         next_pssm(
             args,
@@ -701,16 +704,23 @@ impl SubjectKeys<'_> {
     //                  seqloc.GetInt().GetId().AsFastaString());
     // ```
     /// NCBI's warning for each Seq-align whose letters the PSSM cannot read, by subject
-    /// (`query_pssm`'s `unread`): the Seq-align id as a FASTA string. Only subjects with parsed
-    /// Seq-ids can fail to be read.
-    pub(super) fn unread_warnings(&self, program: &str, unread: &[u32], out: &mut Vec<u8>) {
+    /// (`query_pssm`'s `unread`): the Seq-align id as a FASTA string, each with its subject. Only
+    /// subjects with parsed Seq-ids can fail to be read.
+    pub(super) fn unread_warnings(
+        &self,
+        program: &str,
+        unread: &[u32],
+        out: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
+    ) {
         for &s_idx in unread {
             if let Some(subject) = self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                out.extend_from_slice(b"Warning: [");
-                out.extend_from_slice(program.as_bytes());
-                out.extend_from_slice(b"] Failed to retrieve sequence ");
-                out.extend_from_slice(&subject.alignment_fasta());
-                out.push(b'\n');
+                let mut line = Vec::new();
+                line.extend_from_slice(b"Warning: [");
+                line.extend_from_slice(program.as_bytes());
+                line.extend_from_slice(b"] Failed to retrieve sequence ");
+                line.extend_from_slice(&subject.alignment_fasta());
+                line.push(b'\n');
+                out.push(s_idx, line);
             }
         }
     }
@@ -754,7 +764,7 @@ fn next_pssm(
     contexts: &[QueryContext],
     gapped: &KarlinParams,
     keys: SubjectKeys<'_>,
-    warnings: &mut Vec<u8>,
+    warnings: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
 ) -> Result<QueryPssm> {
     let subject = |s_idx: u32| keys.letters(shown_subjects, s_idx);
     let scoring = PssmScoring {

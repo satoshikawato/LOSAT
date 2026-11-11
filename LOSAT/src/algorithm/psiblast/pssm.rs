@@ -1757,9 +1757,65 @@ pub(crate) struct PssmFiles {
     /// as each of them would make or truncate it.
     last_replaced: Option<usize>,
     staging_count: u64,
-    /// NCBI's warnings of the Seq-aligns whose letters each query's PSSM cannot read (`unread`
-    /// of `query_pssm`), by searched query: NCBI writes them after that query's report.
-    read_warnings: Vec<(usize, Vec<u8>)>,
+    /// NCBI's messages of each query's PSSM reads (`PssmReadMessages`), by searched query in the
+    /// order of the queries: NCBI writes them after that query's report.
+    read_warnings: Vec<(usize, PssmReadMessages)>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+// `input_msa`)
+/// What NCBI writes on standard error while one query's PSSM reads its subjects by their
+/// Seq-align ids (`x_GetSubjectSequence`, after the query's report), in the order of the reads,
+/// each line with the subject (by subject index) whose read writes it: the warning of each
+/// Seq-align whose letters the read cannot get (`Failed to retrieve sequence`, from `unread` of
+/// `query_pssm`), and the taxonomy database's texts where a read loads a sequence whose taxids
+/// the volume looks up then (`add_load_texts`). The scope loads a subject's sequence at the
+/// subject's first Seq-align (`CSeqVector`) before the letters are read, so the subject's texts
+/// come before its warnings and after those of the subjects read before it.
+#[derive(Debug, Default)]
+pub(crate) struct PssmReadMessages {
+    lines: Vec<(u32, Vec<u8>)>,
+}
+
+impl PssmReadMessages {
+    /// One line (or text) that the read of subject `subject` writes, after those before it.
+    pub(crate) fn push(&mut self, subject: u32, line: Vec<u8>) {
+        self.lines.push((subject, line));
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    /// The bytes of the messages, in their order.
+    pub(crate) fn bytes(&self) -> Vec<u8> {
+        self.lines
+            .iter()
+            .flat_map(|(_, line)| line.iter().copied())
+            .collect()
+    }
+
+    /// The taxonomy texts of the PSSM's loads merged in: `loads` holds every subject that the
+    /// PSSM includes, in the order of its reads (each once, at its first included Seq-align), with
+    /// the texts of that read's load (empty for none). A subject's texts come before the warnings
+    /// of its own Seq-aligns, which follow those of the subjects before it (`push` gives every
+    /// warning in the order of the Seq-aligns, which keep a subject's together).
+    pub(crate) fn add_load_texts(&mut self, loads: impl IntoIterator<Item = (u32, Vec<u8>)>) {
+        let mut warnings = std::mem::take(&mut self.lines).into_iter().peekable();
+        for (subject, text) in loads {
+            if !text.is_empty() {
+                self.lines.push((subject, text));
+            }
+            while let Some(line) = warnings.next_if(|(read, _)| *read == subject) {
+                self.lines.push(line);
+            }
+        }
+        debug_assert!(
+            warnings.peek().is_none(),
+            "every warning's subject is one of the PSSM's reads"
+        );
+        self.lines.extend(warnings);
+    }
 }
 
 /// One query's PSSM files, to be written after the reports.
@@ -1797,16 +1853,39 @@ impl PssmFiles {
         }
     }
 
-    /// The warnings of the reads of the searched query `query`'s PSSM (`read_warnings`).
-    pub(crate) fn add_read_warnings(&mut self, query: usize, warnings: Vec<u8>) {
+    /// The warnings of the reads of the searched query `query`'s PSSM (`read_warnings`), made in
+    /// the order of the queries.
+    pub(crate) fn add_read_warnings(&mut self, query: usize, warnings: PssmReadMessages) {
         if !warnings.is_empty() {
             self.read_warnings.push((query, warnings));
         }
     }
 
-    /// The warnings of the PSSMs' reads, by searched query, in the order of the queries.
+    /// The messages of the reads of the searched query `query`'s PSSM, to add the taxonomy
+    /// texts of its loads to (`PssmReadMessages::add_load_texts`); an empty entry is made in the
+    /// order of the queries where it has no warning.
+    pub(crate) fn read_messages(&mut self, query: usize) -> &mut PssmReadMessages {
+        let at = match self
+            .read_warnings
+            .binary_search_by_key(&query, |&(of, _)| of)
+        {
+            Ok(at) => at,
+            Err(at) => {
+                self.read_warnings
+                    .insert(at, (query, PssmReadMessages::default()));
+                at
+            }
+        };
+        &mut self.read_warnings[at].1
+    }
+
+    /// The messages of the PSSMs' reads, by searched query, in the order of the queries.
     pub(crate) fn take_read_warnings(&mut self) -> Vec<(usize, Vec<u8>)> {
         std::mem::take(&mut self.read_warnings)
+            .into_iter()
+            .filter(|(_, messages)| !messages.is_empty())
+            .map(|(query, messages)| (query, messages.bytes()))
+            .collect()
     }
 
     /// One query's PSSM: its ASN.1 file staged and its ASCII PSSM kept. `Err` is LOSAT's refusal

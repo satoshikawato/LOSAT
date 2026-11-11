@@ -573,10 +573,18 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
     let query = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/psiblast/tk.faa");
     let subject = TempFasta::new(
         "blastp_avg_short_subject.faa",
-        &[("s1 one letter", b"M"), ("s2 empty", b""), ("s3 empty", b"")],
+        &[
+            ("s1 one letter", b"M"),
+            ("s2 empty", b""),
+            ("s3 empty", b""),
+        ],
     );
     for (program, title, prolog_end) in [
-        ("blastp", "BLASTP 2.17.0+", " 3 sequences; 1 total letters\n\n"),
+        (
+            "blastp",
+            "BLASTP 2.17.0+",
+            " 3 sequences; 1 total letters\n\n",
+        ),
         (
             "psiblast",
             "PSIBLAST 2.17.0+",
@@ -604,7 +612,11 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
             }
             let output = command.output().expect("run LOSAT CLI");
             let stdout = String::from_utf8_lossy(&output.stdout);
-            assert_eq!(output.status.code(), Some(3), "{program} {args:?}: {stdout}");
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "{program} {args:?}: {stdout}"
+            );
             assert_eq!(
                 String::from_utf8_lossy(&output.stderr),
                 format!(
@@ -622,6 +634,70 @@ fn subjects_of_less_than_one_letter_on_average_stop_the_search_without_the_gumbe
             } else {
                 assert!(stdout.is_empty(), "{program} {args:?}: {stdout}");
             }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
+// A first query batch of invalid queries only is not searched: NCBI reports it, then the next
+// batch's setup fails (NCBI 2.17.0 `BATCH_SIZE=1 blastp` of an all-X query and tk with `-subject`
+// of `MK`, ``, `` and `-searchsp 1000`: probes `q.bp.qx_tk.bs1.sp.{0,7}` of the PS5c review, exit
+// 3; line PS DECISIONS 28).
+#[test]
+fn an_unsearched_first_batch_is_reported_before_the_next_batchs_engine_error() {
+    let query = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/psiblast/ps5c_qx_tk.faa");
+    let subject = TempFasta::new(
+        "blastp_unsearched_first_subject.faa",
+        &[("s1 two", b"MK"), ("s2 empty", b""), ("s3 empty", b"")],
+    );
+    for outfmt in ["0", "7"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+            .arg("blastp")
+            .arg("-query")
+            .arg(&query)
+            .arg("-subject")
+            .arg(&subject.0)
+            .args(["-searchsp", "1000", "-outfmt", outfmt])
+            .env_remove("LOSAT_TIMING")
+            .env_remove("OLD_FSC")
+            .env("BATCH_SIZE", "1")
+            .output()
+            .expect("run LOSAT CLI");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(3), "outfmt {outfmt}: {stdout}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "Warning: [blastp] Subject_2 s2 empty: Subject sequence contains no data\n\
+             Warning: [blastp] Subject_3 s3 empty: Subject sequence contains no data\n\
+             Warning: [blastp] Query_1 qx all X: Could not calculate ungapped Karlin-Altschul \
+             parameters due to an invalid query sequence or its translation. Please verify the \
+             query sequence(s) and/or filtering options \n\
+             BLAST engine error: The average subject length is too short\n",
+            "outfmt {outfmt}"
+        );
+        if outfmt == "0" {
+            assert!(
+                stdout.starts_with("BLASTP 2.17.0+")
+                    && stdout.ends_with(
+                        " 3 sequences; 2 total letters\n\n\n\nQuery= qx all X\n\nLength=30\n\n\n\
+                         ***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    \
+                         -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    \
+                         -1.00 \n\nEffective search space used: 0\n"
+                    ),
+                "{stdout}"
+            );
+        } else {
+            assert!(
+                stdout.starts_with("# BLASTP 2.17.0+\n# Query: qx all X\n# Database: ")
+                    && stdout.lines().count() == 3,
+                "{stdout}"
+            );
         }
     }
 }

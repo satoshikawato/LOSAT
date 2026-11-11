@@ -683,6 +683,43 @@ pub(crate) fn psi_search_and_object(
         stats.h = stat(Some(gapped.h));
         computed = Some(gapped);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:110-112
+    // ```c++
+    //     if (pssm->GetPssm().GetLambda() != CPssm::kInvalidStat) {
+    //         score_blk->kbp_gap_psi[0]->Lambda = pssm->GetPssm().GetLambda();
+    //     } else if (score_blk->kbp_gap_std[0]->Lambda > 0.0) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
+    // ```c
+    // static Boolean s_BlastKarlinBlkIsValid(const Blast_KarlinBlk* kbp)
+    // {
+    //     if ( !kbp ) {
+    //         return FALSE;
+    //     } else {
+    //         return (kbp->Lambda > 0 && kbp->K > 0 && kbp->H > 0);
+    //     }
+    // }
+    // ```
+    // NCBI takes a negative value of the file into `kbp_psi` or `kbp_gap_psi` (0 is
+    // `kInvalidStat`: the query's BLOSUM62 value), then runs with a block it holds invalid (no
+    // gapped X-drop, a cutoff of 1, E-values of -1): an output without meaning, refused as a
+    // PSSM whose scaling gives no Karlin-Altschul parameters is (line PS DECISIONS 28). NCBI's
+    // check of the PSSM (`validation_error`) comes first.
+    let negative = [
+        ("lambdaUngapped", stats.lambda_ungapped),
+        ("kappaUngapped", stats.kappa_ungapped),
+        ("hUngapped", stats.h_ungapped),
+        ("lambda", stats.lambda),
+        ("kappa", stats.kappa),
+        ("h", stats.h),
+    ]
+    .into_iter()
+    .find(|(_, value)| value.is_some_and(|value| value < 0.0));
+    if let (Some((name, _)), None) = (negative, validation_error.as_ref()) {
+        return Err(refuse(format!(
+            "a PSSM whose Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
+        )));
+    }
     let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,

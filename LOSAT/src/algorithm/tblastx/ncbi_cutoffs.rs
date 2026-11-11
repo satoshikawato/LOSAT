@@ -204,6 +204,10 @@ pub fn try_compute_eff_lengths_tblastx(
 /// CRITICAL: Uses GAPPED params (kbp_gap/kbp_gap_std).
 /// CRITICAL: Uses ceil() rounding, NOT trunc.
 ///
+/// NCBI's guard (`Lambda < 0. || K < 0. || H < 0.0`: `BLAST_SCORE_MIN`, blast_stat.c:4054-4057) is
+/// not here: the callers pass valid blocks (`pssm_search::evalue::EvalueStats::hit_cutoff`, which
+/// may get a profile's block, has it).
+///
 /// # Arguments
 /// * `evalue` - Expected value threshold
 /// * `eff_searchsp` - Effective search space
@@ -223,7 +227,24 @@ pub fn cutoff_score_from_evalue(
     let searchsp = eff_searchsp as f64;
     let k_times_searchsp = karlin_params.k * searchsp;
     let k_times_searchsp_over_e = k_times_searchsp / e;
-    let log_value = k_times_searchsp_over_e.ln();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4059-4061
+    // ```c
+    //    E = MAX(E, kSmallFloat);
+    //
+    //    S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ));
+    // ```
+    // A quotient past the double (an E-value near kSmallFloat with a search space above about
+    // 4e12, or the largest -searchsp) is +inf in NCBI, and `(Int4)+inf` is undefined behaviour
+    // (x86-64 gives INT_MIN, so `BLAST_Cutoffs` keeps its cutoff of 1; LOSAT's `as i32` would
+    // give i32::MAX and drop every hit). LOSAT does not reproduce NCBI's undefined behaviour
+    // (Owner 2026-10-10; line PS DECISIONS 28): such a quotient takes the mathematically equal
+    // `ln K + ln searchsp - ln E`, a finite cutoff that every HSP of e-value at most E reaches.
+    // A finite quotient keeps NCBI's order of operations.
+    let log_value = if k_times_searchsp_over_e.is_finite() {
+        k_times_searchsp_over_e.ln()
+    } else {
+        karlin_params.k.ln() + searchsp.ln() - e.ln()
+    };
     let score_before_ceil = log_value / karlin_params.lambda;
     let score = score_before_ceil.ceil();
 
@@ -643,6 +664,36 @@ mod tests {
         assert!(
             cutoff > 0,
             "cutoff should be positive for reasonable search space"
+        );
+    }
+
+    // blast_stat.c:4059-4061 (line PS DECISIONS 28): a quotient `K searchsp / E` past the
+    // double takes `ln K + ln searchsp - ln E`; a finite one keeps NCBI's order of operations.
+    #[test]
+    fn a_cutoff_whose_quotient_overflows_the_double_is_finite() {
+        let gapped = blosum62_gapped();
+        // 0.041 * (2^63 - 1) / 1e-297 = 3.8e314: past f64::MAX. E below kSmallFloat is
+        // raised to it. ceil((ln 0.041 + ln 9.223372036854775807e18 + 297 ln 10) / 0.267).
+        let expected = ((0.041f64.ln() + (i64::MAX as f64).ln() - 1.0e-297f64.ln()) / 0.267).ceil();
+        assert_eq!(expected, 2713.0);
+        for evalue in [1e-300, 1e-297] {
+            assert_eq!(cutoff_score_from_evalue(evalue, i64::MAX, &gapped), 2713);
+        }
+        // The edge: the largest search space whose quotient at E = 1e-297 is finite, and the
+        // next one.
+        let last_finite = (f64::MAX * 1.0e-297 / 0.041) as i64;
+        assert!((0.041 * last_finite as f64 / 1.0e-297).is_finite());
+        let finite = cutoff_score_from_evalue(1e-297, last_finite, &gapped);
+        assert_eq!(
+            finite,
+            ((0.041 * last_finite as f64 / 1.0e-297).ln() / 0.267).ceil() as i32
+        );
+        let past = (last_finite as f64 * (1.0 + 1e-9)) as i64;
+        assert!(!(0.041 * past as f64 / 1.0e-297).is_finite());
+        let overflowed = cutoff_score_from_evalue(1e-297, past, &gapped);
+        assert!(
+            (finite..=finite + 1).contains(&overflowed),
+            "{finite} {overflowed}"
         );
     }
 

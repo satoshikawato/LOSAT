@@ -111,8 +111,10 @@ fn psi_stats<'a>(
     exact_search_spaces: &[Option<i64>],
 ) -> EvalueStats<'a> {
     match gumbel {
-        // Nothing of a psiblast search reads the space with the block (`-use_sw_tback` is
-        // refused), and a `-subject` search has no exact one then.
+        // With the block the search space is 0, which is not a value: nothing of a psiblast
+        // search reads it then (`e_value` and `hit_cutoff` do not; `-use_sw_tback`, whose
+        // Smith-Waterman redo would, is refused), and a `-subject` search has no exact one.
+        // A reader that needs it with the block (series PR, item PS11c-3) fills it first.
         Some(gumbel) => EvalueStats::spouge(gumbel),
         None => EvalueStats::new(
             None,

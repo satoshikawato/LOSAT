@@ -125,9 +125,25 @@ impl<'a> EvalueStats<'a> {
     /// ```
     /// `BlastKarlinEtoS_simple` is `cutoff_score_from_evalue`; its value is raised to the
     /// `new_cutoff` of 1 (`-evalue` is above 0: NCBI's options validation refuses the others).
+    /// A block with a negative value keeps the cutoff of 1:
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4101-4102
+    /// ```c
+    ///    if (kbp->Lambda == -1. || kbp->K == -1. || kbp->H == -1.)
+    ///       return 1;
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4054-4057
+    /// ```c
+    ///    if (Lambda < 0. || K < 0. || H < 0.0)
+    ///    {
+    ///       return BLAST_SCORE_MIN;
+    ///    }
+    /// ```
+    /// (`es` is then `BLAST_SCORE_MIN`, not above the cutoff of 1.)
     pub(crate) fn hit_cutoff(&self, prelim_evalue: f64, kbp: &KarlinParams, m: i32, n: i32) -> i32 {
         match self.gumbel {
             Some(gumbel) => blast_spouge_etos(prelim_evalue, kbp, gumbel, m, n),
+            None if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 => 1,
             None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
                 prelim_evalue,
                 self.search_space,
@@ -259,5 +275,23 @@ mod tests {
             EvalueStats::new(None, 10_000).hit_cutoff(10.0, &kbp, 1, 1_000_000),
             14
         );
+        // blast_stat.c:4054-4057, 4101-4102: a block with a negative value keeps the cutoff 1.
+        for invalid in [
+            KarlinParams {
+                lambda: -1.0,
+                ..kbp
+            },
+            KarlinParams { k: -0.5, ..kbp },
+            KarlinParams { h: -0.14, ..kbp },
+        ] {
+            assert_eq!(
+                EvalueStats::new(None, i64::MAX).hit_cutoff(10.0, &invalid, 302, 10),
+                1
+            );
+        }
+        // The largest search space with an E-value below kSmallFloat: the quotient is past the
+        // double, the cutoff the finite ceil((ln K + ln searchsp - ln E) / Lambda)
+        // (`cutoff_score_from_evalue`, line PS DECISIONS 28).
+        assert_eq!(cutoff(i64::MAX, 1e-300), 2713);
     }
 }

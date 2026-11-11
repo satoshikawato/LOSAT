@@ -7847,6 +7847,9 @@ fn unsearched_batches_then_engine_error(
         x_prolog: reports.x_prolog,
         x_queries_before: reports.x_queries_before,
         x_xml2_carry: reports.x_xml2_carry,
+        // The engine error follows this report and ends the run: it is the run's last report
+        // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
+        last_call: true,
         psi_round: None,
         titles_may_refuse: reports.titles_may_refuse,
     };

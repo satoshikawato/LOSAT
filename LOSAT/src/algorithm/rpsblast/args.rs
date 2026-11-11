@@ -193,7 +193,8 @@ pub struct RpsblastArgs {
     //                      	 	CArgDescriptions::eBoolean);
     //     }
     // ```
-    /// `-sum_stats`: `false` is rpsblast's default; `true` is refused (`into_blastp_args`).
+    /// `-sum_stats`: `false` is rpsblast's default; `true` is refused where the search starts
+    /// (`rps_hooks::rps_search`), after NCBI's errors of the options, the database and the files.
     #[arg(long = "sum_stats", value_name = "bool_value", value_parser = ncbi_boolean, help = "Use sum statistics")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-342
@@ -346,33 +347,10 @@ pub(crate) fn rps_composition_mode(value: &str) -> u8 {
 }
 
 impl RpsblastArgs {
-    /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusals of the output formats
-    /// of a later item and of `-sum_stats true`.
+    /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusal of the output formats of
+    /// a later item.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         Self::check_outfmt(&self.outfmt)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
-        // ```c
-        //     if (hit_params->link_hsp_params) {
-        //         status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
-        //                   subject->length, gap_align->sbp, hit_params->link_hsp_params,
-        //                   score_options->gapped_calculation);
-        // ```
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-561
-        // ```c
-        //       query_context = hp_start->next->hsp->context;
-        //       length_adjustment = query_info->contexts[query_context].length_adjustment;
-        //       query_length = query_info->contexts[query_context].query_length;
-        // ```
-        // With sum statistics NCBI's RPS search links the HSPs of a profile list with the user
-        // query's one-context `query_info` while the HSPs carry the profile's context (0 to the
-        // number of profiles), so `BLAST_LinkHsps` reads past its arrays (valgrind: invalid
-        // reads; a segmentation fault on some queries; e-values of 0.0 otherwise): undefined
-        // behaviour, refused. `-sum_stats false` is rpsblast's default.
-        if self.sum_stats == Some(true) {
-            bail!(
-                "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
-            );
-        }
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         Ok(BlastpArgs {
             query: self.query,
@@ -458,6 +436,7 @@ impl RpsblastArgs {
                 x_drop_ungapped_bits: self.xdrop_ungap,
                 x_drop_gapped_bits: self.xdrop_gap,
                 x_drop_final_bits: self.xdrop_gap_final,
+                sum_stats: self.sum_stats == Some(true),
             }),
         })
     }
@@ -558,11 +537,7 @@ mod tests {
 
     #[test]
     fn options_of_later_items_are_refused() {
-        for extra in [
-            &["-outfmt", "5"][..],
-            &["-outfmt", "1"],
-            &["-sum_stats", "true"],
-        ] {
+        for extra in [&["-outfmt", "5"][..], &["-outfmt", "1"]] {
             let error = parse(extra).unwrap().into_blastp_args().unwrap_err();
             assert!(
                 error
@@ -630,6 +605,7 @@ mod tests {
             ),
             (Some(3.0), Some(-1.0), Some(0.0))
         );
+        assert!(!rps.sum_stats);
         let resolved = args.resolve().unwrap();
         assert_eq!(resolved.line_length, 1);
         assert!(resolved.lcase_masking && resolved.soft_masking);
@@ -668,6 +644,16 @@ mod tests {
         assert_eq!(
             parse(&["-line_length", "2147483647"]).unwrap().line_length,
             Some(2_147_483_647)
+        );
+        // `-sum_stats true` reaches the search, which refuses it (`rps_hooks::rps_search`).
+        assert!(
+            parse(&["-sum_stats", "true"])
+                .unwrap()
+                .into_blastp_args()
+                .unwrap()
+                .rps
+                .unwrap()
+                .sum_stats
         );
         assert_eq!(
             parse(&["-xdrop_gap", "1e300"]).unwrap().xdrop_gap,

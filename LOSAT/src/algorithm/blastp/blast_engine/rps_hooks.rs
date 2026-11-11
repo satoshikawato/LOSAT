@@ -587,6 +587,30 @@ pub(super) fn rps_search(
             gap_trigger_bits: GAP_TRIGGER_BIT_SCORE,
             options: rps,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
+        // ```c
+        //     if (hit_params->link_hsp_params) {
+        //         status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+        //                   subject->length, gap_align->sbp, hit_params->link_hsp_params,
+        //                   score_options->gapped_calculation);
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-561
+        // ```c
+        //       query_context = hp_start->next->hsp->context;
+        //       length_adjustment = query_info->contexts[query_context].length_adjustment;
+        //       query_length = query_info->contexts[query_context].query_length;
+        // ```
+        // With sum statistics (`-sum_stats true`) NCBI's RPS search links the HSPs of each
+        // profile with the user query's one-context `query_info` while the HSPs carry the
+        // profile's context (0 to the number of profiles), so `BLAST_LinkHsps` reads past its
+        // arrays (valgrind: invalid reads; a segmentation fault on some queries; e-values of 0.0
+        // otherwise): undefined behaviour, refused where the first volume's search would start,
+        // after NCBI's errors of the options, the database and its files.
+        if rps.sum_stats {
+            bail!(
+                "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
+            );
+        }
         let traced = engine.search_volume(&files, &consensus, pool)?;
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.

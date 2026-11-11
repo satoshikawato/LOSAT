@@ -63,6 +63,8 @@ pub struct RpsSearch {
     pub(crate) x_drop_ungapped_bits: Option<f64>,
     pub(crate) x_drop_gapped_bits: Option<f64>,
     pub(crate) x_drop_final_bits: Option<f64>,
+    /// `-sum_stats true`, refused where the search starts (`rps_hooks::rps_search`).
+    pub(crate) sum_stats: bool,
 }
 
 /// One user query as the search reads it.

@@ -701,23 +701,34 @@ pub(crate) fn psi_search_and_object(
     // }
     // ```
     // NCBI takes a negative value of the file into `kbp_psi` or `kbp_gap_psi` (0 is
-    // `kInvalidStat`: the query's BLOSUM62 value), then runs with a block it holds invalid (no
-    // gapped X-drop, a cutoff of 1, E-values of -1): an output without meaning, refused as a
-    // PSSM whose scaling gives no Karlin-Altschul parameters is (line PS DECISIONS 28). NCBI's
-    // check of the PSSM (`validation_error`) comes first.
-    let negative = [
+    // `kInvalidStat`: the query's BLOSUM62 value). A `kbp_psi` that is not valid stops the search's
+    // setup with NCBI's error of a query without Karlin-Altschul parameters
+    // (`blastp::blast_engine::psiblast_stop_at_invalid_query`, line PS DECISIONS 30). A
+    // `kbp_gap_psi` that is not valid does not stop NCBI: it runs with it (no gapped X-drop, a
+    // cutoff of 1, E-values of -1), an output without meaning, refused as a PSSM whose scaling gives
+    // no Karlin-Altschul parameters is (line PS DECISIONS 28), unless the setup stops first. NCBI's
+    // check of the PSSM's file (`validation_error`) comes first.
+    let negative = |values: [(&'static str, Option<f64>); 3]| {
+        values
+            .into_iter()
+            .find(|(_, value)| value.is_some_and(|value| value < 0.0))
+    };
+    let ungapped_invalid = negative([
         ("lambdaUngapped", stats.lambda_ungapped),
         ("kappaUngapped", stats.kappa_ungapped),
         ("hUngapped", stats.h_ungapped),
+    ])
+    .is_some();
+    let gapped_negative = negative([
         ("lambda", stats.lambda),
         ("kappa", stats.kappa),
         ("h", stats.h),
-    ]
-    .into_iter()
-    .find(|(_, value)| value.is_some_and(|value| value < 0.0));
-    if let (Some((name, _)), None) = (negative, validation_error.as_ref()) {
+    ]);
+    if let (Some((name, _)), None, false) =
+        (gapped_negative, validation_error.as_ref(), ungapped_invalid)
+    {
         return Err(refuse(format!(
-            "a PSSM whose Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
+            "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
         )));
     }
     let search = PsiSearch {

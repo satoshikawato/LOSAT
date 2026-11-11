@@ -239,7 +239,13 @@ pub fn cutoff_score_from_evalue(
     // give i32::MAX and drop every hit). LOSAT does not reproduce NCBI's undefined behaviour
     // (Owner 2026-10-10; line PS DECISIONS 28): such a quotient takes the mathematically equal
     // `ln K + ln searchsp - ln E`, a finite cutoff that every HSP of e-value at most E reaches.
-    // A finite quotient keeps NCBI's order of operations.
+    // A finite quotient keeps NCBI's order of operations. That gives NCBI's rows where each hit is
+    // judged as one HSP (blastp, psiblast, blastx, tblastn). TBLASTX's rows differ there: its word
+    // cutoff `MIN(update, gap trigger, cutoff_score_max)` is the gap trigger with LOSAT's finite
+    // value (as with the `i32::MAX` before), while NCBI's x86-64 `cutoff_score_max` of 1 makes its
+    // word cutoff 1, so more ungapped HSPs reach its sum statistics (NCBI 2.17.0 320 rows, LOSAT
+    // 262 for a 6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue
+    // 1e-300`): a difference of NCBI's undefined behaviour that LOSAT keeps (line PS DECISIONS 30).
     let log_value = if k_times_searchsp_over_e.is_finite() {
         k_times_searchsp_over_e.ln()
     } else {

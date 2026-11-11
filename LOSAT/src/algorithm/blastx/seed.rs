@@ -761,6 +761,7 @@ impl Lookup {
             parameters,
             options,
             query,
+            true,
             |query, segments, contexts, threshold, pooled| {
                 build_ncbi_lookup_from_prepared(
                     query,
@@ -777,21 +778,25 @@ impl Lookup {
 
     /// The standard table of [`Lookup::x_new_as`] and [`Lookup::x_new_of`], with `build` the
     /// matrix's builder (its query, lookup segments, contexts, threshold and whether it takes the
-    /// pool).
+    /// pool). `poolable`: whether the pooled build covers the table's backbone index (16 bits:
+    /// words of 2 and 3 letters). A table of 4 letters (the joint builder, item SC9 of line NP)
+    /// takes no kept vectors, so it gives none back: no build of the search would take them.
     #[inline(always)]
     fn x_standard_with(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
         query: Vec<u8>,
+        poolable: bool,
         build: impl FnOnce(Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>, i32, bool) -> XBxTable,
     ) -> Result<BxLookup> {
         let contexts = lookup_contexts(batch, parameters, &query);
         // Dispatch point (LOSAT_X_BXPOOLN1, in the strict set): a search on one thread builds its
         // tables without the pool (tblastx/lookup/x_lut_direct.rs). No NCBI counterpart.
-        let pooled = crate::algorithm::tblastx::lookup::x_bx_pooled_for(
-            usize::try_from(options.num_threads).unwrap_or(1),
-        );
+        let pooled = poolable
+            && crate::algorithm::tblastx::lookup::x_bx_pooled_for(
+                usize::try_from(options.num_threads).unwrap_or(1),
+            );
         let kept = x_seed_scan::XKeptPresence::x_built(pooled);
         Ok(
             match build(
@@ -862,6 +867,7 @@ impl Lookup {
             parameters,
             options,
             query,
+            crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(word),
             |query, segments, contexts, threshold, pooled| {
                 crate::algorithm::tblastx::lookup::build_ncbi_lookup_from_prepared_of(
                     matrix,

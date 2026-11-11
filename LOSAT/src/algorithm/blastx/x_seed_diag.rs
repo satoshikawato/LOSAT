@@ -1665,6 +1665,31 @@ mod tests {
         eprintln!("tables: {tables:?}");
     }
 
+    // No NCBI counterpart (memory only): a search of two threads or more builds its tables of 2 and 3
+    // letters pooled and gives their vectors back when they are dropped; a table of 4 letters (the
+    // joint builder, which takes no kept vectors, item SC9) is not marked pooled, so that the pool
+    // does not keep every dropped table of the search.
+    #[test]
+    fn a_table_of_four_letters_gives_no_vectors_back() {
+        let (query, _, mean) = other_matrix_inputs();
+        for (matrix, word) in [
+            ("BLOSUM62", "2"),
+            ("BLOSUM62", "4"),
+            ("PAM30", "3"),
+            ("PAM30", "4"),
+        ] {
+            let extra = ["-word_size", word, "-num_threads", "8"];
+            let (batch, params, options, _) = search_with(&query, 40, mean, false, matrix, &extra);
+            let lookup = Lookup::x_new_for(&batch, &params, &options, 1, None).unwrap();
+            let BxLookup::Wide(Lookup::Standard(table, kept)) = &lookup else {
+                panic!("{matrix} {word}: the standard table of Int4 hits");
+            };
+            assert_eq!(table.word_length.to_string(), word);
+            let pooled = crate::algorithm::tblastx::lookup::x_bx_pooled_for(8);
+            assert_eq!(kept.pooled, pooled && word != "4", "{matrix} {word}");
+        }
+    }
+
     // No NCBI counterpart (speed only): the choice of the loop names a table by its build number,
     // so a table at the address and with the vectors of the one before it is worked out again.
     #[test]

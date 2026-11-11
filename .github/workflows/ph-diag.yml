@@ -1,0 +1,107 @@
+# DIAGNOSTIC ONLY (line WFL item PH, losat-baselines-98, 2026-11-11): not for merge. Runs the WebKit E2E
+# tests with the engine many times and, when a web process's main thread stays in a futex, saves every
+# thread's stack (.github/ph-diag/watch.py), to find where CI's WebKit page stops answering.
+name: PH diag (WebKit hang capture)
+
+on:
+  push:
+    branches: ['diag/ph-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ph-diag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1, wasm32-wasip1-threads
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Native LOSAT
+        working-directory: LOSAT
+        run: cargo build --release --locked
+      - name: Reactors
+        run: python3 web/adapter/tools/build_reactors.py --target-dir ${{ runner.temp }}/adapter-target --output-dir ${{ runner.temp }}/reactors
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reactors
+          path: |
+            ${{ runner.temp }}/reactors/artifacts.json
+            ${{ runner.temp }}/reactors/losat-web-serial.wasm
+            ${{ runner.temp }}/reactors/losat-web-threads.wasm
+          retention-days: 3
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native
+          path: LOSAT/target/release/losat
+          retention-days: 3
+
+  webkit:
+    needs: [build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    defaults:
+      run:
+        working-directory: web/app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: reactors
+          path: ${{ runner.temp }}/reactors
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native
+          path: ${{ runner.temp }}/native
+      - run: chmod +x ${{ runner.temp }}/native/losat
+      - run: npm ci
+      - run: npx playwright install --with-deps webkit
+      - run: sudo apt-get install -y gdb
+      - name: Machine
+        run: |
+          nproc; free -g; uname -r; ldd --version | head -1
+          sha256sum ~/.cache/ms-playwright/webkit-*/minibrowser-wpe/lib/libWPEWebKit-2.0.so.1.*
+      - name: Start the watcher
+        run: |
+          mkdir -p ${{ runner.temp }}/ph
+          sudo -b sh -c 'python3 -I ${{ github.workspace }}/.github/ph-diag/watch.py ${{ runner.temp }}/ph > ${{ runner.temp }}/ph/watcher.out 2>&1'
+      - name: WebKit E2E with the engine, three times
+        continue-on-error: true
+        env:
+          LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
+          LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/losat
+          CI: '1'
+        run: npx playwright test --project=webkit --repeat-each=3 --reporter=list,github > ${{ runner.temp }}/ph/e2e.log 2>&1
+      - name: Summary
+        if: always()
+        run: |
+          sudo chmod -R a+r ${{ runner.temp }}/ph || true
+          grep -E '^\s+[0-9]+ (passed|failed|flaky|skipped|did not run)' ${{ runner.temp }}/ph/e2e.log || true
+          grep -E '✘' ${{ runner.temp }}/ph/e2e.log | head -20 || true
+          cat ${{ runner.temp }}/ph/watch.log 2>/dev/null || echo 'no watch.log'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ph-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/ph
+            web/app/test-results
+          retention-days: 7

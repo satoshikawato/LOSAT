@@ -770,29 +770,16 @@ fn run_inner(
         (&query_file)
             .seek(SeekFrom::Start(start))
             .map_err(|_| inaccessible("query", &args.query))?;
-        // The documents of a `-db` search with a taxonomy database on the search path: a later
-        // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
-        // database (`read_reported_taxonomy`, which needs the batch's hits; outfmt 5 looks the
-        // batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
-        // T). The taxids of every sequence are looked up here, once, and the output is held only
-        // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the
-        // usual run, in which none is, writes batch by batch. Where NCBI's taxonomy cache would
-        // repeat the offset error (`BlastxDatabase::prefetch_refused`) outfmt 5's prefetch, and the
-        // XML2 and JSON lookups of a batch with a subject that has a taxid
-        // (`read_reported_taxonomy`), are refused after the prolog: the run holds then too.
+        // A `-db` search in which a later batch can still refuse the taxonomy database or a
+        // subject with parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; outfmt 5 looks
+        // the batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
+        // T, and asks no scientific name) holds its document too.
         let prefetch = prefetches_subjects(Some(choice.number));
-        let taxdb_may_refuse = database.as_ref().is_some_and(|database| {
-            database.taxdb_found()
-                && (database.taxdb_may_refuse(!prefetch) || database.prefetch_refused())
-        });
-        // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
-        // (`ReportedSubjects::for_batch`), which only the batch's hits show.
-        let parsed_may_be_refused = database
+        let database_may_refuse = database
             .as_ref()
-            .is_some_and(|database| database.parsed_seqids());
+            .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
         if scan.messages_may_be_refused
-            || taxdb_may_refuse
-            || parsed_may_be_refused
+            || database_may_refuse
             || super::blast_xml::subjects_may_be_refused(&subjects)
         {
             held.hold();

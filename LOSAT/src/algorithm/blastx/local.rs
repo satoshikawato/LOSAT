@@ -428,12 +428,21 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
     // holds every format in order, as the archive's titles do and as the command line holds its
-    // document (`blast_xml::HeldOutput`), so that the refusal follows no byte.
+    // document (`blast_xml::HeldOutput`), so that the refusal follows no byte. So does a `-db` run
+    // in which a later batch could still refuse the taxonomy database or a subject with parsed
+    // Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
+    // XML2 and JSON documents).
+    let writes_names = resolved
+        .iter()
+        .any(|options| matches!(options.outfmt, 13..=16));
     let xml_may_refuse = resolved
         .iter()
         .any(|options| matches!(options.outfmt, 5 | 13..=16))
         && (xml_scan.messages_may_be_refused
-            || (database.is_none() && super::blast_xml::subjects_may_be_refused(subjects)));
+            || match database {
+                Some(run) => run.database.later_batch_may_refuse(writes_names),
+                None => super::blast_xml::subjects_may_be_refused(subjects),
+            });
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
     let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
         Some(hold) => {

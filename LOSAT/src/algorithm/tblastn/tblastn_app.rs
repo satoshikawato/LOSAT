@@ -1217,7 +1217,6 @@ fn search(
         0
     };
     app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
-    app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the
@@ -1247,6 +1246,13 @@ fn search(
         database: database.map(TblastnDatabase::numbers),
         dbsize: args.dbsize,
         searchsp: args.searchsp,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+        // ```c
+        //     use_old_fsc = getenv("OLD_FSC");
+        //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+        // ```
+        // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
+        old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
@@ -1292,22 +1298,9 @@ fn search(
     if batches.searched_done > 0 {
         super::args::check_identity_compressed_lookup_of(&resolved)?;
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-295
-    // ```c++
-    //                 query =  input->GetNextSeqBatch(*scope);
-    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-    //     ...
-    //                 if (fmt_args->ArchiveFormatRequested(args)) {
-    //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-    // ```
-    // The refusal of a title the archive cannot write comes before its first byte. The archive
-    // of each batch that NCBI completes holds its queries and, with `-subject`, every subject;
-    // the batch that stops the run (a reader error, `Empty CBlastQueryVector`, a batch of
-    // queries without letters) writes neither, and the error archive holds no sequence.
-    if args.archive.is_some() && batches.searched_done > 0 {
-        super::archive::check_titles(&searched_queries[..batches.searched_done], "query")?;
-        super::archive::check_titles(subject_records, "subject")?;
-    }
+    // The titles that the BLAST archive (outfmt 11) cannot write are refused after the batches
+    // are searched (below): the batch that stops the run here, and one whose search fails, write
+    // no archive.
     if batches.searched_done == 0 && batches.stop.is_some() {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
         // ```c
@@ -1639,6 +1632,27 @@ fn search(
             }
             None => queries,
         };
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-294
+        // ```c++
+        //                 query =  input->GetNextSeqBatch(*scope);
+        //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
+        //     ...
+        //                     results = lcl_blast.Run();
+        //     ...
+        //                 if (fmt_args->ArchiveFormatRequested(args)) {
+        //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+        // ```
+        // The archive of each batch that NCBI completes holds its queries and, with `-subject`,
+        // every subject. The batch that stops the run writes neither: a reader error, `Empty
+        // CBlastQueryVector` or a batch of queries without letters (`read_query_batches`), and a
+        // batch whose search fails (`failed`: the sequence file or a header file that NCBI cannot
+        // read); the error archive holds no sequence. So a title the archive cannot write is
+        // refused here, where the batches have been searched and their definition lines read, and
+        // before the first byte of any report.
+        if args.archive.is_some() && !queries.is_empty() {
+            super::archive::check_titles(queries, "query")?;
+            super::archive::check_titles(subject_records, "subject")?;
+        }
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
         // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640

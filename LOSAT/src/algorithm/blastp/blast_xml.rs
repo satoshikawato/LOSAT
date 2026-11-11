@@ -30,6 +30,7 @@ use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 
+use super::blast_engine::query_rows::QueryRows;
 use super::hsp::BlastpHitList;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
@@ -68,12 +69,12 @@ pub(crate) struct BlastpXml<'a> {
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
 /// (BLAST XML, or the XML2 / JSON documents) to `writer`, each query's warnings before it,
 /// with the document's header before the first query and its end after the last when
-/// `xml.epilog`. `rows(q)` gives the rows of query `q`'s HSPs, in the lists' order.
+/// `xml.epilog`. `rows` gives the rows of each query's HSPs, in the lists' order.
 pub(crate) fn write_blastp_xml<W: StructuredXml>(
     xml: &BlastpXml<'_>,
     document: &mut W,
     hit_lists: &[Option<BlastpHitList>],
-    rows: &mut dyn FnMut(usize) -> Result<Vec<PairwiseHit>>,
+    rows: &mut QueryRows<'_>,
     writer: &mut dyn Write,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
@@ -130,10 +131,10 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             searched: xml.searched[q_idx],
             masks: &xml.masks[q_idx],
         };
-        let mut hit_rows: Vec<PairwiseHit> = Vec::new();
-        if hit_list.is_some() {
-            hit_rows = rows(q_idx)?;
-        }
+        let hit_rows: &[PairwiseHit] = match hit_list {
+            Some(_) => rows.query(q_idx)?,
+            None => &[],
+        };
         let mut next_row = 0usize;
         let start = buf.len();
         let written = document.query(&xml.run, &query, &mut buf, |sink| {

@@ -1300,12 +1300,6 @@ impl TwoStageLookup {
     }
 }
 
-/// Pack (q_idx, diag) into a single u64 key for faster HashMap operations
-#[inline(always)]
-pub fn pack_diag_key(q_idx: u32, diag: isize) -> u64 {
-    ((q_idx as u64) << 32) | ((diag as i32) as u32 as u64)
-}
-
 /// Check if a k-mer starting at position overlaps with any masked interval
 /// Uses binary search for O(log n) performance instead of O(n) linear scan.
 /// IMPORTANT: Intervals must be sorted by start position for binary search to work correctly.

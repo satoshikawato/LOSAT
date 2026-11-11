@@ -496,8 +496,8 @@ pub struct RangedBatch {
 ///         retval->AddQuery(q);
 ///     }
 /// ```
-/// `size_read` and the batch size are `TSeqPos` (32-bit unsigned), as in
-/// `query_batch::next_query_batch_end`; without skipped records the two agree.
+/// `size_read` and the batch size are `TSeqPos` (32-bit unsigned): an `Int4` batch size
+/// converts to it (a negative one becomes 2^32 plus the value).
 pub fn next_ranged_batch_end(
     input_lengths: &[usize],
     skipped: &[bool],

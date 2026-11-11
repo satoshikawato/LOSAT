@@ -5,7 +5,8 @@
 //! write the bl2seq report, a `PRE_FETCH_SEQS_LIMIT` that `NStr::StringToInt` cannot convert
 //! (an empty one too) stops NCBI before each batch's report, except for the archive of outfmt 11,
 //! which NCBI's apps but psiblast write without the prefetch (line DBID N2e probe: NCBI 2.17.0
-//! exits 0 with the bytes it writes without the variable).
+//! exits 0 with the bytes it writes without the variable), and `OLD_FSC` (no Gumbel block) is
+//! read as `-searchsp` is read (env parity G1; the `-db` cases are the `db.oldfsc.*` rows).
 
 use std::process::{Command, Output};
 
@@ -28,12 +29,29 @@ fn run(
     outfmt: &str,
     variable: Option<(&str, &str)>,
 ) -> Output {
+    run_files(
+        program,
+        &format!("{INPUTS}/{query}"),
+        &format!("{INPUTS}/{subject}"),
+        outfmt,
+        variable,
+    )
+}
+
+/// `run` with the paths of the query and subject files (relative to `LOSAT/`).
+fn run_files(
+    program: &str,
+    query: &str,
+    subject: &str,
+    outfmt: &str,
+    variable: Option<(&str, &str)>,
+) -> Output {
     let mut command = Command::new(BIN);
     command
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .arg(program)
-        .args(["-query", &format!("{INPUTS}/{query}")])
-        .args(["-subject", &format!("{INPUTS}/{subject}")])
+        .args(["-query", query])
+        .args(["-subject", subject])
         .args(["-outfmt", outfmt, "-num_threads", "1"]);
     for (name, _) in std::env::vars() {
         if name.starts_with("LOSAT_X_")
@@ -121,4 +139,62 @@ fn environment_that_ncbi_reads_around_the_report_is_refused_where_it_reads_it() 
             );
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+// ```c
+//     use_old_fsc = getenv("OLD_FSC");
+//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+// ```
+// NCBI sets OLD_FSC for any -searchsp (blast_args.cpp:303-307), so BLASTP, BLASTX and TBLASTN
+// with OLD_FSC (any value, the empty one too) write the frozen bytes of `-searchsp 0` (rows
+// sp.<program>.zero.0 of outfmt0_manifest.tsv; NCBI 2.17.0 writes the same bytes with
+// OLD_FSC=1). PSIBLAST, which takes no -searchsp, refuses it.
+#[test]
+fn old_fsc_is_the_statistics_of_searchsp_0_and_psiblast_refuses_it() {
+    for (program, query, subject) in [
+        (
+            "blastp",
+            "tests/db_search/bpqb_q.faa",
+            "tests/db_search/bslice.faa",
+        ),
+        (
+            "blastx",
+            "tests/db_search/bslice_q.fna",
+            "tests/db_search/bslice.faa",
+        ),
+        (
+            "tblastn",
+            "tests/db_search/tslice_q.faa",
+            "tests/db_search/tslice.fna",
+        ),
+    ] {
+        let expected = std::fs::read(format!(
+            "{}/tests/fixtures/outfmt0/sp.{program}.zero.0.out",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("frozen -searchsp 0 report");
+        for value in ["1", ""] {
+            let output = run_files(program, query, subject, "0", Some(("OLD_FSC", value)));
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{program} OLD_FSC={value:?}: {output:?}"
+            );
+            assert!(
+                output.stdout == expected && output.stderr.is_empty(),
+                "{program} OLD_FSC={value:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    let output = run(PROGRAMS[1], "6", Some(("OLD_FSC", "1")));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        output.stdout.is_empty()
+            && stderr.contains("the environment variable OLD_FSC")
+            && stderr.contains("not supported by LOSAT's PSIBLAST"),
+        "{stderr}"
+    );
 }

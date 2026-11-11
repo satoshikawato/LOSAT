@@ -1177,10 +1177,6 @@ impl<'a> TripletWindow<'a> {
     }
 }
 
-pub fn is_position_masked(intervals: &[MaskedInterval], pos: usize) -> bool {
-    intervals.iter().any(|interval| interval.contains(pos))
-}
-
 /// Check if a k-mer starting at position overlaps with any masked interval
 pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -> bool {
     let end = start + kmer_len;

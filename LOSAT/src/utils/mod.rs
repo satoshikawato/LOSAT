@@ -15,6 +15,7 @@ pub(crate) mod x87;
 pub(crate) mod x_frame;
 pub mod x_logclone;
 pub(crate) mod x_mapped;
+pub(crate) mod x_order;
 pub mod x_seg_trim_memo;
 pub(crate) mod xahead;
 pub mod xdiag;

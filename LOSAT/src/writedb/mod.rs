@@ -52,7 +52,6 @@ mod tests;
 use std::path::PathBuf;
 
 pub use platform::Platform;
-pub use writer::WriteDb;
 
 /// Error of the database writer.
 #[derive(Debug)]

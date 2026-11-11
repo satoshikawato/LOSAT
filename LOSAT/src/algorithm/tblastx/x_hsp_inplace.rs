@@ -157,6 +157,7 @@ use super::*;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
 // the clock only in a call the batch function armed, and the linking reads nothing from it.
 use crate::algorithm::tblastx::x_link_timing::{LinkLap, LinkStage};
+use crate::utils::x_order::apply_permutation_in_place;
 #[cfg(test)]
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -203,33 +204,6 @@ pub fn print_summary() {
         load(&REPLAY_FALLBACKS),
         load(&GATE_REFERENCE)
     );
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-// ```c
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
-// NCBI's qsort moves the pointers inside the one array. `source[dst]` names the record that
-// belongs at `dst`; each cycle of that permutation is walked once with swaps (module doc, item 1).
-/// Rearranges `items` so that `items[dst]` is the element that was at `source[dst]`. `source` must
-/// be a permutation of `0..items.len()`; it is left as the identity.
-fn apply_permutation_in_place<T>(items: &mut [T], source: &mut [usize]) {
-    assert_eq!(items.len(), source.len(), "permutation length");
-    for start in 0..source.len() {
-        let mut dst = start;
-        loop {
-            let src = source[dst];
-            // `dst` is settled by the swap below (or needs none): mark it.
-            source[dst] = dst;
-            if src == start {
-                // The cycle is closed: the record that started at `start` has been carried here.
-                break;
-            }
-            items.swap(dst, src);
-            dst = src;
-        }
-    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381

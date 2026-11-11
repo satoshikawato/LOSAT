@@ -1533,7 +1533,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 5 to 16 and 20, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5 to 16 and 20).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
@@ -1657,7 +1657,7 @@ impl TblastxOutputFormat {
     }
 }
 
-/// The format of a validated `-outfmt` value (`tblastx_outfmt`).
+/// The format of a validated `-outfmt` value.
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 /// ```c

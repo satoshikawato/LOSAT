@@ -12,6 +12,7 @@
 /// joint and background probabilities of its `Compo_FrequencyData`.
 #[derive(Debug)]
 pub struct CompoMatrixData {
+    #[cfg(test)]
     pub name: &'static str,
     pub freq_ratios: &'static [[f64; 28]; 28],
     pub joint_probs: &'static [[f64; 20]; 20],
@@ -3013,48 +3014,56 @@ pub(crate) const PAM250_BG: [f64; 20] = [
 /// ```
 pub static COMPO_MATRIX_DATA: [CompoMatrixData; 8] = [
     CompoMatrixData {
+        #[cfg(test)]
         name: "BLOSUM62",
         freq_ratios: &BLOSUM62_FREQ_RATIOS,
         joint_probs: &BLOSUM62_JOINT_PROBS,
         background: &BLOSUM62_BG,
     },
     CompoMatrixData {
+        #[cfg(test)]
         name: "BLOSUM80",
         freq_ratios: &BLOSUM80_FREQ_RATIOS,
         joint_probs: &BLOSUM80_JOINT_PROBS,
         background: &BLOSUM80_BG,
     },
     CompoMatrixData {
+        #[cfg(test)]
         name: "BLOSUM50",
         freq_ratios: &BLOSUM50_FREQ_RATIOS,
         joint_probs: &BLOSUM50_JOINT_PROBS,
         background: &BLOSUM50_BG,
     },
     CompoMatrixData {
+        #[cfg(test)]
         name: "BLOSUM90",
         freq_ratios: &BLOSUM90_FREQ_RATIOS,
         joint_probs: &BLOSUM90_JOINT_PROBS,
         background: &BLOSUM90_BG,
     },
     CompoMatrixData {
+        #[cfg(test)]
         name: "BLOSUM45",
         freq_ratios: &BLOSUM45_FREQ_RATIOS,
         joint_probs: &BLOSUM45_JOINT_PROBS,
         background: &BLOSUM45_BG,
     },
     CompoMatrixData {
+        #[cfg(test)]
         name: "PAM30",
         freq_ratios: &PAM30_FREQ_RATIOS,
         joint_probs: &PAM30_JOINT_PROBS,
         background: &PAM30_BG,
     },
     CompoMatrixData {
+        #[cfg(test)]
         name: "PAM70",
         freq_ratios: &PAM70_FREQ_RATIOS,
         joint_probs: &PAM70_JOINT_PROBS,
         background: &PAM70_BG,
     },
     CompoMatrixData {
+        #[cfg(test)]
         name: "PAM250",
         freq_ratios: &PAM250_FREQ_RATIOS,
         joint_probs: &PAM250_JOINT_PROBS,

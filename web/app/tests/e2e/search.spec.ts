@@ -1429,8 +1429,7 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await expect(gaps).toHaveValue('9 1');
   await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
-  // BLASTP's list is NCBI's of the matrix (BLOSUM62 here) and BLASTX's holds the one pair that
-  // LOSAT's BLASTX reads (WA-FM-02).
+  // BLASTP's and BLASTX's lists are NCBI's of the matrix (BLOSUM62 here; WA-FM-02, series SC6).
   await program(page, 'blastp');
   await expect(gaps.locator('option')).toHaveText([
     ...PROTEIN_GAP_COSTS.lists.BLOSUM62!.map((pair) => `Existence: ${pair.replace(' ', ' Extension: ')}`),
@@ -1442,7 +1441,11 @@ test("NCBI's selects of pairs follow the scores and the matrix; Other shows the 
   await expect(page.getByTestId('param-seg-value')).toHaveValue('yes');
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
   await program(page, 'blastx');
-  await expect(gaps.locator('option')).toHaveText(['Existence: 11 Extension: 1', 'Other']);
+  await expect(gaps.locator('option')).toHaveText([
+    ...PROTEIN_GAP_COSTS.lists.BLOSUM62!.map((pair) => `Existence: ${pair.replace(' ', ' Extension: ')}`),
+    'Other',
+  ]);
+  await expect(gaps).toHaveValue('11 1');
 });
 
 test("Additional options: the command line's other options after the form's, marked and counted, read by the engine; Max matches in a query range in every mode (DW-42)", async ({

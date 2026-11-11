@@ -542,11 +542,16 @@ mod tests {
             pam30.keys().copied().collect::<Vec<_>>(),
             ["-threshold", "-window_size"]
         );
-        // BLASTX reads BLOSUM62 only, which changes nothing; BLASTN has no -matrix.
-        assert!(!defaults(Program::Blastx)
-            .unwrap()
-            .by
-            .contains_key("-matrix"));
+        // BLASTX (item SC6 of line NP): the matrix's gap costs, its threshold + 1 (a translated
+        // query; PAM30 17) and window; blastx-fast keeps its threshold 20 (as blastp-fast above).
+        let blastx = defaults(Program::Blastx).unwrap();
+        let pam30 = &blastx.by["-matrix"]["PAM30"];
+        assert_eq!(pam30["blastx"]["-gapopen"], "9");
+        assert_eq!(pam30["blastx"]["-gapextend"], "1");
+        assert_eq!(pam30["blastx"]["-threshold"], "17");
+        assert_eq!(pam30["blastx"]["-window_size"], "15");
+        assert_eq!(pam30["blastx-fast"]["-threshold"], "20");
+        // BLASTN has no -matrix.
         assert!(defaults(Program::Blastn).unwrap().by.is_empty());
     }
 

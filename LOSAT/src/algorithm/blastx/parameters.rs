@@ -58,9 +58,8 @@ fn ideal_block_computed(std: &[f64; crate::utils::matrix::BLASTAA_SIZE]) -> Karl
 }
 
 /// No NCBI counterpart (`LOSAT_X_BXKAONCE`): the ideal block is a constant of the program (no
-/// input), so it is computed on first use and shared; the value `ideal_block_computed` gives. It
-/// is a constant because BLASTX accepts only BLOSUM62 (`args.rs`, "unsupported BLASTX matrix"); a
-/// port of another BLASTX `-matrix` must key the `OnceLock` by the matrix.
+/// input), so it is computed on first use and shared; the value `ideal_block_computed` gives.
+/// BLOSUM62's only: another matrix's searches compute theirs in `score_block_of`.
 fn ideal_block() -> KarlinParams {
     static IDEAL: std::sync::OnceLock<KarlinParams> = std::sync::OnceLock::new();
     *IDEAL.get_or_init(|| ideal_block_computed(&compute_std_aa_composition()))
@@ -95,6 +94,70 @@ fn ideal_block() -> KarlinParams {
 //       loop_status = Blast_KarlinBlkUngappedCalc(sbp->kbp_psi[context],
 //                                            sbp->sfp[context]);
 // ```
+/// `score_block` with the search's matrix: BLOSUM62's is `score_block`, another matrix's
+/// `score_block_of`.
+pub fn score_block_for(
+    batch: &PreparedQueryBatch,
+    matrix: ScoringMatrix,
+) -> Vec<ContextParameters> {
+    if matrix == ScoringMatrix::Blosum62 {
+        score_block(batch)
+    } else {
+        score_block_of(batch, matrix)
+    }
+}
+
+/// `score_block` with another matrix than BLOSUM62: the contexts' score profiles over the
+/// matrix's score range (`sbp->loscore`, `sbp->hiscore`) and its ideal block
+/// (`ideal_karlin_params_of`, the block TBLASTN's and BLASTP's searches with that matrix take).
+/// Not inlined, so that BLOSUM62's `score_block` keeps its code.
+#[cold]
+#[inline(never)]
+fn score_block_of(batch: &PreparedQueryBatch, matrix: ScoringMatrix) -> Vec<ContextParameters> {
+    use crate::algorithm::tblastx::lookup::{ideal_karlin_params_of, matrix_score_bounds};
+    let std = compute_std_aa_composition();
+    let ideal = ideal_karlin_params_of(matrix);
+    let (low, high) = matrix_score_bounds(matrix);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3127-3130 (the alpha and
+    // beta of an ungapped search, which the length adjustment reads, blast_setup.c:815)
+    // ```c
+    //    else if (num_values > 0) {
+    //      (*alpha) = alpha_arr[0];
+    //      (*beta) = beta_arr[0];
+    // ```
+    // The matrix's ungapped row (BLOSUM62's are the computed block's defaults), as TBLASTX's
+    // contexts take them (`tblastx/blast_engine/run_impl.rs`).
+    let row = crate::stats::tables::lookup_protein_params_ungapped(matrix);
+    batch
+        .contexts
+        .iter()
+        .map(|c| {
+            let mut seq = vec![0];
+            seq.extend_from_slice(&batch.sequence_start[1 + c.offset..1 + c.offset + c.length]);
+            seq.push(0);
+            let comp = compute_aa_composition(&seq, c.length);
+            let profile = compute_score_freq_profile_for_matrix(&comp, &std, low, high, matrix);
+            let ka = compute_karlin_params_ungapped(&profile).ok().map(|p| {
+                let mut ka = apply_check_ideal(p, ideal);
+                ka.alpha = row.alpha;
+                ka.beta = row.beta;
+                ka
+            });
+            ContextParameters {
+                valid: c.is_valid && ka.is_some(),
+                ungapped: ka.unwrap_or_default(),
+                search_space: 0,
+                length_adjustment: 0,
+                word_cutoff: i32::MAX,
+                word_xdrop_init: 0,
+                word_xdrop: 0,
+                hit_cutoff: i32::MAX,
+                hit_cutoff_max: 0,
+            }
+        })
+        .collect()
+}
+
 pub fn score_block(batch: &PreparedQueryBatch) -> Vec<ContextParameters> {
     let std = compute_std_aa_composition();
     let ideal = if ka_once_on() {
@@ -152,6 +215,21 @@ pub fn gumbel_db_length(options: &ResolvedOptions, db_length: i64) -> i64 {
     }
 }
 
+/// The gapped Karlin block of the search's matrix and gap costs (`kbp_gap`, from NCBI's tables);
+/// an ungapped search reads none (its gap costs need not be in the matrix's table, `args.rs`), and
+/// gets the default block, which it never reads.
+pub(crate) fn gapped_karlin(options: &ResolvedOptions) -> KarlinParams {
+    if options.gapped {
+        lookup_protein_params(&ProteinScoringSpec {
+            matrix: options.scoring,
+            gap_open: options.gap_open,
+            gap_extend: options.gap_extend,
+        })
+    } else {
+        KarlinParams::default()
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
 // ```c++
 //     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
@@ -166,14 +244,15 @@ pub fn gumbel_db_length(options: &ResolvedOptions, db_length: i64) -> i64 {
 //     use_old_fsc = getenv("OLD_FSC");
 //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
 // ```
-/// The Gumbel block of a gapped search, none with `-searchsp`, at any value.
+/// The Gumbel block of a gapped search, none with `-searchsp` (at any value) or `OLD_FSC`
+/// (`ResolvedOptions::old_fsc`).
 pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGumbelBlk> {
     if options.old_fsc {
         return None;
     }
     lookup_protein_gumbel_params(
         &ProteinScoringSpec {
-            matrix: ScoringMatrix::Blosum62,
+            matrix: options.scoring,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,
         },
@@ -299,11 +378,7 @@ pub fn effective_lengths(
     if db_length == 0 && fixed_spaces.is_none() && options_space == 0 {
         return Ok(());
     }
-    let gapped = lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
-        gap_open: options.gap_open,
-        gap_extend: options.gap_extend,
-    });
+    let gapped = gapped_karlin(options);
     for (i, (c, p)) in batch.contexts.iter().zip(parameters).enumerate() {
         if !p.valid {
             p.length_adjustment = 0;
@@ -528,7 +603,7 @@ pub fn subject_parameters(
     // length is too short"; LOSAT refuses the search instead.
     ensure!(
         !options.old_fsc || avg_subject_length > 0,
-        "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
+        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
     );
     let n = if options.gapped && !options.old_fsc {
         i32::try_from(min_subject_length.max(10))?
@@ -543,12 +618,7 @@ pub fn subject_parameters(
         db_count,
         fixed_spaces,
     )?;
-    let spec = ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
-        gap_open: options.gap_open,
-        gap_extend: options.gap_extend,
-    };
-    let gapped = lookup_protein_params(&spec);
+    let gapped = gapped_karlin(options);
     let gumbel = if options.gapped {
         gumbel_block(options, db_length)
     } else {

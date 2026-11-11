@@ -73,10 +73,14 @@ indicatif = "0.18"
 rustc-hash = "2.1"
 # Compressed input (`-query`, `-subject`, `makeblastdb -in` named `.gz`, `.bz2` or `.zst`), with
 # pure-Rust decoders only, as the pure-Rust runtime boundary requires (no C library, no `links`
-# metadata): flate2's miniz_oxide backend, bzip2's libbz2-rs-sys backend (not bzip2-sys), and
+# metadata): flate2's zlib-rs backend, bzip2's libbz2-rs-sys backend (not bzip2-sys), and
 # ruzstd (a decoder; LOSAT never compresses). bzip2 0.6 builds libbz2-rs-sys by default; its `bzip2-sys`
-# feature (the C library) is never enabled.
-flate2 = "1.1"
+# feature (the C library) is never enabled. zlib-rs is a Rust port of zlib's inflate (no build
+# script, no `links`), so that a `.gz` file inflates, and fails, as in makeblastdb, which calls the
+# system's zlib (`blastinput::compressed::GzipMembers`); flate2's default miniz_oxide backend accepts
+# data that zlib refuses (a distance past the window start, a block without its end code).
+# `runtime_detection` lets zlib-rs pick its SIMD copy and checksum paths at run time (std).
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 bzip2 = "0.6"
 ruzstd = "0.9"
 

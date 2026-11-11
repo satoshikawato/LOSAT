@@ -1,0 +1,17 @@
+# The shared vector of web ABI v1's `-searchsp` and `-dbsize` (BLASTN, TBLASTX and BLASTP). For each case,
+# `losat <program> -query query -subject subject <extra> -outfmt <outfmt>`, run where `query` holds the bytes
+# of <query> and `subject` those of <subject>, writes <name>.out to standard output;
+# losat_web_run_pair(<program>, ...) returns the same bytes (tests/web_v1_search_space.rs checks the CLI,
+# src/web_api.rs the ABI's export). Columns: name, program, query, subject, outfmt, extra words.
+blastn_plain	blastn	query.fna	subject.fna	6	
+blastn_searchsp	blastn	query.fna	subject.fna	6	-searchsp 1000000
+blastn_dbsize	blastn	query.fna	subject.fna	6	-dbsize 5000000
+blastn_both	blastn	query.fna	subject.fna	6	-searchsp=2000000 -dbsize=9000000
+blastn_task_searchsp	blastn	query.fna	subject.fna	6	-task blastn -searchsp 300000
+tblastx_plain	tblastx	query.fna	subject.fna	6	
+tblastx_searchsp	tblastx	query.fna	subject.fna	6	-searchsp 1000000
+tblastx_dbsize	tblastx	query.fna	subject.fna	6	-dbsize 5000000
+blastp_plain	blastp	query.faa	subject.faa	6	
+blastp_searchsp	blastp	query.faa	subject.faa	6	-searchsp 1000000
+blastp_dbsize	blastp	query.faa	subject.faa	6	-dbsize 5000000
+blastp_both	blastp	query.faa	subject.faa	6	-searchsp=2000000 -dbsize=9000000

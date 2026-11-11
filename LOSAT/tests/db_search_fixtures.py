@@ -36,11 +36,12 @@ LOSAT/tests/db_search (README.md there says how they were built).
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
 the default is every program). It runs NCBI in a cleaned environment (see `check`), because each
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
-ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, and `~/.ncbirc` (HOME is an empty directory).
+ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, and `~/.ncbirc`
+(HOME is an empty directory).
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
-(default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC or
-BL2SEQ_LEGACY variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
+(default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC,
+BL2SEQ_LEGACY, ADAPTIVE_CBS or CTOOLKIT_COMPATIBLE variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
 taxonomy database or a BLASTDB), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
@@ -79,15 +80,15 @@ COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "
            "stderr_sha256", "covers"]
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast")
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
-            "PRE_FETCH_SEQS_LIMIT")
+            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
 # (the directory of a `taxdb.bti`), the three that cut a query file into batches and chunks, and
 # ARCHIVE_FORMAT (how outfmt 11 writes its archive: unset text, `bin...` binary), PRE_FETCH_SEQS_LIMIT
 # (the number of Seq-aligns above which NCBI's formatter reads the reported sequences one by one), and
-# BL2SEQ_LEGACY (read for -subject only; a -db search ignores it).
+# BL2SEQ_LEGACY (read for -subject only; a -db search ignores it), and OLD_FSC (no Gumbel block, any value).
 ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT",
-             "BL2SEQ_LEGACY")
+             "BL2SEQ_LEGACY", "OLD_FSC")
 
 
 def read_manifest() -> tuple[list[str], list[dict[str, str]]]:

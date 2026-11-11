@@ -346,7 +346,7 @@ own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_se
 | translated in six frames | the query (`-query_gencode`) | the subject (`-db_gencode`) | both | nothing |
 | gapped | yes, or `-ungapped` | yes | no: ungapped only, no traceback | yes |
 | HSP linking (`core/link_hsps.c`) | uneven gaps; even gaps when ungapped with no intron length | uneven gaps | even gaps, before and after the re-evaluation for ambiguities | none |
-| composition-based statistics | modes 0 and 2 | modes 0 and 2 (1 and 3 refused) | none | mode 0 |
+| composition-based statistics | modes 0 to 3 | modes 0 to 3 | none | modes 0 and 1 (the default 1, with the database's frequency ratios; 2 and 3 run as 1) |
 | reports written | after each query batch | after the last batch | after each batch when its stream check passes, otherwise at the end | as blastp |
 
 The shared protein code sits low in the layer order: `tblastx::lookup` (the protein word lookup

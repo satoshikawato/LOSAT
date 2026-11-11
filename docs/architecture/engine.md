@@ -224,8 +224,7 @@ rpsblast yet.
 Known copies that remain: blastx keeps its own FASTA reader types in `blastx/input.rs`
 (`FastaRecord`, `EolStyle`, `PushbackBuffer`, `FastaStream`) next to the shared ones in
 `blastinput/fasta_reader`; each program has its own function that purges HSPs with common
-endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
-(`blastx/culling.rs`) instead of `core::hspfilter_culling`; and each of the five programs keeps its own report glue
+endpoints, written for its own HSP type; and each of the five programs keeps its own report glue
 (`tabular.rs`, `blast_xml.rs`, `seqalign.rs`, `archive.rs`) in front of `report`.
 
 Files whose name starts with `x_` hold a speed-up path, behind a switch or graduated

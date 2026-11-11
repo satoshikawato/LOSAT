@@ -223,7 +223,8 @@ pub(crate) fn batches_may_refuse(
 /// (the archives of the batches and the messages between them, as a stream that both go to reads
 /// them from NCBI) and `discard` drops them. Outside `hold` the bytes pass through. Shared, so that
 /// the diagnostics stream behind the archive's message log (`report::archive::DiagTee`) can be one
-/// of its streams.
+/// of its streams. The side files of an outfmt 13 or 14 document of the run follow it
+/// (`side_files`): held, written before the streams and dropped as they are.
 pub(crate) struct ArchiveHold<S: Write>(std::sync::Arc<std::sync::Mutex<HoldState<S>>>);
 
 struct HoldState<S> {
@@ -231,6 +232,8 @@ struct HoldState<S> {
     discarded: bool,
     sinks: Vec<S>,
     held: Vec<(usize, Vec<u8>)>,
+    /// The side files of the run's outfmt 13 and 14 documents.
+    sides: Vec<super::blast_xml::HeldSideFiles>,
 }
 
 /// A stream of an `ArchiveHold`.
@@ -252,6 +255,7 @@ impl<S: Write> ArchiveHold<S> {
             discarded: false,
             sinks: Vec::new(),
             held: Vec::new(),
+            sides: Vec::new(),
         })))
     }
 
@@ -271,24 +275,57 @@ impl<S: Write> ArchiveHold<S> {
         }
     }
 
-    /// Keeps everything written from now on.
-    pub(crate) fn hold(&self) {
-        self.state().holding = true;
+    /// The side files `files` of an outfmt 13 or 14 document of the run, which follow this hold
+    /// (`blast_xml::HeldSideFiles`): the command line holds its document's side files the same way
+    /// (`blast_xml::HeldOutput`).
+    pub(crate) fn side_files(
+        &self,
+        files: crate::report::blast_xml2::RunSideFiles,
+    ) -> crate::report::blast_xml2::RunSideFiles {
+        let side = super::blast_xml::HeldSideFiles::new(files);
+        let mut state = self.state();
+        if state.discarded {
+            side.discard();
+        } else if state.holding {
+            side.hold();
+        }
+        state.sides.push(side.clone());
+        Box::new(side)
     }
 
-    /// Writes what is held, in order, and passes the bytes on again.
-    pub(crate) fn release(&self) -> std::io::Result<()> {
+    /// Keeps everything written from now on.
+    pub(crate) fn hold(&self) {
+        let mut state = self.state();
+        state.holding = true;
+        for side in &state.sides {
+            side.hold();
+        }
+    }
+
+    /// Writes what is held and passes the bytes on again: the side files first (in order), then
+    /// the streams in the order of their writes. A side file that cannot be opened stops the run
+    /// there, as NCBI's does (`Cannot open output file`, exit status 1): the side files before it
+    /// stay and the streams get nothing of what was held.
+    pub(crate) fn release(&self) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
         let held = std::mem::take(&mut state.held);
         if state.discarded {
             return Ok(());
         }
+        for side in &state.sides {
+            if let Err(error) = side.release() {
+                state.discarded = true;
+                return Err(error);
+            }
+        }
         for (sink, bytes) in held {
-            state.sinks[sink].write_all(&bytes)?;
+            state.sinks[sink]
+                .write_all(&bytes)
+                .map_err(super::native::output_error)?;
         }
         for sink in &mut state.sinks {
-            sink.flush()?;
+            sink.flush().map_err(super::native::output_error)?;
         }
         Ok(())
     }
@@ -298,17 +335,33 @@ impl<S: Write> ArchiveHold<S> {
         let mut state = self.state();
         state.discarded = true;
         state.held.clear();
+        for side in &state.sides {
+            side.discard();
+        }
     }
 
-    /// The end of a run that stopped with `error`: one of NCBI's own errors, after which NCBI
-    /// writes its error archive (`error_lines`), follows the archives of the batches before it,
-    /// which NCBI wrote (released); LOSAT's refusal (the title of the batch, or another) follows
-    /// no byte (dropped).
+    /// The end of a run that stopped with `error` and held its output for the archive's titles
+    /// (`batches_may_refuse`): one of NCBI's own errors, after which NCBI writes its error archive
+    /// (`error_lines`), follows the archives of the batches before it, which NCBI wrote
+    /// (released); LOSAT's refusal (the title of the batch, or another) follows no byte (dropped).
     pub(crate) fn end_with(&self, error: &anyhow::Error) {
         if error_lines(error, false).is_some() {
             let _ = self.release();
         } else {
             self.discard();
+        }
+    }
+
+    /// The end of a run that stopped with `error` and held its output only for its BLAST XML, XML2
+    /// or JSON documents: dropped after one of the refusals that such a hold is for
+    /// (`blast_xml::drops_held_document`), written after any other error (the bytes of the batches
+    /// before it, as the run without a hold writes them), as the command line's document
+    /// (`blast_xml::HeldOutput`).
+    pub(crate) fn end_document_with(&self, error: &anyhow::Error) {
+        if super::blast_xml::drops_held_document(error) {
+            self.discard();
+        } else {
+            let _ = self.release();
         }
     }
 }

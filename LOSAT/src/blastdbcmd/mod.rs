@@ -9,7 +9,7 @@
 //! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader), not
 //! clap's: `main` hands it the words after `blastdbcmd`. The masks of `makeblastdb -mask_data`
 //! are read (`-info`, `-mask_sequence_with`, `%m`). A `-db` of several names is read as NCBI's
-//! reader reads it, as one database (`SeqDb::open_in_with_masks`).
+//! reader reads it, as one database (`SeqDb::open_in`).
 
 mod args;
 mod fasta;
@@ -601,7 +601,7 @@ fn open_database(
         let Some(&seqtype) = types.next() else {
             unreachable!("at least one sequence type is tried");
         };
-        let opened = SeqDb::open_in_with_masks(name, seqtype, path).and_then(|mut db| {
+        let opened = SeqDb::open_in(name, seqtype, path).and_then(|mut db| {
             let volumes = SeqDb::info_volumes(name, seqtype, path)?;
             prepare(&mut db)?;
             Ok((db, volumes))

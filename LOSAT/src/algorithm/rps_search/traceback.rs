@@ -117,6 +117,98 @@ pub(super) fn swap_roles(hsp_list: &mut BlastpHspList, query_length: usize) {
     }
 }
 
+/// The identities of a volume's final HSPs of one query as NCBI's formatter counts them: the
+/// columns where the query's letters as read (`query_letters`, without the SEG and lower-case
+/// masks and without the X of `Blast_MaskUnsupportedAA`) equal the profile's consensus letters.
+/// The traceback counts on the searched letters (`num_ident` of `final_hsp` and of the redo, as
+/// NCBI's core does), which differ where the query is masked; NCBI's reports do not read that
+/// count but the aligned sequences of their scope (the outfmt 0 `Identities`, the tabular
+/// `nident`, `pident` and `mismatch`), so the HSPs of a run whose writer prints the HSP's count
+/// (outfmt 0, the default outfmt 6 and 7) take these; a tabular report with a field list counts on
+/// its rows and keeps the traceback's count, which opens NCBI's alignment block for `nident`
+/// (`blastp::tabular::needs_rows`, `rps_hooks::rps_search`). The roles are swapped already
+/// (`swap_roles`: query offsets on the user query, subject offsets on the profile).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1007
+/// ```c++
+///     if (x_IsFieldRequested(eQuerySeq) ||
+///         ...
+///         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
+///         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
+///         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
+///
+///         alnVec->SetGapChar('-');
+///         ...
+///         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+///         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+///         ...
+///             num_ident = 0;
+///             ...
+///             for (unsigned int i = 0;
+///                  i < min(m_QuerySeq.size(), m_SubjectSeq.size());
+///                  ++i) {
+///                 if (m_QuerySeq[i] == m_SubjectSeq[i]) {
+///                     ++num_ident;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2135
+/// ```c++
+/// void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
+///                                           const string& sequence ,
+///                                           int& match, int& positive,
+///                                           string& middle_line)
+/// {
+///     match = 0;
+///     ...
+///     for(int i=0; i<min_length; i++){
+///         if(sequence_standard[i]==sequence[i]){
+///             ...
+///             match ++;
+/// ```
+pub(super) fn formatter_identities(
+    hit_list: &mut BlastpHitList,
+    query_letters: &[u8],
+    consensus: &[u8],
+    offsets: &[i32],
+) {
+    for hsp_list in hit_list
+        .hsplist_array
+        .iter_mut()
+        .take(hit_list.hsplist_count)
+    {
+        let profile = &consensus[offsets[hsp_list.oid as usize] as usize..];
+        for hsp in &mut hsp_list.hsps {
+            let Some(ops) = hsp.gap_info.as_ref() else {
+                continue;
+            };
+            let (mut q, mut s) = (hsp.q_start - 1, hsp.s_start - 1);
+            let mut num_ident = 0usize;
+            for op in ops {
+                match *op {
+                    GapEditOp::Sub(n) => {
+                        let n = n as usize;
+                        num_ident += query_letters[q..q + n]
+                            .iter()
+                            .zip(&profile[s..s + n])
+                            .filter(|(a, b)| a == b)
+                            .count();
+                        q += n;
+                        s += n;
+                    }
+                    GapEditOp::Del(n) => s += n as usize,
+                    GapEditOp::Ins(n) => q += n as usize,
+                }
+            }
+            hsp.mismatch += hsp.num_ident as i64 - num_ident as i64;
+            hsp.num_ident = num_ident;
+            hsp.identity = if hsp.length > 0 {
+                (num_ident as f64 * 100.0) / (hsp.length as f64)
+            } else {
+                0.0
+            };
+        }
+    }
+}
+
 impl RpsTraceback<'_> {
     /// The traceback of the query of letters `query` (without sentinels) and index `q_idx` from
     /// its preliminary hit list.

@@ -655,6 +655,7 @@ fn parse_blastp_args(
         inclusion_ethresh: None,
         first_query_ordinal: 0,
         psiblast_pssm: None,
+        formatting: Default::default(),
         rps: None,
     };
 

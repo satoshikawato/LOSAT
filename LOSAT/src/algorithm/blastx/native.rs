@@ -718,6 +718,8 @@ fn run_inner(
     // `-subject` title, the message of a query or a subject of a database with parsed Seq-ids
     // could still be refused later holds the document in memory until its epilog (`blast_xml::HeldOutput`; outfmt 13 and 14: the side files
     // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
+    // The run stops at a batch after this many queries (`blast_xml::QueryScan::stops_after`).
+    let mut stops_after = None;
     if let Some(held) = &held {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) or `-query -` cannot be read a second time: the read before the search would
@@ -739,15 +741,22 @@ fn run_inner(
             .map_err(|_| inaccessible("query", &args.query))?;
         // A `BATCH_SIZE` that the run refuses (below, before any query is read) leaves no title
         // to check, as a batch size of 0 does.
-        let messages_may_be_refused = super::blast_xml::prescan_queries(
+        // A `-subject` XML2 or JSON document holds each report back until the next query's
+        // arrives (`Xml2Target::holds_back`).
+        let holds_back =
+            super::blast_xml::xml2_kind(options.outfmt).is_some() && database.is_none();
+        let scan = super::blast_xml::prescan_queries(
             query_file
                 .try_clone()
                 .map_err(|_| inaccessible("query", &args.query))?,
             &query_settings,
+            &options,
             args.lcase_masking,
             *batch_size.as_ref().unwrap_or(&0),
             query_range.as_ref(),
+            holds_back,
         )?;
+        stops_after = scan.stops_after;
         (&query_file)
             .seek(SeekFrom::Start(start))
             .map_err(|_| inaccessible("query", &args.query))?;
@@ -771,7 +780,7 @@ fn run_inner(
         let parsed_may_be_refused = database
             .as_ref()
             .is_some_and(|database| database.parsed_seqids());
-        if messages_may_be_refused
+        if scan.messages_may_be_refused
             || taxdb_may_refuse
             || parsed_may_be_refused
             || super::blast_xml::subjects_may_be_refused(&subjects)
@@ -1092,6 +1101,8 @@ fn run_inner(
             )
             .map_err(archive_error);
         }
+        // The run stops after this batch (`stops_after`).
+        let stops = stops_after == Some(queries_before + queries.len());
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
                 let reported = reported_batch(
@@ -1116,6 +1127,7 @@ fn run_inner(
                     },
                     results,
                     queries_before,
+                    stops,
                     xml2.borrow_mut().as_mut(),
                 )
                 .map_err(refused)
@@ -1129,6 +1141,7 @@ fn run_inner(
                 &shown_run,
                 results,
                 queries_before,
+                stops,
                 xml2.borrow_mut().as_mut(),
             )
             .map_err(refused),

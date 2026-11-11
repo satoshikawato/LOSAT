@@ -1250,6 +1250,27 @@ struct ZstdFrames {
     checksum: bool,
     /// Bytes of the current frame given out so far.
     produced: u64,
+    /// The decoder has read a frame header and reserved that frame's window. LOSAT: ruzstd
+    /// reserves the ring buffer for the window only when a decoder that already has a state is
+    /// reset, and a decoder's first frame creates its state without reserving, so the buffer
+    /// grows by doubling as the blocks arrive. A native allocator hands the smaller regions back;
+    /// a Wasm allocator cannot reuse them for the next larger one, and the linear memory, which
+    /// never shrinks, ends near twice the buffer (the Web app's Data worker, `--long=27` file:
+    /// 270.6 MiB where the window is 91.7 MiB). The first frame's header is therefore read a
+    /// second time, with the `reset` of a decoder that has its state, which reserves what every
+    /// later frame reserves. Every frame and input, no size rule.
+    /// ruzstd 0.9.1 reference: src/decoding/frame_decoder.rs:200-210 (`FrameDecoder::reset`:
+    /// ```text
+    /// let state = match &mut self.state {
+    ///     Some(s) => { s.reset(source, self.max_window_size)?; s }
+    ///     None => { self.state = Some(FrameDecoderState::new(source, self.max_window_size)?); ... }
+    /// ```
+    /// ), 103-119 (`FrameDecoderState::new`: `DecoderScratch::new(window_size)`, whose
+    /// `DecodeBuffer::new` reserves nothing, src/decoding/decode_buffer.rs:35-44), 121-130
+    /// (`FrameDecoderState::reset`: `decoder_scratch.reset(window_size)`), decode_buffer.rs:46-49
+    /// (`DecodeBuffer::reset`: `self.buffer.reserve(self.window_size)`), ringbuffer.rs:64-100
+    /// (`reserve`, `reserve_amortized`: the doubling).
+    reserved: bool,
 }
 
 /// The bytes of the frame header at the start of `unit`, as far as its first bytes tell: the
@@ -1326,6 +1347,7 @@ impl ZstdFrames {
             unit: Vec::new(),
             checksum: false,
             produced: 0,
+            reserved: false,
         }
     }
 
@@ -1455,6 +1477,7 @@ impl ZstdFrames {
                             Progress::more(taken)
                         });
                     }
+                    let first = !self.reserved;
                     let Some((result, descriptor)) = self.decode_unit(
                         input,
                         &mut taken,
@@ -1462,13 +1485,20 @@ impl ZstdFrames {
                         frame_header_len,
                         |decoder, bytes| {
                             let descriptor = bytes.get(4).copied().unwrap_or(0);
-                            (decoder.reset(bytes), descriptor)
+                            let header = *bytes;
+                            let mut result = decoder.reset(bytes);
+                            if first && result.is_ok() {
+                                // The first frame of a decoder: see `ZstdFrames::reserved`.
+                                result = decoder.reset(header);
+                            }
+                            (result, descriptor)
                         },
                     ) else {
                         return Ok(Progress::more(taken));
                     };
                     match result {
                         Ok(()) => {
+                            self.reserved = true;
                             self.state = ZstdState::Frame;
                             self.checksum = descriptor & 0x04 != 0;
                             self.produced = 0;

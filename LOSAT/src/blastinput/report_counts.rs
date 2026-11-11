@@ -407,6 +407,59 @@ mod tests {
         );
     }
 
+    // blast_args.cpp:2947-2989 (quoted at `warnings_with`) and NCBI 2.17.0's rpsblast
+    // (DESIGN_ps11c `f.allfmt.c0.7.err`): -num_descriptions, -line_length, -sorthits, the few
+    // matches, then -sorthsps; outfmt 0 reads -line_length and -sorthits and warns of nothing.
+    #[test]
+    fn the_formatting_options_warn_in_ncbis_order() {
+        let all = FormattingArgs {
+            line_length: Some(80),
+            sort_hits: Some(1),
+            sort_hsps: Some(1),
+        };
+        let (counts, warnings) =
+            run_report_counts_with("rpsblast", &[7], Some(2), Some(3), None, &all).unwrap();
+        assert_eq!(counts.hitlist_size, 2);
+        assert_eq!(
+            String::from_utf8(warnings).unwrap(),
+            "Warning: [rpsblast] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\n\
+             Warning: [rpsblast] The parameter -line_length is not applicable for output formats > 4 .\n\
+             Warning: [rpsblast] The parameter -sorthits is ignored for output formats > 4.\n\
+             Warning: [rpsblast] Examining 5 or more matches is recommended\n\
+             Warning: [rpsblast] The parameter -sorthsps is ignored for output formats != 0.\n"
+        );
+        // Outfmt 0: only the few matches.
+        let (_, warnings) =
+            run_report_counts_with("rpsblast", &[0], Some(2), None, None, &all).unwrap();
+        assert_eq!(
+            String::from_utf8(warnings).unwrap(),
+            "Warning: [rpsblast] Examining 5 or more matches is recommended\n"
+        );
+        // -sorthsps alone with outfmt 6, and -line_length 1 with outfmt 10.
+        let hsps = FormattingArgs {
+            sort_hsps: Some(4),
+            ..FormattingArgs::default()
+        };
+        assert_eq!(
+            String::from_utf8(
+                report_counts(6, None, None, None).warnings_with("rpsblast", 6, false, &hsps)
+            )
+            .unwrap(),
+            "Warning: [rpsblast] The parameter -sorthsps is ignored for output formats != 0.\n"
+        );
+        let length = FormattingArgs {
+            line_length: Some(1),
+            ..FormattingArgs::default()
+        };
+        assert_eq!(
+            String::from_utf8(report_counts(10, None, None, None).warnings_with("rpsblast", 10, false, &length))
+                .unwrap(),
+            "Warning: [rpsblast] The parameter -line_length is not applicable for output formats > 4 .\n"
+        );
+        assert_eq!(length.line_length(), 1);
+        assert_eq!(FormattingArgs::default().line_length(), 60);
+    }
+
     #[test]
     fn a_hit_list_of_zero_is_the_no_hits_error() {
         assert!(report_counts(0, None, Some(1), None).validate().is_ok());

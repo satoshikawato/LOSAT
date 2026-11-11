@@ -129,10 +129,20 @@ fn x_drop_overflow(option: &str, bits: f64, scale: f64) -> anyhow::Error {
     )
 }
 
+/// A query's ungapped X-drop (`x_dropoff_init`) from the X-drop in bits `bits` (above 0,
+/// `validate_protein_options`), the query's ungapped Lambda and the database's scale: the product
+/// is a double, converted to `Int4` once; `None` where that conversion is undefined (`int4_of`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:216-221 (quoted at
+/// `RpsCutoffs`)
+fn ungapped_x_dropoff(bits: f64, lambda: f64, scale: f64) -> Option<i32> {
+    int4_of(scale * (bits * std::f64::consts::LN_2 / lambda).ceil())
+}
+
 /// NCBI's `(Int4)` conversion of a double where it is defined: the value truncated toward zero,
 /// `None` where that leaves `Int4` (or the value is not a number), which is undefined behaviour in
 /// C (C11 6.3.1.4).
-pub(crate) fn int4_of(value: f64) -> Option<i32> {
+fn int4_of(value: f64) -> Option<i32> {
     let truncated = value.trunc();
     (truncated >= f64::from(i32::MIN) && truncated <= f64::from(i32::MAX))
         .then_some(truncated as i32)
@@ -250,13 +260,8 @@ impl RpsRun<'_> {
     /// cutoff leaves `i32`.
     fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Result<RpsCutoffs> {
         let int_scale = scale as i32;
-        // (`x_dropoff` is above 0, `validate_protein_options`; the product is the double's.)
-        let x_dropoff = int4_of(
-            scale
-                * (self.x_drop_ungapped_bits * std::f64::consts::LN_2 / query.kbp_std.lambda)
-                    .ceil(),
-        )
-        .ok_or_else(|| x_drop_overflow("-xdrop_ungap", self.x_drop_ungapped_bits, scale))?;
+        let x_dropoff = ungapped_x_dropoff(self.x_drop_ungapped_bits, query.kbp_std.lambda, scale)
+            .ok_or_else(|| x_drop_overflow("-xdrop_ungap", self.x_drop_ungapped_bits, scale))?;
         let hit_cutoff = spouge_etos(
             self.prelim_evalue,
             &self.gapped,
@@ -611,6 +616,150 @@ fn finish_volume_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // C11 6.3.1.4: a double converts to `int` truncated toward zero when the truncated value is
+    // representable; otherwise (and for NaN) the behaviour is undefined, which `int4_of` refuses.
+    #[test]
+    fn int4_conversions_truncate_toward_zero_inside_32_bits_only() {
+        assert_eq!(int4_of(2_147_483_647.9), Some(i32::MAX));
+        assert_eq!(int4_of(2_147_483_648.0), None);
+        assert_eq!(int4_of(-2_147_483_648.9), Some(i32::MIN));
+        assert_eq!(int4_of(-2_147_483_649.0), None);
+        assert_eq!(int4_of(-0.9), Some(0));
+        assert_eq!(int4_of(-2.596), Some(-2));
+        assert_eq!(int4_of(64.9), Some(64));
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, -1e300] {
+            assert_eq!(int4_of(value), None, "{value}");
+        }
+    }
+
+    // blast_parameters.c:216-221: `(Int4)(scale_factor * ceil(x_dropoff * LN2 / Lambda))`, the
+    // ceiling before the scale, one conversion of the product.
+    #[test]
+    fn the_ungapped_x_drop_is_the_ceiling_times_the_scale() {
+        let lambda = 0.3176;
+        // 7 bits: ceil(15.28) = 16 raw, 1,600 at scale 100.
+        assert_eq!(ungapped_x_dropoff(7.0, lambda, 1.0), Some(16));
+        assert_eq!(ungapped_x_dropoff(7.0, lambda, 100.0), Some(1600));
+        // A tiny X-drop is still one raw unit.
+        assert_eq!(ungapped_x_dropoff(1e-300, lambda, 200.0), Some(200));
+        // ceil(x) * scale just inside and just outside 32 bits.
+        let bits_for = |raw: f64| raw * lambda / std::f64::consts::LN_2;
+        assert_eq!(
+            ungapped_x_dropoff(bits_for(21_474_836.0) - 1e-6, lambda, 100.0),
+            Some(2_147_483_600)
+        );
+        assert_eq!(
+            ungapped_x_dropoff(bits_for(21_474_837.0), lambda, 100.0),
+            None
+        );
+        assert_eq!(ungapped_x_dropoff(1e300, lambda, 1.0), None);
+    }
+
+    /// An `RpsRun` of no query with the given X-drops in bits, BLOSUM62 11/1's gapped block and
+    /// no composition-based statistics.
+    fn x_drop_run<'a>(
+        gumbel: &'a BlastGumbelBlk,
+        options: &'a RpsSearch,
+        gapped_bits: f64,
+        final_bits: f64,
+    ) -> RpsRun<'a> {
+        RpsRun {
+            queries: Vec::new(),
+            gapped: KarlinParams {
+                lambda: 0.267,
+                k: 0.041,
+                h: 0.14,
+            },
+            gumbel,
+            cutoff_subject_length: 0,
+            evalue: 10.0,
+            prelim_evalue: 10.0,
+            cbs: 0,
+            sbp: None,
+            hitlist_size: 500,
+            prelim_hitlist_size: 500,
+            window: 40,
+            x_drop_ungapped_bits: 7.0,
+            x_drop_gapped_bits: gapped_bits,
+            x_drop_final_bits: final_bits,
+            gap_trigger_bits: 22.0,
+            options,
+        }
+    }
+
+    // blast_parameters.c:455-469 (quoted at `RpsRun::gapped_x_drops`): each X-drop truncated
+    // toward zero, the final one the larger of its own and the preliminary one (compared as
+    // doubles), both times the scale above 1; the values NCBI's probes give (DESIGN_ps11c §2).
+    #[test]
+    fn gapped_x_drops_are_ncbis_conversions_at_the_scale() {
+        let gumbel = BlastGumbelBlk {
+            lambda: 0.267,
+            c: 0.0,
+            g: 0.0,
+            a: 0.0,
+            alpha: 0.0,
+            sigma: 0.0,
+            a_un: 0.0,
+            alpha_un: 0.0,
+            b: 0.0,
+            beta: 0.0,
+            tau: 0.0,
+            db_length: 0,
+        };
+        let options = RpsSearch::default();
+        let drops = |gapped: f64, last: f64, scale: f64| {
+            x_drop_run(&gumbel, &options, gapped, last)
+                .gapped_x_drops(scale)
+                .map_err(|error| error.to_string())
+        };
+        // The defaults: 15 bits = 38 raw, 25 bits = 64 raw.
+        assert_eq!(drops(15.0, 25.0, 1.0), Ok((38, 64)));
+        assert_eq!(drops(15.0, 25.0, 100.0), Ok((3800, 6400)));
+        // 0 and negative gapped X-drops are kept as they are (the kernels raise them).
+        assert_eq!(drops(0.0, 25.0, 1.0), Ok((0, 64)));
+        assert_eq!(drops(-1.0, -1.0, 100.0), Ok((-200, -200)));
+        assert_eq!(drops(-1.0, 25.0, 100.0), Ok((-200, 6400)));
+        // The final X-drop is at least the preliminary one: 40 and 10 bits give 103 and 103.
+        assert_eq!(drops(40.0, 10.0, 1.0), Ok((103, 103)));
+        // A final X-drop far below 32 bits takes the preliminary one: no undefined conversion.
+        assert_eq!(drops(15.0, -1e300, 100.0), Ok((3800, 3800)));
+        for (gapped, last, scale, option) in [
+            (1e300, 25.0, 1.0, "-xdrop_gap of 1e300 bits"),
+            (-1e300, 25.0, 1.0, "-xdrop_gap of -1e300 bits"),
+            (15.0, 1e300, 1.0, "-xdrop_gap_final of 1e300 bits"),
+            // 1e7 bits = 25,960,568 raw: inside 32 bits at scale 1, outside at scale 100.
+            (1e7, 25.0, 100.0, "-xdrop_gap of 10000000.0 bits"),
+            (15.0, 1e7, 100.0, "-xdrop_gap_final of 10000000.0 bits"),
+        ] {
+            let error = drops(gapped, last, scale).unwrap_err();
+            assert!(
+                error.contains(option) && error.contains(&format!("scale {scale}")),
+                "{error}"
+            );
+        }
+        assert_eq!(drops(1e7, 1e7, 1.0), Ok((25_960_568, 25_960_568)));
+    }
+
+    // blast_kappa.c:2381-2383 (quoted at `RedoRun::new`): the redo's X-drop at Lambda over the
+    // scaling factor 32; 25 bits give 2,076 raw, below the scaled final X-drop 6,400 of scale 100.
+    #[test]
+    fn the_redo_x_drop_is_the_larger_of_the_bits_at_the_redo_lambda_and_the_final_one() {
+        let lambda = 0.267 / SCALING_FACTOR;
+        assert_eq!(
+            int4_of(RedoRun::x_dropoff_of(25.0, lambda, 6400)),
+            Some(6400)
+        );
+        assert_eq!(int4_of(RedoRun::x_dropoff_of(25.0, lambda, 64)), Some(2076));
+        assert_eq!(
+            int4_of(RedoRun::x_dropoff_of(-1.0, lambda, -200)),
+            Some(-83)
+        );
+        // 2.5e7 bits = 2,076,845,484 raw: inside; 1e8 bits: outside.
+        assert!(int4_of(RedoRun::x_dropoff_of(2.5e7, lambda, 64)).is_some());
+        assert_eq!(int4_of(RedoRun::x_dropoff_of(1e8, lambda, 64)), None);
+        assert_eq!(int4_of(RedoRun::x_dropoff_of(-1e300, lambda, 64)), Some(64));
+    }
 
     #[test]
     fn the_first_query_of_a_batch_gets_the_k_of_the_highest_mark() {

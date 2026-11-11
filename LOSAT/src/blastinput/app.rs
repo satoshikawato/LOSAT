@@ -830,10 +830,11 @@ pub fn parse_comp_based_stats(
 }
 
 /// The query splitter that NCBI sets up for every query batch (`CBlastPrelimSearch`, in
-/// `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE` and then `OVERLAP_CHUNK_SIZE`
-/// but does not split an ungapped search. The outer `Err` is LOSAT's rejection of a value
-/// that NCBI cannot convert (its `CStringException` names its build's source files, exit
-/// 255); the inner one is NCBI's error for a chunk size that is not divisible by 3.
+/// `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE` and then (where it can split)
+/// `OVERLAP_CHUNK_SIZE` but does not split an ungapped search. The outer `Err` is LOSAT's
+/// rejection of a value that NCBI cannot convert (its `CStringException` names its build's
+/// source files, exit 255); the inner one is NCBI's error for a chunk size that is not
+/// divisible by 3.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-61
 /// ```c
@@ -854,15 +855,29 @@ pub fn parse_comp_based_stats(
 ///                    "Split query chunk size must be divisible by 3");
 ///     }
 /// ```
-/// `SplitQuery_ShouldSplit` is true for blastp, tblastn and tblastx
-/// (split_query_aux_priv.cpp:73-97), so `SplitQuery_CalculateNumChunks` always reads the
-/// overlap (`blastn/query_split.rs` `SplitSizes`; the `int` becomes a 64-bit `size_t`). The
-/// chunk size must be divisible by 3 only for a translated query (`translated_query`,
-/// tblastx). Whether a blastp or tblastn query batch is split is
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:78-110
+/// ```c
+///     // do not split RPS-BLAST
+///     if (Blast_SubjectIsPssm(program) || ... ) { retval = false; }
+/// ...
+///     if ( !SplitQuery_ShouldSplit(program, *chunk_size, concatenated_query_length, num_queries)) {
+///         return 1;
+///     }
+///     size_t overlap_size = SplitQuery_GetOverlapChunkSize(program);
+/// ```
+/// `SplitQuery_CalculateNumChunks` reads the overlap (`getenv("OVERLAP_CHUNK_SIZE")` in
+/// `SplitQuery_GetOverlapChunkSize`) only after `SplitQuery_ShouldSplit` is true, and that is
+/// false for RPS-BLAST (`Blast_SubjectIsPssm`, "do not split RPS-BLAST"), so `rpsblast` reads
+/// `CHUNK_SIZE` (the constructor above) but never `OVERLAP_CHUNK_SIZE`: `reads_overlap` is false
+/// for it and an overlap that is not an integer does not stop the run. It is true for blastp,
+/// psiblast, tblastn and tblastx (`blastn/query_split.rs` `SplitSizes`; the `int` becomes a
+/// 64-bit `size_t`). The chunk size must be divisible by 3 only for a translated query
+/// (`translated_query`, tblastx). Whether a blastp or tblastn query batch is split is
 /// `blastp/protein_query_split.rs`.
 pub fn check_query_split_environment(
     program: &str,
     translated_query: bool,
+    reads_overlap: bool,
 ) -> anyhow::Result<anyhow::Result<()>> {
     let read = |variable: &str| read_query_split_variable(program, variable);
     if let Some(chunk_size) = read("CHUNK_SIZE")? {
@@ -875,7 +890,9 @@ pub fn check_query_split_environment(
             .into()));
         }
     }
-    read("OVERLAP_CHUNK_SIZE")?;
+    if reads_overlap {
+        read("OVERLAP_CHUNK_SIZE")?;
+    }
     Ok(Ok(()))
 }
 

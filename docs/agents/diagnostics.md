@@ -74,6 +74,8 @@ give.
 The variables of the diagnostic build (the entries marked "(diagnostic build)" below):
 
 ```text
+BLEMIR_DEBUG
+BLEMIR_DEBUG_WINDOW
 LOSAT_DEBUG_BLASTP_TRACE_HSP
 LOSAT_DEBUG_BLASTP_WSSV
 LOSAT_DEBUG_CHAINING
@@ -257,12 +259,16 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_BLASTX_WORKER_LOG=<file>` (cargo feature `blastx-worker-probe` only) the file that the
   probe appends its lines to (BLASTX's workers and every program's search pool); without it a run
   with `-num_threads` above 1 panics.
-- `BLEMIR_DEBUG=1` BLASTN lookup-table sizes and engine debug lines on stderr (any value turns it
-  on; `blastn/lookup.rs`, `blastn/blast_engine/run.rs`). Like `LOSAT_DEBUG_BLASTN`, it turns off the
-  streamed reports of BLASTN (`x_debug_output`); the report bytes do not change.
-  `BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end"` adds a `Focusing on window` line under
-  `BLEMIR_DEBUG` and filters no line; set on its own, it turns off some faster BLASTN paths
-  (`LOSAT_X_QGROUPPAR`, `LOSAT_X_DIAGLV`) without changing the report bytes.
+- `BLEMIR_DEBUG=1` (diagnostic build) BLASTN lookup-table sizes and engine debug lines on stderr
+  (any value turns it on; `blastn/lookup.rs`, `blastn/blast_engine/run.rs`). Like
+  `LOSAT_DEBUG_BLASTN`, it turns off the streamed reports of BLASTN (`x_debug_output`); the report
+  bytes do not change.
+  `BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end"` (diagnostic build) adds a `Focusing on
+  window` line under `BLEMIR_DEBUG` and filters no line; set on its own, it turns off some faster
+  BLASTN paths (`LOSAT_X_QGROUPPAR`, `LOSAT_X_DIAGLV`: the `diagnostics` fields and `x_lv_ref` of
+  `blastn/blast_engine/run.rs`) without changing the report bytes. Both are read through
+  `utils/xdiag.rs`: a build without the `diagnostics` feature ignores them, so they turn nothing
+  off there, and `main` writes the one notice line for each that is set.
 
 ## Performance switches (on by default)
 

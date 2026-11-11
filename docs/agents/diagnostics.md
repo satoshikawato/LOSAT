@@ -4352,7 +4352,7 @@ Scheduling (each value computed by one thread with the original function; order 
   loops with the purges and sorts around them were 57 % of a blastn batch's wall at 16 threads (5,000 and 31,168 cDNAs
   against 3 Mb of 2L; v4-D session 8 probe, `results/s8_probe_i9/REPORT.md`). Form: the chunk's ungapped hits are split
   by query in the order the seed stage saved them (a counting sort), each query task sorts its hits with the batch's
-  comparator (stable), runs the same loop body (the loop is a closure, `x_prelim_list`, called once on the owner with
+  comparator (stable), runs the same loop body (the loop is `prelim_hsp_list::gapped_score_list`, called once on the owner with
   the look-ahead helpers or once per query without them) and purges its list; the purged lists are concatenated in query
   order and sorted by score as before (rayon's stable `par_sort_by` on the search pool). The kept HSPs of the traceback
   are the queries' hit lists one after another, so each query's slice runs the traceback loop (`trace_hsp_list`, no

@@ -1,6 +1,8 @@
 //! SC10b PR-3: the group tables of the TBLASTX unit path (`x_pair_par.rs`) for words whose backbone
 //! index does not fit 16 bits (`-word_size 4`: 20 bits), built for all the batch's tables at once,
-//! with 32-bit indices, by counting and filling on the search pool. A child module of
+//! with 32-bit indices, by counting and filling on the search pool. BLASTX's table of 4-letter words
+//! is its table of one list of all the query's lookup locations (`x_build_full_wide`, item SC9 of
+//! line NP). A child module of
 //! `x_pair_lut.rs`, whose `x_build_group` (16-bit neighbour lists) keeps building the tables of
 //! words of 2 and 3 letters.
 //!
@@ -1331,8 +1333,9 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (cited in the
     // module comment).
-    // Item SC9 of line NP: BLASTX's table of 4-letter words (`x_build_full_wide`, from a lookup query
-    // as BLASTX hands it over, `x_from_prepared`) is the reference builder's full table field by
+    // Item SC9 of line NP: the table of 4-letter words of one list of all the lookup locations
+    // (`x_build_full_wide`, from a lookup query handed over, `x_from_prepared`; the query here is
+    // TBLASTX's, BLASTX's own is `blastx::seed`'s test) is the reference builder's full table field by
     // field, never compacted, built on this thread and in 4 parts on pools of 1, 4 and 8 threads;
     // with a query of SEG masks, a context shorter than a word, an empty one and a repeated letter,
     // three matrices and thresholds 0, 11 and 13.

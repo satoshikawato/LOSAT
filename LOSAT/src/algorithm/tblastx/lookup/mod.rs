@@ -270,6 +270,10 @@ pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 //                                       query, location);
 // ```
 pub(crate) use backbone::x_pair_lut;
+// The reference builder's table of a BLASTX lookup query, for blastx::seed's tests (item SC9 of line
+// NP); no NCBI counterpart for the re-export itself.
+#[cfg(test)]
+pub(crate) use backbone::x_reference_table_from_prepared;
 
 #[cfg(test)]
 mod lookup_tests;

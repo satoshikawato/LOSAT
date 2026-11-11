@@ -2374,7 +2374,8 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
 /// item SC9): the same builds with the matrix's scores and the words of `word_length` letters (the
 /// neighbour lists of the pooled build and of a thread's builds are kept per matrix and word
 /// length, the key of `x_lut_direct.rs`'s memos; a backbone index wider than 16 bits, word length
-/// 4, is the reference builder's). Not inlined, so that BLOSUM62's build keeps its code.
+/// 4, is built by the joint builder, `x_pair_lut_wide.rs`, whose table is the reference builder's).
+/// Not inlined, so that BLOSUM62's build keeps its code.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -2437,8 +2438,9 @@ fn build_ncbi_lookup_with(
     //     }
     // ```
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
-    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
-    // mode, or a backbone index wider than 16 bits) the reference builder below runs. With `pooled`
+    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines, a backbone index
+    // wider than 16 bits takes the joint builder below and diagnostics mode the reference builder
+    // below. With `pooled`
     // (the pooled build, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
     // kept vectors; the caller gives them back (`x_give_back_pooled`, `x_give_back_pooled16`) when
     // it drops the table, or the pool goes without them (a missed reuse only).
@@ -2472,6 +2474,28 @@ fn build_ncbi_lookup_with(
         );
     }
     XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+}
+
+/// The reference builder's table of a BLASTX lookup query (the inputs `build_ncbi_lookup_with`
+/// takes), for the tests of `blastx::seed` (item SC9 of line NP).
+#[cfg(test)]
+pub(crate) fn x_reference_table_from_prepared(
+    matrix: ScoringMatrix,
+    word_length: usize,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+) -> BlastAaLookupTable {
+    let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
+    let prepared = PreparedLookupQuery {
+        concat_query,
+        lookup_locations,
+        contexts,
+        frame_bases,
+        skipped_seg_mask: 0,
+    };
+    build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245

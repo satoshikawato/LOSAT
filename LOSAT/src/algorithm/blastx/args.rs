@@ -695,8 +695,17 @@ pub struct ResolvedOptions {
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
 }
 
-/// NCBI's `eAaLookupTable` (`ELookupTableType`, include/algo/blast/core/blast_options.h): the
-/// standard lookup table, of word sizes 2 to 4.
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:185-191
+// ```c++
+// typedef enum {
+//     eMBLookupTable,  /**< megablast lookup table (includes both
+//                                 contiguous and discontiguous megablast) */
+//     eSmallNaLookupTable,  /**< lookup table for blastn with small query*/
+//     eNaLookupTable,  /**< blastn lookup table */
+//     eAaLookupTable,  /**< standard protein (blastp) lookup table */
+//     eCompressedAaLookupTable,  /**< compressed alphabet (blastp) lookup table */
+// ```
+/// NCBI's `eAaLookupTable` (`ELookupTableType`): the standard lookup table, of word sizes 2 to 4.
 pub(crate) const AA_LOOKUP_TABLE: i32 = 3;
 /// NCBI's `eCompressedAaLookupTable`: the compressed lookup table, of word sizes 5 to 7.
 pub(crate) const COMPRESSED_AA_LOOKUP_TABLE: i32 = 4;
@@ -1045,8 +1054,8 @@ impl BlastxArgs {
         //                                     &threshold);
         // ```
         // The task's threshold 12 (`BLAST_WORD_THRESHOLD_BLASTX`) is the matrix's suggestion
-        // (BLOSUM62's 11 + 1 for a translated query); blastx-fast's 20 and `-word_size 5`'s 19.3
-        // are not the default, and stay.
+        // (BLOSUM62's 11 + 1 for a translated query); blastx-fast's 20 and the 19.3, 21 and 20.25
+        // of `-word_size` 5, 6 and 7 are not the default, and stay.
         let threshold = match self.threshold {
             Some(threshold) => threshold,
             None if self.word_size == Some(5) => 19.3,

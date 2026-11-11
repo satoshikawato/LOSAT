@@ -256,7 +256,6 @@ impl XPairLutQuery {
         matrix: ScoringMatrix,
         word_length: usize,
     ) -> Option<Self> {
-        let alphabet_size = LOOKUP_ALPHABET_SIZE;
         if diagnostics_enabled() || !x_tables_cover(word_length) {
             return None;
         }
@@ -275,34 +274,18 @@ impl XPairLutQuery {
             matrix,
             bounds,
         );
-        // Same expression as build_lookup_from_prepared (BLAST_SequenceBlk length).
-        let query_length = prepared
-            .contexts
-            .last()
-            .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
-            .unwrap_or(0);
-        // Same expression as build_lookup_from_prepared (blast_aalookup.c:438-444).
-        let row_max: Vec<i32> = (0..alphabet_size)
-            .map(|i| {
-                (0..alphabet_size)
-                    .map(|j| lookup_matrix_score(matrix, i, j))
-                    .max()
-                    .unwrap_or(i32::MIN)
-            })
-            .collect();
-        Some(Self {
+        Some(Self::x_from_prepared(
             prepared,
             threshold,
             matrix,
             word_length,
-            query_length,
-            row_max,
-        })
+        ))
     }
 
-    /// BLASTX's lookup query `prepared` (`blastx::seed::Lookup`'s), with the scores of `matrix` and
-    /// words of `word_length` letters: the query of `build_lookup_from_prepared(prepared, threshold,
-    /// matrix, word_length)`, whose table `x_build_full_wide` builds (item SC9 of line NP).
+    /// The query of `build_lookup_from_prepared(prepared, threshold, matrix, word_length)`: the
+    /// lookup query `prepared` with the scores of `matrix` and words of `word_length` letters, as
+    /// `x_prepare_for` makes it for TBLASTX and `blastx::seed::Lookup` hands it over for BLASTX's
+    /// table of 4-letter words (`x_build_full_wide`, item SC9 of line NP).
     pub(in super::super) fn x_from_prepared(
         prepared: PreparedLookupQuery,
         threshold: i32,
@@ -310,7 +293,7 @@ impl XPairLutQuery {
         word_length: usize,
     ) -> Self {
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
-        // The expressions of `build_lookup_from_prepared`, as `x_prepare_for` computes them.
+        // The expressions of `build_lookup_from_prepared`.
         let query_length = prepared
             .contexts
             .last()

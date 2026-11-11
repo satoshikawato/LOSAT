@@ -26,7 +26,7 @@
 //! reference's binary search.
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
-//! (`-word_size 3`, the default), when nothing traces the seeds; elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
+//! (`-word_size` 3, the default, and 2 and 4), when nothing traces the seeds; elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
 //! switch of the strict set: on unless it is `0`. When it
 //! is not set (or empty) it acts only where the cell test is LOSAT_X_BXCROSS's (an x86-64 CPU with
 //! AVX2 and POPCNT), the cell test its rule was timed with; set to a value, it runs on any CPU. With
@@ -77,7 +77,9 @@
 //! fused loop is generic over the table's cell, and widens each hit to an `i32` before any
 //! arithmetic (`(q - s) & mask`, `q - diff`), so the tables, calls and reports are those of the
 //! table of `Int4` hits. Every other table (the direct loop's, `-window_size 0`, the shadow mode,
-//! a longer query batch, the compressed table of `-task blastx-fast`) keeps `Int4` hits.
+//! a longer query batch, the compressed table of `-word_size` 5 to 7 and `-task blastx-fast`, and
+//! the table of 4-letter words, which the joint builder makes with `Int4` hits and the fused loop
+//! scans as it is) keeps `Int4` hits.
 //!
 //! EXPERIMENT (LOSAT_X_BXCROSS): the AVX2 batch is `XCellTest::Cross`:
 //! the subject's hits staged and tested in windows of eight cut across the cells' borders, a
@@ -1663,6 +1665,61 @@ mod tests {
             assert!(tables.iter().any(|t| t.contains("16-bit")), "{tables:?}");
         }
         eprintln!("tables: {tables:?}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (cited at
+    // `Lookup::new`).
+    // Item SC9: BLASTX's table of 4-letter words, as the search builds it (`Lookup::x_new_for`: the
+    // joint builder on BLASTX's own lookup query, on one thread and in 4 parts on a pool of 4
+    // threads), is the reference builder's table of the same lookup query (the batch's buffer,
+    // lookup segments and contexts), field by field: BLOSUM62 two-hit and one-hit, PAM30, IDENTITY
+    // ungapped, and a -query_loc range.
+    #[test]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn the_table_of_four_letters_is_the_reference_table() {
+        let (query, _, mean) = other_matrix_inputs();
+        for (matrix, window, extra) in [
+            ("BLOSUM62", 40, &[][..]),
+            ("BLOSUM62", 0, &[][..]),
+            ("PAM30", 15, &[][..]),
+            ("IDENTITY", 40, &["-ungapped", "-comp_based_stats", "0"][..]),
+            ("BLOSUM62", 40, &["-query_loc", "1001-4000"][..]),
+        ] {
+            let mut args = vec!["-word_size", "4"];
+            args.extend_from_slice(extra);
+            let (batch, params, options, _) =
+                search_with(&query, window, mean, false, matrix, &args);
+            let concat = batch.sequence_start[1..].to_vec();
+            let reference = crate::algorithm::tblastx::lookup::x_reference_table_from_prepared(
+                options.scoring,
+                4,
+                concat.clone(),
+                batch.lookup_segments.clone(),
+                lookup_contexts(&batch, &params, &concat),
+                crate::core::blast_util::ncbi_int4_from_double(options.threshold),
+            );
+            let check = |parts: usize| {
+                let lookup = Lookup::x_new_for(&batch, &params, &options, parts, None).unwrap();
+                let BxLookup::Wide(Lookup::Standard(table, _)) = &lookup else {
+                    panic!("{matrix}: the standard table of Int4 hits");
+                };
+                crate::algorithm::tblastx::lookup::x_assert_same_table_as(
+                    &format!("{matrix} window {window} {extra:?} parts {parts}:"),
+                    table,
+                    &reference,
+                );
+            };
+            check(1);
+            crate::utils::threading::with_search_pool(4, "blastx", |pool| {
+                pool.install(|| check(4));
+                Ok(())
+            })
+            .unwrap();
+            assert!(reference.longest_chain > 0, "{matrix}: an empty table");
+        }
     }
 
     // No NCBI counterpart (memory only): a search of two threads or more builds its tables of 2 and 3

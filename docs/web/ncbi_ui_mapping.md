@@ -65,7 +65,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 欄 | 一覧（`domain/programs.ts` の `list`） |
 |---|---|
 | Max target sequences | 10、50、100、250、500、1000、5000（NCBI の既定は 100、LOSAT は CLI の 500） |
-| Word size | megablast 16、20、24、28、32、48、64／dc-megablast 11、12／blastn と blastn-short 7、11、15／TBLASTN 2、3、5、6／BLASTP 3、5、6（NCBI の 2、3、5、6 のうち LOSAT の BLASTP が読む値。7 は「Other」で書ける）／BLASTX 2、3、5、6（NCBI と同じ。LOSAT の BLASTX は NCBI と同じく 2〜7 を読み、4 と 7 は「Other」で書ける、SC9）／TBLASTX 2、3（NCBI と同じ。LOSAT の TBLASTX は NCBI と同じく 2〜4 を読み、4 は「Other」で書ける、SC10） |
+| Word size | megablast 16、20、24、28、32、48、64／dc-megablast 11、12／blastn と blastn-short 7、11、15／TBLASTN 2、3、5、6／BLASTP 2、3、5、6（NCBI と同じ。LOSAT の BLASTP は 2、3、5〜7 を読み、7 は「Other」で書ける）／BLASTX 2、3、5、6（NCBI と同じ。LOSAT の BLASTX は NCBI と同じく 2〜7 を読み、4 と 7 は「Other」で書ける、SC9）／TBLASTX 2、3（NCBI と同じ。LOSAT の TBLASTX は NCBI と同じく 2〜4 を読み、4 は「Other」で書ける、SC10） |
 | Matrix | PAM30、PAM70、BLOSUM90、BLOSUM80、BLOSUM62、BLOSUM50、BLOSUM45、PAM250（NCBI の順）（BLASTP・BLASTX とも。Gap Costs は行列ごとの NCBI の一覧、Compositional adjustments は NCBI の 4 つ。BLASTX は系列 SC の SC6 から、DW-36、WA-FM-02） |
 
 一覧が LOSAT の読む値に絞ってある欄のうち Matrix・Word size・Gap Costs は、「Other」で他の値を書ける（エンジンが CLI と同じ文で拒む）。Compositional adjustments は「Other」の無い選択で、NCBI の 4 つ（BLASTP・BLASTX・TBLASTN の CLI はどれも 0〜3 を読む、系列 SC の SC5・SC6）。エンジンが読む値を増やす PR は一覧も広げる：エンジンの e2e（`search.spec.ts`「the selects of the protein modes offer NCBI's values that the engine reads, and no other」）が、NCBI の値のそれぞれで「一覧にある ⇔ エンジンが読む」を確かめる（Compositional adjustments は同じ commit の native CLI で）。

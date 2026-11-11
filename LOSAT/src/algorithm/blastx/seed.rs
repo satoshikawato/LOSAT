@@ -475,7 +475,7 @@ pub struct NarrowLookup {
 }
 
 impl BxLookup {
-    /// [`Lookup::x_new_as`] with the cutoff of the search's options (`x_seed_diag::x_narrow_cutoff`).
+    /// [`Lookup::x_new_for`] with the cutoff of the search's options (`x_seed_diag::x_narrow_cutoff`).
     pub(crate) fn x_new_in_parts(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
@@ -698,7 +698,7 @@ impl Lookup {
     //     /* index the query and finish up */
     //
     // ```
-    // Only the tests build a table this way; the searches use `x_new_as`.
+    // Only the tests build a table this way; the searches use `x_new_for` (`BxLookup::x_new_in_parts`).
     #[cfg(test)]
     pub(crate) fn new(
         batch: &PreparedQueryBatch,

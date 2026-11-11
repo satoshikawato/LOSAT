@@ -603,11 +603,47 @@ that prefetches beside one of 3 that does not). The psiblast rows `db.id.wkb.ps.
 each round that makes the next round's PSSM reads the sequences before the cut by their Seq-align ids, so
 `pir|S12347|` beyond `-max_target_seqs 1` (`pweak_r_v5`) is refused where the round's prefetch is off, and two
 following hits whose Seq-align ids `Match` (`gb|FFF00043.1|` and `gb|FFF00043|` of `pweak_v5`), which NCBI puts in one
-row of the PSSM's multiple alignment, are refused also without the variable. `ids/wkb_e3_v5` (`make_ids.py
+row of the PSSM's multiple alignment, make that PSSM as NCBI does (`db.id.wkb.ps.join.i2.6`, NCBI's bytes since line DBID
+pssmrows; weakbatch refused it). `ids/wkb_e3_v5` (`make_ids.py
 --weakbatch-only`, from `ids/wkb_e3.faa`) holds `gb|FFF00043.1|`, `gb|ZZZ00001.1|` and then `gb|FFF00043|`, which the
 lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, refused without the variable
 (`db.id.wkb.ps.e3.i2.7.reject`); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
 `gb|WWW00001.1|`, which the PSSM does not read (`db.id.wkb.ps.p1.i2.7`, NCBI's bytes); the query is `ids/wkb_qy.faa`.
+
+Rows `db.id.psr.*` (line DBID, pssmrows; databases `ids/psr_*` from `ids/psr_*.faa` by `make_ids.py --pssmrows-only`, all
+version 5, query `ids/psr_q.faa`, a random protein of 250 letters; `ids/psr_cpa` holds three variants of the query with 62, 72 and
+82 substitutions): psiblast counts the rows of the PSSM's multiple alignment by Seq-align id handles, and a
+Seq-align whose id `CSeq_id::Match`es the previous one's joins that row. `psr_cp.pal` (`psr_cpa`, then `psr_cpb`, a copy
+of its first record) puts two copies of one record after each other: one row, as NCBI (`db.id.psr.cp.*`, round 2 and the
+ASCII PSSM); `psr_cbxp.pal` puts another subject between the copies, where NCBI writes round 1's report and crashes
+(SIGSEGV, rc 139) and LOSAT refuses after the same report (`db.id.psr.cbx.i2.6.reject`, stdout frozen from NCBI).
+`psr_jm` (`gb|HHH00001|`, `gb|HHH00001.1|`, a third record) holds a Match pair whose second record fills only the cells
+after the first's alignment (`db.id.psr.jm.*`: round 2, the ASCII and ASN.1 PSSMs, and `-inclusion_ethresh 1e-90`, which
+leaves the second out); `psr_jn` the same with `sp||NAMEH` and `sp|P00009.1|NAMEH`; `psr_jx.pal` (`psr_jx1`, `psr_jx2`) the
+pair in two databases (`-num_iterations 3`); `psr_jctl` the same letters under ids that never Match (the control: another
+PSSM); `psr_self` a Match pair both identical to the query, purged as self hits (the empty row). `psr_cul.pal` (`gb|ABC00001.1|`,
+then `gb|abc00001.1|`) and `psr_cue.pal` (`gb|ABC00001.1|`, then `emb|ABC00001.1|`) are handles that NCBI can take for one
+sequence and LOSAT refuses (`db.id.psr.case.i2.6.reject`, `db.id.psr.gbemb.i2.6.reject`). `psr_k.pal` (`psr_ka`:
+`gb|SSS00001.1|` identical to the query, `gb|AAA00001.1|`, `gb|ABC00001.1|`; `psr_kb`: `emb|ABC00001.1|`) puts that pair in
+a search where neither is included in the PSSM nor shown, so NCBI's handles never compare them and LOSAT does not refuse
+(`db.id.psr.k.i2.6`, `-inclusion_ethresh 1e-150 -max_target_seqs 1`). `psr_gim` holds `gim|123` (a giim id) in front of
+`gb|BBB00001.1|` and `gb|CCC00001.1|`: NCBI's handles never take a giim id for one with an equal id, so NCBI writes
+`Unknown` for it and does not converge in 4 rounds, and LOSAT refuses (`db.id.psr.gim.i4.6.reject`).
+Review 2 (`ids/psr_gz.faa`: `gb|SSS00001.1|` identical to the query, `gb|AAA00001.1|`, `gim|123`; `ids/psr_gimn.fna`: `gim|456`
+and `gb|NNN00001.1|`, queries `ids/psr_qp.fna` and `ids/psr_qm.fna`): `db.id.psr.last.k2.*` is `psr_k` with
+`-inclusion_ethresh 1e-135 -max_target_seqs 2` (outfmt 6 and 0, the last row of the PSSM's multiple alignment) and
+`db.id.psr.gz.r2m2.6` the same search of `psr_gz`. A giim id is refused wherever a report reads its sequence:
+`db.id.psr.gim.bp6q`, `bnm6q` and `tbx6q` (`qseqid`, which reads nothing of the subject; the blastn row has NCBI's
+`Error pre-fetching sequence data` warning in its `.err`) are NCBI's bytes, and `db.id.psr.gim.bp6.reject`,
+`bnm6.reject` and `ni.reject` (psiblast with three rounds; `sseqid`, where NCBI writes `Unknown`) are LOSAT's refusals.
+psiblast's PSSM reads the letters of the subjects it includes (below `-inclusion_ethresh`), not those of every reported
+subject: at `-inclusion_ethresh 1e-140` the giim id of `psr_gim` is not included, so `db.id.psr.gim.r3q.6` (three
+rounds) and `db.id.psr.gim.s1q` (round 1 and its ASCII PSSM) are NCBI's bytes. `psr_jv` (`gb|HHH00001.1|`, then
+`gb|HHH00001|`) and `psr_vm` (`gb|AAA00001.1|`, then `gb|AAA00001|`) hold a sequence whose Seq-align id the lookup
+does not give back as that sequence; it is not included at `-inclusion_ethresh 1e-100` (`psr_jv`) and `1e-150`
+(`psr_vm`), so `db.id.psr.jv.r3q.6` and `db.id.psr.vm.r3q.6` (three rounds, `qseqid`) are NCBI's bytes. At the default
+threshold `psr_jv` includes it: NCBI warns `Failed to retrieve sequence gb|HHH00001|` and drops its letters, and LOSAT
+refuses (`db.id.psr.jv.r3q.i.reject`).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
@@ -1028,3 +1064,18 @@ Rows `db.archtitle.*.nosq.*` search databases without their sequence file:
 A database without its header file fails the first batch whose hits read a definition line, with a message that holds the
 file's absolute path; that case is `a_title_in_the_batch_that_a_missing_header_file_fails_is_not_refused` in
 `tests/outfmt11_titles.rs` (a temporary database made by `LOSAT makeblastdb`).
+
+## ADAPTIVE_CBS (line SW, env parity G2+G3)
+
+- `acbs` (protein) and `acbs_n` (nucleotide, the same 1,700 subjects back-translated), with the queries
+  `acbs_q.faa` and `acbs_q.fna`: written by `make_acbs_inputs.py` (its docstring gives the commands and the
+  shape). The rows `db.acbs.*` run them with the environment variable `ADAPTIVE_CBS`: NCBI BLAST+ keeps 1,500
+  preliminary subjects instead of 1,050 and cuts them at 1,100 (BLASTP, BLASTX with `-seg no`, TBLASTN with
+  `-seg no`: 400 subjects reported, 350 without the variable; `-max_target_seqs 600`: 500, 550 without);
+  PSIBLAST keeps the 1,500 and does not cut them. `db.acbs.rpsblast.*` run `rps/rps_mini` with the
+  variable: a database of three profiles shows no difference, only that the variable is read (a local
+  database of 1,700 single-sequence profiles of the same subjects gave rpsblast 351 -> 401 and 551 -> 501,
+  too large to commit).
+- `db.acbs.blastx.wrap*` and `db.acbs.blastx.rej*` search `bslice` with a `-max_target_seqs` whose preliminary
+  size NCBI's 32-bit int wraps: 2147483647 (48 with composition-based statistics), 1073741824 without them
+  (10), and 1073741824 with them (negative: NCBI crashes, LOSAT refuses).

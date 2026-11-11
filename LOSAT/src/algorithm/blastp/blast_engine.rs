@@ -2352,23 +2352,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
     // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
     // A hit list size whose preliminary size is not positive crashes NCBI.
-    if crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
         args.max_target_seqs,
+        args.max_target_seqs_given,
         args.comp_based_stats.is_enabled(),
         true,
-    ) < 1
-    {
-        if args.max_target_seqs_given {
-            bail!(
-                "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}",
-                args.max_target_seqs
-            );
-        }
-        bail!(
-            "a hit list size of {} (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}",
-            args.max_target_seqs
-        );
-    }
+        program,
+    )?;
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:113
     // ```c
     // const string kArgUseSWTraceback(\"use_sw_tback\");
@@ -3220,6 +3210,7 @@ fn psiblast_pssms(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
+    keys: psi_round::SubjectKeys<'_>,
 ) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
     use crate::algorithm::psiblast::pssm::{
         ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord,
@@ -3244,6 +3235,20 @@ fn psiblast_pssms(
         k: gapped.k,
         h: gapped.h,
     };
+    // The rows of each query's PSSM are the handles of the Seq-align ids that it takes
+    // (`SubjectKeys`): keys that NCBI's handles can take for one, and giim ids, are refused before
+    // any PSSM is made (`rounds::HandleIndex`).
+    for hit_list in hit_lists.iter().flatten() {
+        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+        let rows: std::collections::BTreeSet<crate::algorithm::psiblast::rounds::SetKey> = hit_list
+            .hsplist_array[..count]
+            .iter()
+            .flat_map(|hsp_list| &hsp_list.hsps)
+            .filter(|hsp| psi_round::included(hsp.e_value, args.inclusion_ethresh))
+            .map(|hsp| keys.key(hsp.s_idx))
+            .collect();
+        crate::algorithm::psiblast::rounds::SetKey::check_handles(&rows)?;
+    }
     let mut files = PssmFiles::new(request);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
@@ -3299,6 +3304,7 @@ fn psiblast_pssms(
             },
             &alignments,
             &subject,
+            &|s_idx| keys.key(s_idx),
             ancillary,
         )
         .and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
@@ -6483,6 +6489,7 @@ fn search(
             x_prolog: true,
             x_queries_before: 0,
             x_xml2_carry: None,
+            last_call: true,
             psi_round: None,
             titles_may_refuse,
         };
@@ -6830,6 +6837,7 @@ fn search(
                                 x_xml2_carry: x_kinds
                                     .contains(&XBlockReport::Xml2)
                                     .then_some(&x_xml2_carry),
+                                last_call: index + 1 == blocks.len(),
                                 psi_round: None,
                                 titles_may_refuse,
                             },
@@ -7696,6 +7704,11 @@ struct BlastpReports<'a> {
     /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
     /// report; `None` outside the block search).
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
+    /// Whether this call is the run's last report call, so that without the epilog the run stops
+    /// after it (`blast_xml::BlastpXml::stops`). Not a block of the block search before the last
+    /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (which
+    /// writes no XML document, `psiblast::args::PsiblastArgs::check_outfmt`).
+    last_call: bool,
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
     psi_round: Option<&'a crate::algorithm::psiblast::rounds::PsiRoundIo>,
@@ -7895,6 +7908,7 @@ fn search_split_query_batches(
                     x_prolog,
                     x_queries_before: 0,
                     x_xml2_carry: None,
+                    last_call: false,
                     psi_round: None,
                     // The call of the whole query writes the archive.
                     titles_may_refuse: false,
@@ -10783,6 +10797,31 @@ fn run_resolved_in_pool(
         &mut x_compact_hit_lists,
         reports.x_prolog,
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
+    // ```c
+    //     if((ADAPTIVE_CBS_ENV != NULL) && (ext_options->compositionBasedStats) && (hit_options->hitlist_size < 1000)) {
+    //     	BlastHSPCBSStreamClose(hsp_stream, hit_options->hitlist_size);
+    //
+    //     }
+    // ```
+    // `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
+    // (`core::blast_hspstream`) before the subjects of the lists are read. RPSBLAST's engine
+    // trims each volume's lists itself (`rps_search::engine`); PSIBLAST's traceback size is its
+    // preliminary size, 1500 or more here, so it never trims.
+    if args.rps_search.is_none()
+        && crate::core::blast_hspstream::adaptive_cbs_close(
+            args.comp_based_stats.is_enabled(),
+            args.traceback_hitlist_size(),
+        )
+    {
+        let hitlist_size = args.traceback_hitlist_size();
+        for hit_list in preliminary_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+    }
 
     // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
     // and stand for the subject set in the redo; the hit lists name them by their rank
@@ -12309,6 +12348,14 @@ fn run_resolved_in_pool(
     if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
         titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
     }
+    let subject_keys = psi_round::SubjectKeys {
+        listed_ordinals: listed_subjects
+            .as_ref()
+            .map(|listed| listed.ordinals.as_slice()),
+        parsed: listed_titles
+            .as_ref()
+            .map_or(&[][..], |titles| titles.parsed.as_slice()),
+    };
     let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
             Some(request) => Some(psiblast_pssms(
@@ -12319,13 +12366,14 @@ fn run_resolved_in_pool(
                 shown_subjects,
                 &contexts,
                 &gapped_params,
+                subject_keys,
             )?),
             None => None,
         };
     // psiblast's rounds: the round's outcome (its inclusion set and the next round's PSSM, from
     // the same Seq-aligns), and the subjects of the previous round's set for its two-part table
     // (`psi_round::round_outcome`).
-    let psi_found_before: Option<Vec<bool>> = match reports.psi_round {
+    let psi_found_before: Option<psi_round::FoundBefore> = match reports.psi_round {
         Some(io) => psi_round::round_outcome(
             &args,
             io,
@@ -12334,13 +12382,8 @@ fn run_resolved_in_pool(
             shown_subjects,
             &contexts,
             &gapped_params,
-            listed_subjects
-                .as_ref()
-                .map(|listed| listed.ordinals.as_slice()),
-            listed_titles
-                .as_ref()
-                .map_or(&[][..], |titles| titles.parsed.as_slice()),
-        ),
+            subject_keys,
+        )?,
         None => None,
     };
     // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,
@@ -12641,14 +12684,15 @@ fn run_resolved_in_pool(
         //         sequence_data.erase();
         //         ERR_POST(Warning << "Failed to retrieve sequence " <<
         // ```
-        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`) reads the letters of each aligned
-        // subject by its Seq-align id, as those formats do (review 1 of line DBID tabfields, H1).
+        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`, and each round's PSSM for the next
+        // round) reads the letters of each included subject by its Seq-align id, as those formats
+        // do (review 1 of line DBID tabfields, H1). `check_pssm_subjects` refuses those, before the
+        // cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
+        // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
             &hit_lists,
             &batch_prefetch,
-            format_plans.iter().any(|outfmt| outfmt.reads_subjects())
-                || args.psi_pssm.is_some()
-                || reports.psi_round.is_some(),
+            format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Text(OutputFormat::Pairwise)
                 | BlastpReport::Xml
@@ -12912,6 +12956,9 @@ fn run_resolved_in_pool(
             observer.query_stats(q_idx, stats);
         }
     }
+    // Every structured format of the call is XML2 or JSON: none writes the report that a
+    // `-subject` document holds back (`blast_xml::write_blastp_xml`).
+    let xml_only_xml2 = !format_plans.contains(&BlastpReport::Xml);
     for (format_index, (format, &outfmt)) in outputs
         .formats
         .iter_mut()
@@ -13257,6 +13304,8 @@ fn run_resolved_in_pool(
                         .collect(),
                     program: "BLASTP",
                     epilog: reports.epilog,
+                    stops: !reports.epilog && reports.last_call,
+                    only_xml2: xml_only_xml2,
                 };
                 // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
                 // reads their letters query by query and formats them serially, so a window of
@@ -13437,6 +13486,11 @@ fn run_resolved_in_pool(
                     )?,
                     None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
                 }
+                // psiblast's two-part table looks each shown subject up in the previous round's
+                // set by its handle: LOSAT refuses one that it cannot place as NCBI does.
+                if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {
+                    found.refuse_unsure_shown(shown.iter().copied())?;
+                }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
                 // ```c++
                 //     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
@@ -13507,7 +13561,9 @@ fn run_resolved_in_pool(
                             reports.x_prolog,
                             crate::report::pairwise::psiblast_round::ReportRound {
                                 number: io.state.number(),
-                                found_before: psi_found_before.as_deref(),
+                                found_before: psi_found_before
+                                    .as_ref()
+                                    .map(|found| found.found.as_slice()),
                             },
                         )?;
                         continue;

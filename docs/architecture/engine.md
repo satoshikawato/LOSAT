@@ -210,6 +210,7 @@ rpsblast yet.
 | PSSM engine | `core::psi` |
 | sequence encoding | `core::blast_encoding`, `sequence` |
 | `-max_hsps`, `-qcov_hsp_perc`, `-culling_limit` | `core::blast_hits`, `core::hspfilter_culling` |
+| the preliminary hit list size, and its trim with `ADAPTIVE_CBS` (`BlastHSPCBSStreamClose`) | `blastn::hsp::get_prelim_hitlist_size`, `core::blast_hspstream` |
 | SEG, DUST, window masking, genetic codes | `utils::seg`, `utils::dust`, `utils::winmask`, `utils::genetic_code` |
 | X-drop SIMD kernels | `utils::xdrop_simd` (AVX2, 128-bit, NEON) |
 | threads | `utils::threading` |
@@ -269,7 +270,7 @@ flowchart LR
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`; `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges` and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
 | purge, reap, collect | `Blast_HSPListPurgeHSPsWithCommonEndpoints`, `s_Blast_HSPListReapByPrelimEvalue`, `s_BlastHSPCollectorRun` | `purge_prelim_hits_with_common_endpoints`, `PrelimHitCollector` | `prepare_preliminary_hits_for_kappa_in_place`, `PrelimCollector` |
-| traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | inside `process_subject`, called a second time per subject | `traceback::OrdinaryTraceback` |
+| traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | the loop `x_trace_list` stays in `process_subject` (`run.rs`, its second call per subject); its steps are in `traceback_subject.rs`, `traceback_hsp.rs` and `traceback_finish.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
 | report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` | the `match outfmt` at the end of `run_resolved_in_pool` |
@@ -336,7 +337,8 @@ psiblast is blastp with a round driver (`blastp/blast_engine/psi_round.rs`, `sea
 
 blastx, tblastn and tblastx follow the same stages with their own drivers: blastx in
 `blastx/native.rs`, `search.rs` and `runtime.rs`; tblastn in `tblastn/tblastn_app.rs` and
-`stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`. rpsblast has no driver of its
+`stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
+sets up a query batch with `batch_setup.rs` and `context_cutoffs.rs`. rpsblast has no driver of its
 own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_search` from
 `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the profiles are the
 "query" and the user's query is the "subject".

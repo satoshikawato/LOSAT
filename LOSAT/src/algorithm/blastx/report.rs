@@ -1122,6 +1122,10 @@ impl ShownSubjects<'_> {
 // ```c++
 //         formatter.PrintEpilog(opt);
 // ```
+/// The reports of one query batch, the `queries_before` queries of the batches before it written
+/// already. `stops`: the run stops after this batch (a later batch fails before its search), so
+/// a document that holds each report back never writes the last query's
+/// (`blast_xml::written_queries`).
 pub(crate) fn render_queries(
     writer: &mut impl Write,
     stderr: &mut dyn Write,
@@ -1131,6 +1135,7 @@ pub(crate) fn render_queries(
     shown: &ShownSubjects<'_>,
     batches: &mut [BatchResults],
     queries_before: usize,
+    stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
 ) -> Result<()> {
     render_queries_with(
@@ -1142,6 +1147,7 @@ pub(crate) fn render_queries(
         shown,
         batches,
         queries_before,
+        stops,
         xml2,
         None,
     )
@@ -1188,6 +1194,7 @@ pub(super) fn render_queries_with(
     shown: &ShownSubjects<'_>,
     batches: &mut [BatchResults],
     queries_before: usize,
+    stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
@@ -1226,11 +1233,12 @@ pub(super) fn render_queries_with(
             subjects,
             shown,
             batches,
+            stops,
         );
     }
     if let Some(xml2) = xml2 {
         return super::blast_xml::write_blastx_xml(
-            writer, stderr, xml2, options, queries, subjects, shown, batches,
+            writer, stderr, xml2, options, queries, subjects, shown, batches, stops,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698

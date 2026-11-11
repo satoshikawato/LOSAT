@@ -22,7 +22,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub use istat::{discover_stat_type, FormatSite, StatFile, StatType, UnitCounts};
-pub use ncbi_report::NCBI_BUILD_ROOT;
 
 use score::ScoreMean;
 use window::Window;

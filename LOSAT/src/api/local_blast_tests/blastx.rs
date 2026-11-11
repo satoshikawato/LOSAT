@@ -373,7 +373,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query));
     let subjects = subjects(&Inputs::path(&inputs.subject));
-    let cases: [(&str, fn(&mut BlastxArgs)); 9] = [
+    let cases: [(&str, fn(&mut BlastxArgs)); 11] = [
         ("Word-size must be greater than zero", |a| {
             a.word_size = Some(0)
         }),
@@ -381,9 +381,10 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
             "Word-size must be less than 8 for a tblastn, blastp or blastx search",
             |a| a.word_size = Some(8),
         ),
-        ("unsupported BLASTX word_size: use 3 or 5", |a| {
-            a.word_size = Some(4)
-        }),
+        (
+            "-word_size 4 is not supported by LOSAT's BLASTX (word sizes 3 and 5 are)",
+            |a| a.word_size = Some(4),
+        ),
         ("No hits are being saved", |a| a.max_target_seqs = Some(-1)),
         (
             "the task blastp is not supported by LOSAT's BLASTX (use blastx or blastx-fast)",
@@ -395,10 +396,22 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         ("Argument \"strand\". Illegal value", |a| {
             a.strand = "up".into()
         }),
-        ("-evalue requires a finite real value", |a| {
-            a.evalue = f64::INFINITY
+        (
+            "an -evalue that is not finite (inf) is not supported by LOSAT's BLASTX",
+            |a| a.evalue = f64::INFINITY,
+        ),
+        (
+            "the SEG locut or hicut \"+nan\" (not a finite decimal number) is not supported by LOSAT's BLASTX",
+            |a| a.seg = "12 +nan 2.5".into(),
+        ),
+        ("Invalid number of arguments to filtering option", |a| {
+            a.seg = "12 2.2".into()
         }),
-        ("SEG requires finite cutoffs", |a| a.seg.locut = f64::NAN),
+        // The filtering handler comes before the query options handler.
+        ("Invalid number of arguments to filtering option", |a| {
+            a.seg = "12 2.2".into();
+            a.query_loc = Some("5-1".into());
+        }),
     ];
     for (message, set) in cases {
         let mut args = blastx_args(&inputs.query, &inputs.subject, &[]);

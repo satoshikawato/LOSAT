@@ -117,12 +117,12 @@ use std::path::{Path, PathBuf};
 
 use super::file::DbFile;
 use super::SeqDbError;
+use crate::ncbi_str::printable_string;
 use crate::seqid::accguide::{parse_flags, SeqIdWarning, SEQID_NOT_SET};
 use crate::seqid::label;
 use crate::seqid::model::{ObjectId, ParsedSeqId, TextseqId};
 use crate::seqid::parse::{parse_ids, seq_id_from_text, which_inverse_seq_id, SeqIdError};
 use crate::seqid::rank::{best_rank_score, find_best};
-use crate::writedb::data_size::printable_string;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:45-55
 // ```c++

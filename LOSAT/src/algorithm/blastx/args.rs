@@ -1,6 +1,8 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
 use crate::blastinput::value_parsers::{
-    blastx_query_coverage, blastx_threshold, genetic_code, ncbi_int8, report_count,
+    blastx_query_coverage, blastx_real, blastx_threshold, genetic_code, ncbi_boolean,
+    ncbi_input_path, ncbi_int8, ncbi_integer, ncbi_output_path, ncbi_positive_integer,
+    nonnegative_ncbi_integer, protein_word_size, report_count, SegSpec,
 };
 use crate::stats::protein_options::{
     protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
@@ -58,7 +60,7 @@ pub struct BlastxArgs {
     //                      CArgDescriptions::eInputFile, kDfltArgQuery);
     // ```
     // The default `-` is standard input (`input_files::open_input`).
-    #[arg(long, value_name = "PATH", default_value = "-")]
+    #[arg(long, value_name = "PATH", default_value = "-", value_parser = ncbi_input_path())]
     pub query: PathBuf,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2366
     // ```c++
@@ -68,7 +70,7 @@ pub struct BlastxArgs {
     // ```
     // Optional for the parser: without `-subject` and `-db` the run fails with NCBI's error
     // after the parsing (`blastinput/app.rs` `missing_subject_error`).
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_parser = ncbi_input_path())]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // ```c++
@@ -160,7 +162,7 @@ pub struct BlastxArgs {
     //                    "Output file name",
     //                    CArgDescriptions::eOutputFile, "-");
     // ```
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
     // ```c++
@@ -173,14 +175,14 @@ pub struct BlastxArgs {
     // ```c++
     //         arg_desc.AddOptionalKey(kArgEvalue, "evalue", des, CArgDescriptions::eDouble);
     // ```
-    #[arg(long, default_value_t = 10.0, value_parser = finite_f64)]
+    #[arg(long, default_value_t = 10.0, value_parser = blastx_real)]
     pub evalue: f64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-167
     // ```c++
     //         arg_desc.AddOptionalKey(kArgWordSize, "int_value", description,
     //                                 CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]")]
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]")]
     pub word_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:203-205
     // ```c++
@@ -188,7 +190,7 @@ pub struct BlastxArgs {
     //                            "Set maximum number of HSPs per subject sequence to save for each query",
     //                            CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = positive)]
+    #[arg(long, value_parser = ncbi_positive_integer)]
     pub max_hsps: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201
     // ```c++
@@ -206,7 +208,7 @@ pub struct BlastxArgs {
     //                      	 	"Use sum statistics",
     //                      	 	CArgDescriptions::eBoolean);
     // ```
-    #[arg(long, value_parser = boolean, action = clap::ArgAction::Set, help = "Use sum statistics [default: true]")]
+    #[arg(long, value_parser = ncbi_boolean, action = clap::ArgAction::Set, help = "Use sum statistics [default: true]")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:175-177
     // ```c++
@@ -214,7 +216,7 @@ pub struct BlastxArgs {
     //                                 "Cost to open a gap",
     //                                 CArgDescriptions::eInteger);
     // ```
-    #[arg(long = "gapopen", help = "Cost to open a gap [default: 11]")]
+    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11]")]
     pub gap_open: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:180-182
     // ```c++
@@ -222,7 +224,7 @@ pub struct BlastxArgs {
     //                                "Cost to extend a gap",
     //                                CArgDescriptions::eInteger);
     // ```
-    #[arg(long = "gapextend", help = "Cost to extend a gap [default: 1]")]
+    #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1]")]
     pub gap_extend: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-942
     // ```c++
@@ -233,7 +235,7 @@ pub struct BlastxArgs {
     //                     CArgDescriptions::eInteger,
     //                     NStr::IntToString(kDfltArgMaxIntronLength));
     // ```
-    #[arg(long, default_value_t = 0, value_parser = nonnegative)]
+    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
     pub max_intron_length: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-338
     // ```c++
@@ -245,8 +247,9 @@ pub struct BlastxArgs {
     //                         CArgDescriptions::eString, m_FilterByDefault
     //                         ? kDfltArgSegFiltering : kDfltArgNoFiltering);
     // ```
-    #[arg(long, default_value = "12 2.2 2.5", value_parser = seg)]
-    pub seg: BlastxSeg,
+    // Read when NCBI's filtering handler reads it (`seg_spec`).
+    #[arg(long, default_value = "12 2.2 2.5")]
+    pub seg: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     // ```c++
     //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
@@ -254,7 +257,7 @@ pub struct BlastxArgs {
     //                         CArgDescriptions::eBoolean,
     //                         kDfltArgLookupTableMaskingOnlyProt);
     // ```
-    #[arg(long, default_value = "false", value_parser = boolean, action = clap::ArgAction::Set)]
+    #[arg(long, default_value = "false", value_parser = ncbi_boolean, action = clap::ArgAction::Set)]
     pub soft_masking: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:531-534
     // ```c++
@@ -287,7 +290,7 @@ pub struct BlastxArgs {
     //                             "1-hit algorithm",
     //                             CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = nonnegative, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3299
     // ```c++
@@ -298,7 +301,7 @@ pub struct BlastxArgs {
     // ```
     #[arg(
         long,
-        value_parser = nonnegative,
+        value_parser = nonnegative_ncbi_integer,
         help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit [default: 0, no culling]"
     )]
     pub culling_limit: Option<i32>,
@@ -374,7 +377,7 @@ pub struct BlastxArgs {
     // ```
     #[arg(
         long,
-        value_parser = positive,
+        value_parser = ncbi_positive_integer,
         help = "Maximum number of aligned sequences to keep [default: 500]",
         conflicts_with_all = ["num_descriptions", "num_alignments"]
     )]
@@ -391,7 +394,7 @@ pub struct BlastxArgs {
     //                            CArgDescriptions::eInteger,
     //                            NStr::IntToString(kDfltValue));
     // ```
-    #[arg(long, default_value_t = 1, value_parser = positive, help = "Number of threads (CPUs); serial WASI accepts only 1")]
+    #[arg(long, default_value_t = 1, value_parser = ncbi_positive_integer, help = "Number of threads (CPUs); serial WASI accepts only 1")]
     pub num_threads: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3169-3181
     // ```c++
@@ -434,167 +437,6 @@ pub struct BlastxArgs {
     pub comp_based_stats: String,
 }
 
-#[derive(Debug, Clone)]
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-407
-// ```c++
-//         if (m_QueryIsProtein && args[kArgSegFiltering]) {
-//             const string& seg_opts = args[kArgSegFiltering].AsString();
-//             if (seg_opts == kDfltArgNoFiltering) {
-//                 opt.SetSegFiltering(false);
-//             } else if (seg_opts == kDfltArgApplyFiltering) {
-//                 opt.SetSegFiltering(true);
-//             } else {
-//                 x_TokenizeFilteringArgs(seg_opts, tokens);
-//                 opt.SetSegFilteringWindow(NStr::StringToInt(tokens[0]));
-//                 opt.SetSegFilteringLocut(NStr::StringToDouble(tokens[1]));
-//                 opt.SetSegFilteringHicut(NStr::StringToDouble(tokens[2]));
-//             }
-// ```
-pub struct BlastxSeg {
-    pub enabled: bool,
-    /// The value was `yes` (the BLAST archive records `SegFiltering` true for it, and the
-    /// three numbers for a value with parameters).
-    pub yes: bool,
-    pub window: i32,
-    pub locut: f64,
-    pub hicut: f64,
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:375-384
-// ```c++
-// CFilteringArgs::x_TokenizeFilteringArgs(const string& filtering_args,
-//                                         vector<string>& output) const
-// {
-//     output.clear();
-//     NStr::Split(filtering_args, " ", output);
-//     if (output.size() != 3) {
-//         NCBI_THROW(CInputException, eInvalidInput,
-//                    "Invalid number of arguments to filtering option");
-//     }
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-407
-// ```c++
-//         if (m_QueryIsProtein && args[kArgSegFiltering]) {
-//             const string& seg_opts = args[kArgSegFiltering].AsString();
-//             if (seg_opts == kDfltArgNoFiltering) {
-//                 opt.SetSegFiltering(false);
-//             } else if (seg_opts == kDfltArgApplyFiltering) {
-//                 opt.SetSegFiltering(true);
-//             } else {
-//                 x_TokenizeFilteringArgs(seg_opts, tokens);
-//                 opt.SetSegFilteringWindow(NStr::StringToInt(tokens[0]));
-//                 opt.SetSegFilteringLocut(NStr::StringToDouble(tokens[1]));
-//                 opt.SetSegFilteringHicut(NStr::StringToDouble(tokens[2]));
-//             }
-// ```
-fn seg(value: &str) -> std::result::Result<BlastxSeg, String> {
-    let mut s = BlastxSeg {
-        enabled: value != "no",
-        yes: value == "yes",
-        window: 12,
-        locut: 2.2,
-        hicut: 2.5,
-    };
-    if matches!(value, "yes" | "no") {
-        return Ok(s);
-    }
-    let t: Vec<_> = value.split(' ').collect();
-    if t.len() != 3 {
-        return Err("invalid number of arguments to filtering option".into());
-    }
-    s.window = t[0].parse::<i32>().map_err(|_| "invalid SEG window")?;
-    s.locut = t[1].parse::<f64>().map_err(|_| "invalid SEG locut")?;
-    s.hicut = t[2].parse::<f64>().map_err(|_| "invalid SEG hicut")?;
-    if !s.locut.is_finite() || !s.hicut.is_finite() {
-        return Err("SEG requires finite cutoffs".into());
-    }
-    Ok(s)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:146-154
-// ```c++
-//         arg_desc.AddOptionalKey(kArgEvalue, "evalue", des, CArgDescriptions::eDouble);
-//     } else if (m_QueryIsProtein) {
-//         arg_desc.AddDefaultKey(kArgEvalue, "evalue",
-//                      "Expectation value (E) threshold for saving hits ",
-//                      CArgDescriptions::eDouble,
-//                      NStr::DoubleToString(1.0));
-//     } else {
-//         //igblastn
-//         arg_desc.AddDefaultKey(kArgEvalue, "evalue",
-// ```
-fn finite_f64(value: &str) -> std::result::Result<f64, String> {
-    let x = value.parse::<f64>().map_err(|_| "requires a real value")?;
-    if !x.is_finite() {
-        Err("requires a finite real value".into())
-    } else {
-        Ok(x)
-    }
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-945
-// ```c++
-//     arg_desc.AddDefaultKey(kArgMaxIntronLength, "length",
-//                     "Length of the largest intron allowed in a translated "
-//                     "nucleotide sequence when linking multiple distinct "
-//                     "alignments",
-//                     CArgDescriptions::eInteger,
-//                     NStr::IntToString(kDfltArgMaxIntronLength));
-//     arg_desc.SetConstraint(kArgMaxIntronLength,
-//                            new CArgAllowValuesGreaterThanOrEqual(0));
-//     arg_desc.SetCurrentGroup("");
-// ```
-fn nonnegative(value: &str) -> std::result::Result<i32, String> {
-    let n = value
-        .parse::<i32>()
-        .map_err(|_| "requires an Int4 integer")?;
-    if n < 0 {
-        Err("requires an integer >= 0".into())
-    } else {
-        Ok(n)
-    }
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2750-2754
-// ```c++
-// }
-//
-//
-// static void s_ValidateCustomDelim(const string& customFmtSpec,const string& customDelim)
-// {
-// ```
-fn positive(value: &str) -> std::result::Result<i32, String> {
-    let n = nonnegative(value)?;
-    if n == 0 {
-        Err("requires an integer >= 1".into())
-    } else {
-        Ok(n)
-    }
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:291-305
-// ```c++
-//            opt.SetWordThreshold(19.3);
-//            if (args[kArgWordSize].AsInteger() > 5) {
-//                opt.SetWordThreshold(21.0);
-//            }
-//            if (args[kArgWordSize].AsInteger() > 6) {
-//                opt.SetWordThreshold(20.25);
-//            }
-//         }
-//         opt.SetWordSize(args[kArgWordSize].AsInteger());
-//
-//     }
-//
-//     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
-//         CNcbiEnvironment env;
-//         env.Set("OLD_FSC", "true");
-// ```
-fn word_size(value: &str) -> std::result::Result<i32, String> {
-    let n = nonnegative(value)?;
-    if matches!(n, 3 | 5) {
-        Ok(n)
-    } else {
-        Err("unsupported BLASTX word_size: use 3 or 5".into())
-    }
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-871
 // ```c++
 //         switch (comp_stat_string[0]) {
@@ -671,28 +513,6 @@ pub(crate) fn composition_mode(value: &str) -> u8 {
         Ok((CompositionMode::NoCompositionBasedStats, _)) | Err(_) => 0,
     }
 }
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:487-498
-// ```c++
-//
-//
-// inline CArg_Boolean::CArg_Boolean(const string& name, const string& value)
-//     : CArg_String(name, value)
-// {
-//     try {
-//         m_Boolean = NStr::StringToBool(value);
-//     } catch (const CException& e) {
-//         NCBI_RETHROW(e,CArgException,eConvert, s_ArgExptMsg(GetName(),
-//             "Argument cannot be converted",value));
-//     }
-// }
-// ```
-fn boolean(value: &str) -> std::result::Result<bool, String> {
-    match value.to_ascii_lowercase().as_str() {
-        "true" | "t" | "yes" | "y" | "1" => Ok(true),
-        "false" | "f" | "no" | "n" | "0" => Ok(false),
-        _ => Err("invalid boolean".into()),
-    }
-}
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:43-49
 // ```c++
 // const size_t kNumTabularOutputFormatSpecifiers = 50;
@@ -766,7 +586,7 @@ pub struct ResolvedOptions {
     pub gap_extend: i32,
     pub gapped: bool,
     pub composition: u8,
-    pub seg: BlastxSeg,
+    pub seg: SegSpec,
     pub soft_masking: bool,
     pub strand: String,
     pub query_gencode: u8,
@@ -961,12 +781,6 @@ impl BlastxArgs {
         // The command line's parser has checked the values below, a caller of `run_local` has
         // not (the task: `run_local`, first).
         crate::algorithm::blastn::args::QueryStrand::parse(&self.strand)?;
-        if self.seg.enabled && !(self.seg.locut.is_finite() && self.seg.hicut.is_finite()) {
-            bail!("SEG requires finite cutoffs");
-        }
-        if !self.evalue.is_finite() {
-            bail!("-evalue requires a finite real value");
-        }
         let outfmt = u8::try_from(choice.number)?;
         if self
             .subject
@@ -974,13 +788,6 @@ impl BlastxArgs {
             .is_some_and(|subject| subject.as_os_str() == "-")
         {
             bail!("unsupported BLASTX stdin subject");
-        }
-        if self
-            .out
-            .as_ref()
-            .is_some_and(|p| p.file_name().is_some_and(|n| n.len() >= 256))
-        {
-            bail!("BLASTX -out filename length must be < 256");
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:872-877
         // ```c++
@@ -991,6 +798,18 @@ impl BlastxArgs {
         //                        "do a gapped search");
         //         }
         // ```
+        // The filtering handler (`CFilteringArgs`, before the composition handler,
+        // blastx_args.cpp:44-82): NCBI's error of `-seg` here, LOSAT's refusal of a value that
+        // NCBI reads (a locut or hicut that is not finite) after NCBI's checks.
+        let (seg, seg_refusal) = match self.seg_spec() {
+            Ok(seg) => (seg, None),
+            Err(crate::blastinput::app::SegOptionError::Ncbi(message)) => {
+                return Err(SemanticOptionsError::from(message).into())
+            }
+            Err(crate::blastinput::app::SegOptionError::Losat(refusal)) => {
+                (SegSpec::No, Some(refusal))
+            }
+        };
         let composition = composition_mode(&self.comp_based_stats);
         if self.ungapped && composition != 0 {
             return Err(SemanticOptionsError::from("Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search").into());
@@ -1102,8 +921,8 @@ impl BlastxArgs {
         //                                    "Word-size must be less than "
         //                                    "8 for a tblastn, blastp or blastx search");
         // ```
-        // The command line's `-word_size` is 3 or 5 (`word_size`, LOSAT's limit); a caller of
-        // `run_local` sets the field itself: NCBI's errors, then LOSAT's limit.
+        // The command line's `-word_size` is at least 2 (`protein_word_size`); a caller of
+        // `run_local` sets the field itself. LOSAT's limit (3 or 5) comes after NCBI's checks.
         if let Some(word) = self.word_size {
             if word <= 0 {
                 return Err(
@@ -1115,9 +934,6 @@ impl BlastxArgs {
                     "Word-size must be less than 8 for a tblastn, blastp or blastx search",
                 )
                 .into());
-            }
-            if !matches!(word, 3 | 5) {
-                bail!("unsupported BLASTX word_size: use 3 or 5");
             }
         }
         // The hit list size and the counts of the pairwise report
@@ -1156,6 +972,22 @@ impl BlastxArgs {
                 "expect value or cutoff score must be greater than zero",
             )
             .into());
+        }
+        if let Some(refusal) = seg_refusal {
+            return Err(refusal);
+        }
+        // LOSAT's limits, for values that NCBI's checks above accept: an e-value that is not
+        // finite (`+inf`, `1e999`, `-nan`; NCBI's argument reads `inf` and `nan` without a sign as
+        // no number), and the word sizes 2 to 7 but 3 and 5, whose lookup tables the BLASTX engine
+        // does not have (series NP, SC9).
+        if !self.evalue.is_finite() {
+            bail!(
+                "an -evalue that is not finite ({}) is not supported by LOSAT's BLASTX",
+                self.evalue
+            );
+        }
+        if let Some(word) = self.word_size.filter(|word| !matches!(word, 3 | 5)) {
+            bail!("-word_size {word} is not supported by LOSAT's BLASTX (word sizes 3 and 5 are)");
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433
         // ```c++
@@ -1254,6 +1086,17 @@ impl BlastxArgs {
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
             .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
             .map(crate::report::tabular::TabularSpec::intern);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
+        // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
+        // A hit list size whose preliminary size is not positive crashes NCBI (-max_target_seqs
+        // 1073741799 to 2147483622 with composition-based statistics: SIGSEGV).
+        crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
+            counts.hitlist_size,
+            self.max_target_seqs.is_some(),
+            composition > 0,
+            !self.ungapped,
+            "BLASTX",
+        )?;
         Ok(ResolvedOptions {
             word_size,
             threshold,
@@ -1265,7 +1108,7 @@ impl BlastxArgs {
             gap_extend,
             gapped: !self.ungapped,
             composition,
-            seg: self.seg.clone(),
+            seg,
             soft_masking: self.soft_masking,
             strand: self.strand.clone(),
             query_gencode: self.query_gencode,
@@ -1408,6 +1251,13 @@ impl BlastxArgs {
     // ```
     pub fn run(self) -> Result<()> {
         super::native::run(&self)
+    }
+
+    /// `-seg` as NCBI's filtering handler reads it (`app::read_seg_option`).
+    pub(crate) fn seg_spec(
+        &self,
+    ) -> std::result::Result<SegSpec, crate::blastinput::app::SegOptionError> {
+        crate::blastinput::app::read_seg_option(&self.seg, "BLASTX")
     }
 
     /// The `-db` value as NCBI keeps it (`seqdb::db_argument_name`), when given.

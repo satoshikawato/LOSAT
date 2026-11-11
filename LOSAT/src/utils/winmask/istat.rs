@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use super::{MaskerParams, WinMaskError};
+use crate::ncbi_exception::ThrowSite;
 
 /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_istat_factory.hpp:56-62
 /// ```c
@@ -152,8 +153,8 @@ impl FormatSite {
         }
     }
 
-    /// The file, line, error code text (`GetErrCodeString`) and function that NCBI's report
-    /// prints for the throw. The function of `readWord` is not printed (NCBI 2.17.0's Linux
+    /// The file, line, class and error code text (`GetType()::GetErrCodeString()`) and function
+    /// that NCBI's report prints for the throw. The function of `readWord` is not printed (NCBI 2.17.0's Linux
     /// build, observed).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:48-52
@@ -169,23 +170,29 @@ impl FormatSite {
     ///         case eStreamOpenFail:   return "open failed";
     ///         case eFormat:           return "file format error";
     /// ```
-    pub(super) fn throw_site(self) -> (&'static str, u32, &'static str, Option<&'static str>) {
-        const OBINARY: &str = "seq_masker_istat_obinary.cpp";
+    pub(super) fn throw_site(self) -> ThrowSite {
+        const OBINARY: &str = "src/algo/winmask/seq_masker_istat_obinary.cpp";
         const OBINARY_NEW: Option<&str> =
             Some("ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary");
-        const BIN: &str = "seq_masker_istat_bin.cpp";
+        const BIN: &str = "src/algo/winmask/seq_masker_istat_bin.cpp";
         const BIN_NEW: Option<&str> = Some("ncbi::CSeqMaskerIstatBin::CSeqMaskerIstatBin");
-        match self {
-            Self::FileTooShort => (OBINARY, 63, "format error", None),
-            Self::UnitSize => (OBINARY, 114, "bad parameter", OBINARY_NEW),
-            Self::HashKeySize => (OBINARY, 125, "bad hash parameter", OBINARY_NEW),
-            Self::HashOffset => (OBINARY, 129, "bad hash parameter", OBINARY_NEW),
-            Self::HashShift => (OBINARY, 133, "bad hash parameter", OBINARY_NEW),
-            Self::HashTable => (OBINARY, 197, "format error", OBINARY_NEW),
-            Self::ValuesTable => (OBINARY, 208, "format error", OBINARY_NEW),
-            Self::BinFileSize => (BIN, 79, "file format error", BIN_NEW),
-            Self::BinUnitSize => (BIN, 99, "file format error", BIN_NEW),
-            Self::BinLength => (BIN, 108, "file format error", BIN_NEW),
+        let (file, line, kind, function) = match self {
+            Self::FileTooShort => (OBINARY, 63, "Exception::format error", None),
+            Self::UnitSize => (OBINARY, 114, "Exception::bad parameter", OBINARY_NEW),
+            Self::HashKeySize => (OBINARY, 125, "Exception::bad hash parameter", OBINARY_NEW),
+            Self::HashOffset => (OBINARY, 129, "Exception::bad hash parameter", OBINARY_NEW),
+            Self::HashShift => (OBINARY, 133, "Exception::bad hash parameter", OBINARY_NEW),
+            Self::HashTable => (OBINARY, 197, "Exception::format error", OBINARY_NEW),
+            Self::ValuesTable => (OBINARY, 208, "Exception::format error", OBINARY_NEW),
+            Self::BinFileSize => (BIN, 79, "Exception::file format error", BIN_NEW),
+            Self::BinUnitSize => (BIN, 99, "Exception::file format error", BIN_NEW),
+            Self::BinLength => (BIN, 108, "Exception::file format error", BIN_NEW),
+        };
+        ThrowSite {
+            file,
+            line,
+            kind,
+            function,
         }
     }
 }

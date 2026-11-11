@@ -1075,6 +1075,203 @@ pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1064-1095
+// ```c++
+// bool CSeq_id_Textseq_Tree::x_Equals(const CTextseq_id& id1,
+//                                     const CTextseq_id& id2)
+// {
+//     if ( id1.IsSetAccession() != id2.IsSetAccession() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetName() != id2.IsSetName() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetVersion() != id2.IsSetVersion() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetRelease() != id2.IsSetRelease() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetAccession() &&
+//          !NStr::EqualNocase(id1.GetAccession(), id2.GetAccession()) ) {
+//         return false;
+//     }
+//     if ( id1.IsSetName() &&
+//          !NStr::EqualNocase(id1.GetName(), id2.GetName()) ) {
+//         return false;
+//     }
+//     if ( id1.IsSetVersion() &&
+//          id1.GetVersion() != id2.GetVersion() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetRelease() &&
+//          id1.GetRelease() != id2.GetRelease() ) {
+//         return false;
+//     }
+//     return true;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1713-1719
+// ```c++
+// bool CSeq_id_GB_Tree::x_Check(const CSeq_id::E_Choice& type) const
+// {
+//     return
+//         type == CSeq_id::e_Genbank  ||
+//         type == CSeq_id::e_Embl  ||
+//         type == CSeq_id::e_Ddbj;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1141-1148 (`FindInfo`; the
+// packed key of an accession, `ParseAcc` at 825-880, holds its prefix without case, its digits
+// and its version, not the alternative)
+// ```c++
+//     if ( s_PackTextidEnabled() &&
+//          tid.IsSetAccession() && !tid.IsSetName() && !tid.IsSetRelease() ) {
+//         const string& acc = tid.GetAccession();
+//         TPackedKey key = CSeq_id_Textseq_Info::ParseAcc(acc, tid);
+//         if ( key ) {
+//             TPacked packed = CSeq_id_Textseq_Info::Pack(key, tid);
+//             TReadLockGuard guard(m_TreeLock);
+//             TPackedMap_CI it = m_PackedMap.find(key);
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:767-768 (`CSeq_id_Local_Tree`),
+// 919-925 (`CSeq_id_General_Tree`) and 998-1008 (`CSeq_id_Patent_Tree`)
+// ```c++
+//     typedef unordered_map<string, CSeq_id_Local_Info*, PHashNocase, PEqualNocase> TByStr;
+//     typedef map<CObject_id::TId, CSeq_id_Local_Info*>         TById;
+//     ...
+//         typedef unordered_map<string, CSeq_id_General_PlainInfo*, PHashNocase, PEqualNocase> TByStr;
+//         typedef map<TPacked, CSeq_id_General_PlainInfo*>         TById;
+//         ...
+//     typedef map<string, STagMap, PNocase> TDbMap;
+//     ...
+//     // 3-level indexing: country, (number|app_number), seqid.
+//     // Ignoring patent doc-type in indexing.
+//     ...
+//         typedef map<string, TBySeqid, PNocase> TByNumber; // or by App_number
+//     ...
+//     typedef map<string, SPat_idMap, PNocase> TByCountry;
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3467-3481 (the PDB tree's key;
+// `CSeq_id_PDB_Info::Normalize` upper-cases the molecule after its first letter and sets
+// `chain_id` from `chain`, then the tree compares the normalized ids, `Equals`)
+// ```c++
+//     string skey = id.GetMol().Get();
+//     if (id.IsSetChain_id()) {
+//         skey += '_';
+//         skey += id.GetChain_id();
+//     }
+//     else if (id.IsSetChain()) {
+//         skey += '_';
+//         skey += char(id.GetChain());
+//     }
+//     return skey;
+// ```
+// No NCBI counterpart: LOSAT's sets of `CSeq_id_Handle` (psiblast's inclusion sets and the rows
+// of its PSSM, `algorithm::psiblast::rounds::SetKey`) take two ids for one where they are equal
+// (`ParsedSeqId`'s `Eq`, which the handle of each id follows, but for a `giim` id, which those
+// sets refuse) and refuse two other ids that share this key, where the handles can be one or two.
+/// Adds to `out` the key of `id` that every id which NCBI's `CSeq_id_Handle` takes for the same
+/// sequence shares: a text Seq-id's accession and name in upper case, its version and release,
+/// with GenBank, EMBL and DDBJ as one alternative (their tree; an accession that packs is one
+/// handle in the three); a local id's tag and a `general` id's database and tag as `match_keys`
+/// takes them (a number, or a string in upper case); a patent's country, number (or application
+/// number, as one) in upper case and the sequence's number; a PDB id's molecule in upper case and
+/// its chain as written (`chain_id`, else `chain`, read as its default); the others' values. Ids
+/// that NCBI keeps apart can share it (`gb|ABC1.1|` and `emb|abc1.1|`).
+pub fn handle_superset_key(id: &ParsedSeqId, out: &mut Vec<u8>) {
+    let mut part = |bytes: &[u8]| {
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(bytes);
+    };
+    let tag_key = |tag: &ObjectId| -> Vec<u8> {
+        match object_id_number(tag) {
+            Some(number) => format!("n{number}").into_bytes(),
+            None => match tag {
+                ObjectId::Str(text) => [b"s".as_slice(), &text.to_ascii_uppercase()].concat(),
+                ObjectId::Id(_) => unreachable!("an integer tag is a number"),
+            },
+        }
+    };
+    let option = |value: Option<&[u8]>| -> Vec<u8> {
+        value.map_or(b"-".to_vec(), |value| [b"+".as_slice(), value].concat())
+    };
+    match id {
+        ParsedSeqId::Local(tag) => {
+            part(b"local");
+            part(&tag_key(tag));
+        }
+        ParsedSeqId::Gibbsq(number) => {
+            part(b"gibbsq");
+            part(&number.to_le_bytes());
+        }
+        ParsedSeqId::Gibbmt(number) => {
+            part(b"gibbmt");
+            part(&number.to_le_bytes());
+        }
+        ParsedSeqId::Giim(giim) => {
+            part(b"giim");
+            part(&giim.id.to_le_bytes());
+        }
+        ParsedSeqId::Patent(patent) => {
+            let number = match &patent.cit.id {
+                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+            };
+            part(b"patent");
+            part(&patent.cit.country.to_ascii_uppercase());
+            part(&number.to_ascii_uppercase());
+            part(&patent.seqid.to_le_bytes());
+        }
+        ParsedSeqId::General(dbtag) => {
+            part(b"general");
+            part(&dbtag.db.to_ascii_uppercase());
+            part(&tag_key(&dbtag.tag));
+        }
+        ParsedSeqId::Gi(gi) => {
+            part(b"gi");
+            part(&gi.to_le_bytes());
+        }
+        ParsedSeqId::Pdb(pdb) => {
+            let chain = match &pdb.chain_id {
+                Some(chain_id) => chain_id.clone(),
+                None => vec![pdb.chain_or_default() as u8],
+            };
+            part(b"pdb");
+            part(&pdb.mol.to_ascii_uppercase());
+            part(&chain);
+        }
+        _ => {
+            let text = id
+                .textseq()
+                .expect("the other alternatives are text Seq-ids");
+            let alternative = match id {
+                ParsedSeqId::Genbank(_) | ParsedSeqId::Embl(_) | ParsedSeqId::Ddbj(_) => "gb",
+                _ => id.alternative_name(),
+            };
+            part(alternative.as_bytes());
+            part(&option(
+                text.accession
+                    .as_ref()
+                    .map(|accession| accession.to_ascii_uppercase())
+                    .as_deref(),
+            ));
+            part(&option(
+                text.name
+                    .as_ref()
+                    .map(|name| name.to_ascii_uppercase())
+                    .as_deref(),
+            ));
+            part(&option(
+                text.version
+                    .map(|version| version.to_le_bytes())
+                    .as_ref()
+                    .map(|bytes| bytes.as_slice()),
+            ));
+            part(&option(text.release.as_deref()));
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Patent_seq_id.cpp:53-56
 // ```c++
 // bool CPatent_seq_id::Match(const CPatent_seq_id& psip2) const

@@ -13,6 +13,14 @@ pub enum Xml2Target {
     Subjects(usize),
 }
 
+impl Xml2Target {
+    /// Whether the documents of the search hold each query's report back until the next query's
+    /// arrives (`m_IsBl2Seq`, blast_format.cpp:2362-2389; `Xml2Document`): a `-subject` search.
+    pub fn holds_back(self) -> bool {
+        matches!(self, Self::Subjects(_))
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:174-185
 // ```c++
 //         for (unsigned int i = 0; i < subjectsInfo->Size(); i++) {

@@ -68,7 +68,9 @@ while True:
             state, cpu, wchan = main_state(p)
         except (OSError, ValueError):
             continue
-        blocked = state in 'SD' and 'futex' in wchan
+        # Asleep anywhere but the run loop's poll (futex, sigsuspend, pipe ...): a WTF thread left in its
+        # suspend handler's sigsuspend is as stuck as one waiting for a lock.
+        blocked = state in 'SD' and not any(w in wchan for w in ('poll', 'select'))
         s = seen.get(p)
         if s is None or not blocked or cpu != s[1]:
             if s is not None and s[2]:
@@ -78,7 +80,7 @@ while True:
         if not s[2] and now - s[0] >= BLOCK_S:
             s[2] = True
             episodes += 1
-            dump(p, episodes, f'main thread in a futex {now - s[0]:.0f} s (state {state}, wchan={wchan})')
+            dump(p, episodes, f'main thread asleep {now - s[0]:.0f} s (state {state}, wchan={wchan})')
     for p in list(seen):
         if p not in alive:
             del seen[p]

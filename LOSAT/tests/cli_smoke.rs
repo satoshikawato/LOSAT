@@ -1326,6 +1326,26 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
             .replace('"', "\"\"")
     );
     assert!(text.replace('\n', "").contains(&message), "{text}");
+    // A megablast search with a template looks for no index (setup_factory.cpp:440-446): the
+    // one-line warning, also with an index on disk.
+    fs::write(dir.join("db/plain.shd"), b"").unwrap();
+    let template_args = [
+        "-template_type",
+        "coding",
+        "-template_length",
+        "16",
+        "-word_size",
+        "11",
+    ];
+    let output = run(&[&megablast[..], &["-use_index", "true"], &template_args].concat());
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n"
+    );
+    let without = run(&[&megablast[..], &template_args].concat());
+    assert_eq!(output.stdout, without.stdout);
+    fs::remove_file(dir.join("db/plain.shd")).unwrap();
     // An index: a new-style superheader of a volume, or an old-style index volume.
     for file in ["db/plain.shd", "db/plain.00.idx", "db/plain.42.idx"] {
         fs::write(dir.join(file), b"").unwrap();
@@ -1342,6 +1362,44 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
         let output = run(&megablast);
         assert_eq!(output.stdout, plain_megablast.stdout, "{file}");
         fs::remove_file(dir.join(file)).unwrap();
+    }
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:87-88,106-107
+// ```c++
+//     arg.Reset(new CFilteringArgs( !kQueryIsProtein ));
+//     m_Args.push_back(arg);
+// ...
+//     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
+//     arg.Reset(m_QueryOptsArgs);
+// ```
+// NCBI BLAST+ 2.17.0 (line LIB P-S3): BLASTX's error of `-seg` comes from the filtering handler,
+// before the query options handler (`-query_loc`) and the formatting handler (its warning of an
+// ignored `-num_descriptions`).
+#[test]
+fn blastx_seg_error_comes_from_the_filtering_handler() {
+    let dir = temp_path("blastx_seg", "dir");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("q.fna"), format!(">n\n{MT_NUCLEOTIDE}\n")).unwrap();
+    fs::write(
+        dir.join("s.faa"),
+        ">p\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV\n",
+    )
+    .unwrap();
+    let error = "BLAST query/options error: Invalid number of arguments to filtering option\nPlease refer to the BLAST+ user manual.\n";
+    for extra in [&["-num_descriptions", "5"][..], &["-query_loc", "5-1"], &[]] {
+        let output = clean_losat_command()
+            .current_dir(&dir)
+            .args([
+                "blastx", "-query", "q.fna", "-subject", "s.faa", "-outfmt", "6", "-seg", "12 2.2",
+            ])
+            .args(extra)
+            .output()
+            .expect("run LOSAT");
+        assert_eq!(output.status.code(), Some(1), "{extra:?} {output:?}");
+        assert!(output.stdout.is_empty(), "{extra:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stderr), error, "{extra:?}");
     }
     fs::remove_dir_all(&dir).unwrap();
 }

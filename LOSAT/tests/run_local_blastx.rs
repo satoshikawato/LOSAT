@@ -753,7 +753,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query)).unwrap();
     let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-    let cases: [(&str, fn(&mut BlastxArgs)); 10] = [
+    let cases: [(&str, fn(&mut BlastxArgs)); 11] = [
         ("Word-size must be greater than zero", |a| {
             a.word_size = Some(0)
         }),
@@ -786,6 +786,11 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         ),
         ("Invalid number of arguments to filtering option", |a| {
             a.seg = "12 2.2".into()
+        }),
+        // The filtering handler comes before the query options handler.
+        ("Invalid number of arguments to filtering option", |a| {
+            a.seg = "12 2.2".into();
+            a.query_loc = Some("5-1".into());
         }),
     ];
     for (message, set) in cases {

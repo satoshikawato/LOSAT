@@ -8401,16 +8401,33 @@ fn megablast_index(
     let Some(index_name) = args.megablast_index_name() else {
         return Ok(MegablastIndex::NotAsked);
     };
-    if index_name.contains(',') {
-        return Ok(MegablastIndex::VolumeRange);
-    }
-    if let Some(file) = database.megablast_index_file(index_name) {
-        return Ok(MegablastIndex::Found(file));
-    }
-    let root = crate::utils::winmask::NCBI_BUILD_ROOT;
-    let warning = format!(
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:440-446
+    // ```c++
+    //     if( options->GetProgramType() != eBlastTypeBlastn
+    //         && options->GetProgramType() != eBlastTypeMapping) {
+    //         errstr = "Database indexing is available for blastn only.";
+    //     }
+    //     else if( options->GetMBTemplateLength() > 0 ) {
+    //         errstr = "Database indexing is not available for discontiguous ";
+    //         errstr += "searches.";
+    //     }
+    // ```
+    // A megablast search with a template (`-template_type` and `-template_length`, which
+    // require each other) looks for no index.
+    let warning = if args.template_length.is_some() {
+        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".to_string()
+    } else {
+        if index_name.contains(',') {
+            return Ok(MegablastIndex::VolumeRange);
+        }
+        if let Some(file) = database.megablast_index_file(index_name) {
+            return Ok(MegablastIndex::Found(file));
+        }
+        let root = crate::utils::winmask::NCBI_BUILD_ROOT;
+        format!(
         "Warning: (1.1) [blastn] NCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 795: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New() - no database volume has an index\n\nNCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 1026: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old() - no index file specified or index '{index_name}*' not found.\n Database index will not be used.\n"
-    );
+        )
+    };
     // One diagnostic: the archive saves it as one message.
     match &args.archive {
         Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,

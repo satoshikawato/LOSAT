@@ -1471,17 +1471,17 @@ pub(crate) struct XdropResult {
 // ```c
 //         GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
 // ```
-// Appends one operation to the edit script, merging equal neighbours as `GapPrelimEditBlockAdd`
-// does.
+// Appends `n` of one operation to the edit script, merging equal neighbours as
+// `GapPrelimEditBlockAdd` does (`n` calls of it, one operation each).
 #[inline(always)]
-fn push_op(ops: &mut Vec<(u8, u32)>, op: u8) {
+fn push_ops(ops: &mut Vec<(u8, u32)>, op: u8, n: u32) {
     if let Some(last) = ops.last_mut() {
         if last.0 == op {
-            last.1 += 1;
+            last.1 += n;
             return;
         }
     }
-    ops.push((op, 1));
+    ops.push((op, n));
 }
 
 // ---------------------------------------------------------------------------
@@ -3312,6 +3312,10 @@ mod kernel {
             let (mut step, mut len, rec) = XTrace::x_rec(p);
             let mut start = tr.best_start;
             let mut row = rec.sub(trace_bytes(NIB, len));
+            // No NCBI counterpart: the run of equal operations so far (NCBI adds them one at a
+            // time and merges them), added to the script when the operation changes and after the
+            // walk; `u8::MAX` is no operation
+            let (mut run_op, mut run_n) = (u8::MAX, 0u32);
             while a_index > 0 || b_index > 0 {
                 // `b_index < start` (wraps past every `len`) or past the row's cells
                 let b_rel = b_index.wrapping_sub(start);
@@ -3370,7 +3374,18 @@ mod kernel {
                     }
                 }
                 // the NCBI operation: a code's operation times SCRIPT_SUB (0, 3, 6)
-                push_op(&mut sc.ops, if NIB { op * SCRIPT_SUB } else { op });
+                let op = if NIB { op * SCRIPT_SUB } else { op };
+                if op == run_op {
+                    run_n += 1;
+                } else {
+                    if run_n > 0 {
+                        push_ops(&mut sc.ops, run_op, run_n);
+                    }
+                    (run_op, run_n) = (op, 1);
+                }
+            }
+            if run_n > 0 {
+                push_ops(&mut sc.ops, run_op, run_n);
             }
         }
     }
@@ -4208,7 +4223,7 @@ mod tests {
                 a = a.saturating_sub(1);
                 b = b.saturating_sub(1);
             }
-            push_op(&mut ops, op);
+            push_ops(&mut ops, op, 1);
         }
         (a_off, b_off, best_score, false, ops, cells)
     }

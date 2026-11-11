@@ -834,8 +834,8 @@ mod tests {
         }
     }
 
-    /// The inputs of a command line that LOSAT's `blastx` refuses (a word size, X-dropoff or
-    /// `-use_sw_tback` it does not search with): the options model must still write the list NCBI
+    /// The inputs of a command line that LOSAT's `blastx` parser refuses (an X-dropoff or
+    /// `-use_sw_tback`, which it does not search with): the options model must still write the list NCBI
     /// wrote for it. The options LOSAT takes come from its arguments, the refused ones are set by
     /// hand.
     fn refused_inputs(extra: &[&str]) -> OptionInputs {
@@ -937,8 +937,10 @@ mod tests {
             );
         }
         // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
-        // matrix and composition mode since series SC, SC6: 8 of the 80 are refused).
-        assert!(refused >= 5 && CASES.len() - refused > 60, "{refused}");
+        // matrix and composition mode since series SC, SC6; the word sizes LOSAT does not search
+        // with since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them):
+        // 4 of the 80 are refused (`-xdrop_*`, `-use_sw_tback`).
+        assert!(refused >= 4 && CASES.len() - refused > 60, "{refused}");
     }
 
     #[test]

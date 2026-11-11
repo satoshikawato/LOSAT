@@ -7,10 +7,16 @@
 //! whole batch first), after the reports of the batches before and the
 //! outfmt 0 prolog (exit 3).
 //!
+//! `blastn -window_masker_taxid` (line NP M3) with the directories of counts files made here: the
+//! searches with a taxid's file (in every output format, with `-db`, `-strand minus` and a split
+//! batch), the directory from `WINDOW_MASKER_PATH`, `NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH`
+//! and `.ncbirc` (also when `blastn.ini` turns `.ncbirc` off), a taxid without a usable file (exit 3,
+//! as a damaged counts file) and the options given with it (NCBI's argument and input errors).
+//!
 //! The cases are `tests/fixtures/winmask_blastn/cases.tsv` with `<case>.out`, `.err` and `.rc`,
 //! written by `tests/winmask/make_blastn_error_fixtures.py freeze`; the counts files under
-//! `target/winmask_blastn/` are made here with the bytes that script writes. The searches that
-//! succeed are the `wm.*` rows of `tests/blastn_regression_fixtures.py`.
+//! `target/winmask_blastn/` are made here with the bytes that script writes. The other searches with
+//! `-window_masker_db` that succeed are the `wm.*` rows of `tests/blastn_regression_fixtures.py`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-458 (the check of the
 //! counts file), c++/src/algo/blast/api/winmask_filter.cpp:146-151 (`s_BuildSeqMasker`),
@@ -95,13 +101,41 @@ fn make_counts() {
         for (name, content) in files {
             put(&work.join(name), &content);
         }
-        // A file without read permission, made once (its bytes do not matter).
+        // `-window_masker_taxid`: <dir>/<taxid>/wmasker.obinary, the directory named by the
+        // registry files relative to LOSAT/.
+        let rc = b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = target/winmask_blastn/taxid\n".to_vec();
+        let taxid_files: [(&str, Vec<u8>); 7] = [
+            ("taxid/562/wmasker.obinary", data.clone()),
+            ("taxid/-1/wmasker.obinary", data.clone()),
+            (
+                "taxid/7/wmasker.obinary",
+                std::fs::read(work.join("unit17.obinary")).unwrap(),
+            ),
+            (
+                "taxid/10/wmasker.obinary",
+                std::fs::read(work.join("ascii.counts")).unwrap(),
+            ),
+            ("home_rc/.ncbirc", rc.clone()),
+            (
+                "cfg_inidont/blastn.ini",
+                b"[NCBI]\nDONT_USE_NCBIRC = 1\n".to_vec(),
+            ),
+            ("cfg_inidont/.ncbirc", rc),
+        ];
+        for (name, content) in taxid_files {
+            let path = work.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            put(&path, &content);
+        }
+        std::fs::create_dir_all(work.join("taxid/9606/wmasker.obinary")).unwrap();
+        // Files without read permission, made once (their bytes do not matter).
         #[cfg(unix)]
-        {
+        for name in ["unreadable.obinary", "taxid/8/wmasker.obinary"] {
             use std::os::unix::fs::PermissionsExt;
-            let unreadable = work.join("unreadable.obinary");
+            let unreadable = work.join(name);
             if !unreadable.exists() {
-                let part = work.join(format!("unreadable.part{}", std::process::id()));
+                std::fs::create_dir_all(unreadable.parent().unwrap()).unwrap();
+                let part = unreadable.with_extension(format!("part{}", std::process::id()));
                 std::fs::write(&part, &data).unwrap();
                 std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o000)).unwrap();
                 std::fs::rename(&part, &unreadable).unwrap();
@@ -156,6 +190,13 @@ fn runs_here(case: &Case) -> bool {
                 && std::fs::File::open(engine().join("target/winmask_blastn/unreadable.obinary"))
                     .is_err()
         }
+        "taxid_unreadable" => {
+            cfg!(unix)
+                && std::fs::File::open(
+                    engine().join("target/winmask_blastn/taxid/8/wmasker.obinary"),
+                )
+                .is_err()
+        }
         "directory" => cfg!(unix),
         _ => true,
     }
@@ -182,6 +223,7 @@ fn check(threads: &str) {
                         | "OVERLAP_CHUNK_SIZE"
                         | "BLASTDB"
                         | "ARCHIVE_FORMAT"
+                        | "WINDOW_MASKER_PATH"
                 )
             {
                 command.env_remove(name);
@@ -224,9 +266,40 @@ fn check(threads: &str) {
 
 // One test for both thread counts: the counts files are made by the test process.
 #[test]
-fn unusable_counts_files_give_ncbis_errors_at_one_and_four_threads() {
+fn the_cases_give_ncbis_bytes_at_one_and_four_threads() {
     check("1");
     check("4");
+}
+
+// NCBI BLAST+ 2.17.0 reads the ascii counts under a taxid's directory (line NP M/STATE.md, f03 and
+// f04); LOSAT does not read that format and refuses it before any output.
+#[test]
+fn ascii_counts_of_a_taxid_are_refused_before_any_output() {
+    make_counts();
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .current_dir(engine())
+        .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")
+        .env_remove("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH")
+        .args([
+            "blastn",
+            "-query",
+            "tests/fixtures/blastn_regression/inputs/wm_query.fa",
+            "-subject",
+            "tests/fixtures/blastn_regression/inputs/s60k.fa",
+            "-window_masker_taxid",
+            "10",
+            "-outfmt",
+            "0",
+        ])
+        .output()
+        .expect("run losat");
+    assert_ne!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("ascii format") && stderr.contains("not supported by LOSAT"),
+        "{stderr}"
+    );
 }
 
 #[test]

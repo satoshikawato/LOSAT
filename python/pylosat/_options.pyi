@@ -76,6 +76,8 @@ class BlastnOptions(TypedDict, total=False):
     lcase_masking: Literal['true', 'false']
     soft_masking: bool
     """Apply filtering locations as soft masks [default: true]"""
+    window_masker_taxid: int
+    """Enable WindowMasker filtering using a Taxonomic ID"""
     window_masker_db: str
     """Enable WindowMasker filtering using this repeats database."""
     strand: Literal['both', 'plus', 'minus']

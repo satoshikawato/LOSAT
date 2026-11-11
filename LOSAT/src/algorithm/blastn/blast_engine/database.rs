@@ -27,6 +27,7 @@
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -425,6 +426,72 @@ impl BlastnDatabase {
             taxdb: shared::TaxdbRun::default(),
             parsed_seqids,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:665-675,792-797
+    // ```c++
+    // void CIndexedDb_New::AddIndexInfo(
+    //         const std::string & vol_name, bool & partial )
+    // {
+    //     ...
+    //     try {
+    //         shdr.Reset( GetIndexSuperHeader( vol_name + ".shd" ) );
+    // ...
+    //         if( !has_index ) {
+    //             NCBI_THROW( CDbIndex_Exception, eBadOption,
+    //                         "no database volume has an index" );
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:950-968,998-1003
+    // ```c++
+    //         while( start != string::npos ) {
+    //             end = indexnames.find_first_of( " ", start );
+    //             dbnames.push_back( indexnames.substr( start, end - start ) );
+    //             start = indexnames.find_first_not_of( " ", end );
+    //         }
+    // ...
+    //             end = indexname.find_first_of( ",", start );
+    //             string index_base = indexname.substr( start, end );
+    // ...
+    //                 for( long i = start_vol; (unsigned long)i <= stop_vol; ++i ) {
+    //                     ostringstream os;
+    //                     os << index_base << "." << setw( 2 ) << setfill( '0' )
+    //                        << i << ".idx";
+    //                     string name = SeqDB_ResolveDbPath( os.str() );
+    // ```
+    /// A file of a MegaBLAST index of this database that NCBI's index loader would find for the
+    /// `-db` value `index_name` (`DbIndexInit`): a new-style superheader `<volume>.shd` of one of
+    /// its volumes, or an old-style volume `<name>.NN.idx` (00 to 99, NCBI's range without the
+    /// commas that name others) of one of the space-separated names, on the search path. `None`:
+    /// NCBI finds no index and searches without one.
+    pub(super) fn megablast_index_file(&self, index_name: &str) -> Option<PathBuf> {
+        for volume in self.db.volumes() {
+            let mut superheader = volume.base().as_os_str().to_os_string();
+            superheader.push(".shd");
+            let superheader = PathBuf::from(superheader);
+            if superheader.is_file() {
+                return Some(superheader);
+            }
+        }
+        let resolve = |file: &str| match self.db.search_path() {
+            Some(search) => search.resolve_file(file).map(PathBuf::from),
+            None => Some(PathBuf::from(file)).filter(|path| path.is_file()),
+        };
+        let mut start = Some(0);
+        while let Some(at) = start {
+            let end = index_name[at..].find(' ').map(|offset| at + offset);
+            let base = &index_name[at..end.unwrap_or(index_name.len())];
+            for volume in 0..=99 {
+                if let Some(file) = resolve(&format!("{base}.{volume:02}.idx")) {
+                    return Some(file);
+                }
+            }
+            start = end.and_then(|end| {
+                index_name[end..]
+                    .find(|c| c != ' ')
+                    .map(|offset| end + offset)
+            });
+        }
+        None
     }
 
     /// Whether NCBI's prefetch of a batch can fail at a subject (a database with parsed

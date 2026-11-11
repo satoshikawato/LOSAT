@@ -299,6 +299,8 @@ pub(crate) fn run_pair(
                                 &shown,
                                 &mut results,
                                 processed,
+                                // No document here holds a report back (`stops`).
+                                false,
                                 None,
                             )?;
                             processed += queries.len();
@@ -383,6 +385,8 @@ pub(crate) fn run_pair(
                     &shown,
                     &mut results,
                     processed,
+                    // No document here holds a report back (`stops`).
+                    false,
                     None,
                 )?;
                 processed += queries.len();

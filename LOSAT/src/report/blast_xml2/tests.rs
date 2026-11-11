@@ -355,6 +355,45 @@ fn a_delayed_document_writes_one_report_late_and_drops_the_last_on_a_failure() {
 }
 
 #[test]
+fn a_report_that_is_never_written_is_not_made_and_writes_the_one_held_before() {
+    // The last query of a `-subject` run that stops (`StructuredXml::unwritten`): its report is
+    // not made, the report held before it is written as the arriving report would write it, and
+    // the document's start comes first when nothing was written yet.
+    for kind in [Xml2Kind::Single15, Xml2Kind::Single16] {
+        let (mut made, mut skipped) =
+            (Xml2Document::new(kind, true), Xml2Document::new(kind, true));
+        let (mut with_report, mut without) = (Vec::new(), Vec::new());
+        for report in ["{1}\n", "{2}\n"] {
+            made.report(&mut report.as_bytes().to_vec(), &mut with_report)
+                .unwrap();
+            skipped
+                .report(&mut report.as_bytes().to_vec(), &mut without)
+                .unwrap();
+        }
+        made.report(&mut b"{lost}\n".to_vec(), &mut with_report)
+            .unwrap();
+        skipped.unwritten(&mut without).unwrap();
+        assert_eq!(without, with_report, "{kind:?}");
+        // the run's only query: the start of the document alone
+        let mut only = Vec::new();
+        Xml2Document::new(kind, true).unwritten(&mut only).unwrap();
+        assert_eq!(only, framing::prolog_bytes(kind), "{kind:?}");
+    }
+    // The writer of a `-subject` search holds its reports back; BLAST XML and `-db` do not.
+    let subjects = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Subjects(1)));
+    let database = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Database));
+    assert!(subjects.holds_back() && !database.holds_back());
+    assert!(!crate::report::blast_xml::BlastXmlWriter::new(0).holds_back());
+    // The written reports of a call: all but the last only where the run stops and the document
+    // holds it back.
+    use crate::report::blast_xml::written_queries;
+    assert_eq!(written_queries(3, true, true), 2);
+    assert_eq!(written_queries(3, false, true), 3);
+    assert_eq!(written_queries(3, true, false), 3);
+    assert_eq!(written_queries(0, true, true), 0);
+}
+
+#[test]
 fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
     // The BLASTP block search writes a run's reports with a document per block, handing the
     // framing state (the count, the start, the held report of a `-subject` run) on.

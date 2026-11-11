@@ -100,6 +100,9 @@ const MDB_LAST_ERRCODE: i32 = -30780;
 const EINVAL: i32 = 22;
 const EIO: i32 = 5;
 const ENOMEM: i32 = 12;
+/// `EISDIR` of Linux and macOS (an `errno` value; Windows reports a directory otherwise).
+#[cfg(unix)]
+const EISDIR: i32 = 21;
 /// Not an LMDB code: a path of mdb.c that makeblastdb does not reach and that is not
 /// ported; the name of the path is in `Env::unreachable`.
 const MDB_UNREACHABLE: i32 = -1_000_000;
@@ -251,7 +254,13 @@ impl LmdbError {
         if code == ENOMEM {
             return "Cannot allocate memory".to_string();
         }
-        std::io::Error::from_raw_os_error(code).to_string()
+        // `std::io::Error` prints a system error as the system's text (`strerror` on Unix) and
+        // ` (os error N)`; `mdb_strerror` gives the text alone.
+        let text = std::io::Error::from_raw_os_error(code).to_string();
+        match text.strip_suffix(&format!(" (os error {code})")) {
+            Some(strerror) => strerror.to_string(),
+            None => text,
+        }
     }
 
     /// The LMDB code, when this is an LMDB error.
@@ -514,9 +523,61 @@ impl Env {
         // 		env->me_map = NULL;
         // 		return ErrCode();
         // ```
+        // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:4995-5004 (mdb_env_open)
+        // ```c
+        // 	/* For RDONLY, get lockfile after we know datafile exists */
+        // 	if (!(flags & (MDB_RDONLY|MDB_NOLOCK))) {
+        // 		rc = mdb_env_setup_locks(env, &fname, mode, &excl);
+        // 		if (rc)
+        // 			goto leave;
+        // 	}
+        //
+        // 	rc = mdb_fopen(env, &fname,
+        // 		(flags & MDB_RDONLY) ? MDB_O_RDONLY : MDB_O_RDWR,
+        // 		mode, &env->me_fd);
+        // ```
+        // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:4160-4164, 4749
+        // ```c
+        // static const mdb_nchar_t *const mdb_suffixes[2][2] = {
+        // 	{ MDB_NAME("/data.mdb"), MDB_NAME("")      },
+        // 	{ MDB_NAME("/lock.mdb"), MDB_NAME("-lock") }
+        // };
+        // ...
+        // 	rc = mdb_fopen(env, fname, MDB_O_LOCKS, mode, &env->me_lfd);
+        // ```
+        // LMDB opens (creates) its lock file `<path>-lock` before the data file. LOSAT writes
+        // no lock file (PD-LOSAT-DATABASE-SEARCH); it asks the file system about that name
+        // without creating it, so that the open fails where LMDB's open of the lock file fails:
+        // a name the file system cannot hold (`ENAMETOOLONG`: with makeblastdb's `NAME.pdb`,
+        // an output name of 247 bytes and more where a file name has at most 255) or, on Unix,
+        // a directory of that name (`open` gives `EISDIR`), before the data file is made.
+        // makeblastdb removes a directory of that name with its contents before
+        // (`DeleteBlastDb`, `crate::writedb::dir_entry`), so the directory is one that could not
+        // be removed. On Windows LMDB's `CreateFileW` gives a Windows error code, not `EISDIR`,
+        // and that case is not checked (not compared with a makeblastdb run on Windows).
+        let mut lock = path.as_os_str().to_owned();
+        lock.push("-lock");
+        let lock = PathBuf::from(lock);
+        match std::fs::metadata(&lock) {
+            #[cfg(unix)]
+            Ok(meta) if meta.is_dir() => {
+                return Err(LmdbError::Mdb {
+                    func: "mdb_env_open",
+                    code: EISDIR,
+                })
+            }
+            Err(source) if source.kind() != std::io::ErrorKind::NotFound => {
+                return Err(LmdbError::Io { path: lock, source })
+            }
+            _ => {}
+        }
         // The map size (`Uint8` in NCBI's layer) reaches LMDB as a `size_t`. A size the
         // platform's `size_t` cannot hold (a 32-bit platform) would be cut by that conversion;
-        // LOSAT refuses it with the error the map of such a size gets (`ENOMEM`) instead.
+        // LOSAT refuses it with the error the map of such a size gets (`ENOMEM`) instead, before
+        // it makes the data file. LMDB would fail in `mdb_env_map`, after it has created the
+        // data file: the message is the same, and only which error is reported when the data
+        // file cannot be made either differs (PD-LOSAT-DATABASE-SEARCH lists the cut map size
+        // as NCBI undefined behaviour that is not reproduced).
         if map_size > platform.max_map_size {
             return Err(LmdbError::Mdb {
                 func: "mdb_env_open",
@@ -1735,19 +1796,16 @@ impl Env {
     // ```
     // LMDB's lock file holds only the reader table and the process id; LOSAT does not
     // create it, and removes one left at the path so that the files are as makeblastdb
-    // leaves them. One consequence: an output name of 247 to 251 bytes, whose
-    // `NAME.pdb-lock` passes the file-name limit of 255 bytes, stops makeblastdb in
-    // `mdb_env_open` ("File name too long", exit status 2, no volume) while LOSAT builds a
-    // valid database (PD-LOSAT-DATABASE-SEARCH, makedb-v5 PR1 review N1).
+    // leaves them. A lock file that LMDB could not create stops `Env::create` as it stops
+    // `mdb_env_open` (PD-LOSAT-DATABASE-SEARCH).
     pub(crate) fn close(mut self) -> Result<(), LmdbError> {
         self.txn_abort();
         let flushed = self.file.flush();
         let mut lock = self.path.clone().into_os_string();
         lock.push("-lock");
         let lock = PathBuf::from(lock);
-        if lock.exists() {
-            let _ = std::fs::remove_file(&lock);
-        }
+        // `CFile(name).Remove()`: `CDirEntry::Remove(eRecursive)`.
+        let _ = crate::writedb::dir_entry::remove(&lock);
         flushed.map_err(|source| LmdbError::Io {
             path: self.path.clone(),
             source,

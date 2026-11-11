@@ -17,6 +17,7 @@ use clap::Args;
 use crate::blastinput::app::options_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
 use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
@@ -400,7 +401,7 @@ impl DbFilterArgs {
         let invalid = || options_error("Invalid taxidlist file ");
         let mut tax_ids = BTreeSet::new();
         for id in &ids {
-            if id.iter().all(u8::is_ascii_whitespace) {
+            if crate::ncbi_str::is_blank(id) {
                 continue;
             }
             let taxid = string_to_int(id).ok_or_else(invalid)?;
@@ -496,17 +497,23 @@ impl DbFilterArgs {
 // "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/corelib/ncbifile.cpp", line 5754:
 // Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory
 // mapped the file must exist: ''\n\n` (dropin-survey-20261029/DI8 probe S22); LOSAT names the
-// build tree of the official Linux x64 release (`NCBI_BUILD_ROOT`), as the Seq-id parser's
-// exceptions do.
+// build tree of the official Linux x64 release (`ncbi_exception::NCBI_BUILD_ROOT`), as the
+// Seq-id parser's exceptions do.
+const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
+    file: "src/corelib/ncbifile.cpp",
+    line: 5754,
+    kind: "CFileException::eMemoryMap",
+    function: Some("ncbi::CMemoryFileMap::CMemoryFileMap"),
+};
+
 /// `e.what()` of the exception of a seqid list file that is not on the search path (the
 /// resolved name is empty): the report of the `CFileException`.
 fn missing_seqidlist_what() -> String {
-    format!(
-        "NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbifile.cpp\", line 5754: Error: \
-         (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory \
-         mapped the file must exist: ''\n",
-        crate::utils::winmask::NCBI_BUILD_ROOT
+    NcbiException::new(
+        MEMORY_MAP_MISSING,
+        "To be memory mapped the file must exist: ''",
     )
+    .what()
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:152-172
@@ -554,23 +561,21 @@ fn stream_lines(bytes: &[u8]) -> Vec<Vec<u8>> {
     lines
 }
 
-// `NStr::StringToNumeric<int>` with `fAllowLeadingSpaces | fAllowTrailingSpaces`
-// (corelib/ncbistr.cpp, `NStr::StringToInt`): white space may surround the number; a sign (`+` or `-`) may lead it; the digits are
-// decimal and the value must fit a signed 32-bit integer.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2431-2436
+// ```c++
+//     for (auto id : ids) {
+//         try {
+//             if (NStr::IsBlank(id)) {
+//                 continue;
+//             }
+//             auto taxid = NStr::StringToNumeric<TTaxId>(id, NStr::fAllowLeadingSpaces | NStr::fAllowTrailingSpaces);
+// ```
+// `TTaxId` is an `int` (`NStr::StringToInt`, `crate::ncbi_str`): C `isspace` may surround the
+// number, a sign may lead it, and an entry read from a file ends at a NUL byte.
 /// `NStr::StringToNumeric<TTaxId>` of a list entry, `None` for NCBI's exception.
 pub(crate) fn string_to_int(token: &[u8]) -> Option<i32> {
-    let text = std::str::from_utf8(token).ok()?;
-    let text = text.trim_matches(|c: char| c.is_ascii_whitespace());
-    let (negative, digits) = match text.as_bytes().first()? {
-        b'-' => (true, &text[1..]),
-        b'+' => (false, &text[1..]),
-        _ => (false, text),
-    };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let magnitude: i64 = digits.parse().ok()?;
-    i32::try_from(if negative { -magnitude } else { magnitude }).ok()
+    use crate::ncbi_str::{ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
+    crate::ncbi_str::string_to_int(token, ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES).ok()
 }
 
 #[cfg(test)]
@@ -627,6 +632,7 @@ mod tests {
         assert_eq!(string_to_int(b"  -5 "), Some(-5));
         assert_eq!(string_to_int(b"2147483647"), Some(i32::MAX));
         assert_eq!(string_to_int(b"-2147483648"), Some(i32::MIN));
+        assert_eq!(string_to_int(b"\x0b42\x0b"), Some(42));
         for bad in [
             &b"abc"[..],
             b"# human",

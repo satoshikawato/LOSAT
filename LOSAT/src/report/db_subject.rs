@@ -246,9 +246,13 @@ impl ParsedSubject {
         let Some(target) = set.bioseq_defline(&alignment_id) else {
             return Err("has no definition line that holds its Seq-align id".into());
         };
-        let unfetchable = set
-            .display_defline(&alignment_id)
-            .is_some_and(|shown| shown.index != target);
+        // A giim Seq-align id is never found again: NCBI's handles never take it for one with an
+        // equal id (`algorithm::psiblast::rounds::HandleIndex`), so its scope finds no Bioseq by it
+        // (NCBI BLAST+ 2.17.0 writes `Unknown`; review 2 of line DBID pssmrows, H1).
+        let unfetchable = matches!(alignment_id, ParsedSeqId::Giim(_))
+            || set
+                .display_defline(&alignment_id)
+                .is_some_and(|shown| shown.index != target);
         Ok(Self {
             set,
             alignment_id,

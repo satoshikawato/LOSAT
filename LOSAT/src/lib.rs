@@ -113,6 +113,10 @@ pub(crate) mod seqid;
 pub(crate) mod writedb;
 // NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
 pub(crate) mod blastdbcmd;
+// NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
+pub(crate) mod ncbi_exception;
+// NCBI corelib/ncbistr.cpp: the number conversions of `NStr`.
+pub(crate) mod ncbi_str;
 // NCBI's rpsbproc 0.5.1 (RpsbProc/src/rpsbproc_main.cpp of the 2025-05-13 package): the CDD
 // domain annotation of rpsblast's archives.
 pub(crate) mod rpsbproc;

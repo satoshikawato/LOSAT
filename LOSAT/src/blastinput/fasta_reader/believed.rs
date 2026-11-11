@@ -193,7 +193,7 @@ pub(crate) fn parse_believed_defline(
     line_number: u64,
     warn: &mut dyn FnMut(&[u8]),
 ) -> Result<BelievedDefline, String> {
-    let space = crate::seqid::parse::is_space;
+    let space = crate::ncbi_str::is_space;
     let len = defline.len();
     if len <= 1 || defline[1..].iter().all(|&byte| space(byte)) {
         return Ok(BelievedDefline {

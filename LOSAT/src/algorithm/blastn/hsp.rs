@@ -621,9 +621,8 @@ pub fn get_prelim_hitlist_size(
     // The argument is an `int` (`CArg_Integer`); the default is 500.
     let hitlist_size = i32::try_from(hitlist_size).unwrap_or(i32::MAX);
     let mut prelim_hitlist_size = hitlist_size;
-    let adaptive_cbs = std::env::var_os("ADAPTIVE_CBS").is_some();
     if composition_based_stats {
-        if adaptive_cbs {
+        if crate::core::blast_hspstream::adaptive_cbs_environment() {
             if hitlist_size < 1000 {
                 prelim_hitlist_size = std::cmp::max(prelim_hitlist_size.wrapping_add(1000), 1500);
             } else {
@@ -641,6 +640,30 @@ pub fn get_prelim_hitlist_size(
         );
     }
     prelim_hitlist_size
+}
+
+/// LOSAT's refusal of a hit list size whose preliminary size (`get_prelim_hitlist_size`, NCBI's
+/// `int`) is not positive, with which NCBI crashes (BLASTN, BLASTP, PSIBLAST, RPSBLAST, BLASTX
+/// and TBLASTN check it where NCBI would start the search). `max_target_seqs_given`: the size
+/// is `-max_target_seqs`, otherwise `-num_descriptions` / `-num_alignments` gave it.
+pub(crate) fn check_prelim_hitlist_size(
+    hitlist_size: usize,
+    max_target_seqs_given: bool,
+    composition_based_stats: bool,
+    gapped_calculation: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    if get_prelim_hitlist_size(hitlist_size, composition_based_stats, gapped_calculation) >= 1 {
+        return Ok(());
+    }
+    let what = if max_target_seqs_given {
+        format!("a -max_target_seqs of {hitlist_size}")
+    } else {
+        format!("a hit list size of {hitlist_size} (-num_descriptions / -num_alignments)")
+    };
+    anyhow::bail!(
+        "{what}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}"
+    )
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1389-1403

@@ -5,7 +5,13 @@
 //! file with only entries that change no output (such as `[BLAST] BLASTDB`) is accepted.
 
 use std::ffi::{OsStr, OsString};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use super::ncbi_registry::{
+    error_reading_post, last_value, read_registry, syntax_error_notice, Layer, RegistryEntry,
+    RegistryRead,
+};
 
 /// Registry entries (section, name; case-insensitive) that change no output of a search with
 /// `-subject`: the database and data-loader settings and the data directory, and
@@ -333,14 +339,9 @@ fn registry_search_path(
     } else {
         path.push(PathBuf::from("/etc"));
     }
-    // The usage report's registry looks for no `.ncbirc` either when `NCBI_DONT_USE_NCBIRC` is
-    // set or when it has the entry `[NCBI] DONT_USE_NCBIRC`, whose only layer with entries there
-    // is the environment's (`NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, an empty value too;
-    // `IncludeNcbircIfAllowed`, ncbireg.cpp:1634-1648).
-    let arguments_set = env("BLAST_USAGE_REPORT")
-        .is_some_and(|value| ncbi_string_to_bool(&value.to_string_lossy()) == Some(false))
-        || env("NCBI_DONT_USE_NCBIRC").is_some()
-        || env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_some();
+    // The path is made when the usage report's registry looks for `.ncbirc`, or else later
+    // (`usage_report_reads_ncbirc`).
+    let arguments_set = !usage_report_reads_ncbirc(env);
     path.extend((process.program_dirs)(arguments_set)?);
     path.extend(tail);
     Ok(path)
@@ -904,93 +905,22 @@ fn normalize_path(
     Some(head.join(&b'/'))
 }
 
-/// The entries of a registry file, or the reason NCBI reports it as malformed.
+/// The registry file that NCBI loads under `file_name` (the first one on the search path that
+/// is a file, `CFile::Exists`).
 ///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbireg.cpp:652-749
-/// ```c
-///     for (line = 1;  NcbiGetlineEOL(is, str);  ++line) {
-///         try {
-///             SIZE_TYPE len = str.length();
-///             SIZE_TYPE beg = 0;
-///
-///             while (beg < len  &&  isspace((unsigned char) str[beg])) {
-///                 ++beg;
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:256-265
+/// ```c++
+///     string dir;
+///     CDirEntry::SplitPath(name, &dir, 0, 0);
+///     if ( dir.empty() ) {
+///         ITERATE (TSearchPath, it, m_SearchPath) {
+///             const string& result
+///                 = x_FindRegistry(CDirEntry::MakePath(*it, name), style);
+///             if ( !result.empty() ) {
+///                 return result;
 ///             }
-///             if (beg == len) {
-///             ...
-///                 continue;
-///             }
-///
-///             switch (str[beg]) {
-///
-///             case '#':  { // file comment
-///             ...
-///             case ';':  { // section or entry comment
-///             ...
-///             case '[':  { // section name
-///                 ++beg;
-///                 SIZE_TYPE end = str.find_first_of(']', beg + 1);
-///                 if (end == NPOS) {
-///                     NCBI_THROW2(CRegistryException, eSection,
-///                                 "Invalid registry section" + in_path
-///                                 + " (']' is missing): `" + str + "'", line);
-///                 }
-///                 section = NStr::TruncateSpaces(str.substr(beg, end - beg));
-///             ...
-///             default:  { // regular entry
-///                 string name, value;
-///                 if ( !NStr::SplitInTwo(str, "=", name, value) ) {
-///                     NCBI_THROW2(CRegistryException, eEntry,
-///                                 "Invalid registry entry format" + in_path
-///                                 + ": '" + str + "'", line);
-///                 }
-///                 NStr::TruncateSpacesInPlace(name);
-///             ...
-///                 NStr::TruncateSpacesInPlace(value);
-///             ...
-///                 string cont;
-///                 while (s_Backslashed(value, value.size())
-///                        &&  NcbiGetlineEOL(is, cont)) {
-///                     ++line;
-///                     value[value.size() - 1] = '\n';
-///                     value += NStr::TruncateSpaces(cont);
+///         }
 /// ```
-/// LOSAT reads the entries only to decide whether to reject the file, so a line it does
-/// not read as an entry, a comment or a section makes the file rejected.
-fn registry_entries(text: &str) -> Result<Vec<(String, String, String)>, String> {
-    let mut entries = Vec::new();
-    let mut section = String::new();
-    let mut lines = text.lines();
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix('[') {
-            match rest.find(']') {
-                Some(end) if !rest[..end].trim().is_empty() => {
-                    section = rest[..end].trim().to_string();
-                }
-                _ => return Err(format!("a section line it cannot read: {line:?}")),
-            }
-            continue;
-        }
-        let Some((name, value)) = trimmed.split_once('=') else {
-            return Err(format!("a line it cannot read: {line:?}"));
-        };
-        let mut value = value.trim().to_string();
-        while value.ends_with('\\') {
-            let Some(next) = lines.next() else { break };
-            value.pop();
-            value.push('\n');
-            value.push_str(next.trim());
-        }
-        entries.push((section.clone(), name.trim().to_string(), value));
-    }
-    Ok(entries)
-}
-
-/// The registry file that NCBI loads under `file_name` (the first one on the search path).
 fn find_registry(search_path: &[PathBuf], file_name: &str) -> Option<PathBuf> {
     search_path
         .iter()
@@ -998,25 +928,96 @@ fn find_registry(search_path: &[PathBuf], file_name: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn check_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| format!("NCBI BLAST+ would read the registry file {} ({error}), which LOSAT cannot check; this is not supported by LOSAT", path.display()))?;
-    let text = String::from_utf8_lossy(&bytes);
-    let entries = registry_entries(&text).map_err(|reason| {
+// NCBI reference (598d8ae6): c++/include/corelib/metareg.hpp:64-69
+// ```c++
+//         /// C Toolkit style; mostly useful with name = "ncbi"
+// #ifdef NCBI_OS_MSWIN
+//         eName_RcOrIni = eName_Ini
+// #else
+//         eName_RcOrIni = eName_DotRc
+// #endif
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:284-303 (`eName_Ini` adds `.ini`,
+// `eName_DotRc` makes `.<name>rc`)
+// ```c++
+//         case eName_Ini:
+//             for (string name2(name); ; ) {
+//                 string result = x_FindRegistry(name2 + ".ini", eName_AsIs);
+//         ...
+//         case eName_DotRc: {
+//             string base, ext;
+//             CDirEntry::SplitPath(name, 0, &base, &ext);
+//             return x_FindRegistry(CDirEntry::MakePath(dir, '.' + base, ext)
+//                                   + "rc", eName_AsIs);
+// ```
+/// The name of NCBI's system-wide registry file, which `CMetaRegistry::Load("ncbi",
+/// eName_RcOrIni)` looks for: `.ncbirc`, and `ncbi.ini` on Windows.
+const SYSTEM_WIDE_REGISTRY: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+
+/// One read of the registry file at `path` into `layer` (`ncbi_registry::read_registry`):
+/// `Ok(None)` when NCBI cannot open it, which NCBI takes for no file (and looks no further).
+/// `Err` holds LOSAT's refusal.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:60-90 (`SEntry::Reload`, which
+/// `x_Load` calls for the file found)
+/// ```c++
+/// bool CMetaRegistry::SEntry::Reload(CMetaRegistry::TFlags reload_flags)
+/// {
+///     CFile file(actual_name);
+///     if ( !file.Exists() ) {
+///         _TRACE("No such registry file " << actual_name);
+///         return false;
+///     }
+///     ...
+///     CNcbiIfstream ifs(actual_name.c_str(), IOS_BASE::in | IOS_BASE::binary);
+///     if ( !ifs.good() ) {
+///         _TRACE("Unable to (re)open registry file " << actual_name);
+///         return false;
+///     }
+///     ...
+///         if ((reload_flags & fKeepContents)  ||  registry->Empty(rflags)) {
+///             dest = registry->Read(ifs, reg_flags | IRegistry::fJustCore);
+/// ```
+/// NCBI BLAST+ 2.17.0 (g_reg probes `unr`, `unr2`, 2026-11-11): a malformed `.ncbirc` that it
+/// cannot open (mode 000) is not reported, and a `.ncbirc` in the home directory is then not
+/// read either; a `blastn.ini` that it cannot open is no file. The file is opened in binary mode:
+/// the line ends are `NcbiGetlineEOL`'s alone.
+fn read_registry_file(path: &Path, layer: Layer) -> Result<Option<RegistryRead>, String> {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|error| {
         format!(
-            "the registry file {} has {reason}, which NCBI BLAST+ reports as a syntax error; this is not supported by LOSAT",
+            "NCBI BLAST+ would read the registry file {} ({error}), which LOSAT cannot read; this is not supported by LOSAT",
             path.display()
         )
     })?;
-    for (section, name, value) in &entries {
-        if !is_harmless_entry(section, name, value) {
+    read_registry(&bytes, layer).map(Some).map_err(|reason| {
+        format!(
+            "the registry file {} {reason}; this is not supported by LOSAT",
+            path.display()
+        )
+    })
+}
+
+/// The first entry of `entries` that LOSAT does not know to change no output
+/// (`is_harmless_entry`), as LOSAT's refusal of the file at `path`.
+fn check_registry_entries(path: &Path, entries: &[RegistryEntry]) -> Result<(), String> {
+    for RegistryEntry {
+        section,
+        name,
+        value,
+    } in entries
+    {
+        if !is_harmless_entry(section, name, &String::from_utf8_lossy(value)) {
             return Err(format!(
                 "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT with a Boolean, [NCBI] DATA and DONT_USE_NCBIRC); this is not supported by LOSAT",
                 path.display()
             ));
         }
     }
-    Ok(entries)
+    Ok(())
 }
 
 /// The NCBI application settings that LOSAT reproduces (`check_ncbi_application_settings`).
@@ -1459,114 +1460,28 @@ fn data_loaders_of(env: Option<&[u8]>, files: [Option<&[u8]>; 2]) -> bool {
     use_blast_dbs || use_genbank
 }
 
-/// A registry file's value of an entry as NCBI stores it: an unescaped `"` at either end
-/// is removed, and one elsewhere is NCBI's error. LOSAT does not port `NStr::ParseEscapes`
-/// and rejects a value with a backslash (which also marks an escaped `"`).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781
-/// ```c++
-///                 // Historically, " may appear unescaped at the beginning,
-///                 // end, both, or neither.
-///                 beg = 0;
-///                 SIZE_TYPE end = value.size();
-///                 for (SIZE_TYPE pos = value.find('\"');
-///                      pos < end  &&  pos != NPOS;
-///                      pos = value.find('\"', pos + 1)) {
-///                     if (s_Backslashed(value, pos)) {
-///                         continue;
-///                     } else if (pos == beg) {
-///                         ++beg;
-///                     } else if (pos == end - 1) {
-///                         --end;
-///                     } else {
-///                         NCBI_THROW2(CRegistryException, eValue,
-///                                     "Single(unescaped) '\"' in the middle "
-///                                     "of registry value" + in_path + ": '"
-///                                     + str + "'", line);
-///                     }
-///                 }
-///
-///                 try {
-///                     value = NStr::ParseEscapes(value.substr(beg, end - beg));
-///                 } catch (CStringException&) {
-///                     NCBI_THROW2(CRegistryException, eValue,
-///                                 "Badly placed '\\' in the registry value"
-///                                 + in_path + ": '" + str + "'", line);
-///
-///                 }
-/// ```
-fn stored_registry_value(value: &str) -> Result<&str, &'static str> {
-    if value.contains('\\') {
-        return Err("a backslash escape, which LOSAT does not read");
-    }
-    let bytes = value.as_bytes();
-    let mut beg = 0;
-    let mut end = bytes.len();
-    let mut pos = 0;
-    while let Some(found) = bytes[pos..].iter().position(|&byte| byte == b'"') {
-        let at = pos + found;
-        if at >= end {
-            break;
-        }
-        if at == beg {
-            beg += 1;
-        } else if at == end - 1 {
-            end -= 1;
-        } else {
-            return Err("an unescaped '\"' in the middle, which NCBI BLAST+ reports as an error");
-        }
-        pos = at + 1;
-    }
-    Ok(&value[beg..end.max(beg)])
-}
-
-/// The value of `[BLAST] <name>` that a registry file stores: that of its last entry (a
-/// later entry replaces an earlier one, `Set` without `fNoOverride`). `Err` holds why
-/// LOSAT does not read the value as NCBI reads it (`stored_registry_value`).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:794-801
-/// ```c++
-///                 } else if (was_empty  &&  HasEntry(section, name, flags)) {
-///                     ERR_POST_X(8, Warning
-///                                << "Found multiple [" << section << "] "
-///                                << name << " settings" << in_path
-///                                << "; using the one from line " << line);
-///                 }
-///                 Set(section, name, value, set_flags, comment);
-///                 comment.erase();
-/// ```
-fn file_blast_entry(
+/// `last_value` of `[section] entry` as text, for a setting that LOSAT reads as text: `Err`
+/// (LOSAT's refusal) for a value that is not UTF-8, as for the environment's variable.
+fn file_text_entry(
     path: &Path,
-    entries: &[(String, String, String)],
-    entry: &str,
-) -> Result<Option<String>, String> {
-    file_entry(path, entries, "BLAST", entry)
-}
-
-/// `file_blast_entry` of the entry `[section] entry`.
-fn file_entry(
-    path: &Path,
-    entries: &[(String, String, String)],
+    entries: &[RegistryEntry],
     section: &str,
     entry: &str,
 ) -> Result<Option<String>, String> {
-    let Some((_, _, value)) = entries.iter().rev().find(|(in_section, name, _)| {
-        in_section.eq_ignore_ascii_case(section) && name.eq_ignore_ascii_case(entry)
-    }) else {
-        return Ok(None);
-    };
-    stored_registry_value(value)
-        .map(|value| Some(value.to_string()))
-        .map_err(|reason| {
-            format!(
-                "the registry file {} sets [{section}] {entry} to a value with {reason}; this is not supported by LOSAT",
-                path.display()
-            )
+    last_value(entries, section, entry)
+        .map(|value| {
+            String::from_utf8(value.to_vec()).map_err(|_| {
+                format!(
+                    "the registry file {} sets [{section}] {entry} to a value that is not valid UTF-8; this is not supported by LOSAT",
+                    path.display()
+                )
+            })
         })
+        .transpose()
 }
 
 /// A registry file's `[BLAST] MAX_SEQID_LENGTH` when the file has the entry (an empty value
-/// too; `Err` for a value LOSAT cannot read as NCBI stores it).
+/// too; `Err` for a value LOSAT cannot read, `file_text_entry`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:739-747
 /// ```c++
@@ -1582,9 +1497,9 @@ fn file_entry(
 /// ```
 fn max_seqid_length_entry(
     path: &Path,
-    entries: &[(String, String, String)],
+    entries: &[RegistryEntry],
 ) -> Option<Result<String, String>> {
-    file_blast_entry(path, entries, "MAX_SEQID_LENGTH").transpose()
+    file_text_entry(path, entries, "BLAST", "MAX_SEQID_LENGTH").transpose()
 }
 
 /// The registry entry `[BLAST] BLASTDB` from the layers of the application's registry,
@@ -1650,12 +1565,377 @@ fn blastdb_of(
     Ok(None)
 }
 
+/// Where NCBI's diagnostics go once an application has set them up with its `-logfile`
+/// (`SetLogFile`).
+pub enum DiagTarget {
+    /// The standard stream `cerr`: no `-logfile`, `-logfile -`, or a file that cannot be
+    /// opened.
+    Stderr,
+    /// The file of `-logfile`, appended to.
+    File(std::fs::File),
+    /// Nowhere: `-logfile ""` and `-logfile /dev/null` (a stream handler without a stream).
+    Discard,
+}
+
+impl DiagTarget {
+    /// Writes `text` where the diagnostics go (`stderr` for `cerr`).
+    pub fn write_text(&mut self, text: &[u8], stderr: &mut dyn Write) {
+        match self {
+            DiagTarget::File(file) => {
+                let _ = file.write_all(text);
+            }
+            DiagTarget::Stderr => {
+                let _ = stderr.write_all(text);
+                let _ = stderr.flush();
+            }
+            DiagTarget::Discard => {}
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608
+// ```c++
+//     // Check if a non-existing dir is specified
+//     if ( !s_IsSpecialLogName(file_name) ) {
+//         string dir = CFile(file_name).GetDir();
+//         if ( !dir.empty()  &&  !CDir(dir).Exists() ) {
+//             return false;
+//         }
+//     }
+//     ...
+//         // Check special filenames
+//         if ( file_name.empty()  ||  file_name == "/dev/null" ) {
+//             // no output
+//             SetDiagStream(0, quick_flush, 0, 0, kLogName_None);
+//         }
+//         else if (file_name == "-") {
+//             // output to stderr
+//             SetDiagStream(&NcbiCerr, quick_flush, 0, 0, kLogName_Stderr);
+//         }
+//         else {
+//             // output to file
+//             unique_ptr<CFileDiagHandler> fhandler(new CFileDiagHandler());
+//             if ( !fhandler->SetLogFile(file_name, eDiagFile_All, quick_flush) ) {
+//                 ERR_POST_X(9, Info << "Failed to initialize log: " << file_name);
+//                 return false;
+//             }
+// ```
+/// The target of the `-logfile` value `name` (a file NCBI fails to open leaves `cerr`). The file
+/// is opened (made when it does not exist) at once, as NCBI's first `SetupDiag` does, before
+/// `-version` (NCBI BLAST+ 2.17.0 makeblastdb and blastdbcmd `-version -logfile F` make `F`:
+/// g_reg probes `ver_log_ok`, `ver_log_ok2`).
+pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
+    match name {
+        None => DiagTarget::Stderr,
+        Some(name) if name == "-" => DiagTarget::Stderr,
+        Some(name) if name.is_empty() || name == "/dev/null" => DiagTarget::Discard,
+        Some(name) => match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(name)
+        {
+            Ok(file) => DiagTarget::File(file),
+            Err(_) => DiagTarget::Stderr,
+        },
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866
+// ```c++
+//     // Check if logfile is set in the args.
+//     m_LogFile = 0;
+//     if (!m_DisableArgDesc && argc > 1  &&  argv  &&  diag != eDS_User) {
+//         for (int i = 1;  i < argc;  i++) {
+//             if ( !argv[i] ) {
+//                 continue;
+//             }
+//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
+//                 break;
+//             }
+//             if ( NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
+//                 if (!argv[++i]) {
+//                     continue;
+//                 }
+//                 m_LogFile = argv[i];
+//             } else if (NStr::StartsWith(argv[i], s_ArgLogFile)) {
+//                 const char *a = argv[i] + strlen(s_ArgLogFile);
+//                 if (*a == '=') {
+//                     m_LogFile = ++a;
+//                 }
+//             }
+//         }
+//     }
+// ```
+/// The file of `-logfile` (`m_LogFile`) in the arguments `words` (after the program's name):
+/// the value of its last `-logfile FILE` or `-logfile=FILE` before `--`.
+pub fn log_file<S: AsRef<OsStr>>(words: &[S]) -> Option<&OsStr> {
+    let mut log = None;
+    let mut at = 0;
+    while at < words.len() {
+        let word = words[at].as_ref();
+        if word == "--" {
+            break;
+        }
+        if word == "-logfile" {
+            at += 1;
+            if let Some(name) = words.get(at) {
+                log = Some(name.as_ref());
+            }
+        } else if let Some(name) = word.as_encoded_bytes().strip_prefix(b"-logfile=") {
+            // SAFETY: `name` is the rest of `word` after an ASCII prefix, so it starts at a
+            // boundary of the platform's encoding and ends where `word` ends.
+            log = Some(unsafe { OsStr::from_encoded_bytes_unchecked(name) });
+        }
+        at += 1;
+    }
+    log
+}
+
+/// What NCBI's application start writes about the registry files, and the settings it leaves
+/// (`start_application`). NCBI reads the system-wide file (`.ncbirc`) twice: when the
+/// program's usage report is made (`CBlastUsageReport`, a member of every BLAST+ application,
+/// before `AppMain`; `usage_report`) and when the application loads its configuration
+/// (`<program>.ini`, then `.ncbirc`, after the `-logfile`, `-version` and `-conffile` words and
+/// before the program's arguments; `config`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:208-210
+/// ```c++
+/// 	CNcbiIstrstream empty_stream(kEmptyStr);
+/// 	CRef<CNcbiRegistry> registry(new CNcbiRegistry(empty_stream, IRegistry::fWithNcbirc));
+/// 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`, which the
+/// `-version` word ends before, ncbiapp.cpp:972-977)
+/// ```c++
+/// void CNcbiApplicationAPI::x_TryInit(EAppDiagStream diag, const char* conf)
+/// {
+///     // Load registry from the config file
+///     if ( conf ) {
+///         string x_conf(conf);
+///         LoadConfig(*m_Config, &x_conf);
+///     } else {
+///         LoadConfig(*m_Config, NULL);
+///     }
+///     m_ConfigLoaded = true;
+///
+///     CDiagContext::SetupDiag(diag, m_Config, eDCM_Flush, m_LogFile);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663 (`IncludeNcbircIfAllowed`)
+/// ```c++
+///     try {
+///         CMetaRegistry::SEntry entry
+///             = CMetaRegistry::Load("ncbi", CMetaRegistry::eName_RcOrIni,
+///                                   0, flags, m_SysRegistry.GetPointer());
+///         ...
+///     } catch (CRegistryException& e) {
+///         ERR_POST_X(6, Critical << "CNcbiRegistry: "
+///                       "Syntax error in system-wide configuration file: "
+///                       << e.what());
+///         return false;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:669-674 (`x_TryMain`: an exception of
+/// the configuration load ends the application with exit status 2)
+/// ```c++
+///             catch (const CException& e) {
+///                 NCBI_REPORT_EXCEPTION_X(15,
+///                                         "Application's initialization failed", e);
+///                 *got_exception = true;
+///                 *exit_code = 2;
+///             }
+/// ```
+/// Where NCBI's messages go (NCBI BLAST+ 2.17.0, the official Linux x64 release and bioconda's;
+/// g_reg probes of 2026-11-11, env parity DECISIONS 13): the usage report's are written to
+/// `cerr` at once (`usage_report`). An application with a `-logfile` file writes the messages
+/// collected so far, the usage report's, into it when it opens it (`write_log_setup`), then
+/// posts the configuration's messages to its diagnostics (`write_config_load`): `cerr`, the
+/// file, or nowhere. A configuration whose `<program>.ini` throws ends the application with
+/// exit status 2, after the exception's report and then every message collected (the usage
+/// report's and the report again).
+#[derive(Clone, Debug)]
+pub struct ApplicationStart {
+    /// The program whose start this is (the name of its `.ini`).
+    program: String,
+    /// The first environment variable that LOSAT refuses (`rejected_variable`).
+    environment_refusal: Option<String>,
+    /// The usage report's messages, or LOSAT's refusal of the run there (before `-version`).
+    usage_report: Result<String, String>,
+    /// The configuration load's messages, or LOSAT's refusal there.
+    config: Result<ConfigLoad, String>,
+    /// A registry file that the start writes a message about, for LOSAT's library, which runs
+    /// no application start and refuses it (`library_settings`).
+    library_note: Option<String>,
+    /// What `check_ncbi_application_settings` gives after the start.
+    settings: Result<ApplicationSettings, String>,
+}
+
+/// The configuration load of an application start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ConfigLoad {
+    /// The messages of a load (an empty text when there are none).
+    Loaded(String),
+    /// The report of the exception that ended the load (exit status 2).
+    Failed(String),
+}
+
+/// The application start of this process: made once by the command line's entry for an NCBI
+/// program (`start_application`), as NCBI's application starts once.
+static APPLICATION_START: std::sync::OnceLock<ApplicationStart> = std::sync::OnceLock::new();
+
+/// The application start of `program` in this process, made the first time and then kept: what
+/// the command line's entry writes before the program's arguments are read
+/// (`ApplicationStart`), and the settings that `check_ncbi_application_settings` gives after
+/// it.
+pub fn start_application(program: &str) -> &'static ApplicationStart {
+    APPLICATION_START.get_or_init(|| {
+        application_start(
+            program,
+            std::env::vars_os(),
+            &|name: &str| std::env::var_os(name),
+            &ProcessFacts::of_this_process(),
+        )
+    })
+}
+
+/// The application start of this process, when the command line's entry made one
+/// (`start_application`).
+pub fn application_start_of_process() -> Option<&'static ApplicationStart> {
+    APPLICATION_START.get()
+}
+
+impl ApplicationStart {
+    /// The usage report's messages, which go to `cerr` at once, or LOSAT's refusal there: a
+    /// registry file that LOSAT does not read as NCBI does, a `[BLAST] BLAST_USAGE_REPORT` that
+    /// is not a Boolean (NCBI aborts), or a refused environment variable when there are
+    /// messages to write (LOSAT does not write them under it).
+    pub fn usage_report(&self) -> Result<&str, &str> {
+        self.usage_report.as_deref().map_err(String::as_str)
+    }
+
+    /// NCBI's first `SetupDiag` with a `-logfile` file: the file gets the messages collected
+    /// so far, the usage report's (`CDiagContext::SetupDiag` with `eDCM_NoChange` flushes them
+    /// to a new log; ncbiapp.cpp:868-871, ncbidiag.cpp:3863-3874).
+    pub fn write_log_setup(&self, target: &mut DiagTarget) {
+        if let (DiagTarget::File(file), Ok(text)) = (target, &self.usage_report) {
+            let _ = file.write_all(text.as_bytes());
+        }
+    }
+
+    /// The configuration load's messages on `target` (`stderr` for `cerr`): `Ok(None)` after a
+    /// load, `Ok(Some(2))` when the program's `.ini` threw (the application then exits with
+    /// that status, having posted the report and then every collected message), `Err` with
+    /// LOSAT's refusal.
+    pub fn write_config_load(
+        &self,
+        target: &mut DiagTarget,
+        stderr: &mut dyn Write,
+    ) -> Result<Option<i32>, String> {
+        let (text, status) = match &self.config {
+            Err(reason) => return Err(reason.clone()),
+            Ok(ConfigLoad::Loaded(posts)) => (posts.clone(), None),
+            Ok(ConfigLoad::Failed(report)) => (
+                format!(
+                    "{report}{}{report}",
+                    self.usage_report.as_deref().unwrap_or("")
+                ),
+                Some(2),
+            ),
+        };
+        target.write_text(text.as_bytes(), stderr);
+        Ok(status)
+    }
+
+    /// The settings for LOSAT's library, which runs no application start: a refused variable,
+    /// a refusal of the start, and a registry file that the start writes a message about are
+    /// refusals there.
+    fn library_settings(self) -> Result<ApplicationSettings, String> {
+        if let Some(reason) = self.environment_refusal {
+            return Err(reason);
+        }
+        self.usage_report?;
+        self.config?;
+        if let Some(note) = self.library_note {
+            return Err(format!(
+                "{note}; LOSAT's library does not run NCBI BLAST+'s application start that writes it, and this is not supported by LOSAT"
+            ));
+        }
+        self.settings
+    }
+}
+
+/// Whether the usage report's registry reads `.ncbirc`: not with `BLAST_USAGE_REPORT` set to a
+/// false value (the report then makes no registry), nor with `.ncbirc` turned off in the
+/// environment (`NCBI_DONT_USE_NCBIRC`, or the entry `[NCBI] DONT_USE_NCBIRC`, whose only layer
+/// with entries there is the environment's: `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, an empty
+/// value too).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-206
+/// ```c++
+/// void CBlastUsageReport::x_CheckBlastUsageEnv()
+/// {
+/// 	char * blast_usage_env = getenv("BLAST_USAGE_REPORT");
+/// 	if(blast_usage_env != NULL){
+/// 		bool enable = NStr::StringToBool(blast_usage_env);
+/// 		if (!enable) {
+/// 			SetEnabled(false);
+/// 			CUsageReportAPI::SetEnabled(false);
+/// 			LOG_POST(Info <<"Phone home disabled");
+/// 			return ;
+/// 		}
+/// 	}
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1634-1648 (`IncludeNcbircIfAllowed`,
+/// quoted at `check_ncbi_application_settings`)
+fn usage_report_reads_ncbirc(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
+    !(env("BLAST_USAGE_REPORT")
+        .is_some_and(|value| ncbi_string_to_bool(&value.to_string_lossy()) == Some(false))
+        || env("NCBI_DONT_USE_NCBIRC").is_some()
+        || env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_some())
+}
+
+/// The messages of one read of the system-wide file (`ncbi_registry::syntax_error_notice`,
+/// `ncbi_registry::error_reading_post`).
+fn system_wide_posts(read: &RegistryRead) -> String {
+    let mut posts = String::new();
+    if read.stream_failed {
+        posts.push_str(error_reading_post());
+    }
+    if let Some(error) = &read.error {
+        posts.push_str(&syntax_error_notice(error));
+    }
+    posts
+}
+
+/// What a read of the registry file at `path` makes the start write, for LOSAT's library
+/// (`ApplicationStart::library_note`).
+fn library_note(path: &Path, read: &RegistryRead) -> Option<String> {
+    if let Some(error) = &read.error {
+        Some(format!(
+            "the registry file {} has a syntax error that NCBI BLAST+ reports when its program starts ({})",
+            path.display(),
+            error.get_msg()
+        ))
+    } else if read.stream_failed {
+        Some(format!(
+            "the registry file {} is one byte that starts a byte order mark, which NCBI BLAST+ reports as an error reading it when its program starts",
+            path.display()
+        ))
+    } else {
+        None
+    }
+}
+
 /// Rejects the NCBI application settings that change `program`'s output: the environment
 /// variables of the NCBI C++ Toolkit and the entries of the registry files that NCBI loads
 /// (`<program>.ini`, then `.ncbirc` unless it is turned off). Returns the settings that
 /// LOSAT reproduces: whether the data loaders are used (`[BLAST] DATA_LOADERS`, which
 /// decides whether a record's first line can be a sequence identifier), and the registry
 /// entry `[BLAST] BLASTDB` of the database search path.
+///
+/// After the command line's entry has started `program`'s application (`start_application`),
+/// these are the settings of that start, which has written what NCBI writes about the files.
+/// Without it (LOSAT's library: `api`), a registry file that NCBI's start writes a message
+/// about (a syntax error) is refused as well (`ApplicationStart::library_settings`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1254-1259
 /// ```c
@@ -1688,91 +1968,236 @@ fn blastdb_of(
 ///                                   + "rc", eName_AsIs);
 /// ```
 pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSettings, String> {
-    application_settings(
-        program,
-        std::env::vars_os(),
-        &|name: &str| std::env::var_os(name),
-        &ProcessFacts::of_this_process(),
-    )
+    match APPLICATION_START.get() {
+        Some(start) if start.program == program => start.settings.clone(),
+        _ => application_settings(
+            program,
+            std::env::vars_os(),
+            &|name: &str| std::env::var_os(name),
+            &ProcessFacts::of_this_process(),
+        ),
+    }
 }
 
-/// `check_ncbi_application_settings` over the environment `variables` (all of them) and
-/// `env` (one of them by name), and the facts of the process (`ProcessFacts`).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:366-375
-/// ```c++
-/// string CNcbiEnvRegMapper::RegToEnv(const string& section, const string& name)
-///     const
-/// {
-///     string result;
-///     result.assign(kPrefix, kPrefixLen);
-///     if (NStr::StartsWith(name, ".")) {
-///         result += name.substr(1) + "__" + section;
-///     } else {
-///         result += "_" + section + "__" + name;
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:142-153
-/// ```c++
-///     REVERSE_ITERATE (TPriorityMap, it, m_PriorityMap) {
-///         string        var_name = it->second->RegToEnv(section, name);
-///         const string* resultp  = &m_Env->Get(var_name, &found);
-///         if ((m_Flags & fCaseFlags) == 0  &&  !found) {
-///             // try capitalizing the name
-///             resultp = &m_Env->Get(NStr::ToUpper(var_name), &found);
-///         }
-///         if (found) {
-///             return *resultp;
-///         }
-///     }
-/// ```
-/// The environment layer of `HasEntry("NCBI", "DONT_USE_NCBIRC")` (`IncludeNcbircIfAllowed`,
-/// quoted above) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with any value.
+/// `check_ncbi_application_settings` without an application start (LOSAT's library), over the
+/// environment `variables` (all of them) and `env` (one of them by name), and the facts of the
+/// process (`ProcessFacts`).
 fn application_settings(
     program: &str,
     variables: impl Iterator<Item = (OsString, OsString)>,
     env: &dyn Fn(&str) -> Option<OsString>,
     process: &ProcessFacts,
 ) -> Result<ApplicationSettings, String> {
-    for (name, value) in variables {
-        if let Some(reason) = rejected_variable(&name, &value) {
-            return Err(reason);
+    application_start(program, variables, env, process).library_settings()
+}
+
+/// The application start of `program` (`ApplicationStart`) over the environment `variables`
+/// (all of them) and `env` (one of them by name), and the facts of the process
+/// (`ProcessFacts`). The search path is made once for both reads of `.ncbirc`
+/// (`registry_search_path`), and the file found is read once: its two reads give the same.
+///
+/// The configuration load reads `.ncbirc` again unless `CMetaRegistry` keeps the usage report's
+/// read: it does when that read threw nothing and the application's load asks for it with the
+/// same flags, which it does when no `<program>.ini` was loaded (`LoadConfig` calls
+/// `IncludeNcbircIfAllowed(fWithNcbirc)`, as the usage report's registry does; after a `.ini` it
+/// is called with `fJustCore` added, ncbireg.cpp:1687-1692 and metareg.cpp:90). Only a read that
+/// posts without throwing shows it: a one-byte `.ncbirc` of a byte order mark's first byte is
+/// reported once, twice with a `blastn.ini` (NCBI BLAST+ 2.17.0, g_reg probes `b1full`,
+/// `b1ini`); an exception is reported by both reads (`CMetaRegistry::x_Load` keeps no failed
+/// read).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:200-209 (`x_Load`: a read kept for
+/// the same name, style and flags is not read again unless the file changed)
+/// ```c++
+///         TIndex::const_iterator iit
+///             = m_Index.find(SKey(name, style, flags, reg_flags));
+///         if (iit != m_Index.end()) {
+///             _TRACE("found in cache");
+///             _ASSERT(iit->second < m_Contents.size());
+///             SEntry& result = m_Contents[iit->second];
+///             result.Reload(flags);
+///             return result;
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1247-1252, 1278-1279
+/// (`LoadConfig`: `.ncbirc` without a `.ini`)
+/// ```c++
+///     if ( !conf ) {
+///         if (reg.IncludeNcbircIfAllowed(reg_flags)) {
+///     ...
+///         // still consider pulling in defaults from .ncbirc
+///         if (reg.IncludeNcbircIfAllowed(reg_flags)) {
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:210-211 (a
+/// `[BLAST] BLAST_USAGE_REPORT` of the usage report's registry that is not a Boolean throws
+/// in the constructor of the application, before `AppMain`: NCBI aborts)
+/// ```c++
+/// 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
+/// 		bool enable = NStr::StringToBool(registry->Get("BLAST", "BLAST_USAGE_REPORT"));
+/// ```
+/// The environment layer of `HasEntry("NCBI", "DONT_USE_NCBIRC")` (`IncludeNcbircIfAllowed`,
+/// quoted at `check_ncbi_application_settings`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
+/// any value.
+fn application_start(
+    program: &str,
+    mut variables: impl Iterator<Item = (OsString, OsString)>,
+    env: &dyn Fn(&str) -> Option<OsString>,
+    process: &ProcessFacts,
+) -> ApplicationStart {
+    let environment_refusal = variables.find_map(|(name, value)| rejected_variable(&name, &value));
+    let mut start = ApplicationStart {
+        program: program.to_string(),
+        environment_refusal: environment_refusal.clone(),
+        usage_report: Ok(String::new()),
+        config: Ok(ConfigLoad::Loaded(String::new())),
+        library_note: None,
+        settings: Err(String::new()),
+    };
+    // A start whose messages LOSAT would write under a variable that it refuses is refused
+    // there.
+    let unless_refused = |posts: String| match &environment_refusal {
+        Some(reason) if !posts.is_empty() => Err(reason.clone()),
+        _ => Ok(posts),
+    };
+    let search_path = match registry_search_path(env, process) {
+        Ok(path) => path,
+        Err(reason) => {
+            start.settings = Err(environment_refusal.clone().unwrap_or(reason));
+            return start;
+        }
+    };
+    let dont_use_ncbirc = env("NCBI_DONT_USE_NCBIRC").is_some()
+        || env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_some();
+    let ncbirc = if dont_use_ncbirc {
+        None
+    } else {
+        find_registry(&search_path, SYSTEM_WIDE_REGISTRY)
+            .map(|path| (read_registry_file(&path, Layer::SystemWide), path))
+    };
+    // The usage report.
+    let usage_report_reads = usage_report_reads_ncbirc(env);
+    if usage_report_reads {
+        match &ncbirc {
+            Some((Err(reason), _)) => {
+                start.usage_report = Err(reason.clone());
+                return ended(start);
+            }
+            Some((Ok(Some(read)), path)) => {
+                start.library_note = library_note(path, read);
+                if env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT").is_none() {
+                    if let Some(value) = read.last_value("BLAST", "BLAST_USAGE_REPORT") {
+                        let value = String::from_utf8_lossy(value);
+                        if ncbi_string_to_bool(&value).is_none() {
+                            start.usage_report = Err(format!(
+                                "the registry file {} sets [BLAST] BLAST_USAGE_REPORT to {value:?}, which is not a Boolean of NCBI BLAST+ (it aborts); this is not supported by LOSAT",
+                                path.display()
+                            ));
+                            return ended(start);
+                        }
+                    }
+                }
+                start.usage_report = unless_refused(system_wide_posts(read));
+                if start.usage_report.is_err() {
+                    return ended(start);
+                }
+            }
+            Some((Ok(None), _)) | None => {}
         }
     }
-    let search_path = registry_search_path(env, process)?;
-    let mut use_ncbirc = env("NCBI_DONT_USE_NCBIRC").is_none()
-        && env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_none();
-    let mut ini_data_loaders = None;
-    let mut ini_data = Ok(None);
-    let mut ini_blastdb = Ok(None);
+    // The configuration: `<program>.ini`, then `.ncbirc`.
+    let ini = match find_registry(&search_path, &format!("{program}.ini")) {
+        None => None,
+        Some(path) => match read_registry_file(&path, Layer::Application) {
+            Err(reason) => {
+                start.config = Err(reason);
+                return ended(start);
+            }
+            Ok(read) => read.map(|read| (path, read)),
+        },
+    };
+    let mut posts = String::new();
+    if let Some((path, read)) = &ini {
+        start.library_note = start.library_note.take().or(library_note(path, read));
+        if let Some(error) = &read.error {
+            let report = error.report_with_title(106, 15, "Application's initialization failed");
+            start.config = match &environment_refusal {
+                Some(reason) => Err(reason.clone()),
+                None => Ok(ConfigLoad::Failed(report)),
+            };
+            return ended(start);
+        }
+        if read.stream_failed {
+            posts.push_str(error_reading_post());
+        }
+    }
+    let ini_turns_it_off = ini
+        .as_ref()
+        .is_some_and(|(_, read)| read.last_value("NCBI", "DONT_USE_NCBIRC").is_some());
+    let use_ncbirc = !dont_use_ncbirc && !ini_turns_it_off;
+    let mut ncbirc_entries = None;
+    if use_ncbirc {
+        match &ncbirc {
+            Some((Err(reason), _)) => {
+                start.config = Err(reason.clone());
+                return ended(start);
+            }
+            Some((Ok(Some(read)), path)) => {
+                let kept = usage_report_reads && read.error.is_none() && ini.is_none();
+                if !kept {
+                    posts.push_str(&system_wide_posts(read));
+                }
+                start.library_note = start.library_note.take().or(library_note(path, read));
+                ncbirc_entries = Some((path.as_path(), read.entries.as_slice()));
+            }
+            Some((Ok(None), _)) | None => {}
+        }
+    }
+    start.config = unless_refused(posts).map(ConfigLoad::Loaded);
+    let ini_entries = ini
+        .as_ref()
+        .map(|(path, read)| (path.as_path(), read.entries.as_slice()));
+    start.settings = match &environment_refusal {
+        Some(reason) => Err(reason.clone()),
+        None => settings_of(env, ini_entries, ncbirc_entries),
+    };
+    start
+}
+
+/// A start that a stage refused or ended (`application_start`): its settings are that refusal,
+/// or, after a `<program>.ini` that ends the program, the refusal of LOSAT's library.
+fn ended(mut start: ApplicationStart) -> ApplicationStart {
+    let reason = match (&start.usage_report, &start.config) {
+        (Err(reason), _) | (_, Err(reason)) => reason.clone(),
+        _ => format!(
+            "{}; NCBI BLAST+ ends the program there (exit status 2), and this is not supported by LOSAT",
+            start.library_note.as_deref().unwrap_or("a registry file")
+        ),
+    };
+    start.settings = Err(reason);
+    start
+}
+
+/// The settings from the environment and the entries of the registry files that the
+/// application loaded (`<program>.ini`, then `.ncbirc`), after LOSAT's checks of the entries
+/// (`check_registry_entries`).
+fn settings_of(
+    env: &dyn Fn(&str) -> Option<OsString>,
+    ini: Option<(&Path, &[RegistryEntry])>,
+    ncbirc: Option<(&Path, &[RegistryEntry])>,
+) -> Result<ApplicationSettings, String> {
+    for (path, entries) in ini.iter().chain(ncbirc.iter()) {
+        check_registry_entries(path, entries)?;
+    }
+    let text = |file: Option<(&Path, &[RegistryEntry])>, section: &str, name: &str| {
+        file.map_or(Ok(None), |(path, entries)| {
+            file_text_entry(path, entries, section, name)
+        })
+    };
     let mut max_seqid_length = env("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH")
         .map(|value| Ok(value.to_string_lossy().into_owned()));
-    if let Some(path) = find_registry(&search_path, &format!("{program}.ini")) {
-        let entries = check_registry_file(&path)?;
-        if entries.iter().any(|(section, name, _)| {
-            section.eq_ignore_ascii_case("NCBI") && name.eq_ignore_ascii_case("DONT_USE_NCBIRC")
-        }) {
-            use_ncbirc = false;
-        }
-        ini_data_loaders = file_blast_entry(&path, &entries, "DATA_LOADERS")?;
-        ini_blastdb = file_blast_entry(&path, &entries, "BLASTDB");
-        ini_data = file_entry(&path, &entries, "NCBI", "Data");
+    for (path, entries) in ini.iter().chain(ncbirc.iter()) {
         if max_seqid_length.is_none() {
-            max_seqid_length = max_seqid_length_entry(&path, &entries);
-        }
-    }
-    let mut ncbirc_data_loaders = None;
-    let mut ncbirc_blastdb = Ok(None);
-    let mut ncbirc_data = Ok(None);
-    if use_ncbirc {
-        if let Some(path) = find_registry(&search_path, ".ncbirc") {
-            let entries = check_registry_file(&path)?;
-            ncbirc_data_loaders = file_blast_entry(&path, &entries, "DATA_LOADERS")?;
-            ncbirc_blastdb = file_blast_entry(&path, &entries, "BLASTDB");
-            ncbirc_data = file_entry(&path, &entries, "NCBI", "Data");
-            if max_seqid_length.is_none() {
-                max_seqid_length = max_seqid_length_entry(&path, &entries);
-            }
+            max_seqid_length = max_seqid_length_entry(path, entries);
         }
     }
     let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
@@ -1784,12 +2209,17 @@ fn application_settings(
     Ok(ApplicationSettings {
         data_loaders: data_loaders_of(
             env_data_loaders.as_deref().map(OsStr::as_encoded_bytes),
+            [ini, ncbirc].map(|file| {
+                file.and_then(|(_, entries)| last_value(entries, "BLAST", "DATA_LOADERS"))
+            }),
+        ),
+        blastdb: blastdb_of(
+            env_blastdb,
             [
-                ini_data_loaders.as_deref().map(str::as_bytes),
-                ncbirc_data_loaders.as_deref().map(str::as_bytes),
+                text(ini, "BLAST", "BLASTDB"),
+                text(ncbirc, "BLAST", "BLASTDB"),
             ],
         ),
-        blastdb: blastdb_of(env_blastdb, [ini_blastdb, ncbirc_blastdb]),
         seq_id_rank_variable: SEQ_ID_RANK_VARIABLES
             .into_iter()
             .find(|name| env(name).is_some()),
@@ -1798,9 +2228,11 @@ fn application_settings(
             data_path: env("NCBI_DATA_PATH"),
             data: match env("NCBI_CONFIG__NCBI__DATA").or_else(|| env("NCBI_CONFIG__NCBI__Data")) {
                 Some(value) => Ok(Some(value)),
-                None => {
-                    blastdb_of(None, [ini_data, ncbirc_data]).map(|data| data.map(OsString::from))
-                }
+                None => blastdb_of(
+                    None,
+                    [text(ini, "NCBI", "Data"), text(ncbirc, "NCBI", "Data")],
+                )
+                .map(|data| data.map(OsString::from)),
             },
             blastmat: env("BLASTMAT"),
         },
@@ -1834,26 +2266,29 @@ mod tests {
     }
 
     #[test]
-    fn registry_files_are_read_like_ncbis() {
-        let entries = registry_entries(
-            "# file comment\n; entry comment\n[BLAST]\nBLASTDB = /db \\\n  /more\n  \n[ncbi]\ndata=/data\n",
+    fn harmless_entries_are_the_listed_ones() {
+        let read = read_registry(
+            b"# file comment\n; entry comment\n[BLAST]\nBLASTDB = /db \\\n  /more\n  \n[ncbi]\ndata=/data\n",
+            Layer::SystemWide,
         )
         .unwrap();
+        assert_eq!(read.error, None);
+        assert_eq!(read.entries[0].value, b"/db \n/more");
         assert_eq!(
-            entries,
-            vec![
-                ("BLAST".into(), "BLASTDB".into(), "/db \n/more".into()),
-                ("ncbi".into(), "data".into(), "/data".into())
-            ]
+            check_registry_entries(Path::new("f"), &read.entries),
+            Ok(())
         );
-        assert!(registry_entries("garbage line without bracket\n").is_err());
-        assert!(registry_entries("[BLAST\n").is_err());
-        assert!(registry_entries("[ ]\n").is_err());
-        assert!(entries.iter().all(|(s, n, v)| is_harmless_entry(s, n, v)));
         assert!(!is_harmless_entry("BLAST", "LONG_SEQID", "1"));
         assert!(!is_harmless_entry("DEBUG", "DIAG_POST_LEVEL", "Error"));
+        assert!(!is_harmless_entry("NCBI", ".Inherits", "other"));
         assert!(is_harmless_entry("blast", "blast_usage_report", "Off"));
         assert!(!is_harmless_entry("BLAST", "BLAST_USAGE_REPORT", "bogus"));
+        let other = read_registry(b"[BLAST]\nLONG_SEQID=1\n", Layer::SystemWide).unwrap();
+        let refusal = check_registry_entries(Path::new("f"), &other.entries).unwrap_err();
+        assert!(
+            refusal.contains("the registry file f sets [BLAST] LONG_SEQID"),
+            "{refusal}"
+        );
     }
 
     /// No NCBI counterpart: a process with no user database entry and no program directory,
@@ -2240,27 +2675,6 @@ mod tests {
         assert!(!layers(Some(""), None, Some("genbank")));
     }
 
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (an unescaped `"` at
-    // either end is removed; one elsewhere is an error; escapes are not ported).
-    #[test]
-    fn registry_values_lose_the_quotes_at_their_ends() {
-        for (raw, stored) in [
-            ("none", "none"),
-            ("\"none\"", "none"),
-            ("\"none", "none"),
-            ("none\"", "none"),
-            ("\"\"", ""),
-            ("\"", ""),
-            ("\"\"\"", ""),
-            ("", ""),
-        ] {
-            assert_eq!(stored_registry_value(raw), Ok(stored), "{raw:?}");
-        }
-        for raw in ["no\"ne", "\"a\"b\"", "none\\x", "\\\"none\""] {
-            assert!(stored_registry_value(raw).is_err(), "{raw:?}");
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1636-1651 (`.ncbirc` is read
     // unless NCBI_DONT_USE_NCBIRC is set or the registry has [NCBI] DONT_USE_NCBIRC, also
     // from the environment) and c++/src/corelib/env_reg.cpp:366-375 (the variable of
@@ -2273,7 +2687,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let ini = dir.join("blastn.ini");
-        let ncbirc = dir.join(".ncbirc");
+        let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
         let settings = |pairs: &[(&str, &str)]| {
             let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
             all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
@@ -2333,8 +2747,12 @@ mod tests {
         assert_eq!(settings(&[]), Ok(true));
         std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = \"\"\n").unwrap();
         assert_eq!(settings(&[]), Ok(false));
+        // A value NCBI reports as malformed is refused by the library (no application start).
         std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = no\"ne\n").unwrap();
-        assert!(settings(&[]).unwrap_err().contains("[BLAST] DATA_LOADERS"));
+        assert!(settings(&[]).unwrap_err().contains("syntax error"));
+        // The escapes are read: `\x6e` is `n`.
+        std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = \\x6eone\n").unwrap();
+        assert_eq!(settings(&[]), Ok(false));
         // [NCBI] DONT_USE_NCBIRC in the .ini or the environment turns .ncbirc off.
         std::fs::write(&ini, "[NCBI]\nDONT_USE_NCBIRC = 1\n").unwrap();
         assert_eq!(settings(&[]), Ok(true));
@@ -2362,7 +2780,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let ini = dir.join("makeblastdb.ini");
-        let ncbirc = dir.join(".ncbirc");
+        let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
         let _ = std::fs::remove_file(&ini);
         let _ = std::fs::remove_file(&ncbirc);
         let settings = |pairs: &[(&str, &str)]| {
@@ -2403,7 +2821,9 @@ mod tests {
         assert_eq!(settings(&[]), value("80"));
         std::fs::write(&ini, "[BLAST]\nMAX_SEQID_LENGTH =\n").unwrap();
         assert_eq!(settings(&[]), value(""));
-        std::fs::write(&ini, "[BLAST]\nMAX_SEQID_LENGTH = 1\\2\n").unwrap();
+        std::fs::write(&ini, "[BLAST]\nMAX_SEQID_LENGTH = \\x37\\x30\n").unwrap();
+        assert_eq!(settings(&[]), value("70"));
+        std::fs::write(&ini, "[BLAST]\nMAX_SEQID_LENGTH = 1\\xff\n").unwrap();
         assert!(matches!(settings(&[]), Ok(Err(_))));
         std::fs::write(&ini, "[BLAST]\nBLASTDB = /tmp\n").unwrap();
         assert_eq!(settings(&[]), value("70"));
@@ -2463,7 +2883,7 @@ mod tests {
             let (id, variable, value, ini, ncbirc, registry) =
                 (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
             std::fs::create_dir_all(&dir).unwrap();
-            for (name, content) in [("blastp.ini", ini), (".ncbirc", ncbirc)] {
+            for (name, content) in [("blastp.ini", ini), (SYSTEM_WIDE_REGISTRY, ncbirc)] {
                 let file = dir.join(name);
                 let _ = std::fs::remove_file(&file);
                 if content != "<unset>" {
@@ -2496,8 +2916,8 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (quoted at
-    // `stored_registry_value`): LOSAT does not read a value with a backslash or with a `"`
-    // in the middle as NCBI reads it.
+    // `ncbi_registry::read_lines`): the escapes of a value are read, and a value that is not
+    // UTF-8 is not a path LOSAT reads.
     /// A value of `[BLAST] BLASTDB` that LOSAT cannot read is no reason to reject a program
     /// that opens no database: it is kept as the reason for the program that does.
     #[test]
@@ -2524,14 +2944,16 @@ mod tests {
             )
             .unwrap()
         };
-        let ncbirc = dir.join(".ncbirc");
+        let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
         let ini = dir.join("blastp.ini");
         let _ = std::fs::remove_file(&ini);
         std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = C:\\db\n").unwrap();
+        assert_eq!(settings(&[]).blastdb, Ok(Some("C:db".to_string())));
+        std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = /d\\xffb\n").unwrap();
         let unreadable = settings(&[]);
         assert!(unreadable.data_loaders);
         let reason = unreadable.blastdb.unwrap_err();
-        assert!(reason.contains("[BLAST] BLASTDB") && reason.contains("backslash"));
+        assert!(reason.contains("[BLAST] BLASTDB") && reason.contains("UTF-8"));
         // A layer above the file answers first.
         assert_eq!(
             settings(&[("NCBI_CONFIG__BLAST__BLASTDB", "/db")]).blastdb,
@@ -2539,8 +2961,8 @@ mod tests {
         );
         std::fs::write(&ini, "[BLAST]\nBLASTDB = /ini\n").unwrap();
         assert_eq!(settings(&[]).blastdb, Ok(Some("/ini".to_string())));
-        std::fs::write(&ini, "[BLAST]\nBLASTDB = /a\"b\n").unwrap();
-        assert!(settings(&[]).blastdb.is_err());
+        std::fs::write(&ini, "[BLAST]\nBLASTDB = /a\\\"b\n").unwrap();
+        assert_eq!(settings(&[]).blastdb, Ok(Some("/a\"b".to_string())));
         assert_eq!(ApplicationSettings::default().blastdb, Ok(None));
         std::fs::remove_file(&ini).unwrap();
         std::fs::remove_file(&ncbirc).unwrap();
@@ -2562,5 +2984,264 @@ mod tests {
         ] {
             assert_eq!(ncbi_string_to_bool(text), value, "{text:?}");
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866 (quoted at `log_file`).
+    #[test]
+    fn the_log_file_is_the_last_one_before_the_delimiter() {
+        let words = |line: &[&str]| line.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(
+            log_file(&words(&["-logfile", "a", "-logfile=b"])),
+            Some(OsStr::new("b"))
+        );
+        assert_eq!(
+            log_file(&words(&["-in", "x", "-logfile", "a", "-logfile"])),
+            Some(OsStr::new("a"))
+        );
+        assert_eq!(log_file(&words(&["-logfile"])), None);
+        assert_eq!(log_file(&words(&["--", "-logfile", "a"])), None);
+        assert_eq!(log_file(&words(&["-logfilex", "a"])), None);
+        assert_eq!(log_file(&words(&["-logfile="])), Some(OsStr::new("")));
+        assert!(matches!(diag_target(None), DiagTarget::Stderr));
+        assert!(matches!(
+            diag_target(Some(OsStr::new("-"))),
+            DiagTarget::Stderr
+        ));
+        for name in ["", "/dev/null"] {
+            assert!(matches!(
+                diag_target(Some(OsStr::new(name))),
+                DiagTarget::Discard
+            ));
+        }
+        assert!(matches!(
+            diag_target(Some(OsStr::new("/nonexistent-dir-of-losat/log.txt"))),
+            DiagTarget::Stderr
+        ));
+    }
+
+    /// The writes of an application start on the standard error stream and on the file of a
+    /// `-logfile` for the three targets, as the command line's entry and blastdbcmd make them:
+    /// the usage report's messages on stderr at once, the first `SetupDiag`, then the
+    /// configuration's.
+    fn writes_of(start: &ApplicationStart, target: &str) -> (String, String, Option<i32>) {
+        let mut stderr = Vec::new();
+        stderr.extend_from_slice(start.usage_report().unwrap().as_bytes());
+        let file = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-start-{target}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&file);
+        let mut diag = match target {
+            "stderr" => DiagTarget::Stderr,
+            "file" => diag_target(Some(file.as_os_str())),
+            _ => diag_target(Some(OsStr::new("/dev/null"))),
+        };
+        start.write_log_setup(&mut diag);
+        let status = start.write_config_load(&mut diag, &mut stderr).unwrap();
+        drop(diag);
+        let logged = std::fs::read_to_string(&file).unwrap_or_default();
+        let _ = std::fs::remove_file(&file);
+        (String::from_utf8(stderr).unwrap(), logged, status)
+    }
+
+    /// A start with the usage report's messages `u` and the configuration `config`.
+    fn start_with(u: &str, config: ConfigLoad) -> ApplicationStart {
+        ApplicationStart {
+            program: "blastn".to_string(),
+            environment_refusal: None,
+            usage_report: Ok(u.to_string()),
+            config: Ok(config),
+            library_note: None,
+            settings: Ok(ApplicationSettings::default()),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:3863-3874 (quoted at
+    // `ApplicationStart::write_log_setup`) and c++/src/corelib/ncbiapp.cpp:669-674 (quoted at
+    // `ApplicationStart`). NCBI BLAST+ 2.17.0 (g_reg probes: x_blastp, x_ini, x_iniUR,
+    // x_inibothbad, o1, o2, l, h_log, inibad_null, inibad_empty): where the messages go.
+    #[test]
+    fn the_start_writes_where_ncbi_writes() {
+        let (u, a, p) = ("U\n", "A\n", "P\n");
+        let s = |text: &str| text.to_string();
+        let loaded = start_with(u, ConfigLoad::Loaded(s(a)));
+        assert_eq!(writes_of(&loaded, "stderr"), (s("U\nA\n"), s(""), None));
+        assert_eq!(writes_of(&loaded, "file"), (s(u), s("U\nA\n"), None));
+        assert_eq!(writes_of(&loaded, "nowhere"), (s(u), s(""), None));
+        let failed = start_with(u, ConfigLoad::Failed(s(p)));
+        assert_eq!(
+            writes_of(&failed, "stderr"),
+            (s("U\nP\nU\nP\n"), s(""), Some(2))
+        );
+        assert_eq!(
+            writes_of(&failed, "file"),
+            (s(u), s("U\nP\nU\nP\n"), Some(2))
+        );
+        assert_eq!(writes_of(&failed, "nowhere"), (s(u), s(""), Some(2)));
+        // Without the usage report's messages.
+        let failed = start_with("", ConfigLoad::Failed(s(p)));
+        assert_eq!(writes_of(&failed, "stderr"), (s("P\nP\n"), s(""), Some(2)));
+        assert_eq!(writes_of(&failed, "file"), (s(""), s("P\nP\n"), Some(2)));
+        let loaded = start_with("", ConfigLoad::Loaded(s(a)));
+        assert_eq!(writes_of(&loaded, "stderr"), (s(a), s(""), None));
+        assert_eq!(writes_of(&loaded, "file"), (s(""), s(a), None));
+        assert_eq!(writes_of(&loaded, "nowhere"), (s(""), s(""), None));
+        // A refusal at the configuration.
+        let mut refused = start_with(u, ConfigLoad::Loaded(s(a)));
+        refused.config = Err(s("no"));
+        let mut stderr = Vec::new();
+        assert_eq!(
+            refused.write_config_load(&mut DiagTarget::Stderr, &mut stderr),
+            Err(s("no"))
+        );
+        assert!(stderr.is_empty());
+    }
+
+    /// NCBI's post of a `.ncbirc` with `garbage` on line `line` (the official Linux x64 build;
+    /// g_reg probe `partial`).
+    fn critical(line: usize) -> String {
+        format!(
+            "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = {line})\n\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-211,
+    // c++/src/corelib/ncbiapp.cpp:1247-1279 and c++/src/corelib/metareg.cpp:200-209 (quoted at
+    // `application_start`). NCBI BLAST+ 2.17.0 (g_reg probes of 2026-11-11: run.sh `partial`
+    // default and BLAST_USAGE_REPORT=false, x_dontuse, x_inidont, x_ini, x_inibothbad, b1full,
+    // b1ini, inib1r): what each read writes.
+    #[test]
+    fn the_start_reads_the_files_as_ncbi_reads_them() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-start-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
+        let ini = dir.join("blastn.ini");
+        let start = |pairs: &[(&str, &str)]| {
+            let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+            all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+            let env = |name: &str| {
+                all.iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| OsString::from(value))
+            };
+            application_start(
+                "blastn",
+                all.iter()
+                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+                &env,
+                &NO_PROCESS,
+            )
+        };
+        let loaded = |text: &str| Ok(ConfigLoad::Loaded(text.to_string()));
+        let empty = start(&[]);
+        assert_eq!(empty.usage_report, Ok(String::new()));
+        assert_eq!(empty.config, loaded(""));
+        assert_eq!(empty.library_note, None);
+        // A syntax error: both reads report it, and the entries before it are used.
+        std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\ngarbage\n").unwrap();
+        let partial = start(&[]);
+        assert_eq!(partial.usage_report, Ok(critical(3)));
+        assert_eq!(partial.config, loaded(&critical(3)));
+        assert_eq!(
+            partial.settings.as_ref().unwrap().blastdb,
+            Ok(Some("/db".to_string()))
+        );
+        assert!(partial
+            .library_note
+            .as_ref()
+            .unwrap()
+            .contains("syntax error"));
+        let late = start(&[("BLAST_USAGE_REPORT", "false")]);
+        assert_eq!(late.usage_report, Ok(String::new()));
+        assert_eq!(late.config, loaded(&critical(3)));
+        for variable in ["NCBI_DONT_USE_NCBIRC", "NCBI_CONFIG__NCBI__DONT_USE_NCBIRC"] {
+            let off = start(&[(variable, "")]);
+            assert_eq!(off.usage_report, Ok(String::new()));
+            assert_eq!(off.config, loaded(""));
+            assert_eq!(off.settings.unwrap().blastdb, Ok(None));
+        }
+        // `[NCBI] DONT_USE_NCBIRC` in the program's file: the usage report's read alone.
+        std::fs::write(&ini, "[NCBI]\nDONT_USE_NCBIRC=1\n").unwrap();
+        let ini_off = start(&[]);
+        assert_eq!(ini_off.usage_report, Ok(critical(3)));
+        assert_eq!(ini_off.config, loaded(""));
+        // A malformed program's file: exit status 2 with NCBI's report, `.ncbirc` not read.
+        std::fs::write(&ini, "garbage\n").unwrap();
+        let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
+        let failed = start(&[]);
+        assert_eq!(failed.usage_report, Ok(critical(3)));
+        assert_eq!(failed.config, Ok(ConfigLoad::Failed(report.to_string())));
+        std::fs::remove_file(&ncbirc).unwrap();
+        let failed = start(&[]);
+        assert_eq!(failed.usage_report, Ok(String::new()));
+        assert_eq!(failed.config, Ok(ConfigLoad::Failed(report.to_string())));
+        assert!(application_settings(
+            "blastn",
+            [(
+                OsString::from("NCBI_CONFIG_PATH"),
+                dir.as_os_str().to_os_string()
+            )]
+            .into_iter(),
+            &|name: &str| (name == "NCBI_CONFIG_PATH").then(|| dir.as_os_str().to_os_string()),
+            &NO_PROCESS,
+        )
+        .unwrap_err()
+        .contains("LOSAT's library"));
+        std::fs::remove_file(&ini).unwrap();
+        // A `.ncbirc` of one byte that starts a byte order mark: reported by each read that is
+        // not kept from the usage report's.
+        std::fs::write(&ncbirc, b"\xEF").unwrap();
+        let one = start(&[]);
+        assert_eq!(one.usage_report, Ok(error_reading_post().to_string()));
+        assert_eq!(one.config, loaded(""));
+        assert_eq!(
+            start(&[("BLAST_USAGE_REPORT", "0")]).config,
+            loaded(error_reading_post())
+        );
+        std::fs::write(&ini, "[BLAST]\n").unwrap();
+        assert_eq!(start(&[]).config, loaded(error_reading_post()));
+        // A program's file of that byte is read as empty, without a message.
+        std::fs::remove_file(&ncbirc).unwrap();
+        std::fs::write(&ini, b"\xFF").unwrap();
+        let silent = start(&[]);
+        assert_eq!(silent.config, loaded(""));
+        assert_eq!(silent.library_note, None);
+        std::fs::remove_file(&ini).unwrap();
+        // LOSAT's refusals: a variable it refuses when there is a message to write; a UTF-16
+        // file where it is read; a usage report's entry that NCBI aborts on.
+        std::fs::write(&ncbirc, "garbage\n").unwrap();
+        let refused = start(&[("DIAG_POST_LEVEL", "Error")]);
+        assert!(refused
+            .usage_report
+            .unwrap_err()
+            .contains("DIAG_POST_LEVEL"));
+        let refused = start(&[("DIAG_POST_LEVEL", "Error"), ("BLAST_USAGE_REPORT", "off")]);
+        assert_eq!(refused.usage_report, Ok(String::new()));
+        assert!(refused.config.unwrap_err().contains("DIAG_POST_LEVEL"));
+        std::fs::remove_file(&ncbirc).unwrap();
+        let quiet = start(&[("DIAG_POST_LEVEL", "Error")]);
+        assert_eq!(quiet.usage_report, Ok(String::new()));
+        assert_eq!(quiet.config, loaded(""));
+        assert!(quiet.settings.unwrap_err().contains("DIAG_POST_LEVEL"));
+        std::fs::write(&ncbirc, b"\xFF\xFE[\0B\0]\0").unwrap();
+        assert!(start(&[]).usage_report.unwrap_err().contains("UTF-16"));
+        assert!(start(&[("BLAST_USAGE_REPORT", "no")])
+            .config
+            .unwrap_err()
+            .contains("UTF-16"));
+        assert_eq!(start(&[("NCBI_DONT_USE_NCBIRC", "1")]).config, loaded(""));
+        std::fs::write(&ncbirc, "[BLAST]\nBLAST_USAGE_REPORT = maybe\n").unwrap();
+        assert!(start(&[])
+            .usage_report
+            .unwrap_err()
+            .contains("[BLAST] BLAST_USAGE_REPORT"));
+        std::fs::write(&ncbirc, "[BLAST]\nBLAST_USAGE_REPORT = off\n").unwrap();
+        assert_eq!(start(&[]).usage_report, Ok(String::new()));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

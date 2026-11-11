@@ -1,6 +1,8 @@
 //! The command line's entry: what the `losat` binary runs (`main_entry`). The binary names nothing
 //! else of the library; the crate's root re-exports this function for it.
 
+use std::io::Write;
+
 use anyhow::Result;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
 // ```c++
@@ -75,6 +77,30 @@ pub fn main_entry() -> Result<()> {
     // (`blastdbcmd::args`), not clap's: the words after `blastdbcmd` go to it as they are.
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
+    // ```c++
+    // CBlastUsageReport::CBlastUsageReport()
+    // {
+    // 	x_CheckBlastUsageEnv();
+    // ```
+    // Every NCBI program's application has a usage report, made with the application before
+    // `AppMain` runs; it reads `.ncbirc` (`ncbi_environment::ApplicationStart`), and its messages
+    // go to stderr at once, before `-version` and before blastdbcmd's `-logfile` is read.
+    let program = argv
+        .get(1)
+        .and_then(|word| word.to_str())
+        .filter(|word| crate::cli::ENTRY_NAMES.contains(word));
+    let start = program.map(crate::blastinput::ncbi_environment::start_application);
+    if let Some(start) = start {
+        match start.usage_report() {
+            Ok(text) => {
+                let mut stderr = std::io::stderr();
+                let _ = stderr.write_all(text.as_bytes());
+                let _ = stderr.flush();
+            }
+            Err(reason) => return Err(anyhow::Error::msg(reason.to_string())),
+        }
+    }
     if argv.get(1).is_some_and(|word| word == "blastdbcmd") {
         std::process::exit(crate::blastdbcmd::run(&argv[2..]));
     }
@@ -105,12 +131,45 @@ pub fn main_entry() -> Result<()> {
             }
         }
     }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:868-871
+    // ```c++
+    //     // Setup logging as soon as possible.
+    //     // Setup for diagnostics
+    //     try {
+    //         CDiagContext::SetupDiag(diag, 0, eDCM_NoChange, m_LogFile);
+    // ```
+    // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
+    // (`ncbi_environment::log_file`), opened before `-version`; of LOSAT's programs here only
+    // makeblastdb takes it (the search programs refuse it as they read their arguments).
+    let mut target = match program {
+        Some("makeblastdb") => {
+            use crate::blastinput::ncbi_environment::{diag_target, log_file};
+            diag_target(log_file(&argv[2..]))
+        }
+        _ => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+    };
+    if let Some(start) = start {
+        start.write_log_setup(&mut target);
+    }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` is read
     // before the program's arguments, `cli::ncbi_version_request`).
     if let Some(text) = crate::cli::ncbi_version_request(argv.iter().cloned()) {
         print!("{text}");
         return Ok(());
     }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`: the
+    // configuration is loaded before the arguments are read; quoted at
+    // `ncbi_environment::ApplicationStart`). Its messages go where the diagnostics go, and a
+    // `<program>.ini` that NCBI reports as malformed ends the program with exit status 2, `-h`
+    // included.
+    if let Some(start) = start {
+        match start.write_config_load(&mut target, &mut std::io::stderr()) {
+            Ok(None) => {}
+            Ok(Some(status)) => std::process::exit(status),
+            Err(reason) => return Err(anyhow::Error::msg(reason)),
+        }
+    }
+    drop(target);
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match crate::cli::try_parse_from(argv) {
         Ok(cli) => cli,

@@ -3,7 +3,9 @@
 //! makes the path (`ncbi_environment::registry_search_path`), and the file of a `-matrix` that
 //! its tables do not have (`ApplicationSettings::matrix_file`), which NCBI 2.17.0 reads and then
 //! aborts on (rc 134, `free(): invalid size`; tblastx, and blastx `-ungapped -comp_based_stats 0`)
-//! when it is a matrix.
+//! when it is a matrix. And what NCBI writes about a registry file it reports as malformed (env
+//! parity G, `ncbi_environment::ApplicationStart`): the messages of each read of `.ncbirc`,
+//! where they go with `-logfile`, and the exit status 2 of a malformed `<program>.ini`.
 
 use std::fs;
 use std::io::Write;
@@ -229,8 +231,8 @@ fn a_matrix_file_that_ncbi_cannot_open_gives_ncbis_error() {
 
 // NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:331-396 and
 // c++/src/algo/blast/api/blast_usage_report.cpp:195-209 (quoted at `registry_search_path`).
-// NCBI BLAST+ 2.17.0 (env parity S1, a malformed `.ncbirc`, which NCBI reports and LOSAT
-// refuses): blastn run by a link on `PATH` reads one in the link's directory only with
+// NCBI BLAST+ 2.17.0 (env parity S1, a malformed `.ncbirc` or `blastn.ini`, whose read NCBI
+// reports): blastn run by a link on `PATH` reads one in the link's directory only with
 // `BLAST_USAGE_REPORT=false` or `=0`; with an empty `NCBI_CONFIG_PATH` it reads none, not even
 // one in the working directory.
 #[cfg(unix)]
@@ -250,15 +252,24 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
     let args = ["-query", &query, "-subject", &subject, "-outfmt", "6"];
     let blastn = Path::new("blastn");
     let malformed = "a line without an equals sign\n";
+    // A read `.ncbirc` is reported and the search goes on; a read `blastn.ini` ends it with
+    // exit status 2 (`a_malformed_registry_file_is_reported_as_ncbi_reports_it`).
     let refused = |output: &Output, file: &Path| {
-        output.status.code() == Some(1)
-            && String::from_utf8_lossy(&output.stderr).contains(&file.display().to_string())
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if file.ends_with("blastn.ini") {
+            output.status.code() == Some(2)
+                && stderr.contains("Application's initialization failed")
+        } else {
+            output.status.code() == Some(0)
+                && stderr.contains("Syntax error in system-wide configuration file")
+        }
     };
     // The link's directory.
     let in_shim = shim.join(".ncbirc");
     fs::write(&in_shim, malformed).unwrap();
     let plain = run_in(blastn, &args, &dir, &[("PATH", &path)], b"");
     assert_eq!(plain.status.code(), Some(0), "{plain:?}");
+    assert!(plain.stderr.is_empty(), "{plain:?}");
     for value in ["false", "0"] {
         let late = run_in(
             blastn,
@@ -277,6 +288,7 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
         b"",
     );
     assert_eq!(on.status.code(), Some(0), "{on:?}");
+    assert!(on.stderr.is_empty(), "{on:?}");
     fs::remove_file(&in_shim).unwrap();
     // `.ncbirc` turned off: the usage report looks for no file, and the path is made later
     // (ncbireg.cpp:1634-1648); `blastn.ini` in the link's directory is read.
@@ -284,6 +296,7 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
     fs::write(&ini, malformed).unwrap();
     let plain = run_in(blastn, &args, &dir, &[("PATH", &path)], b"");
     assert_eq!(plain.status.code(), Some(0), "{plain:?}");
+    assert!(plain.stderr.is_empty(), "{plain:?}");
     for variable in ["NCBI_DONT_USE_NCBIRC", "NCBI_CONFIG__NCBI__DONT_USE_NCBIRC"] {
         let late = run_in(blastn, &args, &dir, &[("PATH", &path), (variable, "")], b"");
         assert!(refused(&late, &ini), "{variable}: {late:?}");
@@ -302,5 +315,227 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
         b"",
     );
     assert_eq!(none.status.code(), Some(0), "{none:?}");
+    assert!(none.stderr.is_empty(), "{none:?}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// The build tree that the official Linux x64 release of NCBI BLAST+ 2.17.0 names in its `T0`
+/// lines (as `ncbi_exception::NCBI_BUILD_ROOT`).
+const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
+
+/// NCBI's post of one read of a `.ncbirc` with the line `garbage` at `line`.
+fn critical(line: usize) -> String {
+    format!(
+        "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = {line})\n\n"
+    )
+}
+
+/// NCBI's report of a `<program>.ini` of the line `garbage`, which ends the program.
+const INI_REPORT: &str = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
+
+/// The name of the system-wide registry file (`ncbi.ini` on Windows).
+const NCBIRC: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663 and
+// c++/src/corelib/ncbiapp.cpp:669-674 (quoted at `ncbi_environment::ApplicationStart`). NCBI
+// BLAST+ 2.17.0, the official Linux x64 release (env parity g_reg probes of 2026-11-11: run.sh
+// `partial` with and without BLAST_USAGE_REPORT=false, x_version, x_help, x_dontuse, x_inidont,
+// x_ini, x_iniUR, x_inibothbad): a `.ncbirc` that NCBI reports is posted by each of its two reads
+// (the usage report's, then the configuration's), the entries before the bad line are used, and
+// the search goes on; `-version` comes after the first read, `-h` after both. A malformed
+// `blastn.ini` ends the program with exit status 2: its report, then every message collected
+// (the usage report's and the report again).
+#[cfg(unix)]
+#[test]
+fn a_malformed_registry_file_is_reported_as_ncbi_reports_it() {
+    let dir = scratch("syntax");
+    let databases = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/db_search")
+        .display()
+        .to_string();
+    let query = input("arch_q.fna");
+    let args = [
+        "blastn",
+        "-query",
+        &query,
+        "-db",
+        "arch_snucl",
+        "-outfmt",
+        "6",
+    ];
+    let losat = Path::new(BIN);
+    let reference = run_in(losat, &args, &dir, &[("BLASTDB", &databases)], b"");
+    assert_eq!(reference.status.code(), Some(0), "{reference:?}");
+    assert!(!reference.stdout.is_empty() && reference.stderr.is_empty());
+    let ncbirc = dir.join(NCBIRC);
+    fs::write(
+        &ncbirc,
+        format!("[BLAST]\nBLASTDB={databases}\ngarbage\nBLASTDB=/nowhere\n"),
+    )
+    .unwrap();
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let both = critical(3).repeat(2);
+    let partial = run_in(losat, &args, &dir, &[], b"");
+    assert_eq!(text(&partial.stderr), both);
+    assert_eq!(partial.status.code(), Some(0));
+    assert_eq!(partial.stdout, reference.stdout);
+    let late = run_in(losat, &args, &dir, &[("BLAST_USAGE_REPORT", "false")], b"");
+    assert_eq!(text(&late.stderr), critical(3));
+    assert_eq!(late.stdout, reference.stdout);
+    let off = run_in(
+        losat,
+        &args,
+        &dir,
+        &[("NCBI_DONT_USE_NCBIRC", "1"), ("BLASTDB", &databases)],
+        b"",
+    );
+    assert!(off.stderr.is_empty(), "{off:?}");
+    assert_eq!(off.stdout, reference.stdout);
+    let version = run_in(losat, &["blastn", "-version"], &dir, &[], b"");
+    assert_eq!(text(&version.stderr), critical(3));
+    assert!(text(&version.stdout).starts_with("blastn: 2.17.0+\n"));
+    assert_eq!(version.status.code(), Some(0));
+    let help = run_in(losat, &["blastn", "-h"], &dir, &[], b"");
+    assert_eq!(text(&help.stderr), both);
+    assert!(!help.stdout.is_empty());
+    // `[NCBI] DONT_USE_NCBIRC` in blastn.ini: only the usage report reads `.ncbirc`.
+    let ini = dir.join("blastn.ini");
+    fs::write(&ini, "[NCBI]\nDONT_USE_NCBIRC = 1\n").unwrap();
+    let ini_off = run_in(losat, &args, &dir, &[("BLASTDB", &databases)], b"");
+    assert_eq!(text(&ini_off.stderr), critical(3));
+    assert_eq!(ini_off.stdout, reference.stdout);
+    // A malformed blastn.ini, also for `-h`; without the usage report's read, its report twice.
+    fs::write(&ini, "garbage\n").unwrap();
+    let report = format!("{}{INI_REPORT}", critical(3));
+    for words in [&args[..], &["blastn", "-h"]] {
+        let failed = run_in(losat, words, &dir, &[], b"");
+        assert_eq!(failed.status.code(), Some(2), "{failed:?}");
+        assert!(failed.stdout.is_empty());
+        assert_eq!(text(&failed.stderr), format!("{report}{report}"));
+    }
+    let failed = run_in(losat, &args, &dir, &[("BLAST_USAGE_REPORT", "false")], b"");
+    assert_eq!(failed.status.code(), Some(2));
+    assert_eq!(text(&failed.stderr), INI_REPORT.repeat(2));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-871 (`-logfile` is read and the
+// diagnostics set up before `-version`) and c++/src/corelib/ncbidiag.cpp:3863-3874 (the messages
+// collected so far go to a new log). NCBI BLAST+ 2.17.0, the official Linux x64 release (env
+// parity g_reg probes of 2026-11-11: o1, o2, l, work_o/log.txt, h_log, ver_log, ver_log_cmd,
+// inibad_null): with a `-logfile` file, stderr gets the usage report's post and the file gets it
+// with the configuration's (and, when the program's `.ini` is malformed, the report and every
+// message again); `/dev/null` gets nothing; `-version` makes the file with the usage report's
+// post.
+#[cfg(unix)]
+#[test]
+fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
+    let dir = scratch("logfile");
+    let databases = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/db_search")
+        .display()
+        .to_string();
+    let losat = Path::new(BIN);
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let log = dir.join("log.txt");
+    let logged = || {
+        let content = fs::read_to_string(&log).unwrap_or_default();
+        let _ = fs::remove_file(&log);
+        content
+    };
+    fs::write(
+        dir.join(NCBIRC),
+        format!("[BLAST]\nBLASTDB={databases}\ngarbage\n"),
+    )
+    .unwrap();
+    let info = ["blastdbcmd", "-info", "-db", "arch_snucl"];
+    let plain = run_in(losat, &info, &dir, &[], b"");
+    assert_eq!(text(&plain.stderr), critical(3).repeat(2));
+    assert_eq!(plain.status.code(), Some(0));
+    let mut with_log = info.to_vec();
+    with_log.extend(["-logfile", "log.txt"]);
+    let to_file = run_in(losat, &with_log, &dir, &[], b"");
+    assert_eq!(text(&to_file.stderr), critical(3));
+    assert_eq!(to_file.stdout, plain.stdout);
+    assert_eq!(logged(), critical(3).repeat(2));
+    let mut discarded = info.to_vec();
+    discarded.extend(["-logfile", "/dev/null"]);
+    let nowhere = run_in(losat, &discarded, &dir, &[], b"");
+    assert_eq!(text(&nowhere.stderr), critical(3));
+    assert_eq!(nowhere.stdout, plain.stdout);
+    let version = run_in(
+        losat,
+        &["blastdbcmd", "-version", "-logfile", "log.txt"],
+        &dir,
+        &[],
+        b"",
+    );
+    assert_eq!(text(&version.stderr), critical(3));
+    assert_eq!(logged(), critical(3));
+    // A malformed blastdbcmd.ini.
+    let ini = dir.join("blastdbcmd.ini");
+    fs::write(&ini, "[x\n").unwrap();
+    let section = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    let failed = run_in(losat, &with_log, &dir, &[], b"");
+    assert_eq!(failed.status.code(), Some(2), "{failed:?}");
+    assert!(failed.stdout.is_empty());
+    assert_eq!(text(&failed.stderr), critical(3));
+    let collected = format!("{}{section}", critical(3));
+    assert_eq!(logged(), collected.repeat(2));
+    let failed = run_in(losat, &discarded, &dir, &[], b"");
+    assert_eq!(failed.status.code(), Some(2));
+    assert_eq!(text(&failed.stderr), critical(3));
+    fs::remove_file(&ini).unwrap();
+    // makeblastdb: the log of `-logfile` gets the messages first, then the build's lines.
+    fs::write(dir.join(NCBIRC), "garbage\n").unwrap();
+    let fasta = input("arch_s.fna");
+    let build = run_in(
+        losat,
+        &[
+            "makeblastdb",
+            "-in",
+            &fasta,
+            "-dbtype",
+            "nucl",
+            "-out",
+            "built",
+            "-logfile",
+            "log.txt",
+        ],
+        &dir,
+        &[],
+        b"",
+    );
+    assert_eq!(build.status.code(), Some(0), "{build:?}");
+    assert_eq!(text(&build.stderr), critical(1));
+    assert!(build.stdout.is_empty());
+    let content = logged();
+    let head = critical(1).repeat(2);
+    assert!(
+        content.starts_with(&format!("{head}\n\nBuilding a new DB, current time: ")),
+        "{content}"
+    );
+    let version = run_in(
+        losat,
+        &["makeblastdb", "-version", "-logfile", "log.txt"],
+        &dir,
+        &[],
+        b"",
+    );
+    assert_eq!(text(&version.stderr), critical(1));
+    assert!(text(&version.stdout).starts_with("makeblastdb: 2.17.0+\n"));
+    assert_eq!(logged(), critical(1));
+    fs::remove_file(dir.join(NCBIRC)).unwrap();
+    // Without a message, `-version` still makes the file.
+    let version = run_in(
+        losat,
+        &["makeblastdb", "-version", "-logfile", "log.txt"],
+        &dir,
+        &[],
+        b"",
+    );
+    assert!(version.stderr.is_empty());
+    assert!(log.is_file());
+    assert_eq!(logged(), "");
     let _ = fs::remove_dir_all(&dir);
 }

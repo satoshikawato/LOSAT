@@ -163,6 +163,109 @@ impl NcbiException {
         }
     }
 
+    /// `s_GetExceptionText`: the message and the extra text of this exception.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7844-7857
+    /// ```c++
+    /// static string
+    /// s_GetExceptionText(const CException* pex)
+    /// {
+    ///     string text(pex->GetMsg());
+    ///     stringstream os;
+    ///     pex->ReportExtra(os);
+    ///     string s = os.str();
+    ///     if ( !s.empty() ) {
+    ///         text += " (";
+    ///         text += s;
+    ///         text += ')';
+    ///     }
+    ///     return text;
+    /// }
+    /// ```
+    fn exception_text(&self) -> String {
+        match &self.extra {
+            Some(extra) => format!("{} ({extra})", self.message),
+            None => self.message.clone(),
+        }
+    }
+
+    /// `NCBI_REPORT_EXCEPTION_X(err_subcode, title, e)` in a source file whose error code is
+    /// `err_code` (`NCBI_USE_ERRCODE_X`), as NCBI's diagnostics write it in the old post format
+    /// with the default flags (no file, line or function): a line of each exception of the
+    /// chain, oldest first, then the line of the title with the newest exception. Each line
+    /// ends with a line feed.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:676-699
+    /// ```c++
+    /// void CExceptionReporter::ReportDefaultEx(int err_code, int err_subcode,
+    ///     const CDiagCompileInfo& info, const string& title,const exception& ex,
+    ///     TDiagPostFlags flags)
+    /// {
+    ///     ...
+    ///     } else {
+    ///         CNcbiDiag d(info, cex->GetSeverity(), flags);
+    ///         d.SetOmitStackTrace(true);
+    ///         d << ErrCode(err_code, err_subcode) << title << " " <<  *cex;
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7873-7933
+    /// ```c++
+    ///     for (pex = &ex; pex; pex = pex->GetPredecessor()) {
+    ///         pile.push(pex);
+    ///         if (!main_pex  &&  pex->HasMainText())
+    ///             main_pex = pex;
+    ///     }
+    ///     ...
+    ///     if ( !IsOssEmpty(*m_Buffer.m_Stream) ) {
+    ///         *this << "(" << main_pex->GetType() << "::"
+    ///                      << main_pex->GetErrCodeString() << ") "
+    ///               << s_GetExceptionText(main_pex);
+    ///     }
+    ///     ...
+    ///     for (; !pile.empty(); pile.pop()) {
+    ///         pex = pile.top();
+    ///         string text(s_GetExceptionText(pex));
+    ///         ...
+    ///         string err_type(pex->GetType());
+    ///         err_type += "::";
+    ///         err_type += pex->GetErrCodeString();
+    ///         ...
+    ///         SDiagMessage diagmsg
+    ///             (pex_sev,
+    ///             text.c_str(),
+    ///             text.size(),
+    ///             ...
+    ///             err_type.c_str(),
+    /// ```
+    /// `x_Put` posts the lines of the chain while the title's message is still in the buffer,
+    /// which is posted after them; an exception's main text is the newest one's (a rethrow
+    /// clears its predecessor's, ncbiexpt.cpp:188-189). The severity is `Error` (`CException`'s, at
+    /// the post level of a release build), and the old post format writes the severity, then
+    /// the error text (`(type::code)`) or the error code (`(code.subcode)`), then the message
+    /// (`SDiagMessage::x_OldWrite`, ncbidiag.cpp:5672-5695).
+    pub fn report_with_title(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
+        let mut pile = Vec::new();
+        let mut pex = Some(self);
+        while let Some(e) = pex {
+            pile.push(e);
+            pex = e.predecessor.as_deref();
+        }
+        let mut out = String::new();
+        for e in pile.iter().rev() {
+            out.push_str(&format!(
+                "Error: ({}) {}\n",
+                e.site.kind,
+                e.exception_text()
+            ));
+        }
+        out.push_str(&format!(
+            "Error: ({err_code}.{err_subcode}) {title} ({}) {}\n",
+            self.site.kind,
+            self.exception_text()
+        ));
+        out
+    }
+
     /// `CException::what()` (`ReportAll`): the report of the chain, oldest exception first,
     /// ending with a line feed.
     pub fn what(&self) -> String {
@@ -235,6 +338,35 @@ mod tests {
         assert_eq!(
             factory.what(),
             "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp\", line 63: Error: (Exception::format error) file too short\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n"
+        );
+    }
+
+    // blastn 2.17.0 (the official Linux x64 release) with a `blastn.ini` of the line `garbage`
+    // (env parity g_reg probe `x_ini`, 2026-11-11): `NCBI_REPORT_EXCEPTION_X(15, "Application's
+    // initialization failed", e)` of the application layer (error code 106), and of a chain.
+    #[test]
+    fn a_report_with_a_title_has_a_line_per_exception_then_the_title() {
+        let site = ThrowSite {
+            file: "src/corelib/ncbireg.cpp",
+            line: 722,
+            kind: "CRegistryException::eEntry",
+            function: Some("ncbi::IRWRegistry::x_Read"),
+        };
+        let e = NcbiException::with_pos(site, "Invalid registry entry format: 'garbage'", 1);
+        assert_eq!(
+            e.report_with_title(106, 15, "Application's initialization failed"),
+            "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n"
+        );
+        let outer = NcbiException::new(site, "first").rethrow(
+            ThrowSite {
+                kind: "CAppException::eSetupDiag",
+                ..site
+            },
+            "second",
+        );
+        assert_eq!(
+            outer.report_with_title(106, 15, "T"),
+            "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n"
         );
     }
 

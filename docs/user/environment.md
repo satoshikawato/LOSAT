@@ -10,7 +10,9 @@ A variable or configuration entry that LOSAT refuses stops the run with a messag
 run:
 
 - NCBI's toolkit variables, the `NCBI_CONFIG_*` variables and the configuration files: when the
-  program starts, before anything is written (`-h`, `-help` and `-version` still answer).
+  program starts, before anything is written (`-h`, `-help` and `-version` still answer, unless
+  NCBI BLAST+ would write a message about a configuration file before them that LOSAT does not
+  write: then LOSAT stops there).
 - `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` and a `[BLAST] BLASTDB` value that LOSAT
   cannot read: where the `-db` database opens, which in every search program is before an empty
   query file ends the run.
@@ -25,7 +27,7 @@ run:
 | Variable or file | Effect |
 | :--- | :--- |
 | `BLASTDB` | Directories where `-db` names are looked for, separated by `:` (`;` on Windows). The search order is the current directory, then `BLASTDB`, then `[BLAST] BLASTDB` of NCBI's configuration. `taxdb.bti` is found the same way, with `taxdb.btd` in its directory, and so are the files of `-seqidlist`, `-taxidlist` and their negative forms. |
-| `.ncbirc`, `<program>.ini` | NCBI's configuration files (for example `blastn.ini`). LOSAT reads `[BLAST] BLASTDB` and `[BLAST] DATA_LOADERS` from them: the first file of each name on the search path, `<program>.ini` before `.ncbirc`. |
+| `.ncbirc`, `<program>.ini` | NCBI's configuration files (for example `blastn.ini`; on Windows `ncbi.ini` stands for `.ncbirc`). LOSAT reads `[BLAST] BLASTDB` and `[BLAST] DATA_LOADERS` from them: the first file of each name on the search path, `<program>.ini` before `.ncbirc`. A file found that cannot be opened counts as no file, and no later directory is searched for it. |
 | `NCBI_CONFIG__BLAST__BLASTDB` | `[BLAST] BLASTDB` set in the environment; it comes before the files. |
 | `[BLAST] DATA_LOADERS`, `NCBI_CONFIG__BLAST__DATA_LOADERS` | Which of NCBI's data loaders are on. With none on (`none`, or neither `blastdb` nor `genbank`, matched anywhere in the value in any case; or an empty `NCBI_CONFIG__BLAST__DATA_LOADERS`), a query or subject line that is a Seq-id is read as FASTA text instead of being refused. In a configuration file an empty value counts as no entry. |
 | `NCBI_CONFIG_PATH`, `NCBI`, `HOME`, `NCBI_DONT_USE_LOCAL_CONFIG` | Where the configuration files are looked for: the directories of `NCBI_CONFIG_PATH` if it is set (an empty element stands for the default path, and an empty `NCBI_CONFIG_PATH` means no directory); otherwise the current directory, the home directory, `NCBI`, `/etc` (the Windows directory on Windows) and the program's directories. `NCBI_DONT_USE_LOCAL_CONFIG` leaves out the current directory and the home directory. |
@@ -48,10 +50,24 @@ A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_
 BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
 and `BLASTMAT`, `BLASTDB_NUCL_DATA_LOADER`, `BLASTDB_PROT_DATA_LOADER`, `IGDATA`,
 `BLAST_USAGE_REPORT` (a Boolean) and `[NCBI] DATA`, which change no output of LOSAT's programs. A
-file with any other entry, one that LOSAT cannot read, or one that NCBI BLAST+ reports as
-malformed, stops the run, and so does an `NCBI_CONFIG__<SECTION>__<NAME>` variable for another
-entry. A value with a backslash or a quote inside stops every program for `DATA_LOADERS`, a run
-that opens a database for `BLASTDB`, and `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
+file with any other entry stops the run, and so does an `NCBI_CONFIG__<SECTION>__<NAME>` variable
+for another entry. LOSAT reads the files as NCBI BLAST+ 2.17.0 does: comments, sections, entries
+before the first section (left out), a value continued on the next line after a backslash, quotes
+at the ends of a value, and backslash escapes. A value that is not UTF-8 stops a run that opens a
+database for `BLASTDB`, and `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
+
+A file that NCBI BLAST+ reports as malformed gets NCBI BLAST+'s messages, where NCBI BLAST+ writes
+them. NCBI BLAST+ reads `.ncbirc` twice, each time with its `Critical:` message: when the program
+starts (before `-version` answers; not with `BLAST_USAGE_REPORT` set to a false value or
+`.ncbirc` turned off) and when it loads its configuration (after `<program>.ini`, before the
+options are read, `-h` included). The program then goes on with the entries above the line it
+reports. A malformed `<program>.ini` ends the program with exit status 2 and NCBI BLAST+'s
+messages, before the options are read. The messages go to the standard error stream, and with
+`-logfile` (blastdbcmd and makeblastdb) as in NCBI BLAST+: those of the start to the standard
+error stream and into the file, the others into the file; `-logfile /dev/null` and `-logfile ""`
+discard the others. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
+a file that NCBI BLAST+ reports.
 
 ## Variables that change a search or a report
 

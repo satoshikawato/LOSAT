@@ -162,7 +162,7 @@ fn rpsbproc_gives_ncbis_bytes() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 95);
+    assert_eq!(compared, 96);
 }
 
 #[test]

@@ -29,7 +29,8 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
   - `data_with/<dir>/`: the data files of `data/` that the case `d_<name>` edits; the tests make `<dir>/` from `data/`
     and these files (oracle request A4-1 of the review's angle 4): `d_acc0` adds a `cddid.tbl` row with an empty
     accession, `d_wsline` a line of one space, `d_annot10` a `cddannot.dat` line whose coordinates are its last
-    field, `d_bs12` writes the threshold of `smart00421` as `0x10`, and `d_ct3`'s `cdtrack.txt` is the line
+    field, `d_bs12` writes the threshold of `smart00421` as `0x10`, `d_bsnul` writes the bit score of `CHL00113` as
+    `1x`, a 0 byte and `y` (NCBI quotes the string up to the 0 byte, exit 2), and `d_ct3`'s `cdtrack.txt` is the line
     `smart00421` alone.
   - `xml_missing_input`: `-i` names a missing file and the standard input is XML (oracle request M4 of the review).
 

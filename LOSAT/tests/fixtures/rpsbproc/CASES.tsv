@@ -95,6 +95,7 @@ nolength	compare	-	-	-i nolength.asn -d data -t doms
 d_acc0	compare	-	data-with:d_acc0	-i arch/three.asn -d d_acc0 -m rep -t doms -f
 d_annot10	compare	-	data-with:d_annot10	-i arch/three.asn -d d_annot10 -m rep -t doms -f
 d_bs12	compare	-	data-with:d_bs12	-i arch/three.asn -d d_bs12 -m rep -t doms -f
+d_bsnul	compare	-	data-with:d_bsnul	-i arch/three.asn -d d_bsnul -m rep -t doms -f
 d_ct3	compare	-	data-with:d_ct3	-i arch/three.asn -d d_ct3 -m rep -t doms -f
 d_wsline	compare	-	data-with:d_wsline	-i arch/three.asn -d d_wsline -m rep -t doms -f
 xml_missing_input	compare	arch/one.xml	-	-i nofile.asn -d data -t doms

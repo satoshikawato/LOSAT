@@ -69,7 +69,7 @@ pub fn evaluate_gapped(
         });
     }
     let spec = ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix: options.scoring,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     };
@@ -210,7 +210,7 @@ pub fn evaluate_gapped(
 pub fn reap_preliminary(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<LinkedHsp> {
     // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
     let cutoff = options.evalue
-        * if options.composition > 0 && !options.old_fsc {
+        * if options.composition > 1 && !options.old_fsc {
             5.0
         } else {
             1.0
@@ -314,11 +314,11 @@ pub fn reap_final(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<Li
 // ```
 pub fn normalize_scores(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<f64> {
     let ka = lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix: options.scoring,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
-    let scale = if options.composition == 2 { 32.0 } else { 1.0 };
+    let scale = if options.composition != 0 { 32.0 } else { 1.0 };
     list.hsps
         .iter_mut()
         .map(|h| {
@@ -429,6 +429,7 @@ pub fn identity_and_positive(
     h: &super::kappa::RedoneHsp,
     batch: &PreparedQueryBatch,
     subject: &[u8],
+    matrix: ScoringMatrix,
 ) -> (usize, usize) {
     let p = &h.hsp;
     let c = &batch.contexts[p.context];
@@ -447,7 +448,7 @@ pub fn identity_and_positive(
                         identity += 1;
                         positive += 1;
                     } else if h.identity_matrix.as_ref().map_or_else(
-                        || crate::utils::matrix::blosum62_score(q, s) > 0,
+                        || crate::utils::matrix::protein_score(matrix, q, s) > 0,
                         |matrix| matrix.score(q, s) > 0,
                     ) {
                         positive += 1;

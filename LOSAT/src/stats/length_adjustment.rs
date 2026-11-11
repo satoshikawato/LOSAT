@@ -17,12 +17,14 @@
 use super::tables::KarlinParams;
 
 /// Result of length adjustment computation
+///
+/// NCBI's `BLAST_ComputeLengthAdjustment` returns `converged ? 0 : 1`
+/// (blast_stat.c:5125) and its only caller, `BLAST_CalcEffLengths`
+/// (blast_setup.c:821), drops it; no LOSAT caller read it either.
 #[derive(Debug, Clone, Copy)]
 pub struct LengthAdjustmentResult {
     /// The computed length adjustment value (integer, as in NCBI BLAST)
     pub length_adjustment: i64,
-    /// Whether the iteration converged
-    pub converged: bool,
 }
 
 /// Compute the length adjustment using NCBI BLAST's algorithm.
@@ -46,7 +48,7 @@ pub struct LengthAdjustmentResult {
 /// * `params` - Karlin-Altschul parameters (lambda, K, alpha, beta)
 ///
 /// # Returns
-/// A `LengthAdjustmentResult` containing the adjustment value and convergence status.
+/// A `LengthAdjustmentResult` containing the adjustment value.
 pub fn compute_length_adjustment_ncbi(
     query_length: i64,
     db_length: i64,
@@ -68,7 +70,6 @@ pub fn compute_length_adjustment_ncbi(
     if m <= 0.0 || n <= 0.0 || k <= 0.0 || params.lambda <= 0.0 {
         return LengthAdjustmentResult {
             length_adjustment: 0,
-            converged: false,
         };
     }
 
@@ -85,7 +86,6 @@ pub fn compute_length_adjustment_ncbi(
         // No valid length adjustment possible
         return LengthAdjustmentResult {
             length_adjustment: 0,
-            converged: true,
         };
     }
 
@@ -93,7 +93,6 @@ pub fn compute_length_adjustment_ncbi(
     if discriminant < 0.0 {
         return LengthAdjustmentResult {
             length_adjustment: 0,
-            converged: false,
         };
     }
 
@@ -161,10 +160,7 @@ pub fn compute_length_adjustment_ncbi(
     // Note: NCBI BLAST sets length_adjustment even if not converged (uses ell_min)
     // Our implementation already does this above
 
-    LengthAdjustmentResult {
-        length_adjustment,
-        converged,
-    }
+    LengthAdjustmentResult { length_adjustment }
 }
 
 /// Simplified length adjustment for single-sequence comparisons.
@@ -208,8 +204,6 @@ mod tests {
         let params = default_blosum62_params();
         let result = compute_length_adjustment_ncbi(100, 10000, 10, &params);
 
-        // Should converge
-        assert!(result.converged);
         // Length adjustment should be positive
         assert!(result.length_adjustment >= 0);
         // Length adjustment should be less than query length
@@ -221,7 +215,6 @@ mod tests {
         let params = default_blosum62_params();
         let result = compute_length_adjustment_simple(100, 1000, &params);
 
-        assert!(result.converged);
         assert!(result.length_adjustment >= 0);
         assert!(result.length_adjustment < 100);
     }
@@ -231,7 +224,6 @@ mod tests {
         let params = default_blastn_params();
         let result = compute_length_adjustment_ncbi(1000, 100000, 100, &params);
 
-        assert!(result.converged);
         assert!(result.length_adjustment >= 0);
     }
 
@@ -256,12 +248,10 @@ mod tests {
         // Zero query length
         let result = compute_length_adjustment_ncbi(0, 10000, 10, &params);
         assert_eq!(result.length_adjustment, 0);
-        assert!(!result.converged);
 
         // Zero database length
         let result = compute_length_adjustment_ncbi(100, 0, 10, &params);
         assert_eq!(result.length_adjustment, 0);
-        assert!(!result.converged);
     }
 
     #[test]
@@ -300,7 +290,6 @@ mod tests {
 
         // More sequences should generally result in different (often smaller) adjustment
         // because the constraint K*(m-A)*(n-N*A) > MAX(m,n) is tighter
-        assert!(result_few_seqs.converged);
-        assert!(result_many_seqs.converged);
+        assert!(result_many_seqs.length_adjustment <= result_few_seqs.length_adjustment);
     }
 }

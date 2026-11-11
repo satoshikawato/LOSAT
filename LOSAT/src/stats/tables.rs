@@ -1,7 +1,7 @@
 use super::karlin_calc::blast_gcd;
-use super::protein_options::{
-    gap_costs_row, protein_gap_existence_extend_params, scoring_matrix_table,
-};
+#[cfg(test)]
+use super::protein_options::protein_gap_existence_extend_params;
+use super::protein_options::{gap_costs_row, scoring_matrix_table};
 use super::protein_tables::ProteinTableRow;
 use crate::config::{NuclScoringSpec, ProteinScoringSpec, ScoringMatrix};
 
@@ -605,6 +605,7 @@ pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
 ///     }
 ///        }
 /// ```
+#[cfg(test)]
 pub fn lookup_protein_params_gapped(matrix: ScoringMatrix) -> KarlinParams {
     let (gap_open, gap_extend) = protein_gap_existence_extend_params(matrix.ncbi_name())
         .expect("every matrix has a BEST row");

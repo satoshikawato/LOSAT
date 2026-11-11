@@ -232,8 +232,10 @@ pub fn query_warning<R: InputRecord>(
 /// `query_warning` for a query whose Seq-id is its own rather than the `Query_N` that NCBI's
 /// FASTA reader makes: psiblast's PSSM query (`-in_pssm`), whose warnings start with the PSSM's
 /// Seq-id, `seq_id` (`GetSeqIdString()`: a `local str` as written, a `local id` in decimal; the
-/// PSSM path keeps it as the record's local id, `algorithm::psiblast::in_pssm`), then the title.
-/// The lines are `query_warning`'s, which the other queries keep.
+/// PSSM path keeps it as the record's local id, `algorithm::psiblast::in_pssm`), then the title
+/// `title` (the query source's `GetTitle`, which for a PSSM's Bioseq is not the record's title:
+/// `blastp::blast_engine::pssm_hooks::pssm_query_warning`). The lines are `query_warning`'s, which
+/// the other queries keep.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:533-535
 /// ```c++
@@ -241,17 +243,17 @@ pub fn query_warning<R: InputRecord>(
 ///                 const string kTitle = queries.GetTitle(index);
 ///                 string query_id = id->GetSeqIdString();
 /// ```
-pub fn query_warning_with_seq_id<R: InputRecord>(
+pub fn query_warning_with_seq_id(
     program: &str,
     seq_id: &[u8],
-    query: &R,
+    title: &[u8],
     messages: &[String],
 ) -> Vec<u8> {
     if messages.is_empty() {
         return Vec::new();
     }
     let mut warning = format!("Warning: [{program}] ").into_bytes();
-    warning.extend_from_slice(&warning_query_id(seq_id, &query.title_bytes()));
+    warning.extend_from_slice(&warning_query_id(seq_id, title));
     warning.extend_from_slice(b": ");
     for message in sorted_query_messages(messages) {
         warning.extend_from_slice(message.as_bytes());
@@ -405,20 +407,17 @@ mod tests {
             (b"-3", title, b"-3 YP_009220601.1 TK-TMK,.. "),
             (b"5", b"", b"5"),
         ] {
-            let query = FastaRecord::new(String::from_utf8_lossy(seq_id), title, b"MKVOAAOK");
             let mut expected = b"Warning: [psiblast] ".to_vec();
             expected.extend_from_slice(shown);
             expected.extend_from_slice(b": ");
             expected.extend_from_slice(o.as_bytes());
             expected.extend_from_slice(b" \n");
             assert_eq!(
-                query_warning_with_seq_id("psiblast", seq_id, &query, std::slice::from_ref(&o)),
+                query_warning_with_seq_id("psiblast", seq_id, title, std::slice::from_ref(&o)),
                 expected
             );
         }
-        assert!(
-            query_warning_with_seq_id("psiblast", b"5", &FastaRecord::default(), &[]).is_empty()
-        );
+        assert!(query_warning_with_seq_id("psiblast", b"5", b"", &[]).is_empty());
     }
 
     // Query_1 + FASTA title is shortened after 35 bytes, then the invalid-Karlin

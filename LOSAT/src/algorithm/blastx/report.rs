@@ -397,6 +397,7 @@ pub(crate) fn alignment(
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
+    matrix: crate::config::ScoringMatrix,
 ) -> Result<DisplayAlignment> {
     let raw = &hsp.hsp;
     let context = &batch.prepared.contexts[raw.context];
@@ -662,10 +663,7 @@ pub(crate) fn alignment(
         if qc == sc {
             identity += 1;
             positive += 1;
-        } else if qc != b'-'
-            && sc != b'-'
-            && protein_display_score(crate::config::ScoringMatrix::Blosum62, qc, sc) > 0
-        {
+        } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
             positive += 1;
         }
     }
@@ -1421,7 +1419,7 @@ pub(super) fn render_queries_with(
                     })
                     .sum();
                 if comments {
-                    writeln!(writer, "# BLASTX 2.17.0+")?;
+                    writeln!(writer, "# BLASTX {}", crate::NCBI_BLAST_VERSION)?;
                     writeln!(
                         writer,
                         "# Query: {}",
@@ -1484,7 +1482,7 @@ pub(super) fn render_queries_with(
                         if !has_seqalign(hsp, options.gapped) {
                             continue;
                         }
-                        let a = alignment(batch, hsp, subject, query, &code)?;
+                        let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                         let values: Vec<_> = options
                             .fields
                             .iter()
@@ -1556,7 +1554,6 @@ fn write_pairwise(
     probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
 ) -> Result<()> {
-    use crate::config::ScoringMatrix;
     use crate::report::pairwise::{
         write_blastx_pairwise_report, BlastpPairwiseQuery, BlastxPairwiseOptions, PairwiseConfig,
     };
@@ -1657,7 +1654,7 @@ fn write_pairwise(
     };
     let config = PairwiseConfig {
         program: "blastx".into(),
-        protein_matrix: ScoringMatrix::Blosum62,
+        protein_matrix: options.scoring,
         ..PairwiseConfig::default()
     };
     write_blastx_pairwise_report(
@@ -1718,7 +1715,7 @@ pub(super) fn pairwise_hits(
                     if !has_seqalign(hsp, options.gapped) {
                         continue;
                     }
-                    let a = alignment(batch, hsp, subject, query, &code)?;
+                    let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                     let raw = &hsp.hsp;
                     let len = a.qseq.len();
                     let hit = Hit {
@@ -1814,12 +1811,12 @@ fn pairwise_metadata(
     shown: &ShownSubjects<'_>,
 ) -> crate::report::pairwise::BlastpPairwiseReport {
     use crate::{
-        config::{ProteinScoringSpec, ScoringMatrix},
+        config::ProteinScoringSpec,
         report::pairwise::BlastpPairwiseReport,
         stats::{spouge::lookup_protein_gumbel_params, tables::lookup_protein_params},
     };
     let scoring = ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix: options.scoring,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     };
@@ -1838,7 +1835,7 @@ fn pairwise_metadata(
         ),
     };
     BlastpPairwiseReport {
-        version: "2.17.0+".into(),
+        version: crate::NCBI_BLAST_VERSION.into(),
         database_name,
         database_num_sequences: num_sequences,
         database_total_letters: total,
@@ -1847,10 +1844,16 @@ fn pairwise_metadata(
         gap_extend: options.gap_extend,
         word_threshold: 0.0,
         window_size: options.window_size,
-        gapped_karlin: lookup_protein_params(&scoring),
-        gumbel: (!options.old_fsc).then(|| {
+        // An ungapped search's gap costs need not be in the matrix's table (`args.rs`): it has no
+        // gapped block (the report prints the ungapped one only).
+        gapped_karlin: if options.gapped {
+            lookup_protein_params(&scoring)
+        } else {
+            Default::default()
+        },
+        gumbel: (options.gapped && !options.old_fsc).then(|| {
             lookup_protein_gumbel_params(&scoring, total as i64)
-                .expect("pinned BLOSUM62 gap11/1 Gumbel block")
+                .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),
         // BLASTX writes its own description table and alignments (`write_blastx_report`).
         num_descriptions: usize::MAX,

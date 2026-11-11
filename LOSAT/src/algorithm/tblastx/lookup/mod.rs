@@ -44,7 +44,7 @@ pub use backbone::{
 // counterpart: it prints counters and changes no value NCBI computes.
 pub use backbone::x_tbn_lut_print_summary;
 pub(crate) use backbone::{
-    build_ncbi_lookup_for_profile, ideal_karlin_params_of,
+    build_ncbi_lookup_for_profile, ideal_karlin_params_of, matrix_score_bounds,
     prepare_blosum62_lookup_query_for_word_size, prepare_matrix_lookup_query_for_word_size,
     x_compressed_contexts_for_profile, x_lookup_contexts_for_profile, x_lookup_query_for_profile,
     x_lookup_table_for_profile, x_lookup_table_for_profile_in,
@@ -234,7 +234,7 @@ pub(crate) fn compute_unmasked_intervals(
 //        will need real offsets into the query sequence */
 //
 // ```
-pub(crate) use backbone::build_ncbi_lookup_from_prepared;
+pub(crate) use backbone::{build_ncbi_lookup_from_prepared, build_ncbi_lookup_from_prepared_of};
 // BLASTP's table built in place (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
 pub(crate) use backbone::{x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as};

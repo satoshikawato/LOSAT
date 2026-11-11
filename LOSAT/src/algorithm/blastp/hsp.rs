@@ -1884,7 +1884,15 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
 pub(crate) fn collect_hits_and_methods_from_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
 ) -> Vec<(Hit, u8)> {
-    let mut hits = Vec::new();
+    let reported = |hit_list: &BlastpHitList| {
+        hit_list
+            .hsplist_array
+            .iter()
+            .take(hit_list.hsplist_count)
+            .map(|hsp_list| hsp_list.hsps.len())
+            .sum::<usize>()
+    };
+    let mut hits = Vec::with_capacity(hit_lists.iter().flatten().map(reported).sum());
     for hit_list_opt in hit_lists {
         let Some(hit_list) = hit_list_opt else {
             continue;

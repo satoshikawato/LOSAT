@@ -2480,8 +2480,6 @@ mod tests {
                 let effective_db_len =
                     (db_letters as i64 - subjects.len() as i64 * length_adjustment) as f64;
                 SearchSpace {
-                    effective_query_len,
-                    effective_db_len,
                     effective_space: effective_query_len * effective_db_len,
                     length_adjustment,
                 }

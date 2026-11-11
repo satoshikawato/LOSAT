@@ -113,8 +113,6 @@ pub struct ReportContext {
     pub database_total_letters: Option<usize>,
     /// Program name (blastn, tblastx, etc.)
     pub program: String,
-    /// Version string
-    pub version: Option<String>,
 }
 
 impl Default for ReportContext {
@@ -127,7 +125,6 @@ impl Default for ReportContext {
             database_num_sequences: None,
             database_total_letters: None,
             program: "blast".to_string(),
-            version: None,
         }
     }
 }
@@ -802,7 +799,7 @@ pub fn write_outfmt7_header<W: Write>(
 ) -> io::Result<()> {
     // Program version line
     // NCBI: "# TBLASTX 2.17.0+"
-    let version_str = context.version.as_deref().unwrap_or("0.1.0");
+    let version_str = crate::NCBI_BLAST_VERSION;
     writeln!(
         writer,
         "# {} {}",
@@ -836,79 +833,6 @@ pub fn write_outfmt7_header<W: Write>(
     writeln!(writer, "# {} hits found", num_hits)?;
 
     Ok(())
-}
-
-/// Write hits to a writer in outfmt 7 format (tabular with comment headers)
-///
-/// Reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp
-pub fn write_outfmt7<W: Write>(
-    hits: &[Hit],
-    writer: &mut W,
-    config: &OutputConfig,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
-    context: &ReportContext,
-) -> io::Result<()> {
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-    // ```c
-    // void CBlastTabularInfo::Print()
-    // {
-    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    //         if (iter != m_FieldsToShow.begin())
-    //             m_Ostream << m_FieldDelimiter;
-    //         x_PrintField(*iter);
-    //     }
-    //     m_Ostream << "\n";
-    // }
-    // ```
-    let mut buffered = io::BufWriter::new(writer);
-    let writer = &mut buffered;
-
-    // Write header comments
-    write_outfmt7_header(writer, context, hits.len())?;
-
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-    // ```c
-    // void CBlastTabularInfo::Print()
-    // {
-    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    //         if (iter != m_FieldsToShow.begin())
-    //             m_Ostream << m_FieldDelimiter;
-    //         x_PrintField(*iter);
-    //     }
-    //     m_Ostream << "\n";
-    // }
-    // ```
-    for hit in hits {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
-        let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
-        write_hit_fields(
-            writer,
-            query_id,
-            subject_id,
-            hit.identity,
-            hit.num_ident,
-            hit.length,
-            hit.mismatch,
-            hit.gapopen,
-            hit.q_start,
-            hit.q_end,
-            hit.s_start,
-            hit.s_end,
-            hit.e_value,
-            hit.bit_score,
-            config,
-        )?;
-    }
-
-    writer.flush()
 }
 
 /// Write hits grouped by query in outfmt 7 format
@@ -1076,9 +1000,7 @@ pub fn generate_summary(hits: &[Hit], context: &ReportContext) -> String {
         context.program.to_uppercase()
     ));
 
-    if let Some(ref version) = context.version {
-        summary.push_str(&format!("# Version: {}\n", version));
-    }
+    summary.push_str(&format!("# Version: {}\n", crate::NCBI_BLAST_VERSION));
 
     if let Some(ref query) = context.query_name {
         summary.push_str(&format!("# Query: {}\n", query));

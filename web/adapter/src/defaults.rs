@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clap::CommandFactory;
-use LOSAT::cli::{Cli, Commands};
+use LOSAT::web_adapter::{Cli, Commands};
 
 use crate::json;
 use crate::run::Program;
@@ -44,7 +44,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
     let bool_text = |value: bool| value.to_string();
     match command {
         Commands::Blastn(mut args) => {
-            use LOSAT::algorithm::blastn::coordination::{
+            use LOSAT::web_adapter::{
                 configure_task, determine_effective_word_size, determine_evalue,
                 determine_scoring_params, determine_window_size,
             };
@@ -165,12 +165,8 @@ fn hit_list(
     num_descriptions: Option<usize>,
     num_alignments: Option<usize>,
 ) {
-    let counts = LOSAT::blastinput::report_counts::report_counts(
-        0,
-        max_target_seqs,
-        num_descriptions,
-        num_alignments,
-    );
+    let counts =
+        LOSAT::web_adapter::report_counts(0, max_target_seqs, num_descriptions, num_alignments);
     put("-max_target_seqs", counts.hitlist_size.to_string());
     put("-num_descriptions", counts.num_descriptions.to_string());
     put("-num_alignments", counts.num_alignments.to_string());
@@ -267,7 +263,7 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
                     .any(|arg| arg.get_long() == flag.strip_prefix('-'))
             })
     };
-    let matrices: Vec<String> = LOSAT::config::ScoringMatrix::ALL
+    let matrices: Vec<String> = LOSAT::web_adapter::ScoringMatrix::ALL
         .iter()
         .map(|matrix| matrix.ncbi_name().to_string())
         .collect();
@@ -546,11 +542,16 @@ mod tests {
             pam30.keys().copied().collect::<Vec<_>>(),
             ["-threshold", "-window_size"]
         );
-        // BLASTX reads BLOSUM62 only, which changes nothing; BLASTN has no -matrix.
-        assert!(!defaults(Program::Blastx)
-            .unwrap()
-            .by
-            .contains_key("-matrix"));
+        // BLASTX (item SC6 of line NP): the matrix's gap costs, its threshold + 1 (a translated
+        // query; PAM30 17) and window; blastx-fast keeps its threshold 20 (as blastp-fast above).
+        let blastx = defaults(Program::Blastx).unwrap();
+        let pam30 = &blastx.by["-matrix"]["PAM30"];
+        assert_eq!(pam30["blastx"]["-gapopen"], "9");
+        assert_eq!(pam30["blastx"]["-gapextend"], "1");
+        assert_eq!(pam30["blastx"]["-threshold"], "17");
+        assert_eq!(pam30["blastx"]["-window_size"], "15");
+        assert_eq!(pam30["blastx-fast"]["-threshold"], "20");
+        // BLASTN has no -matrix.
         assert!(defaults(Program::Blastn).unwrap().by.is_empty());
     }
 

@@ -263,8 +263,8 @@ flowchart LR
 | :--- | :--- | :--- | :--- |
 | input | `CBlastInput::GetNextSeqBatch`; subjects as a `BlastSeqSrc` (`MultiSeqBlastSeqSrcInit`, `SeqDbBlastSeqSrcInit`) | `read_cli_subjects` or `open_search_database`, then `search_cli` reads the queries | the same names in `blast_engine.rs` |
 | query batches | `CBatchSizeMixer` (blastn), `GetQueryBatchSize` | `run_in_pool` with the adaptive `BatchSizeMixer` (`blastinput/query_batch.rs`) | a fixed size: 10,000 letters unless `BATCH_SIZE` is set; psiblast one query |
-| masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`) | SEG in `blastp/encoding.rs` |
-| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | the head of `search_query_batch` | the head of `run_resolved_in_pool` |
+| masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`); the encoding in `batch_setup.rs` (`encode_query_block`) | SEG in `blastp/encoding.rs` |
+| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | the head of `run_resolved_in_pool` |
 | lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks |
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`; `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges` and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
@@ -346,7 +346,7 @@ own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_se
 | translated in six frames | the query (`-query_gencode`) | the subject (`-db_gencode`) | both | nothing |
 | gapped | yes, or `-ungapped` | yes | no: ungapped only, no traceback | yes |
 | HSP linking (`core/link_hsps.c`) | uneven gaps; even gaps when ungapped with no intron length | uneven gaps | even gaps, before and after the re-evaluation for ambiguities | none |
-| composition-based statistics | modes 0 and 2 | modes 0 and 2 (1 and 3 refused) | none | mode 0 |
+| composition-based statistics | modes 0 to 3 | modes 0 to 3 | none | modes 0 and 1 (the default 1, with the database's frequency ratios; 2 and 3 run as 1) |
 | reports written | after each query batch | after the last batch | after each batch when its stream check passes, otherwise at the end | as blastp |
 
 The shared protein code sits low in the layer order: `tblastx::lookup` (the protein word lookup

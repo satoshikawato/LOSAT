@@ -4026,7 +4026,7 @@ pub fn write_pairwise<W: Write>(
     let writer = &mut buffered;
 
     // Write program header
-    let version = context.version.as_deref().unwrap_or("0.1.0");
+    let version = crate::NCBI_BLAST_VERSION;
     writeln!(writer, "{} {}", context.program.to_uppercase(), version)?;
     writeln!(writer)?;
 
@@ -4127,29 +4127,6 @@ pub fn write_pairwise<W: Write>(
     }
 
     writer.flush()
-}
-
-/// Write hits in pairwise format (simplified version for Hit without sequences)
-///
-/// This is a convenience function when only Hit structures are available
-/// without the extended sequence data.
-pub fn write_pairwise_simple<W: Write>(
-    hits: &[Hit],
-    writer: &mut W,
-    config: &PairwiseConfig,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
-    context: &ReportContext,
-) -> io::Result<()> {
-    let pairwise_hits: Vec<PairwiseHit> = hits.iter().cloned().map(PairwiseHit::from).collect();
-    write_pairwise(
-        &pairwise_hits,
-        writer,
-        config,
-        query_ids,
-        subject_ids,
-        context,
-    )
 }
 
 #[cfg(test)]
@@ -4604,48 +4581,6 @@ mod tests {
             Ok(())
         })
         .unwrap();
-    }
-
-    #[test]
-    fn test_write_pairwise_simple() {
-        let hits = vec![make_hit()];
-        let config = PairwiseConfig::default();
-        let context = ReportContext {
-            program: "tblastx".to_string(),
-            query_name: Some("test_query".to_string()),
-            query_length: Some(100),
-            subject_name: Some("test_db".to_string()),
-            database_name: Some("test_db".to_string()),
-            database_num_sequences: Some(1),
-            database_total_letters: Some(100),
-            version: Some("0.1.0".to_string()),
-        };
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
-        let query_ids = vec![Arc::<str>::from("query1")];
-        let subject_ids = vec![Arc::<str>::from("subject1")];
-
-        let mut output = Vec::new();
-        write_pairwise_simple(
-            &hits,
-            &mut output,
-            &config,
-            &query_ids,
-            &subject_ids,
-            &context,
-        )
-        .unwrap();
-        let output_str = String::from_utf8(output).unwrap();
-
-        assert!(output_str.contains("TBLASTX"));
-        assert!(output_str.contains("Query= test_query"));
-        assert!(output_str.contains("> subject1"));
     }
 }
 
@@ -6272,7 +6207,8 @@ mod tblastx_tests {
 
     /// A BLASTP pairwise report written a window of queries at a time (the rows of a caller that
     /// makes them window by window) is the report written at once: the prolog with the first
-    /// window, the epilog with the last, the query indices global.
+    /// window, the epilog with the last, the query indices global. So is a psiblast round's report
+    /// (`psiblast_round`, the prolog with the first window, no epilog), also in two parts.
     #[test]
     fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         let karlin = KarlinParams {
@@ -6394,6 +6330,50 @@ mod tblastx_tests {
                 String::from_utf8_lossy(&windowed),
                 String::from_utf8_lossy(&at_once)
             );
+        }
+        let round_config = PairwiseConfig {
+            program: "psiblast".to_string(),
+            ..config.clone()
+        };
+        for found_before in [None, Some(&[true][..])] {
+            let round = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {
+                psiblast_round::write_psiblast_round_report(
+                    rows,
+                    range,
+                    out,
+                    &round_config,
+                    &queries,
+                    &query_titles,
+                    &subject_titles,
+                    &parsed,
+                    &report,
+                    None,
+                    None,
+                    None,
+                    true,
+                    psiblast_round::ReportRound {
+                        number: 2,
+                        found_before,
+                    },
+                )
+                .unwrap();
+            };
+            let mut at_once = Vec::new();
+            round(0..4, &hits, &mut at_once);
+            let text = String::from_utf8_lossy(&at_once).into_owned();
+            assert!(text.contains("Results from round 2") && text.contains("Query_3"));
+            for windows in [vec![0..1, 1..4], vec![0..2, 2..3, 3..4]] {
+                let mut windowed = Vec::new();
+                for window in windows {
+                    let rows: Vec<PairwiseHit> = hits
+                        .iter()
+                        .filter(|hit| window.contains(&(hit.hit.q_idx as usize)))
+                        .cloned()
+                        .collect();
+                    round(window, &rows, &mut windowed);
+                }
+                assert_eq!(String::from_utf8_lossy(&windowed), text);
+            }
         }
     }
 }

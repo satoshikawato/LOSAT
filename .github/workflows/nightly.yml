@@ -78,7 +78,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-deny@0.20.2
       - name: cargo deny check advisories (LOSAT, web/adapter, python)
@@ -132,7 +132,7 @@ jobs:
           toolchain: 1.92.0
           components: llvm-tools-preview
       # Prebuilt release binaries, checked against the SHA-256 in install-action's manifest.
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-llvm-cov@0.9.1,cargo-nextest@0.9.148
       - name: cargo llvm-cov nextest --all-features (shard ${{ matrix.shard }}/4)

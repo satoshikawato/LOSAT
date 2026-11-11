@@ -14,6 +14,11 @@ platform (`LOSAT/tests/blastdbcmd_batch_line_ends.rs`). Frozen on
 `B01`-`B61`, `C01`-`C20`, `F01`-`F34`, `S01`-`S46`, `D01`-`D112`, on 2026-10-31 `H01`-`H119`,
 `M01`-`M07` on 2026-10-29, on 2026-11-01 `I101`-`I1195`, `J101`-`J222`, `K01`-`K39` and
 `M101`-`M1003`, on 2026-11-02 `N101`-`N2042` and `O01`-`O47`; NCBI was not run on this tree).
+`U01`, `U03` and `U04` (line SW, SW8, 2026-11-08) are NCBI BLAST+ 2.17.0 blastdbcmd on the
+developer machine, run with the words of the tests from the `blastdbcmd` directory of a copy of
+this layout whose `seqdb/db` held the five files of `user-column-db`
+(`LOSAT/tests/seqdb/README.md`); `{T}` replaces that copy's root. NCBI's whole file set (`-db
+uc/user-column-db -dbtype prot`, with its ISAM files) gave the same bytes but for the path.
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /
@@ -26,8 +31,9 @@ platform (`LOSAT/tests/blastdbcmd_batch_line_ends.rs`). Frozen on
   `h_dd`, `h_p5p5n`, `h_p5np5` alias files over two LMDB files, `nm5` and `nm4` nucleotides
   with the dust masks 11 and 12, `m/nms4` the FASTA of `nm4` with masks 12 on one of its
   sequences, `m/pmg` proteins with GIs and seg masks whose `.ppi` and `.ppd` are copies of
-  their `.pni` and `.pnd` (an index of PIGs). Version 4 with parsed ids
-  besides `p4` and `n4`: `d4` (the FASTA of `d5`: the OIDs of a key in the text order of the
+  their `.pni` and `.pnd` (an index of PIGs), `m/bad4/b_big` the files of `nm4` without its
+  little-endian column data `.nac` (probe M's database of that name, cases M782-M790). Version
+  4 with parsed ids besides `p4` and `n4`: `d4` (the FASTA of `d5`: the OIDs of a key in the text order of the
   ISAM, `10` before `9`), `i4` (pdb ids of four digits that read as GIs, an EMBL and a GenBank
   id in one definition line, CDD, GNOMON, PIG and trace ids as general ids, versions of one
   accession, locus names), `it4` (nucleotide trace, SRA and TSA ids), `dv4` the FASTA of `d5`

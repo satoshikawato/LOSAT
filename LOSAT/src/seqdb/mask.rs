@@ -34,7 +34,13 @@ pub struct MaskAlgorithm {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaskRanges {
     /// The masked ranges `(start, end)` of the algorithm in the sequence (`end` is
-    /// exclusive), in the order the database stores them; empty when there are none.
+    /// exclusive), in the order the database stores them; empty when there are none. A mask
+    /// column read from its big-endian data file `.?xb` alone gives each number byte-reversed,
+    /// as NCBI does, so the ranges can be unsorted, inverted (`start > end`) or past the end
+    /// of the sequence. A consumer that indexes letters with them must check them: blastdbcmd
+    /// `-outfmt %s` refuses them, its FASTA path clips them, and a port of the searches'
+    /// `-db_soft_mask` / `-db_hard_mask`, where NCBI's use of such ranges is undefined, must
+    /// refuse them (line NP, M/DECISIONS 9).
     Ranges(Vec<(u32, u32)>),
     /// The volume of the sequence has a mask column and the sequence has mask data, but the
     /// volume does not know the algorithm. NCBI answers from a stale cache here (it may
@@ -897,8 +903,13 @@ fn refuse_other_first_columns(volumes: &[Volume]) -> Result<(), SeqDbError> {
     Ok(())
 }
 
-/// `s_ReadRanges<SReadInt4>`: the ranges of `vol_algo` in a mask blob. The pairs are
-/// little-endian `u32` (the `.?xc` file). Every read is checked against the blob.
+/// `s_ReadRanges<SReadInt4>`: the ranges of `vol_algo` in a mask blob. The pairs are copied as
+/// they are into `TSeqPos` (`ranges.append`, a `memcpy`), so they read in the host's order:
+/// little-endian on every host of NCBI BLAST+ 2.17.0 (Linux x64 and arm64, macOS x64 and
+/// arm64, Windows x64) and of LOSAT (x86-64, aarch64, wasm32). There a blob of the `.?xc` file
+/// (`WriteInt4_LE`) gives the stored ranges, and one of a `.?xb` file read alone
+/// (`column::open_all`; `WriteInt4`) gives each number with its bytes reversed, as NCBI reads
+/// it. Every read is checked against the blob.
 fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)>, SeqDbError> {
     let format = |message: String| SeqDbError::Format {
         path: path.to_path_buf(),
@@ -921,9 +932,30 @@ fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)
         if algo == vol_algo {
             // `ReadRaw(n*8)`: a negative count is NCBI's "hit end of data".
             let bytes = blob.read_raw(i64::from(num_pairs) * 8).map_err(format)?;
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1418-1423
+            // ```c++
+            //             ITERATE(TPairVector, r2, r1->offsets) {
+            //                 blob.WriteInt4(r2->first);
+            //                 blob.WriteInt4(r2->second);
+            //                 blob2.WriteInt4_LE(r2->first);
+            //                 blob2.WriteInt4_LE(r2->second);
+            //             }
+            // ```
+            // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:302-306
+            // ```c++
+            //         void append(const void *src, size_type num_elements) {
+            //             reserve(_size + num_elements);
+            //             memcpy(&_data[1+ 2*_size], src, num_elements * sizeof(value_type));
+            //             _size += num_elements;
+            //         }
+            // ```
+            // `blob` goes to `.?xb`, `blob2` to `.?xc`. The copy keeps the bytes in host order;
+            // on a little-endian host they are the numbers of `blob2`, and those of `blob`
+            // byte-reversed (`blastdbcmd -outfmt %m` of a column without its `.?xc`, line BDC's
+            // probe M784: 120-161 prints as 2013265920-2701131776).
             for pair in bytes.chunks_exact(8) {
-                let start = u32::from_le_bytes([pair[0], pair[1], pair[2], pair[3]]);
-                let end = u32::from_le_bytes([pair[4], pair[5], pair[6], pair[7]]);
+                let start = u32::from_ne_bytes([pair[0], pair[1], pair[2], pair[3]]);
+                let end = u32::from_ne_bytes([pair[4], pair[5], pair[6], pair[7]]);
                 ranges.push((start, end));
             }
             break;
@@ -997,6 +1029,10 @@ impl SeqDb {
     /// the sequence has no mask data. A sequence with mask data in a volume that does not
     /// know the algorithm is [`MaskRanges::AlgorithmNotInVolume`]: NCBI's volume-algorithm
     /// cache (`GetVolAlgo`) keeps a stale value there, which LOSAT does not reproduce.
+    ///
+    /// The ranges of a mask column read from its `.?xb` alone are byte-reversed, as NCBI
+    /// reads them (line SW, SW8 DECISIONS 40): unsorted, inverted or past the sequence, so
+    /// a caller that indexes letters must check them ([`MaskRanges::Ranges`]).
     pub fn mask_ranges(&self, ordinal: u32, algo_id: i32) -> Result<MaskRanges, SeqDbError> {
         let algorithms = self.mask_algorithms()?;
         if ordinal >= self.num_seqs() {

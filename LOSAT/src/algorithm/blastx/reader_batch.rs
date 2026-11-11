@@ -3,7 +3,7 @@
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
-    parameters::{score_block, subject_parameters, ContextParameters},
+    parameters::{score_block_for, subject_parameters, ContextParameters},
     query_setup::{context_frame, prepare_queries, prepare_unit_queries, PreparedQueryBatch},
     subjects::Subjects,
 };
@@ -34,6 +34,10 @@ pub(crate) struct ReaderBatchShape {
     pub(crate) word_cutoff_min: Option<i32>,
     /// `hit_params->cutoff_score_min` of the batch (the composition redo).
     pub(crate) redo_cutoff_min: Option<i32>,
+    /// NCBI's error of the batch's set-up when the score block cannot load the `-matrix` of an
+    /// ungapped search: the message of each query of the batch (`query_setup::unknown_matrix_message`),
+    /// which every unit's preparation raises (`query_setup::prepare_unit_queries`).
+    pub(crate) matrix_error: Option<Arc<str>>,
 }
 
 /// One unit of a reader batch, prepared in phase 1: its queries, translated and filtered, and
@@ -151,6 +155,9 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            matrix_error: options
+                .unknown_matrix
+                .then(|| super::query_setup::unknown_matrix_message(records).into()),
         }
     }
 
@@ -175,6 +182,7 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            matrix_error: layout.matrix_error.clone(),
         };
         for unit in units {
             for p in unit.params.iter().filter(|p| p.valid) {
@@ -236,9 +244,9 @@ pub(crate) fn prepare_unit(
     subjects: Subjects<'_>,
 ) -> Result<UnitPrep> {
     let mut prepared = prepare_unit_queries(queries, Some(layout), options)?;
-    let params = score_block(&prepared);
+    let params = score_block_for(&prepared, options.scoring);
     prepared.reader_shape = Some(Arc::clone(layout));
-    let kappa = options.composition == 2 && options.gapped;
+    let kappa = options.composition != 0 && options.gapped;
     let ungapped_link = !options.gapped && options.sum_stats;
     let (mut word_cutoff_min, mut redo_cutoff_min) = (None, None);
     if (kappa || ungapped_link)
@@ -290,7 +298,7 @@ pub(crate) fn prepare_lone_unit(
     options: &ResolvedOptions,
 ) -> Result<UnitPrep> {
     let prepared = prepare_queries(queries, options)?;
-    let params = score_block(&prepared);
+    let params = score_block_for(&prepared, options.scoring);
     Ok(UnitPrep {
         prepared,
         params,
@@ -470,6 +478,7 @@ mod tests {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            matrix_error: None,
         }));
         assert_eq!(
             split_queries(&records, &full, &options, DEFAULT_SIZES)

@@ -732,6 +732,7 @@ impl IndexFile {
     /// Byte range of the sequence data of `oid` in the sequence file. For a
     /// protein the range includes the NUL byte that follows the residues; for
     /// a nucleotide it ends where the ambiguity data start.
+    #[cfg(test)]
     pub fn sequence_range(&self, oid: u32) -> Result<(u64, u64), SeqDbError> {
         match self.seqtype {
             SeqType::Protein => self.pair(Region::Sequence, oid),

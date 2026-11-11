@@ -103,6 +103,7 @@ pub(super) const PARSED_SEQIDS: &str =
 // ```
 /// Decodes the `Blast-def-line-set` of the sequence `oid` (volume-relative). An empty record
 /// gives no definition line, as in NCBI.
+#[cfg(test)]
 pub fn decode_defline_set(
     record: &[u8],
     path: &Path,

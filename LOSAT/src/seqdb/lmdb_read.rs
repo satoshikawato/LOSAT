@@ -236,6 +236,7 @@ impl Db {
     }
 
     /// True when the tree has no page (`md_root == P_INVALID`).
+    #[cfg(test)]
     pub fn is_empty_tree(&self) -> bool {
         self.root == P_INVALID
     }

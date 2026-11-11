@@ -2,8 +2,9 @@
 
 Status: **version 1, frozen** (plan TD-1), apart from fail-fast defect fixes, the
 program `tblastn`, which the Owner had added on 2026-11-04 for gbdraw's serial module
-(§7), and the reading of the FASTA inputs, which follows the CLI since 2026-11-05 (plan
-DW-48, §7). The exports are in `LOSAT/src/web_api.rs`, which `LOSAT/src/lib.rs:31` builds for
+(§7), the reading of the FASTA inputs, which follows the CLI since 2026-11-05 (plan
+DW-48, §7), and the options `-searchsp` and `-dbsize` of `blastn`, `tblastx` and `blastp`,
+which gbdraw asked for on 2026-11-10 (§7). The exports are in `LOSAT/src/web_api.rs`, which `LOSAT/src/lib.rs:31` builds for
 `wasm32` only. The program modules are `LOSAT/src/web_api/v1_blastn.rs`,
 `v1_blastp.rs`, `v1_tblastx.rs` and `v1_input.rs`; BLASTX has its own
 `LOSAT/src/algorithm/blastx/web.rs`, TBLASTN `LOSAT/src/algorithm/tblastn/web.rs`.
@@ -196,9 +197,9 @@ same request.
 
 | Program | Module | `outfmt` accepted | Extra words accepted |
 |---|---|---|---|
-| `blastn` | `LOSAT/src/web_api/v1_blastn.rs`; arguments `parse_blastn_args` (`LOSAT/src/web_api.rs:225`) | `6`, `7`. `0` fails with `unsupported BLASTN output format: 0`; a value with more than one word fails with `unsupported BLASTN custom outfmt specification` | `-task` (`megablast` or `blastn`), `-outfmt`, `-word_size`, `-num_threads`, `-evalue` |
-| `blastp` | `LOSAT/src/web_api/v1_blastp.rs`; arguments `parse_blastp_args` (`:548`) | the formats that BLASTP accepts, with field lists for the tabular ones (`check_web_v1_request`, `v1_blastp.rs:121`) | `-task`, `-outfmt`, `-evalue`, `-threshold`, `-word_size`, `-num_threads`, `-max_target_seqs`, `-max_hsps`, `-window_size`, `-matrix`, `-gapopen`, `-gapextend`, `-comp_based_stats`, `-seg`, `-ungapped`, `-use_sw_tback` |
-| `tblastx` | `LOSAT/src/web_api/v1_tblastx.rs`; arguments `parse_tblastx_args` (`:374`) | `6` only (`tblastx_v1_outfmt`, `LOSAT/src/blastinput/value_parsers.rs:1206`) | `-query_gencode`, `-db_gencode`, `-num_threads`, `-outfmt`, `-evalue` |
+| `blastn` | `LOSAT/src/web_api/v1_blastn.rs`; arguments `parse_blastn_args` (`LOSAT/src/web_api.rs:225`) | `6`, `7`. `0` fails with `unsupported BLASTN output format: 0`; a value with more than one word fails with `unsupported BLASTN custom outfmt specification` | `-task` (`megablast` or `blastn`), `-outfmt`, `-word_size`, `-num_threads`, `-evalue`, `-searchsp`, `-dbsize` |
+| `blastp` | `LOSAT/src/web_api/v1_blastp.rs`; arguments `parse_blastp_args` (`:548`) | the formats that BLASTP accepts, with field lists for the tabular ones (`check_web_v1_request`, `v1_blastp.rs:121`) | `-task`, `-outfmt`, `-evalue`, `-threshold`, `-word_size`, `-num_threads`, `-max_target_seqs`, `-max_hsps`, `-window_size`, `-matrix`, `-gapopen`, `-gapextend`, `-comp_based_stats`, `-seg`, `-ungapped`, `-use_sw_tback`, `-searchsp`, `-dbsize` |
+| `tblastx` | `LOSAT/src/web_api/v1_tblastx.rs`; arguments `parse_tblastx_args` (`:374`) | `6` only (`tblastx_v1_outfmt`, `LOSAT/src/blastinput/value_parsers.rs:1206`) | `-query_gencode`, `-db_gencode`, `-num_threads`, `-outfmt`, `-evalue`, `-searchsp`, `-dbsize` |
 | `blastx` | `LOSAT/src/algorithm/blastx/web.rs` | `0`, `6`, `7`, with field lists for `6` and `7` (`v1_outfmt`, `web.rs:68`) | the BLASTX options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-help`, `--help`, `--version` (`web.rs:14-30`) |
 | `tblastn` | `LOSAT/src/algorithm/tblastn/web.rs` | the formats `losat tblastn` writes to standard output, read by the CLI's `-outfmt` parser with its errors (`13` and `14` fail as without `-out`) | the TBLASTN options of the CLI's parser, except `-db`, `-query`, `-subject`, `-out`, `-h`, `-help`, `--help`, `-version`, `--version` (`parse_args`) |
 
@@ -208,6 +209,18 @@ same request.
   that does not parse fails with `<flag> parse error: <detail>`. An `-outfmt` word in
   the extra words is replaced by the `outfmt` parameter, because the parameter is
   appended last.
+- `-searchsp` and `-dbsize` (`blastn`, `tblastx`, `blastp`; `blastx` and `tblastn` read them with
+  the CLI's parser): the effective length of the search space and the effective length of the
+  database, as NCBI's options of the same names (a gbdraw comparison gives its genomes' scale to the
+  E-values). The value is read by the CLI's own parsers (`nonnegative_ncbi_int8` for `-searchsp`,
+  `ncbi_int8` for `-dbsize`: a sign, `0x` hexadecimal, 64 bits; `-searchsp` of at least 0) and goes to the
+  same field of the args structure as on the CLI, so the report is the CLI's (and NCBI BLAST+
+  2.17.0's) for the same words. Both spellings of ABI v1 work (`-searchsp 1000` and `-searchsp=1000`).
+  An invalid value fails with `<flag> parse error: <the parser's detail>`, a flag at the end
+  of the list with `<flag> requires a value`. The shared vector
+  `LOSAT/tests/fixtures/web_v1_search_space/` (12 cases) holds the CLI's bytes:
+  `LOSAT/tests/web_v1_search_space.rs` checks the CLI against it and the `web_api` test checks
+  `losat_web_run_pair` (and, for `blastp`, `losat_web_run_pair_handles`).
 - `blastn`: `-task` other than `megablast` or `blastn` fails with
   `unsupported blastn task for web API: <task>` (`:360`). The default task is
   `megablast`. `-word_size 28` is read as no word size, so `-task blastn -word_size 28`

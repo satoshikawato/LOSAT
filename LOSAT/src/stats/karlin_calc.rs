@@ -257,10 +257,6 @@ impl ScoreFreqProfile {
             score_min,
         }
     }
-
-    pub fn sprob(&self) -> &[f64] {
-        &self.sprob
-    }
 }
 
 /// Build a score frequency profile from already-combined score probabilities.
@@ -616,8 +612,9 @@ fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, 
 // ```
 /// NCBI's `s_CalcLambda` as written: the probabilities `probs` of the scores `min_score` to
 /// `max_score` as given (not normalized, the observed range as given), -1.0 where
-/// `Blast_KarlinLambdaNR` gives it. The position-based composition-based statistics call it
-/// (`core::composition_adjustment::compo_scale`).
+/// `Blast_KarlinLambdaNR` gives it. The composition-based statistics call it: the position-based
+/// ones (`core::composition_adjustment::compo_scale`) and the redo's `calc_lambda` callback
+/// (`core::composition_adjustment::redo_alignment::redo_calc_lambda`).
 pub(crate) fn calc_lambda_of_score_probs(
     probs: Vec<f64>,
     min_score: i32,
@@ -636,69 +633,6 @@ pub(crate) fn calc_lambda_of_score_probs(
         score_min: min_score,
     };
     compute_lambda_nr(&sfp, lambda0).unwrap_or(-1.0)
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-570
-// ```c
-// static double
-// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-// {
-//     ...
-//     return Blast_KarlinLambdaNR(&freq, lambda0);
-// }
-// ```
-// Not `s_CalcLambda` as written: this normalizes the probabilities, narrows the observed range to
-// the nonzero scores and returns `Err` where NCBI returns -1 (the exact port is
-// `calc_lambda_of_score_probs` above).
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2567-2598
-// ```c
-// double Blast_KarlinLambdaNR(Blast_ScoreFreq* sfp, double initialLambdaGuess)
-// {
-//     ...
-// }
-// ```
-pub fn compute_lambda_from_score_probs(
-    score_probs: &[f64],
-    obs_min: i32,
-    obs_max: i32,
-    initial_lambda: f64,
-) -> Result<f64, String> {
-    if obs_min > obs_max {
-        return Err("Invalid observed score range".to_string());
-    }
-
-    let mut sfp = ScoreFreqProfile::new(obs_min, obs_max);
-    let mut score_sum = 0.0;
-    let mut score_avg = 0.0;
-    let mut first_obs = None;
-    let mut last_obs = None;
-
-    for (index, &prob) in score_probs.iter().enumerate() {
-        let score = obs_min + index as i32;
-        sfp.set_prob(score, prob);
-        if prob > 0.0 {
-            score_sum += prob;
-            score_avg += prob * score as f64;
-            first_obs.get_or_insert(score);
-            last_obs = Some(score);
-        }
-    }
-
-    if score_sum <= 0.0 {
-        return Err("Score probabilities sum to zero".to_string());
-    }
-
-    for (index, &prob) in score_probs.iter().enumerate() {
-        let score = obs_min + index as i32;
-        sfp.set_prob(score, prob / score_sum);
-    }
-
-    sfp.obs_min = first_obs.unwrap_or(obs_min);
-    sfp.obs_max = last_obs.unwrap_or(obs_max);
-    sfp.score_avg = score_avg / score_sum;
-
-    compute_lambda_nr(&sfp, initial_lambda)
 }
 
 /// Compute H from Lambda

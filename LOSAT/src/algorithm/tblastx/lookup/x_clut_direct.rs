@@ -375,6 +375,66 @@ impl XFlatSpare {
     }
 }
 
+// No NCBI counterpart: buffer reuse between the builds of a block search (memory placement only); it
+// changes no value NCBI computes.
+/// Item SC2d-2: segments of packed appends (`x_clut_par.rs` `XSegmentOut`) kept by the block search
+/// (`blastp/x_query_blocks.rs` `XBlockSubjects`) from one build's stripes pass to the next build's
+/// appends pass, at most as many as the build's threads, each cut to the entries that build wrote (the
+/// pages past them returned), so that the next build writes their pages, which the last build
+/// touched, instead of faulting the pages of fresh mappings. A kept segment's values are not read: a
+/// piece writes every entry of its range before any is read. What the pool holds is at most the last
+/// build's appends (as many as the hits of the table that build made).
+#[derive(Default)]
+pub(crate) struct XSegmentPool(Mutex<Vec<Vec<u32>>>);
+
+impl XSegmentPool {
+    // No NCBI counterpart: buffer reuse only (above).
+    /// A kept segment of at least `n` entries, if any (the pool then keeps it no more).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn take(&self, n: usize) -> Option<Vec<u32>> {
+        // The lock is held only around a move.
+        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = kept.iter().position(|segment| segment.len() >= n)?;
+        Some(kept.swap_remove(at))
+    }
+
+    // No NCBI counterpart: buffer reuse only (above).
+    /// Keeps at most `at_most` of `segments` (a build's, each cut to its entries) in place of what the
+    /// pool holds: segments of earlier builds that this build did not take (none long enough for its
+    /// pieces, or more than it needed) are dropped, so the pool holds at most the last build's.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn keep(&self, segments: Vec<Vec<u32>>, at_most: usize) {
+        let new: Vec<Vec<u32>> = segments
+            .into_iter()
+            .filter(|segment| !segment.is_empty())
+            .take(at_most)
+            .map(|mut segment| {
+                // The capacity past the entries written is returned (their pages too).
+                segment.shrink_to_fit();
+                segment
+            })
+            .collect();
+        // The lock is held only around a move; the old segments are dropped after it.
+        let old = std::mem::replace(
+            &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
+            new,
+        );
+        drop(old);
+    }
+}
+
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): tasks of another computation that the parallel build's appends
 /// pass runs after its chunks (`x_clut_par.rs`), each once; the caller of the build runs those the
 /// build did not run (the serial builder runs none). A task does not read the table.
@@ -409,6 +469,8 @@ pub(crate) struct XFlatArgs<'a> {
     /// `x_bp_flat_ahead_appends`, whose second part takes the second spare's).
     pub(crate) spare: Option<&'a XFlatSpare>,
     pub(crate) extra: Option<&'a dyn XExtraTasks>,
+    /// Item SC2d-2: the block search's kept segments of packed appends (`XSegmentPool`).
+    pub(crate) segments: Option<&'a XSegmentPool>,
     /// LOSAT_X_BPLKPAHEAD: the build of a block's table ahead of that block, on a pool task
     /// (`blastp/blast_engine/x_lookup_ahead.rs`): it allocates none of the table's vectors, takes
     /// them all from `spare` (made ready by `XFlatSpare::x_make_room`), and makes no table where they
@@ -2889,16 +2951,19 @@ pub(crate) fn x_bp_build_compressed_lookup(
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_bp_build_compressed_lookup` for a build ahead
-/// of its block (`XFlatArgs::x_ahead`): the appends pass of the pool's flat table, with the extra
-/// tasks (`x_clut_par.rs`). `None` where `x_bp_build_compressed_lookup` would give no table ahead
-/// (the switch off, a pool of one thread, `TooLarge`) or the build ends at the appends pass; the
-/// second part is `x_bp_flat_ahead_table`.
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_bp_build_compressed_lookup` (of
+/// `x_bp_build_compressed_lookup_of` for another search matrix `matrix`, item SC2d-2) for a build
+/// ahead of its block (`XFlatArgs::x_ahead`): the appends pass of the pool's flat table, with the
+/// extra tasks (`x_clut_par.rs`). `None` where the build would give no table ahead (the switch off, a
+/// pool of one thread, `TooLarge`) or the build ends at the appends pass; the second part is
+/// `x_bp_flat_ahead_table`.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_bp_flat_ahead_appends(
+    matrix: ScoringMatrix,
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
@@ -2911,6 +2976,7 @@ pub(crate) fn x_bp_flat_ahead_appends(
         return None;
     }
     x_clut_par::x_flat_ahead_appends_in_pool(
+        matrix,
         word_size,
         scaled_threshold,
         query,
@@ -2927,21 +2993,26 @@ pub(crate) fn x_bp_flat_ahead_appends(
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): the second part of a build ahead of its block: the flat table of
-/// `appends` (`x_bp_flat_ahead_appends` of `query` and `locations`) on the vectors that `spare`
-/// holds (`XFlatSpare::x_make_room`). `None` where they lack the room (the spare keeps them) or a
-/// table refuses (which the block's own build then raises).
+/// `appends` (`x_bp_flat_ahead_appends` of `matrix`, `query` and `locations`) on the vectors that
+/// `spare` holds (`XFlatSpare::x_make_room`). `None` where they lack the room (the spare keeps them)
+/// or a table refuses (which the block's own build then raises).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_bp_flat_ahead_table(
+    matrix: ScoringMatrix,
     appends: XFlatAppends,
     query: &[u8],
     locations: &[(i32, i32)],
     pool: &SearchPool<'_>,
     spare: &XFlatSpare,
+    segments: Option<&XSegmentPool>,
 ) -> Option<XFlatCompressedLookup> {
-    match x_clut_par::x_flat_ahead_stripes_in_pool(appends, query, locations, pool, spare)? {
+    match x_clut_par::x_flat_ahead_stripes_in_pool(
+        matrix, appends, query, locations, pool, spare, segments,
+    )? {
         XFlatBuild::Table(table) => Some(table),
         XFlatBuild::Refused | XFlatBuild::TooLarge => None,
     }
@@ -3049,12 +3120,15 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
 //                                     query, locations);
 // ```
 /// blastp-fast's compressed lookup table with the words of the search matrix `matrix`, any but
-/// BLOSUM62 (item SC2b): `x_bp_build_compressed_lookup` without the spare vectors and the build
-/// ahead. The flat table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`;
-/// the reference builder where it declines), else `x_tbn_build_compressed_lookup_of` on this
-/// thread; the reference table with the switch off. Out of line, so that BLOSUM62's build keeps
+/// BLOSUM62 (items SC2b, SC2d-2): `x_bp_build_compressed_lookup` with the matrix's words. The flat
+/// table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`, with
+/// `x_flat_args`: the spare vectors and the build ahead, as BLOSUM62's; the reference builder where
+/// it declines), else `x_tbn_build_compressed_lookup_of` on this thread; the reference table with
+/// the switch off. A build ahead of its block (`XFlatArgs::x_ahead`) is only the pool's build with
+/// the switch on; elsewhere it returns `None` at once. Out of line, so that BLOSUM62's build keeps
 /// its code.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_bp_build_compressed_lookup_of(
     matrix: ScoringMatrix,
     word_size: usize,
@@ -3063,7 +3137,11 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
 ) -> Option<Result<XCompressedLookup, ()>> {
+    if x_flat_args.x_ahead && (!x_bpclut_on() || !x_pool_builds(pool)) {
+        return None;
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -3077,9 +3155,13 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
             locations,
             tables,
             pool,
+            x_flat_args,
         )? {
             XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
             XFlatBuild::Refused => Some(Err(())),
+            // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
+            // builds its table itself (`XFlatArgs::x_ahead`).
+            XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
             XFlatBuild::TooLarge => try_build_compressed_lookup(
                 matrix,
                 word_size,
@@ -3091,7 +3173,7 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
             .map(|built| built.map(XCompressedLookup::Reference)),
         };
     }
-    let _ = pool;
+    let _ = (pool, x_flat_args);
     x_tbn_build_compressed_lookup_of(
         matrix,
         word_size,

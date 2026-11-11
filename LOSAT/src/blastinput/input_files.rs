@@ -66,8 +66,10 @@ pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<s
 /// lines and messages, the same readable-byte hint of `FastaStream::from_file`, the same second
 /// handle of blastn's query stream and second reads of BLASTX's query), while the decoder holds
 /// its window. Concatenated members, streams and frames (bgzip, pbzip2, pzstd, `cat a.gz b.gz`)
-/// are read whole. A file that is not what its name says, or is cut short, is refused here,
-/// before the search (line GZ, DECISIONS 3, 5 and 9).
+/// are read whole, and a `.gz` file as makeblastdb reads it (`compressed::GzipMembers`: a member's
+/// trailer is not checked). A file that is not what its name says, or is cut short (for `.gz`:
+/// where makeblastdb's decompressor fails), is refused here, before the search (line GZ,
+/// DECISIONS 3, 5 and 9; for `.gz` narrowed by swebok-improve SW8 DECISIONS 38 and 41).
 ///
 /// No NCBI counterpart: the NCBI search programs read such a file as text and stop at its first
 /// line (`CFastaReader: Near line 1, there's a line that doesn't look like plausible data`);
@@ -112,18 +114,33 @@ pub fn open_file_input(path: &std::path::Path, role: &str) -> Result<std::fs::Fi
 }
 
 /// Where the inflated copy of the input `path` may go: the input's own directory first, then
-/// `temp_dir()` when that is another directory.
-fn inflation_directories(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+/// the temporary directory (`temporary_directory`) when that is another directory. The second
+/// is looked up only when the caller asks for it, after the first refused the copy.
+fn inflation_directories(path: &std::path::Path) -> impl Iterator<Item = std::path::PathBuf> {
     let beside = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
         _ => std::path::PathBuf::from("."),
     };
-    let fallback = std::env::temp_dir();
-    if fallback == beside {
-        vec![beside]
-    } else {
-        vec![beside, fallback]
-    }
+    let fallback = {
+        let beside = beside.clone();
+        std::iter::once_with(move || temporary_directory().filter(|fallback| *fallback != beside))
+            .flatten()
+    };
+    std::iter::once(beside).chain(fallback)
+}
+
+/// The directory of temporary files: `temp_dir()`.
+#[cfg(not(target_os = "wasi"))]
+fn temporary_directory() -> Option<std::path::PathBuf> {
+    Some(std::env::temp_dir())
+}
+
+/// None on WASI: Rust's `temp_dir()` panics on the WASI targets ("no filesystem on wasm",
+/// `library/std/src/sys/pal/wasip1/os.rs:119` of 1.92), where a host gives a module directories
+/// only by its preopens. The WASI command puts the inflated copy beside the input or refuses it.
+#[cfg(target_os = "wasi")]
+fn temporary_directory() -> Option<std::path::PathBuf> {
+    None
 }
 
 /// What stopped an inflation: the compressed data (`Data`: not that format, cut short, empty)
@@ -179,7 +196,7 @@ fn unnamed_temporary_file(
     for attempt in 0u32..64 {
         let path = directory.join(format!(
             ".losat-{role}-{}-{stamp}-{attempt}.inflated",
-            std::process::id()
+            process_id()
         ));
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true).create_new(true);
@@ -212,6 +229,20 @@ fn unnamed_temporary_file(
         std::io::ErrorKind::AlreadyExists,
         format!("no free temporary file name in {}", directory.display()),
     ))
+}
+
+/// The process id in the temporary file's name: `std::process::id()`.
+#[cfg(not(target_os = "wasi"))]
+fn process_id() -> u32 {
+    std::process::id()
+}
+
+/// 0 on WASI, which has no process id (Rust's `std::process::id()` panics there,
+/// "unsupported", `library/std/src/sys/pal/wasip1/os.rs:131` of 1.92); `create_new` and the
+/// time stamp keep the names apart.
+#[cfg(target_os = "wasi")]
+fn process_id() -> u32 {
+    0
 }
 
 /// Standard input as a file that shares its position, as `cin` does.
@@ -537,23 +568,22 @@ mod tests {
     fn the_inflated_copy_goes_beside_the_input_first_and_then_under_temp_dir() {
         let temp = std::env::temp_dir();
         let nested = std::path::Path::new("data").join("q.fa.gz");
+        let directories =
+            |path: &std::path::Path| super::inflation_directories(path).collect::<Vec<_>>();
         assert_eq!(
-            super::inflation_directories(&nested),
+            directories(&nested),
             vec![std::path::PathBuf::from("data"), temp.clone()]
         );
         assert_eq!(
-            super::inflation_directories(std::path::Path::new("q.fa.gz")),
+            directories(std::path::Path::new("q.fa.gz")),
             vec![std::path::PathBuf::from("."), temp.clone()]
         );
-        assert_eq!(
-            super::inflation_directories(&temp.join("q.fa.gz")),
-            vec![temp]
-        );
+        assert_eq!(directories(&temp.join("q.fa.gz")), vec![temp]);
     }
 
     // No NCBI counterpart (line GZ, DECISIONS 5): a compressed name whose bytes are not that
-    // format, or are cut short, is refused with the file's name and the format; a file that does
-    // not open keeps NCBI's error.
+    // format, or are cut short (for `.gz`: where makeblastdb's decompressor fails), is refused
+    // with the file's name and the format; a file that does not open keeps NCBI's error.
     #[test]
     fn a_compressed_name_without_that_data_is_refused() {
         for compression in Compression::ALL {

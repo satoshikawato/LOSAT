@@ -46,7 +46,6 @@ use super::report::{
     tabular_io_error, ShownSubjects, TabularFlushError,
 };
 use super::runtime::BatchResults;
-use crate::config::ScoringMatrix;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
     TabularHsp, TabularKind, TabularQuery, TabularSpec, TabularSubject, TabularTaxonomy,
@@ -54,7 +53,7 @@ use crate::report::tabular::{
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
-const PROGRAM_VERSION: &str = "BLASTX 2.17.0+";
+const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::ncbi_blast_version!());
 
 /// The program of NCBI's messages.
 const PROGRAM: &str = "blastx";
@@ -317,7 +316,7 @@ pub(super) fn write_blastx_tabular(
     let table = TabularWriter {
         spec,
         program_version: PROGRAM_VERSION,
-        matrix: Some(ScoringMatrix::Blosum62),
+        matrix: Some(options.scoring),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
@@ -497,7 +496,7 @@ pub(super) fn write_blastx_tabular(
                                 stderr.flush()?;
                             }
                         }
-                        let a = alignment(batch, hsp, subject, query, &code)?;
+                        let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                         let raw = &hsp.hsp;
                         // NCBI reads the alignment's rows when a field reads its counts
                         // (`COUNTS_FIELDS`, or `nident` with the engine's identities above 0;

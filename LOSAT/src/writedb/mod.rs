@@ -55,7 +55,6 @@ use std::path::PathBuf;
 use crate::ncbi_exception::NcbiException;
 
 pub use platform::Platform;
-pub use writer::WriteDb;
 
 /// Error of the database writer.
 #[derive(Debug)]

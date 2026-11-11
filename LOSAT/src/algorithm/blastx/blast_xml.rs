@@ -177,15 +177,10 @@ fn query_stats(
     }
 }
 
-/// The gapped Karlin block of the search: the table value of BLASTX's one matrix and the gap
-/// costs (`args`: other values are refused before the search).
+/// The gapped Karlin block of the search: the table value of the matrix and the gap costs
+/// (`parameters::gapped_karlin`; an ungapped search reads its contexts' blocks instead).
 fn gapped_karlin(options: &ResolvedOptions) -> crate::stats::tables::KarlinParams {
-    use crate::config::{ProteinScoringSpec, ScoringMatrix};
-    crate::stats::tables::lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
-        gap_open: options.gap_open,
-        gap_extend: options.gap_extend,
-    })
+    super::parameters::gapped_karlin(options)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
@@ -732,8 +727,21 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     batches: &[BatchResults],
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
-    let positives = FormattingMatrix::new(&options.matrix)
-        .with_context(|| format!("no formatting matrix for {}", options.matrix))?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
+    // ```c++
+    //     else {
+    //         string prog_name = Blast_ProgramNameFromType(
+    //                                            m_Options.GetProgramType());
+    //         if (prog_name != "blastn" && prog_name != "megablast") {
+    //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
+    //                         "unsupported score matrix");
+    // ```
+    // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
+    // report data of the first query (`BLAST engine error:`, exit 3), before any byte of it.
+    // (`native::report_error` writes it as NCBI's engine error.)
+    let Some(positives) = FormattingMatrix::new(&options.matrix) else {
+        anyhow::bail!("unsupported score matrix");
+    };
     let (db_name, db_num, db_len) = match shown {
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
         ShownSubjects::Database { name, pairwise, .. } => (
@@ -754,7 +762,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     );
     let run = XmlRun {
         program: "blastx",
-        version: "BLASTX 2.17.0+",
+        version: concat!("BLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name: db_name.as_bytes(),
         matrix: Some(&options.matrix),

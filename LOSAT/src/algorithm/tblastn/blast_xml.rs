@@ -413,7 +413,7 @@ impl PreparedXml {
         };
         let run = XmlRun {
             program: "tblastn",
-            version: "TBLASTN 2.17.0+",
+            version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
             reference: REFERENCE_GAPPED_BLAST,
             db_name: self.db_name.as_bytes(),
             matrix: Some(&self.matrix_name),

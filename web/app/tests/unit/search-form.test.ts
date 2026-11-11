@@ -331,6 +331,13 @@ describe("knownDefault: the defaults that the engine resolves (describe's defaul
     expect(knownDefault(blastp, '-gapopen', { '-matrix': 'NOSUCH' }, bp)).toBeUndefined();
     expect(knownDefault(blastp, '-evalue', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '10' });
     expect(knownDefault(tblastx, '-window_size', { '-matrix': 'BLOSUM45' }, tx)).toEqual({ defaultValue: '60' });
+    // BLASTX (series SC, SC6): the matrix's gap costs, window and threshold + 1 (a translated query); blastx-fast keeps 20.
+    const blastx = programById('blastx');
+    const bx = optionsOf('blastx');
+    expect(knownDefault(blastx, '-gapopen', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '9' });
+    expect(knownDefault(blastx, '-window_size', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '15' });
+    expect(knownDefault(blastx, '-threshold', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '17' });
+    expect(knownDefault(blastx, '-threshold', { '-matrix': 'PAM30', '-task': 'blastx-fast' }, bx)).toEqual({ defaultValue: '20' });
   });
 
   it("takes a given word size's threshold from the engine's table, and none for two such options set", () => {
@@ -408,14 +415,19 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
   const field = (id: ProgramId, flag: string) => programById(id).sections.flatMap((section) => section.fields).find((f) => f.flag === flag)!;
   const list = (id: ProgramId, flag: string, values: FormValues = {}) => fieldList(field(id, flag), values, optionsOf(id));
 
-  it("gives BLASTP NCBI's matrices, word sizes 2, 3, 5 and 6, and modes 0 and 2, in each task", () => {
+  it("gives BLASTP NCBI's matrices, word sizes 2, 3, 5 and 6, and every mode, in each task", () => {
     for (const values of [{}, { '-task': 'blastp-fast' }, { '-task': 'blastp-short' }]) {
       expect(list('blastp', '-matrix', values)).toEqual(MATRICES);
       expect(list('blastp', '-word_size', values)).toEqual(['2', '3', '5', '6']);
     }
-    expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(['0', '2']);
-    // TBLASTN keeps NCBI's four: its engine reads modes 1 and 3 with -matrix IDENTITY (resetting them to 0).
+    // BLASTP, BLASTX and TBLASTN offer NCBI's four (series SC, SC5 and SC6): their engines read every mode.
+    expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
+    expect(fieldChoices(field('blastx', '-comp_based_stats'), optionsOf('blastx').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
     expect(fieldChoices(field('tblastn', '-comp_based_stats'), optionsOf('tblastn').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
+  });
+
+  it("gives BLASTX NCBI's matrices in either task", () => {
+    for (const values of [{}, { '-task': 'blastx-fast' }, { '-word_size': '5' }]) expect(list('blastx', '-matrix', values)).toEqual(MATRICES);
   });
 
   it("gives TBLASTX NCBI's word sizes 2 and 3", () => {
@@ -569,15 +581,18 @@ describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'IDENTITY' }, tn)).toEqual([]);
     expect(pairList(tblastn, tblastnGaps, { '-matrix': 'constructor' }, tn)).toEqual([]);
     expect(setField(tblastn, {}, '-matrix', '__proto__', tn)).toEqual({ '-matrix': '__proto__' });
-    // BLASTP's lists are NCBI's of each matrix, all of which LOSAT's BLASTP reads.
+    // BLASTP's and BLASTX's lists are NCBI's of each matrix, all of which their engines read.
     expect(pairList(blastp, proteinGaps, {}, bp)).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM62);
     expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM45);
     expect(pairList(blastp, proteinGaps, { '-matrix': 'IDENTITY' }, bp)).toEqual([]);
-    expect(pairList(programById('blastx'), pairRows(programById('blastx'))[0]!, {}, optionsOf('blastx'))).toEqual(['11 1']);
+    const blastxGaps = pairRows(programById('blastx'))[0]!;
+    expect(pairList(programById('blastx'), blastxGaps, {}, optionsOf('blastx'))).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM62);
+    expect(pairList(programById('blastx'), blastxGaps, { '-matrix': 'PAM30' }, optionsOf('blastx'))).toEqual(PROTEIN_GAP_COSTS.lists.PAM30);
+    expect(pairList(programById('blastx'), blastxGaps, { '-matrix': 'IDENTITY' }, optionsOf('blastx'))).toEqual([]);
   });
 
   it("give each matrix's list NCBI's default, which is the engine's default for that matrix", () => {
-    for (const id of ['tblastn', 'blastp'] as const) {
+    for (const id of ['tblastn', 'blastp', 'blastx'] as const) {
       const program = programById(id);
       const pair = pairRows(program)[0]!;
       for (const [matrix, value] of Object.entries(pair.select.defaults ?? {})) {

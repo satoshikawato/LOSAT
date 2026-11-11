@@ -943,9 +943,9 @@ pub fn run(
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
     // A title that the archive cannot hold is refused where NCBI would write its Bioseq, which
-    // is known only after the search. BLASTX/TBLASTN refuse before they create `-out`, and so
-    // does this run when the file was not there and nothing was written to it: no empty file is
-    // left behind.
+    // is known only after the search. When the file was not there and nothing was written to it,
+    // no empty file is left behind (the other programs create `-out` before their option checks,
+    // as NCBI does, and leave it empty: DECISIONS 24 f of line NP, series SM).
     let write_failed = stream.failed;
     drop(stream);
     if out_is_new
@@ -2042,7 +2042,7 @@ fn write_pairwise_prologs(
                 ShownSubjects::Fasta { records, x_stored } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
-                        report::NCBI_TBLASTX_VERSION,
+                        crate::NCBI_BLAST_VERSION,
                         &tblastx_database_name(args),
                         records.len(),
                         match x_stored {
@@ -2055,7 +2055,7 @@ fn write_pairwise_prologs(
                 ShownSubjects::Database { pairwise, .. } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
-                        report::NCBI_TBLASTX_VERSION,
+                        crate::NCBI_BLAST_VERSION,
                         "",
                         0,
                         0,
@@ -2315,7 +2315,7 @@ fn write_tblastx_outputs(
                     args.report_counts.num_alignments,
                 );
                 let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
-                    version: report::NCBI_TBLASTX_VERSION.to_string(),
+                    version: crate::NCBI_BLAST_VERSION.to_string(),
                     database_name: database.clone(),
                     // `-db`: the `Database:` lines are the database's (`database` below).
                     database_num_sequences: match &run.database {
@@ -5023,7 +5023,7 @@ fn search_query_batch<S: TbxScore>(
         let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, ctx_params);
 
         // =======================================================================
-        // NCBI Parity: Use compute_eff_lengths_tblastx to get BOTH
+        // NCBI Parity: Use try_compute_eff_lengths_tblastx to get BOTH
         // length_adjustment and eff_searchsp from a single source of truth.
         // This mirrors BLAST_CalcEffLengths which computes and stores both values.
         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847

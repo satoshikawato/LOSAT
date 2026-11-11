@@ -347,13 +347,6 @@ pub fn gap_decay_divisor(decay_rate: f64, num_segments: usize) -> f64 {
     (1.0 - decay_rate) * blast_powi(decay_rate, (num_segments - 1) as i32)
 }
 
-/// Natural log of factorial.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:473-480
-pub fn ln_factorial(n: f64) -> f64 {
-    blast_ln_factorial(n)
-}
-
 /// Natural log of gamma function for positive integers.
 ///
 /// ln(Gamma(n)) = ln((n-1)!) for positive integers
@@ -793,61 +786,10 @@ pub fn uneven_gap_sum_e(
     sum_e
 }
 
-/// Calculate E-value for alignments with arbitrarily large gaps.
-///
-/// This is used when HSPs are far apart and the gap size is not constrained.
-///
-/// # Arguments
-/// * `num_hsps` - Number of distinct alignments in this collection
-/// * `xsum` - Sum of normalized scores
-/// * `query_length` - Effective length of the query sequence
-/// * `subject_length` - Effective length of the subject sequence
-/// * `searchsp_eff` - Effective size of the search space
-/// * `weight_divisor` - Divisor used to weight the E-value
-pub fn large_gap_sum_e(
-    num_hsps: i16,
-    xsum: f64,
-    query_length: i32,
-    subject_length: i32,
-    searchsp_eff: i64,
-    weight_divisor: f64,
-) -> f64 {
-    let mut sum_e: f64;
-
-    if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
-    } else {
-        let num = num_hsps as i32;
-
-        // NCBI: xsum -= num*log(subject_length*query_length) - ln_factorial(num)
-        // i.e. xsum = xsum - num*log(prod) + ln_factorial(num)
-        let prod = (subject_length as f64) * (query_length as f64);
-        let adjusted_xsum = xsum - (num as f64) * prod.ln() + ln_factorial_int(num);
-
-        let sum_p = blast_sum_p(num, adjusted_xsum);
-
-        // NCBI: sum_e = PtoE(sum_p) * (searchsp_eff / (query_length*subject_length))
-        sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / prod);
-    }
-
-    // NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
-    if weight_divisor == 0.0 {
-        sum_e = i32::MAX as f64;
-    } else {
-        sum_e /= weight_divisor;
-        if sum_e > (i32::MAX as f64) {
-            sum_e = i32::MAX as f64;
-        }
-    }
-
-    sum_e
-}
-
-/// `large_gap_sum_e` in NCBI's order of evaluation: `xsum -= num*log(...) - lnfact`
+/// The e-value of alignments with arbitrarily large gaps, in NCBI's order of evaluation: `xsum -= num*log(...) - lnfact`
 /// subtracts the difference, which rounds differently from subtracting the product and
 /// adding the factorial (the HSP order of TBLASTX depends on the last bit, and BLASTX's sum
-/// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it;
-/// `large_gap_sum_e` keeps the other order for its unit tests only.
+/// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:4560-4561
 /// ```c
@@ -892,20 +834,10 @@ pub fn normalize_score(raw_score: i32, lambda: f64, log_k: f64) -> f64 {
 
 /// NCBI BLAST default parameters for HSP linking
 pub mod defaults {
-    /// Gap probability for ungapped alignments
-    pub const GAP_PROB_UNGAPPED: f64 = 0.5;
-    /// Gap probability for gapped alignments
-    pub const GAP_PROB_GAPPED: f64 = 1.0;
-    /// Gap decay rate for ungapped alignments
-    pub const GAP_DECAY_RATE_UNGAPPED: f64 = 0.5;
-    /// Gap decay rate for gapped alignments
-    pub const GAP_DECAY_RATE_GAPPED: f64 = 0.1;
     /// Default gap size for HSP linking
     pub const GAP_SIZE: i32 = 40;
     /// Default overlap size for HSP linking
     pub const OVERLAP_SIZE: i32 = 9;
-    /// Window size = gap_size + overlap_size + 1
-    pub const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
 }
 
 #[cfg(test)]
@@ -927,13 +859,13 @@ mod tests {
     #[test]
     fn test_ln_factorial() {
         // ln(1!) = 0
-        assert!((ln_factorial(1.0) - 0.0).abs() < 1e-10);
+        assert!((blast_ln_factorial(1.0) - 0.0).abs() < 1e-10);
 
         // ln(2!) = ln(2) ≈ 0.693
-        assert!((ln_factorial(2.0) - 2.0_f64.ln()).abs() < 1e-10);
+        assert!((blast_ln_factorial(2.0) - 2.0_f64.ln()).abs() < 1e-10);
 
         // ln(5!) = ln(120) ≈ 4.787
-        assert!((ln_factorial(5.0) - 120.0_f64.ln()).abs() < 1e-10);
+        assert!((blast_ln_factorial(5.0) - 120.0_f64.ln()).abs() < 1e-10);
     }
 
     #[test]

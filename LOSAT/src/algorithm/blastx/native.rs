@@ -2531,7 +2531,8 @@ type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
 // searched alone. At most `bound` batches are read and not yet written. `split` makes a reader
 // batch its units (the flow's batches); a reader batch of several units (in the capped flow with
 // `LOSAT_X_BXCAPFILL`, every reader batch) is prepared by `prepare` (phase 1, one task per unit)
-// before any of its units is searched. Returns what the reader returns.
+// before any of its units is searched. Returns the reader's error, if any (the reading stops at
+// the first batch whose search or write fails).
 // No NCBI counterpart: scheduling of the batch searches only (NCBI's -mt_mode 1 runs batches as
 // nodes and prints them in order, blastx_app.cpp:345-357, cited in `run`); every value written
 // is computed by the same calls as without the switch, in the same order of writing.

@@ -543,7 +543,6 @@ pub(crate) fn parse_fasta_batches_with_warnings(
 //         }
 //
 // ```
-#[allow(clippy::too_many_arguments)]
 fn parse_fasta_lines<L: AsRef<[u8]>>(
     lines: impl Iterator<Item = L>,
     protein: bool,
@@ -1053,9 +1052,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     if batch.read > 0 {
         deliver(&records[batch.start..])?;
     }
-    if !keep_records {
-        records.clear();
-    }
     Ok(records)
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
@@ -1518,6 +1514,25 @@ fn emit_fasta_batch(
     }
     if batch.length >= batch_size {
         deliver(&records[batch.start..])?;
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-261
+        // ```c++
+        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+        // 	    BLAST_PROF_START( APP.LOOP.PRE );
+        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:931-938
+        // ```c++
+        // void QueryBatchCleanup()
+        // {
+        // #if defined(NCBI_OS_LINUX) && HAVE_MALLOC_H
+        // 	malloc_trim(0);
+        // #endif
+        //     return;
+        //
+        // }
+        // ```
+        // NCBI's batch is local to one turn of the loop: the batch read for the next turn
+        // replaces it. A read that keeps no record drops the batch once delivered likewise.
         if batch.keep_records {
             batch.start = records.len();
         } else {
@@ -1542,7 +1557,8 @@ struct ReaderBatch<'r> {
     keep_records: bool,
     /// The records of the batches delivered and dropped (without `keep_records`).
     released: usize,
-    /// The first kept record of the batch.
+    /// The first kept record of the batch (0 without `keep_records`, whose records are those of
+    /// the batch alone).
     start: usize,
     /// The letters the batch has read (`size_read`).
     length: usize,
@@ -1553,8 +1569,15 @@ struct ReaderBatch<'r> {
 }
 
 impl ReaderBatch<'_> {
-    /// The index of the next record (`Query_<index + 1>`): the records read before it, kept,
-    /// dropped once delivered, or skipped by the range.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
+    // ```c++
+    //     CRef<CSeqIdGenerator> idgen
+    //         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
+    //                              m_Config.GetLocalIdPrefix()));
+    //     m_InputReader->SetIDGenerator(*idgen);
+    // ```
+    /// The index of the next record (`Query_<index + 1>`): the reader's one id generator counts
+    /// every record read before it, kept, dropped once delivered, or skipped by the range.
     fn number(&self, records: &[FastaRecord]) -> usize {
         self.released + records.len() + self.skipped
     }
@@ -2599,9 +2622,10 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
 
 /// `parse_fasta_stream_keeping` without keeping the records: the reader drops each batch once it
 /// has delivered it, so that a read of a query file holds one reader batch, not the file (the
-/// search's queries, and the reads of them before the search: `blast_xml::prescan_queries`,
-/// `archive::prescan_query_titles`). The batches, their records and their numbers are the same.
-#[allow(clippy::too_many_arguments)]
+/// search's queries, as NCBI's loop holds one batch: `emit_fasta_batch`; and the reads of them
+/// before the search, `blast_xml::prescan_queries` and `archive::prescan_query_titles`, which have
+/// no NCBI counterpart: NCBI reads the query file once, and these reads are LOSAT's, for its
+/// refusals before the first byte). The batches, their records and their numbers are the same.
 pub(crate) fn read_fasta_stream_batches<R: Read>(
     stream: &mut FastaStream<R>,
     protein: bool,
@@ -2627,7 +2651,6 @@ pub(crate) fn read_fasta_stream_batches<R: Read>(
 }
 
 /// The read of `parse_fasta_stream_keeping` (`keep_records`) and `read_fasta_stream_batches`.
-#[allow(clippy::too_many_arguments)]
 fn read_fasta_stream<R: Read>(
     stream: &mut FastaStream<R>,
     protein: bool,
@@ -3158,16 +3181,29 @@ mod range_tests {
     use super::*;
     use std::io::Cursor;
 
-    /// The batches a query file of `data` gives with `range` and `batch_size`: for each, the ids,
-    /// letters and placements of its records; and the records the reader keeps.
-    fn batches(
+    /// A delivered batch: the ids, letters and placements of its records.
+    type Batch = Vec<(String, Vec<u8>, RecordPlacement)>;
+
+    fn summary(records: &[FastaRecord]) -> Batch {
+        records
+            .iter()
+            .map(|record| {
+                (
+                    record.internal_id.clone(),
+                    record.sequence.clone(),
+                    record.placement(),
+                )
+            })
+            .collect()
+    }
+
+    /// The batches a query file of `data` gives with `range` and `batch_size`, read by
+    /// `parse_fasta_stream_keeping`; and the records the reader keeps.
+    fn batches_kept(
         data: &[u8],
-        range: &SequenceRange,
+        range: Option<&SequenceRange>,
         batch_size: usize,
-    ) -> (
-        Vec<Vec<(String, Vec<u8>, RecordPlacement)>>,
-        Vec<FastaRecord>,
-    ) {
+    ) -> (Vec<Batch>, Vec<FastaRecord>) {
         let mut delivered = Vec::new();
         let kept = parse_fasta_stream_keeping(
             &mut FastaStream::new(Cursor::new(data.to_vec())),
@@ -3175,20 +3211,9 @@ mod range_tests {
             true,
             batch_size,
             false,
-            Some(range),
+            range,
             &mut |records| {
-                delivered.push(
-                    records
-                        .iter()
-                        .map(|record| {
-                            (
-                                record.internal_id.clone(),
-                                record.sequence.clone(),
-                                record.placement(),
-                            )
-                        })
-                        .collect(),
-                );
+                delivered.push(summary(records));
                 Ok(())
             },
             &mut |_| Ok(()),
@@ -3197,12 +3222,17 @@ mod range_tests {
         (delivered, kept)
     }
 
-    /// `batches` read by `read_fasta_stream_batches`, which keeps no record (`range` optional).
-    fn batches_unkept(
+    /// `batches_kept` with a range.
+    fn batches(
         data: &[u8],
-        range: Option<&SequenceRange>,
+        range: &SequenceRange,
         batch_size: usize,
-    ) -> Vec<Vec<(String, Vec<u8>, RecordPlacement)>> {
+    ) -> (Vec<Batch>, Vec<FastaRecord>) {
+        batches_kept(data, Some(range), batch_size)
+    }
+
+    /// The batches of `batches_kept` read by `read_fasta_stream_batches`, which keeps no record.
+    fn batches_unkept(data: &[u8], range: Option<&SequenceRange>, batch_size: usize) -> Vec<Batch> {
         let mut delivered = Vec::new();
         read_fasta_stream_batches(
             &mut FastaStream::new(Cursor::new(data.to_vec())),
@@ -3212,18 +3242,7 @@ mod range_tests {
             false,
             range,
             &mut |records| {
-                delivered.push(
-                    records
-                        .iter()
-                        .map(|record| {
-                            (
-                                record.internal_id.clone(),
-                                record.sequence.clone(),
-                                record.placement(),
-                            )
-                        })
-                        .collect(),
-                );
+                delivered.push(summary(records));
                 Ok(())
             },
             &mut |_| Ok(()),
@@ -3241,44 +3260,85 @@ mod range_tests {
         let data =
             b">a\nACGTACGTAC\n>b\nACG\n>c\nTTTTGGGG\n>d\nACGT\n>e\nACGTA\n>f\nAC\n>g\nACGTACGT\n";
         for batch_size in [1, 4, 10, 15, 21, usize::MAX] {
-            let (kept_batches, kept) = batches(data, &range, batch_size);
-            assert_eq!(
-                batches_unkept(data, Some(&range), batch_size),
-                kept_batches,
-                "batch size {batch_size}"
-            );
-            assert_eq!(kept_batches.iter().map(Vec::len).sum::<usize>(), kept.len());
-        }
-        let mut delivered = Vec::new();
-        let kept = parse_fasta_stream_keeping(
-            &mut FastaStream::new(Cursor::new(data.to_vec())),
-            false,
-            true,
-            10,
-            false,
-            None,
-            &mut |records| {
-                delivered.push(
-                    records
-                        .iter()
-                        .map(|record| {
-                            (
-                                record.internal_id.clone(),
-                                record.sequence.clone(),
-                                record.placement(),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
+            for range in [Some(&range), None] {
+                let (kept_batches, kept) = batches_kept(data, range, batch_size);
+                assert_eq!(
+                    batches_unkept(data, range, batch_size),
+                    kept_batches,
+                    "batch size {batch_size}, range {}",
+                    range.is_some()
                 );
-                Ok(())
-            },
-            &mut |_| Ok(()),
-        )
-        .unwrap();
+                assert_eq!(kept_batches.iter().map(Vec::len).sum::<usize>(), kept.len());
+            }
+        }
+        let (delivered, kept) = batches_kept(data, None, 10);
         assert_eq!(kept.len(), 7);
         assert_eq!(delivered.len(), 4);
-        assert_eq!(batches_unkept(data, None, 10), delivered);
         assert_eq!(delivered[3][0].0, "Query_7");
+    }
+
+    // The read that keeps no record frees each batch's records once it has delivered the batch,
+    // so that it holds one reader batch, not the file; the read that keeps them holds every
+    // record to its end. Under `-parse_deflines` (without the search's ids) a record is the only
+    // owner of its Seq-ids, so a weak reference to them shows whether the record is still held.
+    #[test]
+    fn a_read_that_keeps_no_record_frees_each_batch_once_delivered() {
+        use crate::blastinput::fasta_reader::believed::BelievedIds;
+        use std::sync::{Arc, Weak};
+        let data = b">lcl|q1\nACGT\n>lcl|q2\nACGT\n>lcl|q3\nACGT\n";
+        for keep in [false, true] {
+            let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
+            stream.parse_deflines = true;
+            let mut ids: Vec<Weak<BelievedIds>> = Vec::new();
+            // At each delivery, the records of the earlier batches still held.
+            let mut held_before = Vec::new();
+            let mut deliver = |records: &[FastaRecord]| {
+                held_before.push(ids.iter().filter(|id| id.upgrade().is_some()).count());
+                for record in records {
+                    let believed = record
+                        .source
+                        .as_ref()
+                        .and_then(|source| source.believed.as_ref())
+                        .expect("parsed Seq-ids");
+                    ids.push(Arc::downgrade(believed));
+                }
+                Ok(())
+            };
+            let kept = if keep {
+                parse_fasta_stream_keeping(
+                    &mut stream,
+                    false,
+                    false,
+                    1,
+                    false,
+                    None,
+                    &mut deliver,
+                    &mut |_| Ok(()),
+                )
+                .unwrap()
+            } else {
+                read_fasta_stream_batches(
+                    &mut stream,
+                    false,
+                    false,
+                    1,
+                    false,
+                    None,
+                    &mut deliver,
+                    &mut |_| Ok(()),
+                )
+                .unwrap();
+                Vec::new()
+            };
+            let held_after = ids.iter().filter(|id| id.upgrade().is_some()).count();
+            if keep {
+                assert_eq!(held_before, vec![0, 1, 2]);
+                assert_eq!((kept.len(), held_after), (3, 3));
+            } else {
+                assert_eq!(held_before, vec![0, 0, 0]);
+                assert_eq!(held_after, 0);
+            }
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-168

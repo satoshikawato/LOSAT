@@ -45,9 +45,12 @@
   count its rows by the Seq-align ids' handles and join following hits whose ids `Match`, as NCBI
   does, which lifted psiblast's refusal of the hits that its PSSM joins and showed copies of one
   record as NCBI's PSSM does, and refused the ids that NCBI's handles can take for one and copies
-  with another hit between them; on 2026-11-11 line DBID pssmread made psiblast's PSSM read each
-  alignment's letters by its Seq-align id as NCBI's scope gets them, another sequence's or none
-  with NCBI's warning, which line DBID pssmrows refused)
+  with another hit between them; the same day `losat makeblastdb` wrote makeblastdb's exception
+  reports (`Error: NCBI C++ Exception:`) for the errors of its general handler and read
+  `-max_file_sz` where makeblastdb reads it, after the head of the log, which version 1.0 listed as
+  known differences; on 2026-11-11 line DBID pssmread made psiblast's PSSM read each alignment's
+  letters by its Seq-align id as NCBI's scope gets them, another sequence's or none with NCBI's
+  warning, which line DBID pssmrows refused)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -239,7 +242,11 @@ Linux and macOS, 4 on Windows), which moves the padding of the date and the cut 
 under `-max_file_sz`. The Web app's builds (wasm32) write what makeblastdb writes on Linux
 x86-64. The output on Windows and macOS has not been compared with a makeblastdb run on those
 platforms; the tests there check LOSAT's platform choice and, on the Linux x86-64 settings,
-the same bytes as on Linux.
+the same bytes as on Linux. Errors that makeblastdb reports through its general handler
+(`Error: NCBI C++ Exception:` and one line per exception, `T0 "<file>", line <n>: Error:
+(<class>::<code>) <function>() - <message>`) name the source files in the build tree of the
+official Linux x64 release of makeblastdb 2.17.0, on every platform, as LOSAT's other NCBI
+exception reports do; a makeblastdb built elsewhere (bioconda, macOS, Windows) names its own tree.
 
 | Not written or rejected | Why |
 | --- | --- |
@@ -254,15 +261,24 @@ the same bytes as on Linux.
 Removal of an existing database and the paths of the output:
 
 - An output path with a space or a double quote in its absolute form (for example a build
-  inside a directory `my data`). makeblastdb reads the path as a list of names: it removes
-  nothing of an existing database, writes the new files beside the old ones and ends with
-  exit status 2. LOSAT takes the path as one name, replaces the database and ends with 0.
-  (`-out` itself may not contain a space, in both programs.)
+  inside a directory `my data`). makeblastdb reads the path as a list of names when it looks
+  for the volumes of an existing database: it removes only that database's LMDB files
+  (`.pdb`, `.pos`, `.pot`, `.ptf`, `.pto`, and logs "Deleted existing ..."), keeps its volume
+  files, writes the new files over or beside them and ends with exit status 2 when it opens
+  the result. LOSAT
+  takes the path as one name, removes the whole database (a directory at one of its names with
+  its contents), replaces it and ends with 0; a build
+  that fails after the removal (a `-max_file_sz` that is no size) leaves none of the old
+  database, where makeblastdb leaves its volume files. (`-out` itself may not contain a space,
+  in both programs.)
 - An existing `sub/db.pal` while the current directory holds volumes of the same names
   (`./db.00.*`). NCBI looks for a volume in the current directory first, so makeblastdb
   removes the files of the current directory. LOSAT removes the volumes beside the alias
-  file. Other behaviour of makeblastdb is kept: the existing database is removed before the
-  input is read, so a failing build also removes it.
+  file (a directory at one of those names with its contents). Other behaviour of makeblastdb is kept: the existing database is removed before the
+  input is read, so a failing build also removes it; a directory at one of the names removed
+  is removed with its contents, read-only parts included, and a symbolic link is removed, not
+  followed (`CDirEntry::Remove`); a volume file's final name is cleared the same way before
+  the volume is renamed to it (a directory `NAME.pin` that is no database is removed then).
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
   `.ncbirc` is not removed (`losat makeblastdb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
@@ -278,33 +294,38 @@ Version 5 and the options added to the writer:
 - `-logfile` is read as makeblastdb's option, not wherever it stands in the command line
   (makeblastdb's corelib also finds it as the value of another option).
 - Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
-  that removes what the earlier files added; makeblastdb skips it without a word. `-in ""`
-  (no name) is refused; makeblastdb reads an empty list.
+  that removes what the earlier files added; makeblastdb skips it without a word.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
-  of a database; one left at the path is removed, makeblastdb's final state). So an output
-  name of 247 to 251 bytes, whose `NAME.pdb-lock` passes the file-name limit of 255 bytes,
-  stops makeblastdb ("BLAST Database error: LMDB runtime error: mdb_env_open: File name too
-  long", exit status 2, no volume written) while LOSAT builds the database (exit status 0;
-  every file is valid and its own name fits).
+  of a database; one left at the path is removed, makeblastdb's final state after a build; a
+  build that fails after LMDB has created its lock file leaves them in makeblastdb, not in
+  LOSAT). On Unix a
+  lock file that LMDB cannot create stops LOSAT where it stops makeblastdb: an
+  output name of 247 bytes or more, whose `NAME.pdb-lock` passes the file-name limit of 255
+  bytes, ends with "BLAST Database error: LMDB runtime error: mdb_env_open: File name too
+  long" (exit status 2) when the second sequence is added, or that creation error (exit status
+  1) for one sequence, with no file written, in both programs; a directory of a lock file's
+  name that the removal of the old database could not remove (it holds a directory that cannot
+  be read) ends the same way with "Is a directory". On Windows these cases have not been
+  compared with a makeblastdb run: LOSAT's paths are not bound by `MAX_PATH`, which binds
+  LMDB's `CreateFileW`, and LOSAT does not check a directory of the lock file's name.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
-- A file that cannot be created, written or renamed, and an input file that cannot be
+- A file that cannot be created or written, and an input file that cannot be
   opened: makeblastdb does not test its streams and ends with exit status 0 and a damaged
   or missing database. LOSAT removes the files of the build and ends with
   `Error: <path>: <system error>` and exit status 255.
+- A volume whose final name is a directory that the removal cannot delete (it holds a
+  directory that cannot be read): makeblastdb's rename fails without a word, the volume stays
+  under its numbered name (`NAME.00.pin`) and makeblastdb ends with `No alias or index file
+  found ...` (exit status 2); LOSAT ends with `Error: <volume> -> <name>: Is a directory`
+  (exit status 255) and leaves `NAME.ptf` (probe of 2026-11-08).
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights); LOSAT stops when it creates the first
   file, after the first lines of the log.
-- `-max_file_sz` that is no size or is 4 GiB or more: LOSAT checks it before it tests the
-  output directory, removes an existing database or writes the log; makeblastdb after. The
-  exit status is the same, except with an output directory makeblastdb refuses: makeblastdb
-  ends with that refusal (exit status 255).
 - Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without
   `-parse_seqids` or with `-taxid`) end with exit status 2 and the text of LOSAT's option
   parser, as in every LOSAT subcommand; makeblastdb uses 1.
-- Errors of makeblastdb's general handler carry the source path of its binary
-  (`Error: NCBI C++ Exception: ...`); LOSAT prints `Error:` and the sentence.
 - With more volumes than the process may hold open files, makeblastdb writes the database
   and ends with exit status 2 ("Too many open files"). LOSAT resolves the finished
   database without opening its volumes and ends with 0.
@@ -327,6 +348,17 @@ Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1
 - Version 4 with `-parse_seqids`: a string-index key longer than 256 bytes (makeblastdb stops
   with "buffer overflow detected").
 - A `-taxid_map` line of white space only (makeblastdb crashes).
+- Version 5 with `-parse_seqids`: `LMDB_SPLIT_CHUNK_SIZE` or `LMDB_MIN_SPLIT_SIZE` that is not
+  a number of the range of `unsigned int` (makeblastdb aborts in its LMDB writer, after the
+  volumes are written, and leaves `NAME.pdb`, `NAME.pos`, `NAME.phr`, `NAME.pin`, `NAME.pog`,
+  `NAME.psq`, `NAME.ptf` and the two lock files, without `NAME.pot`, `NAME.pto` and
+  `NAME.pjs`); LOSAT stops with
+  `BLAST Database creation error: Cannot convert string '<value>' to ...` (exit status 1),
+  removes the volumes and leaves `NAME.pos` and `NAME.ptf`.
+- `-in ""` (no name): makeblastdb reads the first name of an empty list after the log line
+  "Maximum file size" and `-taxid_map`, and crashes (a segmentation fault). LOSAT refuses it
+  there, so that an existing database of the output name has been removed first, as
+  makeblastdb removes it, and the errors of `-max_file_sz` and `-taxid_map` come first.
 
 Reproduced although it looks wrong (deterministic NCBI behaviour): with `-hash_index`, no
 `-parse_seqids` and several volumes, the first sequence of a later volume is indexed under the

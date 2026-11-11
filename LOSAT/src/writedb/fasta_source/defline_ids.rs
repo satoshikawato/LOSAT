@@ -8,11 +8,12 @@
 
 use super::reader::ParseError;
 use super::Warn;
+use crate::ncbi_str::is_blank;
 use crate::seqid::accguide::{parse_flags, SeqIdWarning};
 use crate::seqid::label::content;
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::parse::{
-    has_invalid_local_char, is_blank, parse_ids, MAX_ACCESSION_LENGTH, MAX_GENERAL_TAG_LENGTH,
+    has_invalid_local_char, parse_ids, MAX_ACCESSION_LENGTH, MAX_GENERAL_TAG_LENGTH,
     MAX_LOCAL_ID_LENGTH,
 };
 

@@ -283,6 +283,7 @@ fn run_queries(
                     x_prolog: calls == 0,
                     x_queries_before: 0,
                     x_xml2_carry: None,
+                    last_call: false,
                     psi_round: Some(&io),
                     titles_may_refuse,
                 },

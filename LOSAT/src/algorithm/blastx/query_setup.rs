@@ -450,12 +450,11 @@ pub(crate) fn prepare_unit_queries(
     // ```
     // Same SEG parameters as the block above; the masker is built once for all contexts instead of
     // once per context (placement only).
-    let seg_masker = options.seg.enabled.then(|| {
-        let s = &options.seg;
+    let seg_masker = options.seg.filter_options().map(|(window, locut, hicut)| {
         SegMasker::new(
-            if s.window > 0 { s.window as usize } else { 12 },
-            if s.locut > 0.0 { s.locut } else { 2.2 },
-            if s.hicut > 0.0 { s.hicut } else { 2.5 },
+            if window > 0 { window as usize } else { 12 },
+            if locut > 0.0 { locut } else { 2.2 },
+            if hicut > 0.0 { hicut } else { 2.5 },
         )
         // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the chunks of a split query (split.rs) are masked
         // again after the whole query, mostly over the same segments, so this masker takes the

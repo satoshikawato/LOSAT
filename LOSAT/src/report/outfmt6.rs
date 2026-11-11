@@ -386,8 +386,9 @@ fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<(
     }
 }
 
-/// `write_hit_fields` with the query and subject IDs as bytes, written as they are (NCBI
-/// writes the IDs that it takes from the titles without converting them).
+/// The twelve fields of a default tabular row (`qaccver saccver pident length mismatch gapopen
+/// qstart qend sstart send evalue bitscore`) with the query and subject IDs as bytes, written as
+/// they are (NCBI writes the IDs that it takes from the titles without converting them).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
 /// ```c++

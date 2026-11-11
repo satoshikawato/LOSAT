@@ -12,7 +12,9 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use run_local_support::{cli_out_path, field, fixture_sequence, temp_path, Files, Written};
+use run_local_support::{
+    assert_observer_ranges, cli_out_path, fixture_sequence, temp_path, Files, Written,
+};
 use LOSAT::api::{Error, Outcome, Program};
 
 const FORMATS: [&str; 3] = ["0", "6", "7"];
@@ -150,48 +152,12 @@ impl Drop for Batches {
     }
 }
 
-/// Checks that the api's ranges of the pairwise and tabular reports (at the given positions of
-/// the request) lie where the hit records say: the outfmt 6 and 7 row of an HSP has its
-/// coordinates and the outfmt 0 section of an HSP is one score block with its raw score.
-fn assert_spans(outcome: &Outcome, [fmt0, fmt6, fmt7]: [usize; 3], context: &str) {
-    assert!(
-        !outcome.hsps.is_empty(),
-        "{context}: the fixture must produce hits"
-    );
-    for hsp in &outcome.hsps {
-        for fmt in [fmt6, fmt7] {
-            let report = &outcome.reports[fmt];
-            let span = report.spans[hsp.index]
-                .clone()
-                .unwrap_or_else(|| panic!("{context}: HSP {} has no row in {}", hsp.index, fmt));
-            assert_eq!(
-                [6, 7, 8, 9].map(|index| field(&report.bytes[span.clone()], index)),
-                [hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end].map(|value| value.to_string()),
-                "{context}: row of HSP {} in report {fmt}",
-                hsp.index
-            );
-        }
-        let report = &outcome.reports[fmt0];
-        let span = report.spans[hsp.index]
-            .clone()
-            .unwrap_or_else(|| panic!("{context}: HSP {} has no section", hsp.index));
-        let section = String::from_utf8_lossy(&report.bytes[span]);
-        assert!(
-            section.starts_with(" Score =")
-                && section.matches(" Score =").count() == 1
-                && section.contains(&format!("bits ({}),", hsp.raw_score)),
-            "{context}: section of HSP {}: {section:.40?}",
-            hsp.index
-        );
-    }
-}
-
 /// Checks that one api call of outfmt 0, 6 and 7 equals the single-format CLI runs and,
 /// for inputs with hits, that its ranges and hits agree with the reports.
 fn assert_matches_cli(inputs: &Inputs, extra: &[&str], hits: bool, context: &str) {
     let together = inputs.collect(&FORMATS, extra);
     if hits {
-        assert_spans(&together, [0, 1, 2], context);
+        assert_observer_ranges(&together, [0, 1, 2], context);
     } else {
         assert!(together.hsps.is_empty(), "{context}: no hits");
         assert!(

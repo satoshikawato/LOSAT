@@ -535,8 +535,8 @@ remains subject to all the requirements above.
 
 ## Conventions and Porting Notes
 
-- Match NCBI function names when porting (example: `s_BlastAaExtendTwoHit` ->
-  `extend_hit_two_hit`).
+- Match NCBI function names when porting (example: `s_BlastAaScanSubject` ->
+  `s_blast_aa_scan_subject`).
 - Keep NCBI terminology in comments: query_offset, subject_offset, context, frame.
 - Use `#[inline]` for hot-path functions; use `unsafe` only when necessary and
   always add safety comments.

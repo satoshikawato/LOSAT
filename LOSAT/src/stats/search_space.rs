@@ -154,3 +154,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "search_space_ncbi_tests.rs"]
+mod search_space_ncbi_tests;

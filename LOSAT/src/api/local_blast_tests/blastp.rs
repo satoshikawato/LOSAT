@@ -628,3 +628,66 @@ fn an_observer_without_hit_records_numbers_the_hsps_over_the_whole_search() {
         "the observer changes no output"
     );
 }
+
+// No NCBI counterpart: the hit records of the blastp search in blocks (`x_query_blocks.rs`; Web
+// ABI v2 emits their subject lengths and titles) are those of the search of all queries. The
+// call with all writers, the hit records and an observer takes the blocks over queries that make
+// four of them; the reference is the same search in a shape the block search declines but that
+// still gives the records: outfmt 6 to a writer and outfmt 7 to a file that `run_local` creates
+// (`x_query_block_plan`). The records, compared as `Debug` text, and the outfmt 6 and 7 bytes
+// must be equal.
+#[test]
+fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() {
+    use std::sync::{Arc, Mutex};
+
+    use crate::report::PairwiseHit;
+
+    let (query, subject) = block_inputs();
+    let (queries, subjects) = (queries(&query.0), subjects(&subject));
+    let args = || blastp_args(&query.0, &subject, &["-evalue", "0.001"]);
+    let blocked = run_formats_with(&["6", "7"], true, true, |outputs| {
+        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+    });
+    assert!(!blocked.hits.is_empty(), "the fixture must produce hits");
+
+    let file = temp_path("blocks_records_out7.txt");
+    let (mut rows, mut diagnostics) = (Vec::new(), Vec::new());
+    let collected = Arc::new(Mutex::new(Vec::new()));
+    let sink = collected.clone();
+    let mut on_hits =
+        move |hits: Arc<Vec<PairwiseHit>>| sink.lock().unwrap().extend_from_slice(&hits);
+    {
+        let mut outputs = ReportOutputs {
+            formats: vec![
+                FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut rows),
+                },
+                FormatOutput {
+                    outfmt: "7",
+                    sink: OutputSink::File(&file),
+                },
+            ],
+            diagnostics: &mut diagnostics,
+            hits: Some(&mut on_hits),
+            observer: None,
+        };
+        run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs).expect("run_local");
+    }
+    let commented = std::fs::read(&file).expect("the file");
+    let _ = std::fs::remove_file(&file);
+    let unblocked = collected.lock().unwrap().clone();
+    assert!(blocked.outputs[0] == rows, "outfmt 6");
+    assert!(blocked.outputs[1] == commented, "outfmt 7");
+    assert_eq!(blocked.diagnostics, diagnostics);
+    assert_eq!(blocked.hits.len(), unblocked.len(), "number of records");
+    let debug = |hits: &[PairwiseHit]| {
+        hits.iter()
+            .map(|hit| format!("{hit:?}\n"))
+            .collect::<String>()
+    };
+    assert!(
+        debug(&blocked.hits) == debug(&unblocked),
+        "the hit records of the blocks differ from those of the search of all queries"
+    );
+}

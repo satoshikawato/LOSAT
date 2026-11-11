@@ -10,6 +10,7 @@
     reason = "each test file that declares this module uses a different subset of it, and the blastp and tblastn suites load it through several #[path] files"
 )]
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -206,4 +207,235 @@ pub struct Written {
 pub fn field(row: &[u8], index: usize) -> String {
     let row = std::str::from_utf8(row).expect("utf-8 row").trim_end();
     row.split('\t').nth(index).expect("field").to_string()
+}
+
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// ```c
+// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     // Add tab in front of field, except for the first field.
+//     if (iter != m_FieldsToShow.begin())
+//         m_Ostream << m_FieldDelimiter;
+//     x_PrintField(*iter);
+// }
+// m_Ostream << "\n";
+// ```
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// ```c++
+// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+// ```
+/// The ranges of `Report::spans` of report `index`, one per HSP of `Outcome::hsps` in the order of
+/// the hit list; a range is missing only where the report does not show the HSP.
+fn spans_of(outcome: &Outcome, index: usize, context: &str) -> Vec<Range<usize>> {
+    let report = &outcome.reports[index];
+    assert_eq!(report.spans.len(), outcome.hsps.len(), "{context}");
+    report
+        .spans
+        .iter()
+        .enumerate()
+        .map(|(hsp, span)| {
+            span.clone()
+                .unwrap_or_else(|| panic!("{context}: HSP {hsp} has no range in report {index}"))
+        })
+        .collect()
+}
+
+/// Checks the ranges of the tabular reports of `outcome`: the outfmt 6 rows (at position `fmt6`
+/// of the request) are in HSP index order and tile the output, one line each; with `fmt7`, the
+/// outfmt 7 rows are its non-comment lines and equal the outfmt 6 rows. Returns the number of
+/// rows.
+pub fn assert_tabular_ranges(
+    outcome: &Outcome,
+    fmt6: usize,
+    fmt7: Option<usize>,
+    context: &str,
+) -> usize {
+    let (out6, rows6) = (
+        &outcome.reports[fmt6].bytes,
+        spans_of(outcome, fmt6, context),
+    );
+    let mut position = 0;
+    for (hsp, row) in rows6.iter().enumerate() {
+        assert_eq!(row.start, position, "{context}: outfmt 6 HSP {hsp} start");
+        assert_eq!(
+            out6[row.clone()]
+                .iter()
+                .filter(|&&byte| byte == b'\n')
+                .count(),
+            1,
+            "{context}: outfmt 6 HSP {hsp} is one line"
+        );
+        position = row.end;
+    }
+    assert_eq!(
+        position,
+        out6.len(),
+        "{context}: outfmt 6 rows tile the output"
+    );
+
+    if let Some(fmt7) = fmt7 {
+        let (out7, rows7) = (
+            &outcome.reports[fmt7].bytes,
+            spans_of(outcome, fmt7, context),
+        );
+        for (hsp, (row6, row7)) in rows6.iter().zip(&rows7).enumerate() {
+            assert_eq!(
+                &out6[row6.clone()],
+                &out7[row7.clone()],
+                "{context}: outfmt 7 HSP {hsp}"
+            );
+        }
+        let data_lines = out7
+            .split_inclusive(|&byte| byte == b'\n')
+            .filter(|line| !line.starts_with(b"#"))
+            .count();
+        assert_eq!(data_lines, rows6.len(), "{context}: outfmt 7 data lines");
+    }
+    rows6.len()
+}
+
+/// Checks the ranges of outfmt 0, 6 and 7 of `outcome` (at the given positions of the request)
+/// against its hit records: `assert_tabular_ranges`; the same index has the same coordinates in
+/// the hit record and in its outfmt 6 row; each outfmt 0 section is one score block with the raw
+/// score and the query and subject coordinates of its HSP, inside the report block of its query;
+/// and the subject headings: one per subject of each query, marked with its first HSP and ending
+/// where its section starts.
+pub fn assert_observer_ranges(outcome: &Outcome, [fmt0, fmt6, fmt7]: [usize; 3], context: &str) {
+    let hits = &outcome.hsps;
+    assert!(!hits.is_empty(), "{context}: the fixture must produce hits");
+    let rows = assert_tabular_ranges(outcome, fmt6, Some(fmt7), context);
+    assert_eq!(rows, hits.len(), "{context}: outfmt 6 rows");
+    let rows6 = spans_of(outcome, fmt6, context);
+    for (hit, row) in hits.iter().zip(&rows6) {
+        assert_eq!(
+            [6, 7, 8, 9].map(|index| field(&outcome.reports[fmt6].bytes[row.clone()], index)),
+            [hit.q_start, hit.q_end, hit.s_start, hit.s_end].map(|value| value.to_string()),
+            "{context}: outfmt 6 HSP {} coordinates",
+            hit.index
+        );
+    }
+
+    let out0 = &outcome.reports[fmt0].bytes;
+    let sections = spans_of(outcome, fmt0, context);
+    // Byte offsets of the "Query=" lines that open each query's report block.
+    let query_blocks: Vec<usize> = out0
+        .windows(7)
+        .enumerate()
+        .filter(|&(offset, window)| {
+            window == b"Query= " && (offset == 0 || out0[offset - 1] == b'\n')
+        })
+        .map(|(offset, _)| offset)
+        .collect();
+    let mut blocks_of_queries = std::collections::BTreeMap::new();
+    for (hit, section) in hits.iter().zip(&sections) {
+        let hsp = hit.index;
+        let text = std::str::from_utf8(&out0[section.clone()]).expect("utf-8 section");
+        assert!(
+            text.starts_with(" Score ="),
+            "{context}: section {hsp}: {text:.20?}"
+        );
+        assert_eq!(
+            text.matches(" Score =").count(),
+            1,
+            "{context}: section {hsp}"
+        );
+        assert!(
+            text.contains(&format!("bits ({}),", hit.raw_score)),
+            "{context}: raw score of HSP {hsp}"
+        );
+        assert_eq!(
+            alignment_span(text, "Query"),
+            (hit.q_start, hit.q_end),
+            "{context}: query coordinates of HSP {hsp}"
+        );
+        assert_eq!(
+            alignment_span(text, "Sbjct"),
+            (hit.s_start, hit.s_end),
+            "{context}: subject coordinates of HSP {hsp}"
+        );
+        // The section lies in one report block, the block of its query: the block of a query
+        // is the same for all its HSPs and later for a later query (a query that the search
+        // skips has no block, so the index of the block is not always the index of the query),
+        // and where every query has a block, it is the query's own.
+        let block = query_blocks.partition_point(|&offset| offset < section.start);
+        assert!(block > 0, "{context}: HSP {hsp} before its query block");
+        let block = block - 1;
+        if let Some(&next) = query_blocks.get(block + 1) {
+            assert!(
+                section.end <= next,
+                "{context}: HSP {hsp} after its query block"
+            );
+        }
+        if query_blocks.len() == outcome.query_stats.len() {
+            assert_eq!(
+                block, hit.q_idx,
+                "{context}: HSP {hsp} in the block of its query"
+            );
+        }
+        let (earlier, mut later) = (
+            blocks_of_queries.range(..hit.q_idx),
+            blocks_of_queries.range(hit.q_idx + 1..),
+        );
+        assert!(
+            earlier.last().is_none_or(|(_, &b)| b < block)
+                && later.next().is_none_or(|(_, &b)| b > block),
+            "{context}: HSP {hsp}: the blocks of the queries are in the order of the queries"
+        );
+        assert_eq!(
+            *blocks_of_queries.entry(hit.q_idx).or_insert(block),
+            block,
+            "{context}: HSP {hsp}: one block for all HSPs of a query"
+        );
+    }
+
+    // One heading per subject of each query, just before the section of its first HSP; the
+    // other HSPs of the subject have the same heading.
+    let headings = &outcome.reports[fmt0].subject_headings;
+    assert_eq!(headings.len(), hits.len(), "{context}: headings");
+    for (index, hit) in hits.iter().enumerate() {
+        let heading = headings[index]
+            .clone()
+            .unwrap_or_else(|| panic!("{context}: HSP {index} has no heading"));
+        let first =
+            index == 0 || (hit.q_idx, hit.s_idx) != (hits[index - 1].q_idx, hits[index - 1].s_idx);
+        if first {
+            let text = std::str::from_utf8(&out0[heading.clone()]).expect("utf-8 heading");
+            assert!(
+                text.starts_with("> "),
+                "{context}: heading of HSP {index}: {text:.20?}"
+            );
+            assert_eq!(
+                heading.end, sections[index].start,
+                "{context}: heading of HSP {index} ends at its section"
+            );
+        } else {
+            assert_eq!(
+                headings[index],
+                headings[index - 1],
+                "{context}: HSP {index} has the heading of its subject"
+            );
+        }
+    }
+}
+
+/// The first and last coordinates on the `label` ("Query" or "Sbjct") lines of one
+/// outfmt 0 alignment section.
+fn alignment_span(section: &str, label: &str) -> (usize, usize) {
+    let numbers: Vec<Vec<usize>> = section
+        .lines()
+        .filter(|line| line.starts_with(label))
+        .map(|line| {
+            line.split_whitespace()
+                .filter_map(|word| word.parse().ok())
+                .collect()
+        })
+        .collect();
+    let first = *numbers
+        .first()
+        .and_then(|line| line.first())
+        .expect("first coordinate");
+    let last = *numbers
+        .last()
+        .and_then(|line| line.last())
+        .expect("last coordinate");
+    (first, last)
 }

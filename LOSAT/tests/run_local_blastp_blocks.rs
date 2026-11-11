@@ -31,7 +31,7 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use run_local_support::{field, temp_path, Files};
+use run_local_support::{assert_observer_ranges, field, temp_path, Files};
 use LOSAT::api::{read_fasta, Program, Role};
 
 const CUSTOM: &str =
@@ -299,25 +299,10 @@ fn child_search() {
     )
     .expect("query records");
     if formats.starts_with(&WEB) {
-        // The rows of outfmt 6 and the sections of outfmt 0 and 7 tile their reports in the
-        // order of the records (`Report::spans`), and each record's query is the query of its
-        // outfmt 6 row (the first word of the fixture's definition lines is the `qseqid`).
-        let hits = run.hsps.len();
-        assert!(hits > 0, "the fixture must produce hits");
-        for (format, report) in run.reports[..3].iter().enumerate() {
-            assert_eq!(report.spans.len(), hits, "format {format}");
-            let mut end = 0;
-            for (hsp, span) in report.spans.iter().enumerate() {
-                let span = span
-                    .clone()
-                    .unwrap_or_else(|| panic!("format {format} HSP {hsp}"));
-                assert!(
-                    span.start >= end,
-                    "format {format} HSP {hsp} in write order"
-                );
-                end = span.end;
-            }
-        }
+        // The rows and sections lie where the hit records say (`assert_observer_ranges`), and
+        // each record's query is the query of its outfmt 6 row (the first word of the fixture's
+        // definition lines is the `qseqid`).
+        assert_observer_ranges(&run, [0, 1, 2], &format!("blastp {formats:?} n{threads}"));
         for (hsp, span) in run.reports[1].spans.iter().enumerate() {
             let span = span.clone().expect("a row");
             let q_idx = run.hsps[hsp].q_idx;

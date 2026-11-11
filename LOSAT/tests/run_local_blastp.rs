@@ -58,6 +58,12 @@ impl Inputs {
         Files::new(Program::Blastp, &self.query, &self.subject).collect(formats, extra)
     }
 
+    /// `Files::write` (`api::run`, which gives the entry no hit records and no observer, as the
+    /// command line's call) of `formats`.
+    fn write(&self, formats: &[&str], extra: &[&str]) -> Written {
+        Files::new(Program::Blastp, &self.query, &self.subject).write(formats, extra)
+    }
+
     /// The CLI output file and standard error of one single-format run.
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
         let out = cli_out_path(&self.query, outfmt);
@@ -154,6 +160,9 @@ fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
     let inputs = Inputs::new(8);
     for extra in [&[][..], &["-num_threads", "2"][..]] {
         let together = inputs.collect(&TABULAR, extra);
+        // The CLI's call has neither hit records nor an observer: `run` makes that call.
+        let written = inputs.write(&TABULAR, extra);
+        written.result.as_ref().expect("run");
         for (index, outfmt) in TABULAR.iter().enumerate() {
             assert!(
                 !together.reports[index].bytes.is_empty(),
@@ -165,6 +174,11 @@ fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
                 "run_collect outfmt {outfmt:?} {extra:?}"
             );
             let (cli_output, cli_stderr) = inputs.cli(outfmt, extra);
+            assert!(
+                written.outputs[index] == cli_output,
+                "run outfmt {outfmt:?} {extra:?}"
+            );
+            assert_eq!(written.diagnostics, cli_stderr, "run {outfmt:?} {extra:?}");
             assert!(
                 together.reports[index].bytes == cli_output,
                 "CLI outfmt {outfmt:?} {extra:?}"

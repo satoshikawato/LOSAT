@@ -521,7 +521,9 @@ fn unported_long_subject_chunking_is_rejected_before_search() {
 }
 
 /// A batch without a valid Karlin-Altschul context is not searched, so it does not reach the
-/// subjects: NCBI writes its report, and LOSAT does not refuse a long subject for it.
+/// subjects: NCBI writes its report, and LOSAT does not refuse a long subject for it. The subject is
+/// the one that `unported_long_subject_chunking_is_rejected_before_search` refuses when its batch is
+/// searched, so `Ok` shows that this batch was not.
 #[test]
 fn a_batch_that_is_not_searched_does_not_refuse_a_long_subject() {
     let (_, _, o) = fixture("S06_seed.fna");

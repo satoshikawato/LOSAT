@@ -10,7 +10,7 @@ mod run_local_support;
 
 use std::process::Command;
 
-use run_local_support::{cli_out_path, fixture_sequence, Files, TempFasta};
+use run_local_support::{cli_out_path, fixture_sequence, Files, TempFasta, Written};
 use LOSAT::api::{Outcome, Program};
 
 const FORMATS: [&str; 12] = [
@@ -101,6 +101,12 @@ impl Inputs {
     /// names that the reports show, as the CLI shows them.
     fn collect(&self, formats: &[&str], extra: &[&str]) -> Outcome {
         Files::new(Program::Blastn, &self.query.0, &self.subject.0).collect(formats, extra)
+    }
+
+    /// `Files::write` (`api::run`, which gives the entry no hit records and no observer, as the
+    /// command line's call) of `formats`.
+    fn write(&self, formats: &[&str], extra: &[&str]) -> Written {
+        Files::new(Program::Blastn, &self.query.0, &self.subject.0).write(formats, extra)
     }
 
     /// The CLI output file and standard error of one single-format run, with a SAM document's
@@ -271,6 +277,9 @@ fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
         &["-num_threads", "2"][..],
     ] {
         let together = inputs.collect(&CUSTOM, extra);
+        // The CLI's call has neither hit records nor an observer: `run` makes that call.
+        let written = inputs.write(&CUSTOM, extra);
+        written.result.as_ref().expect("run");
         for (index, outfmt) in CUSTOM.iter().enumerate() {
             assert!(
                 !together.reports[index].bytes.is_empty(),
@@ -282,6 +291,11 @@ fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
                 "run_collect outfmt {outfmt:?} {extra:?}"
             );
             let (cli_output, cli_stderr) = inputs.cli(outfmt, extra);
+            assert!(
+                written.outputs[index] == cli_output,
+                "run outfmt {outfmt:?} {extra:?}"
+            );
+            assert_eq!(written.diagnostics, cli_stderr, "run {outfmt:?} {extra:?}");
             assert!(
                 together.reports[index].bytes == cli_output,
                 "CLI outfmt {outfmt:?} {extra:?}"

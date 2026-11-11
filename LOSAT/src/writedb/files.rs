@@ -6,7 +6,7 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::WriteDbError;
 
@@ -243,6 +243,39 @@ impl WriteDbFile {
         if !self.created {
             self.fname = new_name;
             return Ok(());
+        }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:2510-2559 (CDirEntry::Rename)
+        // ```c++
+        //     EType dst_type = dst.GetType();
+        //
+        //     // If destination exists...
+        //
+        //     if ( dst_type != eUnknown ) {
+        //         ...
+        //         // Overwrite destination entry
+        //         if ( F_ISSET(flags, fRF_Overwrite) ) {
+        //             if ( dst.Exists() ) {
+        //                 dst.Remove();
+        //             }
+        //         }
+        //     }
+        //
+        //     // On some platform rename() fails if destination entry exists,
+        //     // on others it can overwrite destination.
+        //     // For consistency return FALSE if destination already exists.
+        //     if ( dst.Exists() ) {
+        //         // this means Remove() has failed, and error is set already
+        //         LOG_ERROR(21, "CDirEntry::Rename(): Destination path exists: " + GetPath());
+        //         return false;
+        //     }
+        // ```
+        // With `fRF_Overwrite` an entry at the new name is removed first, with
+        // `CDirEntry::Remove(eRecursive)`: a directory of that name goes with its contents
+        // (makeblastdb 2.17.0 replaces a directory `NAME.pin` with the index file). A
+        // destination that stays makes the rename below fail, which LOSAT reports where
+        // makeblastdb, which does not check the result, goes on.
+        if std::fs::symlink_metadata(&new_name).is_ok() {
+            let _ = super::dir_entry::remove(Path::new(&new_name));
         }
         std::fs::rename(&self.fname, &new_name).map_err(|source| WriteDbError::Rename {
             from: PathBuf::from(&self.fname),

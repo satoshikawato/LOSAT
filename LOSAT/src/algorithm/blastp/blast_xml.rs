@@ -34,8 +34,8 @@ use super::blast_engine::query_rows::QueryRows;
 use super::hsp::BlastpHitList;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    hit_ranges, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun,
-    XmlStats, XmlSubjects,
+    hit_ranges, written_queries, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp,
+    XmlQuery, XmlRun, XmlStats, XmlSubjects,
 };
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
@@ -64,6 +64,12 @@ pub(crate) struct BlastpXml<'a> {
     pub program: &'static str,
     /// Whether the document ends with this call.
     pub epilog: bool,
+    /// Whether the run stops after this call: no epilog and no later report call (the block
+    /// search's next block) follow it (`written_queries`).
+    pub stops: bool,
+    /// Every structured format of the call is XML2 or JSON (outfmt 5, which writes every report,
+    /// is not among them; the library takes several formats).
+    pub only_xml2: bool,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -80,14 +86,17 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
 ) -> Result<()> {
     let program = xml.program;
     // Everything NCBI cannot write is refused before the first byte of the document: the
-    // database name, each query's definition line and message, the names of the subjects with
-    // hits. This includes the last query of a `-subject` call, whose report NCBI holds back
-    // until the next query's arrives and never writes when the next batch fails to read
-    // (outfmt 15 and 16): LOSAT refuses a title it would not have written then. It cannot
-    // wait for the report to be written, which would refuse after a byte (the reports before
-    // it are written by now), and the next batch is not read yet.
+    // database name, and for the reports that the document writes each query's definition line
+    // and message and the names of the subjects with hits. A run that stops never writes the
+    // `-subject` report of its last query, which NCBI holds back, unless another format of the
+    // call (outfmt 5) writes it (`written_queries`).
     names::check_text(xml.run.db_name)
         .map_err(|refusal| refusal.error(program, "a database name"))?;
+    let reports = written_queries(
+        hit_lists.len(),
+        xml.stops,
+        xml.only_xml2 && document.holds_back(),
+    );
     let has_hits = |q_idx: usize| {
         hit_lists[q_idx].as_ref().is_some_and(|list| {
             list.hsplist_array
@@ -98,15 +107,15 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     };
     let texts = names::query_texts(
         program,
-        &xml.queries.records[..hit_lists.len()],
+        &xml.queries.records[..reports],
         true,
         &xml.messages,
         has_hits,
     )?;
-    // The names of the subjects with hits, made once each; a title NCBI cannot write is refused
-    // here, before the first byte.
+    // The names of the subjects with hits in the written reports, made once each; a title NCBI
+    // cannot write is refused here, before the first byte.
     let mut subjects = SubjectNameCache::new(&xml.subjects);
-    for hit_list in hit_lists.iter().flatten() {
+    for hit_list in hit_lists.iter().take(reports).flatten() {
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
             if let Some(hsp) = hsp_list.hsps.first() {
                 subjects.get(hsp.s_idx as usize, program)?;
@@ -119,6 +128,13 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
+        }
+        if q_idx == reports {
+            // The held report that is never written (`written_queries`).
+            document.unwritten(&mut buf)?;
+            writer.write_all(&buf)?;
+            buf.clear();
+            break;
         }
         let record = &xml.queries.records[q_idx];
         let text = &texts[q_idx];

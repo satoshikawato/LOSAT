@@ -56,8 +56,6 @@ impl std::error::Error for RpsEngineError {}
 /// first volume has no `.freq` file gets NCBI's warning and the search runs without them
 /// (`args.comp_based_stats` becomes mode 0). Only the first volume of each name is looked at: a
 /// later volume without `.freq` fails inside the search (`RpsVolumeFiles::open_freq`).
-/// `ADAPTIVE_CBS` changes the preliminary hit list of a search with the statistics (the stream
-/// that NCBI closes early): refused, as tblastn refuses it.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:807-840
 /// ```c++
@@ -130,11 +128,6 @@ pub(super) fn check_freq_ratio_file(
         }
     }
     if failed.is_empty() {
-        if std::env::var_os("ADAPTIVE_CBS").is_some() {
-            bail!(
-                "the environment variable ADAPTIVE_CBS, which makes NCBI BLAST+ close its preliminary stream of composition-adjusted HSPs early, is not supported by LOSAT's RPSBLAST"
-            );
-        }
         return Ok(());
     }
     args.comp_based_stats.mode =

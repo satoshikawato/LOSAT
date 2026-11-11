@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_jctl",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_jctl (parsed Seq-ids)",
+  "number-of-letters": 650,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-08T20:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50306,
+  "bytes-to-cache": 790,
+  "files": [
+    "psr_jctl.pdb",
+    "psr_jctl.phr",
+    "psr_jctl.pin",
+    "psr_jctl.pog",
+    "psr_jctl.pos",
+    "psr_jctl.pot",
+    "psr_jctl.psq",
+    "psr_jctl.ptf",
+    "psr_jctl.pto"
+  ]
+}

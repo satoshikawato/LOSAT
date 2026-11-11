@@ -1473,23 +1473,25 @@ impl PreliminarySink for Runtime<'_> {
             self.subjects.shortest_length(),
             None,
         )?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1842-1846
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
         // ```c++
+        //     if((ADAPTIVE_CBS_ENV != NULL) && (ext_options->compositionBasedStats) && (hit_options->hitlist_size < 1000)) {
+        //     	BlastHSPCBSStreamClose(hsp_stream, hit_options->hitlist_size);
         //
         //     }
         //     else {
         //     	BlastHSPStreamClose(hsp_stream);
         //     }
         // ```
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1842-1846
-        // ```c++
-        //
-        //     }
-        //     else {
-        //     	BlastHSPStreamClose(hsp_stream);
-        //     }
-        // ```
-        stream.close_observed(self.observer);
+        let hitlist_size = self.options.hitlist_size as usize;
+        if crate::core::blast_hspstream::adaptive_cbs_close(
+            self.options.composition > 0,
+            hitlist_size,
+        ) {
+            stream.close_cbs_observed(self.observer, hitlist_size);
+        } else {
+            stream.close_observed(self.observer);
+        }
         self.observer.restored(batch, &full);
 
         let mut queries: Vec<_> = (0..batch.original_lengths.len())

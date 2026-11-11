@@ -674,6 +674,28 @@ and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy 
 `wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has read before: NCBI reads C's letters) and
 `ah4.reject` (another sequence that also holds A's id: NCBI's result depends on its reads and memory layout).
 
+Review 2 of pssmread (rows `db.id.prd2.*`; databases from `ids/prd_*.faa` and `ids/prdn_*.fna` by `make_ids.py
+--pssmread-only`, read through `ids/prd_xg.pal`, `prd_tw.pal`, `prd_tu.pal`, `prd_pah.pal`, `prdn_u.nal` and
+`prdn_z.nal`; the taxonomy databases of `tests/seqdb/taxdb`): `txself.tax.pf0.s1`, `txself.sid.pf0.r2` and
+`txself.lastoff.pf0.0` read A (taxid 99990) by the query's report one by one (`staxids`, `sseqid`, outfmt 0, the prefetch
+off) before the PSSM, so the taxonomy database's text (a wrong magic number, the offset error of taxid 99990) comes with
+the report's read and the PSSM's read loads nothing; `xg.s1`, `xg.r3`: A `gnl|DB|SEQA`, whose lookup gives Y
+(`gnl|DB|OTHER ^A gnl|DB|SEQA`) first: NCBI's reader keeps Y's second definition line, which holds the id, so the PSSM
+reads Y's letters; `tw.pf0.s1`: the lookup gives Y (`gb|AAA00002.1|gb|AAA00001.1|`, taxid 99990), whose definition line
+the reader's filter does not keep for A's `gb|AAA00001.1|` (`s_SeqDB_SeqIdIn` stops at the line's first comparable id,
+`gb|AAA00002.1|`): `GetBioseq` throws before its taxid lookup, so NCBI writes
+`Failed to retrieve sequence` and no taxonomy text; `tu.bad.s1` and `tu.lastoff.r1`: A `lcl|777 ^A gi|777` (unfetchable by
+its own ids) after Y (`gi|777|gb|YYY00001.1|`, 20 letters, taxid 99990): the prefetch reads Y and looks its taxid up, and
+the PSSM warns `Failed to retrieve sequence gi|777`; two `losat-rejection` rows: `tu.bad.pf0.reject` (the same with the
+prefetch off: the PSSM's read loads Y first and NCBI writes the text there) and `pah.reject` (C `gi|888|gb|CCC00001.1| ^A
+gi|777` also holds A's `gi|777`: the refusal names database sequence 2). BLASTN (megablast) and TBLASTX with the
+minus-strand query `ids/prdn_qrc.fna` (the prefetch asks the length of a minus-strand Seq-align's subject): `bn.u.rc`,
+`tx.u.rc` (A `lcl|777 ^A gi|777` after Y `gi|777|gb|YYY00001.1|`: the scope gets Y's Bioseq, no warning) and `bn.z.rc`,
+`tx.z.rc` (A `gi|777` after Y `lcl|777 ^A gi|777`, whose kept line `lcl|777` does not hold the id: `Error pre-fetching
+sequence data`). `ids/prd_mb.pal` (`prd_mb0ys`: Y `gb|BBB00001.1|` of 100 letters; `prd_mbab`: A `gb|AAA00001.1|`, B
+`gb|BBB00001|`, C) is `tests/psiblast_pssm_read_order.rs`'s: with `-max_target_seqs 1` no report reads B, whose PSSM read
+fails, and the last query's warning comes before the epilog where both streams go to one file.
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`

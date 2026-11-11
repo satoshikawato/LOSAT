@@ -132,6 +132,17 @@ through `prd_zunf.pal` (the lookup gives Y, whose kept definition line does not 
 `prd_ah4` (Y `lcl|AAA00001.1`, A `gb|AAA00001.1|`, Z `gb|ZZZ00001.1|` with `emb|AAA00001.1|` in its second definition
 line: another sequence also holds A's id); `prd_txself` (A itself, `gb|AAA00001.1|`, with taxid 99990 by
 `-taxid_map prd_txself.map`, B without; the PSSM's own load reads the taxonomy database).
+Review 2 of that line: `prd_xg0y` (Y `gnl|DB|OTHER ^A gnl|DB|SEQA`) and `prd_xga` (A `gnl|DB|SEQA`, B) through
+`prd_xg.pal` (NCBI's scope reads Y's second definition line, which holds A's id); `prd_tw0y` (Y
+`gb|AAA00002.1|gb|AAA00001.1|`, taxid 99990 by `prd_tw0y.map`) and `prd_twa` (A `gb|AAA00001.1|`, B) through `prd_tw.pal`
+(GetBioseq's filter keeps no line of Y: no taxid lookup); `prd_paha` (a copy of `prd_ua`) and `prd_pahc8` (C
+`gi|888|gb|CCC00001.1| ^A gi|777`) through `prd_pah.pal` (another holder of `gi|777`; a list is read in the order of
+its names); `prd_tu2y` (Y `gi|777|gb|YYY00001.1|` of 20 letters,
+taxid 99990 by `prd_tu2y.map`) before `prd_ua` through `prd_tu.pal` (the prefetch reads Y for the unfetchable A); and
+the nucleotide `prdn_u0y`/`prdn_ua` (`prdn_u.nal`) and `prdn_z0y`/`prdn_za` (`prdn_z.nal`), the same shapes as
+`prd_unf`/`prd_zunf`, for the minus-strand query `prdn_qrc.fna` (BLASTN and TBLASTX prefetch the length of a
+minus-strand Seq-align's subject); `prd_mb0ys` (Y `gb|BBB00001.1|`, 100 letters) and `prd_mbab` (A, B `gb|BBB00001|`,
+C) through `prd_mb.pal` for `tests/psiblast_pssm_read_order.rs` (the last query's PSSM warning before the epilog).
 `--pssmread-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
@@ -288,14 +299,27 @@ def build_pssmread(args: argparse.Namespace) -> None:
                                  ("prd_zunf0y", "prd_zunf0y.faa", "5"), ("prd_zunfa", "prd_zunfa.faa", "5"),
                                  ("prd_otag", "prd_otag.faa", "5"), ("prd_otag_4", "prd_otag.faa", "4"),
                                  ("prd_wk5", "prd_wk5.faa", "5"), ("prd_ah4", "prd_ah4.faa", "5"),
-                                 ("prd_txself", "prd_txself.faa", "5")):
+                                 ("prd_txself", "prd_txself.faa", "5"),
+                                 ("prd_xg0y", "prd_xg0y.faa", "5"), ("prd_xga", "prd_xga.faa", "5"),
+                                 ("prd_tw0y", "prd_tw0y.faa", "5"), ("prd_twa", "prd_twa.faa", "5"),
+                                 ("prd_paha", "prd_paha.faa", "5"), ("prd_pahc8", "prd_pahc8.faa", "5"),
+                                 ("prd_tu2y", "prd_tu2y.faa", "5"), ("prd_mb0ys", "prd_mb0ys.faa", "5"),
+                                 ("prd_mbab", "prd_mbab.faa", "5"),
+                                 ("prdn_u0y", "prdn_u0y.fna", "5"), ("prdn_ua", "prdn_ua.fna", "5"),
+                                 ("prdn_z0y", "prdn_z0y.fna", "5"), ("prdn_za", "prdn_za.fna", "5")):
+        maps = {"prd_txself": "prd_txself.map", "prd_tw0y": "prd_tw0y.map", "prd_tu2y": "prd_tu2y.map"}
         subprocess.run(
-            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", "prot", "-parse_seqids",
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta),
+             "-dbtype", "nucl" if fasta.endswith(".fna") else "prot", "-parse_seqids",
              "-blastdb_version", version, "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)]
-            + (["-taxid_map", str(HERE / "prd_txself.map")] if name == "prd_txself" else []),
+            + (["-taxid_map", str(HERE / maps[name])] if name in maps else []),
             check=True, stdout=subprocess.DEVNULL)
-    for alias, names in (("prd_unf", "prd_u0y prd_ua"), ("prd_zunf", "prd_zunf0y prd_zunfa")):
-        (args.out / f"{alias}.pal").write_text(
+    for alias, names, extension in (("prd_unf", "prd_u0y prd_ua", "pal"), ("prd_zunf", "prd_zunf0y prd_zunfa", "pal"),
+                                    ("prd_xg", "prd_xg0y prd_xga", "pal"), ("prd_tw", "prd_tw0y prd_twa", "pal"),
+                                    ("prd_pah", "prd_paha prd_pahc8", "pal"), ("prd_tu", "prd_tu2y prd_ua", "pal"),
+                                    ("prd_mb", "prd_mb0ys prd_mbab", "pal"),
+                                    ("prdn_u", "prdn_u0y prdn_ua", "nal"), ("prdn_z", "prdn_z0y prdn_za", "nal")):
+        (args.out / f"{alias}.{extension}").write_text(
             f"#\n# Alias file of line DBID, pssmread\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
             f"DBLIST {names}\n")
 

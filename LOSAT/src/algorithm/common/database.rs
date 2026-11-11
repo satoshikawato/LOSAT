@@ -3728,13 +3728,20 @@ pub(crate) fn check_prefetched_parsed(
 // Std-seg) asks the handle for the length; a null handle throws, which the prefetch catches with
 // `Error pre-fetching sequence data` (probe of line DBID P3: `lcl|777` before `gi|777` in
 // `ids/nrefuse_v5`, TBLASTX). The protein side of TBLASTN and BLASTX has no strand.
+// Where the data loader reads a blob for the Seq-align id, the scope's handle is that blob's
+// Bioseq or none, whatever else holds the id: `gi|777` of `lcl|777 ^A gi|777` warns in every run of
+// review 2 of line DBID pssmread (`nunf_ah_a nunf_ah_c8`, `nx_unf_0y_4 nu_a_4`, `nz_unf_0y
+// nz_unf_a`: BLASTN's three tasks and TBLASTX, versions 4 and 5) though another sequence holds it.
+// Where it reads none, a Bioseq that the scope holds from an earlier read can stand for it: for
+// `gb|AAA00001.1|` after `lcl|AAA00001.1` with `gb|ZZZ00001.1| ^A emb|AAA00001.1|` also held
+// (`nah4`), NCBI warns in some runs and not in others of the same database.
 /// Whether NCBI's prefetch gets no Bioseq of the database sequence `ordinal` with parsed Seq-ids
 /// `subject` by its Seq-align id (a null handle of `GetBioseqHandles`, [`scope_bioseq`]): `Err`
-/// with the reason of LOSAT's refusal where that depends on what the scope read before (another
-/// holder of the id, [`ScopeBioseq::instead`], beside a null handle) or where `GetBioseq` throws
-/// (NCBI's prefetch stops with the `CSeqDBException`). Where the batch has a Seq-align of it on
-/// the query's minus strand and the subject's plus strand, a null handle fails NCBI's prefetch
-/// ([`batch_prefetch`]; review 2 of line DBID pssmread, H5).
+/// with the reason of LOSAT's refusal where that depends on what the scope read before (the data
+/// loader reads no blob for the id and another sequence holds it, [`ScopeBioseq::instead`]) or
+/// where `GetBioseq` throws (NCBI's prefetch stops with the `CSeqDBException`). Where the batch has
+/// a Seq-align of it on the query's minus strand and the subject's plus strand, a null handle
+/// fails NCBI's prefetch ([`batch_prefetch`]; review 2 of line DBID pssmread, H5).
 fn prefetch_gets_no_bioseq(
     db: &SeqDb,
     ordinal: u32,
@@ -3750,7 +3757,7 @@ fn prefetch_gets_no_bioseq(
         )));
     }
     match read.instead {
-        Some(holder) if !read.bioseq => Ok(Err(format!(
+        Some(holder) if read.blob.is_none() => Ok(Err(format!(
             "has the Seq-align id {}, by which NCBI BLAST+'s scope gets no sequence unless it read database sequence {holder}, which also holds that id, before: NCBI BLAST+ 2.17.0's prefetch of a minus-strand alignment then writes Error pre-fetching sequence data or not, as its reads decide",
             id()
         ))),
@@ -3793,7 +3800,9 @@ pub(crate) struct ScopeBioseq {
     pub(crate) throws: bool,
     /// Another sequence, by ordinal id, that holds an id the scope takes for the Seq-align id
     /// besides `blob` (`ParsedSubject::other_holder`): where the scope holds its Bioseq from an
-    /// earlier read, it gets that one instead.
+    /// earlier read, it can get that one instead (psiblast's PSSM refuses every such read,
+    /// `ParsedSubject::pssm_read`; the prefetch's handle where `blob` is none,
+    /// `prefetch_gets_no_bioseq`).
     pub(crate) instead: Option<u32>,
 }
 

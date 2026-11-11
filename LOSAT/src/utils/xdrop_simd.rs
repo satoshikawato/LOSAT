@@ -1242,7 +1242,14 @@ impl XTrace {
         unsafe {
             let p = self.wp.add(trace_bytes(nib, cells));
             debug_assert!(p as usize <= self.wend as usize);
-            let p = x_put(x_put(p, cells), zz);
+            // both numbers below 128 (one byte each, the usual band): one test, one store
+            let p = if (cells | zz) < 0x80 {
+                (p as *mut u16)
+                    .write_unaligned(u16::from_le_bytes([0x80 | cells as u8, 0x80 | zz as u8]));
+                p.add(2)
+            } else {
+                x_put(x_put(p, cells), zz)
+            };
             self.wp = p;
             p
         }
@@ -1286,8 +1293,17 @@ impl XTrace {
     unsafe fn x_rec(end: *const u8) -> (usize, usize, *const u8) {
         // SAFETY: the caller's: the two numbers of the record end at `end`.
         unsafe {
-            let (zz, p) = x_get_back(end);
-            let (cells, p) = x_get_back(p);
+            // two marked bytes: both numbers below 128 (a record ends with the last byte of its
+            // step, marked only when the step took one byte, and the byte before it is then the
+            // last of the cells, marked only when they took one byte)
+            let [c, z] = (end.sub(2) as *const u16).read_unaligned().to_le_bytes();
+            let (zz, cells, p) = if c & z & 0x80 != 0 {
+                ((z & 0x7f) as usize, (c & 0x7f) as usize, end.sub(2))
+            } else {
+                let (zz, p) = x_get_back(end);
+                let (cells, p) = x_get_back(p);
+                (zz, cells, p)
+            };
             let step = (zz >> 1) ^ (zz & 1).wrapping_neg();
             (step, cells, p)
         }

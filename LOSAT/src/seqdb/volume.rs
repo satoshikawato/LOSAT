@@ -67,16 +67,9 @@ impl Volume {
         Self::open_as(base, seqtype, mode)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:90, 104-109
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:90
     // ```c++
     //       m_HaveColumns  (false),
-    // ...
-    //     m_Idx.Reset(new CSeqDBIdxFile(atlas, name, prot_nucl));
-    //
-    //     m_VolEnd = m_VolStart + m_Idx->GetNumOIDs();
-    //
-    //     // To allow for empty volumes, we must tolerate the absence of all
-    //     // files other than the index file.
     // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3311-3318
     // ```c++
@@ -89,15 +82,18 @@ impl Volume {
     //         x_OpenAllColumns(locked);
     //     }
     // ```
-    // Opening a volume reads its index file only. Its column files (`.?Xa` index, `.?Xb` /
-    // `.?Xc` data: the masks of `makeblastdb -mask_data`, user columns) are opened by
-    // `x_OpenAllColumns`, which only `GetColumnBlob`, `GetColumnMetaData`, `ListColumns` and
-    // `GetColumnId` call (seqdbvol.cpp:3282-3283, 3300-3301, 3316-3317, 3399-3400). A search calls
-    // them only for the masking algorithm of `-db_soft_mask` or `-db_hard_mask` (blast_args.cpp:
-    // 2519-2522; without them `GetFilteringAlgorithm` is -1, uniform_search.cpp:198, 224, 303-308;
-    // seqsrc_seqdb.cpp:318-320, 727-729; seqinfosrc_seqdb.cpp:113-123; align_format_util.cpp:
-    // 396-403), options that LOSAT refuses. So a search reads no column file, whatever the files
-    // hold, and `losat blastdbcmd` opens them on first use ([`Volume::columns`]).
+    // Opening a volume reads its index file only (seqdbvol.cpp:104-109, above `Volume::open`). Its
+    // column files (`.?Xa` index, `.?Xb` / `.?Xc` data: the masks of `makeblastdb -mask_data`,
+    // user columns) are opened by `x_OpenAllColumns`, which only `GetColumnBlob`,
+    // `GetColumnMetaData`, `ListColumns` and `GetColumnId` call (seqdbvol.cpp:3282-3283,
+    // 3300-3301, 3316-3317, 3399-3400). A search calls them only for a masking algorithm that
+    // `-db_soft_mask` or `-db_hard_mask` names (blast_args.cpp:2519-2522), or an imported search
+    // strategy (`-import_search_strategy`, blast_app_util.cpp:498-511; blast_formatter.cpp:370
+    // likewise); without one `GetFilteringAlgorithm` is -1 (uniform_search.cpp:198, 225,
+    // 303-308; seqsrc_seqdb.cpp:318-320, 727-729; seqinfosrc_seqdb.cpp:113-123;
+    // align_format_util.cpp:396-403). LOSAT refuses all three options and has no
+    // blast_formatter, so a search reads no column file, whatever the files hold, and `losat
+    // blastdbcmd` opens them on first use ([`Volume::columns`]).
     /// `open` with the index read as `mode` says.
     pub(super) fn open_as(
         base: &Path,

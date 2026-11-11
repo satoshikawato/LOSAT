@@ -43,8 +43,9 @@
   `.gz` as makeblastdb's decompressor reads it, where a gzip trailer whose CRC-32 or length is
   wrong, or that is cut short, stopped the build; on 2026-11-11 line SW (SW8 follow-up 2) searched
   a volume with column files, the masks of `makeblastdb -mask_data` or a user column, damaged
-  ones included, without reading them, as NCBI's searches do without `-db_soft_mask` and
-  `-db_hard_mask`, which LOSAT still refuses; the reader of stage DB-1 refused such a volume)
+  ones included, without reading them, as NCBI's searches do without a database mask named by
+  `-db_soft_mask`, `-db_hard_mask` or an imported search strategy, all three of which LOSAT still
+  refuses; the reader of stage DB-1 refused such a volume)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -177,7 +178,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | they replace the values behind the statistics (second step). `NSEQ` and `LENGTH` equal to those sums, as `blastdb_aliastool -dblist` writes them, change nothing in NCBI and are read (since stage DB-3) |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path) |
-| Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without `-db_soft_mask` or `-db_hard_mask` (which LOSAT refuses), so LOSAT searches the volume without reading them, whatever they hold |
+| Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`; LOSAT refuses all three), so LOSAT searches the volume without reading them, whatever they hold |
 
 Two errors are NCBI's own and are reproduced: volumes of version 4 and of version 5 in one
 database, and a version 5 volume whose LMDB file is missing.
@@ -185,7 +186,8 @@ database, and a version 5 volume whose LMDB file is missing.
 Left unread without an error: the id and taxonomy files of a version 5 database, which serve
 lookups by id or taxonomy only, the LMDB file's volume list, which NCBI compares with the
 volumes, and (since 2026-11-11) the column files of a volume, which NCBI's searches read only for
-the database masks of `-db_soft_mask` and `-db_hard_mask`. The LMDB file is opened when the
+a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (LOSAT
+refuses all three). The LMDB file is opened when the
 database is opened. Since version 1.3 a search looks
 the Seq-align id of a reported sequence with parsed Seq-ids up in the LMDB file or the ISAM
 files, as NCBI's formatters do. Since stage DB-3 a `-db`

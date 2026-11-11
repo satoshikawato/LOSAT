@@ -14,8 +14,9 @@
 //!
 //! Not read: the LMDB file and the id and taxonomy files of version 5, the
 //! ISAM files of `-parse_seqids`, column files (mask data and user columns: the
-//! mask reader of `losat blastdbcmd` opens them on first use, see [`mask`]; a
-//! search never does, as in NCBI), group alias files, and alias keys that filter
+//! mask reader of `losat blastdbcmd` opens them on first use, see [`mask`]; LOSAT's
+//! searches never do, as NCBI's do not without a database mask, whose options
+//! LOSAT refuses), group alias files, and alias keys that filter
 //! sequences or replace the totals. A database
 //! that needs one of these to give NCBI's result is rejected with
 //! [`SeqDbError::Unsupported`]; the version 5 files that only serve lookups
@@ -605,8 +606,8 @@ impl SeqDb {
     ///
     /// Column files (the mask data of `makeblastdb -mask_data`, user columns) are not read
     /// when the database is opened: [`SeqDb::mask_algorithms`] and [`SeqDb::mask_ranges`]
-    /// (`losat blastdbcmd`) open them on first use, as NCBI does, and a search never asks
-    /// for them (`Volume::open_as`).
+    /// (`losat blastdbcmd`) open them on first use, as NCBI does, and LOSAT's searches never
+    /// ask for them (`Volume::open_as`).
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
         let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
         db.search_path = Some(path.clone());

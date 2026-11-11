@@ -4,10 +4,11 @@
 Usage: make_coldb.py NCBI_BIN [OUT]   (NCBI_BIN holds NCBI BLAST+ 2.17.0's makeblastdb, segmasker, dustmasker and
 windowmasker; OUT defaults to coldb/ next to this script)
 
-A column of a volume is the files `.?Xa` (index), `.?Xb` (big-endian data) and `.?Xc` (little-endian data) for a letter X;
-`makeblastdb -mask_data` writes the masks as the column `BlastDb/MaskData` (`.paa .pab .pac`, `.naa .nab .nac`). NCBI's
-search programs open a volume's columns only through `CSeqDBVol::x_OpenAllColumns`, which runs for a masking algorithm
-of `-db_soft_mask` or `-db_hard_mask` alone, so a search without these options reads none of these files.
+A column of a volume is the files `.?Xa` (index), `.?Xb` (big-endian data) and `.?Xc` (little-endian data) for a letter
+X; `makeblastdb -mask_data` writes the masks as the column `BlastDb/MaskData` (`.paa .pab .pac`, `.naa .nab .nac`).
+NCBI's search programs open a volume's columns only through `CSeqDBVol::x_OpenAllColumns`, which runs only for a masking
+algorithm named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`), so a
+search without one reads none of these files.
 
 The records and taxids are those of taxfilter/tfp.faa (23 protein globins), tfp.map, taxfilter/tfn.fna (16 globin cDNAs)
 and tfn.map:
@@ -23,6 +24,10 @@ and tfn.map:
 
 `.pjs` and `.njs` (the build's paths and dates; no search reads them) are dropped. A rebuild changes the dates stored in
 the index and column files.
+
+Not built here, and kept as they are by a rebuild: `coldb/ucol/user-column-db.*`, a copy of NCBI's unit-test database
+`c++/src/algo/blast/unit_tests/seqdb_reader/data/user-column-db` (598d8ae6), and its queries `coldb/uq.faa`
+(calfumirin-1) and `coldb/uq.fna` (its back-translation by hand, one fixed codon per amino acid).
 """
 import os
 import shutil

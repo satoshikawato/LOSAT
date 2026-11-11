@@ -8,7 +8,8 @@
 //! descriptions; the blob of a sequence holds, per algorithm, a list of ranges.
 //!
 //! The reader of `losat blastdbcmd`; LOSAT's searches do not call it, as NCBI's searches do not
-//! without `-db_soft_mask` or `-db_hard_mask`. The columns are opened on first use.
+//! without a masking algorithm named by `-db_soft_mask`, `-db_hard_mask` or an imported search
+//! strategy (all three refused by LOSAT). The columns are opened on first use.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

@@ -1034,11 +1034,12 @@ file's absolute path; that case is `a_title_in_the_batch_that_a_missing_header_f
 Rows `db.col.*` search databases whose volumes have column files: a column is the files `.?Xa` (index), `.?Xb`
 (big-endian data) and `.?Xc` (little-endian data) for a letter X, and `makeblastdb -mask_data` writes the masks as the
 column `BlastDb/MaskData` (`.paa .pab .pac`, `.naa .nab .nac`). NCBI's searches open a volume's columns only through
-`CSeqDBVol::x_OpenAllColumns`, which runs for the masking algorithm of `-db_soft_mask` or `-db_hard_mask` alone
-(LOSAT refuses both: rows `db.col.rej.*`), so a search without them writes the bytes of the same database without its
-columns, whatever the column files hold. `coldb/` holds what `make_coldb.py NCBI_BIN` builds (makeblastdb, segmasker,
-dustmasker and windowmasker 2.17.0; the records and taxids of `taxfilter/tfp.faa`, `tfp.map`, `tfn.fna` and `tfn.map`;
-`.pjs` and `.njs` dropped):
+`CSeqDBVol::x_OpenAllColumns`, which runs only for a masking algorithm named by `-db_soft_mask`, `-db_hard_mask` or an
+imported search strategy (`-import_search_strategy`; LOSAT refuses all three: rows `db.col.rej.*` for the first two),
+so a search without one writes the bytes of the same database without its columns, whatever the column files hold.
+`coldb/` holds what `make_coldb.py NCBI_BIN` builds (makeblastdb, segmasker, dustmasker and windowmasker 2.17.0; the
+records and taxids of `taxfilter/tfp.faa`, `tfp.map`, `tfn.fna` and `tfn.map`; `.pjs` and `.njs` dropped), and the
+files below that it does not build:
 
 - `p5m`: version 5 protein, `-parse_seqids`, taxid map, the seg masks of `segmasker -parse_seqids` (algorithm 21).
 - `p4m`: version 4 protein without `-parse_seqids`, the seg masks of `segmasker`.
@@ -1049,11 +1050,12 @@ dustmasker and windowmasker 2.17.0; the records and taxids of `taxfilter/tfp.faa
   column is damaged (`make_coldb.py` `DAMAGE`): the index cut, junk, empty or of format version 2, the data files cut or
   junk, one data file or both missing, the index missing, the column of a database of 6 sequences, the column twice under
   two letters. NCBI's column reader stops on most of them (`blastdbcmd -info`, or a search with `-db_soft_mask`); its
-  searches without the mask options do not read them.
-- `ucol/user-column-db.*`: every file of NCBI's `c++/src/algo/blast/unit_tests/seqdb_reader/data/user-column-db`
-  (598d8ae6; six proteins with parsed Seq-ids and the user column `comedy`, its big-endian data file `.pab` alone; NCBI's
+  searches without a database mask do not read them.
+- `ucol/user-column-db.*` (not built by the script): every file of NCBI's
+  `c++/src/algo/blast/unit_tests/seqdb_reader/data/user-column-db`, copied as it is (598d8ae6; six proteins with parsed Seq-ids and the user column `comedy`, its big-endian data file `.pab` alone; NCBI's
   tools cannot write a user column). `tests/seqdb/db` holds the same database without its ISAM files, on which NCBI's
   outfmt 6 and 7 stop with a null pointer exception, columns or not. `uq.faa` (calfumirin-1, XP_642131.1) and `uq.fna`
-  (its back-translation, one codon per amino acid) are the queries of its rows.
+  (its back-translation by hand, one fixed codon per amino acid; neither built by the script) are the queries of its
+  rows.
 
 The other queries are `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX).

@@ -769,23 +769,13 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
     // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
     // A hit list size whose preliminary size is not positive crashes NCBI.
-    if crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
         args.hitlist_size,
+        args.max_target_seqs_given,
         compo_adjust_mode.is_enabled(),
         true,
-    ) < 1
-    {
-        if args.max_target_seqs_given {
-            anyhow::bail!(
-                "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's TBLASTN",
-                args.hitlist_size
-            );
-        }
-        anyhow::bail!(
-            "a hit list size of {} (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's TBLASTN",
-            args.hitlist_size
-        );
-    }
+        "TBLASTN",
+    )?;
     let matrix: Option<ScoringMatrix> = args.matrix_name.parse().ok();
     let threshold = args.threshold;
     let window = args.window_size;

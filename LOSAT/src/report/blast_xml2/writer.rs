@@ -439,7 +439,7 @@ impl Xml2Writer<NoSideFiles> {
     /// way; a run uses `for_run` or `with_document`.
     #[cfg(test)]
     pub fn new(kind: Xml2Kind, params: Xml2Run) -> Self {
-        let delayed = matches!(params.target, Xml2Target::Subjects(_));
+        let delayed = params.target.holds_back();
         Self::with_document(Xml2Document::new(kind, delayed), params)
     }
 }
@@ -454,7 +454,7 @@ impl Xml2Writer<RunSideFiles> {
         out: Option<&std::path::Path>,
         sink: Option<&super::SideFileSink>,
     ) -> Self {
-        let delayed = matches!(params.target, Xml2Target::Subjects(_));
+        let delayed = params.target.holds_back();
         Self::with_document(Xml2Document::for_run(kind, delayed, out, sink), params)
     }
 }
@@ -521,5 +521,13 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.document.epilog(out)
+    }
+
+    fn holds_back(&self) -> bool {
+        self.document.holds_back()
+    }
+
+    fn unwritten(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        self.document.unwritten(out)
     }
 }

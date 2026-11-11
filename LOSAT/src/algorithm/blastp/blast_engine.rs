@@ -2352,23 +2352,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
     // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
     // A hit list size whose preliminary size is not positive crashes NCBI.
-    if crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
         args.max_target_seqs,
+        args.max_target_seqs_given,
         args.comp_based_stats.is_enabled(),
         true,
-    ) < 1
-    {
-        if args.max_target_seqs_given {
-            bail!(
-                "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}",
-                args.max_target_seqs
-            );
-        }
-        bail!(
-            "a hit list size of {} (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's {program}",
-            args.max_target_seqs
-        );
-    }
+        program,
+    )?;
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:113
     // ```c
     // const string kArgUseSWTraceback(\"use_sw_tback\");
@@ -6562,6 +6552,7 @@ fn search(
             x_prolog: true,
             x_queries_before: 0,
             x_xml2_carry: None,
+            last_call: true,
             psi_round: None,
             titles_may_refuse,
         };
@@ -6909,6 +6900,7 @@ fn search(
                                 x_xml2_carry: x_kinds
                                     .contains(&XBlockReport::Xml2)
                                     .then_some(&x_xml2_carry),
+                                last_call: index + 1 == blocks.len(),
                                 psi_round: None,
                                 titles_may_refuse,
                             },
@@ -7901,6 +7893,11 @@ struct BlastpReports<'a> {
     /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
     /// report; `None` outside the block search).
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
+    /// Whether this call is the run's last report call, so that without the epilog the run stops
+    /// after it (`blast_xml::BlastpXml::stops`). Not a block of the block search before the last
+    /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (which
+    /// writes no XML document, `psiblast::args::PsiblastArgs::check_outfmt`).
+    last_call: bool,
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
     psi_round: Option<&'a crate::algorithm::psiblast::rounds::PsiRoundIo>,
@@ -8100,6 +8097,7 @@ fn search_split_query_batches(
                     x_prolog,
                     x_queries_before: 0,
                     x_xml2_carry: None,
+                    last_call: false,
                     psi_round: None,
                     // The call of the whole query writes the archive.
                     titles_may_refuse: false,
@@ -11048,6 +11046,31 @@ fn run_resolved_in_pool(
         &mut x_compact_hit_lists,
         reports.x_prolog,
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
+    // ```c
+    //     if((ADAPTIVE_CBS_ENV != NULL) && (ext_options->compositionBasedStats) && (hit_options->hitlist_size < 1000)) {
+    //     	BlastHSPCBSStreamClose(hsp_stream, hit_options->hitlist_size);
+    //
+    //     }
+    // ```
+    // `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
+    // (`core::blast_hspstream`) before the subjects of the lists are read. RPSBLAST's engine
+    // trims each volume's lists itself (`rps_search::engine`); PSIBLAST's traceback size is its
+    // preliminary size, 1500 or more here, so it never trims.
+    if args.rps_search.is_none()
+        && crate::core::blast_hspstream::adaptive_cbs_close(
+            args.comp_based_stats.is_enabled(),
+            args.traceback_hitlist_size(),
+        )
+    {
+        let hitlist_size = args.traceback_hitlist_size();
+        for hit_list in preliminary_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+    }
 
     // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
     // and stand for the subject set in the redo; the hit lists name them by their rank
@@ -13194,6 +13217,9 @@ fn run_resolved_in_pool(
             observer.query_stats(q_idx, stats);
         }
     }
+    // Every structured format of the call is XML2 or JSON: none writes the report that a
+    // `-subject` document holds back (`blast_xml::write_blastp_xml`).
+    let xml_only_xml2 = !format_plans.contains(&BlastpReport::Xml);
     for (format_index, (format, &outfmt)) in outputs
         .formats
         .iter_mut()
@@ -13539,6 +13565,8 @@ fn run_resolved_in_pool(
                         .collect(),
                     program: "BLASTP",
                     epilog: reports.epilog,
+                    stops: !reports.epilog && reports.last_call,
+                    only_xml2: xml_only_xml2,
                 };
                 // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
                 // reads their letters query by query and formats them serially, so a window of

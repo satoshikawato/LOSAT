@@ -293,9 +293,12 @@ pub struct BlastnArgs {
     //             "MegaBLAST database index name (deprecated; use only for old style indices)",
     //             CArgDescriptions::eString );
     // ```
-    /// `-use_index false` (NCBI's default) is accepted and changes nothing; `true` is refused
-    /// by the value parser: LOSAT has no MegaBLAST database index. `-index_name` stays unported.
-    #[arg(long, value_name = "boolean", value_parser = crate::blastinput::value_parsers::blastn_use_index, help = "Use MegaBLAST database index (only false is supported) [default: false]")]
+    /// `-use_index` as NCBI's handler reads it (`blast_engine::run` `megablast_index`): ignored
+    /// with `-subject` and for a task other than megablast; with `-db` and megablast, NCBI tries
+    /// the database's index, warns that it has none and searches without it, which LOSAT does,
+    /// and LOSAT refuses a database that has an index (it has no indexed search). `-index_name`
+    /// stays unported.
+    #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index (a database that has one is not supported) [default: false]")]
     pub use_index: Option<bool>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:142-146
     // ```c
@@ -793,6 +796,41 @@ impl BlastnArgs {
     /// ```
     pub fn database_name(&self) -> Option<&str> {
         self.db.as_deref().map(crate::seqdb::db_argument_name)
+    }
+
+    /// The `-db` value as given when NCBI's handler asks for the database's MegaBLAST index:
+    /// `-use_index true` with a database and task megablast (with `-subject` or another task
+    /// NCBI ignores `-use_index`; `blast_engine::run` `megablast_index`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3413
+    /// ```c++
+    ///     if( args.Exist( kArgUseIndex ) &&
+    ///         !(args.Exist( kArgSubject ) && args[kArgSubject])) {
+    ///         bool use_index   = true;
+    ///         bool force_index = false;
+    ///         bool old_style_index = false;
+    ///         if( args[kArgUseIndex] ) {
+    ///             if( args[kArgUseIndex].AsBoolean() ) force_index = true;
+    ///             else use_index = false;
+    ///         }
+    ///         if( args.Exist( kTask ) && args[kTask] &&
+    ///                 args[kTask].AsString() != "megablast" ) {
+    ///             use_index = false;
+    ///         }
+    ///         if( use_index ) {
+    ///             ...
+    ///             else if( args.Exist( kArgDb ) && args[kArgDb] ) {
+    ///                 index_name = args[kArgDb].AsString();
+    ///             }
+    /// ...
+    ///             opts.SetUseIndex( true, index_name, force_index, old_style_index );
+    /// ```
+    pub(crate) fn megablast_index_name(&self) -> Option<&str> {
+        if self.use_index == Some(true) && self.task == "megablast" {
+            self.db.as_deref()
+        } else {
+            None
+        }
     }
 
     /// The database length of the options: the `-dbsize` value, 0 without it.

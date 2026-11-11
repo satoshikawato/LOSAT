@@ -61,7 +61,9 @@ fn map_keys_are_makeblastdb_s() {
 /// A key of more digits than an Int8 holds ends makeblastdb (x_taxmap_gibig, exit 255).
 #[test]
 fn a_gi_key_past_int8_is_an_exception() {
-    let error = accession_to_key(b"99999999999999999999", &mut |_| {}).unwrap_err();
+    let error = accession_to_key(b"99999999999999999999", &mut |_| {})
+        .unwrap_err()
+        .what();
     assert!(
         error.ends_with(
             "line 852: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot \
@@ -106,7 +108,7 @@ fn taxids_convert_as_ncbi_s_string_to_int() {
             "Cannot convert string '3000000000' to int, overflow (m_Pos = 0)",
         ),
     ] {
-        let error = string_to_taxid(text).unwrap_err();
+        let error = string_to_taxid(text).unwrap_err().what();
         assert!(
             error.ends_with(&format!(
                 "line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - \

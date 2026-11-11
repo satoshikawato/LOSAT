@@ -626,6 +626,51 @@ impl HitList {
             heapified: false,
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3331-3337
+    // ```c++
+    // Int2 Blast_HitListSortByEvalue(BlastHitList* hit_list)
+    // {
+    //       if (hit_list && hit_list->hsplist_count > 1) {
+    //          qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+    //                   sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    //       }
+    //       s_BlastHitListPurge(hit_list);
+    //    return 0;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857
+    // (`core::blast_hspstream`)
+    // ```c++
+    //     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
+    //         	  int max_index = hit_list->hsplist_count -1;
+    // ...
+    //         	  Blast_HitListSortByEvalue(hit_list);
+    // ...
+    //         			  s_TrimHitList(hit_list, i);
+    // ```
+    /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`):
+    /// sorted by E-value (the order is total, `compare_list`; the lists left without HSPs, last,
+    /// removed) and cut where the E-values pass the limit, when it holds enough lists.
+    fn cbs_close_trim(&mut self, hitlist_size: usize) {
+        use crate::core::blast_hspstream::{cbs_trim_count, cbs_trim_sorts};
+        let count = self.lists.len();
+        if !cbs_trim_sorts(count, hitlist_size) {
+            return;
+        }
+        self.lists.sort_unstable_by(compare_list);
+        let sorted = self
+            .lists
+            .iter()
+            .position(|list| list.hsps.is_empty())
+            .unwrap_or(count);
+        self.lists.truncate(sorted);
+        self.heapified = false;
+        let lists = &self.lists;
+        if let Some(keep) = cbs_trim_count(count, sorted, hitlist_size, |i| lists[i].best_evalue) {
+            self.lists.truncate(keep);
+        }
+    }
     fn down(&mut self, mut i: usize) {
         while i * 2 + 1 < self.lists.len() {
             let l = i * 2 + 1;
@@ -769,22 +814,17 @@ impl HitList {
 //     }
 //     return prelim_hitlist_size;
 // ```
+/// The size in NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`, with `ADAPTIVE_CBS`):
+/// a `-max_target_seqs` from 2^31 - 24 wraps to 2..48 with composition-based statistics, from
+/// 2^30 to 10 without; a size that is not positive (NCBI crashes) was refused with the options
+/// (`args.rs`).
 pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
-    let n = o.hitlist_size as usize;
-    if o.composition > 0 {
-        if n <= 500 {
-            1050
-        } else {
-            // No NCBI counterpart: a hit list size of 2^31 - 25 or more (`-max_target_seqs` up to
-            // 2^31 - 1) does not wrap where `usize` has 32 bits (LOSAT Web's Wasm), so the size
-            // stays above any subject count there as on the command line.
-            n.saturating_mul(2).saturating_add(50)
-        }
-    } else if o.gapped {
-        (2 * n).max(10).min(n + 50)
-    } else {
-        n
-    }
+    let size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        o.hitlist_size as usize,
+        o.composition > 0,
+        o.gapped,
+    );
+    usize::try_from(size).unwrap_or(0)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2538-2588
@@ -1558,6 +1598,42 @@ impl HspStream {
     //
     //        BlastHitList *hitlist = results->hitlist_array[i];
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:816-864
+    // ```c++
+    // void BlastHSPCBSStreamClose(BlastHSPStream* hsp_stream, int hitlist_size)
+    // {
+    //    BlastHitList* hit_list;
+    //    BlastHSPResults * results;
+    //    int index =0;
+    //
+    //    if (!hsp_stream || !hsp_stream->results || hsp_stream->results_sorted)
+    //       return;
+    //
+    //    s_FinalizeWriter(hsp_stream);
+    //
+    //    results = hsp_stream->results;
+    //
+    //    for (index = 0; index < results->num_queries; index++) {
+    //       hit_list = results->hitlist_array[index];
+    //       if (hit_list) {
+    // ...
+    //    }
+    //
+    //    BlastHSPStreamClose(hsp_stream);
+    // ```
+    /// The close with `ADAPTIVE_CBS` (`core::blast_hspstream::adaptive_cbs_close`): each query's
+    /// hit list trimmed after the writer's final step, then `close_observed`.
+    pub fn close_cbs_observed(&mut self, trace: &mut dyn ResultsObserver, hitlist_size: usize) {
+        if self.sorted.is_some() {
+            return;
+        }
+        self.finalize_observed(trace);
+        for query in &mut self.queries {
+            query.cbs_close_trim(hitlist_size);
+        }
+        self.close_observed(trace);
+    }
+
     pub fn close_observed(&mut self, trace: &mut dyn ResultsObserver) {
         if self.sorted.is_some() {
             return;

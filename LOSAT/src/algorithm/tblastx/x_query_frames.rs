@@ -265,7 +265,7 @@ pub(super) fn mask(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker, pool: 
 // ```
 /// As `mask`, for `-soft_masking true` (`mask_at_hash`): the frames get their SEG intervals in
 /// `seg_masks` and keep their letters. Cold and out of line (no NCBI counterpart: code placement
-/// only), so that the caller, `run_impl::search_query_batch`, keeps the default path's code.
+/// only), so that the caller, `batch_setup::query_frames`, keeps the default path's code.
 #[cold]
 #[inline(never)]
 pub(super) fn mask_soft(
@@ -298,7 +298,7 @@ pub(super) fn mask_soft(
 /// its query's lower-case runs in `seg_masks`, combined as NCBI combines them. Without `soft` the
 /// frame keeps an unmasked copy and its masked letters become X (`mask_frame`). `query_frames[i]`
 /// are the frames of `records[i]`. Cold and out of line (no NCBI counterpart: code placement only),
-/// so that the caller, `run_impl::search_query_batch`, keeps the default path's code.
+/// so that the caller, `batch_setup::query_frames`, keeps the default path's code.
 #[cold]
 #[inline(never)]
 pub(super) fn mask_lcase(

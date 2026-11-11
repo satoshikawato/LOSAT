@@ -1,32 +1,249 @@
 //! The preliminary HSP list of one blastn subject chunk, made from the chunk's initial (ungapped)
-//! hits: the loop of the gapped preliminary search over one list of them (`gapped_score_list`),
-//! each hit tested against the interval tree, extended score-only and, at or above its context's
-//! hit-saving cutoff, put into the tree and the list; and that extension as a function of the hit
-//! alone (`x_prelim_extend`), which the look-ahead helpers compute ahead of the loop.
+//! hits once its word finder is done. A gapped search (`gapped_hsp_list`) sorts the hits by score,
+//! or groups them by query (`sort_ungapped_hits_for_gapped`), runs the loop of the gapped
+//! preliminary search over one list of them (`gapped_score_list`: each hit tested against the
+//! interval tree, extended score-only and, at or above its context's hit-saving cutoff, put into
+//! the tree and the list) per query on the pool (LOSAT_X_QGROUPPAR) or over the chunk's list, then
+//! purges and sorts the list and moves it to the subject's coordinates. That extension as a
+//! function of the hit alone (`x_prelim_extend`) is what the look-ahead helpers compute ahead of
+//! the loop. An ungapped search (`ungapped_hsp_list`) makes the list from the sorted hits.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-4114
-//! (`BLAST_GetGappedScore`), of which :3850 is the loop on the initial hits
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
+//! `s_BlastSearchEngineCore` after the word finder: `GetGappedScore`, which is
+//! `BLAST_GetGappedScore`, c++/src/algo/blast/core/blast_gapalign.c:3664-4114, with its loop on
+//! the initial hits at :3850; the purge and the sort; or `BLAST_GetUngappedHSPList`,
+//! blast_gapalign.c:4719-4775; the offsets)
 //! ```c
-//! Int2 BLAST_GetGappedScore (EBlastProgramType program_number,
+//!         if (score_options->gapped_calculation) {
 //! ...
-//!    for (index=0; index<init_hitlist->total; index++)
+//!         if (aux_struct->GetGappedScore) {
+//!             status = aux_struct->GetGappedScore(program_number, query,
+//! ...
+//!             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+//! ...
+//!         Blast_HSPListSortByScore(hsp_list);
+//! ...
+//!         } else {
+//!             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+//! ...
+//!         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
 //! ```
 //!
 //! This module is a child of `run` for the types it keeps private (`UngappedHit`, `PrelimHit`,
-//! `SubjectChunk`, `QueryContext`, `XAheadScratch`). `gapped_score_list` is the body of what was
-//! the closure `x_prelim_list` of `search_query_batch`'s `collect_prelim_hits_for_chunk`, and
-//! `x_prelim_extend` that of the closure of the same name. The values they read are the fields of
-//! `GappedPrelim`; what the loop works on is `GappedListState`. The query group tasks of
+//! `SubjectChunk`, `QueryContext`, `XAheadScratch`, `BlastnTiming`, the sorts). Its functions are
+//! the code of `search_query_batch`'s `collect_prelim_hits_for_chunk` after the scan loop:
+//! `gapped_score_list` and `x_prelim_extend` the bodies of what were the closures `x_prelim_list`
+//! and `x_prelim_extend`, and `ungapped_hsp_list`, `sort_ungapped_hits_for_gapped` and
+//! `gapped_hsp_list` the code around them. The values they read are the fields of `GappedPrelim`
+//! and `GappedDrive`; what the loop works on is `GappedListState`. The query group tasks of
 //! `x_qgroup_par` run `gapped_score_list`, and the look-ahead helpers `x_prelim_extend`, on the
 //! threads of the pool, so what they read is `Sync`.
 
 use super::x_greedy_prelim::XPrelimSubject;
 use super::{
-    blastn_trace, extend_gapped_heuristic_with_scratch, BlastIntervalTree, GapAlignScratch,
+    blastn_trace, extend_gapped_heuristic_with_scratch, purge_prelim_hits_with_common_endpoints,
+    score_compare_prelim_hits, score_compare_ungapped_hits, sort_prelim_hits_by_score, x_bn_mapped,
+    x_bn_mapped_reach, x_qgroup_par, BlastIntervalTree, BlastnTiming, FastaRecord, GapAlignScratch,
     GreedyAlignScratch, IndexMethod, PrelimHit, QueryContext, SubjectChunk, TreeHsp, UngappedHit,
-    XAheadScratch, COMPRESSION_RATIO,
+    XAheadScratch, COMPRESSION_RATIO, X_SORT,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
+use crate::utils::threading::SearchPool;
+use std::sync::atomic::AtomicU64;
+
+/// The HSP list of one subject chunk of an ungapped (`-ungapped`) search, made from its initial
+/// hits: the hits sorted by score and counted, then the list in the subject's coordinates, sorted
+/// by score.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503,522-526,560-563
+/// ```c
+///         if (score_options->gapped_calculation) {
+/// ...
+///         if (aux_struct->GetGappedScore) {
+///             status = aux_struct->GetGappedScore(program_number, query,
+///                     query_info,
+///                     subject, gap_align, score_params, ext_params, hit_params,
+///                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
+/// ...
+///         } else {
+///             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+///                     hit_params->options, &hsp_list);
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719,4742,4760-4772
+/// ```c
+/// Int2 BLAST_GetUngappedHSPList(BlastInitHitList* init_hitlist,
+/// ...
+///    for (index = 0; index < init_hitlist->total; ++index) {
+/// ...
+///       Blast_HSPInit(ungapped_data->q_start,
+///                     ungapped_data->length+ungapped_data->q_start,
+///                     ungapped_data->s_start,
+///                     ungapped_data->length+ungapped_data->s_start,
+///                     init_hsp->offsets.qs_offsets.q_off,
+///                     init_hsp->offsets.qs_offsets.s_off,
+///                     context, query_info->contexts[context].frame,
+///                     subject->frame, ungapped_data->score, NULL, &new_hsp);
+///       Blast_HSPListSaveHSP(hsp_list, new_hsp);
+///    }
+///
+///    /* Sort the HSP array by score */
+///    Blast_HSPListSortByScore(hsp_list);
+/// ```
+/// An ungapped (`-ungapped`) search sorts the initial hits by score first, as a gapped
+/// search does (`BlastNaWordFinder` ends with `if (word_params->ungapped_extension)
+/// Blast_InitHitListSortByScore(init_hitlist)`, na_ungapped.c:1691-1692, and
+/// `ungapped_extension` is TRUE for every program but PHI: blast_parameters.c:189-192),
+/// with the same comparator (`score_compare_ungapped_hits` = `score_compare_match`:
+/// score descending, s_start, length descending, the concatenated query's q_start;
+/// stable, as the oracle's glibc qsort). The order of ties (a plus and a minus hit
+/// with the same score and context-relative ranges) then comes out as NCBI's, and
+/// `Blast_HSPListSortByScore` below keeps it. Then the HSP list of the chunk is made
+/// from those hits (no gapped extension), the subject chunk's offset is taken
+/// (blast_engine.c:564-580), and there is no purge of common end points (a gapped
+/// search's step).
+pub(super) fn ungapped_hsp_list(
+    ungapped_hits: &mut [UngappedHit],
+    chunk: &SubjectChunk,
+    good_init_extends: &AtomicU64,
+) -> Vec<PrelimHit> {
+    // The same sort as the gapped search's (`sort_ungapped_hits_for_gapped`, review 2 S5): with
+    // LOSAT_X_BNMAPPED (default ON) the scratch of the stable sort is a mapped buffer, not a plain
+    // `sort_by` scratch of up to 8 MB left in the thread's arena. The comparator and the stability
+    // are the same, so the order is `sort_by`'s. LOSAT_X_QGROUPPAR is not used for an ungapped
+    // search.
+    if x_bn_mapped() {
+        x_bn_mapped_reach(
+            ungapped_hits
+                .len()
+                .saturating_mul(std::mem::size_of::<UngappedHit>()),
+        );
+        crate::utils::x_mapped::x_sort_by_mapped(
+            ungapped_hits,
+            score_compare_ungapped_hits,
+            &X_SORT,
+        )
+    } else {
+        ungapped_hits.sort_by(score_compare_ungapped_hits)
+    }
+    good_init_extends.fetch_add(
+        ungapped_hits.len() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    let mut chunk_prelim_hits: Vec<PrelimHit> = ungapped_hits
+        .iter()
+        .map(|uh| PrelimHit {
+            context_idx: uh.context_idx,
+            query_idx: uh.query_idx,
+            query_frame: uh.query_frame,
+            query_context_offset: uh.query_context_offset,
+            prelim_qs: uh.qs as usize,
+            prelim_qe: uh.qe as usize,
+            prelim_ss: (uh.ss as usize).saturating_add(chunk.offset),
+            prelim_se: (uh.se as usize).saturating_add(chunk.offset),
+            prelim_score: uh.score,
+            seed_qs: uh.seed_q_off as usize,
+            seed_ss: (uh.seed_s_off as usize).saturating_add(chunk.offset),
+            prelim_evalue: 0.0,
+        })
+        .collect();
+    sort_prelim_hits_by_score(&mut chunk_prelim_hits);
+    chunk_prelim_hits
+}
+
+/// The initial hits of one subject chunk of a gapped search, sorted by score for the gapped loop
+/// or grouped by query for its query group tasks, and counted: returns `(x_counts, x_order,
+/// total_ungapped)`, where `x_counts` (the hits of each query) and `x_order` (the order of the
+/// tasks) are `Some` when the loop runs per query (LOSAT_X_QGROUPPAR).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1688-1692
+/// ```c
+///     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
+///                               init_hitlist->total);
+///
+///     if (word_params->ungapped_extension)
+///         Blast_InitHitListSortByScore(init_hitlist);
+/// ```
+/// The end of NCBI's word finder (`BlastNaWordFinder`): the hits counted, then sorted. No NCBI
+/// counterpart for the query groups (scheduling only).
+pub(super) fn sort_ungapped_hits_for_gapped(
+    ungapped_hits: &mut [UngappedHit],
+    x_qgroup_batch: bool,
+    reuse_prelim_hits: bool,
+    queries: &[FastaRecord],
+    good_init_extends: &AtomicU64,
+) -> (Option<Vec<u32>>, Option<Vec<u32>>, usize) {
+    // ============================================================
+    // NCBI ARCHITECTURE: Batch process ungapped hits in score order
+    // ============================================================
+    // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+    // NCBI processes init_hsp_array sorted by score DESCENDING
+    // High-score HSPs are processed first, their GAPPED HSPs added to interval tree
+    // Lower-score HSPs are then checked for containment against these GAPPED HSPs
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:306-310
+    // ```c
+    // void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
+    // {
+    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+    //           sizeof(BlastInitHSP), score_compare_match);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:307-309
+    // ```c
+    // qsort(init_hsp_array, init_hitlist->total,
+    //       sizeof(BlastInitHSP), score_compare_match);
+    // ```
+    // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
+    // compare equal keep the order in which they were saved. `sort_by`
+    // is stable too.
+    // EXPERIMENT (LOSAT_X_QGROUPPAR): with the stage run per query, each query's hits are
+    // taken in the order the seed stage saved them and sorted by the task (the comparator and
+    // the sort are those below, so each query's hits come in the relative order the batch's
+    // sort gives them).
+    let x_counts = (x_qgroup_batch && reuse_prelim_hits).then(|| {
+        x_qgroup_par::counts(ungapped_hits.iter().map(|hit| hit.query_idx), queries.len())
+    });
+    let x_order = x_counts
+        .as_deref()
+        .and_then(|counts| x_qgroup_par::plan(counts, x_qgroup_par::Stage::Prelim));
+    match (&x_order, &x_counts) {
+        (Some(_), Some(counts)) => {
+            x_qgroup_par::group_in_place(ungapped_hits, |hit| hit.query_idx, counts)
+        }
+        // EXPERIMENT (LOSAT_X_BNMAPPED): `x_mapped::x_sort_by_mapped` is a stable sort
+        // with the same comparator, so the order is that of `sort_by`.
+        _ if x_bn_mapped() => {
+            x_bn_mapped_reach(
+                ungapped_hits
+                    .len()
+                    .saturating_mul(std::mem::size_of::<UngappedHit>()),
+            );
+            crate::utils::x_mapped::x_sort_by_mapped(
+                ungapped_hits,
+                score_compare_ungapped_hits,
+                &X_SORT,
+            )
+        }
+        _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
+    }
+
+    let total_ungapped = ungapped_hits.len();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1688-1689
+    // ```c
+    //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
+    //                               init_hitlist->total);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_diagnostics.c:106-112
+    // ```c
+    //    if (!ungapped_stats || total_hits == 0)
+    //       return;
+    //    ...
+    //    ungapped_stats->good_init_extends += saved_hits;
+    // ```
+    good_init_extends.fetch_add(total_ungapped as u64, std::sync::atomic::Ordering::Relaxed);
+    (x_counts, x_order, total_ungapped)
+}
 
 /// What the gapped preliminary loop of one subject chunk (`gapped_score_list`) and one hit's
 /// extension (`x_prelim_extend`) read: the trace and verbose switches, the subject (its index, its
@@ -770,4 +987,241 @@ pub(super) fn gapped_score_list(
     }
 
     (dbg_gapped_calls, dbg_containment_skipped)
+}
+
+/// What the gapped HSP list of one subject chunk (`gapped_hsp_list`) reads besides
+/// `GappedPrelim`: the query groups' counts and order (`sort_ungapped_hits_for_gapped`; `None`
+/// unless the loop runs per query, LOSAT_X_QGROUPPAR), the batch's queries (their number), the
+/// length that bounds a query group task's interval tree (the concatenated queries; the chunk's is
+/// `GappedPrelim::s_len`), the pool, the LOSAT_TIMING counters and the start of the gapped stage's
+/// clock.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+/// ```c
+///       tree = Blast_IntervalTreeInit(0, query->length+1,
+///                                     0, subject->length+1);
+/// ```
+/// The bounds of each query group task's tree are those of the chunk's tree. No NCBI counterpart
+/// for the query groups themselves and the clock (scheduling and diagnostics only).
+pub(super) struct GappedDrive<'d> {
+    /// Borrowed from the caller, which owns them (they are dropped where they were before).
+    pub(super) x_counts: &'d Option<Vec<u32>>,
+    pub(super) x_order: &'d Option<Vec<u32>>,
+    pub(super) queries: &'d [FastaRecord],
+    pub(super) query_concat_length: usize,
+    pub(super) parallel_pool: &'d SearchPool<'d>,
+    /// `LOSAT_TIMING` counters, `None` when timing is off.
+    pub(super) timing_ref: Option<&'d BlastnTiming>,
+    pub(super) gapped_start_time: std::time::Instant,
+}
+
+/// The gapped HSP list of one subject chunk, from its initial hits in score order: the gapped loop
+/// (`gapped_score_list`) per query on the pool (LOSAT_X_QGROUPPAR: each query's hits sorted, looped
+/// with a tree and scratch of the task's own and purged; the lists concatenated in query order) or
+/// over the chunk's list on this thread with the subject's tree and scratch (`state`); then the
+/// LOSAT_TIMING counters and the verbose line, the list taken from `prelim_hits`, purged and sorted
+/// by score (only sorted, on the pool, when the tasks purged it), and moved to the subject's
+/// coordinates.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-526,545,555,578
+/// ```c
+///         if (aux_struct->GetGappedScore) {
+///             status = aux_struct->GetGappedScore(program_number, query,
+///                     query_info,
+///                     subject, gap_align, score_params, ext_params, hit_params,
+///                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
+/// ...
+///             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+/// ...
+///         Blast_HSPListSortByScore(hsp_list);
+/// ...
+///         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+/// ```
+/// No NCBI counterpart: the query groups on the pool (LOSAT_X_QGROUPPAR), scheduling only; NCBI
+/// runs the loop of one chunk on one thread (blast_gapalign.c:3850).
+pub(super) fn gapped_hsp_list(
+    gapped: &GappedPrelim<'_>,
+    drive: &GappedDrive<'_>,
+    ungapped_hits: &mut [UngappedHit],
+    state: GappedListState<'_>,
+) -> Vec<PrelimHit> {
+    let &GappedPrelim {
+        verbose,
+        chunk,
+        s_len,
+        reuse_prelim_hits,
+        total_ungapped,
+        ..
+    } = gapped;
+    let &GappedDrive {
+        x_counts,
+        x_order,
+        queries,
+        query_concat_length,
+        parallel_pool,
+        timing_ref,
+        gapped_start_time,
+    } = drive;
+    let GappedListState {
+        interval_tree,
+        gap_scratch,
+        greedy_align_scratch,
+        x_helper_scratch,
+        prelim_hits,
+    } = state;
+    // Debug counters for containment analysis
+    let mut dbg_containment_skipped = 0usize;
+    let mut dbg_gapped_calls = 0usize;
+    // Dispatch point of LOSAT_X_QGROUPPAR for the preliminary loop: per query on the
+    // pool, each query's purged list concatenated in query order (the serial purge's
+    // output, see x_qgroup_par.rs), or the loop over the chunk's list.
+    let mut x_purged = false;
+    if let Some(order) = x_order.as_ref() {
+        let x_starts = x_qgroup_par::starts(x_counts.as_deref().unwrap_or(&[]));
+        let mut x_rest: &mut [UngappedHit] = ungapped_hits;
+        let mut x_slices = Vec::with_capacity(queries.len());
+        for query in 0..queries.len() {
+            let (head, tail) = x_rest.split_at_mut(x_starts[query + 1] - x_starts[query]);
+            x_slices.push(std::sync::Mutex::new(head));
+            x_rest = tail;
+        }
+        let x_tree_q_max = (query_concat_length + 1) as i32;
+        let x_tree_s_max = (s_len + 1) as i32;
+        let x_results = x_qgroup_par::run(
+            parallel_pool,
+            x_qgroup_par::Stage::Prelim,
+            order,
+            queries.len(),
+            || {
+                (
+                    BlastIntervalTree::new(0, x_tree_q_max, 0, x_tree_s_max),
+                    GapAlignScratch::new(),
+                    GreedyAlignScratch::new(),
+                )
+            },
+            |(tree, gap, greedy), query| {
+                let mut hits = x_slices[query as usize]
+                    .lock()
+                    .expect("each query's hits are taken by one task");
+                hits.sort_by(score_compare_ungapped_hits);
+                tree.reset();
+                let mut out = Vec::new();
+                let dbg = gapped_score_list(
+                    gapped,
+                    &hits,
+                    GappedListState {
+                        interval_tree: tree,
+                        gap_scratch: gap,
+                        greedy_align_scratch: greedy,
+                        x_helper_scratch: None,
+                        prelim_hits: &mut out,
+                    },
+                );
+                (purge_prelim_hits_with_common_endpoints(out), dbg)
+            },
+        );
+        let mut x_hits: Vec<PrelimHit> = Vec::new();
+        for (hits, (calls, skipped)) in x_results.into_iter().flatten() {
+            dbg_gapped_calls += calls;
+            dbg_containment_skipped += skipped;
+            x_hits.extend(hits);
+        }
+        *prelim_hits = x_hits;
+        x_purged = true;
+    } else {
+        let (calls, skipped) = gapped_score_list(
+            gapped,
+            ungapped_hits,
+            GappedListState {
+                interval_tree,
+                gap_scratch,
+                greedy_align_scratch,
+                x_helper_scratch,
+                prelim_hits,
+            },
+        );
+        dbg_gapped_calls = calls;
+        dbg_containment_skipped = skipped;
+    }
+
+    // DEBUG: Log gapped extension stats
+    let gapped_elapsed = gapped_start_time.elapsed();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3917-3922
+    // ```c
+    // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    //                                   hit_options->min_diag_separation))
+    // {
+    //    BlastHSP* new_hsp;
+    // ```
+    if let Some(timing) = timing_ref {
+        timing.gapped_ns.fetch_add(
+            gapped_elapsed.as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        timing.gapped_calls.fetch_add(
+            dbg_gapped_calls as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+    if verbose {
+        eprintln!(
+            "[INFO] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
+            gapped_elapsed, dbg_gapped_calls, dbg_containment_skipped, total_ungapped
+        );
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+    // ```c
+    // /* Delete if not done in last loop iteration to prevent memory leak. */
+    // hsp_list = Blast_HSPListFree(hsp_list);
+    //
+    // BlastInitHitListReset(init_hitlist);
+    // ```
+    #[expect(
+        clippy::drain_collect,
+        reason = "without reuse the scratch keeps its buffer for the next chunk; mem::take would hand the buffer away and allocate again"
+    )]
+    let mut chunk_prelim_hits: Vec<PrelimHit> = if reuse_prelim_hits {
+        std::mem::take(prelim_hits)
+    } else {
+        prelim_hits.drain(..).collect()
+    };
+    if !chunk_prelim_hits.is_empty() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4085
+        // ```c
+        // if (gap_align->score >= cutoff) {
+        //     status = Blast_HSPInit(..., &new_hsp);
+        //     status = Blast_HSPListSaveHSP(hsp_list, new_hsp);
+        //     status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+        //                                      eQueryAndSubject);
+        // }
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-557
+        // ```c
+        // if (aux_struct->GetGappedScore) {
+        //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+        // }
+        // Blast_HSPListSortByScore(hsp_list);
+        // ```
+        // NCBI purges redundant preliminary score-only gapped HSPs
+        // before subject chunk offset adjustment and final traceback.
+        // With LOSAT_X_QGROUPPAR the queries' lists were purged by their tasks, and the
+        // same stable sort runs on the pool.
+        if x_purged {
+            x_qgroup_par::sort_stable(
+                parallel_pool,
+                &mut chunk_prelim_hits,
+                score_compare_prelim_hits,
+            );
+        } else {
+            chunk_prelim_hits = purge_prelim_hits_with_common_endpoints(chunk_prelim_hits);
+            sort_prelim_hits_by_score(&mut chunk_prelim_hits);
+        }
+        for hit in chunk_prelim_hits.iter_mut() {
+            hit.prelim_ss = hit.prelim_ss.saturating_add(chunk.offset);
+            hit.prelim_se = hit.prelim_se.saturating_add(chunk.offset);
+            hit.seed_ss = hit.seed_ss.saturating_add(chunk.offset);
+        }
+    }
+    chunk_prelim_hits
 }

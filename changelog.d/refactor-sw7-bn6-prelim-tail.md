@@ -1,2 +1,2 @@
-- Engine: the BLASTN preliminary gapped loop of one subject chunk (and one hit's score-only
-  extension) moves out of `search_query_batch`. No output changes.
+- Engine: the end of the BLASTN preliminary search of one subject chunk (the gapped loop and its
+  dispatch, the sorts, the purge and the `-ungapped` list) moves out of `search_query_batch`. No output changes.

@@ -258,6 +258,47 @@ pub(crate) fn x_word_finder_scan(
     diagonals: &mut Diagonals,
     sent: Option<XSent<'_>>,
 ) -> Result<Vec<InitHsp>> {
+    x_word_finder_scan_with(
+        Blosum62Bx, batch, parameters, options, subject, lookup, diagonals, sent,
+    )
+}
+
+/// `x_word_finder_scan` with another matrix than BLOSUM62 (items SC6 and SC6b of line NP): the same
+/// loops with the matrix's extensions (`MatrixBx`): the fused loop on the tables it pays for
+/// (LOSAT_X_BXDIAG, x_seed_diag.rs), the sentinel walks with the matrix's keys where `sent` is
+/// given (LOSAT_X_BXUNGAPSENT), the direct loop otherwise. Not inlined, so that BLOSUM62's loops
+/// keep their code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_word_finder_matrix(
+    scoring: MatrixBx,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
+) -> Result<Vec<InitHsp>> {
+    x_word_finder_scan_with(
+        scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+    )
+}
+
+/// The body of [`x_word_finder_scan`] with the matrix of `scoring`: BLOSUM62's direct loop without
+/// `sent` is `x_word_finder_direct`, another matrix's `x_word_finder_matrix_direct`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_scan_with<S: BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_>>,
+) -> Result<Vec<InitHsp>> {
     // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); every loop
     // below takes `sent`.
     if super::x_ungap_sent::on() {
@@ -269,7 +310,7 @@ pub(crate) fn x_word_finder_scan(
         BxLookup::Wide(lookup) => lookup,
         BxLookup::Narrow(lookup) => {
             return super::x_seed_diag::x_word_finder_narrow(
-                batch, parameters, options, subject, lookup, diagonals, sent,
+                scoring, batch, parameters, options, subject, lookup, diagonals, sent,
             );
         }
     };
@@ -277,11 +318,13 @@ pub(crate) fn x_word_finder_scan(
     // not, the direct loop.
     if super::x_seed_diag::x_bxdiag_mode() != 0 {
         if let Some(hits) = super::x_seed_diag::x_word_finder_diag(
-            batch, parameters, options, subject, lookup, diagonals, sent,
+            scoring, batch, parameters, options, subject, lookup, diagonals, sent,
         )? {
             return Ok(hits);
         }
     }
+    // The walks of `sent` carry their matrix's keys, so one instance serves every matrix (its
+    // one-hit argument is never called: `sent` exists only with a two-hit window).
     if let Some(sent) = sent {
         return x_word_finder_direct_sent(
             batch,
@@ -293,6 +336,11 @@ pub(crate) fn x_word_finder_scan(
             x_bxscan_byte(),
             x_bxhitbf(),
             sent,
+        );
+    }
+    if !S::BLOSUM62 {
+        return x_word_finder_matrix_direct(
+            scoring, batch, parameters, options, subject, lookup, diagonals,
         );
     }
     x_word_finder_direct(
@@ -307,25 +355,18 @@ pub(crate) fn x_word_finder_scan(
     )
 }
 
-/// `x_word_finder_scan` with another matrix than BLOSUM62 (item SC6 of line NP): the direct loop
-/// (`x_word_finder_direct_with`, the port of NCBI's loop) with the matrix's extensions
-/// (`MatrixBx`), on its tables of `Int4` hits (`Lookup::x_new_of` builds no 16-bit table for it);
-/// the fused loop (LOSAT_X_BXDIAG) and the sentinel walks (LOSAT_X_BXUNGAPSENT) are BLOSUM62's.
-/// Not inlined, so that BLOSUM62's loops keep their code.
-#[inline(never)]
+/// The direct loop of another matrix than BLOSUM62 (`x_word_finder_direct_with`, the port of NCBI's
+/// loop) with the matrix's extensions (`MatrixBx`): a subject without the sentinel walks.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_word_finder_matrix(
-    scoring: MatrixBx,
+fn x_word_finder_matrix_direct<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    lookup: &BxLookup,
+    lookup: &Lookup,
     diagonals: &mut Diagonals,
 ) -> Result<Vec<InitHsp>> {
-    let BxLookup::Wide(lookup) = lookup else {
-        anyhow::bail!("BLASTX builds no 16-bit table for another matrix than BLOSUM62");
-    };
     let scan_byte = x_bxscan_byte();
     let acts = x_hitbf_acts(x_bxhitbf(), options, subject, diagonals);
     macro_rules! direct {

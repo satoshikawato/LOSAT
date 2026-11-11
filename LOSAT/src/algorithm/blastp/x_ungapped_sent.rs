@@ -243,9 +243,10 @@ impl XSentQuery {
 }
 
 /// The keys of another matrix's table for the walks (`MatrixTable::sent_table`), built at the first
-/// call for the matrix; `None` where that table is not on the path.
+/// call for the matrix; `None` where that table is not on the path. BLASTX's walks take them too
+/// (`blastx/x_ungap_sent.rs` `XSent::new_of`, item SC6b).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-fn keys_of(matrix: crate::config::ScoringMatrix) -> Option<&'static KeyTable> {
+pub(crate) fn keys_of(matrix: crate::config::ScoringMatrix) -> Option<&'static KeyTable> {
     static KEYS: [OnceLock<Option<Box<KeyTable>>>; crate::config::ScoringMatrix::ALL.len()] =
         [const { OnceLock::new() }; crate::config::ScoringMatrix::ALL.len()];
     KEYS[matrix as usize]

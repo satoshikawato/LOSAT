@@ -573,10 +573,18 @@ pub(crate) fn prepare_unit_queries(
         );
     }
     let lookup_segments = complement_masks(&contexts);
-    // The sentinel walks are BLOSUM62's (its byte table); another matrix's loop does not read them
-    // (`x_seed_scan.rs` `x_word_finder_matrix`).
-    let x_ungap_sent = options.scoring == crate::config::ScoringMatrix::Blosum62
-        && super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size);
+    // The sentinel walks take BLOSUM62's keys, or another matrix's where it has them (item SC6b,
+    // `x_ungap_sent.rs` `query_fits_of`).
+    let x_ungap_sent = if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+        super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size)
+    } else {
+        super::seed::x_ungap_sent::query_fits_of(
+            options.scoring,
+            &buffer,
+            options.word_size,
+            options.window_size,
+        )
+    };
     Ok(PreparedQueryBatch {
         original_lengths: records.iter().map(|r| r.sequence.len()).collect(),
         contexts,

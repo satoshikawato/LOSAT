@@ -483,9 +483,15 @@ impl BxLookup {
         parts: usize,
     ) -> Result<Self> {
         // The search's matrix chooses the builds once per query batch: BLOSUM62's are
-        // `x_new_as`'s, another matrix's `x_new_of`'s (tables of `Int4` hits).
+        // `x_new_as`'s, another matrix's `x_new_of`'s (the same tables with its scores).
         if options.scoring != ScoringMatrix::Blosum62 {
-            return Lookup::x_new_of(batch, parameters, options).map(BxLookup::Wide);
+            return Lookup::x_new_of(
+                batch,
+                parameters,
+                options,
+                parts,
+                x_seed_diag::x_narrow_cutoff(options),
+            );
         }
         Lookup::x_new_as(
             batch,
@@ -757,18 +763,20 @@ impl Lookup {
             },
         )
     }
-    /// [`Lookup::x_new_as`] with another matrix than BLOSUM62 (item SC6 of line NP): the compressed
-    /// table of `-word_size 5` with the matrix's scores (`x_tbn_build_compressed_lookup_of`, as
-    /// TBLASTN's), the standard one with them (`build_ncbi_lookup_from_prepared_of`), both of `Int4`
-    /// hits and without the pool of kept vectors. Not inlined, so that BLOSUM62's builds keep their
-    /// code.
+    /// [`Lookup::x_new_as`] with another matrix than BLOSUM62 (items SC6 and SC6b of line NP): the
+    /// compressed table of `-word_size 5` with the matrix's scores (`x_tbn_build_compressed_lookup_of`,
+    /// as TBLASTN's, `Int4` hits, without the pool of kept vectors), the standard one as BLOSUM62's
+    /// (`build_ncbi_lookup_from_prepared_of`: the pool, `parts`, 16-bit hits from `narrow_cutoff`)
+    /// with its scores. Not inlined, so that BLOSUM62's builds keep their code.
     #[cold]
     #[inline(never)]
     pub(crate) fn x_new_of(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
-    ) -> Result<Self> {
+        parts: usize,
+        narrow_cutoff: Option<u64>,
+    ) -> Result<BxLookup> {
         use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
             x_tbn_build_compressed_lookup_of, XCompressedLookup,
         };
@@ -786,10 +794,10 @@ impl Lookup {
             )
             .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
             .map(|table| {
-                Lookup::Compressed(match table {
+                BxLookup::Wide(Lookup::Compressed(match table {
                     XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
                     XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
-                })
+                }))
             })
             .map_err(|()| {
                 anyhow::anyhow!(
@@ -803,18 +811,27 @@ impl Lookup {
             "unsupported BLASTX lookup word size"
         );
         let contexts = lookup_contexts(batch, parameters, &query);
-        let table = crate::algorithm::tblastx::lookup::build_ncbi_lookup_from_prepared_of(
-            matrix,
-            query,
-            batch.lookup_segments.clone(),
-            contexts,
-            // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), as `x_new_as`.
-            crate::core::blast_util::ncbi_int4_from_double(options.threshold),
+        // The pool as `x_new_as` takes it (LOSAT_X_BXPOOLN1).
+        let pooled = crate::algorithm::tblastx::lookup::x_bx_pooled_for(
+            usize::try_from(options.num_threads).unwrap_or(1),
         );
-        Ok(Self::Standard(
-            table,
-            x_seed_scan::XKeptPresence::x_built(false),
-        ))
+        let kept = x_seed_scan::XKeptPresence::x_built(pooled);
+        Ok(
+            match crate::algorithm::tblastx::lookup::build_ncbi_lookup_from_prepared_of(
+                matrix,
+                query,
+                batch.lookup_segments.clone(),
+                contexts,
+                // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), as `x_new_as`.
+                crate::core::blast_util::ncbi_int4_from_double(options.threshold),
+                pooled,
+                parts,
+                narrow_cutoff,
+            ) {
+                XBxTable::Wide(table) => BxLookup::Wide(Self::Standard(table, kept)),
+                XBxTable::Narrow(table) => BxLookup::Narrow(NarrowLookup { table, kept }),
+            },
+        )
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c++
@@ -1150,8 +1167,7 @@ pub(crate) fn word_finder(
     )
 }
 
-/// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`): its tables are the standard
-/// ones of `Int4` hits (`Lookup::x_new_of` builds no 16-bit table for it).
+/// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`).
 #[cold]
 #[inline(never)]
 pub(super) fn word_finder_bx_of(
@@ -1164,9 +1180,34 @@ pub(super) fn word_finder_bx_of(
     diagonals: &mut Diagonals,
     trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
-    let BxLookup::Wide(lookup) = lookup else {
-        anyhow::bail!("BLASTX builds no 16-bit table for another matrix than BLOSUM62");
-    };
+    match lookup {
+        BxLookup::Wide(lookup) => word_finder_any(
+            scoring, batch, parameters, options, subject, lookup, diagonals, trace,
+        ),
+        BxLookup::Narrow(lookup) => word_finder_narrow(
+            scoring, batch, parameters, options, subject, lookup, diagonals, trace,
+        ),
+    }
+}
+
+/// [`word_finder`] with the matrix of `scoring`: BLOSUM62's is `word_finder` itself.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn word_finder_any<S: BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &Lookup,
+    diagonals: &mut Diagonals,
+    trace: impl FnMut(&[(i32, i32)]),
+) -> Result<Vec<InitHsp>> {
+    if S::BLOSUM62 {
+        return word_finder(
+            batch, parameters, options, subject, lookup, diagonals, trace,
+        );
+    }
     word_finder_over(
         scoring,
         batch,
@@ -1201,13 +1242,15 @@ pub(super) fn word_finder_bx(
             batch, parameters, options, subject, lookup, diagonals, trace,
         ),
         BxLookup::Narrow(lookup) => word_finder_narrow(
-            batch, parameters, options, subject, lookup, diagonals, trace,
+            Blosum62Bx, batch, parameters, options, subject, lookup, diagonals, trace,
         ),
     }
 }
 
-/// [`word_finder`] for the table of 16-bit hits.
-pub(super) fn word_finder_narrow(
+/// [`word_finder`] for the table of 16-bit hits, with the matrix of `scoring`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn word_finder_narrow<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -1217,7 +1260,7 @@ pub(super) fn word_finder_narrow(
     trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
     word_finder_over(
-        Blosum62Bx,
+        scoring,
         batch,
         parameters,
         options,

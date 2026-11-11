@@ -1843,10 +1843,16 @@ fn compute_subject_with<S: super::seed::BxScoring>(
             diagnostics.then_some(&mut seeds),
         )?
     } else if !diagnostics {
-        let x_sent = if x_lead {
+        let x_sent = if !x_lead {
+            None
+        } else if S::BLOSUM62 {
             super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
         } else {
-            None
+            super::seed::x_ungap_sent::XSent::new_of(
+                options.scoring,
+                &batch.sequence_start,
+                &x_buffer,
+            )
         };
         if S::BLOSUM62 {
             super::seed::x_seed_scan::x_word_finder_scan(
@@ -1861,6 +1867,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
                 encoded,
                 lookup,
                 diagonals,
+                x_sent,
             )?
         }
     } else if !S::BLOSUM62 {

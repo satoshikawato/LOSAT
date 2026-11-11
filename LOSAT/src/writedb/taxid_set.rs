@@ -4,12 +4,12 @@
 
 use std::io::BufRead;
 
+use crate::ncbi_exception::NcbiException;
+use crate::ncbi_str::{string_to_int, string_to_int8, ALLOW_LEADING_SPACES};
 use crate::seqid::accguide::{parse_flags, SeqIdWarning};
-use crate::seqid::parse::{is_space, seq_id_from_text, truncate_spaces};
+use crate::seqid::parse::{seq_id_from_text, truncate_spaces};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
-use crate::utils::winmask::NCBI_BUILD_ROOT;
 
-use super::data_size::printable_string;
 use super::id_set::KeyMap;
 
 /// `CTaxIdSet`.
@@ -39,203 +39,27 @@ impl Default for TaxIdSet {
 /// Why a `-taxid_map` file could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaxIdMapError {
-    /// An `NCBI C++ Exception` makeblastdb reports with "Error: " and exit status 255: the
-    /// report (`CException::what()`, ending with a line feed).
-    Exception(String),
+    /// An exception of NCBI's `NStr` that makeblastdb reports with "Error: " and its report
+    /// (`CException::what()`), exit status 255.
+    Exception(NcbiException),
     /// A line of white space only (1-based number): makeblastdb 2.17.0 reads the first token
     /// of an empty token list and crashes (segmentation fault); LOSAT refuses the file.
     BlankLine(usize),
 }
 
-/// A `CStringException` of `NStr`'s number conversions, as `CException::what()` prints it.
-fn string_exception(line: u32, function: &str, message: String, pos: usize) -> String {
-    format!(
-        "NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbistr.cpp\", line {line}: \
-         Error: (CStringException::eConvert) ncbi::NStr::{function}() - {message} (m_Pos = {pos})\n"
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-873
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3582-3587
 // ```c++
-// Int8 NStr::StringToInt8(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD(flags);
-//
-//     // Current position in the string
-//     SIZE_TYPE pos = 0;
-//
-//     // Skip allowed leading symbols
-//     if (flags & fAllowLeadingSymbols) {
-//         bool spaces = ((flags & fAllowLeadingSymbols) == fAllowLeadingSpaces);
-//         s_SkipAllowedSymbols(str, pos, spaces ? eSkipSpacesOnly : eSkipAllAllowed, flags);
+//     template <typename TNumeric>
+//     static typename enable_if< is_integral<TNumeric>::value && is_signed<TNumeric>::value && (sizeof(TNumeric) == sizeof(int) && !is_same<TNumeric, long>::value), TNumeric>::type
+//     x_StringToNumeric(const CTempString str, TStringToNumFlags flags, int base)
+//     {
+//         return StringToInt(str, flags, base);
 //     }
-//     // Determine sign
-//     bool sign = false;
-//     switch (str[pos]) {
-//     case '-':
-//         sign = true;
-//         /*FALLTHRU*/
-//     case '+':
-//         pos++;
-//         break;
-//     ...
-//     }
-//     SIZE_TYPE pos0 = pos;
-//     ...
-//     Int8 n = 0;
-//     Int8 limdiv = base==10? kMax_I8 / 10: kMax_I8 / base;
-//     Int8 limoff = (base==10? kMax_I8 % 10: kMax_I8 % base) + (sign ? 1 : 0);
-//     ...
-//     while (char ch = str[pos]) {
-//         int  delta;   // corresponding numeric value of 'ch'
-//         ...
-//         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
-//             break;
-//         }
-//         // Overflow check
-//         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
-//             S2N_CONVERT_ERROR_OVERFLOW(Int8);
-//         }
-//         n *= base;
-//         n += delta;
-//         pos++;
-//     }
-//
-//     // Last checks
-//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-//         S2N_CONVERT_ERROR_INVAL(Int8);
-//     }
-//     ...
-//     // Assign sign before the end pointer check
-//     n = sign ? -n : n;
-//     CHECK_ENDPTR(Int8);
-//
-//     return n;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:740-759
-// ```c++
-// void s_SkipAllowedSymbols(const CTempString       str,
-//                           SIZE_TYPE&              pos,
-//                           ESkipMode               skip_mode,
-//                           NStr::TStringToNumFlags flags)
-// {
-//     ...
-//     for ( SIZE_TYPE len = str.length();  pos < len;  ++pos ) {
-//         unsigned char ch = str[pos];
-//         if ( isdigit(ch)  ||  ch == '+' ||  ch == '-'  ||  s_IsDecimalPoint(ch,flags) ) {
-//             break;
-//         }
-//         if ( (skip_mode == eSkipSpacesOnly)  &&  !isspace(ch) ) {
-//             break;
-//         }
-//     }
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:546-557
-// ```c++
-//     s += "Cannot convert string '";
-//     s += NStr::PrintableString(str);
-//     s += "' to ";
-//     s += to_type;
-//     if ( !msg.empty() ) {
-//         s += ", ";
-//         s += msg;
-//     }
-// ```
-// The string is a `std::string`'s: the loop ends at its terminating NUL, and at an
-// embedded one (whose end check then passes). The errors are thrown at lines 852
-// (overflow), 861 (no digit) and 870 (`CHECK_ENDPTR`).
-/// `NStr::StringToInt8(str, flags)` in base 10, `leading_spaces` for
-/// `fAllowLeadingSpaces`: the number, or the report of NCBI's exception.
-fn string_to_int8(s: &[u8], leading_spaces: bool) -> Result<i64, String> {
-    let at = |pos: usize| s.get(pos).copied().unwrap_or(0);
-    let error = |line: u32, extra: &str, pos: usize| {
-        string_exception(
-            line,
-            "StringToInt8",
-            format!(
-                "Cannot convert string '{}' to Int8{extra}",
-                printable_string(s)
-            ),
-            pos,
-        )
-    };
-    let mut pos = 0;
-    if leading_spaces {
-        while pos < s.len() {
-            let ch = s[pos];
-            if ch.is_ascii_digit() || ch == b'+' || ch == b'-' || !is_space(ch) {
-                break;
-            }
-            pos += 1;
-        }
-    }
-    let sign = match at(pos) {
-        b'-' => {
-            pos += 1;
-            true
-        }
-        b'+' => {
-            pos += 1;
-            false
-        }
-        _ => false,
-    };
-    let pos0 = pos;
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(sign);
-    let mut n: i64 = 0;
-    loop {
-        let ch = at(pos);
-        if ch == 0 || !ch.is_ascii_digit() {
-            break;
-        }
-        let delta = i64::from(ch - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return Err(error(852, ", overflow", pos));
-        }
-        // `i64::MIN` passes the check as its magnitude, one past `i64::MAX`.
-        n = n.wrapping_mul(10).wrapping_add(delta);
-        pos += 1;
-    }
-    if pos == pos0 {
-        return Err(error(861, "", pos));
-    }
-    let n = if sign { n.wrapping_neg() } else { n };
-    if at(pos) != 0 {
-        return Err(error(870, "", pos));
-    }
-    Ok(n)
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
-// ```c++
-// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Int8 value = StringToInt8(str, flags, base);
-//     if ( value < kMin_Int  ||  value > kMax_Int ) {
-//         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-//     }
-//     return (int) value;
-// }
 // ```
 /// `NStr::StringToNumeric<TTaxId>(str, fAllowLeadingSpaces)` (`TTaxId` is `int`:
 /// `StringToInt`).
-fn string_to_taxid(s: &[u8]) -> Result<i32, String> {
-    let value = string_to_int8(s, true)?;
-    i32::try_from(value).map_err(|_| {
-        string_exception(
-            640,
-            "StringToInt",
-            format!(
-                "Cannot convert string '{}' to int, overflow",
-                printable_string(s)
-            ),
-            0,
-        )
-    })
+fn string_to_taxid(s: &[u8]) -> Result<i32, NcbiException> {
+    string_to_int(s, ALLOW_LEADING_SPACES)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:157-160
@@ -308,9 +132,9 @@ enum Checked {
 fn check_accession(
     acc: &[u8],
     warn: &mut dyn FnMut(SeqIdWarning),
-) -> Result<Option<Checked>, String> {
+) -> Result<Option<Checked>, NcbiException> {
     if !acc.is_empty() && acc.iter().all(u8::is_ascii_digit) {
-        return string_to_int8(acc, false).map(|gi| Some(Checked::Gi(gi)));
+        return string_to_int8(acc, 0).map(|gi| Some(Checked::Gi(gi)));
     }
     Ok(match seq_id_from_text(acc, parse_flags::ANY_RAW, warn) {
         Err(_) => None,
@@ -348,7 +172,10 @@ fn check_accession(
 // }
 // ```
 /// `AccessionToKey`: the key of a map line's Seq-id, empty for none.
-pub fn accession_to_key(acc: &[u8], warn: &mut dyn FnMut(SeqIdWarning)) -> Result<Vec<u8>, String> {
+pub fn accession_to_key(
+    acc: &[u8],
+    warn: &mut dyn FnMut(SeqIdWarning),
+) -> Result<Vec<u8>, NcbiException> {
     let gi_key = |gi: i64| {
         if gi != 0 {
             gi.to_string().into_bytes()

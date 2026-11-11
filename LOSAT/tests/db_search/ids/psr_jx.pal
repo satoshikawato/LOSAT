@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, pssmrows
+#
+TITLE psr_jx (two databases, parsed Seq-ids)
+DBLIST psr_jx1 psr_jx2

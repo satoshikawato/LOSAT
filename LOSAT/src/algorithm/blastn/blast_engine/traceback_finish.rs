@@ -9,9 +9,10 @@
 //!
 //! This module is a child of `run` for the types it keeps private (`BlastnTiming`, the e-value
 //! helpers). The two functions are the bodies of what were two closures of
-//! `search_query_batch`'s `process_subject`; the values those closures captured are the fields of
-//! `TracebackCtx`, which is `Sync` (shared references and `Copy` values only) because the query
-//! group tasks of `x_qgroup_par` call the functions from pool threads.
+//! `search_query_batch`'s `process_subject`; the values those closures captured are among the
+//! fields of `TracebackCtx`, which `traceback_hsp` and `traceback_subject` share, and which pool
+//! threads read (the query group tasks of `x_qgroup_par`, the look-ahead helpers, and the
+//! speculative batch's jobs).
 
 use super::{
     blast_hsp_test_identity_and_length, blastn_trace, calculate_blastn_context_statistics,
@@ -22,9 +23,12 @@ use super::{
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 
-/// The values of one subject's search that the two traceback steps read. Built once per
-/// `process_subject` call, where the closures were made; every field is a shared reference or a
-/// `Copy` value, the types the closures captured.
+/// The values of one subject's search that its traceback reads: these two steps, the traceback of
+/// one HSP (`traceback_hsp`) and the subject's side (`traceback_subject`). Built once per
+/// `process_subject` call of the traceback, once the subject's blastna letters are made; every
+/// field is a shared reference or a `Copy` value (mostly the types the closures captured), so the
+/// struct is `Sync` for the query group tasks, the look-ahead helpers and the speculative batch's
+/// jobs on the pool.
 pub(super) struct TracebackCtx<'a> {
     /// `LOSAT_TIMING` counters, `None` when timing is off.
     pub(super) timing_ref: Option<&'a BlastnTiming>,
@@ -35,10 +39,15 @@ pub(super) struct TracebackCtx<'a> {
     pub(super) s_id: &'a str,
     /// The subject's letters in blastna.
     pub(super) s_seq_blastna: &'a [u8],
+    /// EXPERIMENT (LOSAT_X_BNTBRANGE): the subject's fence flag (`alignment::x_fence`), `None`
+    /// unless its letters are decoded in ranges.
+    pub(super) x_fenced: Option<&'a std::sync::atomic::AtomicBool>,
     /// The queries' contexts: their letters, the cutoffs, the effective search spaces and the
     /// Karlin blocks, by context.
     pub(super) encoded_queries_blastna: &'a Vec<&'a [u8]>,
     pub(super) encoded_queries_nomask: &'a [&'a [u8]],
+    /// The queries' lengths, by query.
+    pub(super) query_lengths: &'a [usize],
     pub(super) cutoff_scores: &'a Vec<i32>,
     pub(super) hit_saving_cutoff_scores: &'a Vec<i32>,
     pub(super) query_eff_searchsp: &'a Vec<i64>,
@@ -52,6 +61,8 @@ pub(super) struct TracebackCtx<'a> {
     pub(super) penalty: i32,
     pub(super) gap_open: i32,
     pub(super) gap_extend: i32,
+    /// The X-dropoff of the traceback alignment.
+    pub(super) x_drop_final: i32,
     pub(super) score_matrix: &'a BlastnaMatrix,
     pub(super) use_dp: bool,
     /// The hit-saving options.

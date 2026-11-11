@@ -15,8 +15,8 @@ use super::{
     // }
     // ```
     input::{
-        parse_fasta_stream_keeping, stream_is_empty, FastaParseError, FastaStream, InputWarning,
-        NoDeflineError, QueryStreamSettings,
+        parse_fasta_stream_keeping, read_fasta_stream_batches, stream_is_empty, FastaParseError,
+        FastaStream, InputWarning, NoDeflineError, QueryStreamSettings,
     },
     query_setup::BATCH_SIZE,
     report,
@@ -1156,7 +1156,7 @@ fn run_inner(
         search_subjects,
         args.parse_deflines,
         &mut |deliver, warn| {
-            parse_fasta_stream_keeping(
+            read_fasta_stream_batches(
                 &mut query_stream,
                 false,
                 args.lcase_masking,
@@ -1552,13 +1552,13 @@ pub(super) fn write_empty_subject_warnings(
 }
 
 /// A reader of a run's query batches (`run_query_batches`): it delivers each reader batch and
-/// writes the bytes of each reader warning, in the reader's order, and returns the records it
-/// keeps. The command line reads the query file (`parse_fasta_stream_keeping`) and keeps every
-/// record; LOSAT Web's `run_local` delivers the records its host registered and keeps none.
+/// writes the bytes of each reader warning, in the reader's order, and keeps no record (the search
+/// holds the batches it searches). The command line reads the query file
+/// (`read_fasta_stream_batches`); LOSAT Web's `run_local` delivers the records its host registered.
 pub(super) type QueryBatchReader<'r> = dyn FnMut(
         &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
         &mut dyn FnMut(&[u8]) -> Result<()>,
-    ) -> Result<Vec<FastaRecord>>
+    ) -> Result<()>
     + 'r;
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
@@ -2553,7 +2553,7 @@ fn x_flow(
         Result<Vec<BatchResults>>,
     ) -> Result<()>,
     write_warning: &mut dyn FnMut(&[u8]) -> Result<()>,
-) -> Result<Vec<FastaRecord>> {
+) -> Result<()> {
     use super::x_timing::Run as XRun;
     use std::cell::{Cell, RefCell};
     use std::collections::{BTreeMap, VecDeque};

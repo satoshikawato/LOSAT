@@ -506,6 +506,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         protein,
         lowercase,
         batch_size,
+        true,
         false,
         None,
         None,
@@ -542,11 +543,13 @@ pub(crate) fn parse_fasta_batches_with_warnings(
 //         }
 //
 // ```
+#[allow(clippy::too_many_arguments)]
 fn parse_fasta_lines<L: AsRef<[u8]>>(
     lines: impl Iterator<Item = L>,
     protein: bool,
     lowercase: bool,
     batch_size: usize,
+    keep_records: bool,
     keep_defline: bool,
     parse_deflines: Option<BelievedRead<'_>>,
     range: Option<&SequenceRange>,
@@ -559,6 +562,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     let mut batch = ReaderBatch {
         range,
         keep_whole: keep_defline,
+        keep_records,
         ..ReaderBatch::default()
     };
 
@@ -717,9 +721,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                     Ok(())
                 },
             )? as usize;
-            let record = current.get_or_insert_with(|| {
-                new_record(records.len() + batch.skipped, protein, String::new())
-            });
+            let record = current
+                .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
             for text in messages {
                 let warning = InputWarning {
                     line: line_index + 1,
@@ -928,7 +931,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 positions: Vec::new(),
                 text: Vec::new(),
             });
-            let mut record = new_record(records.len() + batch.skipped, protein, title);
+            let mut record = new_record(batch.number(&records), protein, title);
             believed_molecule = None;
             if keep_defline || believed.is_some() {
                 record.source = Some(Box::new(crate::blastinput::fasta_reader::RecordSource {
@@ -951,9 +954,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             raw_residues = 0;
             continue;
         }
-        let record = current.get_or_insert_with(|| {
-            new_record(records.len() + batch.skipped, protein, String::new())
-        });
+        let record = current
+            .get_or_insert_with(|| new_record(batch.number(&records), protein, String::new()));
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
         }
@@ -1050,6 +1052,9 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     // then refuses it).
     if batch.read > 0 {
         deliver(&records[batch.start..])?;
+    }
+    if !keep_records {
+        records.clear();
     }
     Ok(records)
 }
@@ -1513,7 +1518,12 @@ fn emit_fasta_batch(
     }
     if batch.length >= batch_size {
         deliver(&records[batch.start..])?;
-        batch.start = records.len();
+        if batch.keep_records {
+            batch.start = records.len();
+        } else {
+            batch.released += records.len();
+            records.clear();
+        }
         batch.length = 0;
         batch.read = 0;
     }
@@ -1527,6 +1537,11 @@ struct ReaderBatch<'r> {
     range: Option<&'r SequenceRange>,
     /// Whether a cut record keeps its whole letters (the archive, `FastaRecord::cut_in_place`).
     keep_whole: bool,
+    /// Whether the reader keeps the records of the batches it delivered (and returns them all);
+    /// otherwise it drops each batch once delivered, so that it holds one batch at a time.
+    keep_records: bool,
+    /// The records of the batches delivered and dropped (without `keep_records`).
+    released: usize,
     /// The first kept record of the batch.
     start: usize,
     /// The letters the batch has read (`size_read`).
@@ -1535,6 +1550,14 @@ struct ReaderBatch<'r> {
     read: usize,
     /// The records the range skipped so far: NCBI's reader numbers them (`Query_<n>`).
     skipped: usize,
+}
+
+impl ReaderBatch<'_> {
+    /// The index of the next record (`Query_<index + 1>`): the records read before it, kept,
+    /// dropped once delivered, or skipped by the range.
+    fn number(&self, records: &[FastaRecord]) -> usize {
+        self.released + records.len() + self.skipped
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:310-313
@@ -1776,7 +1799,7 @@ pub(crate) struct FastaStream<R: Read> {
     /// FASTA, as NCBI does with the data loaders off.
     pub(crate) seq_id_role: Option<&'static str>,
     /// `CStreamLineReader::UngetLine`: the line that the next read gives again (the Seq-id step
-    /// of `parse_fasta_stream_keeping` read it and handed it back).
+    /// of `read_fasta_stream` read it and handed it back).
     unget_line: Option<Vec<u8>>,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
@@ -2549,13 +2572,68 @@ pub(crate) fn parse_fasta_stream_with_warnings<R: Read>(
 }
 /// `parse_fasta_stream_with_warnings`, keeping each record's defline line (`keep_defline`: the
 /// BLAST archive, outfmt 11, writes it) and cutting each record to `range` (`-query_loc`,
-/// `emit_fasta_batch`).
+/// `emit_fasta_batch`). It keeps every record it reads and returns them all (a run's `-subject`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn parse_fasta_stream_keeping<R: Read>(
     stream: &mut FastaStream<R>,
     protein: bool,
     lowercase: bool,
     batch_size: usize,
+    keep_defline: bool,
+    range: Option<&SequenceRange>,
+    deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
+    warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
+) -> Result<Vec<FastaRecord>> {
+    read_fasta_stream(
+        stream,
+        protein,
+        lowercase,
+        batch_size,
+        true,
+        keep_defline,
+        range,
+        deliver,
+        warn,
+    )
+}
+
+/// `parse_fasta_stream_keeping` without keeping the records: the reader drops each batch once it
+/// has delivered it, so that a read of a query file holds one reader batch, not the file (the
+/// search's queries, and the reads of them before the search: `blast_xml::prescan_queries`,
+/// `archive::prescan_query_titles`). The batches, their records and their numbers are the same.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn read_fasta_stream_batches<R: Read>(
+    stream: &mut FastaStream<R>,
+    protein: bool,
+    lowercase: bool,
+    batch_size: usize,
+    keep_defline: bool,
+    range: Option<&SequenceRange>,
+    deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
+    warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
+) -> Result<()> {
+    read_fasta_stream(
+        stream,
+        protein,
+        lowercase,
+        batch_size,
+        false,
+        keep_defline,
+        range,
+        deliver,
+        warn,
+    )
+    .map(drop)
+}
+
+/// The read of `parse_fasta_stream_keeping` (`keep_records`) and `read_fasta_stream_batches`.
+#[allow(clippy::too_many_arguments)]
+fn read_fasta_stream<R: Read>(
+    stream: &mut FastaStream<R>,
+    protein: bool,
+    lowercase: bool,
+    batch_size: usize,
+    keep_records: bool,
     keep_defline: bool,
     range: Option<&SequenceRange>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
@@ -2609,6 +2687,7 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
         protein,
         lowercase,
         batch_size,
+        keep_records,
         keep_defline,
         parse_deflines,
         range,
@@ -3116,6 +3195,90 @@ mod range_tests {
         )
         .unwrap();
         (delivered, kept)
+    }
+
+    /// `batches` read by `read_fasta_stream_batches`, which keeps no record (`range` optional).
+    fn batches_unkept(
+        data: &[u8],
+        range: Option<&SequenceRange>,
+        batch_size: usize,
+    ) -> Vec<Vec<(String, Vec<u8>, RecordPlacement)>> {
+        let mut delivered = Vec::new();
+        read_fasta_stream_batches(
+            &mut FastaStream::new(Cursor::new(data.to_vec())),
+            false,
+            true,
+            batch_size,
+            false,
+            range,
+            &mut |records| {
+                delivered.push(
+                    records
+                        .iter()
+                        .map(|record| {
+                            (
+                                record.internal_id.clone(),
+                                record.sequence.clone(),
+                                record.placement(),
+                            )
+                        })
+                        .collect(),
+                );
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        delivered
+    }
+
+    // The read that drops each batch once delivered (the search's queries and the reads of them
+    // before the search) delivers the batches of the read that keeps the records: the same records,
+    // cut the same way, with the same numbers after the dropped batches and the skipped records.
+    #[test]
+    fn a_read_that_keeps_no_record_delivers_the_same_batches() {
+        let range = SequenceRange { from: 4, to: 7 };
+        let data =
+            b">a\nACGTACGTAC\n>b\nACG\n>c\nTTTTGGGG\n>d\nACGT\n>e\nACGTA\n>f\nAC\n>g\nACGTACGT\n";
+        for batch_size in [1, 4, 10, 15, 21, usize::MAX] {
+            let (kept_batches, kept) = batches(data, &range, batch_size);
+            assert_eq!(
+                batches_unkept(data, Some(&range), batch_size),
+                kept_batches,
+                "batch size {batch_size}"
+            );
+            assert_eq!(kept_batches.iter().map(Vec::len).sum::<usize>(), kept.len());
+        }
+        let mut delivered = Vec::new();
+        let kept = parse_fasta_stream_keeping(
+            &mut FastaStream::new(Cursor::new(data.to_vec())),
+            false,
+            true,
+            10,
+            false,
+            None,
+            &mut |records| {
+                delivered.push(
+                    records
+                        .iter()
+                        .map(|record| {
+                            (
+                                record.internal_id.clone(),
+                                record.sequence.clone(),
+                                record.placement(),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(kept.len(), 7);
+        assert_eq!(delivered.len(), 4);
+        assert_eq!(batches_unkept(data, None, 10), delivered);
+        assert_eq!(delivered[3][0].0, "Query_7");
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-168

@@ -118,6 +118,25 @@ mod batch_setup;
 // so that it uses the private error type of this file).
 #[path = "context_cutoffs.rs"]
 mod context_cutoffs;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:41-67 (`s_BlastDiagTableNew`)
+// and c++/src/algo/blast/core/lookup_wrap.c:255-289 (`GetOffsetArraySize`).
+// The diagonal table and offset-array sizes and the seed-stage tables of a query batch (a child
+// module, so that it uses the private modules of this file).
+#[path = "seed_tables.rs"]
+mod seed_tables;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1584 (the subject loop of
+// `BLAST_PreliminarySearchEngine`) and c++/src/algo/blast/api/prelim_stage.cpp:145-188 (its
+// threads).
+// The worker states, the writer thread and the subject loop of a query batch (a child module, so
+// that it uses the private modules of this file).
+#[path = "subject_loop.rs"]
+mod subject_loop;
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577 (in
+// `BlastHitList2SeqAlign_OMF`).
+// The hit lists and the `LOSAT_TIMING` lines at the end of a query batch's search (a child module,
+// so that it uses the private timer of this file).
+#[path = "batch_finish.rs"]
+mod batch_finish;
 use x_search_timing::XStage;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
 // lines after those (see tblastx/x_link_timing.rs).
@@ -4100,11 +4119,12 @@ impl Drop for XEndBatch<'_> {
 
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
-/// cutoffs, length adjustments and search spaces of the contexts: `context_cutoffs.rs`), then
-/// `process_subject` for every subject and the collection of their hits. These preliminary hit
-/// lists are the final ones: without gapped calculation NCBI's traceback stage aligns nothing,
-/// it only computes bit scores (c++/src/algo/blast/core/blast_traceback.c:1526, 1691-1696;
-/// `hit_collector.rs`).
+/// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
+/// adjustments and search spaces of the contexts: `context_cutoffs.rs`), then `process_subject`
+/// for every subject (`subject_loop.rs`) and the collection of their hits (`batch_finish.rs`).
+/// These preliminary hit lists are the final ones: without gapped calculation NCBI's traceback
+/// stage aligns nothing, it only computes bit scores
+/// (c++/src/algo/blast/core/blast_traceback.c:1526, 1691-1696; `hit_collector.rs`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1607
 /// (`BLAST_PreliminarySearchEngine`), with the set-up of
@@ -4286,8 +4306,6 @@ fn search_query_batch<S: TbxScore>(
     let reeval_calls = AtomicU64::new(0);
     let linking_ns = AtomicU64::new(0);
     let linking_calls = AtomicU64::new(0);
-    let identity_ns = AtomicU64::new(0);
-    let identity_calls = AtomicU64::new(0);
     // No NCBI counterpart: the stage timer of LOSAT_TIMING (x_search_timing.rs). It reads the
     // clock only when `timing_enabled`, and the search reads nothing from it.
     let x_times = x_search_timing::XSearchTimes::new(timing_enabled);
@@ -4344,197 +4362,64 @@ fn search_query_batch<S: TbxScore>(
             Some(HitCollector::new(args, query_records))
         });
 
-    // Diagonal array sizing MUST match NCBI's `s_BlastDiagTableNew`:
-    // it depends only on (query_length + window_size), not on subject length.
-    //
-    // NCBI reference (verbatim):
-    //   diag_array_length = 1;
-    //   while (diag_array_length < (qlen+window_size))
-    //       diag_array_length = diag_array_length << 1;
-    //   diag_table->diag_array_length = diag_array_length;
-    //   diag_table->diag_mask = diag_array_length-1;
-    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
-    //
-    // `query_length` here must match BLAST_SequenceBlk->length, computed as
-    // last_context.query_offset + last_context.query_length (excludes the final trailing NULLB).
-    // References: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315, 378-381
-    // NCBI BLAST diag array sizing:
-    // diag_array_length = next_power_of_2(qlen + window_size)
-    // For tblastx, qlen = total concatenated query buffer (all 6 frames)
-    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
-    let query_length: i32 = contexts
-        .last()
-        .map(|c| c.frame_base + c.aa_len as i32)
-        .unwrap_or(0);
-    crate::blastinput::app::check_diag_table_window(query_length, window, "TBLASTX")?;
-    let mut diag_array_size: i32 = 1;
-    while diag_array_size < (query_length + window) {
-        diag_array_size <<= 1;
-    }
-    let diag_mask: i32 = diag_array_size - 1;
-    if trace_hsp_target().is_some() {
-        // NCBI: diag_array_length = next_power_of_2(qlen + window_size).
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
-        eprintln!(
-            "[TRACE_HSP] diag_table query_length={} window={} diag_array_size={} diag_mask={}",
-            query_length, window, diag_array_size, diag_mask
-        );
-    }
-
-    // [C] array_size for offset_pairs
-    // NCBI: GetOffsetArraySize() = OFFSET_ARRAY_SIZE (4096) + lookup->longest_chain
-    // Reference: ncbi-blast/c++/include/algo/blast/core/lookup_wrap.h + lookup_wrap.c
-    const OFFSET_ARRAY_SIZE: i32 = 4096;
-    let offset_array_size: i32 = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
-    // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, the offset arrays have X_SCAN_BF_SLACK
-    // entries after `offset_array_size`.
-    let offset_pairs_len =
-        crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
-    // EXPERIMENT (LOSAT_X_TBXSCANBF): whether the reference frame loop scans this batch's table with
-    // the branch-free loop (decided once per table).
-    let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_choice(&lookup);
-
-    // EXPERIMENT (PAIRPAR), dispatch point 1 (per batch): the gates, the exactness guards (the
-    // first one only without LOSAT_X_TBXBAND) and the cost rule, then one lookup table per query
-    // context (each backbone chain filtered to the context, order kept). None (a gate, a guard
-    // or the cost rule) keeps the reference loop for every subject of the batch.
-    //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
-    // ```c
-    // while (diag_array_length < (qlen+window_size))
-    // {
-    //         diag_array_length = diag_array_length << 1;
-    // }
-    // ...
-    // diag_table->diag_mask = diag_array_length-1;
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-343
-    // ```c
-    // if (lookup->thin_backbone[i] ) {
-    //     Int4 * dest = NULL;
-    //     /* set the corresponding bit in the pv_array */
-    //     PV_SET(pv, i, PV_ARRAY_BTS);
-    //     bbc[i].num_used = lookup->thin_backbone[i][1];
-    // ```
-    // The guards compare the subject lengths (and, without LOSAT_X_TBXBAND, the context lengths)
-    // with the slack of this table (size above minus query_length); the per-context tables use the
-    // layout above.
-    let x_pair_par_batch = {
-        x_pair_par::XPairPar::prepare(x_pair_par::XBatch {
-            lookup: &lookup,
+    // The sizes of the diagonal table and the offset arrays, the batch's unit path (PAIRPAR,
+    // dispatch point 1) and its batch on the board (`seed_tables::scan_tables`).
+    let seed_tables::ScanTables {
+        diag_array_size,
+        diag_mask,
+        offset_array_size,
+        offset_pairs_len,
+        x_scan_bf,
+        x_pair_par_batch,
+        x_board_batch,
+    } = seed_tables::scan_tables(
+        &seed_tables::ScanInputs {
             contexts: &contexts,
-            query_length,
-            diag_array_size,
+            lookup: &lookup,
+            window,
             subjects,
-            debugging: trace_hsp_target().is_some()
-                || scan_debug_range.is_some()
-                || extension_debug_enabled
-                || diag_enabled
-                || debug_hsp_saving
-                || x_soft_subjects,
-            chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
-            // PAIRLUT: the groups built at dispatch point 0.
-            lut: x_pair_lut_batch,
-            // LOSAT_X_PAIRPARGATE: the thread count and threshold dispatch point 0 decided with.
-            threads: parallel_pool.threads(),
-            threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
+            scan_debug_range,
+            extension_debug_enabled,
+            diag_enabled,
+            debug_hsp_saving,
+            x_soft_subjects,
+            use_serial_scan_chunks,
+            use_parallel_chunks,
+            use_parallel,
+            parallel_pool,
+            args,
             sc,
-        })
-    };
-    // The reference frame loop scans the batch's table (LOSAT_X_TBXSCANBF's choice above).
-    if x_pair_par_batch.is_none() {
-        crate::algorithm::tblastx::x_scan_bf::x_reach_scan_bf(x_scan_bf);
-    }
-    // Dispatch point 1 of the seed release (per batch): the batch's tables move
-    // into two holders, `x_seed_batch.lookup` (the lookup table) and `x_seed_batch.units` (the
-    // unit path with its group tables). From here on they are reached only through the stages
-    // that each call of `process_subject` opens (dispatch point 2), and the
-    // batch's last units stage frees the unit path (dispatch point 3) and its last lookup stage
-    // the lookup table (dispatch point 5). `x_worker_diag_cells` is the size the workers'
-    // diagonal tables are created with: `diag_array_size`, or 0 when the
-    // unit path takes every subject, so that the reference frame loop, the
-    // only reader of that table, runs for none.
-    //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
-    // ```c
-    // if ((status = BlastExtendWordNew(query->length, word_params,
-    //                                 &aux_struct->ewp)) != 0)
-    //   return status;
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
-    // ```c
-    // word_params = BlastInitialWordParametersFree(word_params);
-    // s_BlastCoreAuxStructFree(aux_struct);
-    // ```
-    // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
-    // frees its copies is not a value NCBI computes (x_seed_release.rs).
-    // EXPERIMENT (LOSAT_X_TBXBOARD): every batch of a search with a board (2+ threads) uses it: its
-    // units (the unit path), link groups, frame merges and chain sorts go on the search's board
-    // (tblastx/x_work_board.rs). Several subjects run in TBXNEXT's loop (the other subject loop
-    // waits in the pool); one subject runs on this thread and its units bring their own helpers.
-    let x_board_batch = x_board
-        .filter(|_| {
-            use_parallel
-                && !use_serial_scan_chunks
-                && (subjects.count() == 1 || x_subject_next::on())
-        })
-        .map(|board| (board, board.batch(subjects.count())));
+        },
+        x_pair_lut_batch,
+        x_board,
+    )?;
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the batch leaves the board on every return of this search
+    // (`XEndBatch`).
     let _x_board_end = x_board_batch
         .as_ref()
         .map(|(board, batch)| XEndBatch(board, batch));
-    // A batch without the unit path puts no units on the board: its subjects' slots are closed
-    // now, so the subject loop's threads without a subject return at once (`XBoard::help`).
-    if let Some((_, batch)) = x_board_batch
-        .as_ref()
-        .filter(|_| x_pair_par_batch.is_none())
-    {
-        for s in 0..subjects.count() {
-            batch.close_without_units(s);
-        }
-    }
-    if crate::algorithm::tblastx::x_work_board::on() {
-        crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
-    }
-    // Whether the batch puts units on the board (`x_board_help` below).
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let x_board_unit_path = x_pair_par_batch.is_some();
-    let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
-    let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
+    // The holders of the seed release, which take the lookup table and the unit path, the size of
+    // the workers' diagonal tables and the extensions' sentinel walks (`seed_tables::seed_batch`).
+    let seed_tables::SeedBatch {
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        x_board_unit_path,
+        x_seed_batch,
+        x_worker_diag_cells,
+        tbx_sent,
+    } = seed_tables::seed_batch(
+        &seed_tables::SeedInputs {
+            x_board_batch: &x_board_batch,
+            subjects,
+            diag_array_size,
+            contexts: &contexts,
+            sc,
+            extension_debug_enabled,
+        },
+        lookup,
+        x_pair_par_batch,
+    );
 
     let contexts_ref = &contexts;
-    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the reference frame loops' extensions may take the walks
-    // the sentinels stop (not with the debug output of `extend_hit_two_hit`); another matrix's
-    // need its byte table (`TbxScore::x_sent_walks`).
-    let tbx_sent = sc.x_sent_walks()
-        && !extension_debug_enabled
-        && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice()));
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-    // ```c
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    ...
-    //    status = s_BlastSearchEngineCore(...);
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-    // ```c
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    ...
-    //    status = s_BlastSearchEngineCore(...);
-    // }
-    // ```
-    fn for_each_subjects<FInit, FBody, S>(subjects: usize, init: FInit, mut body: FBody)
-    where
-        FInit: FnOnce() -> WorkerState<S>,
-        FBody: FnMut(&mut WorkerState<S>, usize),
-    {
-        let mut state = init();
-        for s_idx in 0..subjects {
-            body(&mut state, s_idx);
-        }
-    }
 
     // NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,261-264;
     // c++/src/algo/blast/core/blast_engine.c:1372-1374,1434-1443
@@ -4605,25 +4490,9 @@ fn search_query_batch<S: TbxScore>(
     // ```
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let writer = if use_channel {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
-        // The writer thread is NCBI's collector (tblastx/hit_collector.rs): it takes each
-        // subject's message and returns the batch's hit lists in report order after the join,
-        // for the one place that writes every output.
         let rx = rx_opt.take().expect("rx must be available for writer");
-        let mut collector = HitCollector::new(args, query_records);
-        Some(std::thread::spawn(move || -> Vec<TblastxHsp> {
-            while let Ok((s_idx, hits)) = rx.recv() {
-                collector.push(s_idx, hits);
-            }
-            collector.finish()
-        }))
+        // The writer thread (`subject_loop::spawn_writer`).
+        Some(subject_loop::spawn_writer(rx, args, query_records))
     } else {
         None
     };
@@ -5330,7 +5199,7 @@ fn search_query_batch<S: TbxScore>(
                                         subject,
                                         (last_hit + wordsize) as usize,
                                         subject_offset as usize,
-                                        q_raw as usize,
+                                        q_raw,
                                         x_dropoff,
                                         // NCBI aa_ungapped.c:576-582 (call above):
                                         // score = s_BlastAaExtendTwoHit(...);
@@ -5347,7 +5216,7 @@ fn search_query_batch<S: TbxScore>(
                                             subject_full,
                                             (last_hit + wordsize) as usize,
                                             subject_offset as usize,
-                                            q_raw as usize,
+                                            q_raw,
                                             x_dropoff,
                                         )
                                     }
@@ -5854,7 +5723,7 @@ fn search_query_batch<S: TbxScore>(
                                         subject,
                                         (last_hit + wordsize) as usize,
                                         subject_offset as usize,
-                                        q_raw as usize,
+                                        q_raw,
                                         x_dropoff,
                                         // NCBI aa_ungapped.c:576-582 (call above):
                                         // score = s_BlastAaExtendTwoHit(...);
@@ -5871,7 +5740,7 @@ fn search_query_batch<S: TbxScore>(
                                             subject_full,
                                             (last_hit + wordsize) as usize,
                                             subject_offset as usize,
-                                            q_raw as usize,
+                                            q_raw,
                                             x_dropoff,
                                         )
                                     }
@@ -7287,251 +7156,39 @@ fn search_query_batch<S: TbxScore>(
     // No NCBI counterpart: LOSAT_TIMING, the clock before the subject loop (x_search_timing.rs).
     let x_t_subjects = x_times.now();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-    // ```c
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    ...
-    //    status = s_BlastSearchEngineCore(...);
-    // }
-    // ```
-    // LOSAT_X_TBXNEXT: its loop takes the subjects of a parallel search of several subjects.
-    if x_subject_next::on() {
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_TBXNEXT",
-            use_parallel && !use_serial_scan_chunks && subjects.count() > 1
-        );
-    }
+    // The subject loop: `process_subject` for every subject of the batch, on the pool's threads
+    // or on this one (`subject_loop::run_subject_loop`).
+    subject_loop::run_subject_loop(
+        &subject_loop::SubjectLoop {
+            use_parallel,
+            use_serial_scan_chunks,
+            subjects,
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            parallel_pool,
+            offset_pairs_len,
+            x_worker_diag_cells,
+            window,
+            sc,
+            tx_opt: &tx_opt,
+            #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+            x_board_batch: &x_board_batch,
+            #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+            x_board_unit_path,
+            x_seed_end,
+            x_board,
+        },
+        process_subject,
+    );
 
-    #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-    if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
-        // ```c
-        // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-        // /* iterate over all subject sequences */
-        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //        != BLAST_SEQSRC_EOF) {
-        //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-        //        continue;
-        //    }
-        // ```
-        // The threads' subjects go to the collector the subject loop keeps (`emit_subject_hits`;
-        // no writer thread on this target), which takes them in OID order.
-        if x_subject_next::on() {
-            // EXPERIMENT (LOSAT_X_TBXNEXT): as in native builds below, each thread of the pool
-            // takes the next subject when it is free, with one worker state per thread made when
-            // it takes its first subject (tblastx/x_subject_next.rs). Same `process_subject`.
-            parallel_pool.install(|| {
-                x_subject_next::for_each_subject(
-                    subjects.count(),
-                    &|| WorkerState {
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-                        // ```c
-                        //     /* iterate over all subject sequences */
-                        //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-                        //            != BLAST_SEQSRC_EOF) {
-                        // ```
-                        // The state of one thread's iterations of this loop (as below).
-                        tx: None,
-                        hits: Vec::new(),
-                        offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
-                        diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                        // NCBI: diag_table->offset = window_size;
-                        // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-                        diag_offset: window,
-                        sc,
-                    },
-                    &process_subject,
-                    None,
-                );
-            });
-        } else {
-            parallel_pool.install(|| {
-                (0..subjects.count()).into_par_iter().for_each_init(
-                    || WorkerState {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-                        // ```c
-                        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-                        //        != BLAST_SEQSRC_EOF) {
-                        //    ...
-                        //    status = s_BlastSearchEngineCore(...);
-                        // }
-                        // ```
-                        tx: None,
-                        hits: Vec::new(),
-                        offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
-                        diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
-                        // ```c
-                        // diag_table->diag_array_length = diag_array_length;
-                        // diag_table->diag_mask = diag_array_length-1;
-                        // diag_table->offset = window_size;
-                        // ```
-                        diag_offset: window,
-                        sc,
-                    },
-                    process_subject,
-                );
-            });
-        }
-    } else {
-        for_each_subjects(
-            subjects.count(),
-            || WorkerState {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-                // ```c
-                // while (...) {
-                //    ...
-                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-                // }
-                // ```
-                tx: tx_opt.clone(),
-                hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
-                diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                // NCBI: diag_table->offset = window_size;
-                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-                diag_offset: window,
-                sc,
-            },
-            &process_subject,
-        );
-    }
-
-    // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
-    // batch's units (tblastx/x_work_board.rs `XBoard::help`).
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
-        move |stopped: &std::sync::atomic::AtomicBool| {
-            board.help(batch, stopped);
-            // Every unit of the batch has been taken: the next batch may build its tables. A batch
-            // without the unit path has no units; its next batch starts at its seed-stage end.
-            if let Some(seed_end) = x_seed_end.filter(|_| x_board_unit_path) {
-                seed_end.units_taken();
-            }
-        }
-    });
-    // EXPERIMENT (LOSAT_X_TBXBOARD): a batch started early waits here, after its tables, until the
-    // batch before has ended its seed stage (tblastx/x_batch_pipe.rs `XGateView`).
-    if let Some(seed_end) = x_seed_end {
-        seed_end.wait_gate(x_board);
-    }
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 && x_subject_next::on() {
-        // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is
-        // free, with one worker state per thread, made by the same initializer as below when the
-        // thread takes its first subject (tblastx/x_subject_next.rs). Same `process_subject`.
-        parallel_pool.install(|| {
-            x_subject_next::for_each_subject(
-                subjects.count(),
-                &|| WorkerState {
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-                    // ```c
-                    //     /* iterate over all subject sequences */
-                    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-                    //            != BLAST_SEQSRC_EOF) {
-                    // ```
-                    // The state of one thread's iterations of this loop (as below).
-                    tx: tx_opt.clone(),
-                    hits: Vec::new(),
-                    offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
-                    diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                    // NCBI: diag_table->offset = window_size;
-                    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-                    diag_offset: window,
-                    sc,
-                },
-                &process_subject,
-                x_board_help
-                    .as_ref()
-                    .map(|help| help as &(dyn Fn(&std::sync::atomic::AtomicBool) + Sync)),
-            );
-        });
-    } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
-        parallel_pool.install(|| {
-            (0..subjects.count()).into_par_iter().for_each_init(
-                || WorkerState {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-                    // ```c
-                    // while (...) {
-                    //    ...
-                    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-                    // }
-                    // ```
-                    tx: tx_opt.clone(),
-                    hits: Vec::new(),
-                    offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
-                    diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                    // NCBI: diag_table->offset = window_size;
-                    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-                    diag_offset: window,
-                    sc,
-                },
-                process_subject,
-            );
-        });
-    } else {
-        for_each_subjects(
-            subjects.count(),
-            || WorkerState {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-                // ```c
-                // while (...) {
-                //    ...
-                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-                // }
-                // ```
-                tx: tx_opt.clone(),
-                hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
-                diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                // NCBI: diag_table->offset = window_size;
-                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-                diag_offset: window,
-                sc,
-            },
-            &process_subject,
-        );
-    }
-
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    {
-        for_each_subjects(
-            subjects.count(),
-            || WorkerState {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
-                // ```c
-                // while (...) {
-                //    ...
-                //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-                // }
-                // ```
-                tx: tx_opt.clone(),
-                hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
-                diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                // NCBI: diag_table->offset = window_size;
-                // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
-                diag_offset: window,
-                sc,
-            },
-            &process_subject,
-        );
-    }
-
-    // No NCBI counterpart: LOSAT_TIMING, the clock after the subject loop (x_search_timing.rs).
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the batch leaves the board once its subject loop has ended
+    // (`XEndBatch` removes it again when the search returns, which then finds nothing).
     if let Some((board, batch)) = &x_board_batch {
         board.end_batch(batch);
     }
+    // No NCBI counterpart: LOSAT_TIMING, the clock after the subject loop (x_search_timing.rs).
     let x_t_collect = x_times.now();
     // Close channel so the writer can exit.
     if let Some(tx) = tx_opt {
@@ -7539,101 +7196,37 @@ fn search_query_batch<S: TbxScore>(
     }
 
     bar.finish();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
-    // ```c
-    // for (int index = 0; index < hit_list->hsplist_count; index++) {
-    //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-    //     if (!hsp_list)
-    //         continue;
-    //     Blast_HSPListSortByEvalue(hsp_list);
-    // }
-    // ```
-    // Each traversal ends with the batch's hit lists in report order (tblastx/hit_collector.rs):
-    // from the writer thread, or from the collector the subject loop fed.
+    // The batch's hit lists in report order (`batch_finish::collect_hits`).
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    let collected_hits: Option<Vec<TblastxHsp>> = writer.map(|writer| writer.join().unwrap());
+    let hits = batch_finish::collect_hits(writer, local_collector);
     #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
-    let collected_hits: Option<Vec<TblastxHsp>> = None;
-    let hits = match collected_hits {
-        Some(hits) => hits,
-        None => local_collector
-            .into_inner()
-            .unwrap()
-            .expect("a subject loop without a writer thread keeps the collector")
-            .finish(),
-    };
+    let hits = batch_finish::collect_hits(local_collector);
     if diag_enabled {
         print_diagnostics_summary(&diagnostics);
     }
 
     // EXPERIMENT (LOSAT_X_TBXPIPE): the block's lines, printed here, or kept in the batch's result
     // for the batch loop when the pipe runs this search (`x_seed_end`).
-    let mut x_timing: Vec<String> = Vec::new();
-    if timing_enabled {
-        let t_search = t_search_start.elapsed();
-        // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs).
-        // No NCBI counterpart.
-        crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::Search, t_search);
-        let scan_s = scan_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
-        let scan_n = scan_calls.load(AtomicOrdering::Relaxed);
-        let ungapped_s = ungapped_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
-        let ungapped_n = ungapped_calls.load(AtomicOrdering::Relaxed);
-        let reeval_s = reeval_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
-        let reeval_n = reeval_calls.load(AtomicOrdering::Relaxed);
-        let linking_s = linking_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
-        let linking_n = linking_calls.load(AtomicOrdering::Relaxed);
-        let identity_s = identity_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
-        let identity_n = identity_calls.load(AtomicOrdering::Relaxed);
-
-        x_timing.push(format!(
-            "[TIMING] read_queries: {:.3}s",
-            t_read_queries.as_secs_f64()
-        ));
-        x_timing.push(format!(
-            "[TIMING] build_lookup: {:.3}s",
-            t_build_lookup.as_secs_f64()
-        ));
-        x_timing.push(format!(
-            "[TIMING] read_subjects: {:.3}s",
-            t_read_subjects.as_secs_f64()
-        ));
-        x_timing.push(format!(
-            "[TIMING] scan_subject: {:.3}s (calls={})",
-            scan_s, scan_n
-        ));
-        x_timing.push(format!(
-            "[TIMING] ungapped_extend: {:.3}s (calls={})",
-            ungapped_s, ungapped_n
-        ));
-        x_timing.push(format!(
-            "[TIMING] reevaluate: {:.3}s (calls={})",
-            reeval_s, reeval_n
-        ));
-        x_timing.push(format!(
-            "[TIMING] sum_stats_linking: {:.3}s (calls={})",
-            linking_s, linking_n
-        ));
-        x_timing.push(format!(
-            "[TIMING] identity_calc: {:.3}s (calls={})",
-            identity_s, identity_n
-        ));
-        x_timing.push(format!(
-            "[TIMING] search_total: {:.3}s",
-            t_search.as_secs_f64()
-        ));
-        x_timing.push(format!(
-            "[TIMING] total: {:.3}s",
-            t_total.elapsed().as_secs_f64()
-        ));
-        // No NCBI counterpart: the stage lines of x_search_timing.rs, after the lines above.
-        if let Some(lines) = x_times.lines(t_search_start, x_t_subjects, x_t_collect, t_search) {
-            x_timing.extend(lines);
-        }
-        // No NCBI counterpart: the linking lines of x_link_timing.rs, after the stage lines.
-        if let Some(lines) = x_link_timer.lines() {
-            x_timing.extend(lines);
-        }
-    }
+    let mut x_timing = batch_finish::timing_lines(&batch_finish::TimingInputs {
+        timing_enabled,
+        t_search_start,
+        scan_ns: &scan_ns,
+        scan_calls: &scan_calls,
+        ungapped_ns: &ungapped_ns,
+        ungapped_calls: &ungapped_calls,
+        reeval_ns: &reeval_ns,
+        reeval_calls: &reeval_calls,
+        linking_ns: &linking_ns,
+        linking_calls: &linking_calls,
+        t_read_queries,
+        t_build_lookup,
+        t_read_subjects,
+        t_total,
+        x_times: &x_times,
+        x_t_subjects,
+        x_t_collect,
+        x_link_timer: &x_link_timer,
+    });
     if let Some(error) = x_read_failure.take() {
         return Err(error);
     }

@@ -337,7 +337,8 @@ psiblast is blastp with a round driver (`blastp/blast_engine/psi_round.rs`, `sea
 blastx, tblastn and tblastx follow the same stages with their own drivers: blastx in
 `blastx/native.rs`, `search.rs` and `runtime.rs`; tblastn in `tblastn/tblastn_app.rs` and
 `stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
-sets up a query batch with `batch_setup.rs` and `context_cutoffs.rs`. rpsblast has no driver of its
+sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tables.rs`, runs its
+subject loop with `subject_loop.rs` and ends with `batch_finish.rs`. rpsblast has no driver of its
 own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_search` from
 `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the profiles are the
 "query" and the user's query is the "subject".
@@ -428,7 +429,7 @@ single-threaded run inserts results into the hit lists. The patterns, each with 
 
 | Where | What | Runs on |
 | :--- | :--- | :--- |
-| `tblastx/blast_engine/run_impl.rs` | the writer thread that collects subject results (`std::thread::spawn`) | a new OS thread (native only) |
+| `tblastx/blast_engine/subject_loop.rs` | the writer thread that collects subject results (`std::thread::spawn`) | a new OS thread (native only) |
 | `blastn/blast_engine/x_query_scan_par.rs` | the first reading of a large query file by several threads, before the search pool exists | scoped OS threads (Unix) |
 | `tblastn/stage_d_pipeline.rs` | the last query batches searched at the same time, each with its own pool (`LOSAT_X_TBNOWNPOOLS`) | scoped OS threads (native) |
 | `blastinput/x_packed_subjects.rs` | packing `-subject` records while the reader reads the next ones | one scoped OS thread (native) |

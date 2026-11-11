@@ -3220,6 +3220,7 @@ fn psiblast_pssms(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
+    keys: psi_round::SubjectKeys<'_>,
 ) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
     use crate::algorithm::psiblast::pssm::{
         ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord,
@@ -3244,6 +3245,20 @@ fn psiblast_pssms(
         k: gapped.k,
         h: gapped.h,
     };
+    // The rows of each query's PSSM are the handles of the Seq-align ids that it takes
+    // (`SubjectKeys`): keys that NCBI's handles can take for one, and giim ids, are refused before
+    // any PSSM is made (`rounds::HandleIndex`).
+    for hit_list in hit_lists.iter().flatten() {
+        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+        let rows: std::collections::BTreeSet<crate::algorithm::psiblast::rounds::SetKey> = hit_list
+            .hsplist_array[..count]
+            .iter()
+            .flat_map(|hsp_list| &hsp_list.hsps)
+            .filter(|hsp| psi_round::included(hsp.e_value, args.inclusion_ethresh))
+            .map(|hsp| keys.key(hsp.s_idx))
+            .collect();
+        crate::algorithm::psiblast::rounds::SetKey::check_handles(&rows)?;
+    }
     let mut files = PssmFiles::new(request);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
@@ -3299,6 +3314,7 @@ fn psiblast_pssms(
             },
             &alignments,
             &subject,
+            &|s_idx| keys.key(s_idx),
             ancillary,
         )
         .and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
@@ -12317,6 +12333,14 @@ fn run_resolved_in_pool(
     if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
         titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
     }
+    let subject_keys = psi_round::SubjectKeys {
+        listed_ordinals: listed_subjects
+            .as_ref()
+            .map(|listed| listed.ordinals.as_slice()),
+        parsed: listed_titles
+            .as_ref()
+            .map_or(&[][..], |titles| titles.parsed.as_slice()),
+    };
     let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
             Some(request) => Some(psiblast_pssms(
@@ -12327,13 +12351,14 @@ fn run_resolved_in_pool(
                 shown_subjects,
                 &contexts,
                 &gapped_params,
+                subject_keys,
             )?),
             None => None,
         };
     // psiblast's rounds: the round's outcome (its inclusion set and the next round's PSSM, from
     // the same Seq-aligns), and the subjects of the previous round's set for its two-part table
     // (`psi_round::round_outcome`).
-    let psi_found_before: Option<Vec<bool>> = match reports.psi_round {
+    let psi_found_before: Option<psi_round::FoundBefore> = match reports.psi_round {
         Some(io) => psi_round::round_outcome(
             &args,
             io,
@@ -12342,13 +12367,8 @@ fn run_resolved_in_pool(
             shown_subjects,
             &contexts,
             &gapped_params,
-            listed_subjects
-                .as_ref()
-                .map(|listed| listed.ordinals.as_slice()),
-            listed_titles
-                .as_ref()
-                .map_or(&[][..], |titles| titles.parsed.as_slice()),
-        ),
+            subject_keys,
+        )?,
         None => None,
     };
     // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,
@@ -12653,14 +12673,15 @@ fn run_resolved_in_pool(
         //         sequence_data.erase();
         //         ERR_POST(Warning << "Failed to retrieve sequence " <<
         // ```
-        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`) reads the letters of each aligned
-        // subject by its Seq-align id, as those formats do (review 1 of line DBID tabfields, H1).
+        // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`, and each round's PSSM for the next
+        // round) reads the letters of each included subject by its Seq-align id, as those formats
+        // do (review 1 of line DBID tabfields, H1). `check_pssm_subjects` refuses those, before the
+        // cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
+        // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
             &hit_lists,
             &batch_prefetch,
-            format_plans.iter().any(|outfmt| outfmt.reads_subjects())
-                || args.psi_pssm.is_some()
-                || reports.psi_round.is_some(),
+            format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
             format_plans.iter().any(|outfmt| match outfmt {
                 BlastpReport::Text(OutputFormat::Pairwise)
                 | BlastpReport::Xml
@@ -13450,6 +13471,11 @@ fn run_resolved_in_pool(
                     )?,
                     None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
                 }
+                // psiblast's two-part table looks each shown subject up in the previous round's
+                // set by its handle: LOSAT refuses one that it cannot place as NCBI does.
+                if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {
+                    found.refuse_unsure_shown(shown.iter().copied())?;
+                }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
                 // ```c++
                 //     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
@@ -13520,7 +13546,9 @@ fn run_resolved_in_pool(
                             reports.x_prolog,
                             crate::report::pairwise::psiblast_round::ReportRound {
                                 number: io.state.number(),
-                                found_before: psi_found_before.as_deref(),
+                                found_before: psi_found_before
+                                    .as_ref()
+                                    .map(|found| found.found.as_slice()),
                             },
                         )?;
                         continue;

@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_cu",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_cu (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-08T20:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50035,
+  "bytes-to-cache": 623,
+  "files": [
+    "psr_cu.pdb",
+    "psr_cu.phr",
+    "psr_cu.pin",
+    "psr_cu.pog",
+    "psr_cu.pos",
+    "psr_cu.pot",
+    "psr_cu.psq",
+    "psr_cu.ptf",
+    "psr_cu.pto"
+  ]
+}

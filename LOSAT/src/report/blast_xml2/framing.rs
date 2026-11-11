@@ -24,7 +24,9 @@
 //! `-subject` searches keep the last query's result back until the next query's arrives
 //! (`m_IsBl2Seq`, the accumulated results of blast_format.cpp:2363-2404) and write it in the
 //! epilog. NCBI's epilog is not reached after a failed query batch, so that held report is
-//! never written: the document of a failed run lacks the last formatted query's report.
+//! never written: the document of a failed run lacks the last formatted query's report. The
+//! programs do not make that report (`Xml2Document::unwritten`) and refuse none of its texts
+//! (`blast_xml::written_queries`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2364, :2383-2389
 //! ```c++
@@ -330,6 +332,24 @@ impl<F: SideFiles> Xml2Document<F> {
         let result = self.write(report, out);
         report.clear();
         result
+    }
+
+    /// Whether a report is held back until the next one arrives (a `-subject` run).
+    pub fn holds_back(&self) -> bool {
+        self.delayed
+    }
+
+    /// The arrival of the report of the last query of a `-subject` run that stops, which NCBI
+    /// holds back and never writes: the report is not made, and the one held before it is
+    /// written now, as `report` would write it.
+    pub fn unwritten(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        debug_assert!(self.delayed, "only a held report is never written");
+        self.prolog(out);
+        if !std::mem::replace(&mut self.has_pending, false) {
+            return Ok(());
+        }
+        let pending = std::mem::take(&mut self.pending);
+        self.write(&pending, out)
     }
 
     /// `x_WriteXML2`: one report into the stream or its own file.

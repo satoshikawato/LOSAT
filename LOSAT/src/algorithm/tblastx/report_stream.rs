@@ -227,7 +227,7 @@ pub(super) fn check(
     if concatenated + i128::from(args.window()) > 1 << 30 {
         return Err(Off::Window);
     }
-    // The search space of a context (`search_query_batch`, `try_compute_eff_lengths_tblastx`):
+    // The search space of a context (`context_cutoffs`, `try_compute_eff_lengths_tblastx`):
     // the effective database length `db - n a`, at least 1, times the context's length minus
     // the length adjustment `a`. The adjustment is between 0 and the smaller root of
     // `n a^2 - (q n + db) a + c`, at most `2 c / (q n + db) <= 2 q` with `c <= q db`

@@ -532,7 +532,11 @@ pub fn blastn_word_size(value: &str) -> Result<usize, String> {
 /// A BLASTN count of 1 or more (`-num_threads`, `-max_target_seqs`, `-max_hsps`), as
 /// NCBI's arguments (blast_args.cpp:203-207,2731-2732,3162-3163).
 pub fn blastn_count(value: &str) -> Result<usize, String> {
-    ncbi_integer_at_least(value, 1).map(|n| n as usize)
+    ncbi_positive_integer(value).map(|n| n as usize)
+}
+/// `blastn_count` as an `int`, the type of BLASTX's fields.
+pub fn ncbi_positive_integer(value: &str) -> Result<i32, String> {
+    ncbi_integer_at_least(value, 1)
 }
 /// A BLASTN reward: 0 or more, as NCBI's argument (blast_args.cpp:658-659). A reward of 0
 /// is an option that LOSAT rejects before the search (`blastn/scoring.rs`).
@@ -553,8 +557,8 @@ pub fn blastn_gap_cost(value: &str) -> Result<i32, String> {
     ncbi_integer(value)
 }
 /// A BLASTN e-value: any value that NCBI's argument reads (`ncbi_double`). NCBI's option
-/// check rejects 0 or less, and LOSAT rejects infinity and NaN before the search
-/// (`blastn/scoring.rs`).
+/// check rejects 0 or less (`blastn/scoring.rs`); an infinite or NaN e-value searches as in
+/// NCBI (`+inf`, `-nan`, `1e999`; `blastn/ncbi_cutoffs.rs`, E2g).
 pub fn blastn_evalue(value: &str) -> Result<f64, String> {
     ncbi_double(value, "BLASTN")
 }
@@ -771,6 +775,11 @@ pub fn tblastn_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "TBLASTN")
 }
 
+/// A real argument of BLASTX (`ncbi_double`).
+pub fn blastx_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "BLASTX")
+}
+
 /// A real argument of TBLASTX (`ncbi_double`).
 pub fn tblastx_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "TBLASTX")
@@ -863,29 +872,6 @@ pub fn ncbi_mt_mode(value: &str) -> Result<u8, String> {
         .ok()
         .filter(|mode| *mode <= 2)
         .ok_or_else(|| "Illegal value: expected an integer from 0 to 2".to_string())
-}
-
-/// A BLASTN `-use_index` value: a Boolean (`ncbi_boolean`), of which only `false` is served.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3382-3395
-/// ```c++
-///     if( args.Exist( kArgUseIndex ) &&
-///         !(args.Exist( kArgSubject ) && args[kArgSubject])) {
-///         bool use_index   = true;
-///         bool force_index = false;
-///         bool old_style_index = false;
-///         if( args[kArgUseIndex] ) {
-///             if( args[kArgUseIndex].AsBoolean() ) force_index = true;
-///             else use_index = false;
-///         }
-/// ```
-pub fn blastn_use_index(value: &str) -> Result<bool, String> {
-    if ncbi_boolean(value)? {
-        return Err(
-            "-use_index true (the megablast index) is not supported by LOSAT's BLASTN".into(),
-        );
-    }
-    Ok(false)
 }
 
 /// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).

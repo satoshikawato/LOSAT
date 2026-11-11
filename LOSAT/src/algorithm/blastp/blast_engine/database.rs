@@ -36,7 +36,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(all(test, unix))]
 use crate::cli::NativeError;
 use crate::report::blast_xml::HitTaxonomy;
-use crate::report::db_subject::{ParsedSubject, PssmRead};
+use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
@@ -1231,7 +1231,7 @@ impl ListedTitles<'_> {
     }
 
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
-    /// them by their Seq-align ids (`shared::prefetch_reads_itself`), for `batch_prefetch`:
+    /// them by their Seq-align ids (`shared::prefetch_reads`), for `batch_prefetch`:
     /// those it finds as themselves, and one whose lookup throws on its id
     /// (`ParsedSubject::prefetch_fails`: the batch's prefetch fails there); one that it finds
     /// nowhere is left out (the prefetch reads nothing for it). Such a failure is refused where
@@ -1240,11 +1240,12 @@ impl ListedTitles<'_> {
     /// sequence read before weakly, as with the prefetch off). A lookup that fails on a file
     /// (NCBI stops) and another sequence that NCBI can read for one and whose definition lines
     /// do not hold its Seq-align id (NCBI stops) are refused. With `taxids`
-    /// (`taxdb.bti` on the search path), one for which the prefetch can read another sequence
-    /// (`Prefetched::Another`) is refused where the taxonomy database's texts can differ between
-    /// what it can read (`shared::lookup_texts_differ`), and else kept as itself or left out. The
-    /// subjects that the reports show were refused before for all of these
-    /// (`check_parsed_reports`).
+    /// (`taxdb.bti` on the search path), one for which the prefetch reads another sequence that
+    /// the lookup gives first is kept (`batch_prefetch` looks that sequence's taxids up), and one
+    /// for which it can read either of two (`Prefetched::Another`) is refused where the taxonomy
+    /// database's texts can differ between them (`shared::lookup_texts_differ`), and else kept as
+    /// itself or left out. The subjects that the reports show were refused before for all of
+    /// these (`check_parsed_reports`).
     pub(super) fn prefetched_ranks(
         &self,
         database: &BlastpDatabase,
@@ -1262,9 +1263,15 @@ impl ListedTitles<'_> {
                 kept.push(rank);
                 continue;
             }
-            match shared::prefetch_reads_itself(&database.db, subject, taxids, self.program)? {
-                Ok(true) => kept.push(rank),
-                Ok(false) => {}
+            match shared::prefetch_reads(
+                &database.db,
+                self.listed.ordinals[rank],
+                subject,
+                taxids,
+                self.program,
+            )? {
+                Ok(Some(_)) => kept.push(rank),
+                Ok(None) => {}
                 Err(reason) => {
                     return Err(shared::parsed_refusal(
                         self.listed.ordinals[rank],
@@ -1295,12 +1302,14 @@ impl ListedTitles<'_> {
     /// for subjects beyond the cut that no report shows, and only of the subjects with a
     /// Seq-align below `inclusion_ethresh` (`psi_round::included`). Following subjects whose
     /// Seq-align ids `Match` share a row of the PSSM's multiple alignment, each with the letters
-    /// read by its own id (`psiblast::pssm::input_msa`). A subject's read is its own letters,
-    /// another sequence's that NCBI's scope gets by its id (`common::database::loader_gives`),
-    /// or none (`ParsedSubject::pssm_read`); LOSAT refuses the others where a PSSM is made
+    /// read by its own id (`psiblast::pssm::input_msa`). A subject's read is what NCBI's scope
+    /// gets by its id (`shared::scope_bioseq`): its own letters, another sequence's, or none;
+    /// LOSAT refuses where it does not read as NCBI (`ParsedSubject::pssm_read`, and another
+    /// holder of the id that the scope can get instead) where a PSSM is made
     /// (`PssmReads::check`). `prefetch`: whether each query's batch prefetches (the round's),
     /// which reads them all by their own ids before the PSSM; one whose prefetch is off reads
-    /// them one by one (`ParsedSubject::pssm_read`'s `one_by_one`).
+    /// them one by one (`ParsedSubject::pssm_read`'s `one_by_one`), and the blobs that the PSSM's
+    /// reads load first are kept by query for `check_pssm_loads`.
     pub(super) fn pssm_reads(
         &self,
         database: &BlastpDatabase,
@@ -1308,10 +1317,7 @@ impl ListedTitles<'_> {
         prefetch: &shared::BatchPrefetch,
         inclusion_ethresh: f64,
     ) -> Result<PssmReads> {
-        let mut reads = PssmReads {
-            read: std::collections::BTreeMap::new(),
-            refused: None,
-        };
+        let mut reads = PssmReads::default();
         if self.parsed.is_empty() {
             return Ok(reads);
         }
@@ -1321,91 +1327,127 @@ impl ListedTitles<'_> {
                 .iter()
                 .any(|hsp| super::psi_round::included(hsp.e_value, inclusion_ethresh))
         };
-        let read: std::collections::BTreeSet<usize> = hit_lists
+        // The included subjects of each query, in the order of its hit list.
+        let read_by_query: Vec<(usize, usize)> = hit_lists
             .iter()
-            .flatten()
-            .flat_map(|hit_list| {
+            .enumerate()
+            .filter_map(|(query, hit_list)| Some((query, hit_list.as_ref()?)))
+            .flat_map(|(query, hit_list)| {
                 let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                &hit_list.hsplist_array[..count]
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .filter(|hsp_list| included(hsp_list))
+                    .map(move |hsp_list| (query, hsp_list.oid as usize))
             })
-            .filter(|hsp_list| included(hsp_list))
-            .map(|hsp_list| hsp_list.oid as usize)
             .collect();
+        let read: std::collections::BTreeSet<usize> =
+            read_by_query.iter().map(|&(_, rank)| rank).collect();
         let batch_reads = Self::batch_reads(hit_lists, prefetch);
+        // The blob each read loads, whose taxids NCBI looks up there (`check_pssm_loads`).
+        let mut blobs: std::collections::BTreeMap<usize, u32> = std::collections::BTreeMap::new();
         for rank in read {
             let Some(subject) = self.parsed_subject(rank) else {
                 continue;
             };
             let ordinal = self.listed.ordinals[rank];
-            let one_by_one = batch_reads.one_by_one(rank as u32);
-            let read = match subject.pssm_read(one_by_one) {
-                Ok(read) => read,
-                Err(reason) => {
-                    reads.refused.get_or_insert((ordinal, reason, self.program));
-                    continue;
+            // Also another holder of the id whose Bioseq the scope gets where it read it before
+            // (`shared::ScopeBioseq::instead`).
+            if let Err(reason) = subject.pssm_read(batch_reads.one_by_one(rank as u32)) {
+                reads.refused.get_or_insert((ordinal, reason, self.program));
+                continue;
+            }
+            let scope = shared::scope_bioseq(&database.db, ordinal, subject, self.program)?;
+            if let Some(blob) = scope.taxonomy() {
+                blobs.insert(rank, blob);
+            }
+            match scope.letters() {
+                Some(blob) if blob == ordinal => {}
+                Some(other) => {
+                    let letters = database
+                        .db
+                        .read_sequence(other)
+                        .map_err(|error| shared::database_error(error, self.program))?
+                        .protein(0)
+                        .to_vec();
+                    reads.read.insert(rank, Some(letters));
                 }
-            };
-            // The blob that the read loads, if any: the subject's own (also one whose definition
-            // line the formatters do not find), or the other sequence's that the loader keeps.
-            let (loaded, letters): (Option<Vec<i32>>, Option<Option<Vec<u8>>>) = match read {
-                PssmRead::Itself => (Some(subject.volume_taxids()), None),
-                PssmRead::Nothing { own_blob } => {
-                    (own_blob.then(|| subject.volume_taxids()), Some(None))
+                None => {
+                    reads.read.insert(rank, None);
                 }
-                PssmRead::Another(other) => {
-                    match shared::loader_gives(&database.db, subject, other, self.program)? {
-                        None => (None, Some(None)),
-                        Some(other) => {
-                            let set = database
-                                .db
-                                .defline_set(other)
-                                .map_err(|error| shared::database_error(error, self.program))?;
-                            let taxids = shared::defline_set_taxids(&set);
-                            match shared::pssm_bioseq(&database.db, subject, other, self.program)? {
-                                Some(other) => (
-                                    Some(taxids),
-                                    Some(Some(
-                                        database
-                                            .db
-                                            .read_sequence(other)
-                                            .map_err(|error| {
-                                                shared::database_error(error, self.program)
-                                            })?
-                                            .protein(0)
-                                            .to_vec(),
-                                    )),
-                                ),
-                                None => (Some(taxids), Some(None)),
-                            }
-                        }
-                    }
-                }
-            };
-            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:175-189
-            // (the taxonomy database's texts, quoted at `LookupTexts`)
-            // Where the batch's prefetch is off, the PSSM's read is the first load of the blob, whose
-            // taxids NCBI looks up then (`CSeqDBVol::x_GetTaxonomy`): a taxonomy database whose
-            // lookups write texts writes them there (review 1 of line DBID pssmread, H1).
-            if one_by_one
-                && loaded.is_some_and(|taxids| {
-                    shared::lookup_texts_differ(&database.db, &[&taxids, &[]])
+            }
+        }
+        // The loads of the queries whose batch reads one by one, where the PSSM's read is the
+        // scope's first of that blob in the query or not (`check_pssm_loads` asks the run's
+        // taxonomy lookups).
+        reads.loads = read_by_query
+            .into_iter()
+            .filter_map(|(query, rank)| {
+                let blob = *blobs.get(&rank)?;
+                Some(PssmLoad {
+                    query,
+                    ordinal: self.listed.ordinals[rank],
+                    rank,
+                    blob,
                 })
-            {
-                reads.refused.get_or_insert((
-                    ordinal,
-                    format!(
-                        "has the Seq-align id {}, by which psiblast's PSSM reads a sequence one by one in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 looks up that sequence's taxids in the taxonomy database, which writes a text at such a lookup",
-                        String::from_utf8_lossy(&subject.alignment_fasta())
+            })
+            .collect();
+        Ok(reads)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1142-1153
+    // (quoted at `shared::TaxdbRun`)
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513 (quoted at
+    // `shared::pssm_load_texts`)
+    // Where the batch's prefetch is off, the PSSM's read of a Seq-align id loads its blob where
+    // the scope has not read it before in the query (the query's report, an earlier round), and
+    // `x_GetTaxonomy` asks the taxonomy database for each taxid that the volume has not looked
+    // up before in the run; the texts of opening come with the run's first lookup. Where such a
+    // lookup writes a text, NCBI writes it between the query's report and the PSSM's warnings,
+    // which LOSAT does not (review 1 of line DBID pssmread, H1; review 2, H1: a report that read
+    // the subject before, or any lookup of the run before for the texts of opening, writes them
+    // there, as dev did).
+    /// LOSAT's refusal of the PSSM's reads of query `query` (of the call) whose batch reads one by
+    /// one, after that query's report read its subjects (`shared::prefetch_messages`): a load
+    /// whose taxids' lookups write a text (`shared::pssm_load_texts`, with the run's
+    /// `TaxdbRun`). The lookups that write nothing are the run's from then on.
+    pub(super) fn check_pssm_loads(
+        &self,
+        database: &BlastpDatabase,
+        reads: &PssmReads,
+        query: usize,
+    ) -> Result<()> {
+        for load in reads.loads.iter().filter(|load| load.query == query) {
+            let taxids = match self.parsed_subject(load.rank) {
+                Some(subject) if load.blob == load.ordinal => subject.volume_taxids(),
+                _ => shared::defline_set_taxids(
+                    &database
+                        .db
+                        .defline_set(load.blob)
+                        .map_err(|error| shared::database_error(error, self.program))?,
+                ),
+            };
+            let texts = shared::pssm_load_texts(
+                &database.db,
+                &database.taxdb,
+                load.blob,
+                &taxids,
+                self.program,
+            )?;
+            if !texts.is_empty() {
+                let id = self
+                    .parsed_subject(load.rank)
+                    .map(|subject| String::from_utf8_lossy(&subject.alignment_fasta()).into_owned())
+                    .unwrap_or_default();
+                return Err(shared::parsed_refusal(
+                    load.ordinal,
+                    &format!(
+                        "has the Seq-align id {id}, by which psiblast's PSSM reads a sequence in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off (also beyond -max_target_seqs), where NCBI BLAST+ 2.17.0 looks up that sequence's taxids for the first time and the taxonomy database writes a text"
                     ),
                     self.program,
                 ));
-                continue;
-            }
-            if let Some(letters) = letters {
-                reads.read.insert(rank, letters);
             }
         }
-        Ok(reads)
+        Ok(())
     }
 
     /// LOSAT's refusals of the subjects of ranks `ranks` that a batch's prefetch reads though its
@@ -3979,12 +4021,25 @@ mod tests {
 /// where that is not the subject's own letters (`ListedTitles::pssm_reads`): another sequence's
 /// letters in NCBIstdaa, or `None` for no sequence (NCBI's warning `Failed to retrieve sequence`,
 /// and the row becomes the query's). `refused`: LOSAT's refusal of the first subject whose read
-/// it does not make as NCBI, which stops a run where a PSSM is made (`check`).
+/// it does not make as NCBI, which stops a run where a PSSM is made (`check`). `loads`: the blobs
+/// that the reads load, by query (`ListedTitles::check_pssm_loads`).
 #[derive(Default)]
 pub(super) struct PssmReads {
     read: std::collections::BTreeMap<usize, Option<Vec<u8>>>,
     /// The ordinal id, the reason and the program of the refusal.
     refused: Option<(u32, String, &'static str)>,
+    loads: Vec<PssmLoad>,
+}
+
+/// One blob that psiblast's PSSM of a query reads by a subject's Seq-align id (`PssmReads`).
+struct PssmLoad {
+    /// The query of the call.
+    query: usize,
+    /// The subject's ordinal id and rank.
+    ordinal: u32,
+    rank: usize,
+    /// The sequence, by ordinal id, whose blob the read loads (`shared::ScopeBioseq::taxonomy`).
+    blob: u32,
 }
 
 impl PssmReads {
@@ -4003,10 +4058,14 @@ impl PssmReads {
 
     /// The letters that the PSSM reads by the Seq-align id of the subject of rank `s_idx`:
     /// `own()` (its own letters), another sequence's, or `None` for no sequence.
-    pub(super) fn letters(&self, s_idx: u32, own: impl FnOnce() -> Vec<u8>) -> Option<Vec<u8>> {
+    pub(super) fn letters(
+        &self,
+        s_idx: u32,
+        own: impl FnOnce() -> Result<Vec<u8>>,
+    ) -> Result<Option<Vec<u8>>> {
         match self.read.get(&(s_idx as usize)) {
-            Some(read) => read.clone(),
-            None => Some(own()),
+            Some(read) => Ok(read.clone()),
+            None => own().map(Some),
         }
     }
 }

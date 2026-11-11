@@ -2479,6 +2479,18 @@ enum BlastpReport {
 }
 
 impl BlastpReport {
+    /// Whether the report's writer writes the warnings that come after the last query's report
+    /// before its epilog (`QueryWarnings::after_last_query`): psiblast's reports, outfmt 0, 6, 7,
+    /// 10 and 20.
+    fn writes_after_last_query(self) -> bool {
+        matches!(
+            self,
+            BlastpReport::Text(
+                OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
+            ) | BlastpReport::CustomTabular(_)
+        )
+    }
+
     /// Whether NCBI writes a query's result warnings with its report
     /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
     fn writes_query_warnings(self) -> bool {
@@ -2961,6 +2973,10 @@ fn write_blastp_tabular_hit_lists(
         }
     }
 
+    // The warnings after the last query's report (`QueryWarnings::after_last_query`).
+    if let Some(warnings) = warnings {
+        warnings.after_last_query(hit_lists.len(), &mut *writer)?;
+    }
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`). The count is every query
     // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCK) the last block of
@@ -12426,6 +12442,8 @@ fn run_resolved_in_pool(
             pssm_reads.check()?;
         }
     }
+    // Whether this call makes a PSSM: `-out_pssm`'s, or a round's for the next round.
+    let pssm_made = args.psi_pssm.is_some() || reports.psi_round.is_some_and(|io| io.makes_next());
     let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
         hit_lists
             .iter_mut()
@@ -12722,8 +12740,8 @@ fn run_resolved_in_pool(
         // ```
         // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`, and each round's PSSM for the next
         // round) reads the letters of each included subject by its Seq-align id, as those formats
-        // do (review 1 of line DBID tabfields, H1). `check_pssm_subjects` refuses those, before the
-        // cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
+        // do (review 1 of line DBID tabfields, H1). `ListedTitles::pssm_reads` reads those, before
+        // the cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
         // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
             &hit_lists,
@@ -12811,22 +12829,30 @@ fn run_resolved_in_pool(
                     None => blastp_hit_list_hsp_count(lists),
                 };
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !prefetch_taxids || rows == crate::report::tabular::SubjectFetch::Never {
+                    if !prefetch_taxids {
                         continue;
                     }
                     for query in batch.searched.clone() {
-                        let shown = std::slice::from_ref(&hit_lists[query]);
-                        // Rows that read a subject only for its identities (`nident` alone) read
-                        // none of a query whose HSPs have none, which looks no taxid up.
-                        let mut fetched =
-                            database::ListedTitles::fetched_ranks(shown, rows).peekable();
-                        if rows == crate::report::tabular::SubjectFetch::Every
-                            || fetched.peek().is_some()
-                        {
-                            let messages = titles.prefetch_messages(database, fetched)?;
-                            query_warning_lines[query].extend(messages);
+                        if rows != crate::report::tabular::SubjectFetch::Never {
+                            let shown = std::slice::from_ref(&hit_lists[query]);
+                            // Rows that read a subject only for its identities (`nident` alone)
+                            // read none of a query whose HSPs have none, which looks no taxid up.
+                            let mut fetched =
+                                database::ListedTitles::fetched_ranks(shown, rows).peekable();
+                            if rows == crate::report::tabular::SubjectFetch::Every
+                                || fetched.peek().is_some()
+                            {
+                                let messages = titles.prefetch_messages(database, fetched)?;
+                                query_warning_lines[query].extend(messages);
+                            }
+                            open_for_rows(shown)?;
                         }
-                        open_for_rows(shown)?;
+                        // The query's PSSM reads after its report (psiblast_app.cpp:283-308):
+                        // the blobs it loads first look their taxids up then
+                        // (`ListedTitles::check_pssm_loads`).
+                        if pssm_made {
+                            titles.check_pssm_loads(database, &pssm_reads, query)?;
+                        }
                     }
                     continue;
                 }
@@ -12955,13 +12981,24 @@ fn run_resolved_in_pool(
         .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
     // The warnings are written once, with the first format (`QueryWarnings`).
     // NCBI makes each query's PSSM after the query's report (`psiblast_pssms`): the warnings of
-    // its reads come before the next query's warnings, and the last query's after the reports.
+    // its reads come before the next query's warnings, and the last query's after its report,
+    // before the epilog (psiblast_app.cpp:304-308 and 562, `PrintEpilog`; review 2 of line DBID
+    // pssmread, H4), where the first format's writer puts them
+    // (`QueryWarnings::after_last_query`; the others have no epilog: after the reports).
     let mut pssm_read_warnings_after = Vec::new();
     if let Some(files) = psiblast_pssms.as_mut() {
+        let queries = query_warning_lines.len();
         for (query, warnings) in files.take_read_warnings() {
             match query_warning_lines.get_mut(query + 1) {
                 Some(next) => {
                     next.splice(0..0, warnings);
+                }
+                None if format_plans
+                    .first()
+                    .is_some_and(|outfmt| outfmt.writes_after_last_query()) =>
+                {
+                    query_warning_lines.resize(queries + 1, Vec::new());
+                    query_warning_lines[queries].extend(warnings);
                 }
                 None => pssm_read_warnings_after.extend(warnings),
             }

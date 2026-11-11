@@ -245,7 +245,8 @@ pub(crate) struct QueryPssm {
 /// (`x_PSIMatrix2Asn1`, `PsiBlastAddAncillaryPssmData` and `MSerial_AsnText`) and the ASCII
 /// PSSM (`PrintAsciiPssm`), as requested. The inputs are the query, its Seq-aligns, the letters
 /// that NCBI's scope gives by their Seq-align ids (`subject(s_idx)`: in NCBIstdaa, the record's
-/// own or another sequence's, `None` for no sequence) and the keys of those ids (`key(s_idx)`,
+/// own or another sequence's, `None` for no sequence; `Err` for LOSAT's internal error of a record
+/// without letters) and the keys of those ids (`key(s_idx)`,
 /// `rounds::SetKey`), the round's ancillary data, and the gapped block of the matrix and gap
 /// costs (`gapped`, the score block's `kbp_gap_std[0]`). `unread` receives the subject of each
 /// Seq-align whose letters cannot be read, in order (NCBI's warning `Failed to retrieve
@@ -404,7 +405,7 @@ pub(crate) fn query_pssm(
     inclusion_ethresh: f64,
     query: PssmQueryRecord<'_>,
     alignments: &[PssmAlignment<'_>],
-    subject: &dyn Fn(u32) -> Option<Vec<u8>>,
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
     key: &dyn Fn(u32) -> SetKey,
     ancillary: PssmAncillary,
     unread: &mut Vec<u32>,
@@ -917,7 +918,7 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
 fn input_msa(
     query: &[u8],
     alignments: &[PssmAlignment<'_>],
-    subject: &dyn Fn(u32) -> Option<Vec<u8>>,
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
     key: &dyn Fn(u32) -> SetKey,
     inclusion_ethresh: f64,
     unread: &mut Vec<u32>,
@@ -962,7 +963,7 @@ fn input_msa(
                     "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
                 );
             };
-            match subject(alignment.subject)
+            match subject(alignment.subject)?
                 .filter(|letters| letters.len() >= alignment.s_start + subject_span(alignment))
             {
                 Some(letters) => process_denseg(row, alignment, &letters),

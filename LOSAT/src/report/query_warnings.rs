@@ -33,6 +33,23 @@ pub struct QueryWarnings<'a> {
 }
 
 impl QueryWarnings<'_> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-308 and 562
+    // ```c++
+    //                         pssm =
+    //                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
+    //                                      results_1st_query.GetAncillaryData());
+    //     ...
+    //         formatter.PrintEpilog(opt);
+    // ```
+    /// Writes the warnings that come after the report of the last of `queries` queries and before
+    /// the epilog (psiblast's warnings of the last query's PSSM reads, which it makes after the
+    /// query's report): `before[queries]` where the caller sets it, as `before_query`. A report
+    /// writer calls it after its last query, before an epilog it writes (review 2 of line DBID
+    /// pssmread, H4).
+    pub fn after_last_query(&mut self, queries: usize, report: &mut dyn Write) -> io::Result<()> {
+        self.before_query(queries, report)
+    }
+
     /// Writes the warnings of query `index`, after the report written so far (`report`)
     /// is flushed; a failed flush returns before them.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {

@@ -164,7 +164,7 @@ fn row_letters(row: &[PsiMsaCell]) -> Vec<Option<u8>> {
 fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
     let query = [1, 2, 3, 4, 5, 6];
     let subjects: [&[u8]; 3] = [&[10, 11, 12, 13, 14, 15, 16], &[20, 21, 22], &[7, 8, 9, 10]];
-    let subject = |s_idx: u32| Some(subjects[s_idx as usize].to_vec());
+    let subject = |s_idx: u32| Ok(Some(subjects[s_idx as usize].to_vec()));
     let gapped = [
         GapEditOp::Sub(2),
         GapEditOp::Ins(1),
@@ -212,11 +212,13 @@ fn an_unread_seq_align_makes_its_row_the_query() {
     let query = [1, 2, 3, 4, 5, 6];
     // Subject 0 reads its own letters; subject 1 (the same row: its key is 0's) reads another
     // sequence one letter short of its range; subject 2 reads none; subject 3 a longer one.
-    let letters = |s_idx: u32| match s_idx {
-        0 => Some(vec![10, 11, 12, 13]),
-        1 => Some(vec![20, 21]),
-        2 => None,
-        _ => Some(vec![30, 31, 32, 33, 34, 35, 36]),
+    let letters = |s_idx: u32| {
+        Ok(match s_idx {
+            0 => Some(vec![10, 11, 12, 13]),
+            1 => Some(vec![20, 21]),
+            2 => None,
+            _ => Some(vec![30, 31, 32, 33, 34, 35, 36]),
+        })
     };
     let key = |s_idx: u32| SetKey::Index(if s_idx == 1 { 0 } else { s_idx });
     // Two query letters over three subject letters: the range is 0..3.
@@ -246,7 +248,7 @@ fn an_unread_seq_align_makes_its_row_the_query() {
 #[test]
 fn an_alignment_past_the_last_row_is_refused() {
     let query = [1, 2, 3];
-    let subject = |_: u32| Some(vec![4, 5, 6]);
+    let subject = |_: u32| Ok(Some(vec![4, 5, 6]));
     // Subject 1 is not counted but comes first: subject 0's HSP takes index 2 of 2 rows.
     let alignments = [
         alignment(1, 1.0, 0, 0, 3, None),
@@ -311,7 +313,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         &[9, 10, 11, 12],
         &[13, 14, 15, 16],
     ];
-    let subject = |s_idx: u32| Some(subjects[s_idx as usize].to_vec());
+    let subject = |s_idx: u32| Ok(Some(subjects[s_idx as usize].to_vec()));
     // Copies of one record (subjects 0 and 1): one handle, one row; the copy fills only the
     // cells that the first left unaligned.
     let key = key_of(&[
@@ -382,7 +384,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
 #[test]
 fn an_e_value_from_10_on_counts_as_10() {
     let query = [1, 2];
-    let subject = |_: u32| Some(vec![3, 4]);
+    let subject = |_: u32| Ok(Some(vec![3, 4]));
     for (e_value, threshold, rows) in [
         (9.0, 10.0, 2),
         (9.0, 9.0, 1),
@@ -527,7 +529,7 @@ fn run_query_pssm(
     inclusion_ethresh: f64,
     letters: &[u8],
     alignments: &[PssmAlignment<'_>],
-    subject: &dyn Fn(u32) -> Option<Vec<u8>>,
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
 ) -> Result<QueryPssm> {
     query_pssm(
         request,
@@ -561,7 +563,7 @@ fn an_o_in_the_query_prints_as_x() {
     for (position, letter) in [(4, b'A'), (14, b'I'), (24, b'S')] {
         subject_letters[position] = letter;
     }
-    let subject = |_: u32| Some(ncbistdaa_letters(&subject_letters));
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(&subject_letters)));
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let query = crate::algorithm::blastp::encoding::encode_protein_sequence(&record);
     let query = &query.aa_seq[1..=query.aa_len];
@@ -610,7 +612,7 @@ fn an_o_in_the_query_prints_as_x() {
 // first, then the inclusion threshold.
 #[test]
 fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
-    let subject = |_: u32| Some(ncbistdaa_letters(TK_1_40));
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let run = |pseudocount: i32, inclusion_ethresh: f64| {
         run_query_pssm(

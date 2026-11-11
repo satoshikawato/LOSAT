@@ -514,7 +514,7 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
 /// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,
 /// below `-inclusion_ethresh`, `x_ExtractAlignmentData`): the round's inclusion set and the
-/// subjects whose letters the PSSM reads (`ListedTitles::check_pssm_subjects`).
+/// subjects whose letters the PSSM reads (`ListedTitles::pssm_reads`).
 pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
     const BLAST_EXPECT_VALUE: f64 = 10.0;
     crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
@@ -672,14 +672,25 @@ pub(super) struct SubjectKeys<'a> {
 
 impl SubjectKeys<'_> {
     /// The letters that the PSSM reads by the Seq-align id of subject `s_idx` (`PssmReads`), in
-    /// NCBIstdaa: its own are `shown_subjects`' (`None` for no sequence).
-    pub(super) fn letters(&self, shown_subjects: ShownSubjects<'_>, s_idx: u32) -> Option<Vec<u8>> {
-        self.reads
-            .letters(s_idx, || match shown_subjects.letters(s_idx as usize) {
+    /// NCBIstdaa: its own are `shown_subjects`' (`None` for no sequence). A subject whose own
+    /// letters are missing or empty (no database or `-subject` record has none) is LOSAT's
+    /// internal error, not NCBI's warning (review 2 of line DBID pssmread, L2).
+    pub(super) fn letters(
+        &self,
+        shown_subjects: ShownSubjects<'_>,
+        s_idx: u32,
+    ) -> Result<Option<Vec<u8>>> {
+        self.reads.letters(s_idx, || {
+            let letters = match shown_subjects.letters(s_idx as usize) {
                 Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
                 Some(ShownLetters::Stored(residues)) => residues.to_vec(),
                 None => Vec::new(),
-            })
+            };
+            if letters.is_empty() {
+                bail!("internal error of LOSAT's PSIBLAST: subject {s_idx} of the PSSM has no letters");
+            }
+            Ok(letters)
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:445-449

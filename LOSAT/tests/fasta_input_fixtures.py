@@ -868,6 +868,25 @@ def extra_rows() -> list[Row]:
         # (BLASTN's mixer completes the batch, whose archive holds the subjects.)
         add("arch_title_s.zero", program, task, file("batch_clean"), bad_s, env="BATCH_SIZE=0", fmts=(11,),
             kind=refused if program == "blastn" else "ncbi")
+    # outfmt 15 and 16 of a `-subject` search (line NP, series SM): NCBI writes a query's report when
+    # the next query's results arrive, or in the epilog; a run that a later batch stops (record 6's
+    # CheckDataLine error) never writes the last query of the batches before it, so the title of
+    # that query (record 5 with one record a batch, `each`) is not refused. With two records a
+    # batch, record 5 is in the batch that stops (record 4 is the held one); a title on record 1 is
+    # written when record 2's results arrive (LOSAT's refusal).
+    for program, task in ALL_PROGRAMS:
+        if task == "blastn":
+            continue
+        kind = "prot" if program in ("blastp", "tblastn") else "nuc"
+        _, s = base_pair(program)
+        each, two = arch_sizes[kind]
+        file = lambda name: f"@/{name}.{kind}.{EXT[kind]}"
+        add("xml2_title_late.each", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={each}",
+            fmts=(15, 16))
+        add("xml2_title_late.two", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={two}",
+            fmts=(15, 16))
+        add("xml2_title_first.each", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={each}",
+            fmts=(15, 16), kind="losat-rejection")
     # BLASTN: the search of the batch fails (gap costs that NCBI's tables lack, `BLAST engine error`,
     # exit 3): NCBI writes no archive of it
     add("arch_title_lastempty.search_error", "blastn", "blastn", "@/batch_title_lastempty.nuc.fa",

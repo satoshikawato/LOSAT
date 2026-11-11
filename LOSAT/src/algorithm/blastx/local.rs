@@ -370,7 +370,41 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 &mut |_| Ok(()),
             )
         }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
-    let hold = titles_may_refuse.then(archive::ArchiveHold::new);
+    // BLAST XML and the XML2 and JSON documents refuse a query title that NCBI cannot write
+    // before the first byte, in the reports that they write; a `-subject` XML2 or JSON document
+    // never writes the last query of a run that stops at a later batch
+    // (`blast_xml::scan_queries`, on the records in memory, as the command line's read before
+    // the search). With outfmt 5 among the formats every report is written.
+    let structured: Vec<u8> = resolved
+        .iter()
+        .map(|options| options.outfmt)
+        .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
+        .collect();
+    let xml_scan = if structured.is_empty() || batch_size == 0 {
+        super::blast_xml::QueryScan::default()
+    } else {
+        let holds_back = database.is_none() && !structured.contains(&5);
+        super::blast_xml::scan_queries(&resolved[0], holds_back, &mut |deliver| {
+            reader_batches(
+                query_records,
+                lowercase,
+                query_range,
+                batch_size,
+                archive.is_some(),
+                deliver,
+                &mut |_| Ok(()),
+            )
+        })
+        .map_err(report_error)?
+    };
+    // A run in which a `-subject` title (refused with its first hit) or the message of a query
+    // (refused where NCBI does not search its batch) could still be refused by those documents
+    // holds every format in order, as the archive's titles do and as the command line holds its
+    // document (`blast_xml::HeldOutput`), so that the refusal follows no byte.
+    let xml_may_refuse = !structured.is_empty()
+        && (xml_scan.messages_may_be_refused
+            || (database.is_none() && super::blast_xml::subjects_may_be_refused(subjects)));
+    let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
     let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
         Some(hold) => {
             hold.hold();
@@ -593,6 +627,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 &batch_shown(database.as_ref(), reported.as_ref(), shown),
                 results,
                 queries_before,
+                xml_scan.stops_after == Some(queries_before + queries.len()),
                 documents[index].as_mut(),
                 Some(LocalReport {
                     probe: probe.as_mut(),

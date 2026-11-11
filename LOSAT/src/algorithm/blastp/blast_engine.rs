@@ -6483,6 +6483,7 @@ fn search(
             x_prolog: true,
             x_queries_before: 0,
             x_xml2_carry: None,
+            last_call: true,
             psi_round: None,
             titles_may_refuse,
         };
@@ -6830,6 +6831,7 @@ fn search(
                                 x_xml2_carry: x_kinds
                                     .contains(&XBlockReport::Xml2)
                                     .then_some(&x_xml2_carry),
+                                last_call: index + 1 == blocks.len(),
                                 psi_round: None,
                                 titles_may_refuse,
                             },
@@ -7697,6 +7699,11 @@ struct BlastpReports<'a> {
     /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
     /// report; `None` outside the block search).
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
+    /// Whether this call is the run's last report call, so that without the epilog the run stops
+    /// after it (`blast_xml::BlastpXml::stops`). Not a block of the block search before the last
+    /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (which
+    /// writes no XML document, `psiblast::args::PsiblastArgs::check_outfmt`).
+    last_call: bool,
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
     psi_round: Option<&'a crate::algorithm::psiblast::rounds::PsiRoundIo>,
@@ -7896,6 +7903,7 @@ fn search_split_query_batches(
                     x_prolog,
                     x_queries_before: 0,
                     x_xml2_carry: None,
+                    last_call: false,
                     psi_round: None,
                     // The call of the whole query writes the archive.
                     titles_may_refuse: false,
@@ -13269,6 +13277,7 @@ fn run_resolved_in_pool(
                         .collect(),
                     program: "BLASTP",
                     epilog: reports.epilog,
+                    stops: !reports.epilog && reports.last_call,
                 };
                 // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
                 // reads their letters query by query and formats them serially, so a window of

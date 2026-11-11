@@ -53,8 +53,8 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    filter, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    XmlSubjects, REFERENCE_GAPPED_BLAST,
+    filter, written_queries, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery,
+    XmlRun, XmlStats, XmlSubjects, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{QueryWarnings, EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
@@ -263,8 +263,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     }
     debug_assert_eq!(next, hits.len(), "the final list is in query order");
     // The definition line and message of every query, and the names of the subjects with
-    // hits, made (and refused) before the first byte.
-    let texts = queries
+    // hits, made (and refused) before the first byte, for the reports that the document writes:
+    // a run that stops (the one report call without the epilog: the XML formats are not streamed,
+    // `report_stream`) never writes the `-subject` report of its last query, which NCBI holds
+    // back (`written_queries`).
+    let reports = written_queries(queries.len(), !run.epilog, document.holds_back());
+    let texts = queries[..reports]
         .iter()
         .enumerate()
         .map(|(q_idx, query)| {
@@ -300,7 +304,10 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     };
     let mut cache = SubjectNameCache::new(&subjects);
     let mut last_subject = None;
-    for hsp in hits {
+    let written_hits = query_hits
+        .get(reports)
+        .map_or(hits.len(), |range| range.start);
+    for hsp in &hits[..written_hits] {
         if last_subject != Some(hsp.hit.s_idx) {
             last_subject = Some(hsp.hit.s_idx);
             cache.get(hsp.hit.s_idx as usize, PROGRAM)?;
@@ -317,6 +324,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
+        }
+        if q_idx == reports {
+            // The held report that is never written (`written_queries`).
+            document.unwritten(&mut buf)?;
+            writer.write_all(&buf)?;
+            buf.clear();
+            break;
         }
         let text = &texts[q_idx];
         let searched_length = query.seq().len();

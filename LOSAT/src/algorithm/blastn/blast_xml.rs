@@ -35,8 +35,8 @@ use super::x_subject_store::SubjectLetters;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    hit_ranges, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun,
-    XmlStats, XmlSubjects,
+    hit_ranges, written_queries, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp,
+    XmlQuery, XmlRun, XmlStats, XmlSubjects,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::serial::seqalign::seqalign_evalue;
@@ -79,24 +79,31 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     const PROGRAM: &str = "BLASTN";
-    // Everything NCBI cannot write is refused before the first byte of the document, also the
-    // titles of the report of the last query of a `-subject` call, which NCBI holds back and
-    // never writes when the next batch fails to read (a refusal LOSAT makes where NCBI writes
-    // the other reports and the error): the refusal cannot wait for the report to be written,
-    // which would be after a byte, and the next batch is not read yet.
+    // Everything NCBI cannot write is refused before the first byte of the document, for the
+    // reports that the document writes: a run that stops (this call without the epilog: BLAST
+    // XML is never streamed, `x_rpt_stream::Off::Xml`, so the call is the run's last) never
+    // writes the `-subject` report of its last query, which NCBI holds back
+    // (`written_queries`).
     names::check_text(xml.run.db_name)
         .map_err(|refusal| refusal.error(PROGRAM, "a database name"))?;
+    let reports = written_queries(xml.queries.len(), !xml.epilog, document.holds_back());
     let has_hits = |q_idx: usize| {
         hit_lists
             .get(q_idx)
             .and_then(Option::as_ref)
             .is_some_and(|list| list.hsplist_array.iter().any(|list| !list.hsps.is_empty()))
     };
-    let texts = names::query_texts(PROGRAM, xml.queries, false, &xml.messages, has_hits)?;
-    // The names of the subjects with hits, made once each; a title NCBI cannot write is refused
-    // here, before the first byte.
+    let texts = names::query_texts(
+        PROGRAM,
+        &xml.queries[..reports],
+        false,
+        &xml.messages,
+        has_hits,
+    )?;
+    // The names of the subjects with hits in the written reports, made once each; a title NCBI
+    // cannot write is refused here, before the first byte.
     let mut subjects = SubjectNameCache::new(&xml.subjects);
-    for hit_list in hit_lists.iter().flatten() {
+    for hit_list in hit_lists.iter().take(reports).flatten() {
         for hsp_list in &hit_list.hsplist_array {
             if let Some(hsp) = hsp_list.hsps.first() {
                 subjects.get(hsp.s_idx as usize, PROGRAM)?;
@@ -110,6 +117,13 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
+        }
+        if q_idx == reports {
+            // The held report that is never written (`written_queries`).
+            document.unwritten(&mut buf)?;
+            writer.write_all(&buf)?;
+            buf.clear();
+            break;
         }
         let text = &texts[q_idx];
         let query = XmlQuery {

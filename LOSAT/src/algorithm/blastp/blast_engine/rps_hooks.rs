@@ -333,20 +333,38 @@ pub(super) fn rps_search(
     } else {
         None
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-463
-    // ```c
-    //    if (sbp->kbp_gap) {
-    //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
-    //       params->gap_x_dropoff = (Int4)
-    //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-    //       ...
-    //       params->gap_x_dropoff_final = (Int4)
-    //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
-    //    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:77-88
+    // ```c++
+    // CBlastRPSOptionsHandle::SetInitialWordOptionsDefaults()
+    // {
+    //     SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_PROT);
+    //     SetWindowSize(BLAST_WINDOW_SIZE_PROT);
+    //     // FIXME: extend_word_method is missing
+    // }
+    //
+    // void
+    // CBlastRPSOptionsHandle::SetGappedExtensionDefaults()
+    // {
+    //     SetGapXDropoff(BLAST_GAP_X_DROPOFF_PROT);
+    //     SetGapXDropoffFinal(BLAST_GAP_X_DROPOFF_FINAL_PROT);
     // ```
-    let x_drop_gapped = (X_DROP_GAPPED_PRELIM as f64 * std::f64::consts::LN_2 / lambda) as i32;
-    let x_drop_final =
-        ((X_DROP_GAPPED_FINAL as f64 * std::f64::consts::LN_2 / lambda) as i32).max(x_drop_gapped);
+    // The X-drops in bits: `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or these defaults
+    // (7, 15, 25); the engine converts them at each volume's scale (`RpsRun::cutoffs`,
+    // `RpsRun::gapped_x_drops`).
+    let x_drop_ungapped_bits = rps.x_drop_ungapped_bits.unwrap_or(X_DROP_UNGAPPED_BITS);
+    let x_drop_gapped_bits = rps
+        .x_drop_gapped_bits
+        .unwrap_or(f64::from(X_DROP_GAPPED_PRELIM));
+    let x_drop_final_bits = rps
+        .x_drop_final_bits
+        .unwrap_or(f64::from(X_DROP_GAPPED_FINAL));
+    // NCBI's reports count an HSP's identities on the sequences of their scope (outfmt 0 always,
+    // the tabular formats inside their alignment block), not on the masked query of the
+    // traceback's count (`rps_search::traceback::formatter_identities`). LOSAT's outfmt 0 and
+    // default tabular writers print the HSP's count, so the engine counts again for them; the
+    // tabular writer of a field list or outfmt 10 counts on the rows itself and reads the
+    // traceback's count for the block's gate (`tabular::needs_rows`).
+    let recount_identities = super::super::tabular::custom_tabular_spec(&args.outfmt).is_none();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
     // ```c
     //     if (backup->offset + MAX_DBSEQ_LEN <
@@ -551,6 +569,18 @@ pub(super) fn rps_search(
                     kbp_std: ctx.karlin_params,
                     first_query_length: first,
                     batch_kbp,
+                    // The letters as read where the searched ones are masked: before SEG and the
+                    // lower-case masks (`aa_seq_nomask`), else before the 26-column mask. The
+                    // tabular report with a field list counts its identities on the rows itself,
+                    // inside NCBI's alignment block, which the engine's count opens
+                    // (`tabular::needs_rows`): it keeps that count.
+                    aa_seq_nomask: if recount_identities {
+                        ctx.aa_seq_nomask
+                            .as_deref()
+                            .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice()))
+                    } else {
+                        None
+                    },
                 })
                 .collect(),
             gapped: *run.gapped_params,
@@ -563,12 +593,36 @@ pub(super) fn rps_search(
             hitlist_size: args.traceback_hitlist_size(),
             prelim_hitlist_size: run.prelim_hitlist_size,
             window: args.window_size as i32,
-            x_drop_gapped,
-            x_drop_final,
-            x_drop_ungapped_bits: X_DROP_UNGAPPED_BITS,
+            x_drop_ungapped_bits,
+            x_drop_gapped_bits,
+            x_drop_final_bits,
             gap_trigger_bits: GAP_TRIGGER_BIT_SCORE,
             options: rps,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
+        // ```c
+        //     if (hit_params->link_hsp_params) {
+        //         status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+        //                   subject->length, gap_align->sbp, hit_params->link_hsp_params,
+        //                   score_options->gapped_calculation);
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-561
+        // ```c
+        //       query_context = hp_start->next->hsp->context;
+        //       length_adjustment = query_info->contexts[query_context].length_adjustment;
+        //       query_length = query_info->contexts[query_context].query_length;
+        // ```
+        // With sum statistics (`-sum_stats true`) NCBI's RPS search links the HSPs of each
+        // profile with the user query's one-context `query_info` while the HSPs carry the
+        // profile's context (0 to the number of profiles), so `BLAST_LinkHsps` reads past its
+        // arrays (valgrind: invalid reads; a segmentation fault on some queries; e-values of 0.0
+        // otherwise): undefined behaviour, refused where the first volume's search would start,
+        // after NCBI's errors of the options, the database and its files.
+        if rps.sum_stats {
+            bail!(
+                "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
+            );
+        }
         let traced = engine.search_volume(&files, &consensus, pool)?;
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.

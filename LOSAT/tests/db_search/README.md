@@ -1013,7 +1013,10 @@ most 9 in BLOSUM62).
   and a J at 60, part of the ribonucleotide reductase) and `tests/fasta/rps/mask.faa` (PS11c-1, the masks:
   `YP_009220478.1` of `WSSV.faa` as it is, whose acidic low-complexity run SEG masks, and `YP_009220601.1`, the TK-TMK
   record, as `tk_lc` with its residues 61-120 in lower case for `-lcase_masking`; lines of 60 letters, 819 bytes. Made
-  from `WSSV.faa` by taking the two records, renaming the second and lowering the case of its letters 61-120).
+  from `WSSV.faa` by taking the two records, renaming the second and lowering the case of its letters 61-120), and
+  `tests/fasta/rps/nident_gate.faa` (PS11c-1 review: record `BDT63522.1` of `tests/fasta/PajaWSV.faa`, lines of 60
+  letters, 1,563 bytes, with 401 of its 1,473 letters in lower case, those that were identities of its HSPs against a
+  scale-1 test database of the review: with `-lcase_masking` some of its HSPs have identities on masked letters only).
 
 ## outfmt 11 titles where NCBI's search fails (line NP, series SM, DECISIONS 25)
 

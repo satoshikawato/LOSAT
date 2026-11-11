@@ -365,6 +365,13 @@ pub(super) fn rps_search(
     let x_drop_final_bits = rps
         .x_drop_final_bits
         .unwrap_or(f64::from(X_DROP_GAPPED_FINAL));
+    // NCBI's reports count an HSP's identities on the sequences of their scope (outfmt 0 always,
+    // the tabular formats inside their alignment block), not on the masked query of the
+    // traceback's count (`rps_search::traceback::formatter_identities`). LOSAT's outfmt 0 and
+    // default tabular writers print the HSP's count, so the engine counts again for them; the
+    // tabular writer of a field list or outfmt 10 counts on the rows itself and reads the
+    // traceback's count for the block's gate (`tabular::needs_rows`).
+    let recount_identities = super::super::tabular::custom_tabular_spec(&args.outfmt).is_none();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
     // ```c
     //     if (backup->offset + MAX_DBSEQ_LEN <
@@ -570,11 +577,17 @@ pub(super) fn rps_search(
                     first_query_length: first,
                     batch_kbp,
                     // The letters as read where the searched ones are masked: before SEG and the
-                    // lower-case masks (`aa_seq_nomask`), else before the 26-column mask.
-                    aa_seq_nomask: ctx
-                        .aa_seq_nomask
-                        .as_deref()
-                        .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice())),
+                    // lower-case masks (`aa_seq_nomask`), else before the 26-column mask. The
+                    // tabular report with a field list counts its identities on the rows itself,
+                    // inside NCBI's alignment block, which the engine's count opens
+                    // (`tabular::needs_rows`): it keeps that count.
+                    aa_seq_nomask: if recount_identities {
+                        ctx.aa_seq_nomask
+                            .as_deref()
+                            .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice()))
+                    } else {
+                        None
+                    },
                 })
                 .collect(),
             gapped: *run.gapped_params,

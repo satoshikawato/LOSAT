@@ -504,6 +504,45 @@ impl TabularSpec {
         fields.iter().any(|field| self.has(*field))
     }
 
+    /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts
+    /// `num_ident` identities (the engine's count): one of its fields, or `nident` with
+    /// identities. Only the block counts the identities on the aligned sequences and sets the
+    /// frames (`SetCounts`); outside it `nident`, `frames` and `sframe` keep the 0 of
+    /// `x_ResetFields`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
+    /// ```c++
+    ///     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
+    ///         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
+    ///         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
+    ///         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
+    ///         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
+    ///         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
+    ///         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
+    ///         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
+    ///         x_IsFieldRequested(eSubjectStrand)) {
+    /// ```
+    pub fn opens_counts(&self, num_ident: usize) -> bool {
+        self.has_any(&[
+            QueryStart,
+            QueryEnd,
+            SubjectStart,
+            SubjectEnd,
+            AlignmentLength,
+            Gaps,
+            GapOpenings,
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            Mismatches,
+            PercentPositives,
+            PercentIdentical,
+            QueryFrame,
+            Btop,
+            SubjectStrand,
+        ]) || (self.has(NumIdentical) && num_ident > 0)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-837 and 973-980
     // ```c++
     //     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
@@ -1167,38 +1206,9 @@ impl TabularWriter<'_> {
         };
         let spec = self.spec;
         let csv = spec.is_csv();
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
-        // ```c++
-        //     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-        //         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
-        //         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
-        //         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
-        //         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-        //         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
-        //         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
-        //         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
-        //         x_IsFieldRequested(eSubjectStrand)) {
-        // ```
-        // Only that block sets the frames (`SetCounts`); without one of its fields `frames` and
-        // `sframe` keep the 0 of `x_ResetFields`.
-        let counts_set = spec.has_any(&[
-            QueryStart,
-            QueryEnd,
-            SubjectStart,
-            SubjectEnd,
-            AlignmentLength,
-            Gaps,
-            GapOpenings,
-            QuerySeq,
-            SubjectSeq,
-            Positives,
-            Mismatches,
-            PercentPositives,
-            PercentIdentical,
-            QueryFrame,
-            Btop,
-            SubjectStrand,
-        ]) || (spec.has(NumIdentical) && hsp.num_ident > 0);
+        // Only NCBI's alignment block (`TabularSpec::opens_counts`) sets the frames (`SetCounts`);
+        // without one of its fields `frames` and `sframe` keep the 0 of `x_ResetFields`.
+        let counts_set = spec.opens_counts(hsp.num_ident);
         let frames = |hsp: &TabularHsp<'_>| {
             if counts_set {
                 (hsp.q_frame, hsp.s_frame)

@@ -284,6 +284,38 @@ impl<'a> TabularSubjects<'a> {
     }
 }
 
+/// Whether `app`'s tabular report of `spec` reads the alignment rows (`TabularHsp::rows`): the
+/// fields that show them (`TabularNeeds::rows`), and rpsblast's `nident`, `pident` and `mismatch`.
+/// NCBI's formatter counts those on the aligned sequences of its scope, inside its alignment block
+/// (`TabularSpec::opens_counts`), while the RPS engine's count, the Seq-align's `num_ident` that
+/// opens the block for `nident`, is on the masked query (`core/blast_traceback.c:589-594`, the
+/// core's subject is the user query as searched): rpsblast's rows of such a report are rendered
+/// and handed to the HSPs whose block opens. The other programs count on the letters as read in
+/// their engines, so the rows and the engine agree.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-980
+/// ```c++
+///     if (x_IsFieldRequested(eQuerySeq) ||
+///         x_IsFieldRequested(eSubjectSeq) ||
+///         x_IsFieldRequested(ePositives) ||
+///         x_IsFieldRequested(ePercentPositives) ||
+///         x_IsFieldRequested(eBTOP) ||
+///         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
+///         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
+///         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
+/// ```
+pub(super) fn needs_rows(spec: &TabularSpec, app: BlastpApp) -> bool {
+    spec.needs().rows
+        || (app == BlastpApp::Rpsblast
+            && [
+                TabularField::NumIdentical,
+                TabularField::PercentIdentical,
+                TabularField::Mismatches,
+            ]
+            .into_iter()
+            .any(|field| spec.has(field)))
+}
+
 /// The spec of a tabular report with a field list or a delimiter, or of outfmt 10 or 20, of a
 /// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`); `None` for the other
 /// formats and for the default outfmt 6 and 7 (`TabularSpec::of`).
@@ -548,7 +580,7 @@ pub(super) fn write_blastp_tabular(
         // ```
         // The rows of the query's HSPs when a field shows them, and the next one's index.
         let query_rows: Option<&[PairwiseHit]> = match rows.as_deref_mut() {
-            Some(rows) if needs.rows => Some(rows.query(q_idx)?),
+            Some(rows) if needs_rows(spec, tab.app) => Some(rows.query(q_idx)?),
             _ => None,
         };
         let mut row_index = 0usize;
@@ -612,6 +644,13 @@ pub(super) fn write_blastp_tabular(
                     }
                 }
                 let rows = match query_rows {
+                    // rpsblast's identities: the rows inside NCBI's alignment block only (`nident`
+                    // alone opens it on the engine's count, `needs_rows`).
+                    Some(_)
+                        if tab.app == BlastpApp::Rpsblast && !spec.opens_counts(hsp.num_ident) =>
+                    {
+                        None
+                    }
                     Some(rows) => Some(hsp_rows(rows, row_index, hsp)?),
                     None => None,
                 };

@@ -13643,9 +13643,9 @@ fn run_resolved_in_pool(
                     },
                     names: names.as_ref(),
                 };
-                // The rows of the queries' HSPs when a field shows them, a window at a time
-                // (`query_rows`).
-                let mut rows = needs.rows.then(|| {
+                // The rows of the queries' HSPs when a field shows them (and rpsblast's
+                // identities, `tabular::needs_rows`), a window at a time (`query_rows`).
+                let mut rows = super::tabular::needs_rows(spec, args.app).then(|| {
                     query_rows::QueryRows::new(
                         query_rows::row_windows(&hit_lists, hit_lists.len(), x_rows_pool),
                         pairwise_hits.as_deref().map(Vec::as_slice),

@@ -123,7 +123,10 @@ pub(super) fn swap_roles(hsp_list: &mut BlastpHspList, query_length: usize) {
 /// The traceback counts on the searched letters (`num_ident` of `final_hsp` and of the redo, as
 /// NCBI's core does), which differ where the query is masked; NCBI's reports do not read that
 /// count but the aligned sequences of their scope (the outfmt 0 `Identities`, the tabular
-/// `nident`, `pident` and `mismatch`), so the HSPs take these. The roles are swapped already
+/// `nident`, `pident` and `mismatch`), so the HSPs of a run whose writer prints the HSP's count
+/// (outfmt 0, the default outfmt 6 and 7) take these; a tabular report with a field list counts on
+/// its rows and keeps the traceback's count, which opens NCBI's alignment block for `nident`
+/// (`blastp::tabular::needs_rows`, `rps_hooks::rps_search`). The roles are swapped already
 /// (`swap_roles`: query offsets on the user query, subject offsets on the profile).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1007

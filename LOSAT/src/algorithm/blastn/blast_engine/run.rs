@@ -242,10 +242,11 @@ mod traceback_subject;
 #[path = "traceback_hsp.rs"]
 mod traceback_hsp;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:365-375,611 (the sort
-// assertion, the interval tree and the loop on the HSPs of `Blast_TracebackFromHSPList`).
-// The traceback loop over one list of kept HSPs (a child module, so that it uses the private
-// types of this file).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:259-723
+// (`Blast_TracebackFromHSPList`; :365-375,611 are the sort assertion, the interval tree and the
+// loop on the HSPs).
+// The traceback of one subject's kept HSPs and its loop over one list of them (a child module,
+// so that it uses the private types of this file).
 #[path = "traceback_list.rs"]
 mod traceback_list;
 
@@ -16416,123 +16417,39 @@ fn search_query_batch<const UNGAPPED: bool>(
         // Reference: blast_traceback.c:633-692
         // =================================================================
 
-        // Dispatch point of LOSAT_X_QGROUPPAR for the traceback: the kept HSPs are the queries'
-        // hit lists one after another, so each query's are one slice; per query on the pool, the
-        // final lists concatenated in query order and sorted by score (stable, so ties stay in
-        // query order, as the serial sort leaves them: its input, the second purge's output, is
-        // ordered by context first; see x_qgroup_par.rs), or the loop over the subject's list.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1632-1633,1644
+        // ```c
+        //             /* process all the hits to this subject sequence, one list at a time */
+        //             for (hsplist_itr = 0; hsplist_itr < batch->num_hsplists; hsplist_itr++) {
+        // ...
+        //                         Blast_TracebackFromHSPList(program_number, hsp_list, query,
+        // ```
+        // The traceback of the subject's kept HSPs (`traceback_list::traceback_subject_hits`): the
+        // traceback loop, the purges and the final list, per query on the pool (LOSAT_X_QGROUPPAR)
+        // or over the subject's list on this thread with the subject's scratch.
         let prelim_hits = &mut combined_prelim_hits;
-        let x_trace_counts = (x_qgroup_batch
-            && x_qgroup_par::in_query_order(prelim_hits.iter().map(|hit| hit.query_idx)))
-        .then(|| x_qgroup_par::counts(prelim_hits.iter().map(|hit| hit.query_idx), queries.len()));
-        let x_trace_order = x_trace_counts
-            .as_deref()
-            .and_then(|counts| x_qgroup_par::plan(counts, x_qgroup_par::Stage::Traceback));
         let (final_hits, [hits_step1, hits_step2, hits_step3, hits_step4, final_tree_hit_count]) =
-            if let Some(order) = x_trace_order.as_ref() {
-                let x_starts = x_qgroup_par::starts(x_trace_counts.as_deref().unwrap_or(&[]));
-                let x_kept: &[PrelimHit] = prelim_hits;
-                let x_tree_q_max = (query_concat_length + 1) as i32;
-                let x_tree_s_max = (s_len_full + 1) as i32;
-                let x_results = x_qgroup_par::run(
-                    parallel_pool,
-                    x_qgroup_par::Stage::Traceback,
-                    order,
-                    queries.len(),
-                    || {
-                        (
-                            BlastIntervalTree::new(0, x_tree_q_max, 0, x_tree_s_max),
-                            GapAlignScratch::new(),
-                            GreedyAlignScratch::new(),
-                        )
-                    },
-                    |(tree, gap, greedy), query| {
-                        let query = query as usize;
-                        let mut edit_lengths = Vec::new();
-                        let mut alignment_lengths = Vec::new();
-                        // (the list holds the query's preliminary count, as NCBI's traced list does:
-                        // the subject path below)
-                        let mut hits = Vec::with_capacity(x_starts[query + 1] - x_starts[query]);
-                        traceback_list::trace_hsp_list(
-                            &traceback_ctx,
-                            &trace_schedule,
-                            &x_kept[x_starts[query]..x_starts[query + 1]],
-                            traceback_list::TraceListState {
-                                interval_tree: tree,
-                                gap_scratch: gap,
-                                greedy_align_scratch: greedy,
-                                x_helper_scratch: None,
-                                x_spec_scratch: None,
-                                hits: &mut hits,
-                                traceback_edit_script_lengths: &mut edit_lengths,
-                                traceback_alignment_lengths: &mut alignment_lengths,
-                            },
-                        );
-                        let (list, s1, s2, s3, s4) =
-                            traceback_finish::traceback_post_purge(&traceback_ctx, hits);
-                        let (list, s5) =
-                            traceback_finish::traceback_final_list(&traceback_ctx, list, tree);
-                        (list, [s1, s2, s3, s4, s5], edit_lengths, alignment_lengths)
-                    },
-                );
-                // Each query's list is sorted by score (`traceback_final_list`), so the lists go to
-                // the hit lists as they are, in query order (`SubjectHits::ByQuery`), not joined
-                // into the subject's list and split by query again.
-                let mut lists: Vec<Vec<BlastnHsp>> = Vec::new();
-                let mut steps = [0usize; 5];
-                for (list, step_counts, edit_lengths, alignment_lengths) in
-                    x_results.into_iter().flatten()
-                {
-                    if !list.is_empty() {
-                        lists.push(list);
-                    }
-                    for (sum, step) in steps.iter_mut().zip(step_counts) {
-                        *sum += step;
-                    }
-                    traceback_edit_script_lengths.extend(edit_lengths);
-                    traceback_alignment_lengths.extend(alignment_lengths);
-                }
-                (SubjectHits::ByQuery(lists), steps)
-            } else {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:296,312,375-376
-                // ```c
-                //    Int4 num_initial_hsps = hsp_list->hspcnt;
-                // ...
-                //    hsp_array = hsp_list->hsp_array;
-                // ...
-                //    for (index=0; index < num_initial_hsps; index++) {
-                //       hsp = hsp_array[index];
-                // ```
-                // NCBI traces the preliminary list in its own array, so the traced list never
-                // holds more than the preliminary count. No NCBI counterpart (memory placement
-                // only): the list here gets that count once, instead of growing by doubling (up to
-                // twice the traced count) and being copied or shrunk afterwards.
-                hits.reserve_exact(prelim_hits.len());
-                traceback_list::trace_hsp_list(
-                    &traceback_ctx,
-                    &trace_schedule,
-                    prelim_hits,
-                    traceback_list::TraceListState {
-                        interval_tree,
-                        gap_scratch,
-                        greedy_align_scratch: &mut subject_scratch.greedy_align_scratch,
-                        x_helper_scratch: Some(&mut subject_scratch.x_ahead_scratch),
-                        x_spec_scratch: Some(&mut subject_scratch.x_spec_scratch),
-                        hits,
-                        traceback_edit_script_lengths: &mut traceback_edit_script_lengths,
-                        traceback_alignment_lengths: &mut traceback_alignment_lengths,
-                    },
-                );
-                // No NCBI counterpart (memory placement only): the list goes to the purges as it is
-                // (they work in its allocation, `x_in_handle_order`) and leaves as the subject's
-                // result, instead of a copy while the scratch keeps the buffer at its largest size;
-                // the next subject's list gets that subject's preliminary count (above).
-                let (list, s1, s2, s3, s4) =
-                    traceback_finish::traceback_post_purge(&traceback_ctx, std::mem::take(hits));
-                let (list, s5) =
-                    traceback_finish::traceback_final_list(&traceback_ctx, list, interval_tree);
-                (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])
-            };
+            traceback_list::traceback_subject_hits(
+                &traceback_ctx,
+                &trace_schedule,
+                &traceback_list::TraceDrive {
+                    x_qgroup_batch,
+                    queries,
+                    query_concat_length,
+                    s_len_full,
+                },
+                prelim_hits,
+                traceback_list::TraceListState {
+                    interval_tree,
+                    gap_scratch,
+                    greedy_align_scratch: &mut subject_scratch.greedy_align_scratch,
+                    x_helper_scratch: Some(&mut subject_scratch.x_ahead_scratch),
+                    x_spec_scratch: Some(&mut subject_scratch.x_spec_scratch),
+                    hits,
+                    traceback_edit_script_lengths: &mut traceback_edit_script_lengths,
+                    traceback_alignment_lengths: &mut traceback_alignment_lengths,
+                },
+            );
         prelim_hits.clear();
 
         // Phase 2 debug output

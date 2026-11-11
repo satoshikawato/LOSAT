@@ -735,6 +735,36 @@ impl Lookup {
             return x_compressed_lookup(&query, &batch.lookup_segments, options.threshold)
                 .map(BxLookup::Wide);
         }
+        Self::x_standard_with(
+            batch,
+            parameters,
+            options,
+            query,
+            |query, segments, contexts, threshold, pooled| {
+                build_ncbi_lookup_from_prepared(
+                    query,
+                    segments,
+                    contexts,
+                    threshold,
+                    pooled,
+                    parts,
+                    narrow_cutoff,
+                )
+            },
+        )
+    }
+
+    /// The standard table of `-word_size 3` of [`Lookup::x_new_as`] and [`Lookup::x_new_of`], with
+    /// `build` the matrix's builder (its query, lookup segments, contexts, threshold and whether
+    /// it takes the pool).
+    #[inline(always)]
+    fn x_standard_with(
+        batch: &PreparedQueryBatch,
+        parameters: &[ContextParameters],
+        options: &ResolvedOptions,
+        query: Vec<u8>,
+        build: impl FnOnce(Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>, i32, bool) -> XBxTable,
+    ) -> Result<BxLookup> {
         ensure!(
             options.word_size == 3,
             "unsupported BLASTX lookup word size"
@@ -747,7 +777,7 @@ impl Lookup {
         );
         let kept = x_seed_scan::XKeptPresence::x_built(pooled);
         Ok(
-            match build_ncbi_lookup_from_prepared(
+            match build(
                 query,
                 batch.lookup_segments.clone(),
                 contexts,
@@ -755,8 +785,6 @@ impl Lookup {
                 // the x86-64 build does (`INT_MIN` past `Int4`).
                 crate::core::blast_util::ncbi_int4_from_double(options.threshold),
                 pooled,
-                parts,
-                narrow_cutoff,
             ) {
                 XBxTable::Wide(table) => BxLookup::Wide(Self::Standard(table, kept)),
                 XBxTable::Narrow(table) => BxLookup::Narrow(NarrowLookup { table, kept }),
@@ -806,30 +834,22 @@ impl Lookup {
                 )
             });
         }
-        ensure!(
-            options.word_size == 3,
-            "unsupported BLASTX lookup word size"
-        );
-        let contexts = lookup_contexts(batch, parameters, &query);
-        // The pool as `x_new_as` takes it (LOSAT_X_BXPOOLN1).
-        let pooled = crate::algorithm::tblastx::lookup::x_bx_pooled_for(
-            usize::try_from(options.num_threads).unwrap_or(1),
-        );
-        let kept = x_seed_scan::XKeptPresence::x_built(pooled);
-        Ok(
-            match crate::algorithm::tblastx::lookup::build_ncbi_lookup_from_prepared_of(
-                matrix,
-                query,
-                batch.lookup_segments.clone(),
-                contexts,
-                // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), as `x_new_as`.
-                crate::core::blast_util::ncbi_int4_from_double(options.threshold),
-                pooled,
-                parts,
-                narrow_cutoff,
-            ) {
-                XBxTable::Wide(table) => BxLookup::Wide(Self::Standard(table, kept)),
-                XBxTable::Narrow(table) => BxLookup::Narrow(NarrowLookup { table, kept }),
+        Self::x_standard_with(
+            batch,
+            parameters,
+            options,
+            query,
+            |query, segments, contexts, threshold, pooled| {
+                crate::algorithm::tblastx::lookup::build_ncbi_lookup_from_prepared_of(
+                    matrix,
+                    query,
+                    segments,
+                    contexts,
+                    threshold,
+                    pooled,
+                    parts,
+                    narrow_cutoff,
+                )
             },
         )
     }
@@ -1170,8 +1190,9 @@ pub(crate) fn word_finder(
 /// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`).
 #[cold]
 #[inline(never)]
-pub(super) fn word_finder_bx_of(
-    scoring: MatrixBx,
+#[allow(clippy::too_many_arguments)]
+pub(super) fn word_finder_bx_of<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,

@@ -2370,8 +2370,8 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
 
 /// [`build_ncbi_lookup_from_prepared`] with another matrix than BLOSUM62 (BLASTX's other matrices,
 /// items SC6 and SC6b of line NP): the same builds with the matrix's scores (the neighbour lists
-/// of the pooled build are kept per matrix, `XNeighborMemo`'s key). Not inlined, so that BLOSUM62's
-/// build keeps its code.
+/// of the pooled build and of a thread's builds are kept per matrix, the key of `x_lut_direct.rs`'s
+/// memos). Not inlined, so that BLOSUM62's build keeps its code.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]

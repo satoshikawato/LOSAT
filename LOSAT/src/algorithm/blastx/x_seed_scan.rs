@@ -248,8 +248,8 @@ thread_local! {
 /// traces nothing).
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` (the subject and its batch on that path,
 /// `x_ungap_sent.rs`) the fused and the direct loops extend with the sentinel walks.
-/// The search calls it with BLOSUM62's type (`Blosum62Bx`), another matrix's goes through
-/// [`x_word_finder_matrix`].
+/// With the matrix of `scoring`: another matrix than BLOSUM62 takes [`x_word_finder_matrix`], its
+/// instance out of line.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_word_finder_scan<S: BxScoring>(
     scoring: S,
@@ -261,6 +261,11 @@ pub(crate) fn x_word_finder_scan<S: BxScoring>(
     diagonals: &mut Diagonals,
     sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
+    if !S::BLOSUM62 {
+        return x_word_finder_matrix(
+            scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+        );
+    }
     x_word_finder_scan_with(
         scoring, batch, parameters, options, subject, lookup, diagonals, sent,
     )
@@ -273,7 +278,7 @@ pub(crate) fn x_word_finder_scan<S: BxScoring>(
 /// keep their code.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_word_finder_matrix<S: BxScoring>(
+fn x_word_finder_matrix<S: BxScoring>(
     scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -369,7 +374,11 @@ fn x_word_finder_matrix_direct<S: BxScoring>(
     diagonals: &mut Diagonals,
 ) -> Result<Vec<InitHsp>> {
     let scan_byte = x_bxscan_byte();
-    let acts = x_hitbf_acts(x_bxhitbf(), options, subject, diagonals);
+    let hit_bf = x_bxhitbf();
+    let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
+    if hit_bf {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);
+    }
     macro_rules! direct {
         ($hit_bf:literal) => {
             x_word_finder_direct_with::<$hit_bf, _, _>(
@@ -485,6 +494,9 @@ fn x_word_finder_direct_sent<S: BxScoring>(
     hit_bf: bool,
     sent: XSent<'_, S>,
 ) -> Result<Vec<InitHsp>> {
+    // The one-hit argument below is BLOSUM62's; another matrix's `sent` exists only with a two-hit
+    // window (`query_fits_of`), where it is never called.
+    debug_assert!(S::BLOSUM62 || options.window_size > 0);
     let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
     if hit_bf {
         crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);

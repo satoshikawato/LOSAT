@@ -65,7 +65,8 @@ pub struct PreparedQueryBatch {
     /// whole batch.
     pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
-    /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`; false with the switch off).
+    /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62
+    /// `query_fits_of`; false with the switch off).
     pub(crate) x_ungap_sent: bool,
 }
 impl PreparedQueryBatch {

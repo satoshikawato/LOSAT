@@ -6,7 +6,8 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (the walks) and
 //! 1089-1155 (`s_BlastAaExtendTwoHit`), which the seed loops reach through
-//! `extend_two_hit_blosum62` (and `x_ungapped_fast::two_hit`).
+//! `extend_two_hit_blosum62` (and `x_ungapped_fast::two_hit`), another matrix's through
+//! `extend_two_hit_table` (`seed.rs` `bx_two_hit`).
 //!
 //! Why the result is the reference's. The extension is `x_ungapped_sent::two_hit_in::<1, u8>`,
 //! whose statements are blastp's; what differs is where the sentinels are.
@@ -57,9 +58,8 @@ const MAX_DROPOFF: i32 = 127;
 /// Longest query batch on the path (no score of a walk wraps, `x_ungapped_sent.rs`).
 const MAX_QUERY_LEN: usize = (i32::MAX / 16) as usize;
 /// Longest query batch on the path for another matrix than BLOSUM62, whose largest score is at most
-/// 31 (module header): no score of a walk wraps.
-const MAX_QUERY_LEN_OF: usize = (i32::MAX / 32) as usize;
-const _: () = assert!(31 * (MAX_QUERY_LEN_OF as i64 + 3) < i32::MAX as i64);
+/// 31 (module header): no score of a walk wraps (blastp's bound for its blocks).
+const MAX_QUERY_LEN_OF: usize = crate::algorithm::blastp::x_ungapped_sent::MAX_BLOCK_LEN_OF;
 
 struct State {
     /// 0 = off, 1 = LOSAT_X_BXUNGAPSENT, 2 = LOSAT_X_BXUNGAPSENTSHADOW (both, compared).
@@ -377,24 +377,23 @@ mod tests {
         two_hit_is_the_reference_with(ScoringMatrix::Blosum62);
     }
 
-    /// [`two_hit_is_the_reference_on_blastx_buffers`] with every other matrix that has keys (item
-    /// SC6b), and the matrices without keys stay off the path.
+    /// [`two_hit_is_the_reference_on_blastx_buffers`] with every other matrix (item SC6b): all of
+    /// them have keys (IDENTITY too, which ungapped searches take), and a query batch of theirs is
+    /// on the path where the switch is on.
     #[test]
     fn two_hit_of_other_matrices_is_the_reference() {
-        let mut taken = 0;
         for matrix in ScoringMatrix::ALL {
             if matrix == ScoringMatrix::Blosum62 {
                 continue;
             }
-            if keys_of(matrix).is_none() {
-                assert!(!query_fits_of(matrix, &[0, 3, 0], 3, 40));
-                continue;
-            }
+            assert!(keys_of(matrix).is_some(), "{matrix:?} has keys");
+            assert_eq!(query_fits_of(matrix, &[0, 3, 0], 3, 40), on(), "{matrix:?}");
+            assert!(
+                !query_fits_of(matrix, &[0, 3, 0], 3, 0),
+                "{matrix:?} one-hit"
+            );
             two_hit_is_the_reference_with(matrix);
-            taken += 1;
         }
-        // BLOSUM45/50/80/90 and PAM30/70/250 are on the path.
-        assert!(taken >= 7, "only {taken} matrices on the path");
     }
 
     fn two_hit_is_the_reference_with(matrix: ScoringMatrix) {

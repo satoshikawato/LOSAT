@@ -974,17 +974,19 @@ mod tests {
         ResolvedOptions,
         BxLookup,
     ) {
-        search_with(query, window, subject_length, narrow, "BLOSUM62")
+        search_with(query, window, subject_length, narrow, "BLOSUM62", &[])
     }
 
-    /// [`search`] with `-matrix matrix` (its default gap costs and threshold); another matrix than
-    /// BLOSUM62 takes its build (`Lookup::x_new_of`, item SC6b).
+    /// [`search`] with `-matrix matrix` (its default gap costs and threshold, its score block) and
+    /// the options `extra`; another matrix than BLOSUM62 takes its build (`Lookup::x_new_of`, item
+    /// SC6b).
     fn search_with(
         query: &[u8],
         window: i32,
         subject_length: usize,
         narrow: bool,
         matrix: &str,
+        extra: &[&str],
     ) -> (
         PreparedQueryBatch,
         Vec<ContextParameters>,
@@ -993,7 +995,7 @@ mod tests {
     ) {
         let q = parse_fasta(query, false, false).unwrap();
         let window = window.to_string();
-        let args = [
+        let mut args = vec![
             "losat",
             "blastx",
             "-query",
@@ -1005,6 +1007,7 @@ mod tests {
             "-matrix",
             matrix,
         ];
+        args.extend_from_slice(extra);
         let crate::cli::Commands::Blastx(args) =
             crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
                 .unwrap()
@@ -1014,7 +1017,7 @@ mod tests {
         };
         let options = args.resolve().unwrap();
         let batch = prepare_queries(&q, &options).unwrap();
-        let mut params = parameters::score_block(&batch);
+        let mut params = parameters::score_block_for(&batch, options.scoring);
         parameters::effective_lengths(
             &batch,
             &mut params,
@@ -1353,13 +1356,9 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-606 (as above), with
-    // `matrix->data` of the search's matrix (`s_BlastAaExtendTwoHit`).
-    // The test above with every other matrix of BLASTX's table (item SC6b): their tables of either
-    // width, the fused loop with their walks (`bx_two_hit`) and the sentinel walks with their keys
-    // give the reference's hits and diagonal table.
-    #[test]
-    fn the_fused_loop_matches_the_reference_with_other_matrices() {
+    /// The 6 kb of AP027131 as a query and its first 40 proteins as subjects (with their mean
+    /// length) of the tests of the other matrices.
+    fn other_matrix_inputs() -> (Vec<u8>, Vec<Vec<u8>>, usize) {
         let fasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
         let genome = parse_fasta(
             &std::fs::read(fasta.join("AP027131.fasta")).unwrap(),
@@ -1369,17 +1368,39 @@ mod tests {
         .unwrap();
         let piece = String::from_utf8(genome[0].sequence[200_000..206_000].to_vec()).unwrap();
         let query = format!(">piece\n{piece}\n").into_bytes();
-        let all = subjects(&std::fs::read(fasta.join("AP027131.faa")).unwrap());
-        let subjects = &all[..40];
+        let mut subjects = subjects(&std::fs::read(fasta.join("AP027131.faa")).unwrap());
+        subjects.truncate(40);
         let mean = subjects.iter().map(|s| s.len() - 1).sum::<usize>() / subjects.len();
-        for matrix in [
-            "BLOSUM45", "BLOSUM50", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250",
-        ] {
+        (query, subjects, mean)
+    }
+
+    /// BLASTX's other matrices, gapped, and IDENTITY, which an ungapped search takes with word size
+    /// 3 (its byte table has keys for the sentinel walks).
+    const OTHER_MATRICES: [(&str, &[&str]); 8] = [
+        ("BLOSUM45", &[]),
+        ("BLOSUM50", &[]),
+        ("BLOSUM80", &[]),
+        ("BLOSUM90", &[]),
+        ("PAM30", &[]),
+        ("PAM70", &[]),
+        ("PAM250", &[]),
+        ("IDENTITY", &["-ungapped", "-comp_based_stats", "0"]),
+    ];
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-606 (as above), with
+    // `matrix->data` of the search's matrix (`s_BlastAaExtendTwoHit`).
+    // The test above with every other matrix of BLASTX's table and IDENTITY (item SC6b): their
+    // tables of either width, the fused loop with their walks (`bx_two_hit`) and the sentinel walks
+    // with their keys give the reference's hits and diagonal table.
+    #[test]
+    fn the_fused_loop_matches_the_reference_with_other_matrices() {
+        let (query, subjects, mean) = other_matrix_inputs();
+        for (matrix, extra) in OTHER_MATRICES {
             for narrow in [false, true] {
-                let s = search_with(&query, 40, mean, narrow, matrix);
+                let s = search_with(&query, 40, mean, narrow, matrix, extra);
                 assert_ne!(s.2.scoring, ScoringMatrix::Blosum62);
                 for mode in modes() {
-                    let (hits, counts) = compare(&s, subjects, mode, |_| {});
+                    let (hits, counts) = compare(&s, &subjects, mode, |_| {});
                     assert!(hits > 0, "{matrix} {mode:?}: no hit");
                     if mode != XCellTest::Diag(XDiagMode::PerHit) {
                         assert!(counts[2] > 0, "{matrix} {mode:?} {counts:?}");
@@ -1464,76 +1485,82 @@ mod tests {
     }
 
     // No NCBI counterpart (speed only): the entry point of another matrix's seed stage
-    // (`x_word_finder_matrix`, item SC6b) scans its tables as the search builds them (16-bit hits
-    // where `x_narrow_cutoff` lets the fused loop take them), with and without the sentinel walks,
-    // to the reference's hits and diagonal table.
+    // (`x_word_finder_scan` with `MatrixBx`, item SC6b) scans its tables as the search builds them
+    // (16-bit hits where `x_narrow_cutoff` lets the fused loop take them), with and without the
+    // sentinel walks, and with `-window_size 0` (the one-hit stage, the direct loop), to the
+    // reference's hits and diagonal table.
     #[test]
     fn another_matrix_s_seed_stage_gives_the_reference_hits() {
-        let fasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
-        let genome = parse_fasta(
-            &std::fs::read(fasta.join("AP027131.fasta")).unwrap(),
-            false,
-            false,
-        )
-        .unwrap();
-        let piece = String::from_utf8(genome[0].sequence[200_000..206_000].to_vec()).unwrap();
-        let query = format!(">piece\n{piece}\n").into_bytes();
-        let all = subjects(&std::fs::read(fasta.join("AP027131.faa")).unwrap());
-        let subjects = &all[..40];
-        let mean = subjects.iter().map(|s| s.len() - 1).sum::<usize>() / subjects.len();
+        let (query, subjects, mean) = other_matrix_inputs();
         let mut widths = Vec::new();
-        for matrix in [
-            "BLOSUM45", "BLOSUM50", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250",
-        ] {
-            let (batch, params, options, _) = search_with(&query, 40, mean, false, matrix);
-            let lookup =
-                Lookup::x_new_of(&batch, &params, &options, 1, x_narrow_cutoff(&options)).unwrap();
-            widths.push((matrix, matches!(lookup, BxLookup::Narrow(_))));
-            let scoring = MatrixBx::of(options.scoring);
-            let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
-            for with_sent in [false, true] {
-                let mut reference = Diagonals::new(length, options.window_size).unwrap();
-                let mut scanned = Diagonals::new(length, options.window_size).unwrap();
-                let mut hits = 0;
-                for subject in subjects {
-                    let expected = word_finder_bx_of(
-                        scoring,
-                        &batch,
-                        &params,
-                        &options,
-                        subject,
-                        &lookup,
-                        &mut reference,
-                        |_| {},
-                    )
-                    .unwrap();
-                    let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
-                    let sent = with_sent
-                        .then(|| XSent::for_test(scoring, &batch.sequence_start, &lead, false));
-                    let actual = crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_matrix(
-                        scoring,
-                        &batch,
-                        &params,
-                        &options,
-                        subject,
-                        &lookup,
-                        &mut scanned,
-                        sent,
-                    )
-                    .unwrap();
-                    assert_eq!(actual, expected, "{matrix} sent={with_sent}");
+        for (matrix, extra) in OTHER_MATRICES {
+            for window in [40, 0] {
+                let (batch, params, options, _) =
+                    search_with(&query, window, mean, false, matrix, extra);
+                let lookup =
+                    Lookup::x_new_of(&batch, &params, &options, 1, x_narrow_cutoff(&options))
+                        .unwrap();
+                if window > 0 {
+                    widths.push((matrix, matches!(lookup, BxLookup::Narrow(_))));
+                } else {
                     assert!(
-                        scanned.offset == reference.offset && scanned.entries == reference.entries
+                        matches!(lookup, BxLookup::Wide(_)),
+                        "{matrix}: one-hit table"
                     );
-                    hits += actual.len();
                 }
-                assert!(hits > 0, "{matrix}");
+                let scoring = MatrixBx::of(options.scoring);
+                let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
+                // The sentinel walks only with a two-hit window (`query_fits_of`).
+                for with_sent in [false, window > 0] {
+                    let mut reference = Diagonals::new(length, options.window_size).unwrap();
+                    let mut scanned = Diagonals::new(length, options.window_size).unwrap();
+                    let mut hits = 0;
+                    for subject in &subjects {
+                        let expected = word_finder_bx_of(
+                            scoring,
+                            &batch,
+                            &params,
+                            &options,
+                            subject,
+                            &lookup,
+                            &mut reference,
+                            |_| {},
+                        )
+                        .unwrap();
+                        let lead: Vec<u8> =
+                            std::iter::once(0).chain(subject.iter().copied()).collect();
+                        let sent = with_sent
+                            .then(|| XSent::for_test(scoring, &batch.sequence_start, &lead, false));
+                        let actual =
+                            crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_scan(
+                                scoring,
+                                &batch,
+                                &params,
+                                &options,
+                                subject,
+                                &lookup,
+                                &mut scanned,
+                                sent,
+                            )
+                            .unwrap();
+                        let run = format!("{matrix} window={window} sent={with_sent}");
+                        assert_eq!(actual, expected, "{run}");
+                        assert!(
+                            scanned.offset == reference.offset
+                                && scanned.entries == reference.entries,
+                            "{run}"
+                        );
+                        hits += actual.len();
+                    }
+                    assert!(hits > 0, "{matrix} window={window}");
+                }
             }
         }
         // Where the fused loop acts (`x_bxdiag_mode`: AVX2 and POPCNT, or a value of
         // LOSAT_X_BXDIAG), some of these tables take 16-bit hits and the others the direct loop.
         if x_bxdiag_mode() == 1 {
             assert!(widths.iter().any(|w| w.1), "{widths:?}");
+            assert!(widths.iter().any(|w| !w.1), "{widths:?}");
         }
         eprintln!("16-bit tables: {widths:?}");
     }

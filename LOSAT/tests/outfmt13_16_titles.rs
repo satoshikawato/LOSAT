@@ -264,3 +264,268 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
         }
     }
 }
+
+/// `count` proteins of `length` residues (without X or a stop) from a fixed linear congruential
+/// generator, so that each hits only itself.
+fn random_proteins(count: usize, length: usize) -> Vec<String> {
+    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut state: u64 = 20_261_111;
+    (0..count)
+        .map(|_| {
+            (0..length)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    RESIDUES[(state >> 33) as usize % RESIDUES.len()] as char
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// One codon of each residue of `protein`.
+fn back_translate(protein: &str) -> String {
+    protein
+        .chars()
+        .map(|residue| match residue {
+            'A' => "GCT",
+            'C' => "TGT",
+            'D' => "GAT",
+            'E' => "GAA",
+            'F' => "TTT",
+            'G' => "GGT",
+            'H' => "CAT",
+            'I' => "ATT",
+            'K' => "AAA",
+            'L' => "CTG",
+            'M' => "ATG",
+            'N' => "AAT",
+            'P' => "CCG",
+            'Q' => "CAG",
+            'R' => "CGT",
+            'S' => "TCT",
+            'T' => "ACC",
+            'V' => "GTT",
+            'W' => "TGG",
+            'Y' => "TAT",
+            _ => unreachable!("a residue of `random_proteins`"),
+        })
+        .collect()
+}
+
+/// The records of the tests below, as `kind` (`prot` or `nuc`) writes them: `a` and `b` (120
+/// residues each, or their 360 nucleotides) hit only themselves; `$` is a data line that NCBI's
+/// reader refuses (`READER_ERROR`).
+struct Records {
+    a: String,
+    b: String,
+}
+
+impl Records {
+    fn of(kind: &str) -> Self {
+        let proteins = random_proteins(2, 120);
+        let letters = |protein: &str| {
+            if kind == "prot" {
+                protein.to_string()
+            } else {
+                back_translate(protein)
+            }
+        };
+        Records {
+            a: letters(&proteins[0]),
+            b: letters(&proteins[1]),
+        }
+    }
+}
+
+const STOP: &str = ">e9 stop\n$$$$$$$$$$\nACGT\n";
+
+fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, text).expect("write a FASTA file");
+    path
+}
+
+#[test]
+fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
+    let dir = TempDir::new("subject");
+    for (program, query_kind, subject_kind) in PROGRAMS {
+        let each = each(query_kind);
+        let (queries, subjects) = (Records::of(query_kind), Records::of(subject_kind));
+        // Subject s2's title cannot be written; only query b hits s2.
+        let subject = write(
+            &dir.0,
+            &format!("{program}.s"),
+            &format!(">s1 plain\n{}\n>s2 caf\u{e9}\n{}\n", subjects.a, subjects.b),
+        );
+        let held = write(
+            &dir.0,
+            &format!("{program}.held"),
+            &format!(">qa plain\n{}\n>qb plain\n{}\n{STOP}", queries.a, queries.b),
+        );
+        let written = write(
+            &dir.0,
+            &format!("{program}.written"),
+            &format!(">qb plain\n{}\n>qa plain\n{}\n{STOP}", queries.b, queries.a),
+        );
+        for outfmt in ["14", "15", "16"] {
+            for threads in ["1", "4"] {
+                let what = |case: &str| format!("{program} {case} outfmt {outfmt} n{threads}");
+                // Query b's report is held back and never written: s2 is not shown.
+                let result = run(
+                    search(program, &held, &subject, &[("BATCH_SIZE", each)], threads),
+                    outfmt,
+                    &dir.0,
+                );
+                not_refused(&what("held"), &result, outfmt, 1, READER_ERROR, 1);
+                // Query b's report is written when query a's results arrive.
+                let result = run(
+                    search(
+                        program,
+                        &written,
+                        &subject,
+                        &[("BATCH_SIZE", each)],
+                        threads,
+                    ),
+                    outfmt,
+                    &dir.0,
+                );
+                refused(&what("written"), &result);
+            }
+        }
+    }
+}
+
+const NO_DATA: &str = "BLAST engine error: Warning: Sequence contains no data";
+
+#[test]
+fn the_title_before_a_last_batch_without_letters_is_not_refused() {
+    let dir = TempDir::new("lastempty");
+    for (program, query_kind, subject_kind) in PROGRAMS {
+        let each = each(query_kind);
+        let subject = fixture(&format!(
+            "base.s.{subject_kind}.{}",
+            extension(subject_kind)
+        ));
+        let queries = Records::of(query_kind);
+        // The last batch has no letters: NCBI fails it, and the report of qb before it is held
+        // back and never written.
+        let query = write(
+            &dir.0,
+            &format!("{program}.q"),
+            &format!(
+                ">qa plain\n{}\n>qb caf\u{e9}\n{}\n>qc no letters\n",
+                queries.a, queries.b
+            ),
+        );
+        for outfmt in ["14", "15", "16"] {
+            for threads in ["1", "4"] {
+                let what = format!("{program} outfmt {outfmt} n{threads}");
+                let result = run(
+                    search(program, &query, &subject, &[("BATCH_SIZE", each)], threads),
+                    outfmt,
+                    &dir.0,
+                );
+                not_refused(&what, &result, outfmt, 3, NO_DATA, 1);
+            }
+        }
+    }
+}
+
+/// An example of the library API, built (with the profile of the binary) when a single test
+/// target was asked for.
+fn example_binary(name: &str) -> PathBuf {
+    let bin_dir = Path::new(env!("CARGO_BIN_EXE_losat"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let example = bin_dir
+        .join("examples")
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    if !example.exists() {
+        let profile: &[&str] = if bin_dir.ends_with("release") {
+            &["--release"]
+        } else {
+            &["--profile", "test"]
+        };
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "--example", name])
+            .args(profile)
+            .arg("--target-dir")
+            .arg(bin_dir.parent().unwrap())
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .status()
+            .expect("build the example");
+        assert!(status.success(), "cargo build --example {name}");
+    }
+    example
+}
+
+/// The library API (`examples/library_command_line`, the command line's arguments through
+/// `LOSAT::api::run`; a failure ends with status 1) reads the whole query before it searches, so
+/// its batches meet no reader error; a last batch without letters stops it as it stops the
+/// command line. Its refusals look at the same reports and come before the first byte (BLASTX's
+/// library wrote the start of the document, or the reports of the batches before, first).
+#[test]
+fn the_library_refuses_only_the_titles_that_ncbi_writes_before_the_first_byte() {
+    let example = example_binary("library_command_line");
+    let dir = TempDir::new("library");
+    for (program, query_kind, subject_kind) in PROGRAMS {
+        let each = each(query_kind);
+        let base = fixture(&format!(
+            "base.s.{subject_kind}.{}",
+            extension(subject_kind)
+        ));
+        let (queries, subjects) = (Records::of(query_kind), Records::of(subject_kind));
+        let lastempty = write(
+            &dir.0,
+            &format!("{program}.lastempty"),
+            &format!(
+                ">qa plain\n{}\n>qb caf\u{e9}\n{}\n>qc no letters\n",
+                queries.a, queries.b
+            ),
+        );
+        let bad_subject = write(
+            &dir.0,
+            &format!("{program}.s"),
+            &format!(">s1 plain\n{}\n>s2 caf\u{e9}\n{}\n", subjects.a, subjects.b),
+        );
+        let clean = write(
+            &dir.0,
+            &format!("{program}.clean"),
+            &format!(">qa plain\n{}\n>qb plain\n{}\n", queries.a, queries.b),
+        );
+        let library = |query: &Path, subject: &Path, outfmt: &str| {
+            let mut command = Command::new(&example);
+            clear_environment(&mut command);
+            command
+                .arg(program)
+                .arg("-query")
+                .arg(query)
+                .arg("-subject")
+                .arg(subject)
+                .args(["-num_threads", "1"])
+                .env("BATCH_SIZE", each);
+            run(command, outfmt, &dir.0)
+        };
+        for outfmt in ["15", "16"] {
+            let what = |case: &str| format!("library {program} {case} outfmt {outfmt}");
+            not_refused(
+                &what("lastempty"),
+                &library(&lastempty, &base, outfmt),
+                outfmt,
+                1,
+                NO_DATA,
+                1,
+            );
+            // The second batch's title, written in the epilog.
+            refused(
+                &what("second batch"),
+                &library(&file("batch_title.s", query_kind), &base, outfmt),
+            );
+            // A subject's title, shown by query b's report.
+            refused(&what("subject"), &library(&clean, &bad_subject, outfmt));
+        }
+    }
+}

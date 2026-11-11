@@ -4355,7 +4355,7 @@ Scheduling (each value computed by one thread with the original function; order 
   comparator (stable), runs the same loop body (the loop is a closure, `x_prelim_list`, called once on the owner with
   the look-ahead helpers or once per query without them) and purges its list; the purged lists are concatenated in query
   order and sorted by score as before (rayon's stable `par_sort_by` on the search pool). The kept HSPs of the traceback
-  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`x_trace_list`, no
+  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`trace_hsp_list`, no
   helpers and no speculative batches in a task), the passes up to the second purge (`traceback_post_purge`) and the score sort,
   final tree and e-values (`traceback_final_list`); the final lists are concatenated in query order and sorted stably by score.
   The queries are handed out from an atomic counter, the query with the most HSPs first (ungapped hits per query before

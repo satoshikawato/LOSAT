@@ -16,12 +16,12 @@
 //! This module is a child of `run` for the types it keeps private (`PrelimHit`, `QueryContext`,
 //! `XAheadScratch`, `XSpecTraceback`, `BlastnTiming`). The ordered loop (the tree test, the use of
 //! a value computed ahead and the calls of `trace_align_one` and `trace_build_hsp`, in NCBI order)
-//! stays in `x_trace_list` of `search_query_batch`'s `process_subject`. What the first three
-//! compute depends on the HSP alone, so a value computed ahead on any thread is the one the
-//! ordered loop would compute. `x_trace_compute` and the batch's jobs run on other threads of the
-//! pool, so what they read (`TracebackCtx`) is `Sync`, and each pairs its fence mark and note
-//! (`x_fence`, counted per thread) on the thread that computes, as `trace_align_one` does on the
-//! thread of the ordered loop.
+//! is `traceback_list::trace_hsp_list`. What the first three compute depends on the HSP alone, so
+//! a value computed ahead on any thread is the one the ordered loop would compute.
+//! `x_trace_compute` and the batch's jobs run on other threads of the pool, so what they read
+//! (`TracebackCtx`) is `Sync`, and each pairs its fence mark and note (`x_fence`, counted per
+//! thread) on the thread that computes, as `trace_align_one` does on the thread of the ordered
+//! loop.
 
 use super::traceback_finish::TracebackCtx;
 use super::{
@@ -226,8 +226,9 @@ pub(super) fn prepare_traceback(
 /// the subject range (`prepare_traceback`) and the traceback call, dynamic-programming or greedy.
 /// Index in, value out. The tree test and the tree insertion stay in the ordered loop.
 /// No NCBI counterpart: the traceback of the ordered loop (`trace_align_one`, called by
-/// `x_trace_list`) as a function of the HSP's index, which the look-ahead helpers run and the
-/// ordered loop runs through `Ahead::take` for an HSP that no helper has taken.
+/// `traceback_list::trace_hsp_list`) as a function of the HSP's index, which the look-ahead
+/// helpers run and the ordered loop runs through `Ahead::take` for an HSP that no helper has
+/// taken.
 pub(super) fn x_trace_compute(
     traceback_ctx: &TracebackCtx<'_>,
     prelim_hits: &[PrelimHit],
@@ -291,8 +292,8 @@ pub(super) fn x_trace_compute(
 
 /// One speculative batch of the traceback loop: the loop's place, what the batch reads, and the
 /// storage it reuses from batch to batch (the jobs, the results by their place in the batch, and
-/// one scratch slot per thread with its results). The storage stays with `x_trace_list`, whose
-/// ordered loop takes the results.
+/// one scratch slot per thread with its results). The storage stays with
+/// `traceback_list::trace_hsp_list`, whose ordered loop takes the results.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -434,7 +435,8 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
                                 // scratch. The call depends on its arguments only, so the value is the one the ordered loop would
                                 // compute.
                                 // No NCBI counterpart: the call of the ordered loop
-                                // (`trace_align_one`, called by `x_trace_list`), on this slot's scratch.
+                                // (`trace_align_one`, called by `traceback_list::trace_hsp_list`), on this
+                                // slot's scratch.
                                 let result = greedy_gapped_alignment_with_traceback(
                                     encoded_queries_blastna[p.context_idx as usize],
                                     &s_seq_blastna[shift..shift + slen],

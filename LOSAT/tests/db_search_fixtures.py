@@ -106,7 +106,8 @@ def read_manifest() -> tuple[dict[str, list[str]], list[dict[str, str]]]:
     for program in PROGRAMS:
         path = manifest_file(program)
         if not path.exists():
-            continue
+            # A missing file would drop its rows from every check without notice.
+            raise SystemExit(f"{MANIFEST.name}/{path.name}: missing (every program in PROGRAMS has a file)")
         header: list[str] = []
         for line in path.read_text().split("\n"):
             if line.startswith("#"):

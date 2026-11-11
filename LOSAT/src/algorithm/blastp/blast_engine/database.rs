@@ -1409,23 +1409,27 @@ impl ListedTitles<'_> {
         Ok(reads)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1142-1153
-    // (quoted at `shared::TaxdbRun`)
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1142-1182
+    // (quoted at `shared::SlotHolds::walk`)
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513 (quoted at
     // `shared::pssm_load_texts`)
     // Where the batch's prefetch is off, the PSSM's read of a Seq-align id loads its blob where
-    // the scope has not read it before in the query (the query's report, an earlier round), and
-    // `x_GetTaxonomy` asks the taxonomy database for each taxid that the volume has not looked
-    // up before in the run; the texts of opening come with the run's first lookup. Such a lookup
-    // writes its text between the query's report and the PSSM's warnings of the later reads
-    // (review 1 of line DBID pssmread, H1; review 2, H1: a report that read the subject before, or
-    // any lookup of the run before for the texts of opening, writes them there; review 3, H1: the
-    // reads by an ordinal id of the subjects without parsed Seq-ids load the same way).
+    // no fetch of the run loaded it before, and `x_GetTaxonomy` looks each taxid of its
+    // definition lines up in the volume's 256-slot cache, which asks the taxonomy database at the
+    // volume's first lookup of a taxid and where the slot holds another taxid; the texts of opening
+    // come with the run's first lookup. Such a lookup writes its text between the query's report
+    // and the PSSM's warnings of the later reads (review 1 of line DBID pssmread, H1; review 2, H1:
+    // a report that read the subject before, or any lookup of the run before for the texts of
+    // opening, writes them there; review 3, H1: the reads by an ordinal id of the subjects without
+    // parsed Seq-ids load the same way; review 4, H1 and M1: the offset error again at each lookup
+    // that misses its slot, in the order of the reads, also inside one load). It is the volume's
+    // cache that keeps a taxid for the run's later queries and rounds, not NCBI's scope, which may
+    // load a sequence read before again (`shared::pssm_load_texts`).
     /// NCBI's taxonomy texts of the PSSM's reads of query `query` (of the call) whose batch reads
     /// one by one, after that query's report read its subjects (`shared::prefetch_messages`):
     /// every read that `pssm_reads` keeps for the query, in the order of the reads, with the texts
-    /// of the lookups of its load's taxids (`shared::blob_taxids`, `shared::pssm_load_texts`, with
-    /// the run's `TaxdbRun`; empty for none, and for a read that loads no blob), for
+    /// of the lookups of its load (`shared::blob_taxids`, `shared::pssm_load_texts`, with the run's
+    /// `TaxdbRun`; empty for none, and for a read that loads no blob), for
     /// `psiblast::pssm::PssmReadMessages::add_load_texts`. The lookups are the run's from then on.
     pub(super) fn pssm_load_texts(
         &self,
@@ -1442,7 +1446,7 @@ impl ListedTitles<'_> {
             let text = match load.blob {
                 Some(blob) => {
                     let ordinal = self.listed.ordinals[rank];
-                    let taxids = shared::blob_taxids(
+                    let lookups = shared::blob_taxids(
                         &database.db,
                         ordinal,
                         self.parsed_subject(rank),
@@ -1453,7 +1457,7 @@ impl ListedTitles<'_> {
                         &database.db,
                         &database.taxdb,
                         blob,
-                        &taxids,
+                        &lookups,
                         self.program,
                     )?
                 }

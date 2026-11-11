@@ -261,6 +261,42 @@ impl DeflineSet {
             .position(|defline| seqid_in(&defline.ids, target) || seqid_in(&defline.ids, &local))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1069-1092
+    // ```c++
+    //     if (preferred_gi != ZERO_GI || preferred_seqid) {
+    //         CRef<CBlast_def_line_set> new_bdls(new CBlast_def_line_set);
+    //     ...
+    //             seqid.Reset(preferred_seqid);
+    //     ...
+    //         ITERATE(list< CRef<CBlast_def_line> >, iter, BDLS->Get()) {
+    //             if ((! found) && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid)) {
+    //                 found = true;
+    //                 new_bdls->Set().push_front(*iter);
+    //             } else {
+    //                 new_bdls->Set().push_back(*iter);
+    //             }
+    //         }
+    // ```
+    // The data loader asks for the Bioseq of the id it was asked for (cached_sequence.cpp:58), so
+    // `target` is the Seq-align id by which the sequence is read; `x_GetTaxonomy` walks the lines in
+    // this order and asks its volume's cache for each positive taxid (seqdbvol.cpp:1129-1153).
+    /// The positive taxids of the definition lines in the order in which NCBI's volume looks them
+    /// up where it loads this sequence's Bioseq for the id `target` (`CSeqDBVol::x_GetTaxonomy` of
+    /// `x_GetTaxDefline`): the first line that holds `target` (`s_SeqDB_SeqIdIn`, without the
+    /// local form that `bioseq_defline` also takes) first, then the others in their stored order;
+    /// a taxid of several lines comes once for each (each is a lookup of the volume's cache).
+    pub fn taxonomy_lookups(&self, target: &ParsedSeqId) -> Vec<i32> {
+        let front = self
+            .deflines
+            .iter()
+            .position(|defline| seqid_in(&defline.ids, target));
+        front
+            .into_iter()
+            .chain((0..self.deflines.len()).filter(|&index| Some(index) != front))
+            .filter_map(|index| self.deflines[index].taxid.filter(|&taxid| taxid > 0))
+            .collect()
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4741-4785
     // ```c++
     //     if(gi) *gi = ZERO_GI;

@@ -876,20 +876,21 @@ impl ParsedSubject {
         !self.volume_taxids().is_empty()
     }
 
-    /// The positive taxids of the definition lines in the order in which the volume looks them
-    /// up when it fetches the subject Bioseq (`CSeqDBVol::x_GetTaxonomy`; `x_GetTaxDefline`
-    /// puts the target first), each once.
+    /// The lookups of the volume's taxonomy cache when NCBI fetches the subject Bioseq by its
+    /// Seq-align id: the positive taxids of the definition lines in the order of
+    /// `CSeqDBVol::x_GetTaxonomy` (`x_GetTaxDefline` puts the line that holds the id first,
+    /// `DeflineSet::taxonomy_lookups`), a taxid of several lines once for each.
+    pub fn volume_lookups(&self) -> Vec<i32> {
+        self.set.taxonomy_lookups(&self.alignment_id)
+    }
+
+    /// The positive taxids that the volume looks up when it fetches the subject Bioseq, each once,
+    /// in the order of their first lookup ([`ParsedSubject::volume_lookups`]).
     pub fn volume_taxids(&self) -> Vec<i32> {
         let mut taxids = Vec::new();
-        let order = std::iter::once(self.target()).chain(
-            (0..self.set.deflines.len())
-                .filter(|&i| i != self.target)
-                .map(|i| &self.set.deflines[i]),
-        );
-        for defline in order {
-            match defline.taxid {
-                Some(taxid) if taxid > 0 && !taxids.contains(&taxid) => taxids.push(taxid),
-                _ => {}
+        for taxid in self.volume_lookups() {
+            if !taxids.contains(&taxid) {
+                taxids.push(taxid);
             }
         }
         taxids

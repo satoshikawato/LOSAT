@@ -453,11 +453,21 @@ impl XWideLists {
     }
 }
 
+// No NCBI counterpart (scheduling only): where a build's tasks run: on TBLASTX's search pool (the
+// unit path's group tables), or, for BLASTX's table of 4-letter words (item SC9 of line NP), on the
+// pool the build already runs on, in as many tasks as BLASTX's batch gives its build
+// (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`).
+#[derive(Clone, Copy)]
+enum XWideOn<'p, 'a> {
+    Pool(&'p crate::utils::threading::SearchPool<'a>),
+    Here(usize),
+}
+
 // No NCBI counterpart (scheduling only): NCBI builds a table on one thread. `f` on each of `parts`,
-// the results in part order: on tasks of `pool` (`x_claimed`) when it has two threads or more, else
-// in order on this thread.
+// the results in part order: on tasks of the pool (`x_claimed`) when the build has two threads or
+// more, else in order on this thread.
 fn x_wide_parts<T: Send, R: Send>(
-    pool: &crate::utils::threading::SearchPool<'_>,
+    on: XWideOn<'_, '_>,
     parts: Vec<T>,
     f: &(dyn Fn(T) -> R + Sync),
 ) -> Vec<R> {
@@ -465,23 +475,27 @@ fn x_wide_parts<T: Send, R: Send>(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if parts.len() > 1 && x_wide_threads(pool) > 1 {
-        return pool.install(|| x_claimed(parts, f));
+    if parts.len() > 1 && x_wide_threads(on) > 1 {
+        return match on {
+            XWideOn::Pool(pool) => pool.install(|| x_claimed(parts, f)),
+            XWideOn::Here(_) => x_claimed(parts, f),
+        };
     }
-    let _ = pool;
     parts.into_iter().map(f).collect()
 }
 
 // No NCBI counterpart (scheduling only): the threads the build's tasks run on.
-fn x_wide_threads(pool: &crate::utils::threading::SearchPool<'_>) -> usize {
-    if cfg!(all(
+fn x_wide_threads(on: XWideOn<'_, '_>) -> usize {
+    if !cfg!(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    )) && pool.enabled()
-    {
-        pool.threads().max(1)
-    } else {
-        1
+    )) {
+        return 1;
+    }
+    match on {
+        XWideOn::Pool(pool) if pool.enabled() => pool.threads().max(1),
+        XWideOn::Pool(_) => 1,
+        XWideOn::Here(parts) => parts.max(1),
     }
 }
 
@@ -553,19 +567,46 @@ impl XPairLutQuery {
         pool: &crate::utils::threading::SearchPool<'_>,
         mapped: bool,
     ) -> Vec<XPairLutGroup> {
-        self.x_build_tables_wide_with(tables, pool, mapped, X_WIDE_RANGE_WORK_PER_CELL)
+        self.x_build_tables_wide_with(
+            tables,
+            XWideOn::Pool(pool),
+            mapped,
+            X_WIDE_RANGE_WORK_PER_CELL,
+            true,
+        )
+    }
+
+    /// BLASTX's lookup table of 4-letter words (`-word_size 4`, item SC9 of line NP), whose backbone
+    /// index the 16-bit direct builder does not cover: the table of one list of lookup locations,
+    /// all of the query's, which is `build_lookup_from_prepared`'s table (module comment: the full
+    /// table filtered to its own locations), in `BlastAaLookupFinalize`'s layout and never
+    /// compacted (BLASTX's scans index the whole backbone), built in at most `parts` tasks of the
+    /// pool the build runs on.
+    pub(crate) fn x_build_full_wide(&self, parts: usize) -> BlastAaLookupTable {
+        let tables = [self.prepared.lookup_locations.clone()];
+        let mut built = self.x_build_tables_wide_with(
+            &tables,
+            XWideOn::Here(parts),
+            false,
+            X_WIDE_RANGE_WORK_PER_CELL,
+            false,
+        );
+        debug_assert!(built.len() == 1 && built[0].rank.is_empty());
+        built.pop().expect("one table").table
     }
 
     // No NCBI counterpart (scheduling only): `x_build_tables_wide` with the least work of a source
     // range per backbone cell as an argument (the unit tests take 0: as many ranges as threads, up to
     // `X_WIDE_MOST_PARTS`, whatever a table's size).
-    /// `x_build_tables_wide` with `range_work` in place of `X_WIDE_RANGE_WORK_PER_CELL`.
+    /// `x_build_tables_wide` with `range_work` in place of `X_WIDE_RANGE_WORK_PER_CELL`, the tasks on
+    /// `on`, and tables compacted only where `compactable`.
     fn x_build_tables_wide_with(
         &self,
         tables: &[Vec<(i32, i32)>],
-        pool: &crate::utils::threading::SearchPool<'_>,
+        on: XWideOn<'_, '_>,
         mapped: bool,
         range_work: u64,
+        compactable: bool,
     ) -> Vec<XPairLutGroup> {
         let word_length = self.word_length;
         assert!(
@@ -578,7 +619,7 @@ impl XPairLutQuery {
         let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
         assert!(backbone_size < 1 << 29, "joint lookup build: backbone size");
         let query = &self.prepared.concat_query;
-        let threads = x_wide_threads(pool);
+        let threads = x_wide_threads(on);
 
         // 1. The sources.
         let sources = XWideSources::new(query, tables, word_length, backbone_size);
@@ -599,7 +640,7 @@ impl XPairLutQuery {
         let bounds: Vec<usize> = (0..=parts).map(|r| n * r / parts).collect();
         let threshold = self.threshold;
         let made = x_wide_parts(
-            pool,
+            on,
             bounds.windows(2).map(|b| b[0]..b[1]).collect(),
             &|range: std::ops::Range<usize>| {
                 let mut targets: Vec<u32> = Vec::new();
@@ -637,8 +678,8 @@ impl XPairLutQuery {
                     &sources,
                     &lists,
                     &mut counts,
-                    (pool, threads),
-                    (backbone_size, mapped, range_work),
+                    (on, threads),
+                    (backbone_size, mapped, range_work, compactable),
                 )
             })
             .collect()
@@ -653,8 +694,8 @@ impl XPairLutQuery {
         sources: &XWideSources,
         lists: &XWideLists,
         counts: &mut Vec<u32>,
-        (pool, threads): (&crate::utils::threading::SearchPool<'_>, usize),
-        (backbone_size, mapped, range_work): (usize, bool, u64),
+        (on, threads): (XWideOn<'_, '_>, usize),
+        (backbone_size, mapped, range_work, compactable): (usize, bool, u64, bool),
     ) -> XPairLutGroup {
         let word_length = self.word_length;
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
@@ -695,7 +736,7 @@ impl XPairLutQuery {
         // (a) Each range's appends per cell, and the bounds of the entries of its sources with a
         // target.
         let bounds_of: Vec<(u32, u32)> = x_wide_parts(
-            pool,
+            on,
             counts.chunks_mut(backbone_size).zip(ranges()).collect(),
             &|(c, range): (&mut [u32], &[XWideSource])| {
                 c.fill(0);
@@ -723,7 +764,7 @@ impl XPairLutQuery {
         let counted: &[u32] = counts;
         let stripe = backbone_size.div_ceil(parts).next_multiple_of(32);
         let stripes = backbone_size.div_ceil(stripe);
-        let summed: Vec<XWideStripe> = x_wide_parts(pool, (0..stripes).collect(), &|j: usize| {
+        let summed: Vec<XWideStripe> = x_wide_parts(on, (0..stripes).collect(), &|j: usize| {
             let cells = j * stripe..((j + 1) * stripe).min(backbone_size);
             let mut totals = XWideStripe::default();
             for w in cells {
@@ -754,7 +795,8 @@ impl XPairLutQuery {
 
         // (c) The layout: BlastAaLookupFinalize's rule, compacted where the branch-free scan takes
         // the table (`x_scan_bf_takes`, as `x_build_group` decides).
-        let compact = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
+        let compact = compactable
+            && crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
         let backbone_len = if compact { used } else { backbone_size };
         let mut backbone: Vec<BackboneCell> =
             Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len, mapped));
@@ -799,7 +841,7 @@ impl XPairLutQuery {
                 cursor_base += totals.overflow;
             }
             debug_assert!(cells_left.is_empty() && overflow_left.is_empty());
-            x_wide_parts(pool, placed, &|(
+            x_wide_parts(on, placed, &|(
                 (first, slot_base, mut cursor),
                 mut column,
                 cells,
@@ -873,7 +915,7 @@ impl XPairLutQuery {
             lens: (backbone_len, overflow_size),
         };
         x_wide_parts(
-            pool,
+            on,
             counts.chunks_mut(backbone_size).zip(ranges()).collect(),
             &|(at, range): (&mut [u32], &[XWideSource])| {
                 for &s in range {
@@ -1048,7 +1090,7 @@ mod tests {
         assert_eq!(wide.len(), starts.len());
         // As many source ranges as the pool has threads (up to `X_WIDE_MOST_PARTS`), whatever the
         // tables' size: the same tables.
-        let ranged = q.x_build_tables_wide_with(&locations, pool, true, 0);
+        let ranged = q.x_build_tables_wide_with(&locations, XWideOn::Pool(pool), true, 0, true);
         for (g, (a, b)) in wide.iter().zip(&ranged).enumerate() {
             assert_eq!(a.rank, b.rank, "table {g}: rank differs with every range");
             x_assert_same_group(
@@ -1131,7 +1173,7 @@ mod tests {
         #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
         for threads in [4usize, 8] {
             crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
-                assert_eq!(x_wide_threads(pool), threads);
+                assert_eq!(x_wide_threads(XWideOn::Pool(pool)), threads);
                 f(pool);
                 Ok(())
             })
@@ -1283,6 +1325,55 @@ mod tests {
                     (seen.entries, seen.with_entries, seen.in_overflow),
                     (0, 0, 0)
                 );
+            }
+        });
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (cited in the
+    // module comment).
+    // Item SC9 of line NP: BLASTX's table of 4-letter words (`x_build_full_wide`, from a lookup query
+    // as BLASTX hands it over, `x_from_prepared`) is the reference builder's full table field by
+    // field, never compacted, built on this thread and in 4 parts on pools of 1, 4 and 8 threads;
+    // with a query of SEG masks, a context shorter than a word, an empty one and a repeated letter,
+    // three matrices and thresholds 0, 11 and 13.
+    #[test]
+    fn blastx_s_full_table_of_four_letters_is_the_reference_table() {
+        let mut seed = 0x3b17_5eed_0000_0009u64;
+        let mut repeated = vec![1u8; 120];
+        repeated.extend(residues(&mut seed, 40));
+        let query = vec![vec![
+            frame(residues(&mut seed, 260), vec![(10, 30), (200, 201)], 1),
+            frame(residues(&mut seed, 3), vec![], 2),
+            frame(repeated, vec![(70, 99)], 3),
+            frame(residues(&mut seed, 230), vec![(0, 5)], -1),
+            frame(Vec::new(), vec![], -2),
+            frame(residues(&mut seed, 240), vec![], -3),
+        ]];
+        on_pools(|pool| {
+            for matrix in [
+                ScoringMatrix::Blosum62,
+                ScoringMatrix::Pam30,
+                ScoringMatrix::Blosum45,
+            ] {
+                for threshold in [0, 11, 13] {
+                    let params = crate::stats::lookup_protein_params_ungapped(matrix);
+                    let (full, _) =
+                        crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile(
+                            &query, threshold, &params, true, matrix, 4,
+                        );
+                    let prepared = XPairLutQuery::x_prepare_for(&query, threshold, true, matrix, 4)
+                        .expect("the joint builder covers 4 letters")
+                        .prepared;
+                    let q = XPairLutQuery::x_from_prepared(prepared, threshold, matrix, 4);
+                    for parts in [1, 4] {
+                        let table = pool.install(|| q.x_build_full_wide(parts));
+                        x_assert_same_table_as(
+                            &format!("{matrix:?} threshold {threshold} parts {parts}:"),
+                            &table,
+                            &full,
+                        );
+                    }
+                }
             }
         });
     }

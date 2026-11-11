@@ -2458,6 +2458,19 @@ fn build_ncbi_lookup_with(
         Ok(table) => return table,
         Err(prepared) => prepared,
     };
+    // A backbone index wider than the direct builder's 16 bits (`-word_size 4`, item SC9 of line
+    // NP; for BLOSUM62's 3 letters a constant false): the joint builder of 32-bit indices
+    // (`x_pair_lut_wide.rs`) with the batch's lookup locations as its one table, which is the
+    // reference builder's table, on `parts` tasks. Diagnostics mode keeps the reference builder.
+    if !x_pair_lut::x_direct_covers(word_length)
+        && x_pair_lut::x_pair_lut_wide::x_wide_covers(word_length)
+        && !diagnostics_enabled()
+    {
+        return XBxTable::Wide(
+            x_pair_lut::XPairLutQuery::x_from_prepared(prepared, threshold, matrix, word_length)
+                .x_build_full_wide(parts),
+        );
+    }
     XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
 }
 

@@ -300,6 +300,40 @@ impl XPairLutQuery {
         })
     }
 
+    /// BLASTX's lookup query `prepared` (`blastx::seed::Lookup`'s), with the scores of `matrix` and
+    /// words of `word_length` letters: the query of `build_lookup_from_prepared(prepared, threshold,
+    /// matrix, word_length)`, whose table `x_build_full_wide` builds (item SC9 of line NP).
+    pub(in super::super) fn x_from_prepared(
+        prepared: PreparedLookupQuery,
+        threshold: i32,
+        matrix: ScoringMatrix,
+        word_length: usize,
+    ) -> Self {
+        let alphabet_size = LOOKUP_ALPHABET_SIZE;
+        // The expressions of `build_lookup_from_prepared`, as `x_prepare_for` computes them.
+        let query_length = prepared
+            .contexts
+            .last()
+            .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
+            .unwrap_or(0);
+        let row_max: Vec<i32> = (0..alphabet_size)
+            .map(|i| {
+                (0..alphabet_size)
+                    .map(|j| lookup_matrix_score(matrix, i, j))
+                    .max()
+                    .unwrap_or(i32::MIN)
+            })
+            .collect();
+        Self {
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            query_length,
+            row_max,
+        }
+    }
+
     /// The query contexts (those `build_ncbi_lookup` returns with its table).
     pub(crate) fn contexts(&self) -> &[QueryContext] {
         &self.prepared.contexts

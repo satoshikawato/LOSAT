@@ -39,9 +39,12 @@ use anyhow::Result;
 use super::prelim::{RpsPrelim, RpsPrelimScratch};
 use super::redo::RpsRedoParams;
 use super::scan::{RpsBuckets, RpsTable};
-use super::traceback::{filter_results, RpsTraceScratch, RpsTraceback, RpsTraced};
+use super::traceback::{
+    filter_results, formatter_identities, RpsTraceScratch, RpsTraceback, RpsTraced,
+};
 use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
 use super::{RpsRows, RPS_K_MULT};
+use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
 use crate::seqdb::rps::RpsVolumeFiles;
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 
@@ -57,6 +60,13 @@ pub struct RpsSearch {
     pub(crate) requested_cbs: u8,
     /// `-num_threads 0`: one thread per volume of the database (NCBI's "auto").
     pub(crate) auto_threads: bool,
+    /// `-xdrop_ungap`, `-xdrop_gap` and `-xdrop_gap_final` in bits as given; `None`: NCBI's RPS
+    /// defaults (7, 15 and 25 bits, which `rps_hooks::rps_search` reads).
+    pub(crate) x_drop_ungapped_bits: Option<f64>,
+    pub(crate) x_drop_gapped_bits: Option<f64>,
+    pub(crate) x_drop_final_bits: Option<f64>,
+    /// `-sum_stats true`, refused where the search starts (`rps_hooks::rps_search`).
+    pub(crate) sum_stats: bool,
 }
 
 /// One user query as the search reads it.
@@ -74,6 +84,10 @@ pub(crate) struct RpsQuery<'a> {
     /// score block that the composition-based redo copies, which stays where the profile has no
     /// score frequencies.
     pub(crate) batch_kbp: KarlinParams,
+    /// The query's letters as read (between two sentinels) where the searched ones differ (SEG,
+    /// lower-case masks, `Blast_MaskUnsupportedAA`): the reports' identities count on them
+    /// (`traceback::formatter_identities`).
+    pub(crate) aa_seq_nomask: Option<&'a [u8]>,
 }
 
 /// What the search of every query of a volume reads besides the volume.
@@ -96,12 +110,12 @@ pub(crate) struct RpsRun<'a> {
     pub(crate) hitlist_size: usize,
     pub(crate) prelim_hitlist_size: usize,
     pub(crate) window: i32,
-    /// `gap_x_dropoff` and `gap_x_dropoff_final` before the scale (from `kbp_gap_std`).
-    pub(crate) x_drop_gapped: i32,
-    pub(crate) x_drop_final: i32,
-    /// blastp's ungapped X-drop and gap trigger in bits (`word_options->x_dropoff`,
-    /// `kOptions->gap_trigger`).
+    /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
+    /// `gap_x_dropoff_final`: `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or NCBI's RPS
+    /// defaults) and the gap trigger in bits (`kOptions->gap_trigger`).
     pub(crate) x_drop_ungapped_bits: f64,
+    pub(crate) x_drop_gapped_bits: f64,
+    pub(crate) x_drop_final_bits: f64,
     pub(crate) gap_trigger_bits: f64,
     pub(crate) options: &'a RpsSearch,
 }
@@ -112,6 +126,86 @@ fn scale_overflow(scale: f64) -> anyhow::Error {
     anyhow::anyhow!(
         "a profile database of the scale {scale} (its scaled gap costs, X-drops or score cutoffs leave 32-bit integers) is not supported by LOSAT's RPSBLAST"
     )
+}
+
+/// The refusal of an X-drop in bits whose raw score (the bits over Lambda, converted to `Int4`,
+/// times the database's scale where NCBI multiplies) leaves NCBI's `Int4`, or whose quotient by
+/// the scaled gap extension makes NCBI's kernels' sizes leave it (`kernel_x_drop_fits`): NCBI's
+/// conversion of the double, or its arithmetic, is undefined there (DECISIONS 17 N1/N2, line PS).
+/// `given` is the option's value as the command line gives it; an X-drop of NCBI's defaults gets
+/// the database's refusal (`scale_overflow`), as only an extreme scale makes it leave 32 bits.
+fn x_drop_overflow(option: &str, given: Option<f64>, bits: f64, scale: f64) -> anyhow::Error {
+    if given.is_none() {
+        return scale_overflow(scale);
+    }
+    anyhow::anyhow!(
+        "an {option} of {bits:?} bits, whose raw X-drop at the profile database's scale {scale} leaves NCBI BLAST+'s 32-bit integers (its conversion or the sizes of its alignment kernels overflow: undefined behaviour), is not supported by LOSAT's RPSBLAST"
+    )
+}
+
+/// The largest quotient of a raw X-drop by the scaled gap extension that NCBI's gapped kernels
+/// keep in `Int4`, plus one: `num_extra_cells = x_dropoff / gap_extend + 3`, the DP window
+/// `dp_mem_alloc = num_extra_cells + 100`, and its growth `2 * dp_mem_alloc`, which leaves `Int4`
+/// once `dp_mem_alloc` is 2^30 (at the first row that passes the window's first 97 cells).
+const KERNEL_X_DROP_QUOTIENT_LIMIT: i64 = (1 << 30) - 103;
+
+/// Whether NCBI's gapped kernels (`Blast_SemiGappedAlign`, the preliminary stage's, and
+/// `ALIGN_EX`, the CBS 0 traceback's) keep their sizes in `Int4` for the raw X-drop `x_dropoff`
+/// at the scale with the scaled gap costs: the X-drop raised to `gap_open + gap_extend`, over
+/// `gap_extend` (`Int4` division), below `KERNEL_X_DROP_QUOTIENT_LIMIT`. Reachable only where the
+/// scaled gap extension is 1 or 2 (scale 1 or 2 with BLOSUM62 11/1): the quotient is at most
+/// `INT4_MAX / scale` otherwise. LOSAT's kernels size their memory by the sequences, but NCBI's
+/// overflow is undefined behaviour, so such an X-drop is refused.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:426-429
+/// ```c
+///     x_dropoff = gap_align->gap_x_dropoff;
+///
+///     if (x_dropoff < gap_open_extend)
+///         x_dropoff = gap_open_extend;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:457-464
+/// ```c
+///     if (gap_extend > 0)
+///         num_extra_cells = x_dropoff / gap_extend + 3;
+///     else
+///         num_extra_cells = N + 3;
+///
+///     if (num_extra_cells > gap_align->dp_mem_alloc) {
+///         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+///                                       2 * gap_align->dp_mem_alloc);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-644 (the same at
+/// 923-926 in `Blast_SemiGappedAlign`)
+/// ```c
+///         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+///
+///             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+///                                           2 * gap_align->dp_mem_alloc);
+/// ```
+fn kernel_x_drop_fits(x_dropoff: i32, gap_open: i32, gap_extend: i32) -> bool {
+    let gap_open_extend = i64::from(gap_open) + i64::from(gap_extend);
+    let x_dropoff = i64::from(x_dropoff).max(gap_open_extend);
+    gap_extend <= 0 || x_dropoff / i64::from(gap_extend) < KERNEL_X_DROP_QUOTIENT_LIMIT
+}
+
+/// A query's ungapped X-drop (`x_dropoff_init`) from the X-drop in bits `bits` (above 0,
+/// `validate_protein_options`), the query's ungapped Lambda and the database's scale: the product
+/// is a double, converted to `Int4` once; `None` where that conversion is undefined (`int4_of`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:216-221 (quoted at
+/// `RpsCutoffs`)
+fn ungapped_x_dropoff(bits: f64, lambda: f64, scale: f64) -> Option<i32> {
+    int4_of(scale * (bits * std::f64::consts::LN_2 / lambda).ceil())
+}
+
+/// NCBI's `(Int4)` conversion of a double where it is defined: the value truncated toward zero,
+/// `None` where that leaves `Int4` (or the value is not a number), which is undefined behaviour in
+/// C (C11 6.3.1.4).
+fn int4_of(value: f64) -> Option<i32> {
+    let truncated = value.trunc();
+    (truncated >= f64::from(i32::MIN) && truncated <= f64::from(i32::MAX))
+        .then_some(truncated as i32)
 }
 
 /// The per-query cutoffs of the preliminary stage at the database's scale.
@@ -222,14 +316,19 @@ fn spouge_etos(evalue: f64, kbp: &KarlinParams, gbp: &BlastGumbelBlk, m: i32, n:
 }
 
 impl RpsRun<'_> {
-    /// The query's cutoffs, `None` where a scaled one leaves `i32`.
-    fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Option<RpsCutoffs> {
+    /// The query's cutoffs; the refusal where the ungapped X-drop (`-xdrop_ungap`) or a scaled
+    /// cutoff leaves `i32`.
+    fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Result<RpsCutoffs> {
         let int_scale = scale as i32;
-        let x_dropoff = scale
-            * (self.x_drop_ungapped_bits * std::f64::consts::LN_2 / query.kbp_std.lambda).ceil();
-        if !x_dropoff.is_finite() || x_dropoff > f64::from(i32::MAX) {
-            return None;
-        }
+        let x_dropoff = ungapped_x_dropoff(self.x_drop_ungapped_bits, query.kbp_std.lambda, scale)
+            .ok_or_else(|| {
+                x_drop_overflow(
+                    "-xdrop_ungap",
+                    self.options.x_drop_ungapped_bits,
+                    self.x_drop_ungapped_bits,
+                    scale,
+                )
+            })?;
         let hit_cutoff = spouge_etos(
             self.prelim_evalue,
             &self.gapped,
@@ -237,14 +336,110 @@ impl RpsRun<'_> {
             (query.aa_seq.len() - 2) as i32,
             self.cutoff_subject_length,
         )
-        .checked_mul(int_scale)?;
+        .checked_mul(int_scale)
+        .ok_or_else(|| scale_overflow(scale))?;
         let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
             / query.kbp_std.lambda) as i32;
-        Some(RpsCutoffs {
-            x_dropoff: x_dropoff as i32,
-            word_cutoff: gap_trigger.checked_mul(int_scale)?.min(hit_cutoff),
+        Ok(RpsCutoffs {
+            x_dropoff,
+            word_cutoff: gap_trigger
+                .checked_mul(int_scale)
+                .ok_or_else(|| scale_overflow(scale))?
+                .min(hit_cutoff),
             hit_cutoff,
         })
+    }
+
+    /// The gapped X-drops of the preliminary stage and of the final traceback at the database's
+    /// scale (`ext_params->gap_x_dropoff`, `gap_x_dropoff_final`); the refusal where one of
+    /// them, or the X-drop of the composition-based redo when it runs
+    /// (`gapping_params->x_dropoff`), leaves `i32` (`-xdrop_gap`, `-xdrop_gap_final`). A gapped
+    /// X-drop of 0 or below is NCBI's too: the alignment kernels raise it to the gap costs
+    /// (`pssm_search::gapalign`, NCBI's `ALIGN_EX`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-469
+    /// ```c
+    ///    if (sbp->kbp_gap) {
+    ///       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
+    ///       params->gap_x_dropoff = (Int4)
+    ///           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
+    ///       /* Note that this conversion from bits to raw score is done prematurely for
+    ///          RPS and PSSM searches, as the Lambda used here would change after
+    ///          the PSSM is rescaled */
+    ///       params->gap_x_dropoff_final = (Int4)
+    ///           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
+    ///    }
+    ///
+    ///    if (sbp->scale_factor > 1.0) {
+    ///        ASSERT(Blast_ProgramIsRpsBlast(program_number));
+    ///        params->gap_x_dropoff *= (Int4)sbp->scale_factor;
+    ///        params->gap_x_dropoff_final *= (Int4)sbp->scale_factor;
+    ///    }
+    /// ```
+    /// (`min_lambda` is the Lambda of `kbp_gap_std`, BLOSUM62 11/1's, for every query; the
+    /// products are `Int4` multiplications.) The redo's X-drop is `RedoRun::x_dropoff_of` of
+    /// Lambda over the scaling factor (`s_RescaleSearch`) and the scaled final X-drop
+    /// (blast_kappa.c:2375-2383, quoted at `RedoRun::new`).
+    ///
+    /// The kernels then size their memory from the X-drop over the gap extension, in `Int4`
+    /// (`kernel_x_drop_fits`); `gap_open` and `gap_extend` are the scaled gap costs.
+    fn gapped_x_drops(&self, scale: f64, gap_open: i32, gap_extend: i32) -> Result<(i32, i32)> {
+        let int_scale = scale as i32;
+        let lambda = self.gapped.lambda;
+        let scaled = |raw: i32| {
+            if scale > 1.0 {
+                raw.checked_mul(int_scale)
+            } else {
+                Some(raw)
+            }
+        };
+        // An X-drop that the user did not give leaves 32 bits only at an extreme scale: the
+        // refusal then names the database's scale.
+        let gapped_overflow = || {
+            x_drop_overflow(
+                "-xdrop_gap",
+                self.options.x_drop_gapped_bits,
+                self.x_drop_gapped_bits,
+                scale,
+            )
+        };
+        let final_overflow = || {
+            x_drop_overflow(
+                "-xdrop_gap_final",
+                self.options.x_drop_final_bits,
+                self.x_drop_final_bits,
+                scale,
+            )
+        };
+        let raw_gapped = int4_of(self.x_drop_gapped_bits * std::f64::consts::LN_2 / lambda)
+            .ok_or_else(gapped_overflow)?;
+        let raw_final = int4_of(
+            (self.x_drop_final_bits * std::f64::consts::LN_2 / lambda).max(f64::from(raw_gapped)),
+        )
+        .ok_or_else(final_overflow)?;
+        let x_drop_gapped = scaled(raw_gapped).ok_or_else(gapped_overflow)?;
+        let x_drop_final = scaled(raw_final).ok_or_else(final_overflow)?;
+        // The preliminary stage's kernel runs at every mode; the CBS 0 traceback's (the final
+        // X-drop) only without the composition-based redo, whose own gap extension (the costs
+        // times 32) keeps its quotient below 2^26.
+        let redo = self.sbp.is_some() && self.cbs > 0;
+        if !kernel_x_drop_fits(x_drop_gapped, gap_open, gap_extend) {
+            return Err(gapped_overflow());
+        }
+        if !redo && !kernel_x_drop_fits(x_drop_final, gap_open, gap_extend) {
+            return Err(final_overflow());
+        }
+        // The redo converts its X-drop at its own Lambda (`RedoRun::with_final_x_drop_bits`);
+        // it is checked here, before any search.
+        if redo {
+            int4_of(RedoRun::x_dropoff_of(
+                self.x_drop_final_bits,
+                lambda / SCALING_FACTOR,
+                x_drop_final,
+            ))
+            .ok_or_else(final_overflow)?;
+        }
+        Ok((x_drop_gapped, x_drop_final))
     }
 
     /// Every query's traced results on the volume `files`, whose consensus letters are
@@ -270,35 +465,19 @@ impl RpsRun<'_> {
                 .expect("checked when the volume was opened"),
             pv: files.pv(),
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:466-469
-        // ```c
-        //    if (sbp->scale_factor > 1.0) {
-        //        ASSERT(Blast_ProgramIsRpsBlast(program_number));
-        //        params->gap_x_dropoff *= (Int4)sbp->scale_factor;
-        //        params->gap_x_dropoff_final *= (Int4)sbp->scale_factor;
-        //    }
-        // ```
-        let (x_drop_gapped, x_drop_final) = if scale > 1.0 {
-            (
-                self.x_drop_gapped.checked_mul(int_scale),
-                self.x_drop_final.checked_mul(int_scale),
-            )
-        } else {
-            (Some(self.x_drop_gapped), Some(self.x_drop_final))
-        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:558-562
         // ```c
         //    params->gap_open = score_options->gap_open * (Int4)scale_factor;
         //    params->gap_extend = score_options->gap_extend * (Int4)scale_factor;
         // ```
-        let (Some(x_drop_gapped), Some(x_drop_final), Some(gap_open), Some(gap_extend)) = (
-            x_drop_gapped,
-            x_drop_final,
+        let (Some(gap_open), Some(gap_extend)) = (
             files.aux.gap_open.checked_mul(int_scale),
             files.aux.gap_extend.checked_mul(int_scale),
         ) else {
             return Err(scale_overflow(scale));
         };
+        // The X-drops at the scale (`gapped_x_drops`, NCBI's `BlastExtensionParametersNew`).
+        let (x_drop_gapped, x_drop_final) = self.gapped_x_drops(scale, gap_open, gap_extend)?;
         // Every searched query's cutoffs, before the search (`BlastHitSavingParametersNew` and
         // `BlastInitialWordParametersNew` set them for the whole batch before its scan).
         let cutoffs = self
@@ -307,7 +486,6 @@ impl RpsRun<'_> {
             .map(|query| {
                 if query.valid {
                     self.cutoffs(query, scale)
-                        .ok_or_else(|| scale_overflow(scale))
                 } else {
                     Ok(RpsCutoffs {
                         x_dropoff: 0,
@@ -351,6 +529,7 @@ impl RpsRun<'_> {
                 sbp,
                 gap_open: files.aux.gap_open,
                 gap_extend: files.aux.gap_extend,
+                x_drop_final_bits: self.x_drop_final_bits,
             }),
         };
         let prelim_karlin = KarlinParams {
@@ -419,6 +598,10 @@ impl RpsRun<'_> {
                 &query.batch_kbp,
                 &mut scratch.1,
             )?;
+            if let (Some(hit_list), Some(nomask)) = (traced.hit_list.as_mut(), query.aa_seq_nomask)
+            {
+                formatter_identities(hit_list, &nomask[1..nomask.len() - 1], consensus, offsets);
+            }
             if let Some(hit_list) = traced.hit_list.as_mut() {
                 finish_volume_list(
                     hit_list,
@@ -541,6 +724,262 @@ fn finish_volume_list(
 mod tests {
     use super::*;
 
+    // C11 6.3.1.4: a double converts to `int` truncated toward zero when the truncated value is
+    // representable; otherwise (and for NaN) the behaviour is undefined, which `int4_of` refuses.
+    #[test]
+    fn int4_conversions_truncate_toward_zero_inside_32_bits_only() {
+        assert_eq!(int4_of(2_147_483_647.9), Some(i32::MAX));
+        assert_eq!(int4_of(2_147_483_648.0), None);
+        assert_eq!(int4_of(-2_147_483_648.9), Some(i32::MIN));
+        assert_eq!(int4_of(-2_147_483_649.0), None);
+        assert_eq!(int4_of(-0.9), Some(0));
+        assert_eq!(int4_of(-2.596), Some(-2));
+        assert_eq!(int4_of(64.9), Some(64));
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, -1e300] {
+            assert_eq!(int4_of(value), None, "{value}");
+        }
+    }
+
+    // blast_parameters.c:216-221: `(Int4)(scale_factor * ceil(x_dropoff * LN2 / Lambda))`, the
+    // ceiling before the scale, one conversion of the product.
+    #[test]
+    fn the_ungapped_x_drop_is_the_ceiling_times_the_scale() {
+        let lambda = 0.3176;
+        // 7 bits: ceil(15.28) = 16 raw, 1,600 at scale 100.
+        assert_eq!(ungapped_x_dropoff(7.0, lambda, 1.0), Some(16));
+        assert_eq!(ungapped_x_dropoff(7.0, lambda, 100.0), Some(1600));
+        // A tiny X-drop is still one raw unit.
+        assert_eq!(ungapped_x_dropoff(1e-300, lambda, 200.0), Some(200));
+        // ceil(x) * scale just inside and just outside 32 bits.
+        let bits_for = |raw: f64| raw * lambda / std::f64::consts::LN_2;
+        assert_eq!(
+            ungapped_x_dropoff(bits_for(21_474_836.0) - 1e-6, lambda, 100.0),
+            Some(2_147_483_600)
+        );
+        assert_eq!(
+            ungapped_x_dropoff(bits_for(21_474_837.0), lambda, 100.0),
+            None
+        );
+        assert_eq!(ungapped_x_dropoff(1e300, lambda, 1.0), None);
+    }
+
+    /// An `RpsRun` of no query with the given X-drops in bits, BLOSUM62 11/1's gapped block and
+    /// no composition-based statistics.
+    fn x_drop_run<'a>(
+        gumbel: &'a BlastGumbelBlk,
+        options: &'a RpsSearch,
+        gapped_bits: f64,
+        final_bits: f64,
+    ) -> RpsRun<'a> {
+        RpsRun {
+            queries: Vec::new(),
+            gapped: KarlinParams {
+                lambda: 0.267,
+                k: 0.041,
+                h: 0.14,
+                alpha: 1.9,
+                beta: -30.0,
+            },
+            gumbel,
+            cutoff_subject_length: 0,
+            evalue: 10.0,
+            prelim_evalue: 10.0,
+            cbs: 0,
+            sbp: None,
+            hitlist_size: 500,
+            prelim_hitlist_size: 500,
+            window: 40,
+            x_drop_ungapped_bits: 7.0,
+            x_drop_gapped_bits: gapped_bits,
+            x_drop_final_bits: final_bits,
+            gap_trigger_bits: 22.0,
+            options,
+        }
+    }
+
+    // blast_parameters.c:455-469 (quoted at `RpsRun::gapped_x_drops`): each X-drop truncated
+    // toward zero, the final one the larger of its own and the preliminary one (compared as
+    // doubles), both times the scale above 1; the values NCBI's probes give (DESIGN_ps11c §2).
+    #[test]
+    fn gapped_x_drops_are_ncbis_conversions_at_the_scale() {
+        let gumbel = BlastGumbelBlk {
+            lambda: 0.267,
+            c: 0.0,
+            g: 0.0,
+            a: 0.0,
+            alpha: 0.0,
+            sigma: 0.0,
+            a_un: 0.0,
+            alpha_un: 0.0,
+            b: 0.0,
+            beta: 0.0,
+            tau: 0.0,
+            db_length: 0,
+        };
+        // The X-drops as given on the command line (the refusals name them).
+        let given = |gapped: f64, last: f64| RpsSearch {
+            x_drop_gapped_bits: Some(gapped),
+            x_drop_final_bits: Some(last),
+            ..RpsSearch::default()
+        };
+        // BLOSUM62 11/1 at the scale.
+        let drops = |gapped: f64, last: f64, scale: f64| {
+            let options = given(gapped, last);
+            x_drop_run(&gumbel, &options, gapped, last)
+                .gapped_x_drops(scale, 11 * scale as i32, scale as i32)
+                .map_err(|error| error.to_string())
+        };
+        // The defaults: 15 bits = 38 raw, 25 bits = 64 raw.
+        assert_eq!(drops(15.0, 25.0, 1.0), Ok((38, 64)));
+        assert_eq!(drops(15.0, 25.0, 100.0), Ok((3800, 6400)));
+        // 0 and negative gapped X-drops are kept as they are (the kernels raise them).
+        assert_eq!(drops(0.0, 25.0, 1.0), Ok((0, 64)));
+        assert_eq!(drops(-1.0, -1.0, 100.0), Ok((-200, -200)));
+        assert_eq!(drops(-1.0, 25.0, 100.0), Ok((-200, 6400)));
+        // The final X-drop is at least the preliminary one: 40 and 10 bits give 103 and 103.
+        assert_eq!(drops(40.0, 10.0, 1.0), Ok((103, 103)));
+        // A final X-drop far below 32 bits takes the preliminary one: no undefined conversion.
+        assert_eq!(drops(15.0, -1e300, 100.0), Ok((3800, 3800)));
+        for (gapped, last, scale, option) in [
+            (1e300, 25.0, 1.0, "-xdrop_gap of 1e300 bits"),
+            (-1e300, 25.0, 1.0, "-xdrop_gap of -1e300 bits"),
+            (15.0, 1e300, 1.0, "-xdrop_gap_final of 1e300 bits"),
+            // 1e7 bits = 25,960,568 raw: inside 32 bits at scale 1, outside at scale 100.
+            (1e7, 25.0, 100.0, "-xdrop_gap of 10000000.0 bits"),
+            (15.0, 1e7, 100.0, "-xdrop_gap_final of 10000000.0 bits"),
+        ] {
+            let error = drops(gapped, last, scale).unwrap_err();
+            assert!(
+                error.contains(option) && error.contains(&format!("scale {scale}")),
+                "{error}"
+            );
+        }
+        assert_eq!(drops(1e7, 1e7, 1.0), Ok((25_960_568, 25_960_568)));
+        // The kernels' window: 4.1e8 bits = 1,064,383,310 raw, below 2^30 - 103 over a gap
+        // extension of 1; 4.2e8 bits = 1,090,343,879 raw, above it: refused for the preliminary
+        // X-drop, and for the final one where the CBS 0 traceback runs (this run, no redo). At
+        // scale 2 the product with the scale already leaves 32 bits.
+        assert!(drops(4.1e8, 25.0, 1.0).is_ok());
+        assert!(drops(15.0, 4.1e8, 1.0).is_ok());
+        for scale in [1.0, 2.0] {
+            let error = drops(4.2e8, 25.0, scale).unwrap_err();
+            assert!(error.contains("-xdrop_gap of 420000000.0 bits"), "{error}");
+            let error = drops(15.0, 4.2e8, scale).unwrap_err();
+            assert!(
+                error.contains("-xdrop_gap_final of 420000000.0 bits"),
+                "{error}"
+            );
+        }
+        // NCBI's defaults never leave 32 bits but at an extreme scale, which the refusal names.
+        let defaults = RpsSearch::default();
+        let error = x_drop_run(&gumbel, &defaults, 15.0, 25.0)
+            .gapped_x_drops(1e8, 1_100_000_000, 100_000_000)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.starts_with("a profile database of the scale 100000000 (its scaled gap costs"),
+            "{error}"
+        );
+    }
+
+    // blast_gapalign.c:426-429, 457-464, 641-644 (quoted at `kernel_x_drop_fits`): the X-drop
+    // raised to the gap costs, over the gap extension, plus 103 is the DP window; twice a window
+    // of 2^30 leaves `Int4`.
+    #[test]
+    fn the_kernels_window_of_an_x_drop_stays_in_32_bits() {
+        assert_eq!(KERNEL_X_DROP_QUOTIENT_LIMIT, 1_073_741_721);
+        assert!(kernel_x_drop_fits(1_073_741_720, 11, 1));
+        assert!(!kernel_x_drop_fits(1_073_741_721, 11, 1));
+        // Scale 2: the quotient truncates.
+        assert!(kernel_x_drop_fits(2_147_483_441, 22, 2));
+        assert!(!kernel_x_drop_fits(2_147_483_442, 22, 2));
+        // From scale 3 on no `Int4` X-drop reaches it.
+        assert!(kernel_x_drop_fits(i32::MAX, 33, 3));
+        // An X-drop below the gap costs is raised to them; negative ones too.
+        assert!(kernel_x_drop_fits(0, 11, 1));
+        assert!(kernel_x_drop_fits(i32::MIN, 11, 1));
+    }
+
+    // blast_traceback.c:1241-1261: with composition-based statistics only the redo runs after
+    // the preliminary stage, whose gap extension is 32 times the database's: the final X-drop
+    // then never reaches the kernels' window limit, the preliminary one still does.
+    #[test]
+    fn the_final_x_drop_reaches_the_kernels_only_without_the_redo() {
+        static FREQ_RATIOS: [[f64; crate::core::blast_util::BLASTAA_SIZE];
+            crate::core::blast_util::BLASTAA_SIZE] =
+            [[0.0; crate::core::blast_util::BLASTAA_SIZE]; crate::core::blast_util::BLASTAA_SIZE];
+        static BACKGROUND: [f64; 20] = [0.05; 20];
+        let sbp = crate::core::psi::PsiScoreBlk {
+            matrix: [[0; crate::core::blast_util::BLASTAA_SIZE];
+                crate::core::blast_util::BLASTAA_SIZE],
+            ideal_lambda: 0.3176,
+            ideal_k: 0.134,
+            gap_std_k: 0.041,
+            gap_psi: crate::core::psi::KarlinBlk {
+                lambda: 0.267,
+                k: 0.041,
+                h: 0.14,
+            },
+            freq_ratios: &FREQ_RATIOS,
+            bit_scale_factor: 2,
+            background: &BACKGROUND,
+        };
+        let gumbel = BlastGumbelBlk {
+            lambda: 0.267,
+            c: 0.0,
+            g: 0.0,
+            a: 0.0,
+            alpha: 0.0,
+            sigma: 0.0,
+            a_un: 0.0,
+            alpha_un: 0.0,
+            b: 0.0,
+            beta: 0.0,
+            tau: 0.0,
+            db_length: 0,
+        };
+        let options = RpsSearch {
+            x_drop_gapped_bits: Some(15.0),
+            x_drop_final_bits: Some(4.2e8),
+            ..RpsSearch::default()
+        };
+        let mut run = x_drop_run(&gumbel, &options, 15.0, 4.2e8);
+        run.cbs = 1;
+        run.sbp = Some(&sbp);
+        // A final X-drop of 4.2e8 bits leaves 32 bits at the redo's Lambda: the redo's check.
+        let error = run.gapped_x_drops(1.0, 11, 1).unwrap_err().to_string();
+        assert!(error.contains("an -xdrop_gap_final of"), "{error}");
+        // (At the redo's Lambda a final X-drop is about 32 times its raw value, so one above the
+        // kernels' window limit is always refused by this conversion.) 1.5e7 bits are
+        // 1,246,107,290 at the redo's Lambda: accepted.
+        run.x_drop_final_bits = 1.5e7;
+        assert!(run.gapped_x_drops(1.0, 11, 1).is_ok());
+        // The preliminary X-drop is checked at every mode.
+        run.x_drop_gapped_bits = 4.2e8;
+        let error = run.gapped_x_drops(1.0, 11, 1).unwrap_err().to_string();
+        assert!(error.contains("an -xdrop_gap of"), "{error}");
+    }
+
+    // blast_kappa.c:2381-2383 (quoted at `RedoRun::new`): the redo's X-drop at Lambda over the
+    // scaling factor 32; 25 bits give 2,076 raw, below the scaled final X-drop 6,400 of scale 100.
+    #[test]
+    fn the_redo_x_drop_is_the_larger_of_the_bits_at_the_redo_lambda_and_the_final_one() {
+        let lambda = 0.267 / SCALING_FACTOR;
+        assert_eq!(
+            int4_of(RedoRun::x_dropoff_of(25.0, lambda, 6400)),
+            Some(6400)
+        );
+        assert_eq!(int4_of(RedoRun::x_dropoff_of(25.0, lambda, 64)), Some(2076));
+        assert_eq!(
+            int4_of(RedoRun::x_dropoff_of(-1.0, lambda, -200)),
+            Some(-83)
+        );
+        // 2.5e7 bits = 2,076,845,484 raw: inside; 1e8 bits: outside.
+        assert!(int4_of(RedoRun::x_dropoff_of(2.5e7, lambda, 64)).is_some());
+        assert_eq!(int4_of(RedoRun::x_dropoff_of(1e8, lambda, 64)), None);
+        assert_eq!(int4_of(RedoRun::x_dropoff_of(-1e300, lambda, 64)), Some(64));
+    }
+
     #[test]
     fn the_first_query_of_a_batch_gets_the_k_of_the_highest_mark() {
         let marks = [Some(2), None, Some(5), None, None, Some(1)];
@@ -595,6 +1034,67 @@ mod tests {
         });
         hsp.e_value = e_value;
         hsp
+    }
+
+    // tabular.cpp:973-1007 and showalign.cpp:2120-2135 (quoted at `formatter_identities`): the
+    // reports count the identities on the query as read and the profile's consensus, across the
+    // gaps of the edit script (after `swap_roles`: Del steps the profile, Ins the query).
+    #[test]
+    fn the_reports_identities_count_the_letters_as_read() {
+        use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
+        use crate::common::GapEditOp;
+        // Profile 1 starts at 6 of the concatenated consensus (profile 0 holds 5 letters + 1).
+        let enc = |text: &str| -> Vec<u8> {
+            text.bytes()
+                .map(crate::utils::matrix::aa_char_to_ncbistdaa)
+                .collect()
+        };
+        let mut consensus = enc("AAAAA");
+        consensus.push(0);
+        consensus.extend(enc("MKTAYWWIAKQ"));
+        let offsets = [0, 6, 18];
+        // The query as read (its searched letters could have had X over KTAY, a lower-case run;
+        // the traceback's count of 5 below is that of the masked letters).
+        let query = enc("GMKTAYIAKQ");
+        // Query 2..10 against profile 1..11: MKTAY / MKTAY, a gap of WW in the query, IAKQ / IAKQ.
+        let mut aligned = hsp(1, 1e-5, 2, 10);
+        aligned.s_start = 1;
+        aligned.s_end = 11;
+        aligned.length = 11;
+        aligned.num_ident = 5;
+        aligned.mismatch = 4;
+        aligned.gap_info = Some(vec![
+            GapEditOp::Sub(5),
+            GapEditOp::Del(2),
+            GapEditOp::Sub(4),
+        ]);
+        let mut hit_list = BlastpHitList::new(10);
+        hit_list.update(BlastpHspList {
+            oid: 1,
+            query_index: 0,
+            hsps: vec![aligned],
+            best_evalue: 1e-5,
+        });
+        formatter_identities(&mut hit_list, &query, &consensus, &offsets);
+        let counted = &hit_list.hsplist_array[0].hsps[0];
+        assert_eq!(counted.num_ident, 9);
+        assert_eq!(counted.mismatch, 0);
+        assert_eq!(counted.identity, 900.0 / 11.0);
+        // An Ins steps the query alone.
+        let mut inserted = hsp(1, 1e-5, 1, 6);
+        inserted.s_start = 1;
+        inserted.s_end = 5;
+        inserted.length = 6;
+        inserted.gap_info = Some(vec![GapEditOp::Ins(1), GapEditOp::Sub(5)]);
+        let mut hit_list = BlastpHitList::new(10);
+        hit_list.update(BlastpHspList {
+            oid: 1,
+            query_index: 0,
+            hsps: vec![inserted],
+            best_evalue: 1e-5,
+        });
+        formatter_identities(&mut hit_list, &query, &consensus, &offsets);
+        assert_eq!(hit_list.hsplist_array[0].hsps[0].num_ident, 5);
     }
 
     #[test]

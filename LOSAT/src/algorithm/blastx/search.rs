@@ -1844,28 +1844,16 @@ fn compute_subject_with<S: super::seed::BxScoring>(
         )?
     } else if !diagnostics {
         let x_sent = if x_lead {
-            super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
+            super::seed::x_ungap_sent::XSent::new(scoring, &batch.sequence_start, &x_buffer)
         } else {
             None
         };
-        if S::BLOSUM62 {
-            super::seed::x_seed_scan::x_word_finder_scan(
-                batch, params, options, encoded, lookup, diagonals, x_sent,
-            )?
-        } else {
-            super::seed::x_seed_scan::x_word_finder_matrix(
-                super::seed::MatrixBx::of(options.scoring),
-                batch,
-                params,
-                options,
-                encoded,
-                lookup,
-                diagonals,
-            )?
-        }
+        super::seed::x_seed_scan::x_word_finder_scan(
+            scoring, batch, params, options, encoded, lookup, diagonals, x_sent,
+        )?
     } else if !S::BLOSUM62 {
         super::seed::word_finder_bx_of(
-            super::seed::MatrixBx::of(options.scoring),
+            scoring,
             batch,
             params,
             options,
@@ -1924,7 +1912,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
             )?
         } else {
             super::preliminary::gapped_observed_of(
-                super::seed::MatrixBx::of(options.scoring),
+                scoring,
                 batch,
                 params,
                 options,

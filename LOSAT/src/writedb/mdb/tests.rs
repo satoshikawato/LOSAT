@@ -256,3 +256,67 @@ fn a_map_larger_than_size_t_is_refused() {
     let b = std::fs::read(&f.0).unwrap();
     assert_eq!(get_u64(&b, 32), 1 << 32);
 }
+
+// The lock file `NAME.pdb-lock` of makeblastdb 2.17.0 (probes of 2026-11-11, the official Linux
+// x64 release): created with the environment, 8192 bytes of a lock region no transaction has
+// used, removed by the destructor of the writer; left when `mdb_env_open` fails after it made
+// the lock file (the data file that cannot be created: the writer's constructor does not finish,
+// so its destructor does not run).
+#[cfg(unix)]
+#[test]
+fn the_lock_file_lives_as_long_as_the_environment() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = TempFile::new("lock");
+    let lock = f.0.parent().unwrap().join("db.pdb-lock");
+    let env = Env::create(&f.0, 700_000_000, &LINUX).unwrap();
+    let bytes = std::fs::read(&lock).unwrap();
+    assert_eq!(bytes.len(), 8192);
+    // magic, format; the kind of the read mutex (0x18) and of the write mutex (0x50).
+    let mut expected = vec![0u8; 8192];
+    expected[..8].copy_from_slice(&[0xDE, 0xC0, 0xEF, 0xBE, 0x01, 0x00, 0x01, 0x00]);
+    expected[0x18] = 0x90;
+    expected[0x50] = 0x90;
+    assert_eq!(bytes, expected);
+    // The mode of the data file (0664 without the umask's bits).
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&lock), mode(&f.0));
+    env.close().unwrap();
+    assert!(!lock.exists() && f.0.exists());
+    // An environment that is dropped (a build that ends with an error) takes the file with it.
+    let env = Env::create(&f.0, 700_000_000, &LINUX).unwrap();
+    assert!(lock.exists());
+    drop(env);
+    assert!(!lock.exists());
+}
+
+#[cfg(unix)]
+fn os_code(e: &LmdbError) -> Option<i32> {
+    match e {
+        LmdbError::Io { source, .. } => source.raw_os_error(),
+        _ => None,
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_file_stays_when_the_data_file_cannot_be_created() {
+    let f = TempFile::new("lockstays");
+    let lock = f.0.parent().unwrap().join("db.pdb-lock");
+    // A directory with a directory that cannot be read at the data file's name: `open` says
+    // `EISDIR` after the lock file exists.
+    std::fs::create_dir_all(f.0.join("inner")).unwrap();
+    let Err(e) = Env::create(&f.0, 700_000_000, &LINUX) else {
+        panic!("a directory at the data file's name");
+    };
+    assert_eq!(os_code(&e), Some(21), "{e}");
+    assert_eq!(std::fs::metadata(&lock).unwrap().len(), 8192);
+    // A directory at the lock file's name stops the open before the data file is made.
+    std::fs::remove_dir_all(&f.0).unwrap();
+    std::fs::remove_file(&lock).unwrap();
+    std::fs::create_dir(&lock).unwrap();
+    let Err(e) = Env::create(&f.0, 700_000_000, &LINUX) else {
+        panic!("a directory at the lock file's name");
+    };
+    assert_eq!(os_code(&e), Some(21), "{e}");
+    assert!(!f.0.exists());
+}

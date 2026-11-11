@@ -838,7 +838,12 @@ impl SeqDb {
     /// for in the current directory first.
     #[cfg(test)]
     pub(crate) fn open_one_name(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
-        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
+        let tree = alias::resolve_one_name(
+            name,
+            seqtype,
+            alias::LocalCopy::CurrentDir,
+            &SearchPath::current_dir()?,
+        )?;
         Self::open_tree(tree, name, seqtype, false)
     }
 
@@ -858,13 +863,15 @@ impl SeqDb {
     /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which `volume_title` gives
     /// for a volume path), the volume paths and the paths of the alias files
     /// (`FindVolumePaths(paths, alias, true)`). No volume file is read, so the cost does not grow
-    /// with the number of sequences.
+    /// with the number of sequences. `search` is the search path that the message of a database
+    /// which is not there names; only `name` itself is looked for.
     pub(crate) fn locate_one_name_metadata(
         name: &str,
         seqtype: SeqType,
+        search: &SearchPath,
         volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<LocatedDatabase, SeqDbError> {
-        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
+        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir, search)?;
         let mut title = Vec::new();
         alias::walk_title(&tree.root, volume_title, &mut title);
         let mut alias_files = std::collections::BTreeSet::new();

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
 use crate::algorithm::rps_search::engine::RpsSearch;
+use crate::blastinput::report_counts::FormattingArgs;
 use crate::blastinput::value_parsers::*;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:70-131
@@ -50,8 +51,9 @@ use crate::blastinput::value_parsers::*;
 // blastp's driver (`BlastpApp::Rpsblast`) and the RPS engine (`algorithm::rps_search`).
 // Composition-based statistics (modes 1 to 3, the default 1) run the redo of `rps_search::redo`
 // with the database's frequency ratios, or without them where the database has none (NCBI then
-// searches with mode 0); the arguments that LOSAT does not run (item PS11c) are refused by the
-// parser (`cli.rs` `is_unported_rpsblast_arg`).
+// searches with mode 0); the arguments that LOSAT does not run yet (`-searchsp`, item PS11c-2;
+// `-use_sw_tback`, PS11c-3; `-html`, PS15a) are refused by the parser (`cli.rs`
+// `is_unported_rpsblast_arg`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {
@@ -106,21 +108,135 @@ pub struct RpsblastArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2683-2721
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgLineLength, "line_length",
+    //     		                "Line length for formatting alignments\n"
+    //     						"Not applicable for outfmt > 4\n"
+    //     		   			    "Default = `"+ NStr::NumericToString(align_format::kDfltLineLength) + "'",
+    //     		                CArgDescriptions::eInteger);
+    //     arg_desc.SetConstraint(kArgLineLength,
+    //                            new CArgAllowValuesGreaterThanOrEqual(1));
+    //     ...
+    //         arg_desc.AddOptionalKey(kArgSortHits, "sort_hits",
+    //                            "Sorting option for hits:\n"
+    //                            "alignment view options:\n"
+    //                            "  0 = Sort by evalue,\n"
+    //                            "  1 = Sort by bit score,\n"
+    //                            "  2 = Sort by total score,\n"
+    //                            "  3 = Sort by percent identity,\n"
+    //                            "  4 = Sort by query coverage\n"
+    //                            "Not applicable for outfmt > 4\n",
+    //                            CArgDescriptions::eInteger);
+    //         arg_desc.SetConstraint(kArgSortHits,
+    //                            new CArgAllowValuesBetween(CAlignFormatUtil::eEvalue,
+    //                                                       CAlignFormatUtil::eQueryCoverage,
+    //                                                       true));
+    //         arg_desc.AddOptionalKey(kArgSortHSPs, "sort_hsps",
+    //                            "Sorting option for hps:\n"
+    //                            "  0 = Sort by hsp evalue,\n"
+    //                            "  1 = Sort by hsp score,\n"
+    //                            "  2 = Sort by hsp query start,\n"
+    //                            "  3 = Sort by hsp percent identity,\n"
+    //                            "  4 = Sort by hsp subject start\n"
+    //                            "Not applicable for outfmt != 0\n",
+    //                            CArgDescriptions::eInteger);
+    //         arg_desc.SetConstraint(kArgSortHSPs,
+    //                            new CArgAllowValuesBetween(CAlignFormatUtil::eHspEvalue,
+    //                                                       CAlignFormatUtil::eSubjectStart,
+    //                                                       true));
+    // ```
+    /// `-line_length`: the width of the outfmt 0 alignment rows. `-sorthits` and `-sorthsps` are
+    /// read with NCBI's warnings and sort nothing: NCBI's rpsblast does not hand them to its
+    /// formatter (`app/rpsblast_app.cpp:187`, `SetLineLength` only).
+    #[arg(long = "line_length", value_name = "line_length", value_parser = rpsblast_line_length, help = "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]")]
+    pub line_length: Option<usize>,
+    #[arg(long = "sorthits", value_name = "sort_hits", value_parser = rpsblast_sort_option, help = "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4")]
+    pub sorthits: Option<u8>,
+    #[arg(long = "sorthsps", value_name = "sort_hsps", value_parser = rpsblast_sort_option, help = "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0")]
+    pub sorthsps: Option<u8>,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
     #[arg(long = "qcov_hsp_perc", value_parser = rpsblast_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229
+    // ```c++
+    //         // ungapped X-drop
+    //         // Default values: blastn=20, megablast=10, others=7
+    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
+    //                             "X-dropoff value (in bits) for ungapped extensions",
+    //                             CArgDescriptions::eDouble);
+    //         ...
+    //             arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value",
+    //                  "X-dropoff value (in bits) for preliminary gapped extensions",
+    //                  CArgDescriptions::eDouble);
+    //         ...
+    //             arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value",
+    //                          "X-dropoff value (in bits) for final gapped alignment",
+    //                          CArgDescriptions::eDouble);
+    // ```
+    /// `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`: the RPS engine's X-drops in bits
+    /// (`RpsSearch`); NCBI's checks of their values are made with the options' others.
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for ungapped extensions")]
+    pub xdrop_ungap: Option<f64>,
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for preliminary gapped extensions")]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for final gapped alignment")]
+    pub xdrop_gap_final: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
+    // ```c++
+    //     if (!m_SuppressSumStats) {
+    //         arg_desc.AddOptionalKey(kArgSumStats, "bool_value",
+    //                      	 	"Use sum statistics",
+    //                      	 	CArgDescriptions::eBoolean);
+    //     }
+    // ```
+    /// `-sum_stats`: `false` is rpsblast's default; `true` is refused (`into_blastp_args`).
+    #[arg(long = "sum_stats", value_name = "bool_value", value_parser = ncbi_boolean, help = "Use sum statistics")]
+    pub sum_stats: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-342
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgSegFiltering, "SEG_options",
+    //                         "Filter query sequence with SEG "
+    //                         "(Format: '" + kDfltArgApplyFiltering + "', " +
+    //                         "'window locut hicut', or '" + kDfltArgNoFiltering +
+    //                         "' to disable)",
+    //                         CArgDescriptions::eString, m_FilterByDefault
+    //                         ? kDfltArgSegFiltering : kDfltArgNoFiltering);
+    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
+    //                         "Apply filtering locations as soft masks",
+    //                         CArgDescriptions::eBoolean,
+    //                         kDfltArgLookupTableMaskingOnlyProt);
+    // ```
+    /// `-seg`, `-soft_masking` and `-lcase_masking` are blastp's query encoding: a hard mask
+    /// turns the letters into X for the whole search, the reports show the masks in lower case
+    /// and count identities on the letters as read; soft masking keeps the letters (it only
+    /// leaves words out of a query lookup table, which an RPS search does not build), so it
+    /// changes the outfmt 0 display alone.
     #[arg(
         long,
-        help = "Filter query sequence with SEG: no (LOSAT runs no) [default: no]"
+        value_name = "SEG_options",
+        help = "Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to disable) [default: no]"
     )]
     pub seg: Option<String>,
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
+    // ```c++
+    //     // lowercase masking
+    //     arg_desc.AddFlag(kArgUseLCaseMasking,
+    //          "Use lower case filtering in query and subject sequence(s)?", true);
+    // ```
+    #[arg(
+        long = "lcase_masking",
+        default_value_t = false,
+        help = "Use lower case filtering in query and subject sequence(s)?"
+    )]
+    pub lcase_masking: bool,
     #[arg(
         long = "query_loc",
         value_name = "RANGE",
@@ -172,6 +288,23 @@ fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
         .ok_or_else(|| "Illegal value: expected an integer from 0 to 1".to_string())
 }
 
+/// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween(0, 4,
+/// true)`, quoted at `RpsblastArgs::line_length`).
+fn rpsblast_sort_option(value: &str) -> Result<u8, String> {
+    let option = ncbi_integer_at_least(value, 0)?;
+    u8::try_from(option)
+        .ok()
+        .filter(|option| *option <= 4)
+        .ok_or_else(|| "Illegal value: expected an integer from 0 to 4".to_string())
+}
+
+/// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual(1)`,
+/// quoted at `RpsblastArgs::line_length`).
+fn rpsblast_line_length(value: &str) -> Result<usize, String> {
+    let length = ncbi_integer_at_least(value, 1)?;
+    usize::try_from(length).map_err(|_| "Illegal value: expected an integer >= 1".to_string())
+}
+
 /// The composition-based statistics mode of a `-comp_based_stats` value as RPS-BLAST reads it:
 /// its first letter only, `D`/`d` and any unknown letter as 0, `T`/`t` as 1.
 ///
@@ -213,25 +346,32 @@ pub(crate) fn rps_composition_mode(value: &str) -> u8 {
 }
 
 impl RpsblastArgs {
-    /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusals of the options of
-    /// the later items (output formats, query filtering).
+    /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusals of the output formats
+    /// of a later item and of `-sum_stats true`.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         Self::check_outfmt(&self.outfmt)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:68-73
-        // ```c++
-        // CBlastRPSOptionsHandle::SetQueryOptionDefaults()
-        // {
-        //     SetSegFiltering(false);
-        //     m_Opts->SetStrandOption(objects::eNa_strand_unknown);
-        // }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
+        // ```c
+        //     if (hit_params->link_hsp_params) {
+        //         status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+        //                   subject->length, gap_align->sbp, hit_params->link_hsp_params,
+        //                   score_options->gapped_calculation);
         // ```
-        // The query of the reversed search is the scanned sequence: its masks (SEG, soft
-        // masking) are not ported.
-        if let Some(seg) = self.seg.as_deref().filter(|seg| *seg != "no") {
-            bail!("-seg {seg} (query filtering) is not supported by LOSAT's RPSBLAST");
-        }
-        if self.soft_masking == Some(true) {
-            bail!("-soft_masking true is not supported by LOSAT's RPSBLAST");
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-561
+        // ```c
+        //       query_context = hp_start->next->hsp->context;
+        //       length_adjustment = query_info->contexts[query_context].length_adjustment;
+        //       query_length = query_info->contexts[query_context].query_length;
+        // ```
+        // With sum statistics NCBI's RPS search links the HSPs of a profile list with the user
+        // query's one-context `query_info` while the HSPs carry the profile's context (0 to the
+        // number of profiles), so `BLAST_LinkHsps` reads past its arrays (valgrind: invalid
+        // reads; a segmentation fault on some queries; e-values of 0.0 otherwise): undefined
+        // behaviour, refused. `-sum_stats false` is rpsblast's default.
+        if self.sum_stats == Some(true) {
+            bail!(
+                "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
+            );
         }
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         Ok(BlastpArgs {
@@ -281,9 +421,21 @@ impl RpsblastArgs {
             // The requested mode; `rps_hooks::check_freq_ratio_file` sets it to 0 where the
             // database has no frequency ratios.
             comp_based_stats: requested_cbs.to_string(),
-            seg: None,
-            soft_masking: None,
-            lcase_masking: false,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:68-73
+            // ```c++
+            // CBlastRPSOptionsHandle::SetQueryOptionDefaults()
+            // {
+            //     SetSegFiltering(false);
+            //     m_Opts->SetStrandOption(objects::eNa_strand_unknown);
+            // }
+            // ```
+            // The query masks are blastp's (`blastp_query_frames`, the SEG of the filtering
+            // handler and the lower-case letters of the query reader), applied before the score
+            // block (`blast_setup.c:601-624`), so the scan, the extensions, the CBS 0 rescale
+            // and the CBS > 0 redo read the masked letters as NCBI's do.
+            seg: self.seg,
+            soft_masking: self.soft_masking,
+            lcase_masking: self.lcase_masking,
             use_sw_tback: false,
             query_loc: self.query_loc,
             subject_loc: None,
@@ -293,11 +445,19 @@ impl RpsblastArgs {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
+            formatting: FormattingArgs {
+                line_length: self.line_length,
+                sort_hits: self.sorthits,
+                sort_hsps: self.sorthsps,
+            },
             rps: Some(RpsSearch {
                 max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
                 query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
                 requested_cbs,
                 auto_threads: self.num_threads == 0,
+                x_drop_ungapped_bits: self.xdrop_ungap,
+                x_drop_gapped_bits: self.xdrop_gap,
+                x_drop_final_bits: self.xdrop_gap_final,
             }),
         })
     }
@@ -401,8 +561,7 @@ mod tests {
         for extra in [
             &["-outfmt", "5"][..],
             &["-outfmt", "1"],
-            &["-seg", "yes"],
-            &["-soft_masking", "true"],
+            &["-sum_stats", "true"],
         ] {
             let error = parse(extra).unwrap().into_blastp_args().unwrap_err();
             assert!(
@@ -412,13 +571,7 @@ mod tests {
                 "{extra:?}: {error}"
             );
         }
-        for name in [
-            "line_length",
-            "searchsp",
-            "sum_stats",
-            "use_sw_tback",
-            "html",
-        ] {
+        for name in ["searchsp", "use_sw_tback", "html"] {
             let error = parse(&[&format!("-{name}"), "1"]).unwrap_err();
             assert!(
                 error.contains(&format!("-{name} is not supported by LOSAT's RPSBLAST")),
@@ -427,5 +580,152 @@ mod tests {
         }
         assert!(parse(&["-subject", "s.faa"]).is_err());
         assert!(parse(&["-mt_mode", "2"]).is_err());
+    }
+
+    // blast_args.cpp:209-244, 332-342, 1939-1942, 2683-2721 (quoted at the fields): the masks, the
+    // X-drops, the formatting options and `-sum_stats false` reach blastp's arguments.
+    #[test]
+    fn the_options_of_ps11c_1_reach_blastps_arguments() {
+        let args = parse(&[
+            "-seg",
+            "10 1.8 2.1",
+            "-soft_masking",
+            "true",
+            "-lcase_masking",
+            "-xdrop_ungap",
+            "3",
+            "-xdrop_gap",
+            "-1",
+            "-xdrop_gap_final",
+            "0",
+            "-line_length",
+            "1",
+            "-sorthits",
+            "4",
+            "-sorthsps",
+            "0",
+            "-sum_stats",
+            "F",
+        ])
+        .unwrap()
+        .into_blastp_args()
+        .unwrap();
+        assert_eq!(args.seg.as_deref(), Some("10 1.8 2.1"));
+        assert_eq!(args.soft_masking, Some(true));
+        assert!(args.lcase_masking);
+        assert_eq!(
+            args.formatting,
+            FormattingArgs {
+                line_length: Some(1),
+                sort_hits: Some(4),
+                sort_hsps: Some(0),
+            }
+        );
+        let rps = args.rps.as_ref().unwrap();
+        assert_eq!(
+            (
+                rps.x_drop_ungapped_bits,
+                rps.x_drop_gapped_bits,
+                rps.x_drop_final_bits
+            ),
+            (Some(3.0), Some(-1.0), Some(0.0))
+        );
+        let resolved = args.resolve().unwrap();
+        assert_eq!(resolved.line_length, 1);
+        assert!(resolved.lcase_masking && resolved.soft_masking);
+        // Nothing given: NCBI's defaults.
+        let args = parse(&[]).unwrap().into_blastp_args().unwrap();
+        assert_eq!(args.formatting, FormattingArgs::default());
+        assert_eq!(args.resolve().unwrap().line_length, 60);
+        let rps = args.rps.unwrap();
+        assert_eq!(
+            (
+                rps.x_drop_ungapped_bits,
+                rps.x_drop_gapped_bits,
+                rps.x_drop_final_bits
+            ),
+            (None, None, None)
+        );
+    }
+
+    // blast_args.cpp:2683-2721: `-line_length` is 1 or more, `-sorthits` and `-sorthsps` 0 to 4
+    // (LOSAT's parser text and rc 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 1); the X-drops are
+    // NCBI's doubles (`nan` and `inf` are its conversion errors).
+    #[test]
+    fn the_formatting_and_x_drop_values_are_ncbis() {
+        for extra in [
+            &["-line_length", "0"][..],
+            &["-line_length", "-3"],
+            &["-sorthits", "5"],
+            &["-sorthsps", "-1"],
+            &["-sorthsps", "x"],
+            &["-xdrop_gap", "nan"],
+            &["-xdrop_ungap", "inf"],
+            &["-sum_stats", "maybe"],
+        ] {
+            assert!(parse(extra).is_err(), "{extra:?}");
+        }
+        assert_eq!(
+            parse(&["-line_length", "2147483647"]).unwrap().line_length,
+            Some(2_147_483_647)
+        );
+        assert_eq!(
+            parse(&["-xdrop_gap", "1e300"]).unwrap().xdrop_gap,
+            Some(1e300)
+        );
+    }
+
+    // blast_options.c:608-618 (quoted at `validate_protein_options`): an ungapped X-drop of 0 or
+    // below is NCBI's options error, made when the options are validated (after the SEG
+    // option's own error, which its handler raises).
+    #[test]
+    fn an_ungapped_x_drop_of_zero_or_below_is_ncbis_options_error() {
+        for value in ["0", "-1", "-0.0"] {
+            let error = parse(&["-xdrop_ungap", value])
+                .unwrap()
+                .into_blastp_args()
+                .unwrap()
+                .resolve()
+                .unwrap_err();
+            assert_eq!(
+                format!("{error:#}"),
+                "BLAST query/options error: x_dropoff must be greater than zero\nPlease refer to the BLAST+ user manual.\n",
+                "{value}"
+            );
+        }
+        let error = parse(&["-xdrop_ungap", "0", "-seg", "maybe"])
+            .unwrap()
+            .into_blastp_args()
+            .unwrap()
+            .resolve()
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("Invalid number of arguments to filtering option"),
+            "{error:#}"
+        );
+        // The hit saving options are checked after the X-drop.
+        let error = parse(&[
+            "-xdrop_ungap",
+            "0",
+            "-num_descriptions",
+            "0",
+            "-num_alignments",
+            "0",
+        ])
+        .unwrap()
+        .into_blastp_args()
+        .unwrap()
+        .resolve()
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("x_dropoff must be greater than zero"),
+            "{error:#}"
+        );
+        assert!(parse(&["-xdrop_ungap", "1e-300"])
+            .unwrap()
+            .into_blastp_args()
+            .unwrap()
+            .resolve()
+            .is_ok());
     }
 }

@@ -252,6 +252,25 @@ impl<'a> RedoRun<'a> {
         }
     }
 
+    /// The redo's X-drop from the search's final X-drop in bits `bits` (`options->
+    /// gap_x_dropoff_final`) in place of the protein default that `new` reads: RPS-BLAST's
+    /// `-xdrop_gap_final`. `x_drop_final` is the search's final X-drop (raw score), as `new` takes
+    /// it; the caller has checked that the conversion is defined (`x_dropoff_of`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2381-2383 (quoted at
+    /// `new`)
+    pub(crate) fn with_final_x_drop_bits(mut self, bits: f64, x_drop_final: i32) -> Self {
+        self.x_dropoff = Self::x_dropoff_of(bits, self.karlin.lambda, x_drop_final) as i32;
+        self
+    }
+
+    /// `MAX(gap_x_dropoff_final * NCBIMATH_LN2 / min_lambda, extendParams->gap_x_dropoff_final)`
+    /// before NCBI's `(Int4)` conversion (blast_kappa.c:2381-2383, quoted at `new`): `new`'s
+    /// value with the final X-drop `bits` and the redo's Lambda `lambda`.
+    pub(crate) fn x_dropoff_of(bits: f64, lambda: f64, x_drop_final: i32) -> f64 {
+        (bits * std::f64::consts::LN_2 / lambda).max(x_drop_final as f64)
+    }
+
     /// Checks every matrix the composition adjustment builds: an alignment uses each row once,
     /// so the sum of the rows' best scores bounds its score, and above `INT4_MAX` NCBI's 32-bit
     /// scores overflow (undefined behavior in C).

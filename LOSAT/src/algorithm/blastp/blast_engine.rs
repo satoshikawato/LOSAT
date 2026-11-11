@@ -13357,8 +13357,13 @@ fn run_resolved_in_pool(
                 //       m_NumSummary(num_summary), ...
                 // ```
                 let mut writer = format.sink.open()?;
+                // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:187
+                // ```c++
+                //         formatter.SetLineLength(fmt_args->GetLineLength());
+                // ```
+                // (`args.line_length`: rpsblast's `-line_length`, else 60.)
                 let pairwise_config = PairwiseConfig {
-                    line_length: 60,
+                    line_length: args.line_length,
                     show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
@@ -14012,6 +14017,7 @@ mod tests {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
+            formatting: Default::default(),
             rps: None,
         }
     }

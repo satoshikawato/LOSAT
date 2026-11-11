@@ -42,6 +42,7 @@ use super::scan::{RpsBuckets, RpsTable};
 use super::traceback::{filter_results, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
 use super::{RpsRows, RPS_K_MULT};
+use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
 use crate::seqdb::rps::RpsVolumeFiles;
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 
@@ -57,6 +58,11 @@ pub struct RpsSearch {
     pub(crate) requested_cbs: u8,
     /// `-num_threads 0`: one thread per volume of the database (NCBI's "auto").
     pub(crate) auto_threads: bool,
+    /// `-xdrop_ungap`, `-xdrop_gap` and `-xdrop_gap_final` in bits as given; `None`: NCBI's RPS
+    /// defaults (7, 15 and 25 bits, which `rps_hooks::rps_search` reads).
+    pub(crate) x_drop_ungapped_bits: Option<f64>,
+    pub(crate) x_drop_gapped_bits: Option<f64>,
+    pub(crate) x_drop_final_bits: Option<f64>,
 }
 
 /// One user query as the search reads it.
@@ -96,12 +102,12 @@ pub(crate) struct RpsRun<'a> {
     pub(crate) hitlist_size: usize,
     pub(crate) prelim_hitlist_size: usize,
     pub(crate) window: i32,
-    /// `gap_x_dropoff` and `gap_x_dropoff_final` before the scale (from `kbp_gap_std`).
-    pub(crate) x_drop_gapped: i32,
-    pub(crate) x_drop_final: i32,
-    /// blastp's ungapped X-drop and gap trigger in bits (`word_options->x_dropoff`,
-    /// `kOptions->gap_trigger`).
+    /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
+    /// `gap_x_dropoff_final`: `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or NCBI's RPS
+    /// defaults) and the gap trigger in bits (`kOptions->gap_trigger`).
     pub(crate) x_drop_ungapped_bits: f64,
+    pub(crate) x_drop_gapped_bits: f64,
+    pub(crate) x_drop_final_bits: f64,
     pub(crate) gap_trigger_bits: f64,
     pub(crate) options: &'a RpsSearch,
 }
@@ -112,6 +118,24 @@ fn scale_overflow(scale: f64) -> anyhow::Error {
     anyhow::anyhow!(
         "a profile database of the scale {scale} (its scaled gap costs, X-drops or score cutoffs leave 32-bit integers) is not supported by LOSAT's RPSBLAST"
     )
+}
+
+/// The refusal of an X-drop in bits whose raw score (the bits over Lambda, converted to `Int4`,
+/// times the database's scale where NCBI multiplies) leaves NCBI's `Int4`: NCBI's conversion of
+/// the double, or its product, is undefined there (DECISIONS 17 N1/N2, line PS).
+fn x_drop_overflow(option: &str, bits: f64, scale: f64) -> anyhow::Error {
+    anyhow::anyhow!(
+        "an {option} of {bits:?} bits, whose raw X-drop at the profile database's scale {scale} leaves 32-bit integers (NCBI BLAST+'s conversion is undefined there), is not supported by LOSAT's RPSBLAST"
+    )
+}
+
+/// NCBI's `(Int4)` conversion of a double where it is defined: the value truncated toward zero,
+/// `None` where that leaves `Int4` (or the value is not a number), which is undefined behaviour in
+/// C (C11 6.3.1.4).
+pub(crate) fn int4_of(value: f64) -> Option<i32> {
+    let truncated = value.trunc();
+    (truncated >= f64::from(i32::MIN) && truncated <= f64::from(i32::MAX))
+        .then_some(truncated as i32)
 }
 
 /// The per-query cutoffs of the preliminary stage at the database's scale.
@@ -222,14 +246,17 @@ fn spouge_etos(evalue: f64, kbp: &KarlinParams, gbp: &BlastGumbelBlk, m: i32, n:
 }
 
 impl RpsRun<'_> {
-    /// The query's cutoffs, `None` where a scaled one leaves `i32`.
-    fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Option<RpsCutoffs> {
+    /// The query's cutoffs; the refusal where the ungapped X-drop (`-xdrop_ungap`) or a scaled
+    /// cutoff leaves `i32`.
+    fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Result<RpsCutoffs> {
         let int_scale = scale as i32;
-        let x_dropoff = scale
-            * (self.x_drop_ungapped_bits * std::f64::consts::LN_2 / query.kbp_std.lambda).ceil();
-        if !x_dropoff.is_finite() || x_dropoff > f64::from(i32::MAX) {
-            return None;
-        }
+        // (`x_dropoff` is above 0, `validate_protein_options`; the product is the double's.)
+        let x_dropoff = int4_of(
+            scale
+                * (self.x_drop_ungapped_bits * std::f64::consts::LN_2 / query.kbp_std.lambda)
+                    .ceil(),
+        )
+        .ok_or_else(|| x_drop_overflow("-xdrop_ungap", self.x_drop_ungapped_bits, scale))?;
         let hit_cutoff = spouge_etos(
             self.prelim_evalue,
             &self.gapped,
@@ -237,14 +264,81 @@ impl RpsRun<'_> {
             (query.aa_seq.len() - 2) as i32,
             self.cutoff_subject_length,
         )
-        .checked_mul(int_scale)?;
+        .checked_mul(int_scale)
+        .ok_or_else(|| scale_overflow(scale))?;
         let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
             / query.kbp_std.lambda) as i32;
-        Some(RpsCutoffs {
-            x_dropoff: x_dropoff as i32,
-            word_cutoff: gap_trigger.checked_mul(int_scale)?.min(hit_cutoff),
+        Ok(RpsCutoffs {
+            x_dropoff,
+            word_cutoff: gap_trigger
+                .checked_mul(int_scale)
+                .ok_or_else(|| scale_overflow(scale))?
+                .min(hit_cutoff),
             hit_cutoff,
         })
+    }
+
+    /// The gapped X-drops of the preliminary stage and of the final traceback at the database's
+    /// scale (`ext_params->gap_x_dropoff`, `gap_x_dropoff_final`); the refusal where one of
+    /// them, or the X-drop of the composition-based redo when it runs
+    /// (`gapping_params->x_dropoff`), leaves `i32` (`-xdrop_gap`, `-xdrop_gap_final`). A gapped
+    /// X-drop of 0 or below is NCBI's too: the alignment kernels raise it to the gap costs
+    /// (`pssm_search::gapalign`, NCBI's `ALIGN_EX`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-469
+    /// ```c
+    ///    if (sbp->kbp_gap) {
+    ///       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
+    ///       params->gap_x_dropoff = (Int4)
+    ///           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
+    ///       /* Note that this conversion from bits to raw score is done prematurely for
+    ///          RPS and PSSM searches, as the Lambda used here would change after
+    ///          the PSSM is rescaled */
+    ///       params->gap_x_dropoff_final = (Int4)
+    ///           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
+    ///    }
+    ///
+    ///    if (sbp->scale_factor > 1.0) {
+    ///        ASSERT(Blast_ProgramIsRpsBlast(program_number));
+    ///        params->gap_x_dropoff *= (Int4)sbp->scale_factor;
+    ///        params->gap_x_dropoff_final *= (Int4)sbp->scale_factor;
+    ///    }
+    /// ```
+    /// (`min_lambda` is the Lambda of `kbp_gap_std`, BLOSUM62 11/1's, for every query; the
+    /// products are `Int4` multiplications.) The redo's X-drop is `RedoRun::x_dropoff_of` of
+    /// Lambda over the scaling factor (`s_RescaleSearch`) and the scaled final X-drop
+    /// (blast_kappa.c:2375-2383, quoted at `RedoRun::new`).
+    fn gapped_x_drops(&self, scale: f64) -> Result<(i32, i32)> {
+        let int_scale = scale as i32;
+        let lambda = self.gapped.lambda;
+        let scaled = |raw: i32| {
+            if scale > 1.0 {
+                raw.checked_mul(int_scale)
+            } else {
+                Some(raw)
+            }
+        };
+        let gapped_overflow = || x_drop_overflow("-xdrop_gap", self.x_drop_gapped_bits, scale);
+        let final_overflow = || x_drop_overflow("-xdrop_gap_final", self.x_drop_final_bits, scale);
+        let raw_gapped = int4_of(self.x_drop_gapped_bits * std::f64::consts::LN_2 / lambda)
+            .ok_or_else(gapped_overflow)?;
+        let raw_final = int4_of(
+            (self.x_drop_final_bits * std::f64::consts::LN_2 / lambda).max(f64::from(raw_gapped)),
+        )
+        .ok_or_else(final_overflow)?;
+        let x_drop_gapped = scaled(raw_gapped).ok_or_else(gapped_overflow)?;
+        let x_drop_final = scaled(raw_final).ok_or_else(final_overflow)?;
+        // The redo converts its X-drop at its own Lambda (`RedoRun::with_final_x_drop_bits`);
+        // it is checked here, before any search.
+        if self.sbp.is_some() && self.cbs > 0 {
+            int4_of(RedoRun::x_dropoff_of(
+                self.x_drop_final_bits,
+                lambda / SCALING_FACTOR,
+                x_drop_final,
+            ))
+            .ok_or_else(final_overflow)?;
+        }
+        Ok((x_drop_gapped, x_drop_final))
     }
 
     /// Every query's traced results on the volume `files`, whose consensus letters are
@@ -270,30 +364,14 @@ impl RpsRun<'_> {
                 .expect("checked when the volume was opened"),
             pv: files.pv(),
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:466-469
-        // ```c
-        //    if (sbp->scale_factor > 1.0) {
-        //        ASSERT(Blast_ProgramIsRpsBlast(program_number));
-        //        params->gap_x_dropoff *= (Int4)sbp->scale_factor;
-        //        params->gap_x_dropoff_final *= (Int4)sbp->scale_factor;
-        //    }
-        // ```
-        let (x_drop_gapped, x_drop_final) = if scale > 1.0 {
-            (
-                self.x_drop_gapped.checked_mul(int_scale),
-                self.x_drop_final.checked_mul(int_scale),
-            )
-        } else {
-            (Some(self.x_drop_gapped), Some(self.x_drop_final))
-        };
+        // The X-drops at the scale (`gapped_x_drops`, NCBI's `BlastExtensionParametersNew`).
+        let (x_drop_gapped, x_drop_final) = self.gapped_x_drops(scale)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:558-562
         // ```c
         //    params->gap_open = score_options->gap_open * (Int4)scale_factor;
         //    params->gap_extend = score_options->gap_extend * (Int4)scale_factor;
         // ```
-        let (Some(x_drop_gapped), Some(x_drop_final), Some(gap_open), Some(gap_extend)) = (
-            x_drop_gapped,
-            x_drop_final,
+        let (Some(gap_open), Some(gap_extend)) = (
             files.aux.gap_open.checked_mul(int_scale),
             files.aux.gap_extend.checked_mul(int_scale),
         ) else {
@@ -307,7 +385,6 @@ impl RpsRun<'_> {
             .map(|query| {
                 if query.valid {
                     self.cutoffs(query, scale)
-                        .ok_or_else(|| scale_overflow(scale))
                 } else {
                     Ok(RpsCutoffs {
                         x_dropoff: 0,
@@ -351,6 +428,7 @@ impl RpsRun<'_> {
                 sbp,
                 gap_open: files.aux.gap_open,
                 gap_extend: files.aux.gap_extend,
+                x_drop_final_bits: self.x_drop_final_bits,
             }),
         };
         let prelim_karlin = KarlinParams {

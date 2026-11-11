@@ -8454,9 +8454,46 @@ fn megablast_index(
         if let Some(file) = database.megablast_index_file(index_name) {
             return Ok(MegablastIndex::Found(file));
         }
-        let root = crate::utils::winmask::NCBI_BUILD_ROOT;
+        use crate::ncbi_exception::{NcbiException, ThrowSite};
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:794-797
+        // ```c++
+        //         if( !has_index ) {
+        //             NCBI_THROW( CDbIndex_Exception, eBadOption,
+        //                         "no database volume has an index" );
+        //         }
+        // ```
+        const NO_VOLUME_INDEX: ThrowSite = ThrowSite {
+            file: "src/algo/blast/api/blast_dbindex.cpp",
+            line: 795,
+            kind: "CDbIndex_Exception::bad index creation option",
+            function: Some("BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New"),
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1023-1027
+        // ```c++
+        //     if( index_names_.empty() ) {
+        //         string msg("no index file specified or index '");
+        //         msg += indexnames + "*' not found.";
+        //         NCBI_THROW(CDbIndex_Exception, eBadOption, msg);
+        //     }
+        // ```
+        const NO_INDEX_FILE: ThrowSite = ThrowSite {
+            file: "src/algo/blast/api/blast_dbindex.cpp",
+            line: 1026,
+            kind: "CDbIndex_Exception::bad index creation option",
+            function: Some("BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old"),
+        };
+        let new_style = NcbiException::new(NO_VOLUME_INDEX, "no database volume has an index");
+        let old_style = NcbiException::new(
+            NO_INDEX_FILE,
+            format!("no index file specified or index '{index_name}*' not found."),
+        );
+        // `DbIndexInit`'s `result` (blast_dbindex.cpp:1145-1168): the new-style loader's
+        // `e.what()`, a line feed, the old-style loader's `e.what()`; `ERR_POST_EX` adds
+        // " Database index will not be used." (setup_factory.cpp:455).
         format!(
-        "Warning: (1.1) [blastn] NCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 795: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New() - no database volume has an index\n\nNCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 1026: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old() - no index file specified or index '{index_name}*' not found.\n Database index will not be used.\n"
+            "Warning: (1.1) [blastn] {}\n{} Database index will not be used.\n",
+            new_style.what(),
+            old_style.what()
         )
     };
     // One diagnostic: the archive saves it as one message.

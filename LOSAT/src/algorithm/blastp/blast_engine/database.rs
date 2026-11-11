@@ -1293,9 +1293,10 @@ impl ListedTitles<'_> {
     /// from the Seq-aligns of `hit_lists` before the formatter's cut to `-max_target_seqs`: NCBI
     /// reads the letters of each by its Seq-align id, as the formats that read the subject do
     /// (`ParsedSubject::fetched`), also for those beyond the cut that no report shows; where
-    /// that read fails it drops the letters with a warning; following subjects whose Seq-align ids
-    /// match are refused (`shared::refuse_pssm_joined_hits`). Only the subjects with a Seq-align
-    /// below `inclusion_ethresh` are read (`psi_round::included`). `prefetch`: whether each query's
+    /// that read fails it drops the letters with a warning. Following subjects whose Seq-align ids
+    /// `Match` share a row of the PSSM's multiple alignment, each with the letters read by its own
+    /// id (`psiblast::pssm::input_msa`). Only the subjects with a Seq-align below
+    /// `inclusion_ethresh` are read (`psi_round::included`). `prefetch`: whether each query's
     /// batch prefetches (the round's), which reads them all by their own ids before the PSSM;
     /// one whose prefetch is off reads them one by one (`ParsedSubject::fetched`'s
     /// `one_by_one`).
@@ -1340,22 +1341,6 @@ impl ListedTitles<'_> {
                     )
                 })?;
             }
-        }
-        // The PSSM's multiple alignment joins following subjects whose Seq-align ids match. The
-        // reads above come first: a subject whose letters NCBI reads from another sequence is
-        // refused for that, also where it joins its neighbour.
-        for (query, lists) in queries() {
-            shared::refuse_pssm_joined_hits(
-                query,
-                lists.iter().map(|hsp_list| {
-                    let rank = hsp_list.oid as usize;
-                    let subject = self
-                        .parsed_subject(rank)
-                        .map(|subject| (self.listed.ordinals[rank], subject));
-                    (subject, included(hsp_list))
-                }),
-                self.program,
-            )?;
         }
         Ok(())
     }

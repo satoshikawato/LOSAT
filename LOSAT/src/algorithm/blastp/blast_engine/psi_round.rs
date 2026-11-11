@@ -34,7 +34,8 @@ use crate::algorithm::psiblast::pssm::{
     QueryPssm,
 };
 use crate::algorithm::psiblast::rounds::{
-    InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome, SetKey,
+    HandleIndex, InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome,
+    SetKey,
 };
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::QueryContext;
@@ -462,7 +463,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 /// alignments, its inclusion set, and where NCBI makes one the next round's PSSM (an error of
 /// the engine is kept for after the round's report). Returns, when the previous round's set is
 /// not empty, whether each subject of the round (by subject index, a database's by rank) is in
-/// it, for the two-part description table (`psiblast_round::ReportRound`).
+/// it, for the two-part description table (`psiblast_round::ReportRound`, `FoundBefore`).
+/// Refuses keys of the inclusion sets that NCBI's handles can take for one (`HandleIndex`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-566
 // ```c++
 // double GetLowestEvalue(const objects::CDense_seg::TScores& scores,
@@ -498,12 +500,13 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // ```c
 // #define BLAST_EXPECT_VALUE 10.0 /**< by default, alignments whose expect
 // ```
-// The Seq-id of a subject is its key (`rounds::SetKey`): a `-subject` record's index
-// (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists name it
-// by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple alignment
-// keeps its rows by subject (`pssm::input_msa`): two Seq-aligns of one id there are copies of one
-// record (line DBID admits shared ids for such copies only), which NCBI's PSSM puts in one row
-// (review 2 of line DBID weakbatch, H1; line DBID's next item).
+// The Seq-id of a subject is its key (`rounds::SetKey`, `SubjectKeys`): a `-subject` record's
+// index (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists
+// name it by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple
+// alignment counts its rows by the same keys and joins following Seq-aligns whose ids `Match`
+// (`pssm::input_msa`). Keys that differ but that NCBI's handles can take for one are refused
+// where NCBI compares them (`rounds::HandleIndex`): in the inclusion sets before the round's
+// report, a shown subject against the previous set before the outfmt 0 table (`FoundBefore`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509 (quoted at
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
 /// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,
@@ -526,22 +529,9 @@ pub(super) fn round_outcome(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
-    listed_ordinals: Option<&[u32]>,
-    parsed: &[Option<Arc<ParsedSubject>>],
-) -> Option<Vec<bool>> {
-    let key = |s_idx: u32| -> SetKey {
-        match listed_ordinals {
-            None => SetKey::Index(s_idx),
-            Some(ordinals) => match parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                Some(subject) => {
-                    let mut id = Vec::new();
-                    crate::seqid::label::fasta(subject.alignment_id(), &mut id);
-                    SetKey::Id(id)
-                }
-                None => SetKey::Index(ordinals[s_idx as usize]),
-            },
-        }
-    };
+    keys: SubjectKeys<'_>,
+) -> Result<Option<FoundBefore>> {
+    let key = |s_idx: u32| keys.key(s_idx);
     let hsps: Vec<&crate::algorithm::blastp::hsp::BlastpHsp> = hit_lists
         .first()
         .and_then(Option::as_ref)
@@ -554,24 +544,43 @@ pub(super) fn round_outcome(
         })
         .unwrap_or_default();
     let has_alignments = !hsps.is_empty();
+    let previous = io.state.previously_found();
     let set: InclusionSet = hsps
         .iter()
         .filter(|hsp| included(hsp.e_value, args.inclusion_ethresh))
         .map(|hsp| key(hsp.s_idx))
         .collect();
-    let previous = io.state.previously_found();
-    let found_before = (!previous.is_empty()).then(|| {
+    // The handles that NCBI compares: the set's keys with the previous set's (convergence,
+    // `CPsiBlastIterationState::HasConverged`), the PSSM's rows among themselves (below, where the
+    // round makes the next PSSM), and the shown subjects with the previous set in the two-part
+    // table (`FoundBefore::unsure`, refused where it shows them). The previous set is one that
+    // passed the rows' check: a round follows only one that made the next PSSM.
+    let earlier = HandleIndex::new(previous)?;
+    if let Some((other, key)) = set
+        .iter()
+        .find_map(|key| earlier.unsure(key).map(|other| (other, key)))
+    {
+        return Err(SetKey::refuse_pair(other, key));
+    }
+    let found_before = if previous.is_empty() {
+        None
+    } else {
         let subjects = hsps
             .iter()
             .map(|hsp| hsp.s_idx as usize + 1)
             .max()
             .unwrap_or(0);
         let mut found = vec![false; subjects];
+        let mut unsure = std::collections::BTreeMap::new();
         for hsp in &hsps {
-            found[hsp.s_idx as usize] = previous.contains(&key(hsp.s_idx));
+            let subject = key(hsp.s_idx);
+            found[hsp.s_idx as usize] = previous.contains(&subject);
+            if let Some(other) = earlier.unsure(&subject) {
+                unsure.insert(hsp.s_idx, (other.clone(), subject));
+            }
         }
-        found
-    });
+        Some(FoundBefore { found, unsure })
+    };
     // NCBI makes the next PSSM after `Advance` when another round follows or the last PSSM is
     // saved (`itr || GetSaveLastPssm()`), and after a round with alignments only.
     let makes_next = if has_alignments {
@@ -581,8 +590,21 @@ pub(super) fn round_outcome(
     } else {
         false
     };
-    let next =
-        makes_next.then(|| next_pssm(args, io, &hsps, ranges, shown_subjects, contexts, gapped));
+    if makes_next {
+        HandleIndex::new(&set)?;
+    }
+    let next = makes_next.then(|| {
+        next_pssm(
+            args,
+            io,
+            &hsps,
+            ranges,
+            shown_subjects,
+            contexts,
+            gapped,
+            keys,
+        )
+    });
     // The blocks of a PSSM round's search, which NCBI writes back into the PSSM it searched
     // (`in_pssm_files::InPssmRounds::written_back`).
     let searched = args.psi_search.as_deref().map(|psi| {
@@ -595,7 +617,60 @@ pub(super) fn round_outcome(
         next,
         searched,
     });
-    found_before
+    Ok(found_before)
+}
+
+/// What the two-part description table of a round after one with an inclusion set reads of the
+/// previous set (`round_outcome`).
+pub(super) struct FoundBefore {
+    /// Whether each subject (by subject index) is in the previous round's set.
+    pub(super) found: Vec<bool>,
+    /// The subjects whose keys a key of the previous set differs from but can be one handle with
+    /// (`HandleIndex::unsure`), with the two keys: refused where the table shows them
+    /// (`refuse_unsure_shown`).
+    pub(super) unsure: std::collections::BTreeMap<u32, (SetKey, SetKey)>,
+}
+
+impl FoundBefore {
+    /// LOSAT's refusal of a subject of `shown` (subject indices of the outfmt 0 report) that the
+    /// two-part table cannot place as NCBI does (`unsure`). `shown` is every reported subject, a
+    /// superset of the first `-num_descriptions` Seq-aligns that NCBI's `x_SplitSeqAlign` looks up
+    /// (blast_format.cpp:541-553); the checks of the shown titles refuse every such subject first
+    /// in the cases built so far (review 2 of line DBID pssmrows, L1), so this stays a backstop.
+    pub(super) fn refuse_unsure_shown(&self, shown: impl IntoIterator<Item = usize>) -> Result<()> {
+        for s_idx in shown {
+            if let Some((earlier, subject)) = u32::try_from(s_idx)
+                .ok()
+                .and_then(|s_idx| self.unsure.get(&s_idx))
+            {
+                return Err(SetKey::refuse_pair(earlier, subject));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The keys of the subjects of a search's hit lists (`rounds::SetKey`, by subject index; a
+/// database's subjects by rank): the inclusion sets of psiblast's rounds and the rows of its
+/// PSSMs (`round_outcome`, `next_pssm`, `psiblast_pssms`).
+#[derive(Clone, Copy)]
+pub(super) struct SubjectKeys<'a> {
+    /// The ordinal ids of a database's listed subjects (`None` for `-subject` records).
+    pub(super) listed_ordinals: Option<&'a [u32]>,
+    /// The parsed Seq-ids of a database's subjects by rank (empty without them).
+    pub(super) parsed: &'a [Option<Arc<ParsedSubject>>],
+}
+
+impl SubjectKeys<'_> {
+    pub(super) fn key(&self, s_idx: u32) -> SetKey {
+        match self.listed_ordinals {
+            None => SetKey::Index(s_idx),
+            Some(ordinals) => match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                Some(subject) => SetKey::Id(subject.alignment_id().clone()),
+                None => SetKey::Index(ordinals[s_idx as usize]),
+            },
+        }
+    }
 }
 
 /// `ComputePssmForNextIteration` of the round's Seq-aligns `hsps` (`psiblast_pssms`' PSSM of the
@@ -617,6 +692,7 @@ pub(super) fn round_outcome(
 //                                             m_AncillaryData, diags);
 // }
 // ```
+#[allow(clippy::too_many_arguments)]
 fn next_pssm(
     args: &ResolvedBlastpArgs,
     io: &PsiRoundIo,
@@ -625,6 +701,7 @@ fn next_pssm(
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
+    keys: SubjectKeys<'_>,
 ) -> Result<QueryPssm> {
     let subject = |s_idx: u32| -> Vec<u8> {
         match shown_subjects.letters(s_idx as usize) {
@@ -711,6 +788,38 @@ fn next_pssm(
         },
         &alignments,
         &subject,
+        &|s_idx| keys.key(s_idx),
         ancillary,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(text: &str) -> SetKey {
+        use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
+        let ids = crate::seqid::parse::parse_ids(
+            text.as_bytes(),
+            PARTIAL_OK | ANY_LOCAL | RAW_TEXT,
+            &mut |_| {},
+        )
+        .unwrap();
+        SetKey::Id(ids.into_iter().next().unwrap().unwrap())
+    }
+
+    // Review 1 of line DBID pssmrows, M1: only a shown subject that a previous key can be one
+    // handle with is refused (blast_format.cpp:541-553, quoted at `refuse_unsure_shown`).
+    #[test]
+    fn only_a_shown_unsure_subject_is_refused() {
+        let found = FoundBefore {
+            found: vec![true, false, false],
+            unsure: [(2, (id("gb|ABC12.1|"), id("emb|ABC12.1|")))]
+                .into_iter()
+                .collect(),
+        };
+        found.refuse_unsure_shown([0, 1]).unwrap();
+        let error = found.refuse_unsure_shown([0, 2]).unwrap_err().to_string();
+        assert!(error.contains("gb|ABC12.1| and emb|ABC12.1|"), "{error}");
+    }
 }

@@ -304,9 +304,8 @@ pub(super) struct SpeculativeBatch<'b, 's> {
     pub(super) prelim_hits: &'b [PrelimHit],
     pub(super) prelim_index: usize,
     pub(super) batch_size: usize,
-    /// The tree as the ordered loop has it now (read only), and the queries' contexts.
+    /// The tree as the ordered loop has it now (read only).
     pub(super) interval_tree: &'b BlastIntervalTree,
-    pub(super) query_contexts: &'b [QueryContext],
     /// The threads of the pool.
     pub(super) num_threads: usize,
     pub(super) parallel_pool: &'b SearchPool<'b>,
@@ -360,6 +359,7 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
         min_diag_separation,
         x_fenced,
         x_drop_final,
+        query_contexts,
         ..
     } = traceback_ctx;
     let SpeculativeBatch {
@@ -367,7 +367,6 @@ pub(super) fn speculative_batch(traceback_ctx: &TracebackCtx<'_>, batch: Specula
         prelim_index,
         batch_size: SPECULATIVE_TRACEBACK_BATCH_SIZE,
         interval_tree,
-        query_contexts,
         num_threads,
         parallel_pool,
         speculative_jobs,

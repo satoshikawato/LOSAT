@@ -65,15 +65,17 @@ pub(super) struct TraceSchedule<'a> {
 /// What the traceback loop of one list works on and fills: the interval tree, the scratch of the
 /// loop's traceback calls, the scratch lists of the look-ahead helpers and of the speculative
 /// batches (`None` for a query group task, which uses neither), the list the HSPs go to, and the
-/// lengths of their edit scripts and alignments (LOSAT_TIMING). The owner's come from the
-/// subject's scratch (`SubjectScratch`), a query group task's from its own state.
+/// lengths of their edit scripts and alignments (LOSAT_TIMING). The owner's tree, greedy scratch,
+/// scratch lists and `hits` come from the subject's scratch (`SubjectScratch`), its gap scratch
+/// and length lists from `process_subject`; a query group task's tree and scratch come from its
+/// state, its lists from the task.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512,600-601
 /// ```c
-///           BLAST_GappedAlignmentWithTraceback(program_number, query,
-///                 adjusted_subject, gap_align, score_params, q_start, s_start,
-///                 query_length, adjusted_s_length,
-///                 fence_hit);
+///            BLAST_GappedAlignmentWithTraceback(program_number, query,
+///                  adjusted_subject, gap_align, score_params, q_start, s_start,
+///                  query_length, adjusted_s_length,
+///                  fence_hit);
 /// ...
 ///               status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
 ///                                          eQueryAndSubject);
@@ -406,10 +408,10 @@ pub(super) fn trace_hsp_list(
                 // ```c
                 //    for (index=0; index < num_initial_hsps; index++) {
                 // ...
-                //           BLAST_GappedAlignmentWithTraceback(program_number, query,
-                //                 adjusted_subject, gap_align, score_params, q_start, s_start,
-                //                 query_length, adjusted_s_length,
-                //                 fence_hit);
+                //            BLAST_GappedAlignmentWithTraceback(program_number, query,
+                //                  adjusted_subject, gap_align, score_params, q_start, s_start,
+                //                  query_length, adjusted_s_length,
+                //                  fence_hit);
                 // ```
                 // Look-ahead: with helpers the batch (`traceback_hsp::speculative_batch`) is
                 // not used; the tracebacks come from `x_ahead.take`. Both ways only compute
@@ -425,7 +427,6 @@ pub(super) fn trace_hsp_list(
                             prelim_index,
                             batch_size: SPECULATIVE_TRACEBACK_BATCH_SIZE,
                             interval_tree,
-                            query_contexts,
                             num_threads,
                             parallel_pool,
                             speculative_jobs: &mut speculative_jobs,
@@ -592,10 +593,10 @@ pub(super) fn trace_hsp_list(
                 //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
                 //                                hit_options->min_diag_separation)) {
                 // ...
-                //           BLAST_GappedAlignmentWithTraceback(program_number, query,
-                //                 adjusted_subject, gap_align, score_params, q_start, s_start,
-                //                 query_length, adjusted_s_length,
-                //                 fence_hit);
+                //            BLAST_GappedAlignmentWithTraceback(program_number, query,
+                //                  adjusted_subject, gap_align, score_params, q_start, s_start,
+                //                  query_length, adjusted_s_length,
+                //                  fence_hit);
                 // ```
                 // Look-ahead. This is reached after the tree test said "not contained". The
                 // value of the traceback call comes from a helper, or
@@ -747,7 +748,8 @@ pub(super) struct TraceDrive<'q> {
 ///                                     stat_length);
 /// ```
 /// `Blast_TracebackFromHSPList` as one subject's traceback: the loop (`trace_hsp_list`), then the
-/// steps after it (`traceback_finish::traceback_post_purge`, `traceback_finish::traceback_final_list`).
+/// steps after it (`traceback_finish::traceback_post_purge`,
+/// `traceback_finish::traceback_final_list`).
 /// No NCBI counterpart: the query groups on the pool (LOSAT_X_QGROUPPAR), scheduling only; NCBI
 /// traces the hit lists of one subject in turn on one thread (blast_traceback.c:1632-1633).
 pub(super) fn traceback_subject_hits(

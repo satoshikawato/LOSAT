@@ -385,25 +385,23 @@ fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
         for outfmt in ["14", "15", "16"] {
             for threads in ["1", "4"] {
                 let what = |case: &str| format!("{program} {case} outfmt {outfmt} n{threads}");
-                // Query b's report is held back and never written: s2 is not shown.
-                let result = run(
-                    search(program, &held, &subject, &[("BATCH_SIZE", each)], threads),
-                    outfmt,
-                    &dir.0,
-                );
+                // Query b's report is held back and never written: s2 is not shown. (The
+                // e-value cuts query a's random hits on s2.)
+                let mut command =
+                    search(program, &held, &subject, &[("BATCH_SIZE", each)], threads);
+                command.args(["-evalue", "1e-10"]);
+                let result = run(command, outfmt, &dir.0);
                 not_refused(&what("held"), &result, outfmt, 1, READER_ERROR, 1);
                 // Query b's report is written when query a's results arrive.
-                let result = run(
-                    search(
-                        program,
-                        &written,
-                        &subject,
-                        &[("BATCH_SIZE", each)],
-                        threads,
-                    ),
-                    outfmt,
-                    &dir.0,
+                let mut command = search(
+                    program,
+                    &written,
+                    &subject,
+                    &[("BATCH_SIZE", each)],
+                    threads,
                 );
+                command.args(["-evalue", "1e-10"]);
+                let result = run(command, outfmt, &dir.0);
                 refused(&what("written"), &result);
             }
         }
@@ -445,7 +443,7 @@ fn the_title_before_a_last_batch_without_letters_is_not_refused() {
         }
         // A title in the batch that fails (`batch_title_lastempty`: records 5 to 7 without
         // letters, record 7 with `café`) is never written by any format: outfmt 5 writes records
-        // 1 to 4 and the error.
+        // 1 to 4 and the error, outfmt 16 records 1 to 3 (record 4's report is held back).
         for outfmt in ["5", "16"] {
             let result = run(
                 search(
@@ -459,7 +457,8 @@ fn the_title_before_a_last_batch_without_letters_is_not_refused() {
                 &dir.0,
             );
             let what = format!("{program} title in the failing batch, outfmt {outfmt}");
-            not_refused(&what, &result, outfmt, 3, NO_DATA, 4);
+            let written = if outfmt == "5" { 4 } else { 3 };
+            not_refused(&what, &result, outfmt, 3, NO_DATA, written);
         }
     }
 }

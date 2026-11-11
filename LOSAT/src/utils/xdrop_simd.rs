@@ -3259,6 +3259,20 @@ mod kernel {
                 cells,
             });
         }
+        walk::<NIB>(sc, a_off, b_off);
+        Some(XdropResult {
+            a_offset: a_off,
+            b_offset: b_off,
+            score: best,
+            fence_hit: false,
+            cells,
+        })
+    }
+
+    /// The traceback walk of `finish` (NCBI `ALIGN_EX`'s walk over `edit_script`), in a function of
+    /// its own: one call per traceback, so the vector kernels do not hold its state.
+    #[inline(never)]
+    unsafe fn walk<const NIB: bool>(sc: &mut XdropScratch, a_off: usize, b_off: usize) {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:689-726
         // ```c
         // while (a_index > 0 || b_index > 0) {
@@ -3356,13 +3370,6 @@ mod kernel {
                 push_op(&mut sc.ops, if NIB { op * SCRIPT_SUB } else { op });
             }
         }
-        Some(XdropResult {
-            a_offset: a_off,
-            b_offset: b_off,
-            score: best,
-            fence_hit: false,
-            cells,
-        })
     }
 
     // No NCBI counterpart: entry points compiled with CPU features enabled (AVX or SSE) around

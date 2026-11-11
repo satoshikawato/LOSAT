@@ -34,6 +34,8 @@ mod default_bundle;
 mod entry_names;
 #[path = "../library_api.rs"]
 mod library_api;
+#[path = "../makeblastdb_ncbi_exceptions.rs"]
+mod makeblastdb_ncbi_exceptions;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]

@@ -327,6 +327,7 @@ fn numbers_parse_as_ncbi_s() {
     assert_eq!(string_to_int8(b"-5"), Some(-5));
     assert_eq!(string_to_int8(b"9223372036854775808"), None);
     assert_eq!(string_to_int8(b"-9223372036854775808"), Some(i64::MIN));
+    assert_eq!(string_to_int8(b"12\x0034"), Some(12));
     assert_eq!(str_or_id(b"0123"), ObjectId::Str(b"0123".to_vec()));
     assert_eq!(str_or_id(b"123a"), ObjectId::Str(b"123a".to_vec()));
     assert_eq!(str_or_id(b"99"), ObjectId::Id(99));

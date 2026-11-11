@@ -252,10 +252,10 @@ impl<'a> RedoRun<'a> {
         }
     }
 
-    /// The redo's X-drop from the search's final X-drop in bits `bits` (`options->
-    /// gap_x_dropoff_final`) in place of the protein default that `new` reads: RPS-BLAST's
-    /// `-xdrop_gap_final`. `x_drop_final` is the search's final X-drop (raw score), as `new` takes
-    /// it; the caller has checked that the conversion is defined (`x_dropoff_of`).
+    /// The redo's X-drop from the search's final X-drop in bits `bits`
+    /// (`options->gap_x_dropoff_final`) in place of the protein default that `new` reads:
+    /// RPS-BLAST's `-xdrop_gap_final`. `x_drop_final` is the search's final X-drop (raw score), as
+    /// `new` takes it; the caller has checked that the conversion is defined (`x_dropoff_of`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2381-2383 (quoted at
     /// `new`)

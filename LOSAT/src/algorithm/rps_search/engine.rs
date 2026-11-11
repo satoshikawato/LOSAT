@@ -682,6 +682,8 @@ mod tests {
                 lambda: 0.267,
                 k: 0.041,
                 h: 0.14,
+                alpha: 1.9,
+                beta: -30.0,
             },
             gumbel,
             cutoff_subject_length: 0,

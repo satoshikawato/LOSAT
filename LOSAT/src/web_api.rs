@@ -479,6 +479,7 @@ fn parse_tblastx_args(
         archive: None,
         tabular_taxdb: None,
         first_query_ordinal: 0,
+        matrix_file: None,
     };
 
     let mut index = 0;

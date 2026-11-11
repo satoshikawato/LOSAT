@@ -153,7 +153,10 @@ BLAST+.
    search programs use their output-error code 6 for a failed write (exception 3). As in
    exception 5 (version 1.2), a closed pipe that LOSAT's completed writes never reach ends
    with exit code 0. Nothing is written to standard error after the failure (no progress
-   line). A successful run is identical to NCBI's. The function is `rpsbproc::run`
+   line). A failed write to standard error (its reader has closed: NCBI's rpsbproc ends by
+   SIGPIPE, exit status 141 from the shell, PS16a review oracle M1) ends LOSAT at once with exit
+   code 4 and no message; so does a failed write of rpsbproc's help or version, after the
+   message above. A successful run is identical to NCBI's. The function is `rpsbproc::run`
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
@@ -162,7 +165,8 @@ BLAST+.
 
 - **File names that are not UTF-8** (`-query`, `-subject`, `-out`): LOSAT rejects them
   with an explicit "not supported by LOSAT" error instead of printing them differently
-  (NCBI prints the raw bytes). BLASTN in S07+++b; the other programs in their sessions.
+  (NCBI prints the raw bytes). BLASTN in S07+++b; the other programs in their sessions;
+  `losat rpsbproc`'s `-i`, `-o` and `-d` before it writes anything (line PS, item PS16a).
 - **`.ncbirc`**: LOSAT rejects, with an explicit error, an NCBI configuration file that
   NCBI would read and that sets a key changing the program's output (for BLASTN, for
   example `[BLAST] LONG_SEQID`; the list comes from the NCBI source). A `.ncbirc` that

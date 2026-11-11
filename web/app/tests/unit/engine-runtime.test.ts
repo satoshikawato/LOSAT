@@ -349,13 +349,14 @@ describe('ReactorAbi', () => {
 
   /**
    * Instances that answer `inflate_begin` for a `.gz` name with the gzip response, as a list: each
-   * records the handles its `inflate_end` was called with, and the `trapAt`-th instance opened
-   * (counting from 0) traps in `inflate_chunk`.
+   * records the handles its `inflate_end` was called with, the `trapAt`-th instance opened
+   * (counting from 0) traps in `inflate_chunk` and the `beginTrapAt`-th in `inflate_begin`.
    */
-  function fakeInstances(trapAt?: number) {
+  function fakeInstances(trapAt?: number, beginTrapAt?: number) {
     const opened: Array<{ readonly abi: ReactorAbi; readonly ended: number[] }> = [];
     const open = async () => {
       const trap = opened.length === trapAt;
+      const beginTrap = opened.length === beginTrapAt;
       const ended: number[] = [];
       const memory = new WebAssembly.Memory({ initial: 2 });
       let next = 1024;
@@ -374,6 +375,7 @@ describe('ReactorAbi', () => {
         },
         losat_web2_dealloc: () => 0,
         losat_web2_inflate_begin: (ptr: number, len: number) => {
+          if (beginTrap) throw new WebAssembly.RuntimeError('unreachable');
           // The engine's name rule, for `.gz` only.
           if (!/\.gz$/i.test(new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len)))) return 0;
           put(new TextEncoder().encode('{"compression":"gzip","plain_name":"a.fa"}'), 2);
@@ -437,6 +439,19 @@ describe('ReactorAbi', () => {
     const file = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'c.fa.gz'), inflater);
     expect(await file.text()).toBe('>a\nACGT\n');
     expect(opened).toHaveLength(4);
+  });
+
+  it('refuses the file whose name-rule call traps the shared instance, and the next file reopens the shared instance', async () => {
+    // Instance 0, the first shared one, traps in `inflate_begin`; `reopening` replaces it at its next use.
+    const { opened, open } = fakeInstances(undefined, 0);
+    const inflater = new ReactorInflater(reopening(open), open);
+    await expect(inflater.open('a.fa.gz', () => undefined)).rejects.toThrow(EngineStoppedError);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.abi.stoppedBy).toBeDefined();
+    const file = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'b.fa.gz'), inflater);
+    expect(await file.text()).toBe('>a\nACGT\n');
+    // A new shared instance (1) read the name rule and ended it; the file ran on instance 2.
+    expect(opened.map((instance) => instance.ended)).toEqual([[], [1], [1]]);
   });
 
   it('reads the inflate response, gives stream 5 of a chunk to its sink only, and ends an inflation whose response cannot be read', () => {

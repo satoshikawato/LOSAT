@@ -1266,7 +1266,7 @@ struct ZstdFrames {
     ///     None => { self.state = Some(FrameDecoderState::new(source, self.max_window_size)?); ... }
     /// ```
     /// ), 103-119 (`FrameDecoderState::new`: `DecoderScratch::new(window_size)`, whose
-    /// `DecodeBuffer::new` reserves nothing, src/decoding/decode_buffer.rs:35-44), 121-130
+    /// `DecodeBuffer::new` reserves nothing, src/decoding/decode_buffer.rs:35-44), 121-134
     /// (`FrameDecoderState::reset`: `decoder_scratch.reset(window_size)`), decode_buffer.rs:46-49
     /// (`DecodeBuffer::reset`: `self.buffer.reserve(self.window_size)`), ringbuffer.rs:64-100
     /// (`reserve`, `reserve_amortized`: the doubling).

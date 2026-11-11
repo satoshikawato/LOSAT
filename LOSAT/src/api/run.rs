@@ -516,7 +516,7 @@ fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
         Commands::Blastx(a) => (a.query_loc.as_deref(), "BLASTX"),
         Commands::Psiblast(a) => (a.query_loc.as_deref(), "BLASTP"),
         Commands::Rpsblast(a) => (a.query_loc.as_deref(), "RPSBLAST"),
-        Commands::Makedb(_) => (None, ""),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => (None, ""),
     }
 }
 
@@ -549,7 +549,7 @@ fn num_threads(command: &Commands) -> usize {
         Commands::Blastx(a) => a.num_threads as usize,
         Commands::Psiblast(a) => a.num_threads,
         Commands::Rpsblast(a) => usize::try_from(a.num_threads.max(1)).unwrap_or(1),
-        Commands::Makedb(_) => 1,
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => 1,
     }
 }
 
@@ -569,7 +569,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         ],
         Commands::Psiblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Rpsblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
-        Commands::Makedb(_) => [None; 3],
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => [None; 3],
     }
 }
 
@@ -676,7 +676,7 @@ pub(super) fn run_local(
                 let args = psiblast_args(args, outputs)?;
                 run_local_database_blastp(args, query, settings("psiblast")?, outputs)
             }
-            Commands::Rpsblast(_) | Commands::Makedb(_) => {
+            Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
                 unreachable!("Program::parse admits the search programs only")
             }
         };
@@ -704,7 +704,7 @@ pub(super) fn run_local(
             let args = psiblast_args(args, outputs)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
-        Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     }
@@ -910,7 +910,7 @@ fn set_output_file(command: &mut Commands, path: &Path) {
         Commands::Tblastx(args) => args.out = out,
         Commands::Blastx(args) => args.out = out,
         Commands::Psiblast(args) => args.out = out,
-        Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     }

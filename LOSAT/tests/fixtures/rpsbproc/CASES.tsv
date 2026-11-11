@@ -1,0 +1,89 @@
+case	use	stdin	setup	arguments
+three.rep	compare	-	-	-i arch/three.asn -d data -m rep -t doms
+three.rep.f	compare	-	-	-i arch/three.asn -d data -m rep -t doms -f
+three.std	compare	-	-	-i arch/three.asn -d data -m std -t doms
+three.std.f	compare	-	-	-i arch/three.asn -d data -m std -t doms -f
+three.full	compare	-	-	-i arch/three.asn -d data -m full -t doms
+three.full.f	compare	-	-	-i arch/three.asn -d data -m full -t doms -f
+tiny3.rep	compare	-	-	-i arch/tiny3.asn -d data -m rep -t doms
+tiny3.rep.f	compare	-	-	-i arch/tiny3.asn -d data -m rep -t doms -f
+tiny3.std	compare	-	-	-i arch/tiny3.asn -d data -m std -t doms
+tiny3.std.f	compare	-	-	-i arch/tiny3.asn -d data -m std -t doms -f
+tiny3.full	compare	-	-	-i arch/tiny3.asn -d data -m full -t doms
+tiny3.full.f	compare	-	-	-i arch/tiny3.asn -d data -m full -t doms -f
+sd2.rep	compare	-	-	-i arch/sd2.asn -d data -m rep -t doms
+sd2.rep.f	compare	-	-	-i arch/sd2.asn -d data -m rep -t doms -f
+sd2.std	compare	-	-	-i arch/sd2.asn -d data -m std -t doms
+sd2.std.f	compare	-	-	-i arch/sd2.asn -d data -m std -t doms -f
+sd2.full	compare	-	-	-i arch/sd2.asn -d data -m full -t doms
+sd2.full.f	compare	-	-	-i arch/sd2.asn -d data -m full -t doms -f
+src2.rep	compare	-	-	-i arch/src2.asn -d data -m rep -t doms
+src2.rep.f	compare	-	-	-i arch/src2.asn -d data -m rep -t doms -f
+src2.std	compare	-	-	-i arch/src2.asn -d data -m std -t doms
+src2.std.f	compare	-	-	-i arch/src2.asn -d data -m std -t doms -f
+src2.full	compare	-	-	-i arch/src2.asn -d data -m full -t doms
+src2.full.f	compare	-	-	-i arch/src2.asn -d data -m full -t doms -f
+qgap.rep	compare	-	-	-i arch/qgap.asn -d data -m rep -t doms
+qgap.rep.f	compare	-	-	-i arch/qgap.asn -d data -m rep -t doms -f
+qgap.std	compare	-	-	-i arch/qgap.asn -d data -m std -t doms
+qgap.std.f	compare	-	-	-i arch/qgap.asn -d data -m std -t doms -f
+qgap.full	compare	-	-	-i arch/qgap.asn -d data -m full -t doms
+qgap.full.f	compare	-	-	-i arch/qgap.asn -d data -m full -t doms -f
+dctr_e10.rep	compare	-	-	-i arch/dctr_e10.asn -d data -m rep -t doms
+dctr_e10.rep.f	compare	-	-	-i arch/dctr_e10.asn -d data -m rep -t doms -f
+dctr_e10.std	compare	-	-	-i arch/dctr_e10.asn -d data -m std -t doms
+dctr_e10.std.f	compare	-	-	-i arch/dctr_e10.asn -d data -m std -t doms -f
+dctr_e10.full	compare	-	-	-i arch/dctr_e10.asn -d data -m full -t doms
+dctr_e10.full.f	compare	-	-	-i arch/dctr_e10.asn -d data -m full -t doms -f
+tie1.rep	compare	-	-	-i arch/tie1.asn -d data -m rep -t doms
+tie1.rep.f	compare	-	-	-i arch/tie1.asn -d data -m rep -t doms -f
+tie1.std	compare	-	-	-i arch/tie1.asn -d data -m std -t doms
+tie1.std.f	compare	-	-	-i arch/tie1.asn -d data -m std -t doms -f
+tie1.full	compare	-	-	-i arch/tie1.asn -d data -m full -t doms
+tie1.full.f	compare	-	-	-i arch/tie1.asn -d data -m full -t doms -f
+tie2.rep	compare	-	-	-i arch/tie2.asn -d data -m rep -t doms
+tie2.rep.f	compare	-	-	-i arch/tie2.asn -d data -m rep -t doms -f
+tie2.std	compare	-	-	-i arch/tie2.asn -d data -m std -t doms
+tie2.std.f	compare	-	-	-i arch/tie2.asn -d data -m std -t doms -f
+tie2.full	compare	-	-	-i arch/tie2.asn -d data -m full -t doms
+tie2.full.f	compare	-	-	-i arch/tie2.asn -d data -m full -t doms -f
+e10	compare	-	-	-i arch/one.asn -d data -t doms -e 10
+e_small	compare	-	-	-i arch/one.asn -d data -t doms -e 1e-5
+quiet	compare	-	-	-i arch/one.asn -d data -t doms -q
+stdin	compare	arch/one.asn	-	-d data -t doms
+ofile	compare	-	-	-i arch/one.asn -d data -t doms -o out.txt
+defdata	compare	-	-	-i arch/one.asn -t doms
+dslash	compare	-	-	-i arch/one.asn -d data/ -t doms
+nodata	compare	-	-	-i arch/one.asn -d nodir -t doms
+dmissing	compare	-	data-without:cdtrack.txt	-i arch/one.asn -d data_missing -t doms
+noinput	compare	-	-	-i nofile.asn -d data -t doms
+noinput_stdin	compare	arch/one.asn	-	-i nofile.asn -d data -t doms
+emptyin	compare	-	-	-d data -t doms
+garbage	compare	arch/garbage.txt	-	-d data -t doms
+badout	compare	-	-	-i arch/one.asn -d data -t doms -o nodir/x.out
+longopts	compare	-	-	--infile arch/one.asn --data-path data --data-mode std --target-data doms --show-families --evalue 0.5
+notitle	compare	-	-	-i arch/notitle.asn -d data -m full -t doms -f
+parsed	compare	-	-	-i arch/parsed.asn -d data -m full -t doms -f
+bin	compare	-	-	-i arch/bin.asn -d data -m full -t doms -f
+lcl	compare	-	-	-i arch/lcl.asn -d data -m full -t doms -f
+bad_comment	compare	-	-	-i arch/bad/comment.asn -d data -m full -t doms -f
+bad_crlf	compare	-	-	-i arch/bad/crlf.asn -d data -m full -t doms -f
+bad_dupmember	compare	-	-	-i arch/bad/dupmember.asn -d data -m full -t doms -f
+bad_emptyalign	compare	-	-	-i arch/bad/emptyalign.asn -d data -m full -t doms -f
+bad_emptyset	compare	-	-	-i arch/bad/emptyset.asn -d data -m full -t doms -f
+bad_leadblank	compare	-	-	-i arch/bad/leadblank.asn -d data -m full -t doms -f
+bad_noalgo	compare	-	-	-i arch/bad/noalgo.asn -d data -m full -t doms -f
+bad_noaligns	compare	-	-	-i arch/bad/noaligns.asn -d data -m full -t doms -f
+bad_noident	compare	-	-	-i arch/bad/noident.asn -d data -m full -t doms -f
+bad_noresults	compare	-	-	-i arch/bad/noresults.asn -d data -m full -t doms -f
+bad_only_matrix	compare	-	-	-i arch/bad/only_matrix.asn -d data -m full -t doms -f
+bad_second_bad	compare	-	-	-i arch/bad/second_bad.asn -d data -m full -t doms -f
+bad_trailcomma	compare	-	-	-i arch/bad/trailcomma.asn -d data -m full -t doms -f
+bad_trailgarb	compare	-	-	-i arch/bad/trailgarb.asn -d data -m full -t doms -f
+bad_trunc	compare	-	-	-i arch/bad/trunc.asn -d data -m full -t doms -f
+bad_twice_nonl	compare	-	-	-i arch/bad/twice_nonl.asn -d data -m full -t doms -f
+bad_unkmember	compare	-	-	-i arch/bad/unkmember.asn -d data -m full -t doms -f
+refuse_feats	refuse	-	-	-i arch/three.asn -d data -t feats
+refuse_both	refuse	-	-	-i arch/three.asn -d data -t both
+refuse_default_t	refuse	-	-	-i arch/three.asn -d data
+refuse_xml	refuse	-	-	-i arch/one.xml -d data -t doms

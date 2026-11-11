@@ -3728,7 +3728,7 @@ fn write_tblastx_epilog<W: Write>(
 
 /// A `double` written to a C++ stream with the default flags: `%g` with precision 6
 /// (`1e+06` for 1000000, `1.23457e+06` for 1234567).
-fn cpp_default_double(value: f64) -> String {
+pub(crate) fn cpp_default_double(value: f64) -> String {
     fn trim(text: &str) -> &str {
         if text.contains('.') {
             text.trim_end_matches('0').trim_end_matches('.')

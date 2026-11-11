@@ -197,7 +197,9 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.evalue, Some(0.001));
                 assert_eq!(a.max_target_seqs, Some(9));
             }
-            Commands::Makedb(_) => unreachable!("{program} is a search program"),
+            Commands::Makedb(_) | Commands::Rpsbproc(_) => {
+                unreachable!("{program} is a search program")
+            }
         }
     }
 }

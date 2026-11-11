@@ -113,6 +113,9 @@ pub(crate) mod seqid;
 pub(crate) mod writedb;
 // NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
 pub(crate) mod blastdbcmd;
+// NCBI's rpsbproc 0.5.1 (RpsbProc/src/rpsbproc_main.cpp of the 2025-05-13 package): the CDD
+// domain annotation of rpsblast's archives.
+pub(crate) mod rpsbproc;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_api;

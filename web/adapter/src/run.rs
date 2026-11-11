@@ -108,7 +108,10 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Blastn(a) => &mut a.outfmt,
         Commands::Tblastx(a) => &mut a.outfmt,
         Commands::Blastx(a) => &mut a.outfmt,
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
         }
     }
@@ -562,7 +565,10 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
             a.num_alignments,
         ],
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => [None; 3],
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => [None; 3],
     }
 }
 
@@ -576,7 +582,10 @@ fn num_threads(command: &Commands) -> usize {
         // A positive `i32` (the parser's `positive`).
         Commands::Blastx(a) => a.num_threads as usize,
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => 1,
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => 1,
     }
 }
 
@@ -782,7 +791,10 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), "BLASTX", query);
                 run_local_blastx(args, query, subject, &mut outputs)
             }
-            Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {
+            Commands::Psiblast(_)
+            | Commands::Rpsblast(_)
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")
             }
         };

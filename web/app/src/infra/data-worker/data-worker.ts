@@ -2,11 +2,12 @@
 // and the temporary storage of one working session, and it outlives Engine workers. It also
 // keeps the saved copies of Example sets (OPFS examples/, line WF-2).
 // Only this worker uses OPFS synchronous access handles. It holds its own instance of the
-// serial reactor, separate from the Engine worker's, for the index scan and for the
-// engine's describe/validate (src/infra/reactor/control.ts). This module is the worker's
-// composition root.
+// serial reactor, separate from the Engine worker's, for the index scan, the inflation of
+// compressed sources (src/infra/reactor/inflater.ts) and the engine's describe/validate
+// (src/infra/reactor/control.ts). This module is the worker's composition root.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import type { ExampleStore } from '../../ports/example';
+import type { FileInflater } from '../../ports/inflate';
 import type { InputChecker } from '../../ports/input-check';
 import type { RecordScanner } from '../../ports/scan';
 import { sha256Hex } from '../browser/platform';
@@ -18,6 +19,7 @@ import { FakeInputChecker, FakeScanner } from '../fake/fake-fasta';
 import type { ReactorAbi } from '../reactor/abi';
 import { ReactorInputChecker } from '../reactor/checker';
 import { reactorControl, type EngineControl } from '../reactor/control';
+import { ReactorInflater } from '../reactor/inflater';
 import { instantiateSerial, loadReactor } from '../reactor/instance';
 import { ReactorScanner, reopening } from '../reactor/scanner';
 import { DATA_GATEWAY_METHODS, DATA_WORKER_METHODS, EXAMPLE_STORE_METHODS, type DataWorkerApi } from './methods';
@@ -27,11 +29,14 @@ const token = crypto.randomUUID();
 const locks = 'locks' in navigator ? (navigator.locks as unknown as SessionLocks) : undefined;
 
 let scanner: RecordScanner;
+let inflater: FileInflater;
 let checker: InputChecker;
 let control: EngineControl;
 if (ENGINE_ASSETS === null) {
-  // A build without the engine (build/reactors.ts): the development build's fakes.
+  // A build without the engine (build/reactors.ts): the development build's fakes. Without the
+  // engine's decoders every file is read as it is, whatever its name.
   scanner = new FakeScanner();
+  inflater = { open: async () => undefined };
   checker = new FakeInputChecker();
   control = {
     describe: () => Promise.reject(new Error('this build has no engine')),
@@ -53,6 +58,7 @@ if (ENGINE_ASSETS === null) {
   };
   const reactor: () => Promise<ReactorAbi> = reopening(async () => (await instantiateSerial(await module())).abi);
   scanner = new ReactorScanner(reactor);
+  inflater = new ReactorInflater(reactor);
   checker = new ReactorInputChecker(reactor);
   control = reactorControl(reactor);
 }
@@ -65,6 +71,7 @@ const service = started.then(
       ...(session.fallbackReason === undefined ? {} : { fallbackReason: session.fallbackReason }),
       cleanup: session.cleanup,
       scanner,
+      inflater,
       checker,
       digest: sha256Hex,
       newToken: () => crypto.randomUUID(),

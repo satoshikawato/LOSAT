@@ -1,15 +1,19 @@
 // Pure parts of the engine runtime: the thread and renewal policy, the check of an engine
 // module before it is compiled, and the message of an instance that stopped. With
 // LOSAT_WEB_REACTORS, the module check also runs on the built reactors, and the
-// RecordScanner contract runs against the serial reactor in Node.
+// RecordScanner contract and the inflation of compressed sources run against the serial
+// reactor in Node.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { constants as zlib, gzipSync, zstdCompressSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { findReactors } from '../../build/reactors';
 import { ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../src/infra/reactor/artifact';
 import { instantiateSerial, loadReactor } from '../../src/infra/reactor/instance';
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
+import { ReactorInflater } from '../../src/infra/reactor/inflater';
+import { inflateFile } from '../../src/infra/data/inflate';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
 import type { FastaParserKind } from '../../src/domain/dataset';
@@ -280,6 +284,7 @@ describe('ReactorAbi', () => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     let next = 1024;
     const released: number[] = [];
+    const ended: number[] = [];
     const bytes = new TextEncoder().encode(response);
     const ref: { abi?: ReactorAbi } = {};
     const send = () => {
@@ -309,9 +314,24 @@ describe('ReactorAbi', () => {
         released.push(handle);
         return 0;
       },
+      losat_web2_inflate_begin: () => {
+        send();
+        return 5;
+      },
+      // Inflated bytes on stream 5, and a stream that inflation never sends.
+      losat_web2_inflate_chunk: () => {
+        new Uint8Array(memory.buffer, 60_000, 3).set([1, 2, 3]);
+        ref.abi!.emit(5, 60_000, 3);
+        ref.abi!.emit(6, 60_000, 1);
+        return 0;
+      },
+      losat_web2_inflate_end: (handle: number) => {
+        ended.push(handle);
+        return 0;
+      },
     } as unknown as AbiExports;
     ref.abi = new ReactorAbi(exports);
-    return { abi: ref.abi, released };
+    return { abi: ref.abi, released, ended };
   }
 
   it('joins a response that the engine sends in several chunks (1 MiB each in the adapter)', () => {
@@ -324,6 +344,18 @@ describe('ReactorAbi', () => {
     const { abi, released } = fakeReactor('{"handle": 7, "records": [', 4);
     expect(() => abi.register('blastn', 1, new Uint8Array([62, 115]))).toThrow(SyntaxError);
     expect(released).toEqual([7]);
+  });
+
+  it('reads the inflate response, gives stream 5 of a chunk to its sink only, and ends an inflation whose response cannot be read', () => {
+    const { abi, ended } = fakeReactor('{"compression":"zstd","plain_name":"a.fa"}', 7);
+    expect(abi.inflateBegin('a.fa.zst')).toEqual({ handle: 5, compression: 'zstd', plainName: 'a.fa' });
+    const received: number[][] = [];
+    abi.inflateChunk(5, new Uint8Array([9]), (bytes) => received.push([...bytes]));
+    expect(received).toEqual([[1, 2, 3]]);
+    expect(ended).toEqual([]);
+    const broken = fakeReactor('{"compression":', 4);
+    expect(() => broken.abi.inflateBegin('a.fa.zst')).toThrow(SyntaxError);
+    expect(broken.ended).toEqual([5]);
   });
 });
 
@@ -489,5 +521,75 @@ describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () 
     expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-word_size', '-1'])).toBe(false);
     expect(abi.stoppedBy).toBeUndefined();
     expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa'])).toBe(true);
+  });
+});
+
+describe.skipIf(reactors === undefined)("the serial reactor inflates sources with the command line's decoders", () => {
+  const module = reactors === undefined ? undefined : new WebAssembly.Module(reactors.serial.bytes as BufferSource);
+  const inflater = new ReactorInflater(reopening(async () => (await instantiateSerial(module!)).abi));
+  const decoder = new TextDecoder();
+  const A = '>a one\nACGT\n';
+  const B = '>b two\nGGCC\nTT\n';
+  // pzstd output: a skippable frame, then one frame of `>a\nACGT…` and `>b\nTTTT…`.
+  const PZSTD =
+    'UCpNGAQAAAA/AAAAKLUv/QRYlQEAhAI+YQpBQ0dUQUFBQ0NDR0dHVFRUCj5iClRUVFRHR0dHQ0NDQ0FBQUEKAgCYibw/ZwTZFtvJ';
+  const AB_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
+  const sentence = (name: string, suffix: string, format: string, fault: string) =>
+    `'${name}' is named ${suffix} but is not ${format} data (${fault}); LOSAT reads a file named ${suffix} through ${format}`;
+  const inflated = async (bytes: Uint8Array | string, name: string) => {
+    const file = await inflateFile(new File([bytes as BlobPart], name), inflater);
+    return { name: file.name, text: decoder.decode(await file.arrayBuffer()) };
+  };
+  const failure = async (bytes: Uint8Array | string, name: string) => {
+    try {
+      await inflateFile(new File([bytes as BlobPart], name), inflater);
+    } catch (error) {
+      return (error as Error).message;
+    }
+    throw new Error(`${name} was inflated`);
+  };
+
+  it('keeps a plain name as it is, and inflates every member and frame under the plain name', async () => {
+    expect(await inflated(A, 'a.fa')).toEqual({ name: 'a.fa', text: A });
+    expect(await inflated(Buffer.concat([gzipSync(A), gzipSync(B)]), 'two.fa.GZ')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(Buffer.concat([zstdCompressSync(A), zstdCompressSync(B)]), 'two.fa.zst')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(Buffer.from(PZSTD, 'base64'), 'p.fa.zst')).toEqual({ name: 'p.fa', text: AB_TEXT });
+    expect(await inflated(gzipSync(''), '.gz')).toEqual({ name: 'input', text: '' });
+  });
+
+  it('inflates a file of several 8 MiB slices into several 8 MiB parts', async () => {
+    // 17 MiB of bytes that do not compress (xorshift32): each compressed file holds three slices.
+    let state = 2463534242;
+    const bytes = new Uint8Array(17 * 1024 * 1024 + 5).map(() => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return state & 0xff;
+    });
+    for (const [suffix, pack] of [
+      ['gz', gzipSync],
+      ['zst', zstdCompressSync],
+    ] as const) {
+      const packed = pack(bytes);
+      expect(packed.length).toBeGreaterThan(16 * 1024 * 1024);
+      const file = await inflateFile(new File([packed as BlobPart], `big.fa.${suffix}`), inflater);
+      expect(file.name).toBe('big.fa');
+      expect(Buffer.compare(new Uint8Array(await file.arrayBuffer()), bytes)).toBe(0);
+    }
+  }, 60_000);
+
+  it("refuses a damaged, cut, mislabelled or empty file with the command line's sentence, and goes on", async () => {
+    const text = Array.from({ length: 300 }, (_, i) => `>r${i}\n${'ACGTTGCAAGTC'.repeat(30)}\n`).join('');
+    const checked = Buffer.from(zstdCompressSync(text, { params: { [zlib.ZSTD_c_checksumFlag]: 1 } }));
+    checked[checked.length - 1]! ^= 1;
+    expect(await failure(checked, 'bad.fa.zst')).toBe(sentence('bad.fa.zst', '.zst', 'zstd', "a zstd frame's checksum does not match its data"));
+    const gz = gzipSync(text);
+    expect(await failure(gz.subarray(0, gz.length >> 1), 'cut.fa.gz')).toBe(sentence('cut.fa.gz', '.gz', 'gzip', 'incomplete deflate stream'));
+    expect(await failure(A, 'text.fa.gz')).toBe(sentence('text.fa.gz', '.gz', 'gzip', 'invalid gzip header'));
+    expect(await failure('', 'e.fa.gz')).toBe(sentence('e.fa.gz', '.gz', 'gzip', 'the file is empty'));
+    expect(await failure('', 'e.fa.zst')).toBe(sentence('e.fa.zst', '.zst', 'zstd', 'the file is empty'));
+    // The web app's own refusal of bzip2 (line GZ decision 11).
+    expect(await failure(A, 'a.fa.bz2')).toBe("'a.fa.bz2' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)");
+    expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
   });
 });

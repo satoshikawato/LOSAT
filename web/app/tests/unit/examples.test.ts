@@ -14,6 +14,7 @@ import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore } from '../../src/ports/example';
+import { NodeInflater } from './support/node-inflater';
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');
 const UNIPROT = exampleById('uniprot-ecoli-k12');
@@ -33,6 +34,7 @@ function setup(
   const data = new DataService({
     store: new MemoryBlockStore(),
     scanner: new FakeScanner(),
+    inflater: new NodeInflater(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,

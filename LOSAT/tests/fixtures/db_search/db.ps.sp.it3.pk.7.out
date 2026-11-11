@@ -1,0 +1,27 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: YP_009220615.1 putative protein kinase [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220615.1	BDT63551.1	42.410	639	338	7	99	722	189	812	4.13e-147	503
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: YP_009220615.1 putative protein kinase [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+YP_009220615.1	BDT63551.1	42.368	642	340	7	96	722	186	812	0.0	1035
+YP_009220615.1	BDT63564.1	19.767	86	69	0	56	141	396	481	2.27e-04	28.9
+# PSIBLAST 2.17.0+
+# Iteration: 3
+# Query: YP_009220615.1 putative protein kinase [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+YP_009220615.1	BDT63551.1	41.064	677	365	8	61	722	155	812	0.0	1038
+YP_009220615.1	BDT63564.1	19.767	86	69	0	56	141	396	481	9.04e-34	126
+YP_009220615.1	BDT63564.1	15.385	91	73	1	59	145	289	379	5.61e-13	57.4
+
+Search has CONVERGED!
+# BLAST processed 3 queries

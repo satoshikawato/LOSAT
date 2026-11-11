@@ -996,6 +996,11 @@ fn check_resolutions(
     resolutions: Vec<Result<ResolvedOptions>>,
     diagnostics: &mut dyn Write,
 ) -> Result<Vec<ResolvedOptions>> {
+    // The filtering handler comes before the formatting handler (blastx_args.cpp:44-71): NCBI's
+    // error of `-seg` before the formatting handler's (`resolve_with_format` defers it too).
+    if let Err(app::SegOptionError::Ncbi(message)) = args.seg_spec() {
+        return Err(options_error(SemanticOptionsError::from(message).into()));
+    }
     for choice in choices {
         app::formatting_handler_check(choice, Program::Blastx)?;
     }

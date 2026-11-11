@@ -72,16 +72,19 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = Some(args.soft_masking);
-    inputs.seg = Some(if !args.seg.enabled {
-        Filter::No
-    } else if args.seg.yes {
-        Filter::Yes
-    } else {
-        Filter::Seg {
-            window: args.seg.window,
-            locut: args.seg.locut,
-            hicut: args.seg.hicut,
-        }
+    // An archive is written only for a `-seg` that `resolve` read.
+    inputs.seg = args.seg_spec().ok().map(|seg| match seg {
+        crate::blastinput::value_parsers::SegSpec::No => Filter::No,
+        crate::blastinput::value_parsers::SegSpec::Yes => Filter::Yes,
+        crate::blastinput::value_parsers::SegSpec::WindowLocutHicut {
+            window,
+            locut,
+            hicut,
+        } => Filter::Seg {
+            window,
+            locut,
+            hicut,
+        },
     });
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;

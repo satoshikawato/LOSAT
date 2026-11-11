@@ -1221,43 +1221,127 @@ fn mt_mode_does_not_change_the_output() {
     fs::remove_file(nucleotide).unwrap();
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3354-3358
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3397
 // ```c++
-//     arg_desc.AddDefaultKey(
-//             kArgUseIndex, "boolean",
-//             "Use MegaBLAST database index",
-//             CArgDescriptions::eBoolean, NStr::BoolToString(kDfltArgUseIndex));
+//     if( args.Exist( kArgUseIndex ) &&
+//         !(args.Exist( kArgSubject ) && args[kArgSubject])) {
+// ...
+//         if( args.Exist( kTask ) && args[kTask] &&
+//                 args[kTask].AsString() != "megablast" ) {
+//             use_index = false;
+//         }
 // ```
+// NCBI BLAST+ 2.17.0 (the official Linux x64 build, 2026-11-11, line LIB P-S3): `-use_index
+// true` changes nothing with `-subject` or another task; a megablast search of a database
+// without an index writes this warning and the output of the search without `-use_index`;
+// with an index (makembindex) NCBI searches with it, which LOSAT refuses.
 #[test]
-fn use_index_false_is_accepted_and_true_is_refused() {
-    let nucleotide = temp_path("use_index", "fna");
-    fs::write(&nucleotide, format!(">n\n{MT_NUCLEOTIDE}\n")).unwrap();
-    let nucleotide = nucleotide.to_str().unwrap();
-    let base = [
-        "blastn", "-query", nucleotide, "-subject", nucleotide, "-outfmt", "6",
+fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
+    let dir = temp_path("use_index", "dir");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("q.fna"), format!(">n\n{MT_NUCLEOTIDE}\n")).unwrap();
+    let run = |words: &[&str]| {
+        clean_losat_command()
+            .current_dir(&dir)
+            .args(words)
+            .output()
+            .expect("run LOSAT")
+    };
+    let made = run(&[
+        "makeblastdb",
+        "-dbtype",
+        "nucl",
+        "-in",
+        "q.fna",
+        "-out",
+        "db/plain",
+    ]);
+    assert!(made.status.success(), "{made:?}");
+    let subject = [
+        "blastn", "-query", "q.fna", "-subject", "q.fna", "-outfmt", "6",
     ];
-    let plain = run_losat(&base);
+    let plain = run(&subject);
     assert!(plain.status.success() && !plain.stdout.is_empty());
-    for value in ["false", "FALSE", "f", "no", "0"] {
-        let mut words = base.to_vec();
-        words.extend(["-use_index", value]);
-        let output = run_losat(&words);
-        assert!(output.status.success(), "-use_index {value}: {:?}", output);
+    for value in [
+        "false", "FALSE", "f", "no", "0", "true", "t", "1", "yes", "on",
+    ] {
+        let output = run(&[&subject[..], &["-use_index", value]].concat());
+        assert!(output.status.success(), "-use_index {value}: {output:?}");
         assert_eq!(output.stdout, plain.stdout, "-use_index {value}");
+        assert!(output.stderr.is_empty(), "-use_index {value}");
     }
-    for value in ["true", "t", "1", "maybe"] {
-        let mut words = base.to_vec();
-        words.extend(["-use_index", value]);
-        let output = run_losat(&words);
-        assert!(!output.status.success(), "-use_index {value}");
-        assert!(output.stdout.is_empty(), "-use_index {value}");
-    }
-    let mut words = base.to_vec();
-    words.extend(["-use_index", "true"]);
-    let error = String::from_utf8_lossy(&run_losat(&words).stderr).into_owned();
+    let refused = run(&[&subject[..], &["-use_index", "maybe"]].concat());
+    assert_eq!(refused.status.code(), Some(2));
+    // A task other than megablast ignores it.
+    let blastn = [
+        "blastn", "-query", "q.fna", "-db", "db/plain", "-outfmt", "6", "-task", "blastn",
+    ];
+    let plain_blastn = run(&blastn);
+    let output = run(&[&blastn[..], &["-use_index", "true"]].concat());
     assert!(
-        error.contains("-use_index true (the megablast index) is not supported by LOSAT's BLASTN"),
-        "{error}"
+        output.status.success() && output.stderr.is_empty(),
+        "{output:?}"
     );
-    fs::remove_file(nucleotide).unwrap();
+    assert_eq!(output.stdout, plain_blastn.stdout);
+    // Megablast without an index: NCBI's warning, then the search without the index.
+    let root = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
+    let warning = format!(
+        "Warning: (1.1) [blastn] NCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 795: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New() - no database volume has an index\n\nNCBI C++ Exception:\n    T0 \"{root}/src/algo/blast/api/blast_dbindex.cpp\", line 1026: Error: (CDbIndex_Exception::bad index creation option) BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old() - no index file specified or index 'db/plain*' not found.\n Database index will not be used.\n"
+    );
+    let megablast = [
+        "blastn", "-query", "q.fna", "-db", "db/plain", "-outfmt", "6",
+    ];
+    let plain_megablast = run(&megablast);
+    assert!(plain_megablast.status.success() && !plain_megablast.stdout.is_empty());
+    let output = run(&[&megablast[..], &["-use_index", "true"]].concat());
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, plain_megablast.stdout);
+    assert_eq!(String::from_utf8_lossy(&output.stderr), warning);
+    // The archive records the name and the warning (NCBI's `SetUseIndex` and diagnostics).
+    let archive = run(&[
+        "blastn",
+        "-query",
+        "q.fna",
+        "-db",
+        "db/plain",
+        "-outfmt",
+        "11",
+        "-use_index",
+        "true",
+    ]);
+    assert!(archive.status.success(), "{archive:?}");
+    let text = String::from_utf8_lossy(&archive.stdout);
+    assert!(
+        text.contains("name \"ForceMbIndex\",\n          value boolean FALSE\n        },\n        {\n          name \"MbIndexName\",\n          value string \"db/plain\"\n        },\n        {\n          name \"HitlistSize\""),
+        "{text}"
+    );
+    // One message (NCBI saves one diagnostic), its white space cleaned; the text encoding
+    // breaks long lines.
+    let message = format!(
+        "message \"{}\"",
+        warning
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace('"', "\"\"")
+    );
+    assert!(text.replace('\n', "").contains(&message), "{text}");
+    // An index: a new-style superheader of a volume, or an old-style index volume.
+    for file in ["db/plain.shd", "db/plain.00.idx", "db/plain.42.idx"] {
+        fs::write(dir.join(file), b"").unwrap();
+        let output = run(&[&megablast[..], &["-use_index", "true"]].concat());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{file}: {error}");
+        assert!(output.stdout.is_empty(), "{file}");
+        assert!(
+            error.contains("-use_index true with a database that has a MegaBLAST index")
+                && error.contains("is not supported by LOSAT's BLASTN"),
+            "{file}: {error}"
+        );
+        // NCBI does not look for it without `-use_index true`.
+        let output = run(&megablast);
+        assert_eq!(output.stdout, plain_megablast.stdout, "{file}");
+        fs::remove_file(dir.join(file)).unwrap();
+    }
+    fs::remove_dir_all(&dir).unwrap();
 }

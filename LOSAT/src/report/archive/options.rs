@@ -104,6 +104,9 @@ pub struct OptionInputs {
     pub ungapped: bool,
     /// `-no_greedy` (BLASTN): the dynamic programming algorithms are recorded.
     pub no_greedy: bool,
+    /// The database whose MegaBLAST index a BLASTN run asked for and did not use (`-use_index
+    /// true`, `-db`, task megablast; `blastn::blast_engine::run` `megablast_index`).
+    pub mb_index_name: Option<String>,
     pub max_intron_length: i32,
     pub query_gencode: i32,
     pub db_gencode: i32,
@@ -148,6 +151,7 @@ impl OptionInputs {
             window_size: None,
             ungapped: false,
             no_greedy: false,
+            mb_index_name: None,
             max_intron_length: 0,
             query_gencode: 1,
             db_gencode: 1,
@@ -240,6 +244,7 @@ enum Class {
     Gapped,
     Hsp,
     Window,
+    MbIndex,
     Formatting,
     Matrix,
     Threshold,
@@ -255,7 +260,7 @@ fn class_order(program: Program) -> &'static [Class] {
     use Class::*;
     match program {
         Program::Blastn => &[
-            Db, Generic, Nucl, Dmb, Filtering, Gapped, Hsp, Window, Formatting,
+            Db, Generic, Nucl, Dmb, Filtering, Gapped, Hsp, Window, MbIndex, Formatting,
         ],
         Program::Blastp => &[
             Db, Generic, Filtering, Matrix, Threshold, Hsp, Window, Formatting, Gapped, Cbs,
@@ -544,6 +549,27 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                     list.set("WindowSize", Integer(size));
                 } else if program != Program::Blastn {
                     list.set("WindowSize", Integer(suggested_window(&matrix)));
+                }
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2619-2632
+            // ```c++
+            // void CBlastOptions::SetUseIndex(
+            //         bool use_index, const string & index_name,
+            //         bool force_index, bool old_style_index )
+            // {
+            //     ...
+            //     if (m_Remote) {
+            //         m_Remote->SetValue(eBlastOpt_ForceMbIndex, force_index);
+            //         if ( !index_name.empty() ) {
+            //             m_Remote->SetValue(eBlastOpt_MbIndexName, index_name.c_str());
+            // ```
+            // `CMbIndexArgs` sets both (`force_index` true, the `-db` name); the index that
+            // does not load sets `SetUseIndex(false)` (api/setup_factory.cpp:455-459), whose
+            // defaults make the first FALSE in its place and leave the name.
+            Class::MbIndex => {
+                if let Some(name) = &inputs.mb_index_name {
+                    list.set("ForceMbIndex", Boolean(false));
+                    list.set("MbIndexName", Str(name.clone()));
                 }
             }
             Class::Gapped => list.set("UngappedMode", Boolean(inputs.ungapped)),

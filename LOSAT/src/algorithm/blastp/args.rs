@@ -1184,10 +1184,24 @@ impl BlastpArgs {
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
         })?;
-        let matrix = options
-            .matrix_name
-            .parse::<ScoringMatrix>()
-            .unwrap_or(ScoringMatrix::Blosum62);
+        // `validate_protein_options` has refused a matrix that NCBI's tables do not know in a
+        // gapped search (blast_options.c:907-940). An ungapped search takes any name, and NCBI
+        // fails at the score block of the first query batch ("BLAST engine error: Error: Unknown
+        // error code -1 " for each query, exit 3; NCBI BLAST+ 2.17.0, line LIB P-S3); LOSAT
+        // refuses every ungapped BLASTP search before that (`blast_engine.rs`
+        // `validate_requested_blastp_support`), so no search scores with the BLOSUM62 below. The
+        // port of `-ungapped` (series NP, O4) gives NCBI's error, as BLASTX does
+        // (`blastx/query_setup.rs` `unknown_matrix_message`).
+        let matrix = match options.matrix_name.parse::<ScoringMatrix>() {
+            Ok(matrix) => matrix,
+            Err(_) => {
+                debug_assert!(
+                    self.ungapped,
+                    "validate_protein_options refuses an unknown matrix of a gapped search"
+                );
+                ScoringMatrix::Blosum62
+            }
+        };
         let psi_pssm = self
             .psiblast_pssm
             .as_ref()

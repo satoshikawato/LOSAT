@@ -1,8 +1,9 @@
-// Inflation port (DW-45, line GZ; swebok-improve SW8 D2): a source file named `.gz`, `.bz2` or `.zst`
-// is inflated by the engine's own decoders, the ones the command line reads such a file with (ABI v2
+// Inflation port (DW-45, line GZ; swebok-improve SW8 D2): a source file named `.gz` or `.zst` is
+// inflated by the engine's own decoders, the ones the command line reads such a file with (ABI v2
 // `inflate_begin` / `inflate_chunk` / `inflate_end`, docs/web/abi_v2.md §4, §5, §9). The engine's
 // name rule decides the compression and the name of the inflated file; the application holds no
-// copy of it.
+// copy of it. The engine also names (and could inflate) `.bz2`, which the application refuses
+// (line GZ decision 11) once the engine has named it.
 //
 // The real implementation is the adapter's serial reactor inside the Data worker; a build without
 // the engine reads every file as it is. The page reaches it through the Data worker

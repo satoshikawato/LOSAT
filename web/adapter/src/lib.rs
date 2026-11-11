@@ -249,15 +249,20 @@ pub unsafe extern "C" fn losat_web2_inflate_begin(name_ptr: *const u8, name_len:
 #[no_mangle]
 pub unsafe extern "C" fn losat_web2_inflate_chunk(handle: u32, ptr: *const u8, len: usize) -> i32 {
     guarded(|| {
-        let mut inflations = inflations().lock().expect("inflations");
-        let inflation = inflations
+        // The inflation leaves the map while it runs, so that no lock is held while `emit` calls
+        // the host (as `inflate_end`); it goes back only when the chunk inflated.
+        let mut inflation = inflations()
+            .lock()
+            .expect("inflations")
             .1
-            .get_mut(&handle)
+            .remove(&handle)
             .ok_or_else(|| format!("unknown inflation {handle}"))?;
-        if let Err(message) = inflation.chunk(bytes(ptr, len)) {
-            inflations.1.remove(&handle);
-            return Err(message);
-        }
+        inflation.chunk(bytes(ptr, len))?;
+        inflations()
+            .lock()
+            .expect("inflations")
+            .1
+            .insert(handle, inflation);
         Ok(0)
     })
 }

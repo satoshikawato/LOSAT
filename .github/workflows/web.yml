@@ -67,9 +67,10 @@ jobs:
           #   LOSAT/tests/wasi_*.js
           #   LOSAT/tests/outfmt0_manifest.tsv
           #   LOSAT/tests/fixtures/web_v1_*/** (the vectors of the Web API v1 tests)
+          #   LOSAT/tests/compressed/** (the zstd CLI files that web/adapter/tests/inflate.rs reads)
           #   docs/assets/losat-logo*.svg (the README's logos; tests/unit/logo.test.ts reads them)
           #   .github/workflows/web.yml
-          pattern='^(web/.*|LOSAT/src/.*|LOSAT/build\.rs|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/\.cargo/.*|LOSAT/tests/wasi_[^/]*\.js|LOSAT/tests/outfmt0_manifest\.tsv|LOSAT/tests/fixtures/web_v1_[^/]*/.*|docs/assets/losat-logo[^/]*\.svg|\.github/workflows/web\.yml)$'
+          pattern='^(web/.*|LOSAT/src/.*|LOSAT/build\.rs|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/\.cargo/.*|LOSAT/tests/wasi_[^/]*\.js|LOSAT/tests/outfmt0_manifest\.tsv|LOSAT/tests/fixtures/web_v1_[^/]*/.*|LOSAT/tests/compressed/.*|docs/assets/losat-logo[^/]*\.svg|\.github/workflows/web\.yml)$'
           files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
           echo "Changed files:"
           printf '%s\n' "$files"
@@ -179,7 +180,8 @@ jobs:
   # of the adapter job, in Chromium, Firefox and WebKit, compared with the native CLI of the
   # same commit and NCBI's frozen bytes (tests/e2e/engine.spec.ts); the other E2E tests on
   # the application built with the engine; and the reactor tests in Node (the RecordScanner
-  # contract on the serial reactor, responses of more than 1 MiB).
+  # contract on the serial reactor, responses of more than 1 MiB, and the inflation of
+  # compressed sources and Example sets with the engine's decoders: bytes, sentences, limit).
   browser-engine:
     needs: [changes, adapter]
     if: needs.changes.outputs.relevant == 'true'
@@ -205,7 +207,7 @@ jobs:
       - run: chmod +x ${{ runner.temp }}/native/losat
       - run: npm ci
       - run: npx playwright install --with-deps chromium firefox webkit
-      - name: RecordScanner contract on the serial reactor (Node)
+      - name: RecordScanner contract and inflation on the serial reactor (Node)
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
         run: npx vitest run tests/unit/engine-runtime.test.ts

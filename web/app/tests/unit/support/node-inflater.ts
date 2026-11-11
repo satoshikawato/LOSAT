@@ -33,6 +33,3 @@ export class NodeInflater implements FileInflater {
     };
   }
 }
-
-/** The inflater of a build without the engine: every file is read as it is. */
-export const PLAIN_INFLATER: FileInflater = { open: async () => undefined };

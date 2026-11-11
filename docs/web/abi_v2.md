@@ -2,9 +2,10 @@
 
 Status: **version 2, implemented** in `web/adapter/` (session S05). Drafted in S01
 ([`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md) §4, §7). The application
-depends on the TypeScript port `web/app/src/ports/engine.ts`, not on the exported
+depends on the TypeScript ports under `web/app/src/ports/` (the searches and the HSP record in
+`engine.ts`, the index scan in `scan.ts`, the inflation in `inflate.ts`), not on the exported
 functions. The HSP record (§8) and the JSON responses (§9) cross into the
-application, so any change to them updates `web/app/src/ports/engine.ts` in the same
+application, so any change to them updates the port that types them in the same
 commit, and an incompatible change increments the version (§10).
 
 Programs: BLASTP, TBLASTN, BLASTN, TBLASTX and BLASTX (since session SX).
@@ -144,7 +145,9 @@ after it.
 `emit` may be called many times per stream. Chunks of one stream arrive in order. The
 bytes are valid only during the call, so the host must copy them. `emit` is always
 called on the thread that called the export: the engine formats on the calling thread,
-which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`).
+which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`). `emit` must
+not call an export of the instance, and an exception thrown by `emit` leaves the instance as
+after a trap (§4, "After a trap").
 
 | Stream | Content |
 |---|---|

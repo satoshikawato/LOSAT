@@ -22,7 +22,7 @@ clap = { version = "4.5", features = ["derive"] }
 # features (LOSAT/Cargo.toml), so the lock gains no package.
 [dev-dependencies]
 bzip2 = "0.6"
-flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 
 [features]
 default = []

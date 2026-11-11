@@ -84,27 +84,21 @@ pub(crate) const NCBI_BLAST_RELEASE: &str = ncbi_blast_release!();
 /// version, the archive ident, SAM's `@PG VN` and the first line of `-version`.
 pub(crate) const NCBI_BLAST_VERSION: &str = ncbi_blast_version!();
 
-#[doc(hidden)]
-pub mod algorithm;
+pub(crate) mod algorithm;
 pub(crate) mod common;
 pub(crate) mod sequence;
-#[doc(hidden)]
-pub mod utils;
+pub(crate) mod utils;
 
-#[doc(hidden)]
-pub mod config;
-#[doc(hidden)]
-pub mod report;
+pub(crate) mod config;
+pub(crate) mod report;
 pub(crate) mod stats;
 
 // NCBI api/, blastinput/ and core/ layers.
 pub mod api;
-#[doc(hidden)]
-pub mod blastinput;
+pub(crate) mod blastinput;
 pub(crate) mod core;
 // NCBI objtools/blast/seqdb_reader (CSeqDB): reader of BLAST database volumes.
-#[doc(hidden)]
-pub mod seqdb;
+pub(crate) mod seqdb;
 // NCBI objects/seqloc (CSeq_id), objects/blastdb (CBlast_def_line_set) and the id helpers
 // of objtools/align_format: the Seq-ids of database sequences.
 pub(crate) mod seqid;
@@ -118,8 +112,7 @@ pub(crate) mod blastdbcmd;
 pub(crate) mod web_api;
 
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
-#[doc(hidden)]
-pub mod cli;
+pub(crate) mod cli;
 // The body of the `losat` binary (`src/main.rs`): the one item of this crate that the binary names.
 #[doc(hidden)]
 pub use cli::main_entry::main_entry;

@@ -44,9 +44,6 @@ pub(super) struct TracebackCtx<'a> {
     pub(super) query_eff_searchsp: &'a Vec<i64>,
     pub(super) search_karlin_ref: &'a Vec<ContextKarlin>,
     pub(super) round_down_evalue_score: bool,
-    /// The database totals the re-evaluation passes to the e-value.
-    pub(super) db_len_total: usize,
-    pub(super) db_num_seqs: usize,
     /// The scoring of the alignment.
     pub(super) reward: i32,
     pub(super) penalty: i32,
@@ -89,8 +86,6 @@ pub(super) fn traceback_post_purge(
         query_eff_searchsp,
         search_karlin_ref,
         round_down_evalue_score,
-        db_len_total,
-        db_num_seqs,
         reward,
         penalty,
         gap_open,
@@ -175,8 +170,6 @@ pub(super) fn traceback_post_purge(
             lambda: search_karlin_ref[context_idx].gapped.lambda,
             k: search_karlin_ref[context_idx].gapped.k,
             eff_searchsp,
-            db_len: db_len_total,
-            db_num_seqs,
             round_down_evalue_score,
         };
 

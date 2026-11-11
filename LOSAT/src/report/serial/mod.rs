@@ -26,8 +26,10 @@ pub mod real;
 pub mod seqalign;
 pub mod xml;
 
+pub use seqalign::SerialFormat;
 pub(crate) use seqalign::{write_hit_list_seqaligns, write_query_to};
-pub use seqalign::{write_query, SeqAlignError, SerialFormat};
+#[cfg(test)]
+pub use seqalign::{write_query, SeqAlignError};
 
 #[cfg(test)]
 mod asn_ber_tests;

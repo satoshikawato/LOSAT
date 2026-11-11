@@ -14,8 +14,6 @@ use std::path::Path;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
-// Re-export TBLASTX run function
-pub use crate::algorithm::tblastx::blast_engine::run as run_tblastx;
 // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
 // ```c
 // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -37,8 +35,6 @@ pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
 // ```
 pub use crate::algorithm::tblastx::blast_engine::run_local_database as run_local_database_tblastx;
 
-// Re-export BLASTN run function
-pub use crate::algorithm::blastn::blast_engine::run as run_blastn;
 // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
 // ```c
 // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -73,7 +69,6 @@ pub use crate::utils::threading::with_run_pool;
 //     x_RunSearch();
 // }
 // ```
-pub use crate::algorithm::blastp::blast_engine::run as run_blastp;
 pub use crate::algorithm::blastp::blast_engine::run_local as run_local_blastp;
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
 // ```c++

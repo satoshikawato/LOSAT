@@ -451,8 +451,7 @@ pub(crate) fn karlin_error(
 
 /// The hit list size and the counts of the pairwise report of a run that writes the output
 /// formats `outfmts` (`-max_target_seqs`, `-num_descriptions`, `-num_alignments` of `args`),
-/// with the formatting handler's warnings: the one derivation of `process_options` and of
-/// `check_scoring`.
+/// with the formatting handler's warnings: the one derivation of `process_options`.
 pub(crate) fn report_counts_of(
     args: &BlastnArgs,
     outfmts: &[i32],
@@ -464,57 +463,6 @@ pub(crate) fn report_counts_of(
         args.num_descriptions,
         args.num_alignments,
     )
-}
-
-/// The checks of `check_scoring_options`, `check_losat_limits` and the Karlin-Altschul
-/// tables, without the queries: the checks that a host can run before a search. A table
-/// error is reported as for a batch of one query.
-pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
-    check_scoring_for_formats(args, &[0])
-}
-
-/// `check_scoring` for a search that writes the output formats `outfmts` (formats of one
-/// hit list size): the hit list size is the one that the run of these formats derives. A
-/// host that runs one search per hit list size checks each of them.
-pub fn check_scoring_for_formats(args: &BlastnArgs, outfmts: &[i32]) -> anyhow::Result<()> {
-    check_scoring_for_formats_with(args, outfmts, args.ungapped)
-}
-
-/// `check_scoring_for_formats` for an ungapped (`-ungapped`) search when `ungapped`: NCBI
-/// builds no gapped Karlin-Altschul block then, so the gap costs are not looked up in the
-/// tables and greedy gap costs are not limited.
-///
-/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:513-529
-/// ```c
-///     status = Blast_ScoreBlkKbpUngappedCalc(program_number, sbp, query_blk->sequence,
-///                                            query_info, blast_message);
-///     ...
-///     if (scoring_options->gapped_calculation) {
-///         status = s_BlastScoreBlkGappedFill(sbp, scoring_options, program_number,
-///                                            query_info, blast_message);
-/// ```
-pub(crate) fn check_scoring_for_formats_with(
-    args: &BlastnArgs,
-    outfmts: &[i32],
-    ungapped: bool,
-) -> anyhow::Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
-    }
-    // `args.report_counts` is set by `process_options` of a run; a host that has not run
-    // it derives the counts the same way, for the output formats of the search.
-    let (counts, _) = report_counts_of(args, outfmts)?;
-    check_scoring_options_with(args, &counts, ungapped)?;
-    check_losat_limits_with(args, &counts, ungapped)?;
-    if ungapped {
-        return Ok(());
-    }
-    let spec = scoring_spec(args);
-    NuclValues::new(spec.reward, spec.penalty)
-        .and_then(|values| values.check_gaps(&spec))
-        .map_err(|message| karlin_error(&message, [false]))?;
-    check_greedy_gap_costs(args)
 }
 
 /// The Karlin-Altschul blocks of one query context (a strand of a query).
@@ -936,26 +884,41 @@ mod tests {
         }
     }
 
+    /// The checks of the options that a run makes (`process_options`): the counts of the formats
+    /// `[0]` from `report_counts_of`, then `check_scoring_options` and `check_losat_limits`.
+    fn run_checks(words: &[&str]) -> anyhow::Result<()> {
+        let mut args = args(words);
+        args.report_counts = report_counts_of(&args, &[0]).unwrap().0;
+        check_scoring_options(&args)?;
+        check_losat_limits(&args)
+    }
+
+    /// `run_checks` for a run of the formats `outfmts`, gapped or not (`ungapped`).
+    fn run_checks_with(words: &[&str], outfmts: &[i32], ungapped: bool) -> anyhow::Result<()> {
+        let args = args(words);
+        let (counts, _) = report_counts_of(&args, outfmts).unwrap();
+        check_scoring_options_with(&args, &counts, ungapped)?;
+        check_losat_limits_with(&args, &counts, ungapped)
+    }
+
     #[test]
-    fn check_scoring_derives_the_counts_a_run_derives() {
-        // `args.report_counts` stays at its default until a run sets it, so a host's
-        // `check_scoring` must derive the counts from the options itself.
-        let error = message(check_scoring(&args(&[
+    fn the_counts_a_run_derives_give_the_refusals_of_the_options() {
+        let error = message(run_checks(&[
             "-num_descriptions",
             "0",
             "-num_alignments",
             "0",
-        ])));
+        ]));
         assert_eq!(
             error,
             "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
         );
         // The hit list of format 0 is the larger of the two numbers.
-        assert!(check_scoring(&args(&["-num_alignments", "0"])).is_ok());
-        assert!(check_scoring(&args(&["-num_descriptions", "0"])).is_ok());
-        assert!(check_scoring(&args(&["-num_descriptions", "1", "-num_alignments", "0"])).is_ok());
+        assert!(run_checks(&["-num_alignments", "0"]).is_ok());
+        assert!(run_checks(&["-num_descriptions", "0"]).is_ok());
+        assert!(run_checks(&["-num_descriptions", "1", "-num_alignments", "0"]).is_ok());
         // The preliminary hit list size overflows.
-        let error = check_scoring(&args(&["-num_alignments", "2147483598"]))
+        let error = run_checks(&["-num_alignments", "2147483598"])
             .unwrap_err()
             .to_string();
         assert!(
@@ -963,7 +926,7 @@ mod tests {
                 && error.contains("not supported by LOSAT's BLASTN"),
             "{error}"
         );
-        let error = check_scoring(&args(&["-num_descriptions", "2147483598"]))
+        let error = run_checks(&["-num_descriptions", "2147483598"])
             .unwrap_err()
             .to_string();
         assert!(
@@ -971,7 +934,7 @@ mod tests {
             "{error}"
         );
         // `-max_target_seqs` keeps its own wording (the default path, before O1b).
-        let error = check_scoring(&args(&["-max_target_seqs", "2147483598"]))
+        let error = run_checks(&["-max_target_seqs", "2147483598"])
             .unwrap_err()
             .to_string();
         assert!(
@@ -979,13 +942,11 @@ mod tests {
                 && error.contains("whose preliminary hit list size overflows"),
             "{error}"
         );
-        // The same options set on the args by a run give the same refusals.
-        let mut run_args = args(&["-num_descriptions", "0", "-num_alignments", "0"]);
-        run_args.report_counts = report_counts_of(&run_args, &[0]).unwrap().0;
-        assert!(check_scoring_options(&run_args)
-            .unwrap_err()
-            .to_string()
-            .contains("No hits are being saved"));
+        // Without the counts of a run (`args.report_counts` at its default), no hit list is empty.
+        assert!(
+            check_scoring_options(&args(&["-num_descriptions", "0", "-num_alignments", "0"]))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1004,11 +965,6 @@ mod tests {
             error.downcast::<NativeError>().unwrap().message,
             "BLAST engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
         );
-        assert!(
-            message(check_scoring(&args(&["-reward", "1", "-penalty", "-6"])))
-                .starts_with("BLAST engine error: Error: Substitution scores 1 and -6")
-        );
-        assert!(check_scoring(&args(&["-gapopen", "5", "-gapextend", "2"])).is_ok());
     }
 
     #[test]
@@ -1123,32 +1079,14 @@ mod tests {
             &["-gapopen", "5", "-gapextend", "0"],
             &["-gapopen", "40000", "-gapextend", "40000"],
         ] {
-            let parsed = args(words);
-            assert!(
-                check_scoring_for_formats_with(&parsed, &[6], true).is_ok(),
-                "{words:?}"
-            );
+            assert!(run_checks_with(words, &[6], true).is_ok(), "{words:?}");
         }
-        assert!(check_scoring_for_formats_with(
-            &args(&["-reward", "1", "-penalty", "-6"]),
-            &[6],
-            false
-        )
-        .is_err());
+        // (A gapped search of 1/-6 stops at its table: `context_blocks`,
+        // `no_valid_query_needs_no_gapped_block`.)
         // reward <= 0 stays refused.
-        assert!(check_scoring_for_formats_with(&args(&["-reward", "0"]), &[6], true).is_err());
+        assert!(run_checks_with(&["-reward", "0"], &[6], true).is_err());
         // The preliminary hit list of an ungapped search is the hit list: 2147483598 is accepted.
-        assert!(check_scoring_for_formats_with(
-            &args(&["-num_alignments", "2147483598"]),
-            &[0],
-            true
-        )
-        .is_ok());
-        assert!(check_scoring_for_formats_with(
-            &args(&["-num_alignments", "2147483598"]),
-            &[0],
-            false
-        )
-        .is_err());
+        assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], true).is_ok());
+        assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], false).is_err());
     }
 }

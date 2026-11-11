@@ -74,13 +74,21 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 
 pub use alias::SearchPath;
 pub use header::Defline;
-pub use mask::{MaskAlgorithm, MaskAlgorithms, MaskRanges};
-pub use volume::{
-    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader, BLASTNA_SENTINEL,
-    FENCE_SENTRY,
-};
+#[cfg(test)]
+pub use mask::MaskAlgorithm;
+pub use mask::{MaskAlgorithms, MaskRanges};
+pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
+#[cfg(test)]
+pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};
 
 /// EXPERIMENT (LOSAT_X_BNDBSMALL): offsets per read of `SeqDb::x_next_blocks` (64 KiB).
+#[cfg(any(
+    test,
+    all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )
+))]
 const X_LIST_ENTRIES: usize = 1 << 14;
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
@@ -588,6 +596,7 @@ impl SeqDb {
     /// exists, else the single volume `name.{p|n}in`. This is
     /// [`SeqDb::open_in`] with a search path that holds the current directory
     /// only: `BLASTDB` and the registry are not consulted.
+    #[cfg(test)]
     pub fn open(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
         let cwd = std::env::current_dir().unwrap_or_default();
         Self::open_in(name, seqtype, &SearchPath::new(&cwd, None, None)?)
@@ -1376,11 +1385,25 @@ impl SeqDb {
     /// ref_prok_rep_genomes took 183 ms, on one thread while the others waited, at every query
     /// batch (`v4-D12/STATE.md`, s30). The blocks are those of `next_block` (the same ends,
     /// `Volume::x_listed_block_end`, and the same cut at excluded OIDs).
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     pub fn x_next_blocks(&self, first_ordinal: u32, max_bytes: u64, max: usize) -> Vec<BlockRange> {
         self.x_next_blocks_in(first_ordinal, max_bytes, max, X_LIST_ENTRIES)
     }
 
     /// `x_next_blocks` with windows of `entries` offsets.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     fn x_next_blocks_in(
         &self,
         first_ordinal: u32,
@@ -1511,6 +1534,13 @@ impl SeqDb {
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
     /// (`Volume::x_read_block_into`).
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     pub fn x_read_block_into(
         &self,
         range: BlockRange,

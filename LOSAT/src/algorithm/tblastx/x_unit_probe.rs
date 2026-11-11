@@ -8,7 +8,7 @@
 //!   run without the two variables is the scan without probes.
 //! - `XTimeProbe` (LOSAT_TIMING) splits the units' time into the seed stage (the table's reset,
 //!   the scan, the two-hit test, the saving of init HSPs) and the two-hit extensions (the calls
-//!   of `extend_hit_two_hit`), and counts the hits and extensions:
+//!   of `extend_hit_two_hit_fitting`), and counts the hits and extensions:
 //!
 //!   `[TIMING] x_unit: unit_sum ..s seed ..s extend ..s (units=N hits=N extends=N
 //!   seed_ns_per_hit .. extend_ns_per_call .. clock_overhead ..s table_kib_mean .. table_kib_max ..)`

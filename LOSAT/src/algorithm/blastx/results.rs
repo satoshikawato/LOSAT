@@ -336,43 +336,6 @@ pub trait ResultsObserver {
     fn cull_final(&mut self, _num_queries: usize) {}
     fn preliminary_call(&mut self, _oid: usize) {}
     fn numeric(&mut self, _stage: &str, _oid: usize, _hsps: &[PreliminaryHsp]) {}
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2008
-    // ```c++
-    // Int2 Blast_HSPListReapByEvalue(BlastHSPList* hsp_list,
-    //         const BlastHitSavingOptions* hit_options)
-    // {
-    //    BlastHSP* hsp;
-    //    BlastHSP** hsp_array;
-    //    Int4 hsp_cnt = 0;
-    //    Int4 index;
-    //    double cutoff;
-    //
-    //    if (hsp_list == NULL)
-    //       return 0;
-    //
-    //    cutoff = hit_options->expect_value;
-    //
-    //    hsp_array = hsp_list->hsp_array;
-    //    for (index = 0; index < hsp_list->hspcnt; index++) {
-    //       hsp = hsp_array[index];
-    //
-    //       ASSERT(hsp != NULL);
-    //
-    //       if (hsp->evalue > cutoff) {
-    //          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-    //       } else {
-    //          if (index > hsp_cnt)
-    //             hsp_array[hsp_cnt] = hsp_array[index];
-    //          hsp_cnt++;
-    //       }
-    //    }
-    //
-    //    hsp_list->hspcnt = hsp_cnt;
-    //
-    //    return 0;
-    // }
-    // ```
-    fn linked(&mut self, _stage: &str, _oid: usize, _hsps: &LinkedHspList) {}
     fn hsps(&mut self, _stage: &str, _oid: usize, _hsps: &[Hsp]) {}
     fn hitlist(
         &mut self,

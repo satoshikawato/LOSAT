@@ -73,6 +73,7 @@ type Result<T> = std::result::Result<T, PssmTextError>;
 //     return s;
 // }
 // ```
+#[cfg(test)]
 pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
     read_pssm_with_parameters_and_skips(text).map(|(pssm, _)| pssm)
 }

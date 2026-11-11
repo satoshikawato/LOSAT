@@ -460,7 +460,6 @@ fn active_ncbi_lookup_overflow_u16_boundary_preserves_all_offsets() {
     for len in [65533usize, 65534] {
         let c = QueryContext {
             q_idx: 0,
-            f_idx: 0,
             frame: 1,
             aa_seq: vec![0; len + 2],
             aa_seq_nomask: None,
@@ -514,8 +513,7 @@ fn unported_long_subject_chunking_is_rejected_before_search() {
         source: None,
     };
     let error = super::search::search_preliminary(&records, &[subject], &o)
-        .err()
-        .expect("unported subject splitting");
+        .expect_err("unported subject splitting");
     assert_eq!(
         error.to_string(),
         "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
@@ -537,9 +535,7 @@ fn a_batch_that_is_not_searched_does_not_refuse_a_long_subject() {
     };
     let query = record("Query_1", vec![b'N'; 300]);
     let subject = record("Subject_1", vec![b'W'; 5_000_001]);
-    let stages = super::search::search_preliminary(&[query], &[subject], &o).unwrap();
-    assert_eq!(stages.len(), 1);
-    assert!(stages[0].chunks.is_empty());
+    super::search::search_preliminary(&[query], &[subject], &o).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:233-239

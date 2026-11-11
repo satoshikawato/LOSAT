@@ -1027,6 +1027,7 @@ impl SegSpec {
 ///                 opt.SetSegFilteringHicut(NStr::StringToDouble(tokens[2]));
 ///             }
 /// ```
+#[cfg(any(test, target_arch = "wasm32"))]
 pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
     match value {
         "no" => return Ok(SegSpec::No),
@@ -1053,6 +1054,7 @@ pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
 
 /// The TBLASTX `-outfmt` value of web ABI v1, which is frozen (plan TD-1): it keeps the
 /// only format that it accepted before TBLASTX outfmt 0 and 7 were ported (session S08).
+#[cfg(target_arch = "wasm32")]
 pub fn tblastx_v1_outfmt(value: &str) -> Result<String, String> {
     if value.trim() != "6" {
         return Err(

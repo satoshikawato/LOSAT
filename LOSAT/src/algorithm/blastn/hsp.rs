@@ -433,6 +433,7 @@ impl HitListEntry for BlastnHspList {
 //    Int4 num_hits; /**< Number of similar hits for the query (for mapping) */
 // } BlastHitList;
 // ```
+// `num_hits` (for mapping) is not stored: nothing reads it.
 pub struct HitList<L> {
     pub hsplist_count: usize,
     pub hsplist_max: usize,
@@ -441,7 +442,6 @@ pub struct HitList<L> {
     pub heapified: bool,
     pub hsplist_array: Vec<L>,
     pub hsplist_current: usize,
-    pub num_hits: usize,
 }
 
 /// The hit list of a query's final HSP lists.
@@ -463,77 +463,6 @@ fn x_bnhlgrow() -> bool {
 pub type BlastnHspCompare = fn(&BlastnHsp, &BlastnHsp) -> Ordering;
 
 impl BlastnHsp {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
-    // ```c
-    // typedef struct BlastHSP {
-    //    Int4 score;
-    //    Int4 num_ident;
-    //    double bit_score;
-    //    double evalue;
-    //    BlastSeg query;
-    //    BlastSeg subject;
-    //    Int4 context;
-    //    GapEditScript* gap_info;
-    // } BlastHSP;
-    // ```
-    pub fn from_hit(hit: Hit) -> Self {
-        let Hit {
-            identity,
-            length,
-            mismatch,
-            gapopen,
-            q_start,
-            q_end,
-            s_start,
-            s_end,
-            e_value,
-            bit_score,
-            num_ident,
-            query_frame,
-            query_length,
-            q_idx,
-            s_idx,
-            raw_score,
-            gap_info,
-            num_positives,
-            ..
-        } = hit;
-        Self {
-            identity,
-            length,
-            // A nucleotide alignment holds no stored gap character: never below 0.
-            mismatch: usize::try_from(mismatch).unwrap_or(0),
-            gapopen,
-            q_start,
-            q_end,
-            s_start,
-            s_end,
-            e_value,
-            bit_score,
-            num_ident,
-            query_frame,
-            query_length,
-            q_idx,
-            s_idx,
-            raw_score,
-            internal_q_offset_0: if query_length > 0 && query_frame < 0 {
-                query_length.saturating_sub(q_end)
-            } else {
-                q_start.saturating_sub(1)
-            },
-            internal_q_end_0: if query_length > 0 && query_frame < 0 {
-                query_length.saturating_sub(q_start).saturating_add(1)
-            } else {
-                q_end
-            },
-            internal_s_offset_0: s_start.min(s_end).saturating_sub(1),
-            internal_s_end_0: s_start.max(s_end),
-            internal_query_context_offset: 0,
-            gap_info,
-            num_positives,
-        }
-    }
-
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -1002,7 +931,6 @@ impl<L: HitListEntry> HitList<L> {
             heapified: false,
             hsplist_array: Vec::new(),
             hsplist_current: 0,
-            num_hits: 0,
         }
     }
 

@@ -1741,14 +1741,6 @@ fn blastn_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_scoring`) rejects `-db`.
-    let error = crate::algorithm::blastn::scoring::check_scoring(&blastn(&["-db", "d"]).unwrap())
-        .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
 }
 
 // TBLASTN's `-db NAME` and `-dbsize N` (blast_args.cpp:2191-2199 and 2231-2237, quoted

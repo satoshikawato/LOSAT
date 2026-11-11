@@ -22,8 +22,6 @@ const SEG_DEFAULTS: (i32, f64, f64) = (12, 2.2, 2.5);
 /// What the window masker option writes (`windowMaskerOptions`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowMasker<'a> {
-    /// `W -t <taxid>;`
-    Taxid(i32),
     /// `W -d <database>;`
     Database(&'a str),
 }
@@ -57,10 +55,7 @@ pub fn filter_string(
         }
     }
     match window_masker {
-        Some(WindowMasker::Taxid(taxid)) if taxid != 0 => {
-            text.push_str(&truncated(format!("W -t {taxid};")));
-        }
-        Some(WindowMasker::Taxid(_)) | None => {}
+        None => {}
         Some(WindowMasker::Database(database)) => {
             text.push_str("W -d ");
             text.push_str(database);
@@ -136,28 +131,10 @@ mod tests {
             s(filter_string(
                 None,
                 None,
-                Some(WindowMasker::Taxid(9606)),
-                true
-            )),
-            "W -t 9606;m;"
-        );
-        assert_eq!(
-            s(filter_string(
-                None,
-                None,
                 Some(WindowMasker::Database("db.wm")),
                 false
             )),
             "W -d db.wm;"
-        );
-        assert_eq!(
-            s(filter_string(
-                None,
-                None,
-                Some(WindowMasker::Taxid(0)),
-                false
-            )),
-            "F"
         );
     }
 

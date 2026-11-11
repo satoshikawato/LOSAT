@@ -84,6 +84,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: web/app
@@ -96,7 +97,10 @@ jobs:
           cache-dependency-path: web/app/package-lock.json
       - run: npm ci
       - run: npm run check
+      # Usually 40 to 100 s. On 2026-11-11 the runners could not resolve the Ubuntu archive and apt
+      # waited on every package, holding the job for hours; this step stops it instead.
       - run: npx playwright install --with-deps chromium firefox webkit
+        timeout-minutes: 10
       - run: npm run e2e
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
@@ -111,6 +115,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -134,6 +139,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -186,6 +192,7 @@ jobs:
     needs: [changes, adapter]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: web/app
@@ -206,7 +213,10 @@ jobs:
           path: ${{ runner.temp }}/native
       - run: chmod +x ${{ runner.temp }}/native/losat
       - run: npm ci
+      # Usually 40 to 100 s. On 2026-11-11 the runners could not resolve the Ubuntu archive and apt
+      # waited on every package, holding the job for hours; this step stops it instead.
       - run: npx playwright install --with-deps chromium firefox webkit
+        timeout-minutes: 10
       - name: RecordScanner contract and inflation on the serial reactor (Node)
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors

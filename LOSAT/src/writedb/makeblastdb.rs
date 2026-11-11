@@ -853,11 +853,7 @@ impl Read for CompressedInput<'_> {
 /// format, or are cut short (line GZ, DECISIONS 5; for `.gz`: where makeblastdb's decompressor
 /// fails, `compressed::GzipMembers`): exit status 1, the files of the build removed.
 fn compressed_fault_error(name: &str, compression: Compression, fault: &str) -> MakedbError {
-    unsupported(format!(
-        "-in: '{name}' is named {suffix} but is not {format} data ({fault}); LOSAT reads a file named {suffix} through {format}",
-        suffix = compression.suffix(),
-        format = compression.format(),
-    ))
+    unsupported(format!("-in: {}", compression.not_data(name, fault)))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:792-836

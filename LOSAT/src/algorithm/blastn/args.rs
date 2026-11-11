@@ -957,7 +957,7 @@ impl BlastnArgs {
     ///         const CSeqMaskerIstatFactory::EStatType type =
     ///             CSeqMaskerIstatFactory::DiscoverStatType(stat_file);
     /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:432-466
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:430-466
     /// ```c++
     ///     int filter_dbs = 0;
     ///

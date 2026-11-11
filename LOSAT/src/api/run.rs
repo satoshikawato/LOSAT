@@ -697,7 +697,7 @@ pub(super) fn run_local(
             if args.window_masker_db.is_some() {
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:378-387
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:381-388
             // ```c++
             //     CRef<CNcbiRegistry> reg(new CNcbiRegistry(empty_stream,
             //                                               IRegistry::fWithNcbirc));

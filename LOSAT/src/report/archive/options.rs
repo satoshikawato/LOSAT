@@ -505,7 +505,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 //         }
                 // ```
                 // (`SetWindowMaskerTaxId`, called by the filtering handler before it reads
-                // `-window_masker_db`, blast_args.cpp:438-445: the taxid 0 is no parameter.)
+                // `-window_masker_db`, blast_args.cpp:437-444: the taxid 0 is no parameter.)
                 if let Some(taxid) = inputs.window_masker_taxid.filter(|&taxid| taxid != 0) {
                     list.set("WindowMaskerTaxId", Integer(taxid));
                 }

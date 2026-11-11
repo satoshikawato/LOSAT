@@ -145,6 +145,18 @@ pub enum WeakMatch {
     Failed(String),
 }
 
+/// What psiblast's PSSM reads by the Seq-align id of a subject (`ParsedSubject::pssm_read`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PssmRead {
+    /// The subject's own letters.
+    Itself,
+    /// The sequence of the database, by ordinal id, that the lookup gives first: its letters
+    /// where NCBI's data loader keeps it, else none (`common::database::loader_gives`).
+    Another(u32),
+    /// No sequence: NCBI warns `Failed to retrieve sequence` and the row is the query's.
+    Nothing,
+}
+
 /// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
 /// Seq-align id (`ParsedSubject::prefetched`): psiblast's traceback hit lists beyond
 /// `-max_target_seqs`, and the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`
@@ -526,6 +538,36 @@ impl ParsedSubject {
     /// another can stand for by a weak match (`WeakMatch`), after what the lookup finds.
     pub fn fetched(&self, taxonomy: bool, one_by_one: bool) -> Result<(), String> {
         self.found_fetched(taxonomy)?;
+        self.weakly_fetched(one_by_one)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+    // `algorithm::psiblast::pssm::input_msa`)
+    /// What psiblast's PSSM reads by the Seq-align id of a subject that it includes (the
+    /// `CSeqVector` of each Seq-align's range in NCBI's scope): the subject's letters (also as
+    /// the same record found for it, whose letters are the same), the sequence that the lookup
+    /// gives first instead (`FoundInstead::Sequence`; whether NCBI's data loader keeps it, and
+    /// so whether its letters or none are read, `common::database::loader_gives` decides), or
+    /// no sequence (`unfetchable`, or none found). `Err` for what LOSAT does not read as NCBI:
+    /// a sequence that NCBI's scope can read instead where both are read
+    /// (`FoundInstead::AlsoHeld`), a lookup that fails, the same record whose read writes
+    /// taxonomy texts, and with `one_by_one` a weak match (`fetched`).
+    pub fn pssm_read(&self, one_by_one: bool) -> Result<PssmRead, String> {
+        let read = match (self.unfetchable, &self.found_instead) {
+            (true, _) | (false, Some(FoundInstead::Nothing)) => PssmRead::Nothing,
+            (false, Some(FoundInstead::Sequence(ordinal))) => PssmRead::Another(*ordinal),
+            _ => {
+                self.found_fetched(false)?;
+                PssmRead::Itself
+            }
+        };
+        self.weakly_fetched(one_by_one)?;
+        Ok(read)
+    }
+
+    /// `fetched`'s refusal of a weak match where NCBI's formatters may read the subject one by
+    /// one (`one_by_one`).
+    fn weakly_fetched(&self, one_by_one: bool) -> Result<(), String> {
         let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match self.weak_match.as_ref().filter(|_| one_by_one) {
             None => Ok(()),

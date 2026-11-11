@@ -117,6 +117,13 @@ Seq-align ids): the databases `psr_*` from the FASTA of the same names (copies o
 and their controls, for the query `psr_q.faa`) and the aliases `psr_cp.pal`, `psr_cbxp.pal`, `psr_jx.pal`, `psr_cul.pal`,
 `psr_cue.pal` and `psr_k.pal`, and the nucleotide database `psr_gimn` from `psr_gimn.fna` (queries `psr_qp.fna`,
 `psr_qm.fna`). `--pssmrows-only` builds only these.
+Line DBID pssmread (the letters psiblast's PSSM reads by a Seq-align id): `prd_av` (gb|AAA00001| of A, whose lookup
+gives gb|AAA00001.1|, an unrelated sequence Y of the same length, first: the PSSM reads Y's letters), `prd_as1` (Y one
+letter shorter than A's HSP: NCBI warns and the row is the query's) and its version 4 copy `prd_as1_4`, `prd_ad` (Y as
+dbj|AAA00001.1|: read), `prd_ar` (Y as ref|AAA00001.1|, whose ids do not compare equal: the loader keeps none and NCBI
+warns), `prd_t2` (A in two HSPs over a short Y: two warnings), from the FASTA of the same names, for the queries
+`prd_q.faa`, `prd_q2.faa` (two queries), `prd_q3.faa` (three, the second with an O) and the PSSM query `prd_q.asn.gz`.
+`--pssmread-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -264,6 +271,16 @@ def build_pssmrows(args: argparse.Namespace) -> None:
             f"DBLIST {names}\n")
 
 
+def build_pssmread(args: argparse.Namespace) -> None:
+    for name, fasta, version in (("prd_av", "prd_av.faa", "5"), ("prd_as1", "prd_as1.faa", "5"),
+                                 ("prd_ad", "prd_ad.faa", "5"), ("prd_ar", "prd_ar.faa", "5"),
+                                 ("prd_t2", "prd_t2.faa", "5"), ("prd_as1_4", "prd_as1.faa", "4")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", "prot", "-parse_seqids",
+             "-blastdb_version", version, "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -302,6 +319,7 @@ def main() -> int:
     ap.add_argument("--pfwarn-only", action="store_true", help="build only the databases of line DBID pfwarn")
     ap.add_argument("--weakbatch-only", action="store_true", help="build only the databases of line DBID weakbatch")
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
+    ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -332,6 +350,9 @@ def main() -> int:
         return 0
     if args.pssmrows_only:
         build_pssmrows(args)
+        return 0
+    if args.pssmread_only:
+        build_pssmread(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -452,6 +473,7 @@ def main() -> int:
     build_pfwarn(args)
     build_weakbatch(args)
     build_pssmrows(args)
+    build_pssmread(args)
     return 0
 
 

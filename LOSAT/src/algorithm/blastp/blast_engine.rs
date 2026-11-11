@@ -3223,17 +3223,10 @@ fn psiblast_pssms(
     keys: psi_round::SubjectKeys<'_>,
 ) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
     use crate::algorithm::psiblast::pssm::{
-        ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord,
-        PssmScoring, PssmStop,
+        query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord, PssmScoring, PssmStop,
     };
     use crate::core::psi::KarlinBlk;
-    let subject = |s_idx: u32| -> Vec<u8> {
-        match shown_subjects.letters(s_idx as usize) {
-            Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
-            Some(ShownLetters::Stored(residues)) => residues.to_vec(),
-            None => Vec::new(),
-        }
-    };
+    let subject = |s_idx: u32| keys.letters(shown_subjects, s_idx);
     let scoring = PssmScoring {
         matrix: args.scoring.matrix,
         matrix_name: &args.matrix_name,
@@ -3302,6 +3295,7 @@ fn psiblast_pssms(
             psi_ungapped: ungapped,
             psi_gapped: gapped,
         };
+        let mut unread = Vec::new();
         let made = query_pssm(
             request,
             scoring,
@@ -3316,8 +3310,12 @@ fn psiblast_pssms(
             &subject,
             &|s_idx| keys.key(s_idx),
             ancillary,
-        )
-        .and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
+            &mut unread,
+        );
+        let mut warnings = Vec::new();
+        keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
+        files.add_read_warnings(query, warnings);
+        let made = made.and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
         if let Err(error) = made {
             return Err(PssmStop {
                 query,
@@ -6559,7 +6557,13 @@ fn search(
                     .get(after)
                     .map_or(input_done, |&(input, _)| input.min(input_done));
                 search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
-                stop.files.commit()?;
+                // The warnings of the PSSMs' reads up to the failing query's, after the reports
+                // of the queries up to it (NCBI writes each after its query's report).
+                let mut files = stop.files;
+                for (_, warnings) in files.take_read_warnings() {
+                    outputs.diagnostics.write_all(&warnings)?;
+                }
+                files.commit()?;
                 Err(stop.error)
             }
             other => other,
@@ -12330,8 +12334,24 @@ fn run_resolved_in_pool(
     );
     // `-out_pssm`'s PSSM, before it is made (a later query's PSSM error reruns the search without
     // the files, review 2 of line DBID weakbatch H2).
-    if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
-        titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
+    // What the PSSMs read by the subjects' Seq-align ids (`-out_pssm`'s and each round's next
+    // one, `ListedTitles::pssm_reads`), refused where one is made: `-out_pssm`'s here, a
+    // round's below.
+    let pssm_reads = match (
+        args.psi_pssm.is_some() || reports.psi_round.is_some(),
+        listed_titles.as_ref(),
+        database,
+    ) {
+        (true, Some(titles), Some(database)) => titles.pssm_reads(
+            database,
+            &hit_lists,
+            &batch_prefetch,
+            args.inclusion_ethresh,
+        )?,
+        _ => database::PssmReads::default(),
+    };
+    if args.psi_pssm.is_some() {
+        pssm_reads.check()?;
     }
     let subject_keys = psi_round::SubjectKeys {
         listed_ordinals: listed_subjects
@@ -12340,8 +12360,9 @@ fn run_resolved_in_pool(
         parsed: listed_titles
             .as_ref()
             .map_or(&[][..], |titles| titles.parsed.as_slice()),
+        reads: &pssm_reads,
     };
-    let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
+    let mut psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
             Some(request) => Some(psiblast_pssms(
                 &args,
@@ -12374,9 +12395,9 @@ fn run_resolved_in_pool(
     // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,
     // H1: psiblast_app.cpp:291-309 `ComputePssmForNextIteration`) reads the letters of the
     // subjects before the cut by their Seq-align ids.
-    if let (Some(io), Some(titles)) = (reports.psi_round, listed_titles.as_ref()) {
+    if let Some(io) = reports.psi_round {
         if io.makes_next() {
-            titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
+            pssm_reads.check()?;
         }
     }
     let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
@@ -12907,6 +12928,19 @@ fn run_resolved_in_pool(
         .as_ref()
         .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
     // The warnings are written once, with the first format (`QueryWarnings`).
+    // NCBI makes each query's PSSM after the query's report (`psiblast_pssms`): the warnings of
+    // its reads come before the next query's warnings, and the last query's after the reports.
+    let mut pssm_read_warnings_after = Vec::new();
+    if let Some(files) = psiblast_pssms.as_mut() {
+        for (query, warnings) in files.take_read_warnings() {
+            match query_warning_lines.get_mut(query + 1) {
+                Some(next) => {
+                    next.splice(0..0, warnings);
+                }
+                None => pssm_read_warnings_after.extend(warnings),
+            }
+        }
+    }
     let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
@@ -13771,6 +13805,7 @@ fn run_resolved_in_pool(
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     output_result?;
+    outputs.diagnostics.write_all(&pssm_read_warnings_after)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321
     // ```c++
     //        if (m_CmdLineArgs->GetSaveLastPssm()) {

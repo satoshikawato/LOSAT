@@ -45,7 +45,9 @@
   count its rows by the Seq-align ids' handles and join following hits whose ids `Match`, as NCBI
   does, which lifted psiblast's refusal of the hits that its PSSM joins and showed copies of one
   record as NCBI's PSSM does, and refused the ids that NCBI's handles can take for one and copies
-  with another hit between them)
+  with another hit between them; on 2026-11-11 line DBID pssmread made psiblast's PSSM read each
+  alignment's letters by its Seq-align id as NCBI's scope gets them, another sequence's or none
+  with NCBI's warning, which line DBID pssmrows refused)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -662,9 +664,19 @@ database's texts of its loads and before the batch's query warnings, and the row
 Seq-align ids `Match` as one (the row of such hits). psiblast with a PSSM file (`-out_pssm`,
 `-out_ascii_pssm`), and each of its rounds that makes the PSSM of the next round
 (`-num_iterations` other than 1), reads the letters of each aligned sequence by its Seq-align id for
-the PSSM, so such a run is refused as the lists that read the sequence are, also for the sequences of
-its longer list beyond `-max_target_seqs`: those with an alignment below `-inclusion_ethresh`, the
-only ones the PSSM reads (in a round whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off, one by one).
+the PSSM, also for the sequences of its longer list beyond `-max_target_seqs`: those with an
+alignment below `-inclusion_ethresh`, the only ones the PSSM reads (in a round whose prefetch
+`PRE_FETCH_SEQS_LIMIT` turns off, one by one). Each alignment reads its range of the sequence that
+NCBI's scope gets by that id: the sequence itself, or the other sequence that the lookup gives first
+where one of its ids compares equal to the Seq-align id (one accession under `gb`, `emb` or `dbj`);
+where it gets none (a `ref` or local id of the same text, an id found nowhere) or the range ends
+beyond that sequence's letters, LOSAT writes NCBI's `Warning: [psiblast] Failed to retrieve sequence`
+with the Seq-align id for the alignment, after the round's report (with one round, after the query's
+report and before the next query's warnings), and the alignment's row of the multiple alignment
+becomes the query's letters, which the purge removes. A lookup that NCBI's scope can answer with
+either of two sequences (one that another reported sequence also holds), a lookup that fails, and
+in a round whose prefetch is off an id that another sequence's id matches weakly are refused as the
+lists that read the sequence refuse them.
 Its multiple alignment has a row for each handle of these Seq-align ids, and a Seq-align whose id
 `Match`es the previous Seq-align's id goes into the previous row, as NCBI's `CPsiBlastInputData`
 makes them: copies of one record that follow each other share a row, and so do two other sequences

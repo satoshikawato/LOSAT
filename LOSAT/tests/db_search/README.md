@@ -606,8 +606,8 @@ following hits whose Seq-align ids `Match` (`gb|FFF00043.1|` and `gb|FFF00043|` 
 row of the PSSM's multiple alignment, make that PSSM as NCBI does (`db.id.wkb.ps.join.i2.6`, NCBI's bytes since line DBID
 pssmrows; weakbatch refused it). `ids/wkb_e3_v5` (`make_ids.py
 --weakbatch-only`, from `ids/wkb_e3.faa`) holds `gb|FFF00043.1|`, `gb|ZZZ00001.1|` and then `gb|FFF00043|`, which the
-lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, refused without the variable
-(`db.id.wkb.ps.e3.i2.7.reject`); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
+lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, which reads the first one's letters
+for it (`db.id.wkb.ps.e3.s1.7`, NCBI's bytes since line DBID pssmread; refused before); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
 `gb|WWW00001.1|`, which the PSSM does not read (`db.id.wkb.ps.p1.i2.7`, NCBI's bytes); the query is `ids/wkb_qy.faa`.
 
 Rows `db.id.psr.*` (line DBID, pssmrows; databases `ids/psr_*` from `ids/psr_*.faa` by `make_ids.py --pssmrows-only`, all
@@ -642,8 +642,25 @@ rounds) and `db.id.psr.gim.s1q` (round 1 and its ASCII PSSM) are NCBI's bytes. `
 `gb|HHH00001|`) and `psr_vm` (`gb|AAA00001.1|`, then `gb|AAA00001|`) hold a sequence whose Seq-align id the lookup
 does not give back as that sequence; it is not included at `-inclusion_ethresh 1e-100` (`psr_jv`) and `1e-150`
 (`psr_vm`), so `db.id.psr.jv.r3q.6` and `db.id.psr.vm.r3q.6` (three rounds, `qseqid`) are NCBI's bytes. At the default
-threshold `psr_jv` includes it: NCBI warns `Failed to retrieve sequence gb|HHH00001|` and drops its letters, and LOSAT
-refuses (`db.id.psr.jv.r3q.i.reject`).
+threshold `psr_jv` includes it: NCBI warns `Failed to retrieve sequence gb|HHH00001|` (its lookup gives the shorter
+`gb|HHH00001.1|`) and the row, joined with `gb|HHH00001.1|`'s, becomes the query's; `db.id.psr.jv.r3q.i.6` is NCBI's bytes
+(pssmread writes it).
+
+Rows `db.id.prd.*` (line DBID, pssmread; databases `ids/prd_*` from `ids/prd_*.faa` by `make_ids.py --pssmread-only`, all
+version 5 but `prd_as1_4`; queries `ids/prd_q.faa`, `ids/prd_q2.faa` (two queries), `ids/prd_q3.faa` (three, the second with an
+`O`) and the PSSM query `ids/prd_q.asn.gz`, NCBI's `-out_pssm` of `prd_q.faa`): psiblast's PSSM reads the letters of each
+included subject by its Seq-align id, so a record whose id the lookup gives back as another sequence Y (A is
+`gb|AAA00001|`, Y `gb|AAA00001.1|`, listed first) has Y's letters in its row if A's HSP range fits in Y, and otherwise NCBI
+warns `Failed to retrieve sequence gb|AAA00001|` once for each such HSP and the row is the query's. `prd_av` (Y of A's
+length: read; `db.id.prd.av.s1`, the ASCII PSSM, and `.r3`, three rounds), `prd_ad` (Y as `dbj|AAA00001.1|`: read, no
+warning; `db.id.prd.ad.s1`), `prd_as1` (Y one letter shorter than A's HSP: one warning; `db.id.prd.as1.*`: round 1's ASCII PSSM
+(`s1`), two queries over three rounds (`r3q2`; each PSSM's warning comes after its round, before the next round's), two
+queries and the last round's PSSM (`s2q2`; a warning at each PSSM), three queries (`s1q3`, `r2q3`; each query's PSSM warning
+comes after its report, before the next query's warnings) and an `-in_pssm` search (`ip2`; the PSSM after round 1 warns)),
+`prd_as1_4` (the same in a version 4 database; `db.id.prd.as1v4.s1`), `prd_ar` (Y as `ref|AAA00001.1|`, whose ids do not
+compare equal to A's: the loader keeps none and NCBI warns; `db.id.prd.ar.r3`) and `prd_t2` (A in two HSPs over a short Y:
+two warnings; `db.id.prd.t2.s1`). The `.err` files are frozen (the warning counts are 0 for `av` and `ad`, 1 for `s1`,
+`as1v4.s1`, `ip2` and `ar.r3`, 2 for `r3q2` and `t2.s1`, 3 for `s1q3` and `r2q3`, 4 for `s2q2`).
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

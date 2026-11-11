@@ -3628,13 +3628,28 @@ fn prefetch_gets_no_bioseq(
     }
     Ok(match subject.found() {
         Some(FoundInstead::Nothing) => true,
-        Some(FoundInstead::Sequence(other)) => !loader_keeps(
-            &db.defline_set(*other)
-                .map_err(|error| database_error(error, program))?,
-            subject,
-        ),
+        Some(FoundInstead::Sequence(other)) => {
+            loader_gives(db, subject, *other, program)?.is_none()
+        }
         _ => false,
     })
+}
+
+/// The sequence, by ordinal id, that NCBI's scope gets by the Seq-align id of `subject` where
+/// the lookup gives the sequence `other` first (`FoundInstead::Sequence`): that one where the
+/// data loader keeps it ([`loader_keeps`]), else none (a null handle: the prefetch reads nothing
+/// for it, [`prefetch_gets_no_bioseq`], and psiblast's PSSM warns that it cannot read it,
+/// `ParsedSubject::pssm_read`).
+pub(crate) fn loader_gives(
+    db: &SeqDb,
+    subject: &crate::report::db_subject::ParsedSubject,
+    other: u32,
+    program: &str,
+) -> Result<Option<u32>> {
+    let set = db
+        .defline_set(other)
+        .map_err(|error| database_error(error, program))?;
+    Ok(loader_keeps(&set, subject).then_some(other))
 }
 
 /// Whether NCBI's data loader keeps the sequence of the definition lines `set` that the lookup of

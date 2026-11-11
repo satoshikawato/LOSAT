@@ -36,7 +36,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(all(test, unix))]
 use crate::cli::NativeError;
 use crate::report::blast_xml::HitTaxonomy;
-use crate::report::db_subject::ParsedSubject;
+use crate::report::db_subject::{ParsedSubject, PssmRead};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
@@ -1289,25 +1289,31 @@ impl ListedTitles<'_> {
     //         sequence_data.erase();
     //         ERR_POST(Warning << "Failed to retrieve sequence " <<
     // ```
-    /// LOSAT's refusals of the subjects of psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`), made
-    /// from the Seq-aligns of `hit_lists` before the formatter's cut to `-max_target_seqs`: NCBI
-    /// reads the letters of each by its Seq-align id, as the formats that read the subject do
-    /// (`ParsedSubject::fetched`), also for those beyond the cut that no report shows; where
-    /// that read fails it drops the letters with a warning. Following subjects whose Seq-align ids
-    /// `Match` share a row of the PSSM's multiple alignment, each with the letters read by its own
-    /// id (`psiblast::pssm::input_msa`). Only the subjects with a Seq-align below
-    /// `inclusion_ethresh` are read (`psi_round::included`). `prefetch`: whether each query's
-    /// batch prefetches (the round's), which reads them all by their own ids before the PSSM;
-    /// one whose prefetch is off reads them one by one (`ParsedSubject::fetched`'s
-    /// `one_by_one`).
-    pub(super) fn check_pssm_subjects(
+    /// What psiblast's PSSM reads of its subjects by their Seq-align ids, made from the
+    /// Seq-aligns of `hit_lists` before the formatter's cut to `-max_target_seqs`
+    /// (`PssmReads`): NCBI reads the letters of each Seq-align's range by its Seq-align id, also
+    /// for subjects beyond the cut that no report shows, and only of the subjects with a
+    /// Seq-align below `inclusion_ethresh` (`psi_round::included`). Following subjects whose
+    /// Seq-align ids `Match` share a row of the PSSM's multiple alignment, each with the letters
+    /// read by its own id (`psiblast::pssm::input_msa`). A subject's read is its own letters,
+    /// another sequence's that NCBI's scope gets by its id (`common::database::loader_gives`),
+    /// or none (`ParsedSubject::pssm_read`); LOSAT refuses the others where a PSSM is made
+    /// (`PssmReads::check`). `prefetch`: whether each query's batch prefetches (the round's),
+    /// which reads them all by their own ids before the PSSM; one whose prefetch is off reads
+    /// them one by one (`ParsedSubject::pssm_read`'s `one_by_one`).
+    pub(super) fn pssm_reads(
         &self,
+        database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
         inclusion_ethresh: f64,
-    ) -> Result<()> {
+    ) -> Result<PssmReads> {
+        let mut reads = PssmReads {
+            read: std::collections::BTreeMap::new(),
+            refused: None,
+        };
         if self.parsed.is_empty() {
-            return Ok(());
+            return Ok(reads);
         }
         let included = |hsp_list: &crate::algorithm::blastp::hsp::BlastpHspList| {
             hsp_list
@@ -1315,34 +1321,50 @@ impl ListedTitles<'_> {
                 .iter()
                 .any(|hsp| super::psi_round::included(hsp.e_value, inclusion_ethresh))
         };
-        let queries = || {
-            hit_lists
-                .iter()
-                .enumerate()
-                .filter_map(|(query, hit_list)| {
-                    let hit_list = hit_list.as_ref()?;
-                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                    Some((query, &hit_list.hsplist_array[..count]))
-                })
-        };
-        let read: std::collections::BTreeSet<usize> = queries()
-            .flat_map(|(_, lists)| lists.iter())
+        let read: std::collections::BTreeSet<usize> = hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                &hit_list.hsplist_array[..count]
+            })
             .filter(|hsp_list| included(hsp_list))
             .map(|hsp_list| hsp_list.oid as usize)
             .collect();
-        let reads = Self::batch_reads(hit_lists, prefetch);
+        let batch_reads = Self::batch_reads(hit_lists, prefetch);
         for rank in read {
-            if let Some(subject) = self.parsed_subject(rank) {
-                subject.fetched(false, reads.one_by_one(rank as u32)).map_err(|reason| {
-                    shared::parsed_refusal(
-                        self.listed.ordinals[rank],
-                        &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
-                        self.program,
-                    )
-                })?;
+            let Some(subject) = self.parsed_subject(rank) else {
+                continue;
+            };
+            let ordinal = self.listed.ordinals[rank];
+            match subject.pssm_read(batch_reads.one_by_one(rank as u32)) {
+                Ok(PssmRead::Itself) => {}
+                Ok(PssmRead::Nothing) => {
+                    reads.read.insert(rank, None);
+                }
+                Ok(PssmRead::Another(other)) => {
+                    let letters =
+                        match shared::loader_gives(&database.db, subject, other, self.program)? {
+                            Some(other) => Some(
+                                database
+                                    .db
+                                    .read_sequence(other)
+                                    .map_err(|error| shared::database_error(error, self.program))?
+                                    .protein(0)
+                                    .to_vec(),
+                            ),
+                            None => None,
+                        };
+                    reads.read.insert(rank, letters);
+                }
+                Err(reason) => {
+                    if reads.refused.is_none() {
+                        reads.refused = Some((ordinal, reason, self.program));
+                    }
+                }
             }
         }
-        Ok(())
+        Ok(reads)
     }
 
     /// LOSAT's refusals of the subjects of ranks `ranks` that a batch's prefetch reads though its
@@ -3907,5 +3929,43 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(&cwd).unwrap();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+// `algorithm::psiblast::pssm::input_msa`)
+/// What psiblast's PSSM reads of the subjects with parsed Seq-ids that it includes, by rank,
+/// where that is not the subject's own letters (`ListedTitles::pssm_reads`): another sequence's
+/// letters in NCBIstdaa, or `None` for no sequence (NCBI's warning `Failed to retrieve sequence`,
+/// and the row becomes the query's). `refused`: LOSAT's refusal of the first subject whose read
+/// it does not make as NCBI, which stops a run where a PSSM is made (`check`).
+#[derive(Default)]
+pub(super) struct PssmReads {
+    read: std::collections::BTreeMap<usize, Option<Vec<u8>>>,
+    /// The ordinal id, the reason and the program of the refusal.
+    refused: Option<(u32, String, &'static str)>,
+}
+
+impl PssmReads {
+    /// LOSAT's refusal of the reads, where a PSSM is made (`-out_pssm` and `-out_ascii_pssm`, and
+    /// a round that makes the next round's PSSM).
+    pub(super) fn check(&self) -> Result<()> {
+        match &self.refused {
+            Some((ordinal, reason, program)) => Err(shared::parsed_refusal(
+                *ordinal,
+                &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
+                program,
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// The letters that the PSSM reads by the Seq-align id of the subject of rank `s_idx`:
+    /// `own()` (its own letters), another sequence's, or `None` for no sequence.
+    pub(super) fn letters(&self, s_idx: u32, own: impl FnOnce() -> Vec<u8>) -> Option<Vec<u8>> {
+        match self.read.get(&(s_idx as usize)) {
+            Some(read) => read.clone(),
+            None => Some(own()),
+        }
     }
 }

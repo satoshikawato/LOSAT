@@ -146,6 +146,10 @@ C) through `prd_mb.pal` for `tests/psiblast_pssm_read_order.rs` (the last query'
 Review 3 of that line: `prd_np` and its version 4 copy `prd_np_4` from `prd_np.faa` (A and B without `-parse_seqids`,
 taxid 99990 by `-taxid 99990`: the PSSM reads them by `gnl|BL_ORD_ID|n` and looks their taxid up), and `prd_tc` (A
 `gb|AAA00001.1|` taxid 99990 and B `gb|BBB00001.1|` taxid 150 by `prd_tc.map`, one slot of NCBI's taxonomy cache).
+Review 4 of that line (the slot of NCBI's taxonomy cache that 99990 and 150 share, maps of the same names): `prd_m` (A
+with the definition lines `gb|AAA00001.1|` taxid 99990, `gb|CCC00001.1|` 150 and `gb|DDD00001.1|` 99990: one load looks
+99990 up twice around 150), `prd_m2` (A `gb|AAA00001.1|` 99990 and `gb|CCC00001.1|` 150, then B `gb|BBB00001.1|` 99990)
+and `prd_ax` (A `gb|AAA00001.1|` 99990 and X `gb|XXX00001.1|` 150, a random sequence that no PSSM reads).
 `--pssmread-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
@@ -310,9 +314,10 @@ def build_pssmread(args: argparse.Namespace) -> None:
                                  ("prd_mbab", "prd_mbab.faa", "5"),
                                  ("prdn_u0y", "prdn_u0y.fna", "5"), ("prdn_ua", "prdn_ua.fna", "5"),
                                  ("prdn_z0y", "prdn_z0y.fna", "5"), ("prdn_za", "prdn_za.fna", "5"),
-                                 ("prd_tc", "prd_tc.faa", "5")):
+                                 ("prd_tc", "prd_tc.faa", "5"), ("prd_m", "prd_m.faa", "5"),
+                                 ("prd_m2", "prd_m2.faa", "5"), ("prd_ax", "prd_ax.faa", "5")):
         maps = {"prd_txself": "prd_txself.map", "prd_tw0y": "prd_tw0y.map", "prd_tu2y": "prd_tu2y.map",
-                "prd_tc": "prd_tc.map"}
+                "prd_tc": "prd_tc.map", "prd_m": "prd_m.map", "prd_m2": "prd_m2.map", "prd_ax": "prd_ax.map"}
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta),
              "-dbtype", "nucl" if fasta.endswith(".fna") else "prot", "-parse_seqids",

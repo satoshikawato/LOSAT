@@ -713,19 +713,27 @@ letters, LOSAT writes NCBI's `Warning: [psiblast] Failed to retrieve sequence` w
 for the alignment, after the round's report (with one round, after the query's report and before
 the next query's warnings, the last query's before the epilog), and the alignment's row of the
 multiple alignment becomes the query's letters, which the purge removes. In a batch whose prefetch is
-off, a read that loads a sequence the scope has not read before in the query (also a sequence without
-parsed Seq-ids, which the PSSM reads by `gnl|BL_ORD_ID|n`) looks up the taxids that the run has not
-looked up before in its volume, and LOSAT writes the taxonomy database's texts of those lookups (a
-wrong magic number or count at the run's first lookup, the offset error of the last entry) where NCBI
-writes them: after the query's report, with the PSSM's warnings in the order of its reads, also where
-a PSSM error stops the run after that query (where the query's report read the sequence first, or an
-earlier lookup of the run wrote the texts of opening, there is nothing to write). Refused: an id that
+off, a read that loads a sequence no fetch of the run has loaded before (also a sequence without
+parsed Seq-ids, which the PSSM reads by `gnl|BL_ORD_ID|n`) looks each taxid of its definition lines up
+in its volume's 256-slot taxonomy cache, which keeps a taxid for the run's later queries and rounds and
+asks the taxonomy database at the volume's first lookup of a taxid and where the taxid's slot
+(`taxid & 255`) holds another one. LOSAT writes the taxonomy database's texts of those lookups (a wrong
+magic number or count at the run's first lookup, the offset error of the last entry at each lookup of
+its taxid that asks) where NCBI writes them: after the query's report, with the PSSM's warnings in the
+order of its reads (twice for one sequence whose definition lines hold that taxid before and after
+another taxid of its slot, again for a later sequence after a load of such a taxid), also where a PSSM
+error stops the run after that query (where the query's report read the sequence first, or an earlier
+lookup of the run wrote the texts of opening, there is nothing to write). NCBI's scope does not keep a
+query's sequences for its later rounds and queries: a read of a sequence loaded before loads it again
+or not (after 40 other included subjects it does, after none it does not), which writes nothing where
+the slot holds that taxid either way. Refused: an id that
 another sequence also holds besides the one the lookup gives (NCBI's scope can read that one where it
 has read it before, and with the prefetch on as its memory layout falls), a lookup that fails on a
 file, the same record whose read writes taxonomy texts, in a batch whose prefetch is off an id that
-another sequence's id matches weakly, and a read that looks up again the taxid of the offset error
-where a volume holds it and another taxid of the same slot of NCBI's 256-slot taxonomy cache (whether
-NCBI writes the text again follows the order of its fetches).
+another sequence's id matches weakly, a read of a sequence loaded before whose load again would write
+the offset error again (another taxid of its slot was looked up since), and a load after such a read
+that may have put another taxid of the slot there (whether NCBI writes the text there follows what its
+scope keeps).
 Its multiple alignment has a row for each handle of these Seq-align ids, and a Seq-align whose id
 `Match`es the previous Seq-align's id goes into the previous row, as NCBI's `CPsiBlastInputData`
 makes them: copies of one record that follow each other share a row, and so do two other sequences

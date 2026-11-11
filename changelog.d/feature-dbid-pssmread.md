@@ -13,4 +13,8 @@
   database is damaged: the taxonomy database's texts of the lookups that the PSSM's reads make
   (also for a database without parsed Seq-ids, read by `gnl|BL_ORD_ID|n`, and where a PSSM error
   stops the run) are now written where NCBI BLAST+ 2.17.0 writes them, after the query's report and
-  among the PSSM's warnings. LOSAT wrote nothing there, or refused the run.
+  among the PSSM's warnings. The offset error of the last entry comes as often as NCBI's 256-slot
+  taxonomy cache of a volume asks for it: twice for one sequence whose definition lines hold its
+  taxid before and after another taxid of the same slot, again for a later sequence after such a
+  taxid. LOSAT wrote nothing there, or refused the run. Still refused: a later query or round that
+  reads such a sequence again where NCBI's count depends on whether it loads it again.

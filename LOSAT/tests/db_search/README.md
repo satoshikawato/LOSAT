@@ -705,9 +705,20 @@ is the run's first lookup NCBI writes the taxonomy database's text after the que
 the next query's. `np.bad.pf0.s1` (a wrong magic number), `np4.lastoff.pf1.q3` (three queries, the offset error of taxid
 99990 after the first query's report and before the second query's O warning), `np.count.pf0.r2` (two rounds, a count larger
 than the entries: after round 1's report, before round 2's composition warning) and `np.bad.pf0.stop` (`-pseudocount -1`:
-the text, then NCBI's PSSM error, exit 1) are NCBI's bytes; `tc.lastoff.pf0.q2.reject` is refused: the second query's PSSM
-loads A again after B, whose taxid takes the same slot of NCBI's 256-slot taxonomy cache of a volume, so whether NCBI writes
-the offset error again depends on the order of its fetches.
+the text, then NCBI's PSSM error, exit 1) are NCBI's bytes; `tc.lastoff.pf0.q2.reject` is refused: each query's PSSM
+reads B, then A; the second query reads B again, whose taxid takes the same slot of NCBI's 256-slot taxonomy cache of a
+volume only where NCBI's scope loads B again, so A's read again writes the offset error or not as the scope decides (it
+loads them again after 40 other included subjects, not after none).
+
+Review 4 of pssmread (rows `db.id.prd4.*`; `ids/prd_m`, `ids/prd_m2` and `ids/prd_ax` from the FASTA and maps of the same
+names by `make_ids.py --pssmread-only`, `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`, the prefetch off and a report that
+reads nothing of the subjects): NCBI's volume cache keeps one taxid per slot (`taxid & 255`), and each lookup of taxid 99990
+that finds another taxid of its slot (150) there writes the offset error again, in the order of the PSSM's reads and of the
+definition lines of each load. `m.lastoff.pf0.s1` (A's lines 99990, 150, 99990: twice), `m2.lastoff.pf0.s1` (A 99990 and 150,
+then B 99990: twice), `ax.lastoff.pf0.q2` and `ax.lastoff.pf0.r2` (A 99990 and X 150, which no PSSM includes: once, the second
+query's or round's read of A writes nothing whether NCBI's scope loads A again or not) are NCBI's bytes;
+`m2.lastoff.pf0.q2.reject` is refused: the second query reads A again, which puts 150 in the slot only where NCBI's scope
+loads A again, so B's read again writes the offset error or not as the scope decides.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

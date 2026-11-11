@@ -336,7 +336,8 @@ psiblast is blastp with a round driver (`blastp/blast_engine/psi_round.rs`, `sea
 
 blastx, tblastn and tblastx follow the same stages with their own drivers: blastx in
 `blastx/native.rs`, `search.rs` and `runtime.rs`; tblastn in `tblastn/tblastn_app.rs` and
-`stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`. rpsblast has no driver of its
+`stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
+sets up a query batch with `batch_setup.rs` and `context_cutoffs.rs`. rpsblast has no driver of its
 own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_search` from
 `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the profiles are the
 "query" and the user's query is the "subject".

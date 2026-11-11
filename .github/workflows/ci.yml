@@ -14,9 +14,14 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run of its older head. On dev and main a run that has
+# started ends (a newer one waits for it): each run of dev (a person's merge, or dev-head.yml's
+# dispatch every four hours) gives a verdict on its commit. Until 2026-11, 95 of 165 such runs on
+# dev were cancelled by the next one; the runs of dev are a few a day (merges by Auto-merge start
+# none), against about 50 pull request runs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The checks of `rust` other than cargo test; the tests are built in `rust-tests` and run in

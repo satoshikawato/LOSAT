@@ -3707,10 +3707,10 @@ pub(crate) fn pssm_bioseq(
     let Some(target) = set.bioseq_defline(id) else {
         return Ok(None);
     };
-    Ok((!set
+    Ok(set
         .display_defline(id)
-        .is_some_and(|shown| shown.index != target))
-    .then_some(other))
+        .is_none_or(|shown| shown.index == target)
+        .then_some(other))
 }
 
 /// Whether NCBI's data loader keeps the sequence of the definition lines `set` that the lookup of

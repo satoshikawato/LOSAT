@@ -242,6 +242,13 @@ pub(super) fn render(
         .formats
         .iter()
         .any(|format| xml2_kind(format.outfmt).is_some());
+    // Every structured format is XML2 or JSON (outfmt 5 is not among them; the library takes
+    // several formats).
+    let xml_only_xml2 = outputs
+        .formats
+        .iter()
+        .filter(|format| is_structured_xml(format.outfmt))
+        .all(|format| xml2_kind(format.outfmt).is_some());
     let xml = if outputs
         .formats
         .iter()
@@ -262,6 +269,7 @@ pub(super) fn render(
             seg,
             ranges,
             xml_is_xml2,
+            xml_only_xml2,
             xml_taxa,
         )?)
     } else {

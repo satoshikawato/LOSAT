@@ -694,6 +694,23 @@ pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::
 ///     }
 /// ```
 pub fn parse_seg_option(value: &str, program: &str) -> anyhow::Result<SegSpec> {
+    read_seg_option(value, program).map_err(|error| match error {
+        SegOptionError::Ncbi(message) => options_error(message),
+        SegOptionError::Losat(error) => error,
+    })
+}
+
+/// Why `read_seg_option` refuses a `-seg` value: NCBI's error of the filtering handler (its
+/// message, a `CInputException`), or LOSAT's refusal of a value that NCBI accepts.
+#[derive(Debug)]
+pub enum SegOptionError {
+    Ncbi(&'static str),
+    Losat(anyhow::Error),
+}
+
+/// `parse_seg_option` with NCBI's error and LOSAT's refusal apart, for a program that reports
+/// them at different times (BLASTX: `algorithm::blastx::args`).
+pub fn read_seg_option(value: &str, program: &str) -> Result<SegSpec, SegOptionError> {
     match value {
         "no" => return Ok(SegSpec::No),
         "yes" => return Ok(SegSpec::Yes),
@@ -701,11 +718,11 @@ pub fn parse_seg_option(value: &str, program: &str) -> anyhow::Result<SegSpec> {
     }
     let tokens: Vec<&str> = value.split(' ').collect();
     if tokens.len() != 3 {
-        return Err(options_error(
+        return Err(SegOptionError::Ncbi(
             "Invalid number of arguments to filtering option",
         ));
     }
-    let invalid = || options_error("Invalid input for filtering parameters");
+    let invalid = || SegOptionError::Ncbi("Invalid input for filtering parameters");
     let window = tokens[0].parse::<i32>().map_err(|_| invalid())?;
     let mut cuts = [0.0; 2];
     for (cut, token) in cuts.iter_mut().zip(&tokens[1..]) {
@@ -717,9 +734,9 @@ pub fn parse_seg_option(value: &str, program: &str) -> anyhow::Result<SegSpec> {
         *cut = match ncbi_string_to_double(token) {
             Ok(number) if number.is_finite() => number,
             Ok(_) | Err(NcbiDoubleError::Unsupported) if strtod_reads_whole(token) => {
-                anyhow::bail!(
+                return Err(SegOptionError::Losat(anyhow::anyhow!(
                     "the SEG locut or hicut {token:?} (not a finite decimal number) is not supported by LOSAT's {program}"
-                )
+                )))
             }
             Ok(_) | Err(_) => return Err(invalid()),
         };

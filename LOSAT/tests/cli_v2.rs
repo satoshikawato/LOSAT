@@ -2158,19 +2158,11 @@ fn mt_mode_takes_zero_to_two_and_needs_num_threads() {
 }
 
 #[test]
-fn use_index_false_parses_and_true_is_an_unsupported_error() {
-    for value in ["false", "False", "f", "no", "0"] {
+fn use_index_parses_as_an_ncbi_boolean() {
+    for value in [
+        "false", "False", "f", "no", "0", "true", "T", "yes", "1", "on",
+    ] {
         assert!(parse("blastn", &["-use_index", value]).is_ok(), "{value}");
-    }
-    for value in ["true", "T", "yes", "1"] {
-        let error =
-            LOSAT::cli::render_message(&parse("blastn", &["-use_index", value]).unwrap_err());
-        assert!(
-            error.contains(
-                "-use_index true (the megablast index) is not supported by LOSAT's BLASTN"
-            ),
-            "{value}: {error}"
-        );
     }
     assert!(parse("blastn", &["-use_index", "maybe"]).is_err());
     // NCBI's other programs have no -use_index; `-index_name` stays unported.

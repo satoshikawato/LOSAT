@@ -41,7 +41,8 @@ fn cull_key(hsp: &Hsp) -> CullKey {
 /// NCBI's culling writer (or pipe) over the HSPs of one batch or chunk: `write` is
 /// `s_BlastHSPCullingRun` for the HSP list of one subject, `finalize` is
 /// `s_BlastHSPCullingFinal`. The result depends on the order of the writes, which must be
-/// NCBI's (subjects in OID order, the HSPs of a subject in the order of its list).
+/// NCBI's: in the preliminary writer, subjects in OID order and the HSPs of a subject in the
+/// order of its list; in the pipe, the order of the sorted hit lists (`traceback_pipe`).
 pub(crate) struct Culling {
     forest: CullingForest<Hsp>,
     /// The length of each context, `query_info->contexts[context].query_length`.
@@ -101,9 +102,10 @@ impl Culling {
         Ok(())
     }
 
-    /// `s_BlastHSPCullingFinal`: a hit list of at most `max` HSP lists for each of the
-    /// `num_queries` queries (empty for a query without a tree, as the collector leaves it);
-    /// the HSP lists of a query in the order of their subject's first HSP in the rip, each
+    /// `s_BlastHSPCullingFinal`: the hit list of each of the `num_queries` queries (empty for
+    /// a query without a tree, as the collector leaves it), made with `max`
+    /// (`prelim_hitlist_size`) but not cut to it: NCBI appends every culled HSP list. The HSP
+    /// lists of a query come in the order of their subject's first HSP in the rip, each
     /// sorted by `ScoreCompareHSPs` and with its best e-value.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:517-582
@@ -160,8 +162,8 @@ impl Culling {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:705-728
 /// ```c++
 ///    for (qid = 0; qid < results->num_queries; ++qid) {
-///       if (!(results->hitlist_array[qid])) continue;
-///       num_list = results->hitlist_array[qid]->hsplist_count;
+///          if (!(results->hitlist_array[qid])) continue;
+///          num_list = results->hitlist_array[qid]->hsplist_count;
 ///          for (sid = 0; sid < num_list; ++sid) {
 ///         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
 ///         	 Blast_HSPListSortByEvalue(hsp_list);

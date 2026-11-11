@@ -1075,11 +1075,12 @@ mod tests {
         assert_eq!(out[1].1, vec![(4, vec![(9, 0), (6, 3)]), (2, vec![(7, 2)])]);
     }
 
-    // The dominance boundaries pinned for BLASTX's tree before it moved to this forest (the
-    // `C` rows of tests/unit/blastx_d_boundary_expected.tsv: q_start, q_end, score, OID and
-    // subject start of p, then of y, then s_DominateTest(p, y)): the 50 % overlap edge, the
-    // score/length criterion, the ties broken by score, OID and subject offset, an empty
-    // range, and scores near INT4_MAX (NCBI computes in Int8).
+    // NCBI c++/src/algo/blast/core/hspfilter_culling.c:79-120 (s_DominateTest): the
+    // boundaries pinned for BLASTX's tree before it moved to this forest (the `C` rows of
+    // tests/unit/blastx_d_boundary_expected.tsv: q_start, q_end, score, OID and subject start
+    // of p, then of y, then s_DominateTest(p, y)): the 50 % overlap edge, the score/length
+    // criterion, the identical HSPs broken by OID and subject offset, an empty range, and
+    // scores near INT4_MAX (NCBI computes in Int8).
     #[test]
     fn pinned_dominance_boundaries() {
         let golden = include_str!("../../tests/unit/blastx_d_boundary_expected.tsv");

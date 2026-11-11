@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{
-    lmdb_file_name, max_entry_per_txn, string_to_int, string_to_uint, string_to_uint8, txn_batches,
-    LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
+    lmdb_file_name, max_entry_per_txn, txn_batches, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
 use crate::writedb::platform::{LmdbPlatform, Platform};
 
@@ -66,7 +65,7 @@ fn write(c: &Content, dir: &Path) -> Result<(), crate::writedb::WriteDbError> {
     let pdb = dir.join(format!("db.{t}db"));
     let ptf = lmdb_file_name(&pdb, "tf");
     let settings = LmdbEnvSettings {
-        max_lmdb_txn_entry: c.max_txn.clone(),
+        max_lmdb_txn_entry: c.max_txn.clone().map(String::into_bytes),
         ..Default::default()
     };
     let (m1, m2) = if c.map_size > 0 {
@@ -617,29 +616,10 @@ fn large_trees_and_overflow_freelist_records() {
 
 #[test]
 fn environment_values_are_parsed_as_ncbi_parses_them() {
-    // NStr::StringToInt / StringToUInt / StringToUInt8 with default flags (makeblastdb
-    // 2.17.0: MAX_LMDB_TXN_ENTRY="+3" is 3, " 3" and "abc" stop it, "3000000000" overflows
-    // int, BLASTDB_LMDB_MAP_SIZE="-5" stops it).
-    assert_eq!(string_to_int("+3"), Ok(3));
-    assert_eq!(string_to_int("-1"), Ok(-1));
-    assert!(string_to_int(" 3").is_err());
-    assert!(string_to_int("3 ").is_err());
-    assert!(string_to_int("abc").is_err());
-    assert!(string_to_int("").is_err());
-    assert!(string_to_int("3000000000")
-        .unwrap_err()
-        .ends_with("to int, overflow"));
-    assert_eq!(string_to_uint("4294967295"), Ok(u32::MAX));
-    assert!(string_to_uint("4294967296")
-        .unwrap_err()
-        .ends_with("to unsigned int, overflow"));
-    assert!(string_to_uint8("-5").is_err());
-    assert_eq!(string_to_uint8("+40960"), Ok(40960));
-    assert_eq!(string_to_uint8("18446744073709551615"), Ok(u64::MAX));
-    assert!(string_to_uint8("18446744073709551616").is_err());
+    // NStr::StringToInt with the default flags (its cases: `ncbi_str`'s tests).
     // m_MaxEntryPerTxn is unsigned: -1 is 4294967295.
     let s = |v: &str| LmdbEnvSettings {
-        max_lmdb_txn_entry: Some(v.to_string()),
+        max_lmdb_txn_entry: Some(v.as_bytes().to_vec()),
         ..Default::default()
     };
     assert_eq!(
@@ -647,7 +627,18 @@ fn environment_values_are_parsed_as_ncbi_parses_them() {
         Some(40_000)
     );
     assert_eq!(max_entry_per_txn(&s("-1")).ok(), Some(u32::MAX));
-    assert!(max_entry_per_txn(&s("7x")).is_err());
+    assert_eq!(max_entry_per_txn(&s("+3")).ok(), Some(3));
+    // The errors are NCBI's exceptions (makeblastdb 2.17.0 with two sequences: "Error: NCBI C++
+    // Exception:", probe of 2026-11-08).
+    match max_entry_per_txn(&s("7x")) {
+        Err(crate::writedb::WriteDbError::Exception(e)) => {
+            assert_eq!(
+                (e.get_msg(), e.site().line),
+                ("Cannot convert string '7x' to Int8", 870)
+            )
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]
@@ -679,6 +670,45 @@ fn an_oid_without_ids_in_the_middle_stops_the_pos_file() {
         e.to_string(),
         "Error: Input id list not in ascending oid order"
     );
+}
+
+// `CBlastEnv` makes every failure of `mdb_env_open` the `CSeqDBException` "LMDB runtime error:
+// mdb_env_open: <mdb_strerror>" (seqdb_lmdb.cpp:103-110): a map that the platform's `size_t`
+// cannot hold, and a lock file `NAME.pdb-lock` whose name passes 255 bytes (makeblastdb 2.17.0,
+// probe of 2026-11-08), each before the data file is made.
+#[test]
+fn an_environment_that_does_not_open_is_ncbi_s_database_error() {
+    let dir = TempDir::new("envopen");
+    let small = LmdbPlatform {
+        max_map_size: u64::from(u32::MAX),
+        ..LmdbPlatform::LINUX_X86_64
+    };
+    let database = |e: crate::writedb::WriteDbError| match e {
+        crate::writedb::WriteDbError::Database(message) => message,
+        other => panic!("{other:?}"),
+    };
+    let pdb = dir.0.join("db.pdb");
+    let settings = LmdbEnvSettings::default();
+    let Err(e) = WriteDbLmdb::new(&pdb, 1 << 32, &small, &settings) else {
+        panic!("a map of 4 GiB on a 32-bit platform");
+    };
+    assert_eq!(
+        database(e),
+        "LMDB runtime error: mdb_env_open: Cannot allocate memory"
+    );
+    assert!(!pdb.exists());
+    #[cfg(unix)]
+    {
+        let long = dir.0.join(format!("{}.pdb", "e".repeat(247)));
+        let Err(e) = WriteDbTaxId::new(&long, 0, &LmdbPlatform::LINUX_X86_64, &settings) else {
+            panic!("a lock file name of 256 bytes");
+        };
+        assert_eq!(
+            database(e),
+            "LMDB runtime error: mdb_env_open: File name too long"
+        );
+        assert!(!long.exists());
+    }
 }
 
 #[test]

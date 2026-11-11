@@ -293,7 +293,8 @@ pub(crate) fn source_of(given: Option<&Arc<dyn CountsSource>>) -> Arc<dyn Counts
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::winmask::{FileCounts, FormatSite, NCBI_BUILD_ROOT};
+    use crate::ncbi_exception::NCBI_BUILD_ROOT;
+    use crate::utils::winmask::{FileCounts, FormatSite};
 
     fn counts_path(name: &str) -> String {
         format!("{}/tests/winmask/counts/{name}", env!("CARGO_MANIFEST_DIR"))

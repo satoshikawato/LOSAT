@@ -1229,6 +1229,35 @@ impl<H: HitListHsp> BlastpHitList<H> {
         self.purge();
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857
+    // (`core::blast_hspstream`)
+    // ```c
+    //     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
+    //         	  int max_index = hit_list->hsplist_count -1;
+    // ...
+    //         	  Blast_HitListSortByEvalue(hit_list);
+    // ...
+    //         			  s_TrimHitList(hit_list, i);
+    // ```
+    /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`;
+    /// BLASTP's, PSIBLAST's and RPSBLAST's lists): sorted by E-value and cut where the E-values
+    /// pass the limit, when it holds enough lists.
+    pub(crate) fn cbs_close_trim(&mut self, hitlist_size: usize) {
+        use crate::core::blast_hspstream::{cbs_trim_count, cbs_trim_sorts};
+        let count = self.hsplist_count;
+        if !cbs_trim_sorts(count, hitlist_size) {
+            return;
+        }
+        self.sort_by_evalue();
+        let lists = &self.hsplist_array;
+        if let Some(keep) = cbs_trim_count(count, self.hsplist_count, hitlist_size, |i| {
+            lists[i].best_evalue
+        }) {
+            self.hsplist_array.truncate(keep);
+            self.hsplist_count = keep;
+        }
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3314-3326
     // ```c
     //    index1 = 0;

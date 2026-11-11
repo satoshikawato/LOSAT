@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sweep the non-default options of BLASTP, TBLASTN and TBLASTX against NCBI (Session S08+; comparison only).
+"""Sweep the non-default options of BLASTP, TBLASTN, TBLASTX and BLASTX against NCBI (Session S08+; comparison only).
 
 Every case runs NCBI BLAST+ and LOSAT on the same inputs (from LOSAT/, standard input
 empty) with one set of options, in each requested output format, and is classified:
@@ -25,18 +25,25 @@ The options of each program are grouped in sets (`--sets`, default all): matrice
 costs (every pair of NCBI's table for the matrix, read from blast_stat.c, and pairs
 outside it), word size x threshold, window, composition-based statistics (with
 `-ungapped` and `-use_sw_tback`), SEG, e-values, integer spellings, tasks, genetic codes,
-TBLASTN's intron length, X-drops and sum statistics, BLASTP's, TBLASTN's and TBLASTX's masking, TBLASTX's culling limit and
+TBLASTN's and BLASTX's intron length and sum statistics, TBLASTN's X-drops, BLASTP's, TBLASTN's, TBLASTX's and BLASTX's
+masking, BLASTX's query strand, TBLASTX's culling limit and
 `-matrix` (`matrix`; for TBLASTX the nine names and spellings, with an explicit threshold or window),
 `-num_descriptions` / `-num_alignments` (`counts`),
 and the spellings of `-outfmt` (which carry their own format). Exits 1 when any case is
 DIFF.
 
-Usage: option_sweep.py --program blastp|tblastn|tblastx --bin-dir DIR --losat LOSAT
-       [--ncbi-src C++DIR] [--outfmt 0,6,7] [--sets a,b] [--jobs N] [--work DIR] [--api ORACLE]
+Usage: option_sweep.py --program blastp|tblastn|tblastx|blastx --bin-dir DIR --losat LOSAT
+       [--ncbi-src C++DIR] [--outfmt 0,6,7] [--sets a,b] [--jobs N] [--work DIR] [--api ORACLE] [--lock FILE]
+
+With `--lock FILE` (the machine-wide `$BUILD_ROOT/oracle.lock`) each NCBI run takes the lock for
+itself, so other sessions' runs wait seconds, not the whole sweep (skill losat-oracle-runs);
+do not run the sweep under `flock`.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import re
 import shutil
 import subprocess
@@ -53,6 +60,8 @@ INPUTS = {
     "blastp": ["-query", f"{F}/e2e_protein_query.faa", "-subject", f"{F}/e2e_protein_subject.faa"],
     "tblastn": ["-query", f"{F}/e2e_protein_query.faa", "-subject", f"{F}/e2e_tblastn_subject.fna"],
     "tblastx": ["-query", f"{F}/tblastx_multi_query.fasta", "-subject", f"{F}/tblastx_multi_subject.fasta"],
+    # The inputs of the manifest's row sa.blastx.multi.8 (five nucleotide records, two proteins).
+    "blastx": ["-query", f"{F}/e2e_tblastn_subject.fna", "-subject", f"{F}/e2d_t_qp2.faa"],
 }
 REJECTION_MARKERS = (b"not supported by LOSAT", b"which LOSAT does not reproduce")
 MATRICES = ["BLOSUM45", "BLOSUM50", "BLOSUM62", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250", "IDENTITY"]
@@ -83,7 +92,8 @@ def gap_tables(ncbi_src: Path) -> dict[str, list[tuple[int, int]]]:
 
 def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, list[list[str]]]:
     """The option sets of the program: set name -> list of argument lists."""
-    protein = program in ("blastp", "tblastn")
+    # The programs whose gapped search reads NCBI's matrix and gap cost tables.
+    protein = program in ("blastp", "tblastn", "blastx")
     sets: dict[str, list[list[str]]] = {}
     if protein:
         rows = []
@@ -102,16 +112,25 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
         sets["cbs"] += [["-matrix", matrix, "-comp_based_stats", value] for matrix in MATRICES
                         for value in ("0", "1", "3")]
         sets["cbs"] += [["-matrix", matrix, "-ungapped", "-comp_based_stats", "0"] for matrix in MATRICES]
+        # A name NCBI's tables do not know: an ungapped search fails at its first query batch
+        # ("Unknown error code -1"; line LIB, P-S3).
+        sets["cbs"] += [["-matrix", name, "-ungapped", "-comp_based_stats", "0"] for name in ("FOO", "BLOSUM62_20", "")]
         if program == "blastp":
             sets["cbs"] += [["-use_sw_tback", "-comp_based_stats", value] for value in ("0", "1", "2", "3")]
             sets["cbs"] += [["-use_sw_tback"], ["-use_sw_tback", "-matrix", "PAM30"]]
     words = {"blastp": ("1", "2", "3", "4", "5", "6", "7", "8"), "tblastn": ("1", "2", "3", "4", "5", "6", "7", "8"),
-             "tblastx": ("1", "2", "3", "4", "5", "6")}[program]
+             "tblastx": ("1", "2", "3", "4", "5", "6"), "blastx": ("1", "2", "3", "4", "5", "6", "7", "8")}[program]
     thresholds = ("0", "1", "11", "11.5", "13", "30", "999", "-1", "1e1", "0x10", "nan", "+inf")
     sets["word"] = [["-word_size", word] for word in (*words, "0x3", "03", "+3", "3.0")]
     sets["word"] += [["-threshold", value] for value in thresholds]
-    sets["word"] += [["-word_size", word, "-threshold", value] for word in words[1:6]
-                     for value in ("1", "11", "11.5", "21")]
+    # BLASTX's six frames make NCBI's tables of a low threshold take minutes and gigabytes per
+    # case: its pairs are the word sizes LOSAT runs (3 and 5) with thresholds of 11.5 and up.
+    if program == "blastx":
+        sets["word"] += [["-word_size", word, "-threshold", value] for word in ("3", "5")
+                         for value in ("11.5", "21")]
+    else:
+        sets["word"] += [["-word_size", word, "-threshold", value] for word in words[1:6]
+                         for value in ("1", "11", "11.5", "21")]
     if protein:
         sets["word"] += [["-matrix", matrix, "-word_size", word] for matrix in ("PAM30", "BLOSUM45", "IDENTITY")
                          for word in ("2", "5", "6")]
@@ -179,6 +198,24 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
         sets["mask"] = [["-lcase_masking"], ["-soft_masking", "true"], ["-soft_masking", "false"],
                         ["-soft_masking", "F"], ["-soft_masking", "x"], ["-lcase_masking", "-seg", "no"],
                         ["-lcase_masking", "-soft_masking", "false"]]
+    if program == "blastx":
+        sets["task"] = [["-task", task] for task in ("blastx", "blastx-fast", "BLASTX", "tblastn", "blastx-fast ", "")]
+        sets["task"] += [["-task", "blastx-fast", "-word_size", value] for value in ("3", "5", "6")]
+        sets["task"] += [["-task", "blastx-fast", "-matrix", matrix] for matrix in ("PAM30", "BLOSUM80")]
+        sets["word"] += [["-word_size", word] for word in ("-1", "0", "9", "0x5", "05", "+5", "5.0", "", "x")]
+        sets["gencode"] = [["-query_gencode", code] for code in GENCODES]
+        sets["intron"] = [["-max_intron_length", value] for value in ("0", "1", "50", "100", "1000", "-1", "0x10", "+10",
+                                                                     "010", "1e1", "")]
+        sets["intron"] += [["-max_intron_length", "100", "-sum_stats", "false"]]
+        sets["sumstats"] = [["-sum_stats", value] for value in ("true", "false", "T", "F", "yes", "no", "1", "0", "x",
+                                                               "TRUE", "On", "")]
+        sets["sumstats"] += [["-sum_stats", value, "-ungapped", "-comp_based_stats", "0"] for value in ("true", "false")]
+        sets["mask"] = [["-soft_masking", value] for value in ("true", "false", "T", "F", "1", "x", "YES", "")]
+        sets["mask"] += [["-seg", "yes", "-soft_masking", value] for value in ("true", "false")]
+        sets["mask"] += [["-lcase_masking"], ["-lcase_masking", "-seg", "no"], ["-lcase_masking", "-soft_masking", "true"]]
+        sets["strand"] = [["-strand", value] for value in ("both", "plus", "minus", "Plus", "BOTH", "x", "")]
+        sets["gaps"] = [[option, value] for option in ("-gapopen", "-gapextend")
+                        for value in ("0x9", "+11", "011", "-1", "1e1", "11.0", "0x", "2147483648", "", "x")]
     if program == "tblastx":
         sets["gencode"] = [[option, code] for option in ("-query_gencode", "-db_gencode") for code in GENCODES]
         # -soft_masking (blast_args.cpp:387-391): SEG masks only the lookup table (line NP, SM-2).
@@ -218,6 +255,24 @@ class Sweep:
         self.args = args
         self.dbs: dict[str, str] = {}
 
+    @contextlib.contextmanager
+    def oracle_lock(self):
+        """The machine-wide lock around one NCBI run (`--lock`), nothing without it. Each call
+        opens the file again, so the sweep's own threads wait for each other too."""
+        if self.args.lock is None:
+            yield
+            return
+        with open(self.args.lock, "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def ncbi(self, argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+        with self.oracle_lock():
+            return subprocess.run(argv, **kwargs)
+
     def database(self, subject: str) -> str:
         """The subject as a BLAST database (made once; NCBI's oracle of a non-default
         `-db_gencode`)."""
@@ -225,8 +280,8 @@ class Sweep:
             directory = self.args.work / "db" / Path(subject).stem
             shutil.rmtree(directory, ignore_errors=True)
             directory.mkdir(parents=True)
-            subprocess.run([str(self.args.bin_dir / "makeblastdb"), "-in", subject, "-dbtype", "nucl",
-                            "-out", str(directory / "subject")], cwd=ENGINE, capture_output=True, check=True)
+            self.ncbi([str(self.args.bin_dir / "makeblastdb"), "-in", subject, "-dbtype", "nucl",
+                       "-out", str(directory / "subject")], cwd=ENGINE, capture_output=True, check=True)
             self.dbs[subject] = str(directory / "subject")
         return self.dbs[subject]
 
@@ -235,8 +290,8 @@ class Sweep:
         program = self.args.program
         argv = [*INPUTS[program], *options, *([] if "-outfmt" in options else ["-outfmt", outfmt])]
         try:
-            ncbi = subprocess.run([str(self.args.bin_dir / program), *argv], cwd=ENGINE, capture_output=True,
-                                  timeout=self.args.timeout, stdin=subprocess.DEVNULL)
+            ncbi = self.ncbi([str(self.args.bin_dir / program), *argv], cwd=ENGINE, capture_output=True,
+                             timeout=self.args.timeout, stdin=subprocess.DEVNULL)
             ours = subprocess.run([str(self.args.losat.resolve()), program, *argv], cwd=ENGINE, capture_output=True,
                                   timeout=self.args.timeout, stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
@@ -267,8 +322,8 @@ class Sweep:
                 return "exception-gencode"
             index = argv.index("-subject")
             db_argv = [*argv[:index], "-db", self.database(argv[index + 1]), *argv[index + 2:]]
-            oracle = subprocess.run([str(self.args.bin_dir / program), *db_argv], cwd=ENGINE, capture_output=True,
-                                    stdin=subprocess.DEVNULL)
+            oracle = self.ncbi([str(self.args.bin_dir / program), *db_argv], cwd=ENGINE, capture_output=True,
+                               stdin=subprocess.DEVNULL)
             if (oracle.returncode == 0 and oracle.stderr == ours.stderr
                     and normalize_database_lines(oracle.stdout) == normalize_database_lines(ours.stdout)):
                 return "exception-gencode"
@@ -298,6 +353,7 @@ def main() -> int:
     parser.add_argument("--work", type=Path, default=Path("/tmp/losat_e2e_option_sweep"))
     parser.add_argument("--api", type=Path, help="TLOSAN Stage E's local-subject API oracle (TBLASTN gencodes)")
     parser.add_argument("--list", action="store_true", help="print the cases and exit")
+    parser.add_argument("--lock", type=Path, help="the machine-wide oracle lock, taken around each NCBI run")
     args = parser.parse_args()
     args.work = args.work.resolve()
     sets = cases(args.program, gap_tables(args.ncbi_src))
@@ -316,11 +372,13 @@ def main() -> int:
     # The databases are made before the parallel runs.
     if args.program in ("tblastn", "tblastx") and any(db_gencode(options) not in (None, "1") for _, options, _ in work):
         sweep.database(INPUTS[args.program][3])
+    # Each line is written as its case ends (in the cases' order), so a stopped sweep keeps them.
+    print("set\toutfmt\toptions\tresult\tncbi_message\tlosat_message", flush=True)
+    lines = []
     with ThreadPoolExecutor(args.jobs) as pool:
-        lines = list(pool.map(sweep.run, work))
-    print("set\toutfmt\toptions\tresult\tncbi_message\tlosat_message")
-    for line in lines:
-        print("\t".join(line))
+        for line in pool.map(sweep.run, work):
+            print("\t".join(line), flush=True)
+            lines.append(line)
     counts: dict[str, int] = {}
     for line in lines:
         key = line[3].split()[0]

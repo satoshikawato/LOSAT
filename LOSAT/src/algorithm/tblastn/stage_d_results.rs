@@ -168,6 +168,41 @@ impl KappaResultHitList {
         self.lists.sort_by(compare_result_lists);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857;
+    // c++/src/algo/blast/core/blast_hits.c:3331-3337 (`core::blast_hspstream`)
+    // ```c
+    //     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
+    //         	  int max_index = hit_list->hsplist_count -1;
+    // ...
+    //         	  Blast_HitListSortByEvalue(hit_list);
+    // ...
+    //         			  s_TrimHitList(hit_list, i);
+    // ```
+    /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`):
+    /// sorted by E-value (`Blast_HitListSortByEvalue`: the lists left without HSPs, last,
+    /// removed) and cut where the E-values pass the limit, when it holds enough lists.
+    pub(super) fn cbs_close_trim(&mut self, hitlist_size: usize) {
+        use crate::core::blast_hspstream::{cbs_trim_count, cbs_trim_sorts};
+        let count = self.lists.len();
+        if !cbs_trim_sorts(count, hitlist_size) {
+            return;
+        }
+        self.lists.sort_unstable_by(compare_result_lists);
+        let sorted = self
+            .lists
+            .iter()
+            .position(|list| list.hsps.hsps.is_empty())
+            .unwrap_or(count);
+        self.lists.truncate(sorted);
+        self.heapified = false;
+        let lists = &self.lists;
+        if let Some(keep) =
+            cbs_trim_count(count, sorted, hitlist_size, |i| lists[i].hsps.best_evalue)
+        {
+            self.lists.truncate(keep);
+        }
+    }
+
     // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // for (int index = 0; index < hit_list->hsplist_count; index++) {
     //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];

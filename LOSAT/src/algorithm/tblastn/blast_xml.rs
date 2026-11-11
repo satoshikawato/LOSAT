@@ -57,8 +57,8 @@ use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
 use crate::report::blast_xml::{
-    filter, hit_ranges, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    REFERENCE_GAPPED_BLAST,
+    filter, hit_ranges, written_queries, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery,
+    XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
@@ -106,6 +106,9 @@ pub(super) struct PreparedXml {
     db_name: String,
     db_num: i32,
     db_len: i64,
+    /// By query, the texts of the queries whose reports the documents write: every query, or
+    /// all but the last of a run that stops when the documents hold that report back
+    /// (`written_queries`).
     texts: Vec<QueryText>,
     stats: Vec<XmlStats>,
     /// By subject index: the names of the subjects with hits.
@@ -208,6 +211,7 @@ pub(super) fn prepare(
     seg: Option<&SegParams>,
     ranges: &ReportRanges<'_>,
     xml2: bool,
+    only_xml2: bool,
     taxa: XmlTaxa,
 ) -> Result<PreparedXml> {
     ensure!(
@@ -224,7 +228,19 @@ pub(super) fn prepare(
             .iter()
             .any(|list| !list.hsps.hsps.is_empty())
     };
-    let texts = query_records
+    let target = match shown {
+        ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subject_records.len()),
+        ShownSubjects::Database { .. } => Xml2Target::Database,
+    };
+    // The reports that the documents write (the one report call, so a run that stops is one
+    // without the epilog): a run that stops never writes the `-subject` report of its last query
+    // when every document of the call holds it back (`written_queries`; outfmt 5 writes it).
+    let reports = written_queries(
+        query_records.len(),
+        !ranges.epilog,
+        only_xml2 && target.holds_back(),
+    );
+    let texts = query_records[..reports]
         .iter()
         .zip(hitlists)
         .zip(query_validity)
@@ -254,7 +270,10 @@ pub(super) fn prepare(
     };
     subject_names.resize_with(count, || None);
     let mut subject_lengths = vec![0i32; count];
-    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
+    for list in hitlists[..reports]
+        .iter()
+        .flat_map(KappaResultHitList::lists)
+    {
         if list.hsps.hsps.is_empty() {
             continue;
         }
@@ -299,10 +318,7 @@ pub(super) fn prepare(
         ),
     };
     let xml2_run = Xml2Run {
-        target: match shown {
-            ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subject_records.len()),
-            ShownSubjects::Database { .. } => Xml2Target::Database,
-        },
+        target,
         subject_names: match shown {
             ShownSubjects::Fasta { .. } => crate::report::blast_xml2::subject_names(
                 subject_records.iter().map(FastaRecord::believed),
@@ -438,6 +454,13 @@ impl PreparedXml {
             // The query's warnings come before its document (`QueryWarnings`).
             if let Some(warnings) = warnings.as_deref_mut() {
                 warnings.before_query(q_idx, &mut *writer)?;
+            }
+            if q_idx == self.texts.len() {
+                // The held report that is never written (`prepare`, `written_queries`).
+                document.unwritten(&mut buf)?;
+                writer.write_all(&buf)?;
+                buf.clear();
+                break;
             }
             let text = &self.texts[q_idx];
             let query_letters = query.seq();

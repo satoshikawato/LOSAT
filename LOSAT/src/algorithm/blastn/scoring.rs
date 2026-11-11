@@ -275,17 +275,13 @@ fn check_losat_limits_with(
             spec.reward
         );
     }
-    let hitlist_size = counts.hitlist_size;
-    if super::hsp::get_prelim_hitlist_size(hitlist_size, false, !ungapped) < 1 {
-        let what = if args.max_target_seqs.is_some() {
-            format!("a -max_target_seqs of {hitlist_size}")
-        } else {
-            format!("a hit list size of {hitlist_size} (-num_descriptions / -num_alignments)")
-        };
-        anyhow::bail!(
-            "{what}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN"
-        );
-    }
+    super::hsp::check_prelim_hitlist_size(
+        counts.hitlist_size,
+        args.max_target_seqs.is_some(),
+        false,
+        !ungapped,
+        "BLASTN",
+    )?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1506-1520
     // ```c
     //     sbp->loscore = BLAST_SCORE_MAX;

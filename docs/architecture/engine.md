@@ -210,6 +210,7 @@ rpsblast yet.
 | PSSM engine | `core::psi` |
 | sequence encoding | `core::blast_encoding`, `sequence` |
 | `-max_hsps`, `-qcov_hsp_perc`, `-culling_limit` | `core::blast_hits`, `core::hspfilter_culling` |
+| the preliminary hit list size, and its trim with `ADAPTIVE_CBS` (`BlastHSPCBSStreamClose`) | `blastn::hsp::get_prelim_hitlist_size`, `core::blast_hspstream` |
 | SEG, DUST, window masking, genetic codes | `utils::seg`, `utils::dust`, `utils::winmask`, `utils::genetic_code` |
 | X-drop SIMD kernels | `utils::xdrop_simd` (AVX2, 128-bit, NEON) |
 | threads | `utils::threading` |

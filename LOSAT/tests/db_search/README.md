@@ -1064,3 +1064,18 @@ Rows `db.archtitle.*.nosq.*` search databases without their sequence file:
 A database without its header file fails the first batch whose hits read a definition line, with a message that holds the
 file's absolute path; that case is `a_title_in_the_batch_that_a_missing_header_file_fails_is_not_refused` in
 `tests/outfmt11_titles.rs` (a temporary database made by `LOSAT makeblastdb`).
+
+## ADAPTIVE_CBS (line SW, env parity G2+G3)
+
+- `acbs` (protein) and `acbs_n` (nucleotide, the same 1,700 subjects back-translated), with the queries
+  `acbs_q.faa` and `acbs_q.fna`: written by `make_acbs_inputs.py` (its docstring gives the commands and the
+  shape). The rows `db.acbs.*` run them with the environment variable `ADAPTIVE_CBS`: NCBI BLAST+ keeps 1,500
+  preliminary subjects instead of 1,050 and cuts them at 1,100 (BLASTP, BLASTX with `-seg no`, TBLASTN with
+  `-seg no`: 400 subjects reported, 350 without the variable; `-max_target_seqs 600`: 500, 550 without);
+  PSIBLAST keeps the 1,500 and does not cut them. `db.acbs.rpsblast.*` run `rps/rps_mini` with the
+  variable: a database of three profiles shows no difference, only that the variable is read (a local
+  database of 1,700 single-sequence profiles of the same subjects gave rpsblast 351 -> 401 and 551 -> 501,
+  too large to commit).
+- `db.acbs.blastx.wrap*` and `db.acbs.blastx.rej*` search `bslice` with a `-max_target_seqs` whose preliminary
+  size NCBI's 32-bit int wraps: 2147483647 (48 with composition-based statistics), 1073741824 without them
+  (10), and 1073741824 with them (negative: NCBI crashes, LOSAT refuses).

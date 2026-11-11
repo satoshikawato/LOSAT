@@ -87,3 +87,14 @@ refuse_feats	refuse	-	-	-i arch/three.asn -d data -t feats
 refuse_both	refuse	-	-	-i arch/three.asn -d data -t both
 refuse_default_t	refuse	-	-	-i arch/three.asn -d data
 refuse_xml	refuse	-	-	-i arch/one.xml -d data -t doms
+q_tab_utf8	compare	-	-	-i q_tab_utf8.asn -d data -t doms
+bracket_member	compare	-	-	-i bracket_member.asn -d data -t doms
+neg0_length	compare	-	-	-i neg0_length.asn -d data -t doms
+org_descr	compare	-	-	-i org_descr.asn -d data -t doms
+nolength	compare	-	-	-i nolength.asn -d data -t doms
+d_acc0	compare	-	data-with:d_acc0	-i arch/three.asn -d d_acc0 -m rep -t doms -f
+d_annot10	compare	-	data-with:d_annot10	-i arch/three.asn -d d_annot10 -m rep -t doms -f
+d_bs12	compare	-	data-with:d_bs12	-i arch/three.asn -d d_bs12 -m rep -t doms -f
+d_ct3	compare	-	data-with:d_ct3	-i arch/three.asn -d d_ct3 -m rep -t doms -f
+d_wsline	compare	-	data-with:d_wsline	-i arch/three.asn -d d_wsline -m rep -t doms -f
+xml_missing_input	compare	arch/one.xml	-	-i nofile.asn -d data -t doms

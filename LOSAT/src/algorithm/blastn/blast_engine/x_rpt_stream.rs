@@ -99,7 +99,8 @@
 //!   with a hit that cannot be written, `blast_xml.rs`), made per report call; `-outfmt 5` is
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
 //!   query lengths that a later batch could meet keep the reports after the loop: scoring options
-//!   without Karlin-Altschul values or large greedy gap costs (`search_query_batch`), a negative
+//!   without Karlin-Altschul values or large greedy gap costs (`search_query_batch`, in
+//!   `context_statistics`), a negative
 //!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`), an
 //!   ungapped cutoff of a query too long (`UngappedCutoff`), and the BLAST archive's (outfmt 11)
 //!   refusal of a query title that it cannot write (`ArchiveTitle`: the title of a query that the
@@ -507,7 +508,8 @@ fn check(
             one_batch: true,
         });
     }
-    // The scoring of `search_query_batch` (`context_blocks`: `NuclValues::gapped` fails exactly
+    // The scoring of `search_query_batch` (`context_blocks`, called in
+    // `context_statistics::karlin_blocks`: `NuclValues::gapped` fails exactly
     // where `check_gaps` does, for every context) and its greedy gap costs: neither depends on
     // the queries.
     let config = configure_task(args);
@@ -534,7 +536,8 @@ fn check(
     {
         return Err(Off::UngappedCutoff);
     }
-    // The search space of a context (`search_query_batch`): the effective database length
+    // The search space of a context (`search_query_batch`, in `context_statistics`): the
+    // effective database length
     // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the
     // length adjustment `a` between 0 and the smaller root of `n a^2 - (q n + db) a + c`, which is
     // at most `2 c / (q n + db) <= 2 q` (`compute_length_adjustment_ncbi`, `c <= q db`). So

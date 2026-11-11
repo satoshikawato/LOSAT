@@ -112,42 +112,6 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
     })
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:168-170,191-192,206-207,3162-3163
-// ```c++
-// new CArgAllowValuesGreaterThanOrEqual(1)
-// new CArgAllow_Doubles(0.0, 100.0)
-// ```
-// CLI v2 additionally rejects all non-finite floating point values at entry.
-pub fn positive_usize(value: &str) -> Result<usize, String> {
-    let n = value
-        .parse::<usize>()
-        .map_err(|_| "expected a positive integer")?;
-    if n == 0 || n > i32::MAX as usize {
-        return Err("expected an integer in 1..=2147483647".into());
-    }
-    Ok(n)
-}
-pub fn nonnegative_f64(value: &str) -> Result<f64, String> {
-    let n = value
-        .parse::<f64>()
-        .map_err(|_| "expected a finite number")?;
-    if !n.is_finite() || n < 0.0 {
-        return Err("expected a finite number >= 0".into());
-    }
-    Ok(n)
-}
-pub fn nonnegative_i32(value: &str) -> Result<i32, String> {
-    let n = value
-        .parse::<i32>()
-        .map_err(|_| "expected an integer >= 0")?;
-    if n < 0 {
-        return Err("expected an integer >= 0".into());
-    }
-    Ok(n)
-}
-pub fn positive_i32(value: &str) -> Result<i32, String> {
-    positive_usize(value).map(|n| n as i32)
-}
 /// An integer argument as NCBI reads it (`CArg_Integer`): a decimal number with an
 /// optional sign, or else, for a value that starts with `0x` or `0X`, a hexadecimal number
 /// (no digit after the prefix reads as 0), within the range of `int`.
@@ -653,21 +617,6 @@ pub fn tblastn_query_coverage(value: &str) -> Result<f64, String> {
 pub fn tblastx_query_coverage(value: &str) -> Result<f64, String> {
     percentage(value, "TBLASTX")
 }
-pub fn blastp_word_size(value: &str) -> Result<usize, String> {
-    let n = positive_usize(value)?;
-    if n < 2 {
-        return Err("protein word_size must be >= 2".into());
-    }
-    Ok(n)
-}
-// NCBI core/blast_options.c:1301-1308: threshold must be greater than zero.
-pub fn positive_f64(value: &str) -> Result<f64, String> {
-    let n = nonnegative_f64(value)?;
-    if n == 0.0 {
-        return Err("expected a finite number > 0".into());
-    }
-    Ok(n)
-}
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:995-1006
 // ```c++
@@ -953,17 +902,6 @@ pub fn protein_word_size(value: &str) -> Result<i32, String> {
     ncbi_integer_at_least(value, 2)
 }
 
-// LOSAT CLI v2 capability boundary: both inputs are required file paths.
-pub fn file_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
-    use clap::builder::TypedValueParser;
-    clap::builder::OsStringValueParser::new().try_map(|value| {
-        if value.is_empty() || value == "-" {
-            return Err("a file path is required; stdin is not implemented".into());
-        }
-        Ok::<_, String>(PathBuf::from(value))
-    })
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:386-407
 // ```c
 // if (m_QueryIsProtein && args[kArgSegFiltering]) {
@@ -1113,26 +1051,6 @@ pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
     })
 }
 
-// NCBI blast_args.cpp:2657-2660: AddDefaultKey(kArgOutputFormat, ..., eString, ...).
-// CLI v2 exposes only the formatter capabilities actually implemented by LOSAT.
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-//     if (args[kArgOutputFormat]) {
-//         string fmt_choice =
-//             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
-/// A TBLASTX `-outfmt` value: the pairwise report (0) or the tabular formats (6, 7),
-/// without a custom field list. The other formats are not implemented and fail.
-pub fn tblastx_outfmt(value: &str) -> Result<String, String> {
-    if !matches!(value.trim(), "0" | "6" | "7") {
-        return Err(
-            "unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented"
-                .into(),
-        );
-    }
-    Ok(value.into())
-}
-
 /// The TBLASTX `-outfmt` value of web ABI v1, which is frozen (plan TD-1): it keeps the
 /// only format that it accepted before TBLASTX outfmt 0 and 7 were ported (session S08).
 pub fn tblastx_v1_outfmt(value: &str) -> Result<String, String> {
@@ -1142,11 +1060,6 @@ pub fn tblastx_v1_outfmt(value: &str) -> Result<String, String> {
         );
     }
     Ok(value.into())
-}
-
-// NCBI blast_args.cpp:475-488: window size is an Int4, with zero selecting one-hit mode.
-pub fn nonnegative_usize(value: &str) -> Result<usize, String> {
-    nonnegative_i32(value).map(|n| n as usize)
 }
 
 #[cfg(test)]

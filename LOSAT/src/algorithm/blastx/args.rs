@@ -2,6 +2,10 @@
 use crate::blastinput::value_parsers::{
     blastx_query_coverage, blastx_threshold, genetic_code, ncbi_int8, report_count,
 };
+use crate::stats::protein_options::{
+    protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
+    SuggestionProgram,
+};
 use anyhow::{bail, Result};
 use clap::Args;
 use std::path::PathBuf;
@@ -420,8 +424,14 @@ pub struct BlastxArgs {
     //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
     //                            CArgDescriptions::eString, m_DefaultOpt);
     // ```
-    #[arg(long, default_value = "2", value_parser = composition)]
-    pub comp_based_stats: u8,
+    // Read when NCBI's handler reads it (`blastinput/app.rs` `parse_comp_based_stats`: the first
+    // character chooses the mode, and the 'u' of unified P is BLASTP's only).
+    #[arg(
+        long,
+        default_value = "2",
+        help = "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment"
+    )]
+    pub comp_based_stats: String,
 }
 
 #[derive(Debug, Clone)]
@@ -622,11 +632,43 @@ fn word_size(value: &str) -> std::result::Result<i32, String> {
 //         }
 //
 // ```
-fn composition(value: &str) -> std::result::Result<u8, String> {
-    match value {
-        "0" | "F" | "f" => Ok(0),
-        "2" | "D" | "d" | "T" | "t" => Ok(2),
-        _ => Err("unsupported BLASTX composition token: use 0/F/f or 2/D/d/T/t".into()),
+/// The matrix of a `-matrix` name, as NCBI's matrix loader finds it (`None`: a name it does not
+/// know).
+///
+/// NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-166
+/// ```c
+/// const SNCBIPackedScoreMatrix* NCBISM_GetStandardMatrix(const char* name)
+/// {
+///     switch (name[0]) {
+///     case 'B': case 'b':
+///         if ( !NCBI_strncasecmp(name, "BLOSUM", 6) ) {
+/// ...
+///     case 'I': case 'i':
+///         if ( !NCBI_strncasecmp(name, "IDENTITY", 8) ) {
+///             return &NCBISM_Identity;
+/// ```
+/// (a name that starts with IDENTITY but is not IDENTITY is IDENTITY's matrix without its
+/// statistics table: `identity_prefix`.)
+pub(crate) fn blastx_matrix(name: &str) -> Option<crate::config::ScoringMatrix> {
+    name.parse().ok()
+}
+
+/// Whether NCBI's matrix loader reads `name` as IDENTITY (`blastx_matrix`).
+fn identity_prefix(name: &str) -> bool {
+    name.get(..8)
+        .is_some_and(|start| start.eq_ignore_ascii_case("identity"))
+}
+
+/// The composition mode of `-comp_based_stats` as NCBI reads it for BLASTX: 0 to 3 from the first
+/// character (`blastinput/app.rs` `parse_comp_based_stats`, the switch above), any other first
+/// character 0, and a 'u' after it ignored (unified P is BLASTP's).
+pub(crate) fn composition_mode(value: &str) -> u8 {
+    use crate::blastinput::app::{parse_comp_based_stats, CompositionMode};
+    match parse_comp_based_stats(value, false, false) {
+        Ok((CompositionMode::CompositionBasedStats, _)) => 1,
+        Ok((CompositionMode::CompositionMatrixAdjust, _)) => 2,
+        Ok((CompositionMode::CompoForceFullMatrixAdjust, _)) => 3,
+        Ok((CompositionMode::NoCompositionBasedStats, _)) | Err(_) => 0,
     }
 }
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:487-498
@@ -711,7 +753,14 @@ pub struct ResolvedOptions {
     pub word_size: i32,
     pub threshold: f64,
     pub lookup_type: i32,
+    /// The `-matrix` name as typed (BLOSUM62 when omitted), which the reports print.
     pub matrix: String,
+    /// The matrix of `matrix` (BLOSUM62 for a name that NCBI's matrices do not know, which only an
+    /// ungapped search takes: `unknown_matrix`).
+    pub scoring: crate::config::ScoringMatrix,
+    /// An ungapped search's `-matrix` that NCBI's matrix loader does not know: NCBI's set-up of the
+    /// first query batch fails with "Unknown error code -1" (`query_setup.rs`).
+    pub unknown_matrix: bool,
     pub gap_open: i32,
     pub gap_extend: i32,
     pub gapped: bool,
@@ -925,12 +974,6 @@ impl BlastxArgs {
         {
             bail!("unsupported BLASTX stdin subject");
         }
-        if self.matrix.as_deref().is_some_and(|m| m != "BLOSUM62") {
-            bail!("unsupported BLASTX matrix: use BLOSUM62");
-        }
-        if self.gap_open.is_some_and(|g| g != 11) || self.gap_extend.is_some_and(|g| g != 1) {
-            bail!("unsupported BLASTX gap costs: use 11/1");
-        }
         if self
             .out
             .as_ref()
@@ -947,17 +990,73 @@ impl BlastxArgs {
         //                        "do a gapped search");
         //         }
         // ```
-        if self.ungapped && self.comp_based_stats != 0 {
-            return Err(SemanticOptionsError("Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search").into());
+        let composition = composition_mode(&self.comp_based_stats);
+        if self.ungapped && composition != 0 {
+            return Err(SemanticOptionsError::from("Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search").into());
         }
-        // The command line's `composition` reads 0 or 2 only (LOSAT's limit); a caller of
-        // `run_local` sets the mode itself.
-        if !matches!(self.comp_based_stats, 0 | 2) {
-            bail!(
-                "unsupported BLASTX composition-based statistics mode {}: use 0 or 2",
-                self.comp_based_stats
-            );
+        // The matrix as typed (BLOSUM62 when omitted) and its gap costs: with `-matrix`, a cost
+        // not given is the matrix's BEST one.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:255-275
+        // ```c++
+        //     if (args[kArgMatrixName]) {
+        //         opt.SetMatrixName(args[kArgMatrixName].AsString().c_str());
+        //         int gap_open=0, gap_extend=0;
+        //         BLAST_GetProteinGapExistenceExtendParams(
+        //                     args[kArgMatrixName].AsString().c_str(),
+        //                     &gap_open, &gap_extend);
+        //         if (!args[kArgGapOpen])
+        //             opt.SetGapOpeningCost(gap_open);
+        //         if (!args[kArgGapExtend])
+        //             opt.SetGapExtensionCost(gap_extend);
+        //     }
+        // ```
+        let matrix_name = self.matrix.clone().unwrap_or_else(|| "BLOSUM62".into());
+        let (best_open, best_extend) = match &self.matrix {
+            Some(name) => protein_gap_existence_extend_params(name).unwrap_or((0, 0)),
+            None => (11, 1),
+        };
+        let gap_open = self.gap_open.unwrap_or(best_open);
+        let gap_extend = self.gap_extend.unwrap_or(best_extend);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:913-924
+        // ```c
+        //     if (program_number != eBlastTypeBlastn && options->gapped_calculation)
+        //     {
+        //        ...
+        //        Boolean std_matrix_only =
+        //                   (program_number != eBlastTypeBlastp &&
+        //                    program_number != eBlastTypeTblastn);
+        //        Int2 status = Blast_KarlinBlkGappedLoadFromTables(kbp, options->gap_open,
+        //                    options->gap_extend, options->matrix, std_matrix_only);
+        // ```
+        // A gapped search takes a matrix of NCBI's tables but IDENTITY (BLASTX reads the standard
+        // matrices only), with one of the matrix's gap costs, NCBI's errors otherwise (after the
+        // composition check above and before the threshold's); an ungapped one takes any name,
+        // and any gap costs.
+        if !self.ungapped {
+            use crate::stats::protein_options::{
+                karlin_blk_gapped_load_from_tables, print_allowed_values, print_matrix_message,
+                TableStatus,
+            };
+            match karlin_blk_gapped_load_from_tables(gap_open, gap_extend, &matrix_name, true) {
+                Ok(_) => {}
+                Err(TableStatus::UnknownMatrix) => {
+                    return Err(SemanticOptionsError::from(print_matrix_message(
+                        &matrix_name,
+                        true,
+                    ))
+                    .into())
+                }
+                Err(TableStatus::UnknownGapCosts) => {
+                    return Err(SemanticOptionsError::from(print_allowed_values(
+                        &matrix_name,
+                        gap_open,
+                        gap_extend,
+                    ))
+                    .into())
+                }
+            }
         }
+        let scoring = blastx_matrix(&matrix_name);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1765-1773
         // ```c++
         //    if ((status = LookupTableOptionsValidate(program_number,
@@ -982,7 +1081,7 @@ impl BlastxArgs {
         //         return BLASTERR_OPTION_VALUE_INVALID;
         // ```
         if self.threshold.is_some_and(|x| x <= 0.0) {
-            return Err(SemanticOptionsError("Non-zero threshold required").into());
+            return Err(SemanticOptionsError::from("Non-zero threshold required").into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1348
         // ```c++
@@ -1006,10 +1105,12 @@ impl BlastxArgs {
         // `run_local` sets the field itself: NCBI's errors, then LOSAT's limit.
         if let Some(word) = self.word_size {
             if word <= 0 {
-                return Err(SemanticOptionsError("Word-size must be greater than zero").into());
+                return Err(
+                    SemanticOptionsError::from("Word-size must be greater than zero").into(),
+                );
             }
             if word > 7 {
-                return Err(SemanticOptionsError(
+                return Err(SemanticOptionsError::from(
                     "Word-size must be less than 8 for a tblastn, blastp or blastx search",
                 )
                 .into());
@@ -1038,7 +1139,7 @@ impl BlastxArgs {
         // 	}
         // ```
         if counts.hitlist_size < 1 {
-            return Err(SemanticOptionsError("No hits are being saved").into());
+            return Err(SemanticOptionsError::from("No hits are being saved").into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
         // ```c++
@@ -1050,7 +1151,7 @@ impl BlastxArgs {
         // 	}
         // ```
         if self.evalue <= 0.0 {
-            return Err(SemanticOptionsError(
+            return Err(SemanticOptionsError::from(
                 "expect value or cutoff score must be greater than zero",
             )
             .into());
@@ -1069,6 +1170,55 @@ impl BlastxArgs {
         // at `word_size` below) and word size 3 leaves the task's: `-task blastx-fast -word_size 3`
         // is the standard table with threshold 20 (api/blast_options_local_priv.hpp:612-619).
         let task_threshold = if fast { 20.0 } else { 12.0 };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:604-622
+        // ```c++
+        //     if (args[kArgWordScoreThreshold]) {
+        //         opt.SetWordThreshold(args[kArgWordScoreThreshold].AsDouble());
+        //     } else if (s_IsDefaultWordThreshold(opt.GetProgram(),
+        //                                         opt.GetWordThreshold())) {
+        //         double threshold = -1;
+        //         BLAST_GetSuggestedThreshold(opt.GetProgramType(),
+        //                                     opt.GetMatrixName(),
+        //                                     &threshold);
+        // ```
+        // The task's threshold 12 (`BLAST_WORD_THRESHOLD_BLASTX`) is the matrix's suggestion
+        // (BLOSUM62's 11 + 1 for a translated query); blastx-fast's 20 and `-word_size 5`'s 19.3
+        // are not the default, and stay.
+        let threshold = match self.threshold {
+            Some(threshold) => threshold,
+            None if self.word_size == Some(5) => 19.3,
+            None if fast => task_threshold,
+            None => suggested_threshold(SuggestionProgram::TranslatedQuery, &matrix_name),
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
+        // ```c++
+        //     if (args[kArgWindowSize]) {
+        //         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
+        //     } else {
+        //         int window = -1;
+        //         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
+        //                                      opt.GetMatrixName(),
+        //                                      &window);
+        // ```
+        let window_size = self
+            .window_size
+            .unwrap_or_else(|| suggested_window_size(&matrix_name));
+        // NCBI 2.17.0 crashes on a name that its matrix loader reads as IDENTITY without IDENTITY's
+        // statistics table (`IDENTITYX`), and on IDENTITY with the compressed lookup table
+        // (`-word_size 5`, blastx-fast): LOSAT refuses both (ungapped searches only: a gapped one
+        // stops at NCBI's matrix error first).
+        if scoring.is_none() && identity_prefix(&matrix_name) {
+            bail!(
+                "-matrix {matrix_name} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTX"
+            );
+        }
+        crate::blastinput::protein_options_check::check_identity_compressed_lookup(
+            &matrix_name,
+            word_size == 5,
+            word_size,
+            "blastx",
+            "BLASTX",
+        )?;
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-99
@@ -1105,17 +1255,15 @@ impl BlastxArgs {
             .map(crate::report::tabular::TabularSpec::intern);
         Ok(ResolvedOptions {
             word_size,
-            threshold: self.threshold.unwrap_or(if self.word_size == Some(5) {
-                19.3
-            } else {
-                task_threshold
-            }),
+            threshold,
             lookup_type: if word_size == 5 { 4 } else { 3 },
-            matrix: "BLOSUM62".into(),
-            gap_open: 11,
-            gap_extend: 1,
+            matrix: matrix_name,
+            scoring: scoring.unwrap_or(crate::config::ScoringMatrix::Blosum62),
+            unknown_matrix: scoring.is_none(),
+            gap_open,
+            gap_extend,
             gapped: !self.ungapped,
-            composition: self.comp_based_stats,
+            composition,
             seg: self.seg.clone(),
             soft_masking: self.soft_masking,
             strand: self.strand.clone(),
@@ -1190,7 +1338,7 @@ impl BlastxArgs {
             // ```
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307, `parameters::gumbel_block`).
             old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
-            window_size: self.window_size.unwrap_or(40),
+            window_size,
             evalue: self.evalue,
             sum_stats: self.sum_stats.unwrap_or(true),
             max_intron_length: self.max_intron_length,
@@ -1464,7 +1612,19 @@ mod tests {
 // The native app catches this category after stream extraction. Product scope
 // refusals retain the separate registered CLI-v2 boundary.
 #[derive(Debug)]
-pub(crate) struct SemanticOptionsError(pub &'static str);
+pub(crate) struct SemanticOptionsError(pub std::borrow::Cow<'static, str>);
+
+impl From<&'static str> for SemanticOptionsError {
+    fn from(message: &'static str) -> Self {
+        Self(std::borrow::Cow::Borrowed(message))
+    }
+}
+
+impl From<String> for SemanticOptionsError {
+    fn from(message: String) -> Self {
+        Self(std::borrow::Cow::Owned(message))
+    }
+}
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
 // ```c++
 //     catch (const blast::CInputException& e) {                               \
@@ -1474,7 +1634,7 @@ pub(crate) struct SemanticOptionsError(pub &'static str);
 // ```
 impl std::fmt::Display for SemanticOptionsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
+        f.write_str(&self.0)
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3638-3638

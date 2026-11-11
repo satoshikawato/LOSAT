@@ -1047,3 +1047,20 @@ most 9 in BLOSUM62).
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt
   0 K of each batch's first query) and `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30
   and a J at 60, part of the ribonucleotide reductase).
+
+## outfmt 11 titles where NCBI's search fails (line NP, series SM, DECISIONS 25)
+
+Rows `db.archtitle.*.nosq.*` search databases without their sequence file:
+
+- `arch_sprot_nopsq.pin` and `.phr` are copies of `arch_sprot.pin` and `.phr` (BLASTP, BLASTX); `arch_tbn_snucl_nonsq.nin`
+  and `.nhr` are copies of `arch_tbn_snucl.nin` and `.nhr` (TBLASTN, BLASTN, TBLASTX). NCBI reads the sequence file first in
+  the preliminary search of the first query batch with a valid context and fails that batch (`BLAST engine error: Database
+  memory map file error`, exit 3); the batches before it are written.
+- The queries `tests/fixtures/fasta_input/batch_title_unsearched.{prot.faa,nuc.fa}` and `batch_title_unsearched_next.*`
+  hold `u1` and `u2`, 30 X (protein) or 90 N (nucleotide) only, which have no valid context, then the sequences of q2
+  and q3 of `batch_title_first` as `q3` and `q4`; `café` is in the title of `u1` or of `q3`. With `BATCH_SIZE` 60 (180)
+  the first batch is `{u1, u2}`.
+
+A database without its header file fails the first batch whose hits read a definition line, with a message that holds the
+file's absolute path; that case is `a_title_in_the_batch_that_a_missing_header_file_fails_is_not_refused` in
+`tests/outfmt11_titles.rs` (a temporary database made by `LOSAT makeblastdb`).

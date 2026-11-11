@@ -8,7 +8,7 @@
 //!   - ncbi_math.c: BLAST_LnFactorial, BLAST_LnGammaInt
 
 use crate::stats::sum_statistics::{
-    e_to_p, ln_factorial, normalize_score, p_to_e, small_gap_sum_e,
+    blast_ln_factorial, e_to_p, normalize_score, p_to_e, small_gap_sum_e,
 };
 
 /// Test ln_factorial_int precision for small n (typical case: 2-10 HSPs)
@@ -24,11 +24,11 @@ fn test_ln_factorial_int_small() {
     ];
 
     for (n, expected) in test_cases {
-        let result = ln_factorial(n as f64);
+        let result = blast_ln_factorial(n as f64);
         if expected == 0.0 {
             assert!(
                 result.abs() < 1e-12,
-                "ln_factorial({}) should be numerically zero, got {}",
+                "blast_ln_factorial({}) should be numerically zero, got {}",
                 n,
                 result
             );
@@ -37,7 +37,7 @@ fn test_ln_factorial_int_small() {
             // For small n, expect very high precision
             assert!(
                 relative_error < 1e-10,
-                "ln_factorial({}) = {}, expected {}, relative error = {}",
+                "blast_ln_factorial({}) = {}, expected {}, relative error = {}",
                 n,
                 result,
                 expected,
@@ -54,7 +54,7 @@ fn test_ln_factorial_int_medium() {
     let test_cases = vec![50, 75, 100];
 
     for n in test_cases {
-        let direct = ln_factorial(n as f64);
+        let direct = blast_ln_factorial(n as f64);
         // Stirling's approximation: ln(n!) ≈ n*ln(n) - n + 0.5*ln(2*pi*n)
         let stirling = (n as f64) * (n as f64).ln() - (n as f64)
             + 0.5 * (2.0 * std::f64::consts::PI * n as f64).ln();
@@ -64,7 +64,7 @@ fn test_ln_factorial_int_medium() {
         // Note: Stirling's approximation itself has error, so we use a more lenient threshold
         assert!(
             relative_error < 1e-4,
-            "ln_factorial({}) = {}, Stirling = {}, relative error = {}",
+            "blast_ln_factorial({}) = {}, Stirling = {}, relative error = {}",
             n,
             direct,
             stirling,
@@ -81,7 +81,7 @@ fn test_ln_factorial_int_large() {
     let test_cases = vec![200, 300, 400, 500];
 
     for n in test_cases {
-        let direct = ln_factorial(n as f64);
+        let direct = blast_ln_factorial(n as f64);
         // Stirling's approximation
         let stirling = (n as f64) * (n as f64).ln() - (n as f64)
             + 0.5 * (2.0 * std::f64::consts::PI * n as f64).ln();
@@ -91,7 +91,7 @@ fn test_ln_factorial_int_large() {
         // should still be within acceptable bounds for E-value calculation
         assert!(
             relative_error < 1e-4,
-            "ln_factorial({}) = {}, Stirling = {}, relative error = {}",
+            "blast_ln_factorial({}) = {}, Stirling = {}, relative error = {}",
             n,
             direct,
             stirling,

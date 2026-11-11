@@ -31,7 +31,7 @@
 //! the loop's order for everything after `compute_subject` (the sink: linking, reaping, the HSP
 //! stream) and changes only which thread computes a subject and when.
 
-use super::{compute_subject, SubjectComputation};
+use super::{compute_subject_any, SubjectComputation};
 use crate::algorithm::blastx::{
     args::ResolvedOptions,
     parameters::ContextParameters,
@@ -286,7 +286,7 @@ fn search_task(
     };
     let subjects = subjects.x_with_block(x_block.as_ref());
     for oid in first..end {
-        match compute_subject(
+        match compute_subject_any(
             subjects,
             batch,
             params,

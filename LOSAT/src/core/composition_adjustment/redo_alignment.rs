@@ -588,6 +588,9 @@ pub(crate) fn x_whole_subject_composition(
 //     free_align_traceback_type * free_align_traceback;
 // } Blast_RedoAlignCallbacks;
 // ```
+// LOSAT has no counterpart of `new_xdrop_align` and `free_align_traceback`: LOSAT's three callers
+// (blastp, blastx, tblastn) never set them, so the two fields and their function types are not
+// ported (P-V3b).
 pub type BlastCalcLambdaFn = fn(&[f64], i32, i32, f64) -> Result<f64>;
 pub type BlastGetRangeFn = for<'seq> fn(
     &BlastCompoMatchingSequence<'seq>,
@@ -612,29 +615,10 @@ pub type BlastRedoOneAlignmentFn = fn(
     i32,
     &BlastRedoAlignParams,
 ) -> Result<Option<Box<BlastCompoAlignment>>>;
-pub type BlastNewXdropAlignFn = fn(
-    i32,
-    i32,
-    i32,
-    i32,
-    i32,
-    &BlastCompoSequenceData,
-    &BlastCompoSequenceRange,
-    i32,
-    &BlastCompoSequenceData,
-    &BlastCompoSequenceRange,
-    i32,
-    &BlastRedoAlignParams,
-    EMatrixAdjustRule,
-) -> Result<Option<Box<BlastCompoAlignment>>>;
-pub type BlastFreeAlignTracebackFn = fn(usize);
-
 pub struct BlastRedoAlignCallbacks {
     pub calc_lambda: Option<BlastCalcLambdaFn>,
     pub get_range: BlastGetRangeFn,
     pub redo_one_alignment: BlastRedoOneAlignmentFn,
-    pub new_xdrop_align: Option<BlastNewXdropAlignFn>,
-    pub free_align_traceback: Option<BlastFreeAlignTracebackFn>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1292
@@ -966,15 +950,6 @@ pub fn blast_compo_alignment_new(
         context,
         next: None,
     })
-}
-
-// NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:88-95
-// ```c
-// void BlastCompo_AlignmentsFree(BlastCompo_Alignment ** palign,
-//                                void (*free_context)(void*));
-// ```
-pub fn blast_compo_alignments_free(palign: &mut Option<Box<BlastCompoAlignment>>) {
-    *palign = None;
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:160-178
@@ -2572,59 +2547,6 @@ pub fn preliminary_test_near_identical(
 //     ...
 // }
 // ```
-pub fn blast_redo_one_match<'seq>(
-    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
-    params: &BlastRedoAlignParams,
-    matching_seq: &BlastCompoMatchingSequence<'seq>,
-    query_info: &BlastCompoQueryInfo,
-    lambda: f64,
-    callbacks: &BlastRedoAlignCallbacks,
-) -> Result<BlastRedoOneMatchResult> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
-    // ```c
-    // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-    // status_code = Blast_CompositionWorkspaceInit(
-    //         NRrecord_tld[i],
-    //         scoringParams->options->matrix
-    // );
-    // ```
-    let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
-    blast_redo_one_match_with_workspace(
-        incoming_aligns,
-        params,
-        matching_seq,
-        query_info,
-        lambda,
-        callbacks,
-        &mut composition_workspace,
-    )
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1111
-// ```c
-// Blast_RedoOneMatch(..., BlastCompo_QueryInfo query_info[],
-//                    int numQueries, ...);
-// ```
-pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
-    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
-    params: &BlastRedoAlignParams,
-    matching_seq: &BlastCompoMatchingSequence<'seq>,
-    query_info: &BlastCompoQueryInfo,
-    lambda: f64,
-    callbacks: &BlastRedoAlignCallbacks,
-    composition_workspace: &mut BlastCompositionWorkspace,
-) -> Result<BlastRedoOneMatchResult> {
-    blast_redo_one_match_with_workspace_queries(
-        incoming_aligns,
-        params,
-        matching_seq,
-        std::slice::from_ref(query_info),
-        lambda,
-        callbacks,
-        composition_workspace,
-    )
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146
 // ```c
 // Blast_RedoOneMatch(..., BlastCompo_QueryInfo query_info[],
@@ -2634,42 +2556,6 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
 //     &nWindows, query_is_translated, subject_is_translated,
 //     params->positionBased);
 // ```
-pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
-    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
-    params: &BlastRedoAlignParams,
-    matching_seq: &BlastCompoMatchingSequence<'seq>,
-    query_infos: &[BlastCompoQueryInfo],
-    lambda: f64,
-    callbacks: &BlastRedoAlignCallbacks,
-    composition_workspace: &mut BlastCompositionWorkspace,
-) -> Result<BlastRedoOneMatchResult> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3631-3641
-    // ```c++
-    //                                         &matchingSeq,           // thread-local
-    //                                         -1,                     // const
-    //                                         query_info,             // thread-local
-    //                                         numContexts,            // thread-local
-    //                                         matrix,                 // thread-local
-    //                                         BLASTAA_SIZE,           // const
-    //                                         NRrecord,               // thread-local
-    //                                         &pvalueForThisPair,     // local
-    //                                         compositionTestIndex,   // thread-local
-    //                                         &LambdaRatio            // local
-    //                                 );
-    // ```
-    let mut matrix_state = None;
-    blast_redo_one_match_with_workspace_queries_and_matrix(
-        incoming_aligns,
-        params,
-        matching_seq,
-        query_infos,
-        lambda,
-        callbacks,
-        composition_workspace,
-        &mut matrix_state,
-    )
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3631-3641
 // ```c++
 //                                         &matchingSeq,           // thread-local
@@ -4132,11 +4018,9 @@ mod tests {
             calc_lambda: None,
             get_range: translated_subject_get_range,
             redo_one_alignment: assert_mode2_redo,
-            new_xdrop_align: None,
-            free_align_traceback: None,
         };
         let mut workspace = BlastCompositionWorkspace::new_blosum62();
-        let result = blast_redo_one_match_with_workspace_queries(
+        let result = blast_redo_one_match_with_workspace_queries_and_matrix(
             &incoming,
             &params,
             &matching_seq,
@@ -4144,6 +4028,7 @@ mod tests {
             0.0083437500000000005,
             &callbacks,
             &mut workspace,
+            &mut None,
         )
         .unwrap();
         assert_eq!(result.lambda_ratio.unwrap().to_bits(), 1.0f64.to_bits());
@@ -4413,17 +4298,26 @@ mod tests {
             calc_lambda: None,
             get_range: test_get_range,
             redo_one_alignment: test_redo_one_alignment,
-            new_xdrop_align: None,
-            free_align_traceback: None,
         };
 
-        let result = blast_redo_one_match(
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
+        // ```c
+        // NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
+        // status_code = Blast_CompositionWorkspaceInit(
+        //         NRrecord_tld[i],
+        //         scoringParams->options->matrix
+        // );
+        // ```
+        let mut workspace = BlastCompositionWorkspace::new_blosum62();
+        let result = blast_redo_one_match_with_workspace_queries_and_matrix(
             &aligns,
             &params,
             &matching_seq,
-            &query_info,
+            std::slice::from_ref(&query_info),
             0.267,
             &callbacks,
+            &mut workspace,
+            &mut None,
         )
         .unwrap();
 

@@ -20,8 +20,11 @@ Supported query genetic-code IDs are
 `1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33`.
 ID 32 is invalid for this BLASTX CLI. Protein subjects have no `db_gencode`.
 
-The search profile supports BLOSUM62, gap costs 11/1, word sizes 3/5,
-composition modes 0/2, plus/minus/both query strands, SEG and lowercase masks,
+The search profile supports NCBI's matrices (BLOSUM45, BLOSUM50, BLOSUM62,
+BLOSUM80, BLOSUM90, PAM30, PAM70, PAM250) with the gap costs of NCBI's table for
+each and their suggested threshold and window size, IDENTITY in an ungapped
+search with word size 3, word sizes 3/5, composition modes 0 to 3 (`2u` as 2,
+`5` as 0, as NCBI reads them), plus/minus/both query strands, SEG and lowercase masks,
 soft/hard masking, gapped search or ungapped search with composition mode 0,
 sum statistics, intron length, target/HSP limits, culling, and subject-besthit.
 Omitted defaults retain their NCBI meanings, including description/alignment
@@ -45,9 +48,8 @@ registered standard-field expansion. Output goes to stdout unless `-out` names
 a file; `-out -` also uses stdout.
 
 Each protein subject may contain at most 5,000,000 residues. Longer subjects,
-database searches, stdin FASTA specified with `-query -` or `-subject -`,
-unsupported options/tasks/matrices/gap costs,
-and composition modes 1/3 fail explicitly. Native threads 1/2/4/8 and serial
+stdin FASTA specified with `-query -` or `-subject -`, and unsupported options
+and tasks fail explicitly. Native threads 1/2/4/8 and serial
 and threaded command-WASI and Web/reactor entry points are implemented. Their
 full v0.2.0 acceptance, including browser and pool-failure coverage, remains
 open. Formal performance measurements exist for fixed workloads; they do not

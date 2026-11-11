@@ -122,7 +122,7 @@ pub(crate) fn ordinary_traceback_observed(
         "BLASTX ordinary traceback requires gapped composition 0"
     );
     let ka = lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix: options.scoring,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
@@ -198,7 +198,9 @@ pub(crate) fn ordinary_traceback_observed(
         //          /* compute the cutoff score to use */
         // ```
         if h.q_gapped_start == 0 && h.s_gapped_start == 0 {
-            let Some((q, s)) = get_offsets_for_gapped_alignment(query, subject, &h) else {
+            let Some((q, s)) =
+                get_offsets_for_gapped_alignment(query, subject, &h, options.scoring)
+            else {
                 continue;
             };
             h.q_gapped_start = q;
@@ -253,7 +255,7 @@ pub(crate) fn ordinary_traceback_observed(
             &subject[shift..shift + s_length],
             h.q_gapped_start as usize,
             s_start,
-            ScoringMatrix::Blosum62,
+            options.scoring,
             None,
             options.gap_open,
             options.gap_extend,
@@ -575,6 +577,7 @@ fn get_offsets_for_gapped_alignment(
     query: &[u8],
     subject: &[u8],
     h: &PreliminaryHsp,
+    matrix: ScoringMatrix,
 ) -> Option<(i32, i32)> {
     let q_start = h.q_start as usize;
     let s_start = h.s_start as usize;
@@ -586,7 +589,8 @@ fn get_offsets_for_gapped_alignment(
             h.s_start + (q_length / 2) as i32,
         ));
     }
-    let score_at = |q: usize, s: usize| crate::utils::matrix::blosum62_score(query[q], subject[s]);
+    let score_at =
+        |q: usize, s: usize| crate::utils::matrix::protein_score(matrix, query[q], subject[s]);
     let mut score: i32 = (0..11).map(|i| score_at(q_start + i, s_start + i)).sum();
     let mut max_score = score;
     let mut max_offset = q_start + 10;
@@ -729,7 +733,7 @@ mod tests {
                 s_end: end as i32,
                 s_gapped_start: 0,
             };
-            let result = get_offsets_for_gapped_alignment(&q, &s, &h);
+            let result = get_offsets_for_gapped_alignment(&q, &s, &h, ScoringMatrix::Blosum62);
             assert_eq!(
                 result,
                 if f[2] != 0 { Some((f[3], f[4])) } else { None },

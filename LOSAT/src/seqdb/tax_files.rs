@@ -182,6 +182,7 @@ pub fn is_ncbi_volume_error(message: &str) -> bool {
 }
 
 /// `m_NumOids` of NCBI: the sum of the OID counts of all volumes of the entry.
+#[cfg(test)]
 pub fn total_oids(vols: &[(Vec<u8>, u32)]) -> u64 {
     vols.iter().map(|v| v.1 as u64).sum()
 }
@@ -744,6 +745,7 @@ impl<'r, R: ReadAt + ?Sized> OidTaxIds<'r, R> {
 
 /// Taxids of one OID from a `.not`/`.pot` file (`CLookupTaxIds::GetTaxIdListForOid`). For many
 /// OIDs use [`OidTaxIds`], which reads the header once.
+#[cfg(test)]
 pub fn taxids_of_oid<R: ReadAt + ?Sized>(not: &R, oid: u32) -> Result<Vec<i32>, String> {
     OidTaxIds::open(not)?.taxids(oid)
 }
@@ -923,6 +925,7 @@ impl<'r, R: ReadAt + ?Sized> OidSeqIds<'r, R> {
 
 /// Seqids of one OID from a `.nos`/`.pos` file (`CLookupSeqIds::GetSeqIdListForOid`). For many
 /// OIDs use [`OidSeqIds`].
+#[cfg(test)]
 pub fn seqids_of_oid<R: ReadAt + ?Sized>(nos: &R, oid: u32) -> Result<Vec<Vec<u8>>, String> {
     OidSeqIds::open(nos)?.seqids(oid)
 }

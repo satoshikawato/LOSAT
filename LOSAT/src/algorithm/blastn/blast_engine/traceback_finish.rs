@@ -20,8 +20,7 @@ use super::{
     sort_hsps_by_score, BlastIntervalTree, BlastnHsp, BlastnTiming, ContextKarlin, IndexMethod,
     ReevalParams, TreeHsp,
 };
-
-const BLASTNA_SIZE: usize = 16;
+use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 
 /// The values of one subject's search that the two traceback steps read. Built once per
 /// `process_subject` call, where the closures were made; every field is a shared reference or a
@@ -53,7 +52,7 @@ pub(super) struct TracebackCtx<'a> {
     pub(super) penalty: i32,
     pub(super) gap_open: i32,
     pub(super) gap_extend: i32,
-    pub(super) score_matrix: &'a [i32; BLASTNA_SIZE * BLASTNA_SIZE],
+    pub(super) score_matrix: &'a BlastnaMatrix,
     pub(super) use_dp: bool,
     /// The hit-saving options.
     pub(super) percent_identity: f64,

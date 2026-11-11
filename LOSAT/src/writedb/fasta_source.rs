@@ -70,7 +70,9 @@ pub struct FastaBioseqSource<R: Read> {
 }
 
 impl<R: Read> FastaBioseqSource<R> {
-    /// `CFastaBioseqSource(fasta_file, is_protein, parse_ids = false, long_ids = false)`.
+    /// `CFastaBioseqSource(fasta_file, is_protein, parse_ids, long_ids = false)`: with
+    /// `parse_ids` (`-parse_seqids`) the reader parses the ids of each definition line
+    /// (`fRequireID | fParseRawID`) and the Bioseq carries them (`Bioseq::parsed`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:701-734
     /// ```c++
@@ -110,13 +112,6 @@ impl<R: Read> FastaBioseqSource<R> {
     ///     m_FastaReader = new CFastaReader(*m_LineReader, flags);
     /// ```
     /// The flags are those of `reader`.
-    pub fn new(input: R, is_protein: bool) -> Self {
-        Self::with_parse_ids(input, is_protein, false)
-    }
-
-    /// `CFastaBioseqSource(fasta_file, is_protein, parse_ids, long_ids = false)`: with
-    /// `parse_ids` (`-parse_seqids`) the reader parses the ids of each definition line
-    /// (`fRequireID | fParseRawID`) and the Bioseq carries them (`Bioseq::parsed`).
     pub fn with_parse_ids(input: R, is_protein: bool, parse_ids: bool) -> Self {
         Self {
             reader: Some(FastaReader::new(input, is_protein, parse_ids)),

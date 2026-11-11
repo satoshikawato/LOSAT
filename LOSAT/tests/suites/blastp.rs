@@ -47,6 +47,8 @@ mod blastp_redo_memory;
 mod blastp_redo_par;
 #[path = "../blastp_restricted_gapped.rs"]
 mod blastp_restricted_gapped;
+#[path = "../blastp_row_windows.rs"]
+mod blastp_row_windows;
 #[path = "../blastp_subj_meta.rs"]
 mod blastp_subj_meta;
 #[path = "../blastp_subject_runs.rs"]

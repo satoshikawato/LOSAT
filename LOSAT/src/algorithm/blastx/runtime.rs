@@ -1095,7 +1095,7 @@ impl PreliminarySink for Runtime<'_> {
             // /** The core of the BLAST search: comparison between the (concatenated)
             // ```
             let reap_cutoff = self.options.evalue
-                * if self.options.composition > 0 && !self.options.old_fsc {
+                * if self.options.composition > 1 && !self.options.old_fsc {
                     5.0
                 } else {
                     1.0
@@ -1151,7 +1151,8 @@ impl PreliminarySink for Runtime<'_> {
                         composition_method: 0,
                         identity_matrix: None,
                     };
-                    let (identity, positive) = identity_and_positive(&redone, batch, &encoded);
+                    let (identity, positive) =
+                        identity_and_positive(&redone, batch, &encoded, self.options.scoring);
                     Hsp {
                         hsp: h.hsp,
                         num: h.num,
@@ -1245,7 +1246,7 @@ impl PreliminarySink for Runtime<'_> {
             // /** The core of the BLAST search: comparison between the (concatenated)
             // ```
             let reap_cutoff = self.options.evalue
-                * if self.options.composition > 0 {
+                * if self.options.composition > 1 {
                     5.0
                 } else {
                     1.0
@@ -1374,7 +1375,7 @@ impl PreliminarySink for Runtime<'_> {
         // /** The core of the BLAST search: comparison between the (concatenated)
         // ```
         let reap_cutoff = self.options.evalue
-            * if self.options.composition > 0 {
+            * if self.options.composition > 1 {
                 5.0
             } else {
                 1.0
@@ -1530,7 +1531,7 @@ impl PreliminarySink for Runtime<'_> {
         //         }
         //     }
         // ```
-        let mut inactive_heaps: Vec<_> = if self.options.composition == 2 {
+        let mut inactive_heaps: Vec<_> = if self.options.composition != 0 {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -1559,7 +1560,7 @@ impl PreliminarySink for Runtime<'_> {
         //             }
         //         }
         // ```
-        let mut heaps: Vec<_> = if self.options.composition == 2 {
+        let mut heaps: Vec<_> = if self.options.composition != 0 {
             (0..queries.len())
                 .map(|_| CompoHeap::new(self.options.hitlist_size as usize))
                 .collect()
@@ -1604,7 +1605,7 @@ impl PreliminarySink for Runtime<'_> {
         //     }
         // ```
 
-        let mut kappa = if self.options.composition == 2 {
+        let mut kappa = if self.options.composition != 0 {
             Some(KappaState::new(batch, &full, self.options)?)
         } else {
             None
@@ -2649,7 +2650,7 @@ fn finalize_redone(
         options,
         subject.len() as i32,
         db_length,
-        if options.composition == 2 { 32.0 } else { 1.0 },
+        if options.composition != 0 { 32.0 } else { 1.0 },
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2008
     // ```c++
@@ -2713,7 +2714,7 @@ fn finalize_redone(
         .zip(bits)
         .map(|(h, bit_score)| {
             let r = &redone[h.source_index];
-            let (identity, positive) = identity_and_positive(r, batch, subject);
+            let (identity, positive) = identity_and_positive(r, batch, subject, options.scoring);
             Hsp {
                 hsp: h.hsp.clone(),
                 num: h.num,

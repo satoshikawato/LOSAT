@@ -1276,7 +1276,10 @@ mod tests {
                 &["-evalue", "0"][..],
                 "BLAST query/options error: expect value",
             ),
-            (&["-matrix", "PAM30"], "unsupported BLASTX matrix"),
+            (
+                &["-matrix", "IDENTITY"],
+                "BLAST query/options error: IDENTITY is not a supported matrix",
+            ),
             (
                 &["-num_descriptions", "0", "-num_alignments", "0"],
                 "BLAST query/options error: No hits are being saved",
@@ -2783,7 +2786,7 @@ mod tests {
         }
     }
 
-    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 52 rows of the manifest that a
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 54 rows of the manifest that a
     // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
     // store refuses: maintainer decision 3), stream 4 and stream 3.
     #[test]
@@ -2804,7 +2807,7 @@ mod tests {
                 !gap_line(file("-query")) && !gap_line(file("-subject"))
             })
             .collect();
-        assert_eq!(rows.len(), 52);
+        assert_eq!(rows.len(), 54);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
@@ -3239,7 +3242,7 @@ mod tests {
         for extra in [
             &["-subject_loc", "5-2", "-query_loc", "9-1"][..],
             &["-query_loc", "9-1", "-evalue", "0"],
-            &["-subject_loc", "5-2", "-matrix", "PAM30"],
+            &["-subject_loc", "5-2", "-matrix", "IDENTITY"],
         ] {
             let argv = [&words[..5], extra].concat();
             let error = run(&argv, &query, &subject).unwrap_err();
@@ -3249,9 +3252,12 @@ mod tests {
             validate(&[&words[..5], &["-subject_loc", "5-2", "-query_loc", "9-1"]].concat())
                 .unwrap_err();
         assert!(error.contains("subject location"), "{error}");
-        let error = validate(&[&words[..5], &["-subject_loc", "5-2", "-matrix", "PAM30"]].concat())
-            .unwrap_err();
-        assert!(error.starts_with("unsupported BLASTX matrix"), "{error}");
+        // The subject range comes before NCBI's errors of the options (IDENTITY, which BLASTX
+        // does not take).
+        let error =
+            validate(&[&words[..5], &["-subject_loc", "5-2", "-matrix", "IDENTITY"]].concat())
+                .unwrap_err();
+        assert!(error.contains("subject location"), "{error}");
         // A subject range that starts past the subject's end is an error of the records, which
         // validate does not see.
         let past = [&words[..5], &["-subject_loc", "70-80"]].concat();

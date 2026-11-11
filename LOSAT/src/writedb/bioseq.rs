@@ -41,14 +41,14 @@
 /// them (one letter per residue for the text codings, 4 bases per byte for
 /// ncbi2na, 2 bases per byte for ncbi4na; the last byte is padded with zero
 /// bits).
+///
+/// CWriteDB also writes iupacna, iupacaa and ncbistdaa; LOSAT's FASTA reader never
+/// produces them, so they are not variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SeqData {
-    Iupacna(Vec<u8>),
-    Iupacaa(Vec<u8>),
     Ncbi2na(Vec<u8>),
     Ncbi4na(Vec<u8>),
     Ncbieaa(Vec<u8>),
-    Ncbistdaa(Vec<u8>),
     /// Any other choice (ncbi8na, ncbipna, ncbi8aa, ncbipaa, gap): CWriteDB
     /// stops with "Unable to process sequence for entry \[id\].".
     Other,

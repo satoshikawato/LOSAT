@@ -40,6 +40,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::args::BlastpApp;
+use super::blast_engine::query_rows::QueryRows;
 use super::hsp::{BlastpHitList, BlastpHsp};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -81,9 +82,6 @@ pub(super) struct BlastpTabular<'a> {
     /// psiblast's count of outfmt 7's `# N hits found` line by query (the HSPs of its larger
     /// traceback hit list), `None` for blastp (the HSPs of the final hit list).
     pub hits_found: Option<&'a [usize]>,
-    /// The rendered alignments of the final HSPs in the order of the hit lists, when a field
-    /// shows the rows (`TabularNeeds::rows`).
-    pub rows: Option<&'a [PairwiseHit]>,
     /// Whether outfmt 20's header line comes before the first query (the run's first report).
     pub prolog: bool,
     /// The number of queries formatted (outfmt 7's last line), `None` without the epilog.
@@ -409,13 +407,16 @@ pub(super) fn write_tabular_round_epilog(
 /// Writes the report of every query of `hit_lists` (indexed by query) to `writer`, each query's
 /// warnings (and the taxonomy database's warning of its formatter) before its lines, outfmt 20's
 /// header line first when `tab.prolog` and outfmt 7's last line after the last query when
-/// `tab.epilog`. `probe` marks each row (the format observer).
+/// `tab.epilog`. `probe` marks each row (the format observer). `rows` gives the rendered
+/// alignments of each query's HSPs, in the order of its lists, when a field shows them
+/// (`TabularNeeds::rows`).
 pub(super) fn write_blastp_tabular(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
     writer: &mut dyn Write,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut rows: Option<&mut QueryRows<'_>>,
 ) -> Result<()> {
     let spec = tab.spec;
     let needs = spec.needs();
@@ -480,7 +481,7 @@ pub(super) fn write_blastp_tabular(
     }
     let mut buf: Vec<u8> = Vec::new();
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
-    // The index of the next HSP in the final hit lists (the order of `tab.rows`).
+    // The index of the next HSP in the final hit lists (the probe's HSP number).
     let mut hsp_index: HspIndex = 0;
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its lines (`QueryWarnings`), then the warning of its
@@ -537,6 +538,20 @@ pub(super) fn write_blastp_tabular(
             writer.write_all(&buf)?;
             continue;
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-986
+        // ```c++
+        //     if (x_IsFieldRequested(eQuerySeq) ||
+        //         x_IsFieldRequested(eSubjectSeq) ||
+        //     ...
+        //         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+        //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+        // ```
+        // The rows of the query's HSPs when a field shows them, and the next one's index.
+        let query_rows: Option<&[PairwiseHit]> = match rows.as_deref_mut() {
+            Some(rows) if needs.rows => Some(rows.query(q_idx)?),
+            _ => None,
+        };
+        let mut row_index = 0usize;
         for hsp_list in reported(hit_list) {
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
@@ -596,10 +611,11 @@ pub(super) fn write_blastp_tabular(
                         warnings.sink.flush()?;
                     }
                 }
-                let rows = match tab.rows.filter(|_| needs.rows) {
-                    Some(rows) => Some(hsp_rows(rows, hsp_index, hsp)?),
+                let rows = match query_rows {
+                    Some(rows) => Some(hsp_rows(rows, row_index, hsp)?),
                     None => None,
                 };
+                row_index += 1;
                 let row = tabular_hsp(hsp, searched_length, rows);
                 match probe.as_deref_mut() {
                     // One printed row is one HSP; the probe marks it without changing it.
@@ -646,7 +662,8 @@ fn reported(hit_list: &BlastpHitList) -> impl Iterator<Item = &super::hsp::Blast
     hit_list.hsplist_array.iter().take(hit_list.hsplist_count)
 }
 
-/// The rows of the HSP `hsp` (the `index`-th of the final hit lists): its rendered alignment.
+/// The rows of the HSP `hsp` (the `index`-th of its query's final list, whose rows are `rows`):
+/// its rendered alignment.
 fn hsp_rows<'r>(
     rows: &'r [PairwiseHit],
     index: HspIndex,
@@ -806,7 +823,6 @@ mod tests {
             },
             unsearched: &[false, true],
             hits_found: None,
-            rows: None,
             prolog: true,
             epilog: Some(2),
             taxdb_found: false,
@@ -817,7 +833,7 @@ mod tests {
             before: &[b"Warning: q1\n".to_vec()],
             sink: &mut err,
         };
-        write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None).unwrap();
+        write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
         (
             String::from_utf8(out).unwrap(),
             String::from_utf8(err).unwrap(),

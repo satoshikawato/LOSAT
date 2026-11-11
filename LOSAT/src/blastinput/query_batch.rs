@@ -34,35 +34,6 @@ pub fn query_batches(lengths: &[usize], batch_size: usize) -> Vec<Range<usize>> 
     batches
 }
 
-/// The end (a query index) of the query batch that starts at `start`: queries are added
-/// while the residues read are fewer than the batch size.
-///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-/// ```c++
-///     TSeqPos size_read = 0;
-///
-///     while (size_read < GetBatchSize()) {
-///
-///         if (End())
-///             break;
-///         ...
-///             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-///         ...
-///         retval->AddQuery(q);
-///     }
-/// ```
-/// The batch size and `size_read` are `TSeqPos` (32-bit unsigned): an `Int4` batch size
-/// converts to it (a negative one becomes 2^32 plus the value).
-pub fn next_query_batch_end(lengths: &[usize], start: usize, batch_size: u32) -> usize {
-    let mut end = start;
-    let mut size_read: u32 = 0;
-    while end < lengths.len() && size_read < batch_size {
-        size_read = size_read.wrapping_add(lengths[end] as u32);
-        end += 1;
-    }
-    end
-}
-
 /// `NStr::StringToInt` with the default flags: an optional sign and decimal digits, within
 /// the range of an `int`, and nothing else (no spaces); `None` where NCBI throws its
 /// `CStringException`.
@@ -567,10 +538,14 @@ pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        get_query_batch_size, ncbi_string_to_int, next_query_batch_end, query_batches,
-        BatchSizeMixer,
-    };
+    use super::{get_query_batch_size, ncbi_string_to_int, query_batches, BatchSizeMixer};
+    use crate::blastinput::seq_range::next_ranged_batch_end;
+
+    /// The end of the batch that starts at `start` when no record is skipped. The batch size
+    /// is a `TSeqPos` (32-bit unsigned): an `Int4` batch size converts to it.
+    fn next_query_batch_end(lengths: &[usize], start: usize, batch_size: u32) -> usize {
+        next_ranged_batch_end(lengths, &vec![false; lengths.len()], start, batch_size)
+    }
 
     // blast_input.cpp:134-171: a batch takes records until their letters reach the batch
     // size; each searched query belongs to the batch that read it.

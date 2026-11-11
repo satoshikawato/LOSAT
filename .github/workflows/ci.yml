@@ -145,7 +145,7 @@ jobs:
       # is python.yml's check, which is not required; after clippy, so the `cargo metadata` of this
       # step cannot rewrite a stale LOSAT/Cargo.lock before clippy --locked reads it. The
       # advisories run in nightly.yml (job `audit`).
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-deny@0.20.2
       - name: cargo deny (bans, licenses, sources)
@@ -190,7 +190,7 @@ jobs:
         with:
           workspaces: LOSAT -> target
           cache-on-failure: true
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-nextest@0.9.148
       - name: cargo nextest run --all-features
@@ -263,7 +263,7 @@ jobs:
         with:
           workspaces: LOSAT -> target
           key: semver-checks
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-semver-checks@0.51.0
       - name: Semver checks of LOSAT::api against the base

@@ -429,7 +429,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
 │   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd
-│   ├── common.rs          # Shared hit type, gap edit operations and the older output writers
+│   ├── common.rs          # Shared hit type, gap edit operations and the HSP comparators
 │   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
 │   ├── blastinput/        # Application layer, FASTA and compressed input, shared value parsers;

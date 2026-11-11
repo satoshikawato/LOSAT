@@ -1,7 +1,8 @@
 //! The refusal of a title that the BLAST archive (outfmt 11) cannot write as NCBI does
 //! (`report::archive::check_titles`, a byte outside `0x20..=0x7E` in text) looks only at the
 //! records that NCBI BLAST+ 2.17.0 writes, on a whole run of the binary of each search program
-//! with `-subject` (line NP, series SM, DECISIONS 24).
+//! with `-subject` (line NP, series SM, DECISIONS 24), and with `-db` without its header file,
+//! whose batch with hits NCBI fails (DECISIONS 25).
 //!
 //! NCBI writes the archive of each query batch that it completes (`WriteArchive`: the batch's
 //! queries and every `-subject` record); the batch that stops the run (a reader error, a last
@@ -240,6 +241,20 @@ fn a_title_in_a_batch_that_ncbi_writes_is_refused_before_the_first_byte() {
                 let result = run(program, &late, &subject, &env, threads);
                 refused(&what(&format!("late each {path:?}")), &result);
             }
+            // BLASTP's block search (LOSAT_X_BPQBLOCK, here a block of each batch) writes each
+            // block's archive before it searches the next: a run with such a title (the second
+            // record of `batch_title.s`, read without a reader error) takes the search of all
+            // queries, which refuses it before the first byte.
+            if program == "blastp" {
+                let result = run(
+                    program,
+                    &file("batch_title.s", query_kind),
+                    &subject,
+                    &[("BATCH_SIZE", each), ("LOSAT_X_BPQBLOCK", "60")],
+                    threads,
+                );
+                refused(&what("blocks"), &result);
+            }
             // The subjects are written with the first batch.
             let clean = file("batch_clean", query_kind);
             let result = run(
@@ -352,5 +367,270 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes() {
             &what("subject"),
             &library(program, &clean, &bad_subject, &[]),
         );
+        // The second batch's title (`batch_title.s` read as the query, one record a batch): the
+        // first batch's archive is held until the refusal drops it.
+        refused(
+            &what("second batch"),
+            &library(
+                program,
+                &file("batch_title.s", query_kind),
+                &subject,
+                &[("BATCH_SIZE", each)],
+            ),
+        );
+    }
+}
+
+/// A temporary directory of this test, removed at its end.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(tag: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-outfmt11-titles-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the temporary directory");
+        TempDir(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// `count` proteins of `length` residues (without X or a stop) from a fixed linear congruential
+/// generator, so that each hits only itself.
+fn random_proteins(count: usize, length: usize) -> Vec<String> {
+    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut state: u64 = 20_261_108;
+    (0..count)
+        .map(|_| {
+            (0..length)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    RESIDUES[(state >> 33) as usize % RESIDUES.len()] as char
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// One codon of each residue of `protein`.
+fn back_translate(protein: &str) -> String {
+    protein
+        .chars()
+        .map(|residue| match residue {
+            'A' => "GCT",
+            'C' => "TGT",
+            'D' => "GAT",
+            'E' => "GAA",
+            'F' => "TTT",
+            'G' => "GGT",
+            'H' => "CAT",
+            'I' => "ATT",
+            'K' => "AAA",
+            'L' => "CTG",
+            'M' => "ATG",
+            'N' => "AAT",
+            'P' => "CCG",
+            'Q' => "CAG",
+            'R' => "CGT",
+            'S' => "TCT",
+            'T' => "ACC",
+            'V' => "GTT",
+            'W' => "TGG",
+            'Y' => "TAT",
+            _ => unreachable!("a residue of `random_proteins`"),
+        })
+        .collect()
+}
+
+/// Writes the FASTA file `path` of the records `(id, title, sequence)`.
+fn write_fasta(path: &Path, records: &[(&str, String, String)]) {
+    let text: String = records
+        .iter()
+        .map(|(id, title, sequence)| format!(">{id} {title}\n{sequence}\n"))
+        .collect();
+    std::fs::write(path, text).expect("write a FASTA file");
+}
+
+/// The version 4 database `name` of the sequences `sequences` (`s0`, `s1`, ...) made by
+/// `LOSAT makeblastdb` in `dir`, without its header file (`.phr` or `.nhr`).
+fn database_without_headers(dir: &Path, name: &str, dbtype: &str, sequences: &[String]) -> PathBuf {
+    let fasta = dir.join(format!("{name}.fa"));
+    let ids = ["s0", "s1", "s2"];
+    let records: Vec<(&str, String, String)> = sequences
+        .iter()
+        .enumerate()
+        .map(|(index, sequence)| (ids[index], format!("subject {index}"), sequence.clone()))
+        .collect();
+    write_fasta(&fasta, &records);
+    let db = dir.join(name);
+    let output = losat()
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(&fasta)
+        .args(["-dbtype", dbtype, "-blastdb_version", "4", "-out"])
+        .arg(&db)
+        .output()
+        .expect("run LOSAT makeblastdb");
+    assert!(
+        output.status.success(),
+        "makeblastdb: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let headers = dir.join(format!("{name}.{}hr", &dbtype[..1]));
+    std::fs::remove_file(&headers).expect("remove the header file");
+    db
+}
+
+/// `-db` without its header file (line NP, series SM, DECISIONS 25): NCBI reads a definition
+/// line first where it makes the Seq-aligns of a batch with hits, and fails that batch (`BLAST
+/// Database error: Error: File (<path>) not found.`, status 2; the path is absolute, so no row of
+/// `tests/db_search_manifest.tsv` freezes it) after the archives of the batches before. The query
+/// files hold two records of X (protein) or N (nucleotide) only, which have no valid context (NCBI
+/// does not search their batch, reads no definition line for it and writes its archive), then two
+/// records that hit the database, the first with a hyphen (the reader's warning, read with its
+/// batch); `BATCH_SIZE` 60 (180) makes a batch of the first two and one of each record after. A
+/// title that the archive cannot write in the batch that fails, or in the batch after it, is never
+/// written: LOSAT gives the run's bytes without that title, also where the run holds its output
+/// for the later title (`archive::ArchiveHold`: the first batch's archive comes before the
+/// warning in a stream that both go to). One in the first batch is written: LOSAT refuses it
+/// before the first byte. The command line (`-num_threads` 1 and 4, apart and merged) and the
+/// library API (`examples/library_command_line`, whose formats and diagnostics are separate
+/// streams of the caller).
+#[test]
+fn a_title_in_the_batch_that_a_missing_header_file_fails_is_not_refused() {
+    let dir = TempDir::new("nohdr");
+    let proteins = random_proteins(2, 150);
+    let nucleotides: Vec<String> = proteins
+        .iter()
+        .map(|protein| back_translate(protein))
+        .collect();
+    let protein_db = database_without_headers(&dir.0, "sp", "prot", &proteins);
+    let nucleotide_db = database_without_headers(&dir.0, "sn", "nucl", &nucleotides);
+    // The query files of each kind: `café` on no record, on u1 (the first batch) or on q3 (the
+    // batch that fails).
+    let query = |kind: &str, bad: &str| -> PathBuf {
+        let (letter, length, hits) = if kind == "prot" {
+            ('X', 30, &proteins)
+        } else {
+            ('N', 90, &nucleotides)
+        };
+        let title = |id: &str| {
+            if id == bad {
+                "query café".to_string()
+            } else {
+                "query".to_string()
+            }
+        };
+        let unsearched: String = std::iter::repeat_n(letter, length).collect();
+        // A hyphen in the middle of q3: the reader warns and ignores it.
+        let (head, tail) = hits[0].split_at(hits[0].len() / 2);
+        let hyphened = format!("{head}-{tail}");
+        let path = dir.0.join(format!("q.{kind}.{bad}.fa"));
+        write_fasta(
+            &path,
+            &[
+                ("u1", title("u1"), unsearched.clone()),
+                ("u2", title("u2"), unsearched),
+                ("q3", title("q3"), hyphened),
+                ("q4", title("q4"), hits[1].clone()),
+            ],
+        );
+        path
+    };
+    let example = example_binary("library_command_line");
+    for (program, query_kind, subject_kind) in PROGRAMS {
+        let db = if subject_kind == "prot" {
+            &protein_db
+        } else {
+            &nucleotide_db
+        };
+        let batch_size = if query_kind == "prot" { "60" } else { "180" };
+        for arm in ["1", "4", "library"] {
+            let what = |case: &str| format!("{program} {case} ({arm})");
+            let command = |bad: &str| -> Command {
+                let mut command = if arm == "library" {
+                    let mut command = Command::new(&example);
+                    clear_environment(&mut command);
+                    command
+                } else {
+                    losat()
+                };
+                command
+                    .arg(program)
+                    .arg("-query")
+                    .arg(query(query_kind, bad))
+                    .arg("-db")
+                    .arg(db)
+                    .args(["-outfmt", "11", "-num_threads"])
+                    .arg(if arm == "library" { "1" } else { arm })
+                    .env("BATCH_SIZE", batch_size);
+                command
+            };
+            let search = |bad: &str| -> Run {
+                let output = command(bad).output().expect("losat runs");
+                Run {
+                    status: output.status.code(),
+                    stdout: output.stdout,
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                }
+            };
+            // Standard output and standard error into one file, as `2>&1` writes them.
+            let merged = |bad: &str| -> Vec<u8> {
+                let path = dir.0.join(format!("merged.{program}.{arm}.{bad}"));
+                let file = std::fs::File::create(&path).expect("create the merged output");
+                let status = command(bad)
+                    .stdout(file.try_clone().expect("clone the merged output"))
+                    .stderr(file)
+                    .status()
+                    .expect("losat runs");
+                assert!(
+                    !status.success(),
+                    "{program} {bad} ({arm}): the run succeeded"
+                );
+                std::fs::read(&path).expect("read the merged output")
+            };
+            let clean = search("none");
+            // The library API ends a failure with status 1.
+            let status = if arm == "library" { 1 } else { 2 };
+            not_refused(
+                &what("no title"),
+                &clean,
+                status,
+                "BLAST Database error: Error: File (",
+                true,
+            );
+            assert!(
+                clean.stderr.contains("Hyphens are invalid"),
+                "{}: no warning of the reader: {}",
+                what("no title"),
+                clean.stderr
+            );
+            for bad in ["q3", "q4"] {
+                let failed = search(bad);
+                assert_eq!(
+                    (failed.status, &failed.stdout, &failed.stderr),
+                    (clean.status, &clean.stdout, &clean.stderr),
+                    "{}: a title in the batch that fails, or after it, changed the run",
+                    what(bad)
+                );
+                if arm != "library" {
+                    assert!(
+                        merged(bad) == merged("none"),
+                        "{}: the merged stream changed",
+                        what(bad)
+                    );
+                }
+            }
+            refused(&what("u1"), &search("u1"));
+        }
     }
 }

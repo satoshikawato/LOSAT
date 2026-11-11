@@ -64,7 +64,7 @@ fn blosum62_ideal_karlin_params() -> KarlinParams {
 
 // NCBI c++/src/algo/blast/core/blast_stat.c:1506-1528:
 // for each finite matrix score, update sbp->loscore and sbp->hiscore.
-fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
+pub(crate) fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
     let mut low = i32::MAX;
     let mut high = i32::MIN;
     for query in 0..LOOKUP_ALPHABET_SIZE {
@@ -2403,6 +2403,36 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
         Err(prepared) => prepared,
     };
     XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0)
+}
+
+/// [`build_ncbi_lookup_from_prepared`] with another matrix than BLOSUM62 (BLASTX's other matrices,
+/// item SC6 of line NP): the in-place builder without the pool, the reference builder where it
+/// declines, and `Int4` hits only (the 16-bit table is the fused loop's, BLOSUM62's). Not inlined,
+/// so that BLOSUM62's build keeps its code.
+#[cold]
+#[inline(never)]
+pub(crate) fn build_ncbi_lookup_from_prepared_of(
+    matrix: ScoringMatrix,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+) -> BlastAaLookupTable {
+    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+    let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
+    let prepared = PreparedLookupQuery {
+        concat_query,
+        lookup_locations,
+        contexts,
+        frame_bases,
+        skipped_seg_mask: 0,
+    };
+    let prepared = match x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, 3, None) {
+        Ok(XBxTable::Wide(table)) => return table,
+        Ok(XBxTable::Narrow(_)) => unreachable!("a build without a cutoff takes Int4 hits"),
+        Err(prepared) => prepared,
+    };
+    build_lookup_from_prepared(prepared, threshold, matrix, 3).0
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245

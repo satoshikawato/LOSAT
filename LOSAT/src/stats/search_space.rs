@@ -4,10 +4,6 @@ use super::tables::KarlinParams;
 /// Effective search space with length-adjusted values
 #[derive(Debug, Clone, Copy)]
 pub struct SearchSpace {
-    /// Effective query length after adjustment
-    pub effective_query_len: f64,
-    /// Effective database length after adjustment
-    pub effective_db_len: f64,
     /// Effective search space (product of effective lengths)
     pub effective_space: f64,
     /// The length adjustment value used (for debugging/verification)
@@ -23,8 +19,6 @@ impl SearchSpace {
         let q = query_len as f64;
         let d = db_len as f64;
         Self {
-            effective_query_len: q,
-            effective_db_len: d,
             effective_space: q * d,
             length_adjustment: 0,
         }
@@ -53,8 +47,6 @@ impl SearchSpace {
         let effective_n = (n - length_adj).max(1.0);
 
         Self {
-            effective_query_len: effective_m,
-            effective_db_len: effective_n,
             effective_space: effective_m * effective_n,
             length_adjustment: result.length_adjustment,
         }
@@ -101,34 +93,9 @@ impl SearchSpace {
         let effective_n = (n - (length_adj * n_seqs)).max(1.0);
 
         Self {
-            effective_query_len: effective_m,
-            effective_db_len: effective_n,
             effective_space: effective_m * effective_n,
             length_adjustment: result.length_adjustment,
         }
-    }
-}
-
-/// Compute effective search space for translated searches (TBLASTX)
-///
-/// For translated searches, the effective lengths are based on the
-/// amino acid sequence lengths (nucleotide length / 3)
-pub fn compute_tblastx_search_space(
-    query_nucl_len: usize,
-    subject_nucl_len: usize,
-    params: &KarlinParams,
-    use_length_adjustment: bool,
-) -> SearchSpace {
-    // Convert to amino acid lengths (6 frames each)
-    let query_aa_len = query_nucl_len / 3;
-    let subject_aa_len = subject_nucl_len / 3;
-
-    // Total search space is 6 * 6 = 36 frame combinations
-    // But we use the single-frame length for statistics
-    if use_length_adjustment {
-        SearchSpace::with_length_adjustment(query_aa_len, subject_aa_len, params)
-    } else {
-        SearchSpace::simple(query_aa_len, subject_aa_len)
     }
 }
 
@@ -139,9 +106,7 @@ mod tests {
     #[test]
     fn test_simple_search_space() {
         let ss = SearchSpace::simple(100, 1000);
-        assert_eq!(ss.effective_query_len, 100.0);
-        assert_eq!(ss.effective_db_len, 1000.0);
-        assert_eq!(ss.effective_space, 100000.0);
+        assert_eq!(ss.effective_space, 100.0 * 1000.0);
     }
 
     #[test]
@@ -157,13 +122,16 @@ mod tests {
         let ss = SearchSpace::with_length_adjustment(100, 1000, &params);
 
         // Effective lengths should be smaller than original
-        assert!(ss.effective_query_len < 100.0);
-        assert!(ss.effective_db_len < 1000.0);
+        assert!(ss.length_adjustment > 0);
         assert!(ss.effective_space < 100000.0);
 
+        // The space is the product of the two adjusted lengths
+        let adj = ss.length_adjustment as f64;
+        let expected_m = (100.0_f64 - adj).max(1.0);
+        let expected_n = (1000.0_f64 - adj).max(1.0);
+        assert_eq!(ss.effective_space, expected_m * expected_n);
+
         // But still positive
-        assert!(ss.effective_query_len > 0.0);
-        assert!(ss.effective_db_len > 0.0);
         assert!(ss.effective_space > 0.0);
     }
 
@@ -203,12 +171,14 @@ mod tests {
         let ss = SearchSpace::for_database_search(100, 10000, 10, &params, true);
 
         // Effective lengths should be smaller than original
-        assert!(ss.effective_query_len < 100.0);
-        assert!(ss.effective_db_len < 10000.0);
+        assert!(ss.length_adjustment > 0);
         assert!(ss.effective_space < 1000000.0);
 
-        // Length adjustment should be recorded
-        assert!(ss.length_adjustment >= 0);
+        // The space is (m - adj) * (n - N * adj)
+        let adj = ss.length_adjustment as f64;
+        let expected_m = (100.0_f64 - adj).max(1.0);
+        let expected_n = (10000.0_f64 - adj * 10.0).max(1.0);
+        assert_eq!(ss.effective_space, expected_m * expected_n);
     }
 }
 

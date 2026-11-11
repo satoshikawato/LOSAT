@@ -342,8 +342,6 @@ pub(super) fn blastp_database_search_space(
         .with_context(overflow)?;
     Ok((
         SearchSpace {
-            effective_query_len: effective_query_length as f64,
-            effective_db_len: effective_db_length as f64,
             effective_space: effective_search_space as f64,
             length_adjustment,
         },
@@ -2129,13 +2127,19 @@ mod tests {
             blastp_database_search_space(379, 357_308, 1_000, &params, "BLASTP").unwrap();
         assert_eq!(exact, 84_653_016);
         assert_eq!(space.effective_space, 84_653_016.0);
+        let adj = space.length_adjustment;
+        assert_eq!(
+            space.effective_space,
+            ((379 - adj) * (357_308 - 1_000 * adj)) as f64
+        );
         let (space, exact) =
             blastp_database_search_space(379, 1_000_000_000, 1_000, &params, "BLASTP").unwrap();
         assert_eq!(exact, 245_967_282_000);
         assert_eq!(space.effective_space, 245_967_282_000.0);
+        let adj = space.length_adjustment;
         assert_eq!(
-            space.effective_query_len * space.effective_db_len,
-            space.effective_space
+            space.effective_space,
+            ((379 - adj) * (1_000_000_000 - 1_000 * adj)) as f64
         );
     }
 
@@ -2153,7 +2157,7 @@ mod tests {
         let (space, exact) =
             blastp_database_search_space(379, 5_000, 1_000, &params, "BLASTP").unwrap();
         assert_eq!(space.length_adjustment, 4);
-        assert_eq!(space.effective_db_len, 1_000.0);
+        assert_eq!(space.effective_space, 1_000.0 * 375.0);
         assert_eq!(exact, 1_000 * 375);
     }
 
@@ -2874,15 +2878,20 @@ mod tests {
                 second: 0,
             };
             let (mut log, mut messages) = (Vec::new(), Vec::new());
-            crate::writedb::makeblastdb::build_database(
+            let status = crate::writedb::makeblastdb::run_with(
                 &args,
                 Some(&now),
                 crate::writedb::Platform::host(),
                 &mut fasta.as_slice(),
                 &mut log,
                 &mut messages,
-            )
-            .unwrap_or_else(|error| panic!("makeblastdb: {error}"));
+            );
+            assert_eq!(
+                status,
+                0,
+                "makeblastdb: {}",
+                String::from_utf8_lossy(&messages)
+            );
             (dir, name)
         }
 

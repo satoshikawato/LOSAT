@@ -674,6 +674,7 @@ impl SeqidLookup<'_> {
     /// one whose Bioseq NCBI's BLAST database data loader serves for it
     /// (`CBlastDbDataLoader::x_GetOid`; the search's own database, so its list's OIDs only).
     /// `None`: not found (`seqid_to_oids`).
+    #[cfg(test)]
     pub fn seqid_to_oid(&self, seqid: &ParsedSeqId) -> Result<Option<u32>, SeqDbError> {
         Ok(self.seqid_to_oids(seqid, false)?.first().copied())
     }

@@ -591,3 +591,68 @@ pub(crate) fn process_blast_results(
     }
     Ok(queries)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::seqid::model::{Dbtag, TextseqId};
+
+    // serial/exception.cpp:86-150 (quoted at `choice_selection`); NCBI's rpsbproc printed the first
+    // one for a profile database with `lcl|` ids (PS16a probe 2).
+    #[test]
+    fn choice_selection_messages() {
+        let message = |error| match error {
+            ProcessError::ChoiceSelection(message) => message,
+            ProcessError::Unsupported(message) => panic!("{message}"),
+        };
+        assert_eq!(
+            message(choice_selection(
+                "NCBI-Seqloc",
+                "Seq-id",
+                "general",
+                "local"
+            )),
+            "CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local"
+        );
+        assert_eq!(
+            message(choice_selection("NCBI-Blast4", "Blast4-cutoff", "e-value", "raw-score")),
+            "CBlast4_cutoff::GetE_value(): Invalid choice selection: NCBI-Blast4::Blast4-cutoff.raw-score"
+        );
+        assert_eq!(
+            message(choice_selection(
+                "NCBI-Seqloc",
+                "Seq-loc",
+                "packed-int",
+                "int"
+            )),
+            "CSeq_loc::GetPacked_int(): Invalid choice selection: NCBI-Seqloc::Seq-loc.int"
+        );
+    }
+
+    // Seq_id.cpp:2292-2326 and biodata_core.cpp:1030-1046 (quoted at `query_accession`): the
+    // label of the best id, after its first `:`, then after its first `|`.
+    #[test]
+    fn query_labels() {
+        let query = |ids: Vec<ParsedSeqId>| Query {
+            ids,
+            mol: 3,
+            ..Query::default()
+        };
+        let local = ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()));
+        assert_eq!(query_accession(&query(vec![local.clone()])), b"Query_1");
+        let general = ParsedSeqId::General(Dbtag {
+            db: b"CDD".to_vec(),
+            tag: ObjectId::Id(5),
+        });
+        assert_eq!(query_accession(&query(vec![general])), b"5");
+        let refseq = ParsedSeqId::Other(TextseqId {
+            accession: Some(b"NP_414783".to_vec()),
+            version: Some(1),
+            ..TextseqId::default()
+        });
+        // FastaAARank prefers the RefSeq id to the local one.
+        assert_eq!(query_accession(&query(vec![local, refseq])), b"NP_414783.1");
+        assert_eq!(query_accession(&query(vec![ParsedSeqId::Gi(123)])), b"123");
+        assert_eq!(query_accession(&query(Vec::new())), b"");
+    }
+}

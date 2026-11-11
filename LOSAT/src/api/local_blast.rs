@@ -615,3 +615,7 @@ impl<'a> ReportOutputs<'a> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "local_blast_tests/mod.rs"]
+mod local_blast_tests;

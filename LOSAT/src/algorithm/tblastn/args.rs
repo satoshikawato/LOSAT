@@ -1235,3 +1235,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tblastn_culling_tests.rs"]
+mod tblastn_culling_tests;

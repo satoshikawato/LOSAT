@@ -1431,3 +1431,7 @@ pub fn command_line_bytes() -> Vec<u8> {
     }
     line
 }
+
+#[cfg(test)]
+#[path = "cli_v2_tests.rs"]
+mod cli_v2_tests;

@@ -883,3 +883,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "init_hsp_size_tests.rs"]
+mod init_hsp_size_tests;

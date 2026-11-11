@@ -91,6 +91,51 @@ impl Drop for TempDir {
     }
 }
 
+/// Where the ambiguity data of sequence `oid` lie in the sequence file (`.nsq`) of the nucleotide
+/// database `db`: from the sequence's entry in the ambiguity offset array to the next sequence's
+/// entry in the sequence offset array (the sequence data end where the ambiguity data start, and
+/// the ambiguity data end where the next sequence starts), read from the index file (`.nin`).
+/// The index is NCBI's format: big-endian 32-bit words, a version (4 or 5), the sequence type, the
+/// volume number (version 5 only), the title (a length and its bytes), the LMDB file name
+/// (version 5 only), the date (a length and its bytes), the number of sequences `n`, the volume
+/// length (64 bits, little-endian), the longest sequence (32 bits), and then three arrays of
+/// `n + 1` offsets: the headers', the sequences', the ambiguity data'.
+fn ambiguity_range(db: &str, oid: usize) -> (usize, usize) {
+    let bytes = std::fs::read(format!("{db}.nin")).expect("read the index file");
+    let mut at = 0usize;
+    let word = |at: &mut usize| {
+        let value = u32::from_be_bytes(bytes[*at..*at + 4].try_into().unwrap());
+        *at += 4;
+        value
+    };
+    let version = word(&mut at);
+    assert!(version == 4 || version == 5, "index version {version}");
+    word(&mut at); // the sequence type
+    if version == 5 {
+        word(&mut at); // the volume number
+    }
+    let strings = if version == 5 { 3 } else { 2 }; // title, [LMDB file name], date
+    for _ in 0..strings {
+        let length = word(&mut at) as usize;
+        at += length;
+    }
+    let sequences = word(&mut at) as usize;
+    at += 8; // the volume length
+    word(&mut at); // the longest sequence
+    let array = |first: usize| -> Vec<usize> {
+        (0..=sequences)
+            .map(|i| {
+                let from = first + 4 * i;
+                u32::from_be_bytes(bytes[from..from + 4].try_into().unwrap()) as usize
+            })
+            .collect()
+    };
+    let array_bytes = 4 * (sequences + 1);
+    let sequence_starts = array(at + array_bytes);
+    let ambiguity_starts = array(at + 2 * array_bytes);
+    (ambiguity_starts[oid], sequence_starts[oid + 1])
+}
+
 /// A FASTA record with `title` and `seq` in lines of 61 letters.
 fn record(text: &mut Vec<u8>, title: &[u8], seq: &[u8]) {
     text.push(b'>');
@@ -652,12 +697,8 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
         std::fs::write(&path, header).unwrap();
     });
     let ambiguity = database(&dir, "ambiguity", |db| {
-        let volume = LOSAT::seqdb::SeqDb::open(db, LOSAT::seqdb::SeqType::Nucleotide).unwrap();
-        let index = volume.volumes()[0].index();
-        let (at, next) = index.ambiguity_range(1).unwrap().unwrap();
-        let (at, next) = (at as usize, next as usize);
+        let (at, next) = ambiguity_range(db, 1);
         assert!(at < next, "the second sequence has ambiguity data");
-        drop(volume);
         let path = format!("{db}.nsq");
         let mut sequences = std::fs::read(&path).unwrap();
         let count = u32::from_be_bytes(sequences[at..at + 4].try_into().unwrap());
@@ -942,11 +983,8 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
     let intact = copy("nambig_intact");
     let raised = copy("nambig_raised");
     {
-        let db = LOSAT::seqdb::SeqDb::open(&raised, LOSAT::seqdb::SeqType::Nucleotide).unwrap();
-        let (at, next) = db.volumes()[0].index().ambiguity_range(1).unwrap().unwrap();
-        let (at, next) = (at as usize, next as usize);
+        let (at, next) = ambiguity_range(&raised, 1);
         assert!(at < next, "the second sequence has ambiguity data");
-        drop(db);
         let path = format!("{raised}.nsq");
         let mut sequences = std::fs::read(&path).unwrap();
         let count = u32::from_be_bytes(sequences[at..at + 4].try_into().unwrap());

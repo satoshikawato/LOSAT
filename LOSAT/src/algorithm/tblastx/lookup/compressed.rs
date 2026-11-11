@@ -2907,3 +2907,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "compressed_lookup_tests.rs"]
+mod compressed_lookup_tests;

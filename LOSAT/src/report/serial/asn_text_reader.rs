@@ -494,18 +494,37 @@ impl<S: AsnSource> Reader<S> {
 
     /// The variant of a CHOICE whose variants are `names` (in module order), as its position;
     /// a name that is not one of them is an error.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1381-1413
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1436-1475
     // ```c++
+    // void CObjectIStreamAsn::BeginChoice(const CChoiceTypeInfo* choiceType)
+    // {
+    //     if (choiceType->GetVariantInfo(kFirstMemberIndex)->GetId().IsAttlist()) {
+    //         ...
+    //     }
+    //     m_BlockStart = true;
+    // }
+    // ...
     // TMemberIndex CObjectIStreamAsn::BeginChoiceVariant(const CChoiceTypeInfo* choiceType)
     // {
+    //     bool skipname = !m_BlockStart;
+    //     if ( !NextElement() )
+    //         return kInvalidMember;
     //     CTempString id = ReadMemberId(SkipWhiteSpace());
+    //     ...
     //     if ( id.empty() )
     //         ThrowError(fFormatError, "choice variant id expected");
-    //     TMemberIndex index = choiceType->GetVariants().Find(id);
+    //
+    //     TMemberIndex index = GetChoiceIndex(choiceType, id);
     //     if ( index == kInvalidMember ) {
-    //         ...
+    //         if (CanSkipUnknownVariants()) {
+    //             SetFailFlags(fUnknownValue);
+    //         } else {
     //             UnexpectedMember(id, choiceType->GetVariants());
+    //         }
+    //     }
     // ```
+    // (`NextElement` at the choice's start fails at a `}`, which reads as no id here; the variant
+    // names of the modules LOSAT reads are their ASN.1 names, `GetChoiceIndex` (:426-442).)
     pub(crate) fn choice(&mut self, names: &[&str]) -> Result<usize> {
         let id = self.member_id_range()?;
         if id.is_empty() {

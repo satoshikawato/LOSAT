@@ -258,7 +258,7 @@ impl ConversionError {
 }
 
 /// `NStr::PrintableString(str)` (`fNewLine_Quote | fNonAscii_Passthru`, C escapes).
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4436-4540 (`s_PrintableString`)
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3732-3845 (`s_PrintableString`)
 // ```c++
 //         switch (c) {
 //         case '\a':
@@ -548,7 +548,7 @@ pub(crate) fn string_to_int(text: &[u8]) -> Result<i32, ConversionError> {
 
 /// `NStr::StringToDouble(str)` (flags 0): the first byte must be a digit, the C locale's
 /// decimal point or a sign; `strtod` reads the number, which must end the text.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1309-1374
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1312-1374
 // ```c++
 //     // For consistency make additional check on incorrect leading symbols.
 //     // Because strtod() may just skip such symbols.
@@ -812,7 +812,7 @@ impl CddData {
     }
 
     /// `CPtrMap::Find` of `m_pssmid2cd`: the domain of `pssm_id`.
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:91-103
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:109-127
     // ```c++
     // CPtrMap<TKey, TVal, TComp> :: Find(const TKey &k) const
     // {
@@ -1127,7 +1127,7 @@ impl CddData {
         })?;
         self.domains = domains;
         self.clusters = clusters;
-        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:138-148
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:167-179
         // ```c++
         // void CPtrMap<TKey, TVal, TComp> :: Reset(const TSORTED_PTRS & ptrs)
         // {
@@ -1135,7 +1135,7 @@ impl CddData {
         // 	if (m_ptr_vec.size() > 1) sort(m_ptr_vec.begin(), m_ptr_vec.end(), m_sort_cmp);
         // }
         // ```
-        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:50-58
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:63-70
         // ```c++
         // 	struct TSortComp
         // 	{

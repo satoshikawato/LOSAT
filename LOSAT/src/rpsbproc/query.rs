@@ -170,7 +170,7 @@ pub(crate) fn check_masks(masks: &[Mask]) -> Result<(), ProcessError> {
 /// `CSeq_id::GetStringDescr(bioseq, eFormat_BestWithVersion)` and the clean-up of
 /// `FillSequenceFromBioseq`: the label of the best id, the text after its first `:` and then
 /// after its first `|`.
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2292-2326
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2292-2345
 // ```c++
 // string CSeq_id::GetStringDescr(const CBioseq& bioseq, EStringFormat fmt)
 // {

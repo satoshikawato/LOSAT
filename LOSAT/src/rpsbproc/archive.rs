@@ -206,7 +206,7 @@ pub(crate) struct ArchiveStream<R: Read> {
 }
 
 /// The `Blast4-request-body` variants.
-// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:76-109
+// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:76-98
 // ```text
 // Blast4-request-body ::= CHOICE {
 //     finish-params           Blast4-finish-params-request,
@@ -245,7 +245,7 @@ const REQUEST_BODY: [&str; 15] = [
 ];
 
 /// The `Blast4-value` variants.
-// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512-552
+// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512-551
 // ```text
 // Blast4-value ::= CHOICE {
 //     big-integer             BigInt,
@@ -343,7 +343,7 @@ const BLAST4_FRAME_TYPE: [(&str, i32); 7] = [
     ("minus3", 6),
 ];
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:105-111
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:115-121
 // ```text
 // Na-strand ::= ENUMERATED {          -- strand of nucleic acid
 //     unknown (0) ,
@@ -362,7 +362,7 @@ const NA_STRAND: [(&str, i32); 6] = [
     ("other", 255),
 ];
 
-// NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:62-90
+// NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:26-51
 // ```text
 //     class ENUMERATED {
 //         not-set (0) ,
@@ -399,7 +399,7 @@ const BIOSEQ_SET_CLASS: [(&str, i32); 25] = [
     ("other", 255),
 ];
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:367-381 (Seq-inst topology, strand)
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:283-294 (Seq-inst topology, strand)
 // ```text
 //     topology ENUMERATED {          -- topology of molecule
 //         not-set (0) ,
@@ -429,7 +429,7 @@ const SEQ_INST_STRAND: [(&str, i32); 5] = [
     ("other", 255),
 ];
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:94-119
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:47-73
 // ```text
 // Seqdesc ::= CHOICE {
 //     mol-type GIBB-mol ,          -- type of molecule
@@ -519,7 +519,7 @@ const SEQ_DATA: [&str; 11] = [
     "gap",
 ];
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:76-87
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:79-90
 // ```text
 // Seq-loc ::= CHOICE {
 //     null NULL ,           -- not placed
@@ -548,7 +548,7 @@ const SEQ_LOC: [&str; 11] = [
     "feat",
 ];
 
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:63-80
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:32-40
 // ```text
 //     segs CHOICE {                   -- alignment data
 //         dendiag SEQUENCE OF Dense-diag ,
@@ -564,7 +564,7 @@ const SEQ_ALIGN_SEGS: [&str; 7] = [
     "dendiag", "denseg", "std", "packed", "disc", "spliced", "sparse",
 ];
 
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:52-60
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-29
 // ```text
 // Seq-align ::= SEQUENCE {
 //     type ENUMERATED {
@@ -697,7 +697,7 @@ impl<R: Read> ArchiveStream<R> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:56-59
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:56-63
     // ```text
     // Blast4-request ::= SEQUENCE {
     //     ident                   VisibleString OPTIONAL,
@@ -725,7 +725,7 @@ impl<R: Read> ArchiveStream<R> {
         Ok((ident, body))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:156-165
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:156-166
     // ```text
     // Blast4-queue-search-request ::= SEQUENCE {
     //     program                 VisibleString,
@@ -919,7 +919,7 @@ impl<R: Read> ArchiveStream<R> {
         Ok(ParamValue::Other(name))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:287-295
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:287-299
     // ```text
     // Blast4-get-search-results-reply ::= SEQUENCE {
     //     alignments              Seq-align-set OPTIONAL,
@@ -1033,7 +1033,7 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     /// A `Seq-loc` of a mask: the ids of a `packed-int`, the name of another variant.
-    // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:89-96
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-101
     // ```text
     // Seq-interval ::= SEQUENCE {
     //     from INTEGER ,
@@ -1097,7 +1097,7 @@ impl<R: Read> ArchiveStream<R> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:332-335
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:332-337
     // ```text
     // Blast4-error ::= SEQUENCE {
     //     code                    INTEGER,
@@ -1128,7 +1128,7 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     /// A `Bioseq-set`: its `seq-set`.
-    // NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:57-95
+    // NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:22-60
     // ```text
     // Bioseq-set ::= SEQUENCE {      -- just a collection
     //     id Object-id OPTIONAL ,
@@ -1197,7 +1197,7 @@ impl<R: Read> ArchiveStream<R> {
         entries.ok_or_else(|| self.reader.error("member seq-set missing"))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:40-44
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
     // ```text
     // Bioseq ::= SEQUENCE {
     //     id SET OF Seq-id ,            -- equivalent identifiers
@@ -1293,7 +1293,7 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `User-object`: whether it is a `CFastaReader` object with a `DefLine` field whose
     /// value is not a string.
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:150-171
+    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:128-148
     // ```text
     // User-object ::= SEQUENCE {
     //     class VisibleString OPTIONAL ,   -- endeavor which designed this object
@@ -1400,7 +1400,7 @@ impl<R: Read> ArchiveStream<R> {
         Ok(bad_defline)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:340-386
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297
     // ```text
     // Seq-inst ::= SEQUENCE {            -- the sequence data itself
     //     repr ENUMERATED {              -- representation class
@@ -1474,7 +1474,7 @@ impl<R: Read> ArchiveStream<R> {
         Ok(aligns)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:52-86
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-51
     // ```text
     // Seq-align ::= SEQUENCE {
     //     type ENUMERATED {
@@ -1545,7 +1545,7 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     /// One `Score` of a Seq-align, into the fields `ParseAlignScores` reads.
-    // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:240-245
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:283-289
     // ```text
     // Score ::= SEQUENCE {
     //     id Object-id OPTIONAL ,
@@ -1646,7 +1646,7 @@ impl<R: Read> ArchiveStream<R> {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:110-117
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:74-81
     // ```text
     // Dense-seg ::= SEQUENCE {          -- for (multiway) global or partial alignments
     //     dim INTEGER DEFAULT 2 ,       -- dimensionality
@@ -1727,7 +1727,7 @@ impl<R: Read> ArchiveStream<R> {
         Ok(seg)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:23-26
+    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:78-80
     // ```text
     // Object-id ::= CHOICE {
     //     id INTEGER ,
@@ -1741,7 +1741,7 @@ impl<R: Read> ArchiveStream<R> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:117-119
+    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:71-73
     // ```text
     // Dbtag ::= SEQUENCE {
     //     db VisibleString ,          -- name of database or system
@@ -1762,7 +1762,7 @@ impl<R: Read> ArchiveStream<R> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-66
+    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-65
     // ```text
     // Date ::= CHOICE {
     //     str VisibleString ,        -- for those unparsed dates
@@ -1861,7 +1861,7 @@ impl<R: Read> ArchiveStream<R> {
     //       rel Date OPTIONAL ,                 -- release date, month and year
     //       chain-id VisibleString OPTIONAL }   -- chain identifier; length-independent generalization of 'chain'
     // ```
-    // NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:466-472
+    // NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:119-124
     // ```text
     // Id-pat ::= SEQUENCE {           -- just to identify a patent
     //     country VisibleString ,         -- Patent Document Country

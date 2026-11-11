@@ -526,6 +526,13 @@ mod tests {
             .unwrap()
             .into_blastp_args()
             .unwrap();
+        // RPS-BLAST's defaults (blastinput_unit_test.cpp:3296-3303 `RpsBlastCBS`): composition-based
+        // statistics 1 and no SEG (`blast_rps_options.cpp:68-73`).
+        assert_eq!(args.seg, None);
+        assert_eq!(
+            args.resolve().unwrap().seg,
+            crate::algorithm::blastp::args::BlastpSegSpec::No
+        );
         let rps = args.rps.unwrap();
         assert_eq!(rps.requested_cbs, 1);
         assert_eq!(

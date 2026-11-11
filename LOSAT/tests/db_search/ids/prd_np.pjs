@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "prd_np",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_np (no parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-11T22:46:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 37693,
+  "bytes-to-cache": 631,
+  "files": [
+    "prd_np.pdb",
+    "prd_np.phr",
+    "prd_np.pin",
+    "prd_np.pot",
+    "prd_np.psq",
+    "prd_np.ptf",
+    "prd_np.pto"
+  ]
+}

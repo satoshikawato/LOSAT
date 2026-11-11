@@ -668,11 +668,12 @@ subject (`lcl|777` before `gi|777`) whose lookup gives Y (`prd_u0y`, listed firs
 not warn; `zunf.s1`, `zunf.r3` do the same where Y's kept definition line is `lcl|777` and does not hold the id, so NCBI warns
 `Failed to retrieve sequence gi|777`; `otag.s1`, `otag.pf0.s1` (`PRE_FETCH_SEQS_LIMIT=0`) and `otag4.s1` (version 4) store
 `gnl|BL_ORD_ID|0` with a text tag, whose lookup throws: NCBI writes `Error pre-fetching sequence data` (prefetch on) and
-`Failed to retrieve sequence gnl|BL_ORD_ID|0` and exits 0. Three `losat-rejection` rows (rc 1, with the `pssm` files kind: no
-PSSM file is written): `txself.pf0.reject` (A itself with taxid 99990 by `prd_txself.map`, `BLASTDB=tests/seqdb/taxdb/bad_magic`
-and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy database's text, which LOSAT does not model),
-`wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has read before: NCBI reads C's letters) and
-`ah4.reject` (another sequence that also holds A's id: NCBI's result depends on its reads and memory layout).
+`Failed to retrieve sequence gnl|BL_ORD_ID|0` and exits 0. `txself.pf0` (A itself with taxid 99990 by `prd_txself.map`,
+`BLASTDB=tests/seqdb/taxdb/bad_magic` and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy
+database's text after the report; a refusal until review 3 of the line). Two `losat-rejection` rows (rc 1, with the `pssm`
+files kind: no PSSM file is written): `wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has
+read before: NCBI reads C's letters) and `ah4.reject` (another sequence that also holds A's id: NCBI's result depends on its
+reads and memory layout).
 
 Review 2 of pssmread (rows `db.id.prd2.*`; databases from `ids/prd_*.faa` and `ids/prdn_*.fna` by `make_ids.py
 --pssmread-only`, read through `ids/prd_xg.pal`, `prd_tw.pal`, `prd_tu.pal`, `prd_pah.pal`, `prdn_u.nal` and
@@ -686,15 +687,27 @@ the reader's filter does not keep for A's `gb|AAA00001.1|` (`s_SeqDB_SeqIdIn` st
 `gb|AAA00002.1|`): `GetBioseq` throws before its taxid lookup, so NCBI writes
 `Failed to retrieve sequence` and no taxonomy text; `tu.bad.s1` and `tu.lastoff.r1`: A `lcl|777 ^A gi|777` (unfetchable by
 its own ids) after Y (`gi|777|gb|YYY00001.1|`, 20 letters, taxid 99990): the prefetch reads Y and looks its taxid up, and
-the PSSM warns `Failed to retrieve sequence gi|777`; two `losat-rejection` rows: `tu.bad.pf0.reject` (the same with the
-prefetch off: the PSSM's read loads Y first and NCBI writes the text there) and `pah.reject` (C `gi|888|gb|CCC00001.1| ^A
-gi|777` also holds A's `gi|777`: the refusal names database sequence 2). BLASTN (megablast) and TBLASTX with the
+the PSSM warns `Failed to retrieve sequence gi|777`; `tu.bad.pf0` (the same with the prefetch off: the PSSM's read loads Y
+first, so NCBI writes the text, then the warning; a refusal until review 3); one `losat-rejection` row, `pah.reject` (C
+`gi|888|gb|CCC00001.1| ^A gi|777` also holds A's `gi|777`: the refusal names database sequence 2). BLASTN (megablast) and TBLASTX with the
 minus-strand query `ids/prdn_qrc.fna` (the prefetch asks the length of a minus-strand Seq-align's subject): `bn.u.rc`,
 `tx.u.rc` (A `lcl|777 ^A gi|777` after Y `gi|777|gb|YYY00001.1|`: the scope gets Y's Bioseq, no warning) and `bn.z.rc`,
 `tx.z.rc` (A `gi|777` after Y `lcl|777 ^A gi|777`, whose kept line `lcl|777` does not hold the id: `Error pre-fetching
 sequence data`). `ids/prd_mb.pal` (`prd_mb0ys`: Y `gb|BBB00001.1|` of 100 letters; `prd_mbab`: A `gb|AAA00001.1|`, B
 `gb|BBB00001|`, C) is `tests/psiblast_pssm_read_order.rs`'s: with `-max_target_seqs 1` no report reads B, whose PSSM read
 fails, and the last query's warning comes before the epilog where both streams go to one file.
+
+Review 3 of pssmread (rows `db.id.prd3.*`; `ids/prd_np` and its version 4 copy `ids/prd_np_4` from `ids/prd_np.faa`, A and B
+without `-parse_seqids` and taxid 99990 by `-taxid 99990`, and `ids/prd_tc` from `ids/prd_tc.faa`, A taxid 99990 and B taxid
+150 by `prd_tc.map`, all by `make_ids.py --pssmread-only`; the prefetch off and a report that reads nothing of the subjects):
+psiblast's PSSM reads a subject without parsed Seq-ids by `gnl|BL_ORD_ID|n`, whose load looks its taxid up, so where that
+is the run's first lookup NCBI writes the taxonomy database's text after the query's report, before the PSSM's warnings and
+the next query's. `np.bad.pf0.s1` (a wrong magic number), `np4.lastoff.pf1.q3` (three queries, the offset error of taxid
+99990 after the first query's report and before the second query's O warning), `np.count.pf0.r2` (two rounds, a count larger
+than the entries: after round 1's report, before round 2's composition warning) and `np.bad.pf0.stop` (`-pseudocount -1`:
+the text, then NCBI's PSSM error, exit 1) are NCBI's bytes; `tc.lastoff.pf0.q2.reject` is refused: the second query's PSSM
+loads A again after B, whose taxid takes the same slot of NCBI's 256-slot taxonomy cache of a volume, so whether NCBI writes
+the offset error again depends on the order of its fetches.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

@@ -143,6 +143,9 @@ the nucleotide `prdn_u0y`/`prdn_ua` (`prdn_u.nal`) and `prdn_z0y`/`prdn_za` (`pr
 `prd_unf`/`prd_zunf`, for the minus-strand query `prdn_qrc.fna` (BLASTN and TBLASTX prefetch the length of a
 minus-strand Seq-align's subject); `prd_mb0ys` (Y `gb|BBB00001.1|`, 100 letters) and `prd_mbab` (A, B `gb|BBB00001|`,
 C) through `prd_mb.pal` for `tests/psiblast_pssm_read_order.rs` (the last query's PSSM warning before the epilog).
+Review 3 of that line: `prd_np` and its version 4 copy `prd_np_4` from `prd_np.faa` (A and B without `-parse_seqids`,
+taxid 99990 by `-taxid 99990`: the PSSM reads them by `gnl|BL_ORD_ID|n` and looks their taxid up), and `prd_tc` (A
+`gb|AAA00001.1|` taxid 99990 and B `gb|BBB00001.1|` taxid 150 by `prd_tc.map`, one slot of NCBI's taxonomy cache).
 `--pssmread-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
@@ -306,13 +309,22 @@ def build_pssmread(args: argparse.Namespace) -> None:
                                  ("prd_tu2y", "prd_tu2y.faa", "5"), ("prd_mb0ys", "prd_mb0ys.faa", "5"),
                                  ("prd_mbab", "prd_mbab.faa", "5"),
                                  ("prdn_u0y", "prdn_u0y.fna", "5"), ("prdn_ua", "prdn_ua.fna", "5"),
-                                 ("prdn_z0y", "prdn_z0y.fna", "5"), ("prdn_za", "prdn_za.fna", "5")):
-        maps = {"prd_txself": "prd_txself.map", "prd_tw0y": "prd_tw0y.map", "prd_tu2y": "prd_tu2y.map"}
+                                 ("prdn_z0y", "prdn_z0y.fna", "5"), ("prdn_za", "prdn_za.fna", "5"),
+                                 ("prd_tc", "prd_tc.faa", "5")):
+        maps = {"prd_txself": "prd_txself.map", "prd_tw0y": "prd_tw0y.map", "prd_tu2y": "prd_tu2y.map",
+                "prd_tc": "prd_tc.map"}
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta),
              "-dbtype", "nucl" if fasta.endswith(".fna") else "prot", "-parse_seqids",
              "-blastdb_version", version, "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)]
             + (["-taxid_map", str(HERE / maps[name])] if name in maps else []),
+            check=True, stdout=subprocess.DEVNULL)
+    # Without parsed Seq-ids: the PSSM reads by the ordinal id (review 3 of line DBID pssmread, H1).
+    for name, version in (("prd_np", "5"), ("prd_np_4", "4")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "prd_np.faa"), "-dbtype", "prot",
+             "-taxid", "99990", "-blastdb_version", version, "-title", f"{name} (no parsed Seq-ids)",
+             "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
     for alias, names, extension in (("prd_unf", "prd_u0y prd_ua", "pal"), ("prd_zunf", "prd_zunf0y prd_zunfa", "pal"),
                                     ("prd_xg", "prd_xg0y prd_xga", "pal"), ("prd_tw", "prd_tw0y prd_twa", "pal"),

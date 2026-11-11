@@ -9,3 +9,8 @@
   the sequence that NCBI's scope gets, also for a hit whose definition line the reports do not find:
   BLASTN's and TBLASTX's `Error pre-fetching sequence data` for a minus-strand alignment, and the
   taxonomy database's texts of the sequence read, are now NCBI's.
+- psiblast `-db` where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off and the taxonomy
+  database is damaged: the taxonomy database's texts of the lookups that the PSSM's reads make
+  (also for a database without parsed Seq-ids, read by `gnl|BL_ORD_ID|n`, and where a PSSM error
+  stops the run) are now written where NCBI BLAST+ 2.17.0 writes them, after the query's report and
+  among the PSSM's warnings. LOSAT wrote nothing there, or refused the run.

@@ -7,11 +7,7 @@ use super::search_seed::encode_tblastn_lookup_query;
 use super::search_seed::Seed;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
-use crate::algorithm::blastp::gapalign::{
-    blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
-    blastp_score_only_gapped_alignment_with_scratch, protein_identities_from_edit_ops,
-    BlastpGappedAlignmentMode, GapAlignScratch,
-};
+use crate::algorithm::blastp::gapalign::{protein_identities_from_edit_ops, GapAlignScratch};
 use crate::algorithm::common::translated_chunks::TranslatedChunk;
 use crate::algorithm::tblastx::translation::{
     frame_length, translate_frame_into, x_codon_residues, x_codons_into, QueryFrame,
@@ -56,8 +52,9 @@ pub(super) struct TracebackOwnedHsp {
 // GetGappedScore(..., init_hitlist, &hsp_list, ...);
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
 // Score only this chunk's sorted initial HSPs before the next chunk scan.
-/// `subject_sequence` is the chunk's residues of `frame`.
-fn score_gapped_chunk(
+/// `subject_sequence` is the chunk's residues of `frame`; `score` is the source of the scores (the
+/// matrix, or a PSSM query's rows, `score::TbnScore`).
+fn score_gapped_chunk<S: super::score::TbnScore>(
     queries: &[&[u8]],
     query_frames: &[QueryFrame],
     context_offsets: &[i32],
@@ -71,7 +68,8 @@ fn score_gapped_chunk(
     x_drop: i32,
     cutoff_scores: &[i32],
     matrix: ScoringMatrix,
-    scratch: &mut GapAlignScratch,
+    scratch: &mut S::Scratch,
+    score: S,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let mut results = Vec::new();
     debug_assert_eq!(subject_sequence.len(), chunk.length);
@@ -153,20 +151,13 @@ fn score_gapped_chunk(
         //     max_offset - init_hsp->offsets.qs_offsets.q_off;
         // init_hsp->offsets.qs_offsets.q_off = max_offset;
         // status = s_BlastProtGappedAlignment(...);
-        let q_gapped_start = blastp_get_start_for_gapped_alignment(
-            query_sequence,
-            subject_sequence,
-            q_start,
-            length,
-            s_start,
-            length,
-            matrix,
-        );
+        let q_gapped_start =
+            score.gapped_start(query_sequence, subject_sequence, q_start, length, s_start, matrix);
         let s_gapped_start = i64::from(hit.s_seed) + i64::try_from(q_gapped_start)?
             - i64::from(hit.q_seed - u32::try_from(context_offset)?);
         let s_gapped_start =
             usize::try_from(s_gapped_start).context("negative gapped subject start")?;
-        let gapped = blastp_score_only_gapped_alignment_with_scratch(
+        let gapped = score.score_only(
             query_sequence,
             subject_sequence,
             q_gapped_start,
@@ -175,7 +166,6 @@ fn score_gapped_chunk(
             gap_open,
             gap_extend,
             x_drop,
-            BlastpGappedAlignmentMode::Exact,
             scratch,
         );
         // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
@@ -271,8 +261,9 @@ pub(super) struct PreliminaryProfile<'a> {
 // (x_preliminary_protein_hsps_by_unit). The unit tests that check the stage against NCBI traces run
 // this same path (`preliminary_hsps_of_letters`, `preliminary_hsps_traced`); the test probe next to
 // `PreliminaryEvent` records its events.
-/// The preliminary stage of one subject, as independent (frame, chunk) units.
-pub(super) fn preliminary_protein_hsps_for_search(
+/// The preliminary stage of one subject, as independent (frame, chunk) units, with the scores of
+/// `score` (the matrix, or a PSSM query's rows).
+pub(super) fn preliminary_protein_hsps_for_search<S: super::score::TbnScore>(
     queries: &[&[u8]],
     // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store (the unit path
     // translates the store).
@@ -282,6 +273,7 @@ pub(super) fn preliminary_protein_hsps_for_search(
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     x_query_side: &XQuerySide,
     x_subject: Option<(&super::search_seed::XSubjectSide, usize)>,
+    score: S,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     x_preliminary_protein_hsps_by_unit(
         queries,
@@ -291,6 +283,7 @@ pub(super) fn preliminary_protein_hsps_for_search(
         pool,
         x_query_side,
         x_subject,
+        score,
     )
 }
 
@@ -477,6 +470,24 @@ impl XQuerySide {
         let frames = setup_frames.iter().map(|f| f[0].clone()).collect();
         let _ = side.frames.set(x_query_frames_of(frames, queries)?);
         Ok(side)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-99
+    // ```c
+    //        if (sbp->psi_matrix && sbp->psi_matrix->pssm) {
+    //            matrix = sbp->psi_matrix->pssm->data;
+    //            has_pssm = TRUE;
+    //        } else {
+    //            matrix = sbp->matrix->data;
+    //        }
+    // ```
+    /// The query set's lookup table made by its setup: a PSSM query's (`in_pssm::lookup_table`),
+    /// which the subjects' plans then read (`x_scan_plan`) instead of the matrix's.
+    pub(super) fn x_set_lookup(
+        &self,
+        table: std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>,
+    ) {
+        let _ = self.lookup.set(table);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100 (cited at
@@ -667,7 +678,7 @@ impl Drop for XUnitResidues<'_> {
 // (lines 572-586) and the per-frame append (840-850) depend on the order, and
 // they run here afterwards, in that order, on one thread.  The offset pairs are
 // consumed straight from the scan buffer, so no per-frame seed list is kept.
-fn x_preliminary_protein_hsps_by_unit(
+fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore>(
     queries: &[&[u8]],
     subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
@@ -675,6 +686,7 @@ fn x_preliminary_protein_hsps_by_unit(
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     x_query_side: &XQuerySide,
     x_subject: Option<(&super::search_seed::XSubjectSide, usize)>,
+    score: S,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     use super::search_init::XTwoHit;
     use super::search_seed::{x_scan_plan, x_scan_unit};
@@ -741,11 +753,11 @@ fn x_preliminary_protein_hsps_by_unit(
     else {
         return Ok(Vec::new());
     };
-    struct UnitState<'a> {
+    struct UnitState<'a, M> {
         two_hit: XTwoHit<'a>,
         pairs: Vec<crate::algorithm::tblastx::blast_aascan::BlastOffsetPair>,
         hits: Vec<InitHsp>,
-        scratch: GapAlignScratch,
+        scratch: M,
     }
     // The units end with NCBI's offset step instead of starting on a cleared table, and the
     // sequential path below runs on this thread's kept buffers.
@@ -755,7 +767,7 @@ fn x_preliminary_protein_hsps_by_unit(
             None => (None, Vec::new(), Vec::new(), GapAlignScratch::new()),
         };
         UnitState {
-            two_hit: XTwoHit::with_table(
+            two_hit: S::x_two_hit(XTwoHit::with_table(
                 table,
                 query_sequence,
                 init_context_offsets,
@@ -764,15 +776,17 @@ fn x_preliminary_protein_hsps_by_unit(
                 profile.matrix,
                 profile.window,
                 profile.word_size,
-            ),
+            )),
             pairs,
             hits,
-            scratch,
+            scratch: S::unit_scratch(scratch),
         }
     };
     #[cfg(feature = "parallel")]
     let new_state = || state_on(None);
-    let run_unit = |state: &mut UnitState<'_>, unit: usize| -> Result<Vec<(usize, GappedHsp)>> {
+    let run_unit = |state: &mut UnitState<'_, S::Scratch>,
+                    unit: usize|
+     -> Result<Vec<(usize, GappedHsp)>> {
         let (frame_index, chunk, _) = &plan.subject.units[unit];
         let frame = &plan.subject.frames[*frame_index];
         let chunk = *chunk;
@@ -812,8 +826,22 @@ fn x_preliminary_protein_hsps_by_unit(
         hits.clear();
         #[cfg(test)]
         probe_begin_unit(unit, frame.frame, chunk.offset);
-        match two_hit.x_ungap_matrix() {
-            None => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+        // Dispatch point: a PSSM query's walks (`score::XPssmWalks`, in a scan of their own so that
+        // the matrices keep their code), else the matrix's (BLOSUM62's or another's table).
+        match (score.x_walks(), two_hit.x_ungap_matrix()) {
+            (Some(walks), _) => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+                #[cfg(test)]
+                probe_seeds(unit, frame.frame, chunk_offset, filled);
+                two_hit.x_pairs_bf_walks(
+                    walks,
+                    frame.frame,
+                    chunk_offset,
+                    subject_sequence,
+                    filled,
+                    hits,
+                )
+            }),
+            (None, None) => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
                 #[cfg(test)]
                 probe_seeds(unit, frame.frame, chunk_offset, filled);
                 // The two-hit loop of the units without a branch on the common outcomes
@@ -822,7 +850,7 @@ fn x_preliminary_protein_hsps_by_unit(
             }),
             // Another matrix's byte-table walks (`XTwoHit::x_pairs_bf_of`), in a scan of its own
             // so that BLOSUM62's keeps its code.
-            Some(table) => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+            (None, Some(table)) => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
                 #[cfg(test)]
                 probe_seeds(unit, frame.frame, chunk_offset, filled);
                 two_hit.x_pairs_bf_of(
@@ -865,6 +893,7 @@ fn x_preliminary_protein_hsps_by_unit(
             profile.gapped_cutoff,
             profile.matrix,
             scratch,
+            score,
         )?;
         #[cfg(test)]
         let gapped = probe_gapped(unit, frame.frame, chunk.offset, gapped)?;
@@ -926,7 +955,7 @@ fn x_preliminary_protein_hsps_by_unit(
             diagonals: two_hit.into_table(),
             pairs,
             hits,
-            scratch,
+            scratch: S::kept_scratch(scratch),
         }));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584,844
@@ -1153,6 +1182,7 @@ pub(super) fn preliminary_hsps_of_letters(
         None,
         &XQuerySide::new(),
         None,
+        super::score::MatrixScore,
     )
 }
 
@@ -1203,6 +1233,7 @@ fn preliminary_hsps_traced_of(
         None,
         &XQuerySide::new(),
         None,
+        super::score::MatrixScore,
     )?;
     let events = with_probe(|probe| std::mem::take(&mut probe.events)).unwrap_or_default();
     Ok((hsps, events))
@@ -2098,7 +2129,7 @@ const HSP_MAX_WINDOW: usize = 11;
 // if (score > 0) { *q_retval = hsp->query.end - HSP_MAX_WINDOW/2;
 //     *s_retval = hsp->subject.end - HSP_MAX_WINDOW/2; return TRUE; }
 // return FALSE;
-fn blast_get_offsets_for_gapped_alignment_protein(
+pub(super) fn blast_get_offsets_for_gapped_alignment_protein(
     query: &[u8],
     subject: &[u8],
     q_start: usize,
@@ -2343,6 +2374,63 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
         containment_events,
         identity_events,
         X_WHOLE_MARGIN,
+        super::score::MatrixScore,
+    )
+    .map(|(results, stat_length, _)| (results, stat_length))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:429-439,509-512
+// ```c
+//          if (hsp->query.gapped_start == 0 && hsp->subject.gapped_start == 0) {
+//             Boolean retval =
+//                 BlastGetOffsetsForGappedAlignment(query, subject, sbp,
+//                                                   hsp, &q_start, &s_start);
+// ...
+//             BLAST_GappedAlignmentWithTraceback(program_number, query,
+//                  adjusted_subject, gap_align, score_params, q_start, s_start,
+//                  query_length, adjusted_s_length,
+//                  fence_hit);
+// ```
+// (`gap_align->sbp` holds the PSSM: `positionBased` reads its rows.)
+/// `full_translation_traceback_with_matrix_and_events_with_mask_mode_owned` of a PSSM query
+/// (`-in_pssm`, PSI-TBLASTN): the same traceback with the scores of the PSSM's rows; the
+/// identities and positives read the unmasked query letters with `matrix` (NCBI's `sbp->matrix`,
+/// the `-matrix`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn x_pssm_traceback_owned(
+    rows: &crate::algorithm::pssm_search::rows::QueryPssm,
+    query: &[u8],
+    subject: SubjectNt<'_>,
+    db_gencode: u8,
+    gapped: &[GappedHsp],
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop_final: i32,
+    seg: Option<&SegParams>,
+    soft_masking: bool,
+    mask_lowercase: bool,
+) -> Result<(Vec<TracebackOwnedHsp>, i32)> {
+    x_traceback_in_windows(
+        query,
+        subject,
+        db_gencode,
+        gapped,
+        matrix,
+        gap_open,
+        gap_extend,
+        x_drop_final,
+        0.0,
+        0,
+        seg,
+        soft_masking,
+        mask_lowercase,
+        None,
+        None,
+        None,
+        None,
+        X_WHOLE_MARGIN,
+        super::score::PssmScore(rows),
     )
     .map(|(results, stat_length, _)| (results, stat_length))
 }
@@ -2350,8 +2438,9 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
 /// `full_translation_traceback_with_matrix_and_events_with_mask_mode_owned` whose first windows
 /// of the whole translation after a fence hold `first_margin` residues (at least
 /// `HSP_MAX_WINDOW`) on either side of an HSP, and the number of times the list was traced in
-/// such windows (0 when no fence was read).
-fn x_traceback_in_windows(
+/// such windows (0 when no fence was read); `score` is the source of the scores (the matrix, or a
+/// PSSM query's rows).
+fn x_traceback_in_windows<S: super::score::TbnScore>(
     query: &[u8],
     subject: SubjectNt<'_>,
     db_gencode: u8,
@@ -2370,6 +2459,7 @@ fn x_traceback_in_windows(
     mut containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
     mut identity_events: Option<&mut Vec<(usize, usize)>>,
     first_margin: usize,
+    score: S,
 ) -> Result<(Vec<TracebackOwnedHsp>, i32, usize)> {
     let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
     // NCBI c++/src/algo/blast/core/blast_traceback.c:380-391,583-596:
@@ -2483,7 +2573,7 @@ fn x_traceback_in_windows(
                     .context("HSP subject start before translated window")?;
                 let s_end = window_index(hit.s_end, subject_base)
                     .context("HSP subject end before translated window")?;
-                let start = blast_get_offsets_for_gapped_alignment_protein(
+                let start = score.offsets(
                     query_sequence,
                     subject_sequence,
                     q_offset,
@@ -2513,7 +2603,6 @@ fn x_traceback_in_windows(
                 )
             };
             let mut fence_hit = false;
-            let mut scratch = GapAlignScratch::new();
             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-512
             // ```c
             //            BLAST_GappedAlignmentWithTraceback(program_number, query,
@@ -2523,7 +2612,7 @@ fn x_traceback_in_windows(
             // ```
             // The window's letters end before its sentinel (`subject_sequence` ends with it),
             // which only the last column of the right extension reads (TN-1).
-            let alignment = blast_gapped_alignment_with_traceback_in_window(
+            let alignment = score.traceback(
                 query_sequence,
                 subject_sequence,
                 subject_sequence.len() - 1,
@@ -2533,8 +2622,7 @@ fn x_traceback_in_windows(
                 gap_open,
                 gap_extend,
                 x_drop_final,
-                &mut scratch,
-                Some(&mut fence_hit),
+                &mut fence_hit,
             );
             if fence_hit {
                 retry = true;
@@ -4561,6 +4649,7 @@ mod tests {
                                 Some(&mut events.2),
                                 Some(&mut events.3),
                                 margin,
+                                crate::algorithm::tblastn::score::MatrixScore,
                             )
                             .unwrap();
                             (format!("{rows:?} {stat_length} {events:?}"), rows, attempts)

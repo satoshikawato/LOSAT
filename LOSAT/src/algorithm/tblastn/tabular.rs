@@ -65,6 +65,18 @@ use crate::utils::genetic_code::GeneticCode;
 const PROGRAM: &str = "TBLASTN";
 /// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
 const PROGRAM_VERSION: &str = concat!("TBLASTN ", crate::ncbi_blast_version!());
+/// The `# PSITBLASTN 2.17.0+` line of a PSSM search (`-in_pssm`, `in_pssm::PROGRAM`).
+const PSI_PROGRAM_VERSION: &str = concat!("PSITBLASTN ", crate::ncbi_blast_version!());
+
+/// The program line of outfmt 7 (and 20's formatter): tblastn's, or PSI-TBLASTN's with
+/// `-in_pssm` (`pssm`).
+pub(super) fn program_version(pssm: bool) -> &'static str {
+    if pssm {
+        PSI_PROGRAM_VERSION
+    } else {
+        PROGRAM_VERSION
+    }
+}
 
 /// Whether `nident` is the only field of the counts' block of `spec`, which reads the rows of some
 /// HSPs (`write_tblastn_tabular`).
@@ -117,6 +129,8 @@ pub(super) struct TblastnTabular<'a> {
     pub genetic_code: u8,
     /// The run's matrix (`m_ScoringMatrix`, the positives).
     pub matrix: ScoringMatrix,
+    /// The program line of outfmt 7 (`program_version`).
+    pub program_version: &'static str,
 }
 
 /// The custom tabular report of a checked `-outfmt` value (`TabularSpec::of`): a field list or a
@@ -241,7 +255,7 @@ pub(super) fn write_tblastn_tabular(
     // The positives of the rows: the formatter's `m_ScoringMatrix` (`GetAsciiProteinMatrix`).
     let table = TabularWriter {
         spec,
-        program_version: PROGRAM_VERSION,
+        program_version: tab.program_version,
         matrix: Some(tab.matrix),
     };
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns

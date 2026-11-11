@@ -886,7 +886,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "gilist"
             | "html"
             | "import_search_strategy"
-            | "in_pssm"
             | "line_length"
             | "negative_gilist"
             | "remote"

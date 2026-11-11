@@ -1,5 +1,6 @@
 //! TBLASTN CLI, genetic-code, and internal seed-search boundary.
 mod args;
+mod in_pssm;
 mod tblastn_app;
 // NCBI c++/src/algo/blast/core/blast_engine.c:804-844:
 // for (context=first_context; context<=last_context; context++) {
@@ -26,6 +27,7 @@ mod x_db_stream;
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
+mod score;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
 // Too far and overlap without a branch.
 mod x_tbn_hitbf;

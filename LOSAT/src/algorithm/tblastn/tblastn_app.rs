@@ -332,6 +332,9 @@ impl TblastnArgs {
         // The query is opened and the output file created before the options are checked;
         // `-` is standard input and standard output. Web ABI v1's query is the call's bytes.
         let query_input = match &io {
+            // `-in_pssm`: the query is the PSSM, which the options' handler reads
+            // (`check_options`); NCBI opens the default `-query -` and never reads it.
+            RunIo::Files if args.in_pssm.is_some() => Input::Bytes(&[]),
             RunIo::Files => {
                 input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
                 // NCBI opens the query file inside `Run` too: its error is saved and an error
@@ -679,6 +682,53 @@ fn search_cli(
     };
     let resolved = args.check_options(outputs.diagnostics)?;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:194-196,225-238
+    // ```c++
+    //         /*** Get the query sequence(s) or PSSM (these two options are mutually
+    //          * exclusive) ***/
+    //         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
+    // ...
+    //         } else {
+    //             _ASSERT(pssm->HasQuery());
+    //             _ASSERT(pssm->GetQuery().IsSeq());
+    //             query.Reset(new CBlastQueryVector());
+    //             scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    //
+    //             CRef<CSeq_loc> sl(new CSeq_loc());
+    //             sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
+    //
+    //             CRef<CBlastSearchQuery> q(new CBlastSearchQuery(*sl, *scope));
+    //             query->AddQuery(q);
+    // ```
+    // `-in_pssm` (PSI-TBLASTN): the PSSM's Bioseq is the one query, read with the options; no
+    // FASTA input, no `Query is Empty!` and no query batches (one search of the PSSM,
+    // tblastn_app.cpp:305-327).
+    if let Some(psi) = resolved.pssm.clone() {
+        super::in_pssm::check_limits(&args, &resolved, &psi, choice.number)?;
+        drop(query_input);
+        crate::blastinput::input_files::write_empty_subject_warnings_by_length(
+            subjects,
+            |index| {
+                x_subject_stores.map_or(subjects[index].seq().len(), |stores| stores[index].len())
+            },
+            "tblastn",
+            outputs.diagnostics,
+        )?;
+        crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
+        let records = vec![super::in_pssm::query_record(&psi, args.parse_deflines)];
+        return search(
+            &args,
+            resolved,
+            1,
+            &records,
+            QueryReading::End,
+            subjects,
+            subject_placements,
+            x_subject_stores,
+            database.as_ref(),
+            outputs,
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:200-221
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -900,6 +950,7 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
+    super::in_pssm::check_records_only(&args)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -971,6 +1022,7 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
+    super::in_pssm::check_records_only(&args)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -1094,6 +1146,8 @@ fn write_first_batch_prologs(
     subject_letters: SubjectLetters<'_>,
     database: Option<&crate::report::pairwise::PairwiseDatabase>,
     taxdb_found: bool,
+    // The program line of outfmt 0 (`TBLASTN`; `PSITBLASTN` with `-in_pssm`).
+    program: &str,
 ) -> Result<()> {
     let name = subject_path.map_or_else(String::new, |path| {
         format!("User specified sequence set (Input: {})", path.display())
@@ -1107,6 +1161,7 @@ fn write_first_batch_prologs(
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
+                program,
                 crate::NCBI_BLAST_VERSION,
                 &name,
                 num_subjects,
@@ -1191,6 +1246,8 @@ fn search(
         identity_cbs_reset,
         scoring,
     } = search_settings(&resolved)?;
+    // `-in_pssm` (PSI-TBLASTN): the query's PSSM, which the batch's search and reports read.
+    let pssm = resolved.pssm.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:64-74
     // ```c++
     //     CBlastOptionsMemento(CBlastOptionsLocal* local_opts)
@@ -1286,6 +1343,38 @@ fn search(
     // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
     // queries without letters), after the reports of the batches before (without the
     // epilog) and the messages of that batch's records (`read_query_batches`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:59-68
+    // ```c++
+    // CPsiBlastImpl::CPsiBlastImpl(CRef<objects::CPssmWithParameters> pssm,
+    //                              CRef<CLocalDbAdapter> subject,
+    //                              CConstRef<CPSIBlastOptionsHandle> options)
+    // : m_Pssm(pssm), m_Query(0), m_Subject(subject), m_OptsHandle(options),
+    //     m_ResultType(eDatabaseSearch)
+    // {
+    //     x_Validate();
+    //     x_ExtractQueryFromPssm();
+    //     x_CreatePssmScoresFromFrequencyRatios();
+    // }
+    // ```
+    // `-in_pssm`: NCBI's checks of the PSSM (`CPsiBlastValidate::Pssm`) and the PSSM engine's
+    // scores of a PSSM of frequency ratios only (`PsiBlastComputePssmScores`) fail when the search
+    // object is made, after the outfmt 0 prolog (tblastn_app.cpp:270, 322) and before any
+    // subject is read.
+    if let Some(error) = pssm
+        .as_deref()
+        .and_then(|psi| psi.validation_error.as_deref())
+    {
+        write_first_batch_prologs(
+            outputs,
+            subject_path.map(|path| path.as_path()),
+            subjects.len(),
+            subject_letters,
+            pairwise_database.as_ref(),
+            args.tabular_taxdb.unwrap_or(false),
+            super::in_pssm::PROGRAM,
+        )?;
+        return Err(app::engine_error(error));
+    }
     let batches = crate::blastinput::query_batch::read_query_batches(
         input_records,
         &searched_queries,
@@ -1319,6 +1408,7 @@ fn search(
             subject_letters,
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
+            "TBLASTN",
         )?;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
@@ -1451,6 +1541,7 @@ fn search(
                 subject_set,
                 engine_positives,
                 culling_limit: resolved.culling_limit,
+                pssm: pssm.as_deref(),
             },
             compo_adjust_mode,
             resolved.sum_stats,
@@ -1497,6 +1588,7 @@ fn search(
                             subject_set,
                             engine_positives,
                             culling_limit: resolved.culling_limit,
+                            pssm: pssm.as_deref(),
                         },
                         compo_adjust_mode,
                         resolved.sum_stats,
@@ -1610,6 +1702,22 @@ fn search(
             query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
             query_validity.extend(batch_validity);
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2777-2792
+        // ```c
+        //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
+        //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+        //       if (loop_status) {
+        //           contexts[context].is_valid = FALSE;
+        // ```
+        // A PSSM query whose letters give no Karlin-Altschul parameters (one that `-seg` masks
+        // completely) makes NCBI BLAST+ 2.17.0's tblastn crash (SIGSEGV, probe `gs.masked`): LOSAT
+        // refuses it (DECISIONS 35 Q5 of line PS, as psiblast's, DECISIONS 12 S4), before
+        // anything is written.
+        if pssm.is_some() && query_validity.iter().any(|&valid| !valid) {
+            anyhow::bail!(
+                "a PSSM query whose letters give no Karlin-Altschul parameters (one that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by LOSAT's TBLASTN"
+            );
+        }
         // A run without a searched query has no parameters of a query set.
         let mut lengths = lengths.unwrap_or(LocalSubjectParameters {
             lengths: Vec::new(),
@@ -1710,12 +1818,23 @@ fn search(
                     index < identity_warned,
                     filtered_empty && !query_batch_skipped[index],
                 );
-                lines.extend(crate::report::query_warnings::query_warning(
-                    "tblastn",
-                    args.first_query_ordinal + query_input.ordinal(index),
-                    query,
-                    &messages,
-                ));
+                lines.extend(match pssm.as_deref() {
+                    // A PSSM query's label is its Seq-id and the title of NCBI's query source of
+                    // the PSSM's Bioseq (`PsiSearch::warning_title`), as psiblast's
+                    // (`blastp::blast_engine::pssm_hooks::pssm_query_warning`).
+                    Some(psi) => crate::report::query_warnings::query_warning_with_seq_id(
+                        "tblastn",
+                        psi.query.local_id.as_bytes(),
+                        psi.warning_title.as_deref().unwrap_or(&psi.query.title),
+                        &messages,
+                    ),
+                    None => crate::report::query_warnings::query_warning(
+                        "tblastn",
+                        args.first_query_ordinal + query_input.ordinal(index),
+                        query,
+                        &messages,
+                    ),
+                });
                 lines
             })
             .collect();
@@ -2029,6 +2148,7 @@ fn search(
             args.out.as_deref(),
             archive_render.as_ref(),
             &tabular_inputs,
+            pssm.as_deref(),
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
         // The failed batch's reading messages, then its error.

@@ -50,11 +50,15 @@ const PSSM_FILES: &[&str] = &[
     "in_pssm",
 ];
 
+/// tblastn's `-in_pssm` (PSI-TBLASTN, line PS item PS7), refused for the same reason as psiblast's.
+const TBLASTN_PSSM_FILES: &[&str] = &["in_pssm"];
+
 /// The options of `program`'s command line that write a PSSM file or read the query from one
 /// (`PSSM_FILES`): they are not in an argv that `validate` accepts, and `describe` leaves them out.
 pub(super) fn pssm_file_options(program: Program) -> &'static [&'static str] {
     match program {
         Program::Psiblast => PSSM_FILES,
+        Program::Tblastn => TBLASTN_PSSM_FILES,
         _ => &[],
     }
 }

@@ -217,16 +217,39 @@ fn text_asn(buffer: &[u8]) -> bool {
     false
 }
 
-/// The refusal of the PSSM search's limits ("... is not supported by LOSAT's PSIBLAST").
-fn refuse(what: impl std::fmt::Display) -> anyhow::Error {
-    anyhow::anyhow!("{what} is not supported by LOSAT's PSIBLAST")
+/// Who reads `-in_pssm`: the program that LOSAT's refusals name, and the options' matrix, with
+/// which NCBI's PSSM engine computes the scores of a PSSM of frequency ratios only
+/// (`scores_from_freq_ratios`). psiblast reads with `PSIBLAST` (BLOSUM62: its `-in_pssm` refuses
+/// the other matrices, DECISIONS 11 of line PS); tblastn's PSI-TBLASTN with its own options
+/// (`algorithm::tblastn::in_pssm`, DECISIONS 35).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PssmReader<'a> {
+    /// The program of LOSAT's refusals (`PSIBLAST`, `TBLASTN`).
+    pub(crate) program: &'static str,
+    /// The options' matrix name (`opts.GetMatrixName()`).
+    pub(crate) matrix_name: &'a str,
+}
+
+impl PssmReader<'static> {
+    /// psiblast's reader.
+    pub(crate) const PSIBLAST: Self = Self {
+        program: "PSIBLAST",
+        matrix_name: "BLOSUM62",
+    };
+}
+
+impl PssmReader<'_> {
+    /// The refusal of the PSSM search's limits ("... is not supported by LOSAT's PSIBLAST").
+    fn refuse(&self, what: impl std::fmt::Display) -> anyhow::Error {
+        anyhow::anyhow!("{what} is not supported by LOSAT's {}", self.program)
+    }
 }
 
 /// Reads `-in_pssm path`: NCBI's errors for a file it cannot read or guess, LOSAT's refusals of
 /// what it does not read, then the PSSM search's query, rows and values, and the PSSM as NCBI's
 /// object holds it when the search starts (`in_pssm_files::InPssmFile`, which psiblast's rounds
 /// and PSSM files write back).
-pub(crate) fn read_in_pssm(path: &Path) -> Result<(PsiSearch, InPssmFile)> {
+pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
     // ```c++
     // void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
@@ -260,7 +283,7 @@ pub(crate) fn read_in_pssm(path: &Path) -> Result<(PsiSearch, InPssmFile)> {
             ))
         }
         PssmFileFormat::NotText => {
-            return Err(refuse(format!(
+            return Err(reader.refuse(format!(
                 "a PSSM file that is not ASN.1 text (binary ASN.1, XML or another format; {})",
                 path.display()
             )))
@@ -273,7 +296,7 @@ pub(crate) fn read_in_pssm(path: &Path) -> Result<(PsiSearch, InPssmFile)> {
             // REAL numbers NCBI computes with undefined behaviour or in `long double`): LOSAT's
             // refusal, where NCBI reads the file.
             Err(error) if error.message.contains("is not supported by LOSAT") => {
-                return Err(refuse(format!(
+                return Err(reader.refuse(format!(
                     "a PSSM that LOSAT's reader does not read ({}, line {}: {})",
                     path.display(),
                     error.line,
@@ -288,7 +311,7 @@ pub(crate) fn read_in_pssm(path: &Path) -> Result<(PsiSearch, InPssmFile)> {
                 )))
             }
         };
-    psi_search_and_object(pssm, skipped)
+    psi_search_and_object(pssm, skipped, reader)
 }
 
 /// `CPsiBlastValidate::Pssm`'s error for `pssm`, which NCBI raises (`CBlastException`, "BLAST
@@ -375,7 +398,7 @@ fn visible(bytes: &[u8]) -> bool {
 /// The PSSM search of `pssm`: its query record, rows and values, or LOSAT's refusal.
 #[cfg(test)]
 pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
-    psi_search_and_object(pssm, Vec::new()).map(|(search, _)| search)
+    psi_search_and_object(pssm, Vec::new(), PssmReader::PSIBLAST).map(|(search, _)| search)
 }
 
 /// The PSSM search of `pssm` and the PSSM as NCBI's `CPsiBlastImpl` leaves it before the first
@@ -385,6 +408,7 @@ pub(crate) fn psi_search_of(pssm: PssmWithParameters) -> Result<PsiSearch> {
 pub(crate) fn psi_search_and_object(
     pssm: PssmWithParameters,
     skipped: Vec<&'static str>,
+    reader: PssmReader<'_>,
 ) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-539
     // ```c++
@@ -398,7 +422,7 @@ pub(crate) fn psi_search_and_object(
     // NCBI's application takes the query's Bioseq here (a PSSM without one ends with a C++
     // exception of the release build); the reader has refused a Seq-entry set.
     let Some(query) = pssm.pssm.query.as_ref() else {
-        return Err(refuse(
+        return Err(reader.refuse(
             "a PSSM without a query sequence (NCBI BLAST+'s psiblast stops with a C++ exception)",
         ));
     };
@@ -424,7 +448,7 @@ pub(crate) fn psi_search_and_object(
     // own `byRow` (`PsiBlastComputePssmScores` copies the scores, not `byRow`): a ratio-only
     // PSSM written row by row would be searched with its scores transposed.
     if ratios_only && pssm.pssm.by_row == Some(true) {
-        return Err(refuse(
+        return Err(reader.refuse(
             "a PSSM of frequency ratios only written by row (NCBI reads the scores it computes for it in the wrong order)",
         ));
     }
@@ -439,7 +463,7 @@ pub(crate) fn psi_search_and_object(
         }
         [PssmSeqId::Local(ObjectId::Id(id))] => id.to_string(),
         _ => {
-            return Err(refuse(
+            return Err(reader.refuse(
                 "a PSSM query whose Seq-id is not one local id (an accession, gi or other id is shown through the parsed Seq-ids of the query)",
             ))
         }
@@ -469,7 +493,7 @@ pub(crate) fn psi_search_and_object(
         || !visible(identifier)
         || !visible(matrix_name)
     {
-        return Err(refuse(
+        return Err(reader.refuse(
             "a PSSM whose strings hold a byte outside the visible ASCII range (NCBI reads it as '#' with an error message)",
         ));
     }
@@ -492,7 +516,7 @@ pub(crate) fn psi_search_and_object(
     // defline gives one title without white space at its ends (psiblast's own PSSMs hold such a
     // title); the PSSM search reads that one only.
     if titles.len() > 1 {
-        return Err(refuse(format!(
+        return Err(reader.refuse(format!(
             "a PSSM query with {} titles (NCBI's Query= line joins them, its tabular query id and warnings read the first)",
             titles.len()
         )));
@@ -501,7 +525,7 @@ pub(crate) fn psi_search_and_object(
     if title.first().is_some_and(u8::is_ascii_whitespace)
         || title.last().is_some_and(u8::is_ascii_whitespace)
     {
-        return Err(refuse(
+        return Err(reader.refuse(
             "a PSSM query whose title starts or ends with white space (NCBI's Query= line, tabular query id and warnings each read such a title their own way)",
         ));
     }
@@ -542,7 +566,7 @@ pub(crate) fn psi_search_and_object(
         title[..end].to_vec()
     };
     if query.inst.mol.1 != 3 || query.inst.repr.1 != 2 {
-        return Err(refuse(format!(
+        return Err(reader.refuse(format!(
             "a PSSM query whose Seq-inst is not a raw protein (repr {}, mol {})",
             query.inst.repr.0, query.inst.mol.0
         )));
@@ -562,7 +586,7 @@ pub(crate) fn psi_search_and_object(
     };
     let length = query.inst.length.unwrap_or(-1);
     if letters.is_empty() || letters.len() as i64 != i64::from(length) || letters.contains(&b'-') {
-        return Err(refuse(
+        return Err(reader.refuse(
             "a PSSM query whose letters are missing, of another length than its Seq-inst, or with a gap or a byte outside NCBIstdaa",
         ));
     }
@@ -597,7 +621,7 @@ pub(crate) fn psi_search_and_object(
             || (!ratios_only && scores.len() as i64 != cells)
             || (ratios_len != 0 && ratios_len as i64 != cells))
     {
-        return Err(refuse(format!(
+        return Err(reader.refuse(format!(
             "a PSSM whose dimensions ({rows_n} rows, {columns_n} columns) do not match its scores ({}), frequency ratios ({ratios_len}) or query ({} letters)",
             scores.len(),
             letters.len()
@@ -617,7 +641,7 @@ pub(crate) fn psi_search_and_object(
             .iter()
             .find(|&&score| !(BLAST_SCORE_MIN..=BLAST_SCORE_MAX).contains(&score))
         {
-            return Err(refuse(format!(
+            return Err(reader.refuse(format!(
                 "a PSSM score of {score}, outside BLAST_SCORE_MIN..BLAST_SCORE_MAX ({BLAST_SCORE_MIN}..{BLAST_SCORE_MAX}, one letter's score range in NCBI BLAST+),"
             )));
         }
@@ -675,13 +699,20 @@ pub(crate) fn psi_search_and_object(
         h: stat(final_data.map(|data| data.h)),
     };
     let mut computed = None;
+    let mut validation_error = validation_error;
     if ratios_only {
-        let (scores, gapped) = scores_from_freq_ratios(&letters, &freq_ratios)?;
-        rows = scores;
-        stats.lambda = stat(Some(gapped.lambda));
-        stats.kappa = stat(Some(gapped.k));
-        stats.h = stat(Some(gapped.h));
-        computed = Some(gapped);
+        match scores_from_freq_ratios(&letters, &freq_ratios, reader)? {
+            Ok((scores, gapped)) => {
+                rows = scores;
+                stats.lambda = stat(Some(gapped.lambda));
+                stats.kappa = stat(Some(gapped.k));
+                stats.h = stat(Some(gapped.h));
+                computed = Some(gapped);
+            }
+            // The engine's error, raised where `CPsiBlastValidate::Pssm`'s are (after the
+            // outfmt 0 prolog).
+            Err(engine_error) => validation_error = Some(engine_error),
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:110-112
     // ```c++
@@ -727,7 +758,7 @@ pub(crate) fn psi_search_and_object(
     if let (Some((name, _)), None, false) =
         (gapped_negative, validation_error.as_ref(), ungapped_invalid)
     {
-        return Err(refuse(format!(
+        return Err(reader.refuse(format!(
             "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
         )));
     }
@@ -755,10 +786,13 @@ pub(crate) fn psi_search_and_object(
 
 /// The scores of a PSSM of frequency ratios only, and the gapped values of its scaling:
 /// `PsiBlastComputePssmScores` runs the PSSM engine on the ratios (padded to 28 rows) of the
-/// query's letters as the search holds them (O as X), with BLOSUM62 and its gap costs 11/1 (the
-/// defaults of `CPsiBlastInputFreqRatios`; LOSAT's psiblast runs no other matrix), and keeps the
-/// scores and `lambda`, `kappa`, `h`; the ungapped values stay absent (`kbp_psi` then takes
-/// `kbp_std`'s, `PsiSearch::ungapped_karlin`).
+/// query's letters as the search holds them (O as X), with the options' matrix (`reader`:
+/// BLOSUM62 for psiblast, which runs no other matrix with `-in_pssm`) and the gap costs 11/1 (the
+/// defaults of `CPsiBlastInputFreqRatios`), and keeps the scores and `lambda`, `kappa`, `h`; the
+/// ungapped values stay absent (`kbp_psi` then takes `kbp_std`'s, `PsiSearch::ungapped_karlin`).
+/// A matrix whose table has no 11/1 row stops the engine with NCBI's error (the inner `Err`,
+/// `CBlastException` "BLAST engine error" when the search is made); a matrix NCBI does not know
+/// is the options' error that follows the reading (`validate_protein_options`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:466-485
 /// ```c++
@@ -784,7 +818,37 @@ pub(crate) fn psi_search_and_object(
 fn scores_from_freq_ratios(
     letters: &[u8],
     freq_ratios: &[[f64; BLASTAA_SIZE]],
-) -> Result<(Vec<[i32; BLASTAA_SIZE]>, crate::core::psi::KarlinBlk)> {
+    reader: PssmReader<'_>,
+) -> Result<std::result::Result<(Vec<[i32; BLASTAA_SIZE]>, crate::core::psi::KarlinBlk), String>> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:979-985
+    // ```c
+    //         opts->matrix = strdup(matrix_name);
+    //         /* Make it all upper case */
+    //         for (i=0; i<strlen(opts->matrix); ++i)
+    //             opts->matrix[i] = toupper((unsigned char) opts->matrix[i]);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3531-3561
+    // ```c
+    //    Int2 status =
+    //       Blast_KarlinBlkGappedLoadFromTables(kbp, gap_open,
+    //                                           gap_extend, matrix_name, FALSE);
+    // ...
+    //       else if (status == 2)
+    //       {
+    //          snprintf(buffer, sizeof(buffer), "Gap existence and extension values of %ld and %ld not supported for %s", (long) gap_open, (long) gap_extend, matrix_name);
+    // ```
+    // The engine's score block takes the matrix with the gap costs 11/1.
+    let matrix_name = reader.matrix_name.to_ascii_uppercase();
+    let Ok(matrix) = matrix_name.parse::<crate::config::ScoringMatrix>() else {
+        return Ok(Err(format!("{matrix_name} is not a supported matrix")));
+    };
+    if crate::stats::protein_options::karlin_blk_gapped_load_from_tables(11, 1, &matrix_name, false)
+        .is_err()
+    {
+        return Ok(Err(format!(
+            "Gap existence and extension values of 11 and 1 not supported for {matrix_name}"
+        )));
+    }
     let query: Vec<u8> = letters
         .iter()
         .map(
@@ -795,7 +859,7 @@ fn scores_from_freq_ratios(
         )
         .collect();
     let spec = crate::config::ProteinScoringSpec {
-        matrix: crate::config::ScoringMatrix::Blosum62,
+        matrix,
         gap_open: 11,
         gap_extend: 1,
     };
@@ -808,9 +872,11 @@ fn scores_from_freq_ratios(
             h: gapped.h,
         },
     )?;
-    crate::core::psi::pssm_from_freq_ratios(&query, freq_ratios, &sbp).map_err(|_| {
-        refuse("a PSSM of frequency ratios from which NCBI's PSSM engine makes no scaled scores (NCBI BLAST+ 2.17.0 does not finish or stops with an error)")
-    })
+    crate::core::psi::pssm_from_freq_ratios(&query, freq_ratios, &sbp)
+        .map(Ok)
+        .map_err(|_| {
+            reader.refuse("a PSSM of frequency ratios from which NCBI's PSSM engine makes no scaled scores (NCBI BLAST+ 2.17.0 does not finish or stops with an error)")
+        })
 }
 
 /// `GetScores` or `GetFreqRatios` + the copy of `PsiBlastSetupScoreBlock`:
@@ -1185,7 +1251,7 @@ mod tests {
         let warning = |title: &[u8], skipped: Vec<&'static str>| {
             let mut pssm = rnd();
             pssm.pssm.query.as_mut().unwrap().titles = Some(vec![title.to_vec()]);
-            let (search, _) = psi_search_and_object(pssm, skipped).unwrap();
+            let (search, _) = psi_search_and_object(pssm, skipped, PssmReader::PSIBLAST).unwrap();
             assert_eq!(search.query.title, title);
             search.warning_title.unwrap()
         };

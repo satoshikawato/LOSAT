@@ -88,6 +88,10 @@ pub(super) struct LocalStageDProfile<'a> {
     /// instead of the plain hit-list collector; the pipe after the traceback is run by the
     /// finish of the search (`tblastn_app.rs`).
     pub culling_limit: i32,
+    /// `-in_pssm` (PSI-TBLASTN): the query's PSSM, the source of the scores of the batch's one
+    /// query (`score::PssmScore`) and of its Karlin-Altschul blocks (`query_set_setup`); `None`
+    /// for a FASTA query batch.
+    pub pssm: Option<&'a crate::algorithm::pssm_search::PsiSearch>,
 }
 
 /// The numbers of a database (`-db`) as NCBI's search reads them from its sequence source:
@@ -1245,7 +1249,16 @@ fn run_local_search_with_pool(
     let _x_search_timer = XSearchTimer::start();
     let link = parameters.link;
     let cutoff_arrays = ContextCutoffArrays::of(&parameters);
-    let search = preliminary_profile(profile, scoring, gapped, &cutoff_arrays);
+    // NCBI blast_parameters.c:455-458: the gapped X-drop from `kbp_gap` (a PSSM query's
+    // `kbp_gap_psi`, `query_set_setup`).
+    let search = preliminary_profile(
+        profile,
+        scoring,
+        profile
+            .pssm
+            .map_or(gapped, |psi| psi.gapped_karlin(&gapped)),
+        &cutoff_arrays,
+    );
     // NCBI c++/src/algo/blast/core/blast_hits.c:43-70;
     // c++/src/algo/blast/core/hspfilter_collector.c:105-161:
     // if (compositionBasedStats) {
@@ -1286,6 +1299,7 @@ fn run_local_search_with_pool(
                 prelim_evalue: parameters.prelim_evalue,
                 prelim_size,
                 culling_limit: profile.culling_limit,
+                pssm: profile.pssm.map(|psi| &psi.pssm),
             },
             subjects,
             pool,
@@ -2375,6 +2389,7 @@ fn split_preliminary_hitlists(
                 prelim_evalue: setup.parameters.prelim_evalue,
                 prelim_size,
                 culling_limit: inputs.profile.culling_limit,
+                pssm: inputs.profile.pssm.map(|psi| &psi.pssm),
             },
             subjects,
             pool,
@@ -2641,27 +2656,65 @@ fn query_set_setup(
     // BlastHitSavingParametersNew(..., min_subject_length,
     //     options->compositionBasedStats, ...);
     // params->gap_x_dropoff = (Int4)(options->gap_x_dropoff*LN2/min_lambda);
-    let parameters = local_parameters_for_call(
-        &query_contexts,
-        inputs.total_nt,
-        inputs.num_subjects,
-        &gapped_by_context,
-        &ungapped_by_context,
-        LocalParameterOptions {
-            expect_value: inputs.profile.expect_value,
-            do_sum_stats: inputs.do_sum_stats,
-            max_intron_length: 0,
-            gap_trigger_bits: 22.0,
-            word_xdrop_bits: 7.0,
-            scale_factor: 1.0,
-            gumbel: inputs.gumbel,
-            eff_searchsp_override,
-        },
-        LocalParameterCall::Initial {
-            min_subject_length: i32::try_from(inputs.min_subject_length)?,
-            composition_based_stats: inputs.compo_adjust_mode.ncbi_value(),
-        },
-    );
+    let options = LocalParameterOptions {
+        expect_value: inputs.profile.expect_value,
+        do_sum_stats: inputs.do_sum_stats,
+        max_intron_length: 0,
+        gap_trigger_bits: 22.0,
+        word_xdrop_bits: 7.0,
+        scale_factor: 1.0,
+        gumbel: inputs.gumbel,
+        eff_searchsp_override,
+    };
+    let call = LocalParameterCall::Initial {
+        min_subject_length: i32::try_from(inputs.min_subject_length)?,
+        composition_based_stats: inputs.compo_adjust_mode.ncbi_value(),
+    };
+    let (parameters, gapped_by_context) = match inputs.profile.pssm {
+        None => (
+            local_parameters_for_call(
+                &query_contexts,
+                inputs.total_nt,
+                inputs.num_subjects,
+                &gapped_by_context,
+                &ungapped_by_context,
+                options,
+                call,
+            ),
+            gapped_by_context,
+        ),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-127 (quoted at
+        // `PsiSearch::ungapped_karlin` and `PsiSearch::gapped_karlin`)
+        // A PSSM query's `kbp_psi` and `kbp_gap_psi`: the file's values, else `kbp_std`'s and
+        // `kbp_gap_std`'s. They are `kbp` and `kbp_gap` from here on (the word X-drop, the
+        // cutoffs, the linking, the X-drops of the gapped stages, the e-values and bit scores);
+        // the effective lengths keep `kbp_gap_std` and the gap trigger `kbp_std`
+        // (`LocalKarlinBlocks`).
+        Some(psi) => {
+            let gapped_psi: Vec<_> = gapped_by_context
+                .iter()
+                .map(|kbp| psi.gapped_karlin(kbp))
+                .collect();
+            let ungapped_psi: Vec<_> = ungapped_by_context
+                .iter()
+                .map(|kbp| psi.ungapped_karlin(kbp))
+                .collect();
+            let parameters = super::stage_d_stats::local_parameters_for_blocks(
+                &query_contexts,
+                inputs.total_nt,
+                inputs.num_subjects,
+                super::stage_d_stats::LocalKarlinBlocks {
+                    gapped: &gapped_psi,
+                    lengths: &gapped_by_context,
+                    ungapped: &ungapped_by_context,
+                    x_dropoff: &ungapped_psi,
+                },
+                options,
+                call,
+            );
+            (parameters, gapped_psi)
+        }
+    };
     Ok(QuerySetSetup {
         working_frames,
         contexts,
@@ -2688,6 +2741,9 @@ struct PreliminaryInputs<'a> {
     prelim_size: usize,
     /// `-culling_limit` (0: none).
     culling_limit: i32,
+    /// `-in_pssm`: the PSSM's rows, the scores of the one query (`score::PssmScore`) and the
+    /// source of its lookup table (`in_pssm::lookup_table`); `None` for a FASTA batch.
+    pssm: Option<&'a crate::algorithm::pssm_search::rows::QueryPssm>,
 }
 
 // Where the HSP lists of the subjects go as the owner of the search takes them in OID order:
@@ -2866,6 +2922,20 @@ fn run_preliminary_subjects_into(
     // share the query frames and the table (`XQuerySide`).
     let x_query_side =
         super::search_gapped::XQuerySide::x_with_frames(inputs.frames, inputs.queries)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-99 (quoted at
+    // `pssm_search::lookup`)
+    // A PSSM query's table, of its rows over the complement of its masks, made with the batch
+    // (`in_pssm::lookup_table`).
+    if let (Some(rows), [query]) = (inputs.pssm, inputs.queries) {
+        x_query_side.x_set_lookup(std::sync::Arc::new(super::in_pssm::lookup_table(
+            rows,
+            query,
+            inputs.search.seg,
+            inputs.search.mask_lowercase,
+            inputs.search.word_size,
+            inputs.search.threshold,
+        )));
+    }
     // A batch searched with a pool of two or more threads inside it builds its table before its
     // subjects, on the pool (`XQuerySide::x_build_lookup_on`): the subjects would otherwise wait
     // while the first one builds it on its thread. A batch on one thread (side by side, or
@@ -2919,15 +2989,30 @@ fn run_preliminary_subjects_into(
         // Dispatch point: the call that runs the preliminary stage for one subject
         // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search runs the unit-wise stage.
         let x_pool = x_unit_pool(subject);
-        let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
-            inputs.queries,
-            subject,
-            inputs.genetic_code,
-            inputs.search,
-            x_pool,
-            &x_query_side,
-            x_subject_side.map(|side| (side, x_oid)),
-        )?;
+        // Dispatch point: the scores of the batch's PSSM query (`-in_pssm`, the same for every
+        // subject), else the matrix's.
+        let preliminary = match inputs.pssm {
+            None => super::search_gapped::preliminary_protein_hsps_for_search(
+                inputs.queries,
+                subject,
+                inputs.genetic_code,
+                inputs.search,
+                x_pool,
+                &x_query_side,
+                x_subject_side.map(|side| (side, x_oid)),
+                super::score::MatrixScore,
+            )?,
+            Some(rows) => super::search_gapped::preliminary_protein_hsps_for_search(
+                inputs.queries,
+                subject,
+                inputs.genetic_code,
+                inputs.search,
+                x_pool,
+                &x_query_side,
+                x_subject_side.map(|side| (side, x_oid)),
+                super::score::PssmScore(rows),
+            )?,
+        };
         // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
         // BLAST_LinkHsps(..., hsp_list_out, ...);
         // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
@@ -3302,8 +3387,10 @@ fn finish_local_mode0_no_sum_stats(
             scoring.final_xdrop_bits,
             gapped_params[context].lambda,
         )?;
-        let (traced, stat_length) =
-            full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
+        // Dispatch point: the scores of the batch's PSSM query (`-in_pssm`, the same for every
+        // list), else the matrix's.
+        let (traced, stat_length) = match profile.pssm {
+            None => full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
                 &queries[context],
                 subject,
                 profile.genetic_code,
@@ -3321,7 +3408,22 @@ fn finish_local_mode0_no_sum_stats(
                 None,
                 None,
                 None,
-            )?;
+            )?,
+            Some(psi) => super::search_gapped::x_pssm_traceback_owned(
+                &psi.pssm,
+                &queries[context],
+                subject,
+                profile.genetic_code,
+                &input,
+                scoring.matrix,
+                scoring.gap_open,
+                scoring.gap_extend,
+                final_xdrop,
+                profile.seg,
+                profile.soft_masking,
+                profile.mask_lowercase,
+            )?,
+        };
         if traced.is_empty() {
             return Ok((stat_length, None));
         }
@@ -3527,6 +3629,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -3577,6 +3680,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -3867,6 +3971,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -3955,6 +4060,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -4112,6 +4218,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
         )
         .unwrap();
@@ -4205,6 +4312,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    pssm: None,
                 },
             )
             .unwrap();
@@ -4389,6 +4497,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    pssm: None,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4620,6 +4729,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    pssm: None,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4834,6 +4944,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
             BlastCompoAdjustMode::NoCompositionBasedStats,
             false,
@@ -4982,6 +5093,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
             BlastCompoAdjustMode::NoCompositionBasedStats,
             false,
@@ -5151,6 +5263,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -5352,6 +5465,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    pssm: None,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -5516,6 +5630,7 @@ mod tests {
                         subject_set: Default::default(),
                         engine_positives: false,
                         culling_limit: 0,
+                        pssm: None,
                     },
                     BlastCompoAdjustMode::CompositionMatrixAdjust,
                     true,
@@ -5827,6 +5942,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
         )
         .unwrap();
@@ -6017,6 +6133,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    pssm: None,
                 },
             )
             .unwrap();
@@ -6132,6 +6249,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
         )
         .unwrap();
@@ -6229,6 +6347,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
         )
         .unwrap();
@@ -6343,6 +6462,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                pssm: None,
             },
         )
         .unwrap();
@@ -6618,6 +6738,7 @@ mod tests {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            pssm: None,
         };
         for ranges in [
             vec![0..1],
@@ -6711,6 +6832,7 @@ mod tests {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            pssm: None,
         };
         let ranges = vec![0..1, 1..2, 2..3, 3..4];
         let searched = x_search_batches(

@@ -7,7 +7,17 @@ import type { OutputStream } from '../../ports/run-output';
 import { EngineStoppedError } from '../reactor/abi';
 import { loadReactor } from '../reactor/instance';
 import { RunOutputWriter } from '../run-output/writer';
-import type { EngineCommand, EngineEvent, EngineInit, ModuleSource, WorkerError, WorkerPrepare, WorkerRun, WorkerTestCommand } from './protocol';
+import {
+  STOP_AT_OUTPUT_CHANNEL,
+  type EngineCommand,
+  type EngineEvent,
+  type EngineInit,
+  type ModuleSource,
+  type WorkerError,
+  type WorkerPrepare,
+  type WorkerRun,
+  type WorkerTestCommand,
+} from './protocol';
 import { EngineRuntime } from './runtime';
 
 const scope = self as unknown as {
@@ -43,6 +53,24 @@ async function moduleOf(source: ModuleSource) {
   return 'module' in source ? source : loadReactor(source.asset);
 }
 
+// Test builds: a page arms the next search of this worker to stop its instance at its first
+// output, as a trap in the engine would (tests/e2e/harness/engine.ts, stopDuringSearch).
+let stopAtOutput = false;
+if (__LOSAT_TEST_HOOKS__) {
+  const arming = new BroadcastChannel(STOP_AT_OUTPUT_CHANNEL);
+  arming.onmessage = (event: MessageEvent<{ type?: string }>) => {
+    if (event.data?.type !== 'arm') return;
+    stopAtOutput = true;
+    arming.postMessage({ type: 'armed' });
+  };
+}
+
+function stopIfArmed(): void {
+  if (!stopAtOutput) return;
+  stopAtOutput = false;
+  throw new Error('a test stopped the engine at its first output');
+}
+
 function init(command: EngineInit): void {
   generation = command.generation;
   let serial: ReturnType<typeof moduleOf> | undefined;
@@ -54,6 +82,7 @@ function init(command: EngineInit): void {
     faultChannel: command.faultChannel,
     keeperChannel: command.keeperChannel,
     onThreadedSearch: () => scope.postMessage({ type: 'threaded-search', generation }),
+    ...(__LOSAT_TEST_HOOKS__ ? { beforeOutput: stopIfArmed } : {}),
   });
 }
 

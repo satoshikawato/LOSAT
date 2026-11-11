@@ -41,7 +41,14 @@
   checked the sequences that each round's PSSM reads, and refused following hits that its PSSM
   joins, where LOSAT wrote other later rounds than NCBI, and line GZ read a `-in` file named
   `.gz` as makeblastdb's decompressor reads it, where a gzip trailer whose CRC-32 or length is
-  wrong, or that is cut short, stopped the build)
+  wrong, or that is cut short, stopped the build, and line DBID pssmrows made psiblast's PSSM
+  count its rows by the Seq-align ids' handles and join following hits whose ids `Match`, as NCBI
+  does, which lifted psiblast's refusal of the hits that its PSSM joins and showed copies of one
+  record as NCBI's PSSM does, and refused the ids that NCBI's handles can take for one and copies
+  with another hit between them; the same day `losat makeblastdb` wrote makeblastdb's exception
+  reports (`Error: NCBI C++ Exception:`) for the errors of its general handler and read
+  `-max_file_sz` where makeblastdb reads it, after the head of the log, which version 1.0 listed as
+  known differences)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -233,7 +240,11 @@ Linux and macOS, 4 on Windows), which moves the padding of the date and the cut 
 under `-max_file_sz`. The Web app's builds (wasm32) write what makeblastdb writes on Linux
 x86-64. The output on Windows and macOS has not been compared with a makeblastdb run on those
 platforms; the tests there check LOSAT's platform choice and, on the Linux x86-64 settings,
-the same bytes as on Linux.
+the same bytes as on Linux. Errors that makeblastdb reports through its general handler
+(`Error: NCBI C++ Exception:` and one line per exception, `T0 "<file>", line <n>: Error:
+(<class>::<code>) <function>() - <message>`) name the source files in the build tree of the
+official Linux x64 release of makeblastdb 2.17.0, on every platform, as LOSAT's other NCBI
+exception reports do; a makeblastdb built elsewhere (bioconda, macOS, Windows) names its own tree.
 
 | Not written or rejected | Why |
 | --- | --- |
@@ -248,15 +259,24 @@ the same bytes as on Linux.
 Removal of an existing database and the paths of the output:
 
 - An output path with a space or a double quote in its absolute form (for example a build
-  inside a directory `my data`). makeblastdb reads the path as a list of names: it removes
-  nothing of an existing database, writes the new files beside the old ones and ends with
-  exit status 2. LOSAT takes the path as one name, replaces the database and ends with 0.
-  (`-out` itself may not contain a space, in both programs.)
+  inside a directory `my data`). makeblastdb reads the path as a list of names when it looks
+  for the volumes of an existing database: it removes only that database's LMDB files
+  (`.pdb`, `.pos`, `.pot`, `.ptf`, `.pto`, and logs "Deleted existing ..."), keeps its volume
+  files, writes the new files over or beside them and ends with exit status 2 when it opens
+  the result. LOSAT
+  takes the path as one name, removes the whole database (a directory at one of its names with
+  its contents), replaces it and ends with 0; a build
+  that fails after the removal (a `-max_file_sz` that is no size) leaves none of the old
+  database, where makeblastdb leaves its volume files. (`-out` itself may not contain a space,
+  in both programs.)
 - An existing `sub/db.pal` while the current directory holds volumes of the same names
   (`./db.00.*`). NCBI looks for a volume in the current directory first, so makeblastdb
   removes the files of the current directory. LOSAT removes the volumes beside the alias
-  file. Other behaviour of makeblastdb is kept: the existing database is removed before the
-  input is read, so a failing build also removes it.
+  file (a directory at one of those names with its contents). Other behaviour of makeblastdb is kept: the existing database is removed before the
+  input is read, so a failing build also removes it; a directory at one of the names removed
+  is removed with its contents, read-only parts included, and a symbolic link is removed, not
+  followed (`CDirEntry::Remove`); a volume file's final name is cleared the same way before
+  the volume is renamed to it (a directory `NAME.pin` that is no database is removed then).
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
   `.ncbirc` is not removed (`losat makeblastdb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
@@ -272,33 +292,38 @@ Version 5 and the options added to the writer:
 - `-logfile` is read as makeblastdb's option, not wherever it stands in the command line
   (makeblastdb's corelib also finds it as the value of another option).
 - Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
-  that removes what the earlier files added; makeblastdb skips it without a word. `-in ""`
-  (no name) is refused; makeblastdb reads an empty list.
+  that removes what the earlier files added; makeblastdb skips it without a word.
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
-  of a database; one left at the path is removed, makeblastdb's final state). So an output
-  name of 247 to 251 bytes, whose `NAME.pdb-lock` passes the file-name limit of 255 bytes,
-  stops makeblastdb ("BLAST Database error: LMDB runtime error: mdb_env_open: File name too
-  long", exit status 2, no volume written) while LOSAT builds the database (exit status 0;
-  every file is valid and its own name fits).
+  of a database; one left at the path is removed, makeblastdb's final state after a build; a
+  build that fails after LMDB has created its lock file leaves them in makeblastdb, not in
+  LOSAT). On Unix a
+  lock file that LMDB cannot create stops LOSAT where it stops makeblastdb: an
+  output name of 247 bytes or more, whose `NAME.pdb-lock` passes the file-name limit of 255
+  bytes, ends with "BLAST Database error: LMDB runtime error: mdb_env_open: File name too
+  long" (exit status 2) when the second sequence is added, or that creation error (exit status
+  1) for one sequence, with no file written, in both programs; a directory of a lock file's
+  name that the removal of the old database could not remove (it holds a directory that cannot
+  be read) ends the same way with "Is a directory". On Windows these cases have not been
+  compared with a makeblastdb run: LOSAT's paths are not bound by `MAX_PATH`, which binds
+  LMDB's `CreateFileW`, and LOSAT does not check a directory of the lock file's name.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
-- A file that cannot be created, written or renamed, and an input file that cannot be
+- A file that cannot be created or written, and an input file that cannot be
   opened: makeblastdb does not test its streams and ends with exit status 0 and a damaged
   or missing database. LOSAT removes the files of the build and ends with
   `Error: <path>: <system error>` and exit status 255.
+- A volume whose final name is a directory that the removal cannot delete (it holds a
+  directory that cannot be read): makeblastdb's rename fails without a word, the volume stays
+  under its numbered name (`NAME.00.pin`) and makeblastdb ends with `No alias or index file
+  found ...` (exit status 2); LOSAT ends with `Error: <volume> -> <name>: Is a directory`
+  (exit status 255) and leaves `NAME.ptf` (probe of 2026-11-08).
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights); LOSAT stops when it creates the first
   file, after the first lines of the log.
-- `-max_file_sz` that is no size or is 4 GiB or more: LOSAT checks it before it tests the
-  output directory, removes an existing database or writes the log; makeblastdb after. The
-  exit status is the same, except with an output directory makeblastdb refuses: makeblastdb
-  ends with that refusal (exit status 255).
 - Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without
   `-parse_seqids` or with `-taxid`) end with exit status 2 and the text of LOSAT's option
   parser, as in every LOSAT subcommand; makeblastdb uses 1.
-- Errors of makeblastdb's general handler carry the source path of its binary
-  (`Error: NCBI C++ Exception: ...`); LOSAT prints `Error:` and the sentence.
 - With more volumes than the process may hold open files, makeblastdb writes the database
   and ends with exit status 2 ("Too many open files"). LOSAT resolves the finished
   database without opening its volumes and ends with 0.
@@ -321,6 +346,17 @@ Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1
 - Version 4 with `-parse_seqids`: a string-index key longer than 256 bytes (makeblastdb stops
   with "buffer overflow detected").
 - A `-taxid_map` line of white space only (makeblastdb crashes).
+- Version 5 with `-parse_seqids`: `LMDB_SPLIT_CHUNK_SIZE` or `LMDB_MIN_SPLIT_SIZE` that is not
+  a number of the range of `unsigned int` (makeblastdb aborts in its LMDB writer, after the
+  volumes are written, and leaves `NAME.pdb`, `NAME.pos`, `NAME.phr`, `NAME.pin`, `NAME.pog`,
+  `NAME.psq`, `NAME.ptf` and the two lock files, without `NAME.pot`, `NAME.pto` and
+  `NAME.pjs`); LOSAT stops with
+  `BLAST Database creation error: Cannot convert string '<value>' to ...` (exit status 1),
+  removes the volumes and leaves `NAME.pos` and `NAME.ptf`.
+- `-in ""` (no name): makeblastdb reads the first name of an empty list after the log line
+  "Maximum file size" and `-taxid_map`, and crashes (a segmentation fault). LOSAT refuses it
+  there, so that an existing database of the output name has been removed first, as
+  makeblastdb removes it, and the errors of `-max_file_sz` and `-taxid_map` come first.
 
 Reproduced although it looks wrong (deterministic NCBI behaviour): with `-hash_index`, no
 `-parse_seqids` and several volumes, the first sequence of a later volume is indexed under the
@@ -617,13 +653,14 @@ a result that LOSAT does not reproduce.
 
 | Rejected, for a reported sequence | Formats | NCBI BLAST+ 2.17.0 | Rule |
 | --- | --- | --- | --- |
-| A Seq-align id that the lookup does not find: `gnl|PIG|` (makeblastdb fills the PIG files from no FASTA id), in version 4 `bbs|` and `nat|` (makeblastdb writes no ISAM key for them), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of each volume is no sequence (makeblastdb stores such an id only when the FASTA names it), any other id of a version 4 database without ISAM files; and a local id that alone decides the definition line (`lcl|777` before `gi|777`), which the lookup finds but the formatters do not | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id | 2, 3 |
+| A Seq-align id that the lookup does not find: `gnl|PIG|` (makeblastdb fills the PIG files from no FASTA id), in version 4 `bbs|` and `nat|` (makeblastdb writes no ISAM key for them), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of each volume is no sequence (makeblastdb stores such an id only when the FASTA names it), any other id of a version 4 database without ISAM files; and a local id that alone decides the definition line (`lcl|777` before `gi|777`), which the lookup finds but the formatters do not; a `giim` id (`gim|123`), which the lookup finds but NCBI's Seq-id handles never take for one with an equal id, so the scope never finds its Bioseq | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | The default tabular fields and any list with `sacc`, `saccver` or a field that reads the letters stop (exit 255). Other lists exit 0: `sseqid` writes `Unknown`, `sallseqid` the stored id. Outfmt 0 and 5 write `Unknown`, 13 to 16 and SAM the id | 2, 3 |
 | A Seq-align id that the lookup finds first on another sequence, for example `gb|X|` after `gb|X.1|`, `emb|X.1|` after `gb|X.1|`, `gb|X|` after `emb|X.1|`, `lcl|X` after `gb|X.1|`, in version 5 `lcl|300` after `bbs|300` and `bbs|301` after `lcl|301` (one LMDB key), `gnl|BL_ORD_ID|n` where n plus the first ordinal id of a volume is another sequence. The lookup does not refuse the same record in two volumes or in two databases of an alias (with other tax ids: the row below) | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | Writes the other sequence's names, in every program but BLASTN also its identities, where one of its ids equals the Seq-align id (`gb|X.1|` for `gb|X|`, a `gnl|BL_ORD_ID|n` that is its own number); otherwise as in the row above | 2, 3 |
 | A Seq-align id that another sequence also holds, in any letter case, where the lookup finds the sequence itself (or the same record) first: `lcl|555` and `gb|X.1|` with `lcl|555` in a second definition line, `lcl|abc` and `lcl|ABC`, `bbs|123` in two databases of an alias. Not the same record in two volumes or databases (with other tax ids: the row below) | 0, 5, 13 to 17; 6, 7, 10, 20 with a field that reads the sequence (below) | Where both are reported (also for different queries), its scope, which reads them in the order of its prefetch and compares ids without case, can write the other sequence's names, in every program but BLASTN also its identities; for `pdb|1ABC|A` and `pdb|1abc|A` in two databases it stops (exit 2) | 2, 3 |
 | The same record in another volume or database of an alias, or of `-db "a b"`, with other tax ids, which the lookup gives first or which also holds the Seq-align id. In the formats that show a title made from the tax ids (outfmt 0 for an empty title whose tax id the taxonomy database names or a protein title ending in `]` where a definition line has no title; the tabular formats where a printed id is the first word of the title that replaces an `lcl|Subject_N` id, for a nucleotide or a protein title ending in `]`), and in every format where the taxonomy database's texts depend on the copy: texts of opening it where only one copy has a tax id, the offset error of a tax id that a copy holds (also for the same tax ids in another volume) | 13 to 16 and the tabular `staxid`, `staxids` and name fields; for such a title the formats named; for the texts 0, 5, 6, 7, 10, 13 to 17, 20, and 8, 9, 12 with `PRE_FETCH_SEQS_LIMIT=2147483647` | Shows for both the copy that the lookup gives first: its tax ids and their names, the title made from them, and the taxonomy database's texts of the lookups that the volume of that copy makes (the offset error of `taxdb.btd` once for that volume); the other formats write the same bytes | 2 |
 | A Seq-align id whose lookup fails (an LMDB file without the accession table; `gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) | 0, 5, 6, 7, 10, 13 to 17, 20 | Stops (exit 2; for the text tag "Error pre-fetching sequence data", exit 255) | 3 |
 | Following hits of a query whose Seq-align ids `Match` but that are not copies of one record: `pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`, one accession and version under `gb`, `emb` or `dbj` | 0, 5, 13 to 16; tabular `qcovs` and `qcovus` | Shows them as one hit; writes the coverage of both on the first row and `N/A` on the other | 2 |
-| In `psiblast`, the same in the hit list before the cut where the run makes a PSSM (`-out_pssm`, `-out_ascii_pssm`, each round that makes the next round's PSSM), the later one with an alignment below `-inclusion_ethresh` | every format | Puts their alignments in one row of the PSSM's multiple alignment, whose rows it counts by the hit ids (`x_ExtractAlignmentData`), so the PSSM and the later rounds differ | 2 |
+| In `psiblast`, two sequences whose Seq-align ids differ but that NCBI's Seq-id handles can take for one, where NCBI compares them: one with an alignment below `-inclusion_ethresh` and one of the previous round's inclusion set (convergence); two such, where the round makes a PSSM (`-save_pssm_after_last_round` with `-out_pssm` or `-out_ascii_pssm`, a round that makes the next round's PSSM); in outfmt 0, a reported sequence and one of the previous round's set (LOSAT checks every reported sequence, a superset of the `-num_descriptions` first that NCBI's two-part table looks up). Such ids: ids that differ only in letter case (`gb|ABC1.1|` and `gb|abc1.1|`), one accession under `gb`, `emb` and `dbj` (`gb|ABC1.1|` and `emb|ABC1.1|`, one handle where the accession packs), and ids that LOSAT does not tell apart as the handles do (an integer tag and the same digits as a string, a patent's number and application number, PDB ids that differ only in their release or the case of the molecule's first letter). Also a `giim` id (`gim|123`) with an alignment below `-inclusion_ethresh` where the round makes a PSSM | every format | Takes them for one sequence in its inclusion sets (convergence, the two-part description table) and counts them as one row of the PSSM's multiple alignment (`CSeq_id_Handle`); never takes a `giim` id for one handle with an equal id (its tree's search for an equal id is inverted), so it counts each of its alignments as a row and cannot read its letters | 2 |
+| In `psiblast` where the run makes a PSSM, two copies of one record with another hit between them in the hit list before the cut, both with an alignment below `-inclusion_ethresh` | every format | Counts one row for the copies (`x_CountAndSelectQualifyingAlignments`) but moves to a new row at each (`x_ExtractAlignmentData`) and writes past the last row: it crashes (SIGSEGV, exit 139) | 3 |
 | In `psiblast`, such hits that its cut of a longer list to `-max_target_seqs` counts (copies of one record count as one) | every format | `PruneSeqalign` counts them as one subject and keeps one more | 2 |
 | In `psiblast`, a sequence of its longer list beyond `-max_target_seqs`, which no report shows: one whose Seq-align id's lookup throws on the id (`gnl|BL_ORD_ID|0` stored with a text tag) where the report reads the sequences it shows or the run writes a PSSM; one for which the prefetch can read another sequence whose definition lines do not hold the id (`pdb|1abc|A` for `pdb|1ABC|A` in two databases of an alias; line DBID P3), or, where the taxonomy database's texts can differ between what NCBI's prefetch can read for it: another sequence that the lookup finds first with an id that compares equal, another sequence that also holds the id (as the blobs read before in the run decide), or the same record in another volume (an id found nowhere is not read, as by NCBI; a subject whose definition line the formatters do not find is read as itself) | 0, 6, 7, 10, 20 | For the failed lookup its prefetch writes "Error pre-fetching sequence data" and leaves the shown sequences it has not loaded yet to the formatter, which reads them one by one (its scope can match an id of a sequence read before weakly, as with `PRE_FETCH_SEQS_LIMIT`), and its PSSM drops that sequence's letters ("Failed to retrieve sequence"); otherwise it stops (exit 2, `oid headers do not contain target gi/seq_id`) or looks up the other sequence's tax ids | 2, 3 |
 | Where NCBI's prefetch reads a reported sequence by its Seq-align id and no report reads it (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, at which the prefetch reads every reported sequence also for them; a tabular field list that reads nothing of the sequence, below; psiblast's sequences beyond `-max_target_seqs`), in a batch whose prefetch is on (a positive `PRE_FETCH_SEQS_LIMIT` turns off the prefetch of a batch whose Seq-aligns outnumber it; each batch counts its own): another sequence that the prefetch can read for it whose definition lines do not hold the id (`pdb|1ABC|A` and `pdb|1abc|A` in two databases of an alias); where the taxonomy database's texts can differ between what the prefetch can read, as in psiblast's row above; a Seq-align id whose lookup fails on a file of the database (an LMDB page that does not read: NCBI's prefetch rethrows the `CSeqDBException`); and a Seq-align id whose lookup throws on the id in a batch whose other reported sequences' loads make the taxonomy database write a text (its texts of opening, the offset error of a tax id). Without a taxonomy database on the search path too, but for the texts | 8, 9, 12; 6, 7, 10, 20 without a field that reads the sequence | Stops (exit 2, `oid headers do not contain target gi/seq_id`, or `BLAST Database error`); looks up the other sequence's tax ids; the prefetch loads the batch's sequences in the order of its Seq-id handles (the ids its mapper packs, such as GIs and accessions, by their packed value, then the others by the address of each id's record, which LOSAT does not model) and ends at the failed lookup with "Error pre-fetching sequence data" | 2, 3 |
@@ -660,6 +697,11 @@ Seq-align ids `Match` as one (the row of such hits). psiblast with a PSSM file (
 the PSSM, so such a run is refused as the lists that read the sequence are, also for the sequences of
 its longer list beyond `-max_target_seqs`: those with an alignment below `-inclusion_ethresh`, the
 only ones the PSSM reads (in a round whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off, one by one).
+Its multiple alignment has a row for each handle of these Seq-align ids, and a Seq-align whose id
+`Match`es the previous Seq-align's id goes into the previous row, as NCBI's `CPsiBlastInputData`
+makes them: copies of one record that follow each other share a row, and so do two other sequences
+whose ids `Match` (`gb|X|` and `gb|X.1|`, two handles, which leave the last row empty), each with the
+letters read by its own id.
 
 A nucleotide title of punctuation is not refused: it stops at the end of the string, in outfmt 0 and
 in the tabular first word of an `lcl|Subject_N` id (approved exception 2 of

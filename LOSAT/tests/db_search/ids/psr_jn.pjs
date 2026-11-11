@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_jn",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_jn (parsed Seq-ids)",
+  "number-of-letters": 650,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-08T20:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50318,
+  "bytes-to-cache": 782,
+  "files": [
+    "psr_jn.pdb",
+    "psr_jn.phr",
+    "psr_jn.pin",
+    "psr_jn.pog",
+    "psr_jn.pos",
+    "psr_jn.pot",
+    "psr_jn.psq",
+    "psr_jn.ptf",
+    "psr_jn.pto"
+  ]
+}

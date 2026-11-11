@@ -594,13 +594,24 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
 /// One run of `losat makeblastdb` for a protein database titled "t": the exit
 /// status, the log and the messages of the standard error stream.
 fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, String, String) {
+    makedb_version(input, out, max_file_sz, stdin, 4)
+}
+
+/// [`makedb`] of the format version `version`.
+fn makedb_version(
+    input: &str,
+    out: &str,
+    max_file_sz: &str,
+    stdin: &[u8],
+    version: i32,
+) -> (i32, String, String) {
     let args = MakedbArgs {
         input: input.to_string(),
         input_type: "fasta".to_string(),
         dbtype: "prot".to_string(),
         title: Some("t".to_string()),
         out: Some(out.to_string()),
-        blastdb_version: 4,
+        blastdb_version: version,
         max_file_sz: max_file_sz.to_string(),
         logfile: None,
         parse_seqids: false,
@@ -892,49 +903,308 @@ fn a_late_error_removes_the_volumes_already_written() {
     assert_eq!(files_named(&tmp.0, "db."), [] as [&str; 0]);
 }
 
-/// The errors makeblastdb reports through its last `catch` clauses end with
-/// exit status 255 and "Error: ": a `-max_file_sz` that is no size (LOSAT
-/// tests it before it touches a file), and a directory that cannot be used.
+/// `Error: ` and the exception's report, as makeblastdb's general handler prints it: the build
+/// tree of the official Linux x64 release of 2.17.0 and the file below it.
+fn ncbi_report(file: &str, rest: &str) -> String {
+    format!(
+        "Error: NCBI C++ Exception:\n    T0 \"{}/src/{file}\", line {rest}\n\n",
+        crate::ncbi_exception::NCBI_BUILD_ROOT
+    )
+}
+
+/// The report of `CBuildDatabase::CreateDirectories`' exception at `line` with `message`.
+fn create_directories_report(line: u32, message: &str) -> String {
+    ncbi_report(
+        "objtools/blast/seqdb_writer/build_db.cpp",
+        &format!(
+            "{line}: Error: (CMultisourceException::eInvalid) \
+             BLASTDB::ncbi::CBuildDatabase::CreateDirectories() - {message}"
+        ),
+    )
+}
+
+/// The head of the log that `CBuildDatabase`'s constructor writes (time and name masked).
+const LOG_HEAD: &str =
+    "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <OUT>\nNew DB title:  \
+                        t\nSequence type: Protein\nKeep MBits: T\n";
+
+/// The errors makeblastdb reports through the `CException` clause of its general handler end
+/// with exit status 255, "Error: " and the exception's report (makeblastdb 2.17.0, the official
+/// Linux x64 release, probe of 2026-11-08): a `-max_file_sz` that is no size, read after the head of the
+/// log, and a directory that cannot be used, before it.
 #[test]
 fn other_errors_end_with_status_255() {
     let fasta = prot_fasta();
     let tmp = TempDir::new("other");
-    for value in [
-        "abc",
-        "",
-        "-1",
-        "1e3",
-        " 1KB",
-        "1Ki",
-        "18446744073709551616",
+    for (value, line, pos) in [
+        ("abc", 1622, 0),
+        ("", 1622, 0),
+        ("-1", 1578, 0),
+        ("1e3", 1674, 2),
+        (" 1KB", 1622, 0),
+        ("1Ki", 1674, 2),
+        ("18446744073709551616", 1750, 19),
+        ("18446744073709551615.5", 1757, 20),
     ] {
         let (status, log, messages) = makedb(&fasta, &tmp.base("db"), value, b"");
         assert_eq!(status, 255, "{value:?}");
         assert_eq!(
             messages,
-            format!("Error: -max_file_sz: Cannot convert string '{value}' to Uint8\n")
+            ncbi_report(
+                "corelib/ncbistr.cpp",
+                &format!(
+                    "{line}: Error: (CStringException::eConvert) \
+                     ncbi::NStr::StringToUInt8_DataSize() - Cannot convert string '{value}' to \
+                     Uint8 (m_Pos = {pos})"
+                )
+            ),
+            "{value:?}"
         );
-        assert_eq!(log, "", "{value:?}");
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            LOG_HEAD,
+            "{value:?}"
+        );
+        assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0], "{value:?}");
     }
-    // A value that is a size, but too large, is an error of the options.
-    let (status, _, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
+    // A value that is a size, but too large, is an error of the options, after the head too.
+    let (status, log, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
     assert_eq!(
         (status, messages.as_str()),
         (1, "BLAST options error: max_file_sz must be < 4 GiB\n")
     );
-    // The parent of the database is a file.
+    assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
+    // An existing database of the same name is removed before the value is read, as
+    // makeblastdb removes it.
+    let (status, _, _) = makedb(&fasta, &tmp.base("db"), "3GB", b"");
+    assert_eq!(status, 0);
+    assert!(!files_named(&tmp.0, "db.").is_empty());
+    let (status, log, _) = makedb(&fasta, &tmp.base("db"), "abc", b"");
+    assert_eq!(status, 255);
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        LOG_HEAD.replace(
+            "Keep MBits",
+            &format!(
+                "Deleted existing Protein BLAST database named {}\nKeep MBits",
+                logged_db_name(&log)
+            )
+        )
+    );
+    assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0]);
+    // The parent of the database is a file: the directory's error comes first.
     std::fs::write(tmp.0.join("f"), b"").unwrap();
     let out = tmp.0.join("f").join("db").to_string_lossy().into_owned();
-    let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
-    assert_eq!(
-        (status, log.as_str(), messages.as_str()),
-        (255, "", "Error: Failed to create directory 'f'\n")
-    );
+    for value in ["3GB", "abc", "4GiB"] {
+        let (status, log, messages) = makedb(&fasta, &out, value, b"");
+        assert_eq!(
+            (status, log.as_str(), messages),
+            (
+                255,
+                "",
+                create_directories_report(1063, "Failed to create directory 'f'")
+            ),
+            "{value}"
+        );
+    }
     assert_eq!(
         files_named(&tmp.0, ""),
         ["f"],
         "nothing but the planted file"
     );
+}
+
+/// `-in ""` names no input file: makeblastdb 2.17.0 reads the first name of the empty list
+/// after the log line "Maximum file size" and `-taxid_map`, and crashes (a segmentation fault,
+/// probe of 2026-11-08). LOSAT refuses it there (exit status 1): after an existing database of
+/// the output name has been removed, as makeblastdb removes it, and after the errors of
+/// `-max_file_sz`.
+#[test]
+fn an_empty_in_is_refused_where_makeblastdb_reads_the_list() {
+    let refusal = "losat makeblastdb: -in names no input file; losat makeblastdb reads FASTA \
+                   files or the standard input\n";
+    let tmp = TempDir::new("inempty");
+    let db = tmp.base("db");
+    let (status, log, messages) = makedb("", &db, "3GB", b"");
+    assert_eq!((status, messages.as_str()), (1, refusal));
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        format!("{LOG_HEAD}Maximum file size: 3000000000B\n")
+    );
+    let (status, log, messages) = makedb("", &db, "abc", b"");
+    assert_eq!(
+        (status, messages),
+        (
+            255,
+            ncbi_report(
+                "corelib/ncbistr.cpp",
+                "1622: Error: (CStringException::eConvert) \
+                 ncbi::NStr::StringToUInt8_DataSize() - Cannot convert string 'abc' to Uint8 \
+                 (m_Pos = 0)"
+            )
+        )
+    );
+    assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
+    let (status, _, _) = makedb(&prot_fasta(), &db, "3GB", b"");
+    assert_eq!(status, 0);
+    assert!(!files_named(&tmp.0, "db.").is_empty());
+    let (status, log, messages) = makedb("", &db, "3GB", b"");
+    assert_eq!((status, messages.as_str()), (1, refusal));
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        format!(
+            "{}Maximum file size: 3000000000B\n",
+            LOG_HEAD.replace(
+                "Keep MBits",
+                &format!(
+                    "Deleted existing Protein BLAST database named {}\nKeep MBits",
+                    logged_db_name(&log)
+                )
+            )
+        )
+    );
+    assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0]);
+}
+
+/// An output name whose LMDB lock file (`NAME.pdb-lock`) passes the file system's limit of a
+/// file name, 255 bytes (an output name of 247 bytes and more), stops a version 5 build where
+/// LMDB's open of that file fails, as in makeblastdb 2.17.0 (probe of 2026-11-08): when the
+/// second sequence publishes the first, with `BLAST Database error: LMDB runtime error:
+/// mdb_env_open: File name too long` (exit status 2); with one sequence in the close, as a
+/// creation error (exit status 1). No file is left. At 246 bytes the build ends normally.
+#[cfg(unix)]
+#[test]
+fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
+    let tmp = TempDir::new("lockname");
+    let one = tmp.0.join("one.fa");
+    let two = tmp.0.join("two.fa");
+    std::fs::write(&one, ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n").unwrap();
+    std::fs::write(
+        &two,
+        ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n>seq2 second\nMKKLLPTAAAGLLLLAAQPAMA\n",
+    )
+    .unwrap();
+    let (one, two) = (one.to_string_lossy(), two.to_string_lossy());
+    let head = format!("{LOG_HEAD}Maximum file size: 3000000000B\n");
+    let error = "LMDB runtime error: mdb_env_open: File name too long";
+    for length in [247, 250] {
+        let out = tmp.base(&"e".repeat(length));
+        let (status, log, messages) = makedb_version(&two, &out, "3GB", b"", 5);
+        assert_eq!(
+            (status, messages),
+            (2, format!("BLAST Database error: {error}\n")),
+            "{length}"
+        );
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            format!("{head}\nNo volumes were created.\n\n"),
+            "{length}"
+        );
+        let (status, log, messages) = makedb_version(&one, &out, "3GB", b"", 5);
+        assert_eq!(
+            (status, messages),
+            (1, format!("BLAST Database creation error: {error}\n")),
+            "{length}"
+        );
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            format!(
+                "{head}Adding sequences from FASTA; added 1 sequences in <S> seconds.\n\nNo \
+                 volumes were created.\n\n"
+            ),
+            "{length}"
+        );
+        assert_eq!(files_named(&tmp.0, "e"), [] as [&str; 0], "{length}");
+    }
+    let (status, _, messages) = makedb_version(&two, &tmp.base(&"e".repeat(246)), "3GB", b"", 5);
+    assert_eq!((status, messages.as_str()), (0, ""));
+    assert!(files_named(&tmp.0, "e").contains(&format!("{}.pdb", "e".repeat(246))));
+}
+
+/// makeblastdb removes the names of an existing database with `CFile(name).Remove()`, which
+/// removes a directory with its contents (`CDirEntry::Remove(eRecursive)`), and gives a volume
+/// file its final name with `CDirEntry::Rename(fRF_Overwrite)`, which removes what is there the
+/// same way (makeblastdb 2.17.0, the official Linux x64 release, probe of 2026-11-08, cases
+/// `*_dir_full_2seq`, `pdb_symlink_dir_2seq`): a directory with contents, read-only parts
+/// included, at the LMDB names `db.pdb`, `db.pdb-lock`, `db.ptf-lock` (removals that make the
+/// log say "Deleted existing ..."), at `db.00.pdb` (an LMDB name of a volume, not counted) or
+/// at the volume name `db.pin` (no database is found there; the rename removes it) is gone and
+/// the build ends normally. A symbolic link at `db.pdb` is removed and its target kept.
+#[test]
+fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
+    let tail = "Maximum file size: 3000000000B\nAdding sequences from FASTA; added 2 sequences in \
+                <S> seconds.\n\n\n";
+    let built = [
+        "db.pdb", "db.phr", "db.pin", "db.pjs", "db.pot", "db.psq", "db.ptf", "db.pto",
+    ];
+    let mut cases = vec![
+        ("db.pdb", true, false),
+        ("db.pdb-lock", true, false),
+        ("db.ptf-lock", true, false),
+        ("db.00.pdb", false, false),
+        ("db.pin", false, false),
+    ];
+    if cfg!(unix) {
+        cases.push(("db.pdb", true, true));
+    }
+    for (name, deleted, link) in cases {
+        let tmp = TempDir::new("dirname");
+        let two = tmp.0.join("two.fa");
+        std::fs::write(
+            &two,
+            ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n>seq2 second\nMKKLLPTAAAGLLLLAAQPAMA\n",
+        )
+        .unwrap();
+        let dir = if link {
+            tmp.0.join("target")
+        } else {
+            tmp.0.join(name)
+        };
+        std::fs::create_dir_all(dir.join("inner").join("deeper")).unwrap();
+        std::fs::write(dir.join("inner").join("deeper").join("f"), b"x").unwrap();
+        std::fs::write(dir.join("a"), b"a").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: PathBuf, mode| {
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
+            };
+            if link {
+                std::os::unix::fs::symlink("target", tmp.0.join(name)).unwrap();
+            } else {
+                mode(dir.join("a"), 0o444);
+                mode(dir.join("inner"), 0o555);
+                mode(dir.clone(), 0o555);
+            }
+        }
+        let (status, log, messages) =
+            makedb_version(&two.to_string_lossy(), &tmp.base("db"), "3GB", b"", 5);
+        assert_eq!((status, messages.as_str()), (0, ""), "{name}");
+        let head = if deleted {
+            LOG_HEAD.replace(
+                "Keep MBits",
+                &format!(
+                    "Deleted existing Protein BLAST database named {}\nKeep MBits",
+                    logged_db_name(&log)
+                ),
+            )
+        } else {
+            LOG_HEAD.to_string()
+        };
+        assert_eq!(
+            String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+            format!("{head}{tail}"),
+            "{name}"
+        );
+        assert_eq!(files_named(&tmp.0, "db"), built, "{name}");
+        for file in built {
+            let meta = std::fs::symlink_metadata(tmp.0.join(file)).unwrap();
+            assert!(meta.file_type().is_file(), "{name}: {file}");
+        }
+        if link {
+            assert!(dir.join("a").is_file() && dir.join("inner/deeper/f").is_file());
+        }
+    }
 }
 
 /// The directory of the output name is made as makeblastdb makes it
@@ -987,7 +1257,10 @@ fn directories_of_the_output_name() {
                 (
                     255,
                     "",
-                    format!("Error: You do not have write permissions on '{name}'\n")
+                    create_directories_report(
+                        1069,
+                        &format!("You do not have write permissions on '{name}'")
+                    )
                 ),
                 "{given}"
             );
@@ -1030,7 +1303,10 @@ fn an_existing_directory_without_write_permission_stops_the_build_before_the_log
             (
                 255,
                 "",
-                format!("Error: You do not have write permissions on '{name}'\n")
+                create_directories_report(
+                    1069,
+                    &format!("You do not have write permissions on '{name}'")
+                )
             ),
             "{out}"
         );

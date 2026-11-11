@@ -2345,13 +2345,17 @@ mod tests {
     // after it, a stage of no strips, and a stage with another partition count. Every stage
     // gives the reference's hits and table cell for cell (heads, cells, occupancy, capacity,
     // bounds). In every other case on 2+ threads the owner sleeps in its folds until a helper
-    // has folded (`partitioned`), so that these cases check the equality on folds by several
-    // threads on any machine, which the test asserts for each of them.
+    // has folded (`partitioned`, at most 200 ms in a stage), so that these cases check the
+    // equality on folds by several threads on any machine. That a helper folded is not
+    // guaranteed for one case (a helper may start after the owner's wait on a loaded machine:
+    // the review of 2026-10 and three gate runs to 2026-11-11), so the test asserts it for some
+    // case, not for each.
     #[test]
     fn seed_stage_part_equals_the_reference_fold() {
         let mut rng = Lcg(0x9A27_F01D);
         let mut case = 0usize;
         let mut waited_cases = 0usize;
+        let mut shared_cases = 0usize;
         for parts in [2usize, 3, 7, 16] {
             for threads in 1..=8usize {
                 let pool = rayon::ThreadPoolBuilder::new()
@@ -2484,17 +2488,20 @@ mod tests {
                         first += n;
                     }
                     if owner_waits {
-                        // the helpers folded too
                         waited_cases += 1;
-                        assert!(
-                            most_folders >= 2,
-                            "case {case} parts {parts} threads {threads} levels {levels}: the owner waited in its folds, but no stage was folded on more than one thread"
-                        );
+                        if most_folders >= 2 {
+                            shared_cases += 1;
+                        }
                     }
                 }
             }
         }
         assert_eq!(waited_cases, 28);
+        // the helpers folded too, in a stage of some case where the owner waited
+        assert!(
+            shared_cases >= 1,
+            "the owner waited in its folds in {waited_cases} cases, but no stage of them was folded on more than one thread"
+        );
     }
 
     // A parallel iterator inside every scan and fold call of every participant (the pattern

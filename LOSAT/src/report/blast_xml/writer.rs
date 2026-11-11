@@ -149,6 +149,57 @@ pub trait StructuredXml {
 
     /// Appends the end of the document (the epilog), after the last query.
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()>;
+
+    /// Whether the document holds each query's report back until the next query's arrives, so
+    /// that a run that stops (no epilog) never writes the report of the last query it formats:
+    /// the XML2 and JSON documents of a `-subject` search (`Xml2Document`). BLAST XML writes each
+    /// query's report at once.
+    fn holds_back(&self) -> bool {
+        false
+    }
+
+    /// Takes the place of the report of the last query of a run that stops, which the document
+    /// holds back and never writes (`holds_back`): that report is not made, and `out` gets what
+    /// the document writes when it arrives (the report held before it).
+    fn unwritten(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        let _ = out;
+        anyhow::bail!("the document writes the report of every query")
+    }
+}
+
+/// How many of the `queries` of a report call have reports that the documents write, and so have
+/// texts (titles, messages, the names of their hits' subjects) that NCBI's writer must be able
+/// to write: all of them, except the last when the run stops after this call (`stops`: no epilog
+/// and no later report call follow it) and the documents hold that report back (`holds_back`:
+/// `StructuredXml::holds_back`, `Xml2Target::holds_back`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
+/// ```c++
+/// 	if((m_IsIterative) || (m_IsBl2Seq)) {
+/// 		if(m_AccumulatedResults.empty()) {
+/// 			...
+/// 			m_AccumulatedResults.push_back(res);
+/// 		...
+/// 			if(m_AccumulatedResults[0].GetSeqId()->Match(*query_id)) {
+/// 				m_AccumulatedResults.push_back(res);
+/// 			}
+/// 			else {
+/// 				CRef <CBlastSearchQuery> q = m_AccumulatedQueries->GetBlastSearchQuery(0);
+/// 				if(m_IsBl2Seq) {
+/// 				    CCmdLineBlastXML2ReportData report_data(q, m_AccumulatedResults, m_Options,
+/// 				    		   	   	   	   	   	   	    m_Scope, m_SeqInfoSrc);
+/// 				    x_WriteXML2(report_data);
+/// ```
+/// A `-subject` report is written when the next query's results arrive, or in the epilog
+/// (`PrintEpilog`, blast_format.cpp:2206-2219), which a run that a later batch stops never
+/// reaches: NCBI never makes the last formatted query's report, so it never fails on a title
+/// there, and LOSAT refuses none of that report's texts.
+pub fn written_queries(queries: usize, stops: bool, holds_back: bool) -> usize {
+    if stops && holds_back {
+        queries.saturating_sub(1)
+    } else {
+        queries
+    }
 }
 
 /// The hit-level calls of a structured writer behind `HitSink`.

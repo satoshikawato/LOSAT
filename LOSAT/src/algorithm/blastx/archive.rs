@@ -757,6 +757,160 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
 }
 
 #[cfg(test)]
+mod hold_tests {
+    //! `ArchiveHold`: what a run that held its output writes when it ends, by what it held for
+    //! (`end_with`: the archive's titles; `end_document_with`: the XML, XML2 and JSON documents),
+    //! and the side files of outfmt 13 and 14 that follow it (`side_files`).
+    use super::*;
+    use crate::cli::NativeError;
+    use crate::report::blast_xml2::SideFiles;
+    use crate::seqdb::SeqDbError;
+    use std::sync::{Arc, Mutex};
+
+    /// A stream that the test reads after the hold wrote to it.
+    #[derive(Clone, Default)]
+    struct Shared(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Shared {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Shared {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    /// Side files that record each file as `<n>:<bytes>;`.
+    struct Recorded(Shared);
+
+    impl SideFiles for Recorded {
+        fn create(&mut self, _n: u32) -> std::io::Result<Box<dyn Write + '_>> {
+            Err(std::io::Error::other("a run writes through write_file"))
+        }
+
+        fn listed(&self, n: u32) -> Vec<u8> {
+            format!("f{n}").into_bytes()
+        }
+
+        fn write_file(&mut self, n: u32, report: &[u8]) -> Result<()> {
+            write!(self.0, "{n}:{};", String::from_utf8_lossy(report))?;
+            Ok(())
+        }
+    }
+
+    /// A run that holds two streams and its side files, wrote `a1 b1 a2` and two side files, and
+    /// has not ended.
+    fn held_run() -> (ArchiveHold<Shared>, [Shared; 3]) {
+        let (a, b, files) = (Shared::default(), Shared::default(), Shared::default());
+        let hold = ArchiveHold::new();
+        let (mut first, mut second) = (hold.writer(a.clone()), hold.writer(b.clone()));
+        hold.hold();
+        let mut side = hold.side_files(Box::new(Recorded(files.clone())));
+        first.write_all(b"a1 ").unwrap();
+        side.write_file(1, b"one").unwrap();
+        second.write_all(b"b1 ").unwrap();
+        first.write_all(b"a2 ").unwrap();
+        side.write_file(2, b"two").unwrap();
+        assert_eq!(side.listed(2), b"f2");
+        for stream in [&a, &b, &files] {
+            assert_eq!(stream.text(), "", "nothing passes a hold");
+        }
+        (hold, [a, b, files])
+    }
+
+    fn written(streams: &[Shared; 3]) -> [String; 3] {
+        [streams[0].text(), streams[1].text(), streams[2].text()]
+    }
+
+    const ALL: [&str; 3] = ["a1 a2 ", "b1 ", "1:one;2:two;"];
+    const NOTHING: [&str; 3] = ["", "", ""];
+
+    fn ncbis_error() -> anyhow::Error {
+        NativeError {
+            exit: 3,
+            message: "BLAST engine error: Warning: Sequence contains no data\n".into(),
+        }
+        .into()
+    }
+
+    /// A refusal of the taxonomy database as the XML2 and JSON documents meet it (`XmlRefusal`).
+    fn document_refusal() -> anyhow::Error {
+        super::super::blast_xml::XmlRefusal::of_taxonomy(
+            crate::algorithm::common::database::taxdb_error_for_tests(SeqDbError::Unsupported {
+                path: "taxdb.btd".into(),
+                message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
+            }),
+        )
+    }
+
+    #[test]
+    fn a_release_writes_the_side_files_and_every_stream_in_order() {
+        let (hold, streams) = held_run();
+        hold.release().unwrap();
+        assert_eq!(written(&streams), ALL);
+    }
+
+    #[test]
+    fn the_archives_hold_writes_after_ncbis_error_and_drops_after_any_refusal() {
+        let (hold, streams) = held_run();
+        hold.end_with(&ncbis_error());
+        assert_eq!(written(&streams), ALL);
+        for refusal in [
+            document_refusal(),
+            anyhow::anyhow!("this is not supported by LOSAT's BLASTX"),
+        ] {
+            let (hold, streams) = held_run();
+            hold.end_with(&refusal);
+            assert_eq!(written(&streams), NOTHING, "{refusal}");
+        }
+    }
+
+    #[test]
+    fn the_documents_hold_drops_after_their_refusal_and_writes_after_any_other_error() {
+        let (hold, streams) = held_run();
+        hold.end_document_with(&document_refusal());
+        assert_eq!(written(&streams), NOTHING);
+        // The taxonomy database's refusal of the prefetch (outfmt 5) is one of them.
+        let (hold, streams) = held_run();
+        let prefetch =
+            crate::algorithm::common::database::taxdb_error_for_tests(SeqDbError::Unsupported {
+                path: "taxdb.btd".into(),
+                message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
+            });
+        hold.end_document_with(&prefetch);
+        assert_eq!(written(&streams), NOTHING);
+        for other in [
+            ncbis_error(),
+            anyhow::anyhow!("taxdb.btd: Input/output error; this database is not supported"),
+        ] {
+            let (hold, streams) = held_run();
+            hold.end_document_with(&other);
+            assert_eq!(written(&streams), ALL, "{other}");
+        }
+    }
+
+    #[test]
+    fn after_a_discard_nothing_more_is_written() {
+        let (hold, streams) = held_run();
+        let mut late = hold.writer(streams[0].clone());
+        let mut side = hold.side_files(Box::new(Recorded(streams[2].clone())));
+        hold.discard();
+        late.write_all(b"late").unwrap();
+        side.write_file(3, b"three").unwrap();
+        hold.release().unwrap();
+        assert_eq!(written(&streams), NOTHING);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::cli::{try_parse_from, Cli, Commands};

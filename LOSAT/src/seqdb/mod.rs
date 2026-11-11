@@ -13,9 +13,11 @@
 //! `TITLE` and `DBLIST`).
 //!
 //! Not read: the LMDB file and the id and taxonomy files of version 5, the
-//! ISAM files of `-parse_seqids`, column files (mask data; only
-//! [`SeqDb::open_in_with_masks`] keeps and reads them, see [`mask`]), group alias
-//! files, and alias keys that filter sequences or replace the totals. A database
+//! ISAM files of `-parse_seqids`, column files (mask data and user columns: the
+//! mask reader of `losat blastdbcmd` opens them on first use, see [`mask`]; LOSAT's
+//! searches never do, as NCBI's do not without a database mask, whose options
+//! LOSAT refuses), group alias files, and alias keys that filter
+//! sequences or replace the totals. A database
 //! that needs one of these to give NCBI's result is rejected with
 //! [`SeqDbError::Unsupported`]; the version 5 files that only serve lookups
 //! by id or taxonomy are left unread. The LMDB file of a version 5 database
@@ -610,34 +612,13 @@ impl SeqDb {
     ///
     /// A database that stores parsed Seq-ids opens; `has_parsed_seqids` tells
     /// it from one that holds only the ordinal ids.
+    ///
+    /// Column files (the mask data of `makeblastdb -mask_data`, user columns) are not read
+    /// when the database is opened: [`SeqDb::mask_algorithms`] and [`SeqDb::mask_ranges`]
+    /// (`losat blastdbcmd`) open them on first use, as NCBI does, and LOSAT's searches never
+    /// ask for them (`Volume::open_as`).
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
-        let mut db = Self::open_tree(
-            alias::resolve_in(name, seqtype, path)?,
-            name,
-            seqtype,
-            false,
-        )?;
-        db.search_path = Some(path.clone());
-        Ok(db)
-    }
-
-    /// [`SeqDb::open`] for a database with column files: the mask data of `makeblastdb
-    /// -mask_data` is kept and read by [`SeqDb::mask_algorithms`] and
-    /// [`SeqDb::mask_ranges`] instead of the database being rejected. The searches still
-    /// call [`SeqDb::open`].
-    #[cfg(test)]
-    pub(crate) fn open_with_masks(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        Self::open_in_with_masks(name, seqtype, &SearchPath::new(&cwd, None, None)?)
-    }
-
-    /// [`SeqDb::open_in`] with the column files kept, as `losat blastdbcmd` reads them.
-    pub fn open_in_with_masks(
-        name: &str,
-        seqtype: SeqType,
-        path: &SearchPath,
-    ) -> Result<Self, SeqDbError> {
-        let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype, true)?;
+        let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
         db.search_path = Some(path.clone());
         Ok(db)
     }
@@ -848,7 +829,7 @@ impl SeqDb {
     #[cfg(test)]
     pub(crate) fn open_one_name(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
         let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
-        Self::open_tree(tree, name, seqtype, false)
+        Self::open_tree(tree, name, seqtype)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1613-1616
@@ -942,23 +923,14 @@ impl SeqDb {
     // when their values equal the sums below their nodes (`alias::check_sums`,
     // which rejects every other value).
     /// Opens the volumes of a resolved database (`name` is for messages).
-    fn open_tree(
-        tree: alias::AliasTree,
-        name: &str,
-        seqtype: SeqType,
-        keep_columns: bool,
-    ) -> Result<Self, SeqDbError> {
+    fn open_tree(tree: alias::AliasTree, name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
         let mut volumes = Vec::with_capacity(tree.volumes.len());
         let mut volume_starts = Vec::with_capacity(tree.volumes.len() + 1);
         let mut num_oids: u64 = 0;
         let mut total_length: u64 = 0;
         let mut max_length: u32 = 0;
         for volume_name in &tree.volumes {
-            let volume = if keep_columns {
-                Volume::open_keeping_columns(Path::new(volume_name), seqtype)?
-            } else {
-                Volume::open(Path::new(volume_name), seqtype)?
-            };
+            let volume = Volume::open(Path::new(volume_name), seqtype)?;
             volume_starts.push(num_oids as u32);
             num_oids += u64::from(volume.num_oids());
             // NCBI holds the number of sequences in a signed 32-bit `int`

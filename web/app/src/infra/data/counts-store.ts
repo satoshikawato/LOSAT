@@ -77,7 +77,7 @@ export class OpfsCountsStore implements CountsStore {
           copy.url !== start.url ||
           copy.lastModified !== start.lastModified ||
           copy.size !== start.size ||
-          copy.savedBytes !== start.from
+          copy.savedBytes < start.from
         ) {
           throw named(COUNTS_CHANGED, 'the saved part is not the one to continue');
         }

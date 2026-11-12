@@ -43,7 +43,7 @@ export class BrowserCountsDownloader implements CountsDownloader {
       await body.response.body?.cancel().catch(() => undefined);
       const name = (error as { name?: unknown }).name;
       if (name === COUNTS_BUSY) return { ok: false, reason: 'busy' };
-      if (name === COUNTS_CHANGED) return { ok: false, reason: 'unreachable', detail: 'the saved part changed in another tab' };
+      if (name === COUNTS_CHANGED) return { ok: false, reason: 'changed' };
       return { ok: false, reason: 'not-kept', detail: messageOf(error) };
     }
     return this.read(request, body, token, onProgress, signal);
@@ -56,7 +56,9 @@ export class BrowserCountsDownloader implements CountsDownloader {
   private async answer(request: CountsRequest, signal: AbortSignal): Promise<Body | Extract<CountsResult, { ok: false }>> {
     const resume = request.resume !== undefined && request.resume.savedBytes > 0 ? request.resume : undefined;
     for (const range of resume === undefined ? [undefined] : [resume, undefined]) {
-      const from = range?.savedBytes ?? 0;
+      // A copy whose bytes all came but that was not finished asks for its last byte again: the
+      // site answers 416 for a range that starts at the end.
+      const from = range === undefined ? 0 : Math.min(range.savedBytes, range.size - 1);
       const answer = await ask(request.url, from === 0 ? {} : { Range: `bytes=${from}-` }, signal, {
         fetch: this.options.fetch,
         timeoutMs: this.options.timeoutMs,
@@ -75,6 +77,10 @@ export class BrowserCountsDownloader implements CountsDownloader {
           return { response, from, size, lastModified };
         }
         await response.body?.cancel().catch(() => undefined);
+        // Another file (a 206 of another start, size or date; 416 for a range past its end) is asked
+        // from its start. Any other status (404, 503) fails as a first answer would, and the saved
+        // part stays for another Continue: there is no automatic retry.
+        if (response.status !== 206 && response.status !== 416) return { ok: false, reason: 'refused', status: response.status };
         continue;
       }
       return this.fromStart(response, lastModified);
@@ -109,6 +115,8 @@ export class BrowserCountsDownloader implements CountsDownloader {
     // The fetch's signal ended with the answer's headers; cancelling the reader ends the body.
     const onAbort = () => void reader.cancel(signal.reason).catch(() => undefined);
     signal.addEventListener('abort', onAbort, { once: true });
+    // A Cancel while the store opened the copy (after the answer's headers, before this listener).
+    if (signal.aborted) onAbort();
     /** The parts of a browser that keeps nothing: this tab's copy. */
     const kept: Blob[] = [];
     let chunks: Bytes[] = [];

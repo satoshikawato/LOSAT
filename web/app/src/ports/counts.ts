@@ -83,6 +83,8 @@ export type CountsResult =
   | { readonly ok: false; readonly reason: 'refused'; readonly status: number }
   /** Another tab is downloading the same file. */
   | { readonly ok: false; readonly reason: 'busy' }
+  /** Another tab changed the saved part between its look-up and the download. */
+  | { readonly ok: false; readonly reason: 'changed' }
   /** The storage refused the bytes (it is full), or could not be written. */
   | { readonly ok: false; readonly reason: 'not-kept'; readonly detail: string };
 

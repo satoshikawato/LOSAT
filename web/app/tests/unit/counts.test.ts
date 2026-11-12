@@ -402,8 +402,44 @@ describe('BrowserCountsDownloader', () => {
     await run(downloader);
     const partial = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy;
     s.state.status = 500;
+    const asked = s.calls.length;
     expect((await run(downloader, request(partial))).result).toMatchObject({ ok: false, reason: 'refused', status: 500 });
+    // One request: a refused continue is not followed by a download from the first byte.
+    expect(s.calls.length - asked).toBe(1);
     expect((await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy.savedBytes).toBe(2500);
+  });
+
+  it('stops when Cancel comes while the store opens the copy, and lets go of it', async () => {
+    const controller = new AbortController();
+    class CancelledAtBegin extends MemoryCountsStore {
+      override async beginCounts(...args: Parameters<MemoryCountsStore['beginCounts']>) {
+        const token = await super.beginCounts(...args);
+        controller.abort(new DOMException('cancelled', 'AbortError'));
+        return token;
+      }
+    }
+    const store = new CancelledAtBegin();
+    const s = site();
+    const { downloader } = make(s.fetchImpl, store);
+    await expect(downloader.download(request(), () => undefined, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect((await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy).toMatchObject({ complete: false, savedBytes: 0 });
+    // The copy is not held: the next download writes it.
+    expect((await run(make(site().fetchImpl, store).downloader)).result).toMatchObject({ ok: true, copy: { complete: true } });
+  });
+
+  it('finishes a copy whose bytes all came but that was not finished by asking for its last byte again', async () => {
+    const s = site();
+    const { downloader, store } = make(s.fetchImpl);
+    const token = (await store.beginCounts(HUMAN, { url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
+    await store.appendCounts(token, COUNTS.bytes.slice());
+    await store.closeCounts(token);
+    const whole = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy;
+    expect(whole).toMatchObject({ complete: false, savedBytes: 5000 });
+    const { result } = await run(downloader, request(whole));
+    expect(s.calls.map((c) => c.headers['Range'])).toEqual(['bytes=4999-']);
+    expect(result).toMatchObject({ ok: true, copy: { complete: true, size: 5000 } });
+    const saved = await store.readCounts(HUMAN, countsUrl(HUMAN));
+    expect(new Uint8Array(await saved!.file!.arrayBuffer())).toEqual(COUNTS.bytes);
   });
 
   it('holds the file in this tab when the browser keeps nothing', async () => {
@@ -603,12 +639,12 @@ describe('OpfsCountsStore', () => {
     expect(await store.readCounts(HUMAN, 'https://example.org/x')).toBeUndefined();
   });
 
-  it('continues a saved part at its byte, and refuses a part that is not the one asked for', async () => {
+  it('continues a saved part at its byte (or before it), and refuses a part that is not the one asked for', async () => {
     const { store } = await make();
     const token = (await store.beginCounts(HUMAN, start()))!;
     await store.appendCounts(token, COUNTS.bytes.slice(0, 2000));
     await store.closeCounts(token);
-    await expect(store.beginCounts(HUMAN, start(1000))).rejects.toMatchObject({ name: COUNTS_CHANGED });
+    await expect(store.beginCounts(HUMAN, start(3000))).rejects.toMatchObject({ name: COUNTS_CHANGED });
     await expect(store.beginCounts(HUMAN, { ...start(2000), lastModified: 'Fri, 02 Oct 2026 08:00:00 GMT' })).rejects.toMatchObject({ name: COUNTS_CHANGED });
     const next = (await store.beginCounts(HUMAN, start(2000)))!;
     await store.appendCounts(next, COUNTS.bytes.slice(2000));

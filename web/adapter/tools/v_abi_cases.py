@@ -270,7 +270,8 @@ def window_masker() -> list[dict]:
     alone, or none with the taxid 0. LOSAT Web has no other environment (`CHUNK_SIZE`), no registry
     (`.ncbirc`, `NCBI_CONFIG*`), no current directory for the taxid (its directory is always
     `windowmasker`), no file it cannot read (`taxid_unreadable`, `unreadable`), no directory as a
-    counts file, and no `-db`."""
+    counts file, and no `-db`. Two searches of its own (`winmask_web.taxid_unknown_*`): a taxid whose
+    file has no known format."""
     sys.path.insert(0, str(REPO / "LOSAT/tests"))
     sys.path.insert(0, str(REPO / "LOSAT/tests/winmask"))
     import blastn_regression_fixtures as regression  # noqa: E402  (the manifest reader)
@@ -286,7 +287,7 @@ def window_masker() -> list[dict]:
         custom = custom_outfmt(outfmt)
         if failure and outfmt not in FORMATS["blastn"]:
             return  # a failure is compared in the formats of every run
-        key = (tuple(argv), outfmt if custom else None)
+        key = (tuple(argv), outfmt if custom else None, window_masker_path)
         search = searches.setdefault(key, {"program": "blastn", "argv": argv, "cwd": str(engine), "cases": [],
                                            "frozen": {}})
         if custom:
@@ -337,6 +338,17 @@ def window_masker() -> list[dict]:
                 at = argv.index("-outfmt")
                 add(f"winmask_blastn.ascii{option[0]}", ["blastn", *argv[:at], *option, *argv[at:]], None, True,
                     prolog=False)
+    # The file of a taxid is read without NCBI's check of the format (`WindowMaskerTaxidToDb`): a file
+    # of no known format (empty, 3 bytes) is the reader's "unrecognized unit counts format" in each
+    # query batch (exit 3), not the refusal of `-window_masker_db`'s check (line NP WW2 review F2).
+    unknown = "target/winmask_blastn/taxid_unknown"
+    for taxid, content in (("11", b""), ("12", b"abc")):
+        (engine / unknown / taxid).mkdir(parents=True, exist_ok=True)
+        (engine / unknown / taxid / "wmasker.obinary").write_bytes(content)
+        add(f"winmask_web.taxid_unknown_{taxid}",
+            ["blastn", "-query", "tests/fixtures/blastn_regression/inputs/wm_query.fa",
+             "-subject", "tests/fixtures/blastn_regression/inputs/s60k.fa", "-task", "blastn",
+             "-window_masker_taxid", taxid, "-outfmt", "6"], None, True, prolog=True, window_masker_path=unknown)
     return list(searches.values())
 
 

@@ -54,10 +54,12 @@ export class MemoryCountsStore implements CountsStore {
         copy.url !== start.url ||
         copy.lastModified !== start.lastModified ||
         copy.size !== start.size ||
-        copy.savedBytes !== start.from
+        copy.savedBytes < start.from
       ) {
         throw named(COUNTS_CHANGED, 'changed');
       }
+      // A copy is continued at its byte or before it (its last byte again, when all came but it was not finished).
+      this.entries.set(taxid, { copy: { ...copy, savedBytes: start.from }, bytes: entry!.bytes.slice(0, start.from) });
     } else {
       this.entries.set(taxid, { copy: this.copyOf(taxid, start, 0, false), bytes: new Uint8Array(0) });
     }

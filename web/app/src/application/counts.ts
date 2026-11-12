@@ -224,6 +224,8 @@ function problem(result: Exclude<CountsResult, { ok: true }>, taxid: number): st
       return result.status === 404 ? `${COUNTS_HOST} has no WindowMasker counts for ${taxid}.` : refusedSentence(COUNTS_HOST, result.status);
     case 'busy':
       return `Another tab is downloading the counts for ${taxid}.`;
+    case 'changed':
+      return `Another tab changed the saved counts for ${taxid}: press Continue again.`;
     case 'not-kept':
       return `Not kept: ${result.detail}`;
   }

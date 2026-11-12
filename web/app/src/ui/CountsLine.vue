@@ -6,7 +6,7 @@
 // Delete. Nothing is sent before "Download" is pressed. The rest waits behind "?"
 // (stop-describing-ui). A download that ends or fails is told to a screen reader, and a button that
 // leaves with the focus on it hands the focus to the taxonomy ID box (WA2-AX-04).
-import { computed, onBeforeUpdate, onUpdated, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onBeforeUpdate, onUpdated, ref, watch } from 'vue';
 import type { CountsLoader } from '../application/counts';
 import { COUNTS_FILE, COUNTS_HOST } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
@@ -63,6 +63,19 @@ const sentence = computed(() => {
 function press(): void {
   if (!busy.value) props.counts.download(props.taxid);
 }
+
+// A download runs while its line is shown, as an Example set's load does while its mode is: another
+// taxonomy ID, the row unchecked or a counts file chosen stops it (what came stays; Continue asks for
+// the rest), so that no download goes on without its progress and Cancel.
+watch(
+  () => props.taxid,
+  (_now, before) => {
+    if (state.value.load?.taxid === before) props.counts.cancel();
+  },
+);
+onBeforeUnmount(() => {
+  if (state.value.load?.taxid === props.taxid) props.counts.cancel();
+});
 
 watch(failure, (message) => {
   if (message !== undefined) announce(message, 'alert');

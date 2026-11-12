@@ -650,14 +650,12 @@ fn lookup_contexts(
         .contexts
         .iter()
         .zip(parameters)
-        .enumerate()
-        .map(|(i, (c, p))| {
+        .map(|(c, p)| {
             let mut aa = vec![0];
             aa.extend_from_slice(&query[c.offset..c.offset + c.length]);
             aa.push(0);
             QueryContext {
                 q_idx: c.query_index as u32,
-                f_idx: (i % 6) as u8,
                 frame: c.frame,
                 aa_seq: aa,
                 aa_seq_nomask: None,

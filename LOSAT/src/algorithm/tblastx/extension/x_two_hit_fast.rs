@@ -1,5 +1,5 @@
 //! TBLASTX's two-hit ungapped extension
-//! (`two_hit.rs::extend_hit_two_hit`: the word loop and the `s_BlastAaExtendLeft` /
+//! (`two_hit.rs::extend_hit_two_hit_fitting`: the word loop and the `s_BlastAaExtendLeft` /
 //! `s_BlastAaExtendRight` walks of NCBI `s_BlastAaExtendTwoHit`) with the scores read from one
 //! flat byte table.
 //!
@@ -126,7 +126,7 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Once, OnceLock};
 
-/// The seven values of `extend_hit_two_hit`: (q_start, q_end, s_start, s_end, score,
+/// The seven values of `extend_hit_two_hit_fitting`: (q_start, q_end, s_start, s_end, score,
 /// right_extended, s_last_off).
 pub(crate) type TwoHit = (usize, usize, usize, usize, i32, bool, usize);
 
@@ -453,7 +453,7 @@ unsafe fn walk_right<T: WalkTable>(
     (best, best_len, n)
 }
 
-/// `extend_hit_two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop, false)`, or
+/// `extend_hit_two_hit_fitting(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop, false)`, or
 /// `None` when the reference has to run (an X-drop outside 1..=127, a word that does not fit).
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(never)]

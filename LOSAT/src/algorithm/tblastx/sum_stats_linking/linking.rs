@@ -572,59 +572,6 @@ struct BufferPools {
 // Main entry point
 // ---------------------------------------------------------------------------
 
-/// Apply NCBI-style sum-statistics even-gap linking
-///
-/// This is the main entry point for HSP linking with NCBI-compatible cutoffs.
-///
-/// # Arguments
-/// * `hits` - Vector of ungapped HSPs to link
-/// * `params` - Karlin-Altschul parameters for the scoring matrix
-/// * `linking_params` - NCBI-style linking parameters (avg query length, subject length, etc.)
-/// * `query_contexts` - Query context information
-/// * `subject_frame_bases` - Subject frame base offsets
-/// * `length_adj_per_context` - Pre-computed length adjustment per context
-///   (NCBI: `query_info->contexts[ctx].length_adjustment`)
-/// * `eff_searchsp_per_context` - Pre-computed effective search space per context
-///   (NCBI: `query_info->contexts[ctx].eff_searchsp`)
-///
-/// NCBI Parity Note:
-/// In NCBI, length_adjustment and eff_searchsp are calculated once per context
-/// in BLAST_CalcEffLengths (blast_setup.c:700-850) and stored in query_info->contexts[].
-/// link_hsps.c then references these stored values:
-/// ```c
-/// length_adjustment = query_info->contexts[query_context].length_adjustment;
-/// searchsp_eff = query_info->contexts[query_context].eff_searchsp;
-/// ```
-/// We now mirror this by accepting pre-computed vectors instead of recalculating.
-pub fn apply_sum_stats_even_gap_linking(
-    hits: Vec<UngappedHit>,
-    params: &KarlinParams,
-    linking_params: &LinkingParams,
-    query_contexts: &[QueryContext],
-    subject_frame_bases: &[i32],
-    length_adj_per_context: &[i64],
-    eff_searchsp_per_context: &[i64],
-) -> Vec<UngappedHit> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
-    // ```c
-    // for (frame_index=0; frame_index<num_query_frames; frame_index++)
-    // {
-    //    hp_start->next = hp_frame_start[frame_index];
-    //    number_of_hsps = hp_frame_number[frame_index];
-    // }
-    // ```
-    apply_sum_stats_even_gap_linking_with_parallel(
-        hits,
-        params,
-        linking_params,
-        query_contexts,
-        subject_frame_bases,
-        length_adj_per_context,
-        eff_searchsp_per_context,
-        true,
-    )
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
 // for (frame_index=0; frame_index<num_query_frames; frame_index++)
@@ -1549,8 +1496,8 @@ fn link_hsp_group_ncbi(
     // BLAST_SmallGapSumE(..., query_info->contexts[query_context].eff_searchsp, ...);
     // ```
     //
-    // Previously we recalculated these locally via compute_length_adjustment_simple().
-    // Now we use the SAME pre-computed values from utils.rs for NCBI parity.
+    // These are the SAME pre-computed values as the rest of the search uses (utils.rs), for NCBI
+    // parity.
     // ========================================================================
     let length_adjustment = length_adj_per_context[query_context];
     let eff_search_space = eff_searchsp_per_context[query_context];
@@ -3572,7 +3519,6 @@ mod tests {
         let contexts: Vec<_> = (0..12)
             .map(|index| QueryContext {
                 q_idx: (index / 6) as u32,
-                f_idx: (index % 6) as u8,
                 frame: [1, 2, 3, -1, -2, -3][index % 6],
                 aa_seq: Vec::new(),
                 aa_seq_nomask: None,
@@ -3780,7 +3726,6 @@ mod tests {
         let contexts: Vec<_> = (0..6)
             .map(|index| QueryContext {
                 q_idx: 0,
-                f_idx: index as u8,
                 frame: [1, 2, 3, -1, -2, -3][index],
                 aa_seq: Vec::new(),
                 aa_seq_nomask: None,

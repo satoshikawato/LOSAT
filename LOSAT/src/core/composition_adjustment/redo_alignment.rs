@@ -148,14 +148,14 @@ impl BlastCompoAdjustMode {
 //     eUserSpecifiedRelEntropy       = 4
 // } EMatrixAdjustRule;
 // ```
+// `Blast_ChooseMatrixAdjustRule` (compo_mode_condition.c) returns only `eDontAdjustMatrix`,
+// `eCompoScaleOldMatrix` and `eUserSpecifiedRelEntropy`, so the three other values are not
+// declared.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EMatrixAdjustRule {
     DontAdjustMatrix = -1,
     CompoScaleOldMatrix = 0,
-    UnconstrainedRelEntropy = 1,
-    RelEntropyOldMatrixNewContext = 2,
-    RelEntropyOldMatrixOldContext = 3,
     UserSpecifiedRelEntropy = 4,
 }
 
@@ -226,11 +226,11 @@ pub struct BlastCompoAlignment {
 //     void * context;
 // } BlastCompo_GappingParams;
 // ```
+// `decline_align` is not stored: nothing reads it (it is 0 in every caller).
 #[derive(Debug)]
 pub struct BlastCompoGappingParams {
     pub gap_open: i32,
     pub gap_extend: i32,
-    pub decline_align: i32,
     pub x_dropoff: i32,
     pub context: Cell<Option<NonNull<c_void>>>,
 }
@@ -304,6 +304,7 @@ impl BlastCompoSequenceData {
     //     queryData->data[idx] = origData[idx];
     // }
     // ```
+    #[cfg(test)]
     pub fn slice_range(&self, range: &BlastCompoSequenceRange) -> Self {
         let begin = range.begin.max(0) as usize;
         let end = range.end.max(range.begin) as usize;
@@ -489,6 +490,9 @@ pub struct WindowInfo {
 //     double near_identical_cutoff;
 // } Blast_RedoAlignParams;
 // ```
+// `unified_p`, `restricted_alignment`, `is_same_adjustment`, `re_matrix_adjustment_pseudocounts`,
+// `cutoff_evalue` and `do_link_hsps` are not stored: nothing reads them (`composition_test_index`
+// and `cutoff_score` carry what the redo takes from `unified_p` and `do_link_hsps`).
 #[derive(Debug)]
 pub struct BlastRedoAlignParams {
     pub matrix_info: BlastMatrixInfo,
@@ -496,21 +500,15 @@ pub struct BlastRedoAlignParams {
     pub compo_adjust_mode: BlastCompoAdjustMode,
     pub alphsize: i32,
     pub composition_test_index: i32,
-    pub unified_p: bool,
     pub log_k: f64,
     pub score_divisor: f64,
-    pub restricted_alignment: bool,
     pub smith_waterman: bool,
-    pub is_same_adjustment: bool,
     pub near_identical_cutoff: f64,
     pub position_based: bool,
-    pub re_matrix_adjustment_pseudocounts: i32,
     pub ccat_query_length: i32,
     pub query_is_translated: bool,
     pub subject_is_translated: bool,
     pub cutoff_score: i32,
-    pub cutoff_evalue: f64,
-    pub do_link_hsps: bool,
 }
 
 impl BlastRedoAlignParams {
@@ -634,229 +632,6 @@ pub struct BlastRedoOneMatchResult {
     pub alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>>,
     pub pvalue_for_this_pair: Option<f64>,
     pub lambda_ratio: Option<f64>,
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1274
-// ```c++
-//                             in_align, FALSE, subject_is_translated);
-//                     adjust_search_failed =
-//                             Blast_AdjustScores(matrix, query_composition,
-//                                     query.length,
-//                                     &subject_composition,
-//                                     subject.length,
-//                                     scaledMatrixInfo, compo_adjust_mode,
-//                                     RE_pseudocounts, NRrecord,
-//                                     &matrix_adjust_rule,
-//                                     callbacks->calc_lambda,
-//                                     pvalueForThisPair,
-//                                     compositionTestIndex,
-//                                     LambdaRatio);
-//                     if (adjust_search_failed < 0) { /* fatal error */
-//                         status = adjust_search_failed;
-//                         goto window_index_loop_cleanup;
-//                     }
-//                     num_adjustments++;
-//                 }
-//
-//                 if ( !adjust_search_failed ) {
-//                     newAlign = callbacks->redo_one_alignment(
-//                             in_align,
-//                             matrix_adjust_rule,
-//                             &query,
-//                             &window->query_range,
-//                             ccat_query_length,
-//                             &subject,
-//                             &window->subject_range,
-//                             matchingSeq->length,
-//                             gapping_params
-//                     );
-//                     if (newAlign && newAlign->score >= params->cutoff_s) {
-//                         s_WithDistinctEnds(&newAlign, &alignments[query_index],
-//                                 callbacks->free_align_traceback,
-//                                 num_adjustments == 1);
-// ```
-pub enum BlastRedoTraceEvent<'a> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:966-1000
-    // ```c++
-    // s_IsContained(BlastCompo_Alignment * in_align,
-    //               BlastCompo_Alignment * alignments,
-    //               double lambda)
-    // {
-    //     BlastCompo_Alignment * align;     /* represents the current alignment
-    //                                             in the main loop */
-    //     /* Endpoints of the alignment */
-    //     int query_offset    = in_align->queryStart;
-    //     int query_end       = in_align->queryEnd;
-    //     int subject_offset  = in_align->matchStart;
-    //     int subject_end     = in_align->matchEnd;
-    //     double score        = in_align->score;
-    //     double scoreThresh = score + KAPPA_BIT_TOL * LOCAL_LN2/lambda;
-    //
-    //     for (align = alignments;  align != NULL;  align = align->next ) {
-    //         /* for all elements of alignments */
-    //         if (KAPPA_SIGN(in_align->frame) == KAPPA_SIGN(align->frame)) {
-    //             /* hsp1 and hsp2 are in the same query/subject frame */
-    //             if (KAPPA_CONTAINED_IN_HSP
-    //                 (align->queryStart, align->queryEnd, query_offset,
-    //                  align->matchStart, align->matchEnd, subject_offset) &&
-    //                 KAPPA_CONTAINED_IN_HSP
-    //                 (align->queryStart, align->queryEnd, query_end,
-    //                  align->matchStart, align->matchEnd, subject_end) &&
-    //                 scoreThresh <= align->score) {
-    //                 return 1;
-    //             }
-    //         }
-    //     }
-    //     return 0;
-    // }
-    //
-    //
-    // /* Documented in redo_alignment.h. */
-    // void
-    // ```
-    Contained {
-        incoming: &'a BlastCompoAlignment,
-        result: bool,
-    },
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:224-274
-    // ```c++
-    // s_HitlistReapContained(BlastHSP * hsp_array[], Int4 * hspcnt)
-    // {
-    //     Int4 iread;       /* iteration index used to read the hitlist */
-    //     Int4 iwrite;      /* iteration index used to write to the hitlist */
-    //     Int4 old_hspcnt;  /* number of HSPs in the hitlist on entry */
-    //
-    //     old_hspcnt = *hspcnt;
-    //
-    //     for (iread = 1;  iread < *hspcnt;  iread++) {
-    //         /* for all HSPs in the hitlist */
-    //         Int4      ireadBack;  /* iterator over indices less than iread */
-    //         BlastHSP *hsp1;       /* an HSP that is a candidate for deletion */
-    //
-    //         hsp1 = hsp_array[iread];
-    //         for (ireadBack = 0;  ireadBack < iread && hsp1 != NULL;  ireadBack++) {
-    //             /* for all HSPs before hsp1 in the hitlist and while hsp1
-    //              * has not been deleted */
-    //             BlastHSP *hsp2;    /* an HSP that occurs earlier in hsp_array
-    //                                 * than hsp1 */
-    //             hsp2 = hsp_array[ireadBack];
-    //
-    //             if( hsp2 == NULL ) {  /* hsp2 was deleted in a prior iteration. */
-    //                 continue;
-    //             }
-    //             if (hsp2->query.frame == hsp1->query.frame &&
-    //                 hsp2->subject.frame == hsp1->subject.frame) {
-    //                 /* hsp1 and hsp2 are in the same query/subject frame. */
-    //                 if (CONTAINED_IN_HSP
-    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.offset,
-    //                      hsp2->subject.offset, hsp2->subject.end,
-    //                      hsp1->subject.offset) &&
-    //                     CONTAINED_IN_HSP
-    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.end,
-    //                      hsp2->subject.offset, hsp2->subject.end,
-    //                      hsp1->subject.end)    &&
-    //                     hsp1->score <= hsp2->score) {
-    //                     hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
-    //                 }
-    //             } /* end if hsp1 and hsp2 are in the same query/subject frame */
-    //         } /* end for all HSPs before hsp1 in the hitlist */
-    //     } /* end for all HSPs in the hitlist */
-    //
-    //     /* Condense the hsp_array, removing any NULL items. */
-    //     iwrite = 0;
-    //     for (iread = 0;  iread < *hspcnt;  iread++) {
-    //         if (hsp_array[iread] != NULL) {
-    //             hsp_array[iwrite++] = hsp_array[iread];
-    //         }
-    //     }
-    //     *hspcnt = iwrite;
-    //     /* Fill the remaining memory in hsp_array with NULL pointers. */
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:266-273
-    // ```c
-    //     /* Condense the hsp_array, removing any NULL items. */
-    //     iwrite = 0;
-    //     for (iread = 0;  iread < *hspcnt;  iread++) {
-    //         if (hsp_array[iread] != NULL) {
-    //             hsp_array[iwrite++] = hsp_array[iread];
-    //         }
-    //     }
-    //     *hspcnt = iwrite;
-    // ```
-    ReapList {
-        phase: &'static str,
-        index: usize,
-        context: usize,
-        frame: i8,
-        score: i32,
-        q_start: i32,
-        q_end: i32,
-        s_start: i32,
-        s_end: i32,
-    },
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:238-260
-    // ```c
-    //         for (ireadBack = 0;  ireadBack < iread && hsp1 != NULL;  ireadBack++) {
-    //             /* for all HSPs before hsp1 in the hitlist and while hsp1
-    //              * has not been deleted */
-    //             BlastHSP *hsp2;    /* an HSP that occurs earlier in hsp_array
-    //                                 * than hsp1 */
-    //             hsp2 = hsp_array[ireadBack];
-    //
-    //             if( hsp2 == NULL ) {  /* hsp2 was deleted in a prior iteration. */
-    //                 continue;
-    //             }
-    //             if (hsp2->query.frame == hsp1->query.frame &&
-    //                 hsp2->subject.frame == hsp1->subject.frame) {
-    //                 /* hsp1 and hsp2 are in the same query/subject frame. */
-    //                 if (CONTAINED_IN_HSP
-    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.offset,
-    //                      hsp2->subject.offset, hsp2->subject.end,
-    //                      hsp1->subject.offset) &&
-    //                     CONTAINED_IN_HSP
-    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.end,
-    //                      hsp2->subject.offset, hsp2->subject.end,
-    //                      hsp1->subject.end)    &&
-    //                     hsp1->score <= hsp2->score) {
-    //                     hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
-    // ```
-    ReapCompare {
-        index: usize,
-        previous_index: usize,
-        result: bool,
-    },
-    ReapContained {
-        frame: i8,
-        score: i32,
-        q_start: i32,
-        q_end: i32,
-        s_start: i32,
-        s_end: i32,
-        result: bool,
-    },
-
-    MatchStart {
-        context: usize,
-        count: usize,
-        matrix: Option<&'a AdjustedProteinMatrix>,
-    },
-    MatchEnd {
-        context: usize,
-        matrix: Option<&'a AdjustedProteinMatrix>,
-    },
-    Adjustment {
-        before: bool,
-        status: i32,
-        query_count: i32,
-        subject_count: i32,
-        rule: EMatrixAdjustRule,
-        matrix: Option<&'a AdjustedProteinMatrix>,
-    },
-    Redo {
-        incoming: &'a BlastCompoAlignment,
-        rule: EMatrixAdjustRule,
-        matrix: Option<&'a AdjustedProteinMatrix>,
-    },
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1110-1121
@@ -2570,28 +2345,6 @@ pub fn preliminary_test_near_identical(
 //                                         &LambdaRatio            // local
 //                                 );
 // ```
-pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
-    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
-    params: &BlastRedoAlignParams,
-    matching_seq: &BlastCompoMatchingSequence<'seq>,
-    query_infos: &[BlastCompoQueryInfo],
-    lambda: f64,
-    callbacks: &BlastRedoAlignCallbacks,
-    composition_workspace: &mut BlastCompositionWorkspace,
-    matrix_state: &mut Option<AdjustedProteinMatrix>,
-) -> Result<BlastRedoOneMatchResult> {
-    blast_redo_one_match_with_workspace_queries_and_matrix_observed(
-        incoming_aligns,
-        params,
-        matching_seq,
-        query_infos,
-        lambda,
-        callbacks,
-        composition_workspace,
-        matrix_state,
-        &mut |_| {},
-    )
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234,1240-1241,1256-1256,1259-1260
 // ```c
 //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -2700,7 +2453,7 @@ const X_LANES_PREFETCH_INPUTS: usize = 32;
 //                                     subject.length,
 // ```
 // Newton lanes, TBLASTN (translated subject, protein query): a replica of the
-// window loop of `blast_redo_one_match_with_workspace_queries_and_matrix_observed` from window
+// window loop of `blast_redo_one_match_with_workspace_queries_and_matrix` from window
 // `first_window` on: the same `query_info` choice, the same near-identical test and `get_range` calls
 // with the same arguments (results kept in `ranges` for the loop), and the subject composition of
 // every HSP. Containment is not tested (every HSP is assumed not contained), so the inputs are a
@@ -2854,7 +2607,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
 //                                 callbacks->free_align_traceback,
 //                                 num_adjustments == 1);
 // ```
-pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'seq>(
+pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
     incoming_aligns: &Option<Box<BlastCompoAlignment>>,
     params: &BlastRedoAlignParams,
     matching_seq: &BlastCompoMatchingSequence<'seq>,
@@ -2863,7 +2616,6 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
-    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     if params.smith_waterman {
         bail!("blastp redo_alignment Smith-Waterman path is not yet ported");
@@ -3109,10 +2861,6 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                 current,
                 lambda,
             );
-            trace(BlastRedoTraceEvent::Contained {
-                incoming: current,
-                result: contained,
-            });
             if !contained {
                 let mut adjust_search_failed = false;
                 let range = range_result
@@ -3172,14 +2920,6 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                     //                     }
                     //                     num_adjustments++;
                     // ```
-                    trace(BlastRedoTraceEvent::Adjustment {
-                        before: true,
-                        status: 0,
-                        query_count: query_composition.num_true_amino_acids,
-                        subject_count: subject_composition.num_true_amino_acids,
-                        rule: matrix_adjust_rule,
-                        matrix: adjusted_matrix.as_ref(),
-                    });
                     if query_composition.num_true_amino_acids == 0
                         || subject_composition.num_true_amino_acids == 0
                     {
@@ -3246,14 +2986,6 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                     //                     }
                     //                     num_adjustments++;
                     // ```
-                    trace(BlastRedoTraceEvent::Adjustment {
-                        before: false,
-                        status: i32::from(adjust_search_failed),
-                        query_count: query_composition.num_true_amino_acids,
-                        subject_count: subject_composition.num_true_amino_acids,
-                        rule: matrix_adjust_rule,
-                        matrix: adjusted_matrix.as_ref(),
-                    });
                     num_adjustments += 1;
                 }
 
@@ -3277,11 +3009,6 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                     //                                 callbacks->free_align_traceback,
                     //                                 num_adjustments == 1);
                     // ```
-                    trace(BlastRedoTraceEvent::Redo {
-                        incoming: current,
-                        rule: matrix_adjust_rule,
-                        matrix: adjusted_matrix.as_ref(),
-                    });
                     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234,1259-1260
                     // ```c
                     //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -3737,28 +3464,21 @@ mod tests {
                     gapping_params: BlastCompoGappingParams {
                         gap_open: 11,
                         gap_extend: 1,
-                        decline_align: 0,
                         x_dropoff: 10,
                         context: Cell::new(None),
                     },
                     compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
                     alphsize: BLASTAA_SIZE as i32,
                     composition_test_index: 0,
-                    unified_p: false,
                     log_k: 0.0,
                     score_divisor: 32.0,
-                    restricted_alignment: false,
                     smith_waterman: false,
-                    is_same_adjustment: false,
                     near_identical_cutoff: 1.74 * LOCAL_LN2 / lambda,
                     position_based: false,
-                    re_matrix_adjustment_pseudocounts: 20,
                     ccat_query_length: *query_lengths.iter().max().unwrap(),
                     query_is_translated: false,
                     subject_is_translated: true,
                     cutoff_score: 1,
-                    cutoff_evalue: 10.0,
-                    do_link_hsps: true,
                 };
                 for window in &windows {
                     let query_index = usize::try_from(window.query_range.context).unwrap();
@@ -3991,28 +3711,21 @@ mod tests {
             gapping_params: BlastCompoGappingParams {
                 gap_open: 11,
                 gap_extend: 1,
-                decline_align: 0,
                 x_dropoff: 10,
                 context: Cell::new(None),
             },
             compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            unified_p: false,
             log_k: 0.0,
             score_divisor: 32.0,
-            restricted_alignment: false,
             smith_waterman: false,
-            is_same_adjustment: false,
             near_identical_cutoff: 1.74 * LOCAL_LN2 / 0.0083437500000000005,
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: 160,
             query_is_translated: false,
             subject_is_translated: true,
             cutoff_score: 320,
-            cutoff_evalue: 10.0,
-            do_link_hsps: true,
         };
         let callbacks = BlastRedoAlignCallbacks {
             calc_lambda: None,
@@ -4223,28 +3936,21 @@ mod tests {
             gapping_params: BlastCompoGappingParams {
                 gap_open: 11,
                 gap_extend: 1,
-                decline_align: 0,
                 x_dropoff: 10,
                 context: Cell::new(None),
             },
             compo_adjust_mode: BlastCompoAdjustMode::NoCompositionBasedStats,
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            unified_p: false,
             log_k: 0.0,
             score_divisor: 1.0,
-            restricted_alignment: false,
             smith_waterman: false,
-            is_same_adjustment: false,
             near_identical_cutoff: 0.0,
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: 100,
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 1,
-            cutoff_evalue: 10.0,
-            do_link_hsps: false,
         };
         fn test_get_range<'seq>(
             _matching_seq: &BlastCompoMatchingSequence<'seq>,

@@ -335,6 +335,19 @@ test('a cancelled search ends its runtime; the next search runs in a new one wit
   record('cancel', browserName, rows);
 });
 
+test('an instance that stops during a search ends its runtime, on several threads once the keeper grew the memory', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[0]!;
+  for (const threads of [1, 4]) {
+    const result = await page.evaluate((s) => window.losatHarness!.engine.stopDuringSearch(s), searchOf(vbr, threads));
+    expect(result.stopped.status).toBe('failed');
+    expect(result.stopped.record.error).toContain('a test stopped the engine at its first output');
+    // Threads of a stopped threaded instance may still run: the Engine worker keeps them, and
+    // the Gateway ends the runtime after the keeper's grow (gateway.ts, retire).
+    expect(result.runtimeEnds).toEqual([threads === 1 ? 'at-once' : 'grown']);
+  }
+});
+
 test('a runtime renewed after every search gives the same bytes and registers the subject again', async ({ context }) => {
   const page = await openHarness(context, isolated);
   const vbr = vbrCases()[1]!;

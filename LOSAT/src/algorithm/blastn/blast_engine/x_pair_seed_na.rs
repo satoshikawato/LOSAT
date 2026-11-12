@@ -228,16 +228,22 @@ fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
         });
     };
     let mut on_kmer = |kmer_start: usize, current_kmer: u64| {
-        let run = x.hits(current_kmer);
+        let mut run = x.hits(current_kmer);
         if PIECE {
-            cut.run(kmer_start, run, out, |q_off_1, out| {
-                pair(q_off_1, kmer_start, out)
-            });
-            return cut.go();
+            match cut.fit(run, out) {
+                Ok(fit) => run = fit,
+                Err((skip, rest)) => {
+                    cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
+                        pair(q_off_1, kmer_start, out)
+                    });
+                    return cut.go();
+                }
+            }
         }
         for &q_off_1 in run {
             pair(q_off_1, kmer_start, out);
         }
+        // (a run that fits never stops the cut; after a stop the scan has left)
         true
     };
     scan_kernel(

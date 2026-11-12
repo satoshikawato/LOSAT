@@ -350,15 +350,20 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
             return;
         }
         let kmer_start = s_off as usize;
-        let run = csr.run(index as usize);
+        let mut run = csr.run(index as usize);
         if PIECE {
-            cut.run(kmer_start, run, out, |q_off_1, out| {
-                seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
-            });
-        } else {
-            for &q_off_1 in run {
-                seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+            match cut.fit(run, out) {
+                Ok(fit) => run = fit,
+                Err((skip, rest)) => {
+                    cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
+                        seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
+                    });
+                    return;
+                }
             }
+        }
+        for &q_off_1 in run {
+            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
         }
     };
     let mut ring: Ring<'_, (i32, u32)> = Ring::new(csr);

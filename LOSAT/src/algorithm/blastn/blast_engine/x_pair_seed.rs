@@ -240,47 +240,58 @@ impl Cut {
         self.stop.get().is_none()
     }
 
-    /// The pairs `run` of the word at subject offset `s`, in order, through `pair`, while `out`
-    /// has room: all of them, or those before the first pair it has no room for, where the cut
-    /// stops (and `out` is closed, so the later words leave at the test of `go`). The first
-    /// word passes over the pairs the pieces before took. `pair` pushes at most one seed.
+    /// The pairs `run` of a word, after those the pieces before took (the first word passes
+    /// over them): `Ok` with all of them when `out` has room for all (the caller hands each to
+    /// its pair in its own loop, the loop of the strips' scan), else `Err` with the pairs passed
+    /// over and the rest, for `run_cold`.
+    ///
+    /// (The caller's loop is the strips' loop, whose body runs for every pair, so that the
+    /// loads of the inputs `seed_of_pair` reads stay out of the loop: a loop that tests the room
+    /// before each pair, or that calls its pair from a second loop too, kept them in or kept the
+    /// pair a call, about 30 instructions more per seed; results/s14p and s14q of line EB.)
     #[inline(always)]
-    fn run<O: SeedOut>(
+    fn fit<'r, O: SeedOut>(
+        &self,
+        run: &'r [u32],
+        out: &O,
+    ) -> Result<&'r [u32], (usize, &'r [u32])> {
+        let skip = self.skip.replace(0) as usize;
+        let run = &run[skip..];
+        if run.len() <= out.room() {
+            Ok(run)
+        } else {
+            Err((skip, run))
+        }
+    }
+
+    /// The pairs `run` (the rest of the run of the word at subject offset `s` after `skip`
+    /// pairs) through `pair`, while `out` has room: those before the first pair it has no room
+    /// for, where the cut stops (and `out` is closed, so the later words leave at the test of
+    /// `go`). `pair` pushes at most one seed.
+    #[cold]
+    #[inline(never)]
+    fn run_cold<O: SeedOut>(
         &self,
         s: usize,
+        skip: usize,
         run: &[u32],
         out: &mut O,
         mut pair: impl FnMut(u32, &mut O),
     ) {
-        let skip = self.skip.replace(0) as usize;
-        let run = &run[skip..];
-        // (one loop that calls `pair` at one place, so that it is inlined into the loop as the
-        // strips' scan inlines `seed_of_pair`: called from a second loop it stayed a call per
-        // pair, about 30 instructions more per seed, results/s14p of line EB; the room test runs
-        // only for a run that may not fit, `fits` being the same for the whole loop)
-        let fits = run.len() <= out.room();
-        if !fits && !self.go() {
+        if !self.go() {
             return;
         }
         for (j, &q) in run.iter().enumerate() {
-            if !fits && out.room() == 0 {
-                self.stop_at(s, skip + j, out);
+            if out.room() == 0 {
+                self.stop.set(Some(Resume {
+                    skip: (skip + j) as u32,
+                    ..Resume::at(s)
+                }));
+                out.close();
                 return;
             }
             pair(q, out);
         }
-    }
-
-    /// The cut at the pair `skip` of the run of the word at `s` (the first pair `out` has no
-    /// room for): the scan stops there and `out` is closed.
-    #[cold]
-    #[inline(never)]
-    fn stop_at<O: SeedOut>(&self, s: usize, skip: usize, out: &mut O) {
-        self.stop.set(Some(Resume {
-            skip: skip as u32,
-            ..Resume::at(s)
-        }));
-        out.close();
     }
 
     /// For a word whose pairs are chains: where the first word's walk of its chain starts (the
@@ -601,15 +612,20 @@ fn scan_strip_csr<
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
         // ```
-        let run = csr.run(index as usize);
+        let mut run = csr.run(index as usize);
         if PIECE {
-            cut.run(kmer_start, run, out, |q_off_1, out| {
-                seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
-            });
-        } else {
-            for &q_off_1 in run {
-                seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+            match cut.fit(run, out) {
+                Ok(fit) => run = fit,
+                Err((skip, rest)) => {
+                    cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
+                        seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
+                    });
+                    return;
+                }
             }
+        }
+        for &q_off_1 in run {
+            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
         }
     };
     let mut ring: H::Ring<'_, (usize, u64)> = csr.ring();

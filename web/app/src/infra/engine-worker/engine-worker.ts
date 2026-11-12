@@ -78,6 +78,7 @@ function stopIfArmed(): void {
 // cancelDuringWarmUp). The worker cannot take a message while it holds; the mark of the use
 // count can be read (instance-use.ts).
 let holdUse = false;
+let prepareFailure: string | undefined;
 const holding = __LOSAT_TEST_HOOKS__ ? new BroadcastChannel(HOLD_USE_CHANNEL) : undefined;
 if (holding !== undefined) {
   holding.onmessage = (event: MessageEvent<{ type?: string }>) => {
@@ -127,8 +128,14 @@ function toWorkerError(error: unknown): WorkerError {
 async function prepare(threads: number, argv: readonly string[] | undefined): Promise<void> {
   try {
     await runtime?.prepare(threads, argv);
-  } catch {
+  } catch (error) {
     // The search that follows starts the runtime again and reports what fails.
+    if (__LOSAT_TEST_HOOKS__) prepareFailure = String(error);
+  }
+  // Test builds: a warm-up armed to hold that did not use the threaded instance says why, so
+  // that its test fails with the reason rather than waiting for the hold (cancelDuringWarmUp).
+  if (__LOSAT_TEST_HOOKS__ && holdUse && argv !== undefined) {
+    holding?.postMessage({ type: 'not-held', reason: prepareFailure ?? 'the warm-up made no use of the threaded instance' });
   }
 }
 

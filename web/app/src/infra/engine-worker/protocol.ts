@@ -83,7 +83,8 @@ export const STOP_AT_OUTPUT_CHANNEL = 'losat-web:test:stop-at-output';
  * Test builds only (`__LOSAT_TEST_HOOKS__`): the BroadcastChannel on which a page arms the
  * Engine worker's next use of the threaded instance (a search or a warm-up) to hold at its
  * start until the Gateway ends the runtime ({type: 'arm'}, answered by {type: 'armed'}; the
- * worker posts {type: 'holding'} when it holds).
+ * worker posts {type: 'holding'} when it holds, and {type: 'not-held', reason} after a
+ * preparation with an argv that did not hold).
  */
 export const HOLD_USE_CHANNEL = 'losat-web:test:hold-use';
 

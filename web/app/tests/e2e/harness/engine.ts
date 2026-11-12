@@ -333,7 +333,12 @@ export async function cancelDuringWarmUp(search: SearchCase): Promise<WarmUpCanc
   const heard = (type: string) =>
     new Promise<void>((resolve) => channel.addEventListener('message', (event: MessageEvent<{ type?: string }>) => event.data?.type === type && resolve()));
   const armed = heard('armed');
-  const holding = heard('holding');
+  const holding = new Promise<void>((resolve, reject) =>
+    channel.addEventListener('message', (event: MessageEvent<{ type?: string; reason?: string }>) => {
+      if (event.data?.type === 'holding') resolve();
+      if (event.data?.type === 'not-held') reject(new Error(`the warm-up did not hold the threaded instance: ${event.data.reason ?? ''}`));
+    }),
+  );
   const gateway = engine as { run: EngineGateway['run'] };
   try {
     // The Engine worker and its threaded instance start; the worker listens once its script runs.

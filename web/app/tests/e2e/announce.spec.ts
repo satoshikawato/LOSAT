@@ -5,7 +5,6 @@
 // the focus to the page's body. WA2-AX-06: n and p on the Dot Plot are told. WA2-AX-08: the
 // output texts that scroll are Tab stops, also in WebKit. WA2-AX-13: the hidden file input is not
 // a second button.
-import { gzipSync } from 'node:zlib';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { exampleById } from '../../src/domain/examples';
@@ -188,15 +187,25 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');
 
-/** The 16S set's host, stubbed at its real address (examples.spec.ts). */
+/**
+ * The 16S set's host, stubbed at its real address (examples.spec.ts). The body is the set's text,
+ * as a proxy that decoded the gzip would give it: the downloader keeps such a body as it is, in a
+ * build without the engine too, whose Data worker inflates nothing. Inflating the gzip body of a
+ * set is examples.spec.ts's, with the engine's decoders.
+ */
+const SIXTEEN_S_TEXT = '>NR_102783.2 Bacillus subtilis 16S\nACGTACGTACGTACGTACGT\n>NR_114042.1 Escherichia coli 16S\nACGTTCGTACGTACGTTCGT\n';
+
 async function stubSixteenS(page: Page): Promise<void> {
-  const gz = gzipSync('>NR_102783.2 Bacillus subtilis 16S\nACGTACGTACGTACGTACGT\n>NR_114042.1 Escherichia coli 16S\nACGTTCGTACGTACGTTCGT\n');
   await page.route(/^https:\/\/ftp\.ncbi\.nlm\.nih\.gov\//, (route) =>
     route.fulfill({
       status: 200,
-      contentType: 'application/x-gzip',
-      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Length': String(gz.length), 'Last-Modified': 'Tue, 27 Oct 2026 12:04:14 GMT' },
-      body: gz,
+      contentType: 'text/plain',
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Length': String(Buffer.byteLength(SIXTEEN_S_TEXT)),
+        'Last-Modified': 'Tue, 27 Oct 2026 12:04:14 GMT',
+      },
+      body: SIXTEEN_S_TEXT,
     }),
   );
 }
@@ -229,12 +238,11 @@ test("Delete of an Example's saved copy leaves with the copy; the focus goes to 
 });
 
 test("an Example's Cancel that leaves as the load ends gives the focus back to the set's button", async ({ page }) => {
-  const gz = gzipSync('>NR_102783.2 Bacillus subtilis 16S\nACGTACGTACGTACGTACGT\n');
   let release: () => void = () => undefined;
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route(/^https:\/\/ftp\.ncbi\.nlm\.nih\.gov\//, async (route) => {
     await held;
-    await route.fulfill({ status: 200, contentType: 'application/x-gzip', headers: { 'Access-Control-Allow-Origin': '*' }, body: gz });
+    await route.fulfill({ status: 200, contentType: 'text/plain', headers: { 'Access-Control-Allow-Origin': '*' }, body: SIXTEEN_S_TEXT });
   });
   await start(page);
   await page.getByTestId(`example-${SIXTEEN_S.id}`).click();

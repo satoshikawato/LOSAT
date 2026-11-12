@@ -566,8 +566,6 @@ mod tests {
                     by_hand.push((extra[index], ""));
                     index += 1;
                 }
-                // Not recorded (the ungapped X-drop is never set by the application).
-                "-xdrop_ungap" => index += 2,
                 "-parse_deflines" => index += 1,
                 other => {
                     parsed.push(other);

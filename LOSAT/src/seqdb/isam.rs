@@ -792,16 +792,19 @@ impl StringIsam {
     }
 
     /// The number of lines (`m_NumTerms`).
+    #[cfg(test)]
     pub fn num_terms(&self) -> i32 {
         self.num_terms
     }
 
     /// The number of pages (`m_NumSamples`).
+    #[cfg(test)]
     pub fn num_samples(&self) -> i32 {
         self.num_samples
     }
 
     /// The lines per page (`m_PageSize`).
+    #[cfg(test)]
     pub fn page_size(&self) -> i32 {
         self.page_size
     }
@@ -831,6 +834,7 @@ impl StringIsam {
     // ```
     /// `GetIdBounds(string&, string&, int&)`: the lower-cased first and last key and the number
     /// of lines; count 0 and empty keys for an uninitialised index.
+    #[cfg(test)]
     pub fn id_bounds(&self) -> (Vec<u8>, Vec<u8>, i32) {
         if !self.initialized {
             return (Vec::new(), Vec::new(), 0);
@@ -1657,6 +1661,7 @@ impl StringIsam {
     /// `x_StringSearch` for one term: every line of the volume that matches it, ignoring ASCII
     /// case, in file order (see the quirks of `x_DiffChar` above). Empty for an uninitialised
     /// index.
+    #[cfg(test)]
     pub fn string_search(&self, term_in: &[u8]) -> Result<Vec<IsamLine>, SeqDbError> {
         let mut lines = Vec::new();
         self.string_search_into(term_in, &mut lines)?;
@@ -3049,11 +3054,13 @@ impl NegativeOids {
     }
 
     /// `m_Included.GetBit(oid)`.
+    #[cfg(test)]
     pub fn is_included(&self, oid: u32) -> bool {
         self.included.get_bit(oid)
     }
 
     /// `m_Visible.GetBit(oid)`.
+    #[cfg(test)]
     pub fn is_visible(&self, oid: u32) -> bool {
         self.visible.get_bit(oid)
     }

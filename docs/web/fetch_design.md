@@ -153,10 +153,16 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    残す。自動の再試行はしない（1 回の操作に 1 要求）。
 4. **取得と展開**（`infra/browser/example-downloader.ts`）。ページ（main thread）が配備の CSP の下で取得する（`credentials: 'omit'`、
    referrer 無し。WF-1 と同じ）。NCBI の .gz は `application/x-gzip`、UniProt の `compressed=true` は Content-Encoding 無しで来るので
-   ブラウザは展開しない。本文が gzip の magic で始まるときだけ `DecompressionStream('gzip')` に通す（途中で展開済みの本文はそのまま）。
-   展開した部分は約 8 MiB ごとの Blob にまとめ、メモリの山は保存の大きさほどに留める。展開後 256 MiB を超える本文は止める。
+   ブラウザは展開しない。本文が gzip の magic で始まるときだけ展開する（途中で展開済みの本文はそのまま）。展開は 2026-11-11 から
+   エンジンの decoder で行う（swebok-improve SW8 D2、Owner-delegated）：取得した本文（約 8 MiB ごとの Blob）を `<fileName>.gz`
+   （サイト上のファイル名）の File として Data worker に渡し、source の `.gz` と同じ道（`infra/data/inflate.ts`、ABI v2 の
+   `inflate_*`）で展開する。Web の展開器はエンジンの 1 つだけになる。それまでの `DecompressionStream('gzip')` は連結した
+   member（bgzip、`cat a.gz b.gz`）を 3 ブラウザとも拒み、壊れたときの文もブラウザごとに違った。展開した部分は約 8 MiB ごとの
+   Blob にまとめる。取得した本文が 256 MiB を超えるか（gzip の本文が展開後より大きいのは高々 0.03 % ほど）、展開後が
+   256 MiB を超えれば止める。展開の間は圧縮した本文（最大の pdbaa で 36.8 MB）も Blob として持つ。エンジンの無い開発用の
+   build は gzip の本文を展開できない（「could not be decompressed (this build has no engine)」）。
    時間切れは 60 s（応答の見出しまで）。進捗は「Downloading 3.1 of 8.0 MB from ftp.ncbi.nlm.nih.gov…」（Content-Length の無い
-   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている、大きすぎる、
+   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている（括弧の中はコマンドラインと同じエンジンの文）、大きすぎる、
    FASTA でない：`>` で始まらない 200 の答え（空や HTML）は写しにしない）で、欄はそのまま。
 5. **保存**（`infra/data/example-store.ts`、Data worker）。OPFS の `examples/<id>/` に `data`、最後に `meta.json`（meta の無い
    ディレクトリは書きかけで、次の保存が消す）。書き込みは block store と同じ同期 access handle、保存と削除は Web Lock

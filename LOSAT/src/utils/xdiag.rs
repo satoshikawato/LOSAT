@@ -26,6 +26,8 @@ pub const ON: bool = cfg!(feature = "diagnostics");
 
 /// The diagnostic variables, sorted. `docs/agents/diagnostics.md` lists the same names.
 pub const NAMES: &[&str] = &[
+    "BLEMIR_DEBUG",
+    "BLEMIR_DEBUG_WINDOW",
     "LOSAT_DEBUG_BLASTP_TRACE_HSP",
     "LOSAT_DEBUG_BLASTP_WSSV",
     "LOSAT_DEBUG_CHAINING",
@@ -169,7 +171,10 @@ mod tests {
     fn the_names_are_distinct_sorted_and_outside_the_switches() {
         assert!(NAMES.windows(2).all(|pair| pair[0] < pair[1]));
         for name in NAMES {
-            assert!(name.starts_with("LOSAT_"), "{name}");
+            assert!(
+                name.starts_with("LOSAT_") || name.starts_with("BLEMIR_"),
+                "{name}"
+            );
             assert!(!STRICT_SET.contains(name), "{name} is in STRICT_SET");
             assert!(!GRADUATED.contains(name), "{name} is in GRADUATED");
             assert!(!name.ends_with("SHADOW"), "{name} is a shadow switch");

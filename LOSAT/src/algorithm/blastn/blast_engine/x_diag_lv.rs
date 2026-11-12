@@ -90,9 +90,10 @@
 //! For dc-megablast (window 40, template 16, 18 or 21) the window term binds, `s_off_pos - 24`
 //! to `s_off_pos - 19`; with one hit (megablast, blastn, blastn-short) the bound is
 //! `s_off_pos + 1`. `retrieve_below` returns `None` without a walk when the bucket's
-//! `max_level` is below the bound, and is `retrieve` otherwise. The callers: the two retrieves
-//! of `process_offset_pairs` (`run.rs`; not while the debug, trace or window diagnostics print
-//! what they read), the one-hit fold of PAIRPAR (`x_pair_seed.rs` `fold`) and the
+//! `max_level` is below the bound, and is `retrieve` otherwise. The callers: the retrieves of the
+//! two reference scans, `extend_offset_pairs` (`pair_extend.rs`, two-stage tables) and the seed
+//! closure of the other tables (`run.rs`), not while the debug, trace or window diagnostics print
+//! what they read; the one-hit fold of PAIRPAR (`x_pair_seed.rs` `fold`) and the
 //! two-hit fold of `LOSAT_X_PAIRPARDISC` (`x_pair_seed_disc.rs` `fold_two_hit`). The
 //! off-diagonal retrieves (`scan_range > 0`, an unported option) stay plain walks.
 //!
@@ -159,7 +160,7 @@
 //! diagonal and no cell for any other diagonal. Only the strips folds of LOSAT_X_PAIRPARDISC keep
 //! and read the memo: each of their stages makes it again from the bounds at its start
 //! (`x_lv2_reset`: no latest insert, `other` the bucket's bound), so the reference fold
-//! (`process_offset_pairs`: a chunk without a pool with LOSAT_X_BNDCONE `0`, a masked chunk, and
+//! (`extend_offset_pairs`: a chunk without a pool with LOSAT_X_BNDCONE `0`, a masked chunk, and
 //! every worker with many subjects) runs the code before the switch and need not keep it.
 //!
 //! Why the output is the same:

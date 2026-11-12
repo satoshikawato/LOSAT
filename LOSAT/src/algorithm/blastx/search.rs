@@ -474,9 +474,8 @@ fn x_search_core(
     // ```
     // LOSAT does not split a subject; a batch that is searched refuses longer ones (below).
     let longest_subject = subjects.longest_length();
-    let db_length = subjects.total_length()?;
-    let db_count = i64::try_from(subjects.statistics_len())?;
-    let min_subject_length = subjects.shortest_length();
+    let numbers = subjects.numbers()?;
+    let (db_length, db_count) = (numbers.total, numbers.count);
     // No NCBI counterpart: decides whether candidate HSPs are copied for the containment callback;
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
@@ -559,8 +558,10 @@ fn x_search_core(
         // with a valid context (batches without one are not searched, above). The subjects are
         // checked there too, after the split sizes and the setup of the queries, whose errors
         // come first at any thread count (`native.rs`, `XUnit::take_prep`).
+        // A database may include no sequence (a list or an alias file's range that keeps none):
+        // its batches are searched without subjects.
         ensure!(
-            !subjects.is_empty() || subjects.is_unreadable() || options.filtered_empty,
+            !subjects.is_empty() || !matches!(subjects, Subjects::Fasta(_)),
             "BLASTX preliminary requires a protein subject"
         );
         ensure!(
@@ -679,9 +680,7 @@ fn x_search_core(
                                 subjects,
                                 options,
                                 &spaces,
-                                db_length,
-                                db_count,
-                                min_subject_length,
+                                numbers,
                                 x_containment,
                                 x_cap.map(|(_, per_task)| per_task),
                                 x_parts,
@@ -761,9 +760,7 @@ fn x_search_core(
                             batch,
                             &mut params,
                             options,
-                            db_length,
-                            db_count,
-                            min_subject_length,
+                            numbers,
                             Some(fixed_spaces),
                         )?;
                         Ok(Some(x_subject_flow::XChunkSetup {
@@ -784,7 +781,6 @@ fn x_search_core(
                     options,
                     pool.threads() - 1,
                     x_bx_mem::diag_keep(options, subjects),
-                    db_length,
                     x_containment,
                     x_bx_mem::in_capped_batch(pool),
                     is_split,
@@ -880,15 +876,8 @@ fn x_search_core(
             let x_parts = 1;
             let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
-            let xdrop = subject_parameters(
-                batch,
-                &mut params,
-                options,
-                db_length,
-                db_count,
-                min_subject_length,
-                Some(fixed_spaces),
-            )?;
+            let xdrop =
+                subject_parameters(batch, &mut params, options, numbers, Some(fixed_spaces))?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180
             // ```c++
             //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
@@ -996,7 +985,6 @@ fn x_search_core(
                     &mut *diagonals,
                     helper_tables,
                     xdrop,
-                    db_length,
                     x_containment,
                     x_bx_mem::in_capped_batch(pool),
                     sink,
@@ -1077,7 +1065,6 @@ fn x_search_core(
                                                         scratch,
                                                         xdrop,
                                                         diagnostics,
-                                                        db_length,
                                                         oid,
                                                         x_containment,
                                                     )
@@ -1119,7 +1106,6 @@ fn x_search_core(
                             &mut *diagonals,
                             xdrop,
                             diagnostics,
-                            db_length,
                             oid,
                             x_containment,
                         );
@@ -1260,9 +1246,7 @@ fn x_compute_chunk(
     subjects: Subjects<'_>,
     options: &ResolvedOptions,
     fixed_spaces: &[i64],
-    db_length: i64,
-    db_count: i64,
-    min_subject_length: usize,
+    numbers: super::parameters::SubjectNumbers,
     x_containment: bool,
     x_par: Option<usize>,
     x_parts: usize,
@@ -1275,15 +1259,7 @@ fn x_compute_chunk(
     let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
     if let Some(per_task) = x_par {
-        let xdrop = subject_parameters(
-            batch,
-            &mut params,
-            options,
-            db_length,
-            db_count,
-            min_subject_length,
-            Some(fixed_spaces),
-        )?;
+        let xdrop = subject_parameters(batch, &mut params, options, numbers, Some(fixed_spaces))?;
         let results = x_bx_mem::chunk_subjects_on_pool(
             per_task,
             subjects,
@@ -1292,21 +1268,12 @@ fn x_compute_chunk(
             options,
             &lookup,
             xdrop,
-            db_length,
             x_containment,
         )?;
         return Ok(Some((params, results)));
     }
     let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
-    let xdrop = subject_parameters(
-        batch,
-        &mut params,
-        options,
-        db_length,
-        db_count,
-        min_subject_length,
-        Some(fixed_spaces),
-    )?;
+    let xdrop = subject_parameters(batch, &mut params, options, numbers, Some(fixed_spaces))?;
     // Only the subjects with something for the sink are kept, by oid: the chunks of a wave are
     // all in memory at once, and a database holds hundreds of thousands of subjects, most
     // without a hit. The sink gets the others as empty computations (`SubjectComputation::
@@ -1324,7 +1291,6 @@ fn x_compute_chunk(
             &mut diagonals,
             xdrop,
             false,
-            db_length,
             oid,
             x_containment,
         )?;
@@ -1386,7 +1352,6 @@ fn compute_subject(
     diagonals: &mut Diagonals,
     xdrop: i32,
     diagnostics: bool,
-    db_length: i64,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1400,7 +1365,6 @@ fn compute_subject(
         diagonals,
         xdrop,
         diagnostics,
-        db_length,
         oid,
         x_containment,
     )
@@ -1420,7 +1384,6 @@ fn compute_subject_of(
     diagonals: &mut Diagonals,
     xdrop: i32,
     diagnostics: bool,
-    db_length: i64,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1434,7 +1397,6 @@ fn compute_subject_of(
         diagonals,
         xdrop,
         diagnostics,
-        db_length,
         oid,
         x_containment,
     )
@@ -1452,7 +1414,6 @@ fn compute_subject_any(
     diagonals: &mut Diagonals,
     xdrop: i32,
     diagnostics: bool,
-    db_length: i64,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1466,7 +1427,6 @@ fn compute_subject_any(
             diagonals,
             xdrop,
             diagnostics,
-            db_length,
             oid,
             x_containment,
         )
@@ -1480,7 +1440,6 @@ fn compute_subject_any(
             diagonals,
             xdrop,
             diagnostics,
-            db_length,
             oid,
             x_containment,
         )
@@ -1501,7 +1460,6 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     diagonals: &mut Diagonals,
     xdrop: i32,
     diagnostics: bool,
-    db_length: i64,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1531,12 +1489,14 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // ```
     // Worker-local cutoff preparation precedes WordFinder as in NCBI; only
     // adoption/observer notification is replayed on the serial OID collector.
+    // `db_length` is `BlastSeqSrcGetTotLen` (blast_engine.c:1407), not the statistics' total:
+    // `Subjects::total_length`.
     let prepared_link = if !options.gapped && options.sum_stats {
         Some(super::even_gap::cutoffs(
             batch,
             params,
             subject_length as i32,
-            db_length,
+            subjects.total_length()?,
         ))
     } else {
         None

@@ -327,7 +327,8 @@ fn reader(
 
 /// `CMaskBDBReader`: the sequences of a nucleotide BLAST database in OID order, each as
 /// `CSeqDB::GetBioseq` makes it (the Seq-ids of the first definition line, the title joined
-/// from all of them).
+/// from all of them). Every OID of the volumes, also those outside the alias files' OID
+/// ranges (`SeqDb::include_every_oid`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/seqmasks_io/mask_bdb_reader.hpp:55-61
 /// ```c++
@@ -379,7 +380,9 @@ impl DatabaseSource {
             )
         })?;
         let path = SearchPath::from_environment(registry).map_err(database_failure)?;
-        let db = SeqDb::open_in(name, SeqType::Nucleotide, &path).map_err(database_failure)?;
+        let mut db = SeqDb::open_in(name, SeqType::Nucleotide, &path).map_err(database_failure)?;
+        // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
+        db.include_every_oid();
         Ok(DatabaseSource {
             db,
             oid: 0,

@@ -32,6 +32,59 @@ pub(crate) struct RegistryRead {
     /// starts a byte order mark, `text_encoding_form`): NCBI then posts
     /// `ERROR_READING_THE_REGISTRY` (`error_reading_post`).
     pub(crate) stream_failed: bool,
+    /// The entries that set a `[section] name` again while its value is not empty, in the order
+    /// of the file, which NCBI warns of as it reads them (`RepeatedEntry`).
+    pub(crate) repeated: Vec<RepeatedEntry>,
+}
+
+/// An entry of a registry file that sets a `[section] name` again while the value it has is not
+/// empty: NCBI posts `Found multiple [section] name settings; using the one from line <line>`
+/// (`repeated_entry_post`) when it reads it into an empty registry (`was_empty`, as each read of
+/// a file into its layer is), with the section and the name as the entry writes them and the
+/// entry's last line. `[NCBI] .Inherits` joins its values instead.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:783-799
+/// ```c++
+///                 if (NStr::EqualNocase(section, "NCBI")
+///                     &&  NStr::EqualNocase(name, ".Inherits")
+///                     &&  HasEntry(section, name, flags)) {
+///                     ...
+///                 } else if (was_empty  &&  HasEntry(section, name, flags)) {
+///                     ERR_POST_X(8, Warning
+///                                << "Found multiple [" << section << "] "
+///                                << name << " settings" << in_path
+///                                << "; using the one from line " << line);
+///                 }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:983-990 (`HasEntry` without
+/// `fCountCleared` counts an entry whose value is not empty)
+/// ```c++
+///     TEntries::const_iterator eit = entries.find(name);
+///     if (eit == entries.end()) {
+///         return false;
+///     } else if ((flags & fCountCleared) != 0) {
+///         return true;
+///     } else {
+///         return !eit->second.value.empty();
+///     }
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RepeatedEntry {
+    pub(crate) section: String,
+    pub(crate) name: String,
+    pub(crate) line: usize,
+}
+
+/// NCBI's warning of a `RepeatedEntry`, posted while `program` runs (its diagnostics' prefix,
+/// `running_syntax_error_notice`). NCBI BLAST+ 2.17.0 on 2026-11-12 (line NP M3c review, `d1`):
+/// `Warning: (110.8) [blastn] Found multiple [WINDOW_MASKER] WINDOW_MASKER_PATH settings; using
+/// the one from line 3`. `CMetaRegistry` reads a file without its path (`in_path` empty,
+/// `error_reading_post`).
+pub(crate) fn repeated_entry_post(entry: &RepeatedEntry, program: &str) -> String {
+    format!(
+        "Warning: (110.8) [{program}] Found multiple [{}] {} settings; using the one from line {}\n",
+        entry.section, entry.name, entry.line
+    )
 }
 
 impl RegistryRead {
@@ -92,10 +145,24 @@ pub(crate) fn last_value<'a>(
 /// `Critical: (110.6) ` before the text, and ends with a line feed (what() ends with one too,
 /// so an empty line follows).
 pub(crate) fn syntax_error_notice(error: &NcbiException) -> String {
+    syntax_error_post(error, "")
+}
+
+/// `syntax_error_notice` posted while `program` runs, after its application has set its
+/// diagnostics' prefix (`SetDiagPostPrefix`), which the old post format writes as `[program] `
+/// after the error code: the post of a registry that the program loads in its search, such as
+/// that of blastn's `-window_masker_taxid` (NCBI BLAST+ 2.17.0, 2026-11-12:
+/// `Critical: (110.6) [blastn] CNcbiRegistry: ...`, the rest as at the start).
+pub(crate) fn running_syntax_error_notice(error: &NcbiException, program: &str) -> String {
+    syntax_error_post(error, &format!("[{program}] "))
+}
+
+/// The post of `syntax_error_notice` with the diagnostics' `prefix`.
+fn syntax_error_post(error: &NcbiException, prefix: &str) -> String {
     let what = error.what();
     let what = what.split('\0').next().unwrap_or_default();
     format!(
-        "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: {what}\n"
+        "Critical: (110.6) {prefix}CNcbiRegistry: Syntax error in system-wide configuration file: {what}\n"
     )
 }
 
@@ -194,6 +261,13 @@ impl LineEnds {
 /// ncbidiag.cpp:5612-5700).
 pub(crate) fn error_reading_post() -> &'static str {
     "Error: (110.4) Error reading the registry after line 1: \n"
+}
+
+/// `error_reading_post` posted while `program` runs, with its diagnostics' prefix
+/// (`running_syntax_error_notice`; NCBI BLAST+ 2.17.0 on 2026-11-12:
+/// `Error: (110.4) [blastn] Error reading the registry after line 1: `).
+pub(crate) fn running_error_reading_post(program: &str) -> String {
+    error_reading_post().replacen("(110.4) ", &format!("(110.4) [{program}] "), 1)
 }
 
 /// What one `GetTextEncodingForm(is, eBOM_Discard)` leaves of the stream.
@@ -495,6 +569,7 @@ fn read_registry_with(bytes: &[u8], layer: Layer, ends: LineEnds) -> Result<Regi
                     entries: Vec::new(),
                     error: None,
                     stream_failed: check == checks,
+                    repeated: Vec::new(),
                 });
             }
         }
@@ -625,21 +700,25 @@ fn read_registry_with(bytes: &[u8], layer: Layer, ends: LineEnds) -> Result<Regi
 /// ```
 /// `in_path` is empty (`error_reading_post`). `SplitInTwo` with no flag cuts at the first `=`. A
 /// comment changes no entry. `Set` keeps no entry before the first section (`IRWRegistry::Set`,
-/// ncbireg.cpp:833-837: the section "" is not a name). The warning of a repeated entry is not
-/// written: a release build posts nothing below `Error` (`CDiagBuffer::sm_PostSeverity`,
-/// ncbidiag.cpp:3975-3979), and NCBI 2.17.0 writes nothing for a repeated `[BLAST] BLASTDB` in
-/// `.ncbirc`, in its `-logfile` neither (g_reg probes `multi`, `multi_log`). The values of
+/// ncbireg.cpp:833-837: the section "" is not a name). The read records each repeated entry
+/// (`RepeatedEntry`), whose warning the application start does not write: a release build posts
+/// nothing below `Error` there (`CDiagBuffer::sm_PostSeverity`, ncbidiag.cpp:3975-3979), and NCBI
+/// 2.17.0 writes nothing for a repeated `[BLAST] BLASTDB` in `.ncbirc`, in its `-logfile` neither
+/// (g_reg probes `multi`, `multi_log`). A read while the program runs writes it (the registry of
+/// blastn's `-window_masker_taxid`, `ncbi_environment::window_masker_ncbirc`). The values of
 /// `[NCBI] .Inherits` that NCBI joins are kept as separate entries: no program of LOSAT reads the
 /// entry, which makes NCBI read further files (`ncbi_environment` refuses it).
 fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
     let mut lines = Lines { data, pos: 0, ends };
-    let mut entries = Vec::new();
+    let mut entries: Vec<RegistryEntry> = Vec::new();
+    let mut repeated = Vec::new();
     let mut section = String::new();
     let mut line = 0usize;
-    let done = |entries: Vec<RegistryEntry>, error: NcbiException| RegistryRead {
+    let done = |entries: Vec<RegistryEntry>, repeated, error: NcbiException| RegistryRead {
         entries,
         error: Some(error),
         stream_failed: false,
+        repeated,
     };
     while let Some(str) = lines.next_line() {
         line += 1;
@@ -662,7 +741,7 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
                         "'",
                         line,
                     )?;
-                    return Ok(done(entries, error));
+                    return Ok(done(entries, repeated, error));
                 };
                 let name = truncate_spaces(&str[beg..end]);
                 if name.is_empty() {
@@ -673,7 +752,7 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
                         "'",
                         line,
                     )?;
-                    return Ok(done(entries, error));
+                    return Ok(done(entries, repeated, error));
                 }
                 if !is_name(name) {
                     let error = registry_exception(
@@ -683,7 +762,7 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
                         "'",
                         line,
                     )?;
-                    return Ok(done(entries, error));
+                    return Ok(done(entries, repeated, error));
                 }
                 section = String::from_utf8_lossy(name).into_owned();
             }
@@ -696,7 +775,7 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
                         "'",
                         line,
                     )?;
-                    return Ok(done(entries, error));
+                    return Ok(done(entries, repeated, error));
                 };
                 let name = truncate_spaces(&str[..equals]);
                 if !is_name(name) {
@@ -707,7 +786,7 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
                         "'",
                         line,
                     )?;
-                    return Ok(done(entries, error));
+                    return Ok(done(entries, repeated, error));
                 }
                 let mut value = truncate_spaces(&str[equals + 1..]).to_vec();
                 let mut text = str.to_vec();
@@ -739,7 +818,7 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
                             "'",
                             line,
                         )?;
-                        return Ok(done(entries, error));
+                        return Ok(done(entries, repeated, error));
                     }
                     pos = value[at + 1..]
                         .iter()
@@ -754,12 +833,24 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
                         "'",
                         line,
                     )?;
-                    return Ok(done(entries, error));
+                    return Ok(done(entries, repeated, error));
                 };
                 if !section.is_empty() {
+                    let name = String::from_utf8_lossy(name).into_owned();
+                    let inherits = section.eq_ignore_ascii_case("NCBI")
+                        && name.eq_ignore_ascii_case(".Inherits");
+                    if !inherits
+                        && last_value(&entries, &section, &name).is_some_and(|old| !old.is_empty())
+                    {
+                        repeated.push(RepeatedEntry {
+                            section: section.clone(),
+                            name: name.clone(),
+                            line,
+                        });
+                    }
                     entries.push(RegistryEntry {
                         section: section.clone(),
-                        name: String::from_utf8_lossy(name).into_owned(),
+                        name,
                         value,
                     });
                 }
@@ -770,6 +861,7 @@ fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {
         entries,
         error: None,
         stream_failed: false,
+        repeated,
     })
 }
 

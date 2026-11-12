@@ -905,10 +905,8 @@ mod tests {
             names: None,
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let mut warnings = QueryWarnings {
-            before: &[b"Warning: q1\n".to_vec()],
-            sink: &mut err,
-        };
+        let before = [b"Warning: q1\n".to_vec()];
+        let mut warnings = QueryWarnings::new(&before, &mut err);
         write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
         (
             String::from_utf8(out).unwrap(),

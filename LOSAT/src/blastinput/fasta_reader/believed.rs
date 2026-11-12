@@ -272,7 +272,18 @@ pub(crate) fn duplicate_id(
         keys.clear();
         scope_keys(id, &mut keys);
         if keys.iter().any(|key| seen.contains(key)) {
-            return Some(if role == "query" {
+            return Some(if role == "query" && program == "PSIBLAST" {
+                // psiblast's queries are batches of one, after each of which NCBI's formatter
+                // resets the scope against a database (`CBlastFormat::ResetScopeHistory`) and not
+                // with `-subject`, where NCBI BLAST+ 2.17.0 crashes on such queries (review of
+                // RG Q1, S1; series Q, Q1c).
+                anyhow::anyhow!(
+                    "two query records have the Seq-id {} under -parse_deflines (NCBI BLAST+'s \
+                     psiblast searches each with its own letters against a database and crashes \
+                     with -subject); this is not supported by LOSAT's {program}",
+                    fasta(id)
+                )
+            } else if role == "query" {
                 anyhow::anyhow!(
                     "two query records have the Seq-id {} under -parse_deflines (in one query \
                      batch NCBI BLAST+ searches the letters of the first for both); this is not \

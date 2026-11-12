@@ -2,11 +2,12 @@
 //! (`CBlastDBCmdApp::Init`) that NCBI's argument reader reads (`ncbi_app::args`), so that every
 //! command line that NCBI's reader refuses is refused with NCBI's text, also for the options that
 //! LOSAT's BLASTDBCMD does not serve (the program refuses those after the reader accepts them).
-//! With them blastdbcmd's copies of `NStr::StringToInt8` and `NStr::PrintableString` for the
-//! values it converts itself (`-range`, `-mask_sequence_with`, the lines of its batch files), not
-//! yet folded into `ncbi_str` (whose `StringToInt8` ends a number at a NUL byte).
+//! With them blastdbcmd's copy of `NStr::StringToInt8` for the values it converts itself
+//! (`-range`, `-mask_sequence_with`, the lines of its batch files), not yet folded into
+//! `ncbi_str` (whose `StringToInt8` ends a number at a NUL byte).
 
 use crate::ncbi_app::args::{flag, key, Constraint, Dep, Desc, Kind};
+use crate::ncbi_str::printable_string;
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:901-919
 // ```c++
@@ -320,7 +321,7 @@ fn string_to_int8_at(value: &str) -> Result<i64, (String, usize)> {
         (
             format!(
                 "Cannot convert string '{}' to Int8{extra}",
-                printable_string(value)
+                printable_string(value.as_bytes())
             ),
             pos,
         )
@@ -354,101 +355,6 @@ fn string_to_int8_at(value: &str) -> Result<i64, (String, usize)> {
         return Err(error("", pos));
     }
     Ok(if sign { n.wrapping_neg() } else { n })
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3743-3810
-// ```c++
-//         case '\a':
-//             if (lang == eLanguage_C)
-//                 c = 'a';
-//             ...
-//         case '\n':
-//             if (!(mode & NStr::fNewLine_Passthru))
-//                 c = 'n';
-//             /*FALLTHRU*/
-//         case '\\':
-//         case '\'':
-//         case '"':
-//             break;
-//         case '&':
-//             ...
-//             continue;
-//         case '?':
-//             if (lang == eLanguage_C) {
-//                 if (i  &&  str[i - 1] == '?')
-//                     break;
-//                 if (i < str.size() - 1  &&  str[i + 1] == '?')
-//                     break;
-//             }
-//             continue;
-//         default:
-//             ...
-//             if (!isprint((unsigned char) c)) {
-//                 octal = true;
-//                 break;
-//             }
-//             continue;
-//         }
-//         ...
-//         out->put('\\');
-//         if (c == '\n') {
-//             out->write("n\\\n", 3);
-//         } else if (octal) {
-//             bool reduce;
-//             if (!(mode & NStr::fPrintable_Full)) {
-//                 reduce = (i == str.size() - 1  ||
-//                           str[i + 1] < '0' || '7' < str[i + 1] ? true : false);
-// ```
-// `PrintableString(str)` has the mode 0 (`fNewLine_Quote`): a line feed becomes `\n`, the
-// branch of `c == '\n'` is that of `fNewLine_Passthru`.
-/// `NStr::PrintableString(str)`: C escapes for the quotes, the backslash, the control
-/// characters and `??` (trigraphs), and octal for the other bytes that are not printable
-/// ASCII, in as few digits as the next byte allows.
-pub(super) fn printable_string(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
-    for (i, &byte) in bytes.iter().enumerate() {
-        let escape = match byte {
-            0x07 => Some("\\a".to_string()),
-            0x08 => Some("\\b".to_string()),
-            0x0c => Some("\\f".to_string()),
-            b'\r' => Some("\\r".to_string()),
-            b'\t' => Some("\\t".to_string()),
-            0x0b => Some("\\v".to_string()),
-            b'\n' => Some("\\n".to_string()),
-            b'\\' | b'\'' | b'"' => Some(format!("\\{}", byte as char)),
-            b'?' if (i > 0 && bytes[i - 1] == b'?') || bytes.get(i + 1) == Some(&b'?') => {
-                Some("\\?".to_string())
-            }
-            0x20..=0x7e => None,
-            _ => {
-                // `char` is signed: a byte above 0x7f is below '0'.
-                let reduce = bytes
-                    .get(i + 1)
-                    .is_none_or(|&next| !(b'0'..=b'7').contains(&next));
-                let digits = [byte >> 6, (byte >> 3) & 7, byte & 7];
-                // NCBI ncbistr.cpp:3817-3820: `if (v || !reduce)` writes the first digit (and
-                // then every digit).
-                let skip = if digits[0] != 0 || !reduce {
-                    0
-                } else if digits[1] != 0 {
-                    1
-                } else {
-                    2
-                };
-                let octal: String = digits[skip..]
-                    .iter()
-                    .map(|digit| char::from(b'0' + digit))
-                    .collect();
-                Some(format!("\\{octal}"))
-            }
-        };
-        match escape {
-            Some(escape) => out.push_str(&escape),
-            None => out.push(byte as char),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -702,17 +608,6 @@ mod tests {
             string_to_int8_at("").unwrap_err(),
             ("Cannot convert string '' to Int8".to_string(), 0)
         );
-    }
-
-    #[test]
-    fn printable_string_escapes_as_ncbi() {
-        assert_eq!(printable_string("a'b\"c\\d"), "a\\'b\\\"c\\\\d");
-        assert_eq!(printable_string("x\ty"), "x\\ty");
-        assert_eq!(printable_string("1\n2"), "1\\n2");
-        assert_eq!(printable_string("a??b?c"), "a\\?\\?b?c");
-        assert_eq!(printable_string("\u{1}9"), "\\19");
-        assert_eq!(printable_string("\u{1}1"), "\\0011");
-        assert_eq!(printable_string("é"), "\\303\\251");
     }
 
     #[test]

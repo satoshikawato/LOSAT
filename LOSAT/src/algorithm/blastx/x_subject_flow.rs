@@ -273,7 +273,6 @@ fn search_task(
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    db_length: i64,
     x_containment: bool,
 ) -> Task {
     let mut kept = Vec::new();
@@ -295,7 +294,6 @@ fn search_task(
             diagonals,
             xdrop,
             false,
-            db_length,
             oid,
             x_containment,
         ) {
@@ -373,7 +371,6 @@ pub(super) fn run(
     diagonals: &mut Diagonals,
     helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
-    db_length: i64,
     x_containment: bool,
     capped: bool,
     sink: &mut impl PreliminarySink,
@@ -409,7 +406,6 @@ pub(super) fn run(
             lookup,
             table,
             xdrop,
-            db_length,
             x_containment,
         )
     };
@@ -709,7 +705,6 @@ pub(super) fn run_chunks(
     options: &ResolvedOptions,
     helpers: usize,
     keep: bool,
-    db_length: i64,
     x_containment: bool,
     capped: bool,
     is_split: bool,
@@ -765,7 +760,6 @@ pub(super) fn run_chunks(
             &ready.lookup,
             table,
             ready.xdrop,
-            db_length,
             x_containment,
         )
     };

@@ -368,7 +368,16 @@ impl NcbiException {
 /// as an application with NCBI's default diagnostic flags writes it (`SDiagMessage::x_OldWrite`,
 /// quoted at [`NcbiException::report_default_ex`]): `Error: (<id>) <message>` and a line feed.
 fn post_error(id: &str, message: &str) -> String {
-    format!("Error: ({id}) {message}\n")
+    String::from_utf8(post_error_bytes(id, message.as_bytes()))
+        .expect("the text of UTF-8 parts is UTF-8")
+}
+
+/// `post_error` of a message that is bytes: NCBI's diagnostic stream writes them as they are.
+fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
+    let mut line = format!("Error: ({id}) ").into_bytes();
+    line.extend_from_slice(message);
+    line.push(b'\n');
+    line
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567
@@ -404,6 +413,12 @@ fn post_error(id: &str, message: &str) -> String {
 /// (ncbiapp.cpp:675-679: rpsbproc's data loader).
 pub fn err_post_x(err_code: u32, err_subcode: u32, message: &str) -> String {
     post_error(&format!("{err_code}.{err_subcode}"), message)
+}
+
+/// `err_post_x` of a message that is bytes (a `std::exception`'s `what()` that quotes data
+/// bytes, rpsbproc's motif parse error).
+pub fn err_post_x_bytes(err_code: u32, err_subcode: u32, message: &[u8]) -> Vec<u8> {
+    post_error_bytes(&format!("{err_code}.{err_subcode}"), message)
 }
 
 #[cfg(test)]

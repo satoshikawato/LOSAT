@@ -320,10 +320,13 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
 }
 
 /// The build tree that the official Linux x64 release of NCBI BLAST+ 2.17.0 names in its `T0`
-/// lines (as `ncbi_exception::NCBI_BUILD_ROOT`).
+/// lines (as `ncbi_exception::NCBI_BUILD_ROOT`). The registry tests that use it and the helpers
+/// below run on Unix only.
+#[cfg(unix)]
 const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
 /// NCBI's post of one read of a `.ncbirc` with the line `garbage` at `line`.
+#[cfg(unix)]
 fn critical(line: usize) -> String {
     format!(
         "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = {line})\n\n"
@@ -331,10 +334,12 @@ fn critical(line: usize) -> String {
 }
 
 /// NCBI's report of a `<program>.ini` of the line `garbage`, which ends the program.
+#[cfg(unix)]
 const INI_REPORT: &str = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
 
-/// The name of the system-wide registry file (`ncbi.ini` on Windows).
-const NCBIRC: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+/// The name of the system-wide registry file on Unix (Windows names it `ncbi.ini`).
+#[cfg(unix)]
+const NCBIRC: &str = ".ncbirc";
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663 and
 // c++/src/corelib/ncbiapp.cpp:669-674 (quoted at `ncbi_environment::ApplicationStart`). NCBI

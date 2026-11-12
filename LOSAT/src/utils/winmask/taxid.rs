@@ -13,7 +13,7 @@ const STAT_FILE_NAME: &str = "wmasker.obinary";
 
 /// `WindowMaskerTaxidToDb(taxid)`: the counts file of `taxid` under `directory` (the registry
 /// entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`,
-/// `ncbi_environment::ApplicationSettings::window_masker_path`; `None` or empty: the current
+/// `ncbi_environment::WindowMaskerRegistry::path`; `None` or empty: the current
 /// directory), or `None` when that path is not a file (or a link to one). Only the name decides:
 /// NCBI does not check the format of the file it finds (an ascii counts file under that name
 /// is read as one), unlike `-window_masker_db`. `Err` when the current directory is needed

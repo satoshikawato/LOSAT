@@ -230,29 +230,29 @@ fn in_scope_array(x: &Inputs<'_>) -> bool {
 /// through `seed_of_pair`, into `out` (a list, or with LOSAT_X_DCSEEDLEAN the strip's
 /// partitions' lists).
 fn scan_strip_disc<O: SeedOut>(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &mut O) {
-    scan_strip_disc_from::<O, false>(x, disc, job, job.start, 0, out);
+    scan_strip_disc_from::<O, false>(x, disc, job, Resume::at(job.start), out);
 }
 
-/// `scan_strip_disc` from the word at `start` (`job.start`, or where a piece stopped), passing
-/// over that word's first `skip` pairs (both templates' pairs count, the first template's
-/// first). EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at the first pair `out`
+/// `scan_strip_disc` from the word at `from.s` (`job.start`, or where a piece stopped), that
+/// word from where `from` says (`Resume`: the element of the first or the second template's
+/// chain). EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at the first pair `out`
 /// has no room for (`Cut`) and returns where it goes on; `None` when the strip is done.
 pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     job: &StripJob,
-    start: usize,
-    skip: u32,
+    from: Resume,
     out: &mut O,
 ) -> Option<Resume> {
     // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains to walk.
     if let Some(csr) = disc.x_csr() {
-        return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, start, skip, out);
+        return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, from, out);
     }
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
-    let cut = Cut::new(skip);
+    let cut = Cut::new(&from);
+    let start = from.s;
     disc_word_scan_subject_until(
         kind,
         x.search_seq_packed,
@@ -262,7 +262,8 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
         [start as i32, job.end as i32],
         &mut |s_off, index, index2| {
             let kmer_start = s_off as usize;
-            let (mut j, skip) = (0u32, if PIECE { cut.skip.replace(0) } else { 0 });
+            // (where a resumed word's walk starts, and whether its first chain is passed over)
+            let (node, second) = if PIECE { cut.chain_start() } else { (0, false) };
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
             // ```c
             //     while (q_off) {
@@ -271,14 +272,19 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
             //         q_off = lookup->next_pos[q_off];
             //     }
             // ```
-            two_stage.for_each_hit(index as u64, |q_off_1| {
-                if PIECE && !cut.take(kmer_start, &mut j, skip, out) {
-                    return;
-                }
+            let mut pair = |q_off_1: u32| {
                 if q_off_1 != 0 {
+                    if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
+                        return;
+                    }
                     seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
                 }
-            });
+            };
+            if !PIECE {
+                two_stage.for_each_hit(index as u64, &mut pair);
+            } else if !second {
+                two_stage.for_each_hit_from(index as u64, node, &mut pair);
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1428-1444
             // ```c
             //     Int4 q_off = lookup->hashtable2[index];
@@ -290,12 +296,18 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
             //     }
             // ```
             if let Some(index2) = index2 {
-                two_stage.for_each_hit2(u64::from(index2), |q_off_1| {
-                    if PIECE && !cut.take(kmer_start, &mut j, skip, out) {
+                let mut pair2 = |q_off_1: u32| {
+                    if PIECE && !cut.take(kmer_start, q_off_1, true, out) {
                         return;
                     }
                     seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
-                });
+                };
+                if PIECE {
+                    let node2 = if second { node } else { 0 };
+                    two_stage.for_each_hit2_from(u64::from(index2), node2, &mut pair2);
+                } else {
+                    two_stage.for_each_hit2(u64::from(index2), &mut pair2);
+                }
             }
             !PIECE || cut.go()
         },
@@ -323,15 +335,15 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     disc: &DiscTemplates,
     csr: &Csr,
     job: &StripJob,
-    start: usize,
-    skip: u32,
+    from: Resume,
     out: &mut O,
 ) -> Option<Resume> {
     debug_assert!(!disc.two_templates);
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
-    let cut = Cut::new(skip);
+    let cut = Cut::new(&from);
+    let start = from.s;
     let mut emit = |(s_off, index): (i32, u32)| {
         if !two_stage.has_hits(u64::from(index)) {
             return;
@@ -1117,8 +1129,7 @@ fn seed_stage_lists<const LEAN: bool, const MEMO: bool>(
     // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
     let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
         let job = &jobs[i];
-        let (start, skip) = from.map_or((job.start, 0), |r| (r.s, r.skip));
-        scan_strip_disc_from::<_, true>(x, disc, job, start, skip, out)
+        scan_strip_disc_from::<_, true>(x, disc, job, from.unwrap_or(Resume::at(job.start)), out)
     };
     let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
         let part::PartState {

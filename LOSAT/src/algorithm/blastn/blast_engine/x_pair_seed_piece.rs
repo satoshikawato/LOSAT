@@ -42,7 +42,7 @@
 //! seeds of the piece are a chain of blocks in scan order. The arenas are a pool of
 //! `PIECES_PER_THREAD * threads + RESERVED` slots, allocated at their size once and kept in the
 //! subject scratch, so a stage holds at most that many pieces whatever the subject, the query or
-//! the density of the seeds; the strip the slowest partition is in (the lowest strip not done)
+//! the density of the seeds; the strip the slowest partition is in (the lowest strip a partition has not folded all of)
 //! alone may take the last `RESERVED` slots, so that it can always go on (no wait for a piece
 //! nobody frees). A participant produces one piece per turn and parks the rest of the strip, so
 //! that a helper never holds a strip half-scanned (it can leave a stalled stage at any turn).
@@ -67,12 +67,12 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Mutex, OnceLock, PoisonError, RwLock};
 
 /// No NCBI counterpart: reads LOSAT_X_SEEDPIECE once (a strict-set switch that carries a number:
-/// on unless it is `0`, with pieces of the number of seeds given from 2 to 2^21, else of
+/// on unless it is `0`, with pieces of the number of seeds given from 2 to 2^17, else of
 /// `PIECE_SEEDS`): the seeds of a piece, `None` when the switch is off. It does not change any
 /// value NCBI computes.
 pub(super) fn seeds() -> Option<usize> {
     static N: OnceLock<Option<usize>> = OnceLock::new();
-    *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_SEEDPIECE", 2..=1 << 21, PIECE_SEEDS))
+    *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_SEEDPIECE", 2..=1 << 17, PIECE_SEEDS))
 }
 
 /// The seeds of one piece at most (NCBI's `OFFSET_ARRAY_SIZE`, 4,096 pairs per batch, times 4).
@@ -81,7 +81,7 @@ pub(super) const PIECE_SEEDS: usize = 16_384;
 const BLOCK: usize = 64;
 /// The pieces of a stage per thread of the stage (the pool of arenas).
 pub(super) const PIECES_PER_THREAD: usize = 3;
-/// The slots of the pool only the lowest strip not done may take.
+/// The slots of the pool only the strip the slowest partition is in may take.
 pub(super) const RESERVED: usize = 2;
 /// No block (the end of a chain, or a partition without a block yet).
 const NONE: u16 = u16::MAX;
@@ -315,7 +315,9 @@ where
         .map(|st| Mutex::new(OwnLines(st)))
         .collect();
     let mut arenas = std::mem::take(&mut scratch.arenas);
-    arenas.resize_with(slots_n.max(arenas.len()), Arena::default);
+    // (a stage of fewer threads than the one before keeps only its own slots' arenas)
+    arenas.truncate(slots_n);
+    arenas.resize_with(slots_n, Arena::default);
     let pool: Vec<RwLock<Arena>> = arenas.into_iter().map(RwLock::new).collect();
     let sched = Mutex::new(Sched {
         parked: Vec::new(),
@@ -328,7 +330,7 @@ where
     let parked_n = AtomicUsize::new(0);
     let free_n = AtomicUsize::new(slots_n);
     let cursor_hint = AtomicUsize::new(0);
-    let low_parked = AtomicUsize::new(n);
+    let low_parked = AtomicUsize::new(usize::MAX);
     let lanes: Vec<OwnLines<AtomicU64>> = (0..parts).map(|_| OwnLines(AtomicU64::new(0))).collect();
     let homes: Vec<AtomicBool> = (0..parts).map(|_| AtomicBool::new(false)).collect();
     let strips: Vec<StripState> = (0..n).map(|_| StripState::default()).collect();

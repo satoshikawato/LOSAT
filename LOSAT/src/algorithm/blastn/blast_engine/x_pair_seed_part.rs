@@ -502,7 +502,8 @@ pub(super) struct PartStats {
     /// the slowest partition, any partition once every strip was handed out)
     pub(super) runs: u64,
     pub(super) away: u64,
-    /// the partitions of strips of the stage (strips x partitions)
+    /// the partitions of strips of the stage (strips x partitions; EXPERIMENT LOSAT_X_SEEDPIECE:
+    /// the pieces made, empty ones included, x partitions)
     pub(super) units: u64,
 }
 
@@ -1798,7 +1799,8 @@ pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
 /// on: the partition count of the stages, the number of partitioned stages merged, the time in
 /// merges and the number of helpers that left a stalled stage; with LOSAT_X_PAIRPARHOME also the
 /// runs folded and the partitions of strips folded away from home (`PartStats::runs`, `away`), and
-/// the partitions of strips of the stages (`units`: strips x partitions). Without the
+/// the partitions of strips of the stages (`units`: strips x partitions; with LOSAT_X_SEEDPIECE pieces x
+/// partitions). Without the
 /// switch the lines are those of the strips paths alone.
 pub(super) fn timing_fields(kind: usize) -> String {
     if !switch_on() {
@@ -2264,10 +2266,7 @@ mod tests {
                 let start = cuts[i] + from.map_or(0, |r| r.s);
                 for k in start..cuts[i + 1] {
                     if out.room() == 0 {
-                        return Some(Resume {
-                            s: k - cuts[i],
-                            skip: 0,
-                        });
+                        return Some(Resume::at(k - cuts[i]));
                     }
                     out.push(seed_of(first + k, &ops[k]));
                 }
@@ -2853,10 +2852,7 @@ mod tests {
                             let start = cuts[i] + from.map_or(0, |r| r.s);
                             for k in start..cuts[i + 1] {
                                 if out.room() == 0 {
-                                    return Some(Resume {
-                                        s: k - cuts[i],
-                                        skip: 0,
-                                    });
+                                    return Some(Resume::at(k - cuts[i]));
                                 }
                                 out.push(seed_of(k, &ops[k]));
                             }

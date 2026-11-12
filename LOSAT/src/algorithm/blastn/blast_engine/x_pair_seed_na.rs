@@ -195,22 +195,21 @@ fn in_scope(x: &NaInputs<'_>) -> bool {
 /// a word in the table's order, `q_off_1 == 0` skipped as the reference skips it; each pair
 /// becomes a `Seed` with the context of its query offset.
 fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
-    scan_strip_na_from::<O, false>(x, job, job.start, 0, out);
+    scan_strip_na_from::<O, false>(x, job, Resume::at(job.start), out);
 }
 
-/// `scan_strip_na` from the word at `start` (`job.start`, or where a piece stopped), passing over
-/// that word's first `skip` pairs. EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at
+/// `scan_strip_na` from the word at `from.s` (`job.start`, or where a piece stopped), passing over
+/// that word's first `from.skip` pairs. EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at
 /// the first pair `out` has no room for (`Cut`) and returns where it goes on; `None` when the
 /// strip is done.
 fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
     x: &NaInputs<'_>,
     job: &StripJob,
-    start: usize,
-    skip: u32,
+    from: Resume,
     out: &mut O,
 ) -> Option<Resume> {
     let s_range = job.s_range;
-    let cut = Cut::new(skip);
+    let cut = Cut::new(&from);
     let pair = |q_off_1: u32, kmer_start: usize, out: &mut O| {
         if q_off_1 == 0 {
             return;
@@ -247,7 +246,7 @@ fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
         x.word_length,
         x.scan_step,
         x.subject_masked,
-        start,
+        from.s,
         job.end,
         &mut on_kmer,
     );
@@ -693,8 +692,7 @@ fn seed_stage_of(
             // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
             let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
                 let job = &jobs[i];
-                let (start, skip) = from.map_or((job.start, 0), |r| (r.s, r.skip));
-                scan_strip_na_from::<_, true>(x, job, start, skip, out)
+                scan_strip_na_from::<_, true>(x, job, from.unwrap_or(Resume::at(job.start)), out)
             };
             let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
                 let part::PartState {

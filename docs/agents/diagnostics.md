@@ -4078,7 +4078,7 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_SEEDPIECE=1` (BLASTN `-task dc-megablast`, `blastn`, `megablast` and `blastn-short`: the partitioned stages
   of `LOSAT_X_DCSEEDLEAN` and `LOSAT_X_BNSEEDLISTS` with `LOSAT_X_PAIRPARHOME`, two threads or more, one unmasked
   subject, a query block above 8,000 letters; memory; in the strict set from the pull request that added it,
-  2026-11-12: `LOSAT_X_SEEDPIECE=0` turns it off; a number from 2 to 2,097,152 sets the seeds of a piece, any other
+  2026-11-12: `LOSAT_X_SEEDPIECE=0` turns it off; a number from 2 to 131,072 sets the seeds of a piece, any other
   value or none the built-in 16,384) holds a strip's seeds in pieces of a fixed size instead of in one list per
   partition and strip (`x_pair_seed_piece.rs`, exactness argument in its module comment). NCBI scans into an offset
   array of 4,096 + `longest_chain` pairs, stops when it is full and extends those pairs before the scan goes on
@@ -4087,12 +4087,16 @@ Scheduling (each value computed by one thread with the original function; order 
   (on dc-megablast's 5 Mb chunks at 16 threads about 80 MiB, nearly all capacity left by main-diagonal runs). Now:
   - the scan kernels' callbacks return whether the scan goes on (the reference callers always `true`); a strip's scan
     (`scan_strip_from`, `scan_strip_disc_from`, `scan_strip_na_from` with `PIECE`) compares each word's run with the
-    piece's room and stops at the first pair it has no room for, inside a run as well (`Cut`), returning the word's
-    offset and the pairs of that word it read (`Resume`); the words still in the CSR's prefetch ring are dropped and
-    the next piece scans again from that word, passing over the pairs it read;
-  - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (P partitions), each partition's
-    seeds a chain of blocks in scan order; the arenas are a pool of 3 T + 2 (T threads), allocated at their size once
-    and kept in the subject scratch, the last two for the strip the slowest partition is in alone;
+    piece's room and stops at the first pair it has no room for, inside a run or a chain as well (`Cut`), returning
+    the word's offset and where in the word it stopped (`Resume`: the pairs of a CSR cell's or the direct table's run
+    it read, or the element of the first or second template's chain); the words still in the CSR's prefetch ring are
+    dropped, and the next piece scans again from that word, going on in its run or chain from there
+    (`for_each_hit_from`, `for_each_hit2_from`), so no pair is read twice;
+  - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (20 bytes each; P partitions),
+    each partition's seeds a chain of blocks in scan order; the arenas are a pool of 3 T + 2 (T threads), allocated at
+    their size once and kept in the subject scratch, the last two for the strip the slowest partition is in alone. So
+    the stage holds at most (3 T + 2) x (16,384 + 64 P) x 20 bytes whatever the subject, the query or the density of
+    the seeds: 17 MB at 16 threads, 79 MB at 64;
   - a participant makes one piece per turn and parks the rest of its strip (any participant goes on with it), so
     no helper holds a strip half-scanned; a partition folds the pieces of a strip in order, then the next strip, and
     the positions count on across a strip's pieces, so the keys, the hits' order and the appended cells' numbers are

@@ -186,30 +186,49 @@ trait SeedOut {
 }
 
 /// EXPERIMENT (LOSAT_X_SEEDPIECE): where the scan of a strip goes on after a seed piece: the
-/// subject offset of the word (`kmer_start`) of the first pair the piece had no room for, and how
-/// many pairs of that word the scan read before it (every pair the reference reads in the word,
-/// in its order, whether `seed_of_pair` keeps it or not). A scan started again from that word's
-/// offset gives the same words from that one on (NCBI's scan resumes at `scan_range[0]`), and its
-/// first word with pairs is that word.
+/// subject offset of the word (`kmer_start`) of the first pair the piece had no room for, and
+/// where that pair is in the word: for a word whose pairs are a run (a CSR cell, the direct
+/// table's list), how many pairs of the run the scan read before it (every pair the reference
+/// reads, whether `seed_of_pair` keeps it or not); for a word whose pairs are chains, the pair's
+/// element of its chain (`node`, its `q_off`) and whether that is the second template's chain. A
+/// scan started again from that word's offset gives the same words from that one on (NCBI's scan
+/// resumes at `scan_range[0]`), and its first word with pairs is that word.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Resume {
     pub(super) s: usize,
     pub(super) skip: u32,
+    pub(super) node: u32,
+    pub(super) second: bool,
 }
 
-/// EXPERIMENT (LOSAT_X_SEEDPIECE): the cut of one piece's scan: the pairs of the first word to
-/// pass over (`Resume::skip` of a resumed strip) and where the scan stopped (`None` while it goes
-/// on). Cells, so that the closures of a scan (the word's, the ring's `emit`) share it.
+impl Resume {
+    /// A strip's scan from its start.
+    pub(super) fn at(s: usize) -> Self {
+        Resume {
+            s,
+            ..Resume::default()
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_SEEDPIECE): the cut of one piece's scan: where the first word goes on
+/// (`Resume`: the pairs of its run to pass over, or the element of its chains to start from) and
+/// where the scan stopped (`None` while it goes on). Cells, so that the closures of a scan (the
+/// word's, the ring's `emit`) share it.
 #[derive(Default)]
 struct Cut {
     skip: std::cell::Cell<u32>,
+    node: std::cell::Cell<u32>,
+    second: bool,
     stop: std::cell::Cell<Option<Resume>>,
 }
 
 impl Cut {
-    fn new(skip: u32) -> Self {
+    fn new(from: &Resume) -> Self {
         Cut {
-            skip: std::cell::Cell::new(skip),
+            skip: std::cell::Cell::new(from.skip),
+            node: std::cell::Cell::new(from.node),
+            second: from.second,
             stop: std::cell::Cell::new(None),
         }
     }
@@ -259,8 +278,8 @@ impl Cut {
         for (j, &q) in run.iter().enumerate() {
             if out.room() == 0 {
                 self.stop.set(Some(Resume {
-                    s,
                     skip: (skip + j) as u32,
+                    ..Resume::at(s)
                 }));
                 out.close();
                 return;
@@ -269,21 +288,33 @@ impl Cut {
         }
     }
 
-    /// For a scan that walks a word's pairs one by one (a chain): whether pair `j` (its index in
-    /// the word; `skip` the word's pairs to pass over) of the word at `s` goes to `seed_of_pair`.
-    /// The first pair `out` has no room for stops the cut.
+    /// For a word whose pairs are chains: where the first word's walk of its chain starts (the
+    /// element the piece before stopped at, or 0: the head), and whether its first template's
+    /// chain is passed over (the piece before stopped in the second's); 0 and `false` for every
+    /// later word.
     #[inline(always)]
-    fn take<O: SeedOut>(&self, s: usize, j: &mut u32, skip: u32, out: &mut O) -> bool {
-        if *j < skip || !self.go() {
-            *j += 1;
+    fn chain_start(&self) -> (u32, bool) {
+        let node = self.node.replace(0);
+        (node, node != 0 && self.second)
+    }
+
+    /// For a word whose pairs are chains: whether the pair at element `q_off_1` of the word at
+    /// `s` (of the second template's chain where `second`) goes to `seed_of_pair`. The first pair
+    /// `out` has no room for stops the cut there.
+    #[inline(always)]
+    fn take<O: SeedOut>(&self, s: usize, q_off_1: u32, second: bool, out: &mut O) -> bool {
+        if !self.go() {
             return false;
         }
         if out.room() == 0 {
-            self.stop.set(Some(Resume { s, skip: *j }));
+            self.stop.set(Some(Resume {
+                node: q_off_1,
+                second,
+                ..Resume::at(s)
+            }));
             out.close();
             return false;
         }
-        *j += 1;
         true
     }
 }
@@ -477,18 +508,17 @@ fn plan_strips(
 /// lookup width and step (unmasked subject), from `job.start` to `job.end`; every lookup
 /// chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
 fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
-    scan_strip_from::<O, false>(x, job, job.start, 0, out);
+    scan_strip_from::<O, false>(x, job, Resume::at(job.start), out);
 }
 
-/// `scan_strip` from the word at `start` (a word of the strip's scan: `job.start`, or where a
-/// piece stopped), passing over that word's first `skip` pairs. EXPERIMENT (LOSAT_X_SEEDPIECE):
+/// `scan_strip` from the word at `from.s` (a word of the strip's scan: `job.start`, or where a
+/// piece stopped), that word from where `from` says (`Resume`). EXPERIMENT (LOSAT_X_SEEDPIECE):
 /// with `PIECE` the scan stops at the first pair `out` has no room for (`Cut`) and returns where
 /// it goes on; `None` when the strip is done.
 fn scan_strip_from<O: SeedOut, const PIECE: bool>(
     x: &Inputs<'_>,
     job: &StripJob,
-    start: usize,
-    skip: u32,
+    from: Resume,
     out: &mut O,
 ) -> Option<Resume> {
     // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
@@ -497,10 +527,10 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
         // EXPERIMENT (LOSAT_X_BNPVONCE): one presence test per word on a head that fits the cache.
         return match csr.x_packed() {
             Some(packed) if super::x_bn_pv_once(&packed) => {
-                scan_strip_csr::<O, _, false, PIECE>(x, &packed, job, start, skip, out)
+                scan_strip_csr::<O, _, false, PIECE>(x, &packed, job, from, out)
             }
-            Some(packed) => scan_strip_csr::<O, _, true, PIECE>(x, &packed, job, start, skip, out),
-            None => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, start, skip, out),
+            Some(packed) => scan_strip_csr::<O, _, true, PIECE>(x, &packed, job, from, out),
+            None => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, from, out),
         };
     }
     let two_stage = x.two_stage;
@@ -510,23 +540,29 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
     let scan_step = x.scan_step;
     let s_range = job.s_range;
     let end = job.end;
-    let cut = Cut::new(skip);
+    let cut = Cut::new(&from);
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
-        let (mut j, skip) = (0u32, if PIECE { cut.skip.replace(0) } else { 0 });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
         // ```
-        two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
-            if PIECE && !cut.take(kmer_start, &mut j, skip, out) {
-                return;
-            }
+        let mut pair = |q_off_1: u32| {
             if q_off_1 != 0 {
+                if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
+                    return;
+                }
                 seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
             }
-        });
-        !PIECE || cut.go()
+        };
+        if PIECE {
+            let (node, _) = cut.chain_start();
+            two_stage.for_each_hit_from(current_lut_kmer, node, &mut pair);
+            cut.go()
+        } else {
+            two_stage.for_each_hit(current_lut_kmer, &mut pair);
+            true
+        }
     };
     scan_kernel(
         packed,
@@ -534,7 +570,7 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
         lut_word_length,
         scan_step,
         x.subject_masked,
-        start,
+        from.s,
         end,
         &mut on_kmer,
     );
@@ -557,14 +593,13 @@ fn scan_strip_csr<
     x: &Inputs<'_>,
     csr: &H,
     job: &StripJob,
-    start: usize,
-    skip: u32,
+    from: Resume,
     out: &mut O,
 ) -> Option<Resume> {
     use crate::algorithm::blastn::lookup::x_dc_csr::XRing;
     let two_stage = x.two_stage;
     let s_range = job.s_range;
-    let cut = Cut::new(skip);
+    let cut = Cut::new(&from);
     let mut emit = |(kmer_start, index): (usize, u64)| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
@@ -595,7 +630,7 @@ fn scan_strip_csr<
         two_stage.lut_word_length(),
         x.scan_step,
         x.subject_masked,
-        start,
+        from.s,
         job.end,
         &mut on_kmer,
     );
@@ -1594,8 +1629,7 @@ fn seed_stage_of(
             // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
             let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
                 let job = &jobs[i];
-                let (start, skip) = from.map_or((job.start, 0), |r| (r.s, r.skip));
-                scan_strip_from::<_, true>(x, job, start, skip, out)
+                scan_strip_from::<_, true>(x, job, from.unwrap_or(Resume::at(job.start)), out)
             };
             let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
                 let part::PartState {

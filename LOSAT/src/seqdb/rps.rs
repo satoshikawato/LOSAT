@@ -278,6 +278,17 @@ pub(crate) struct RpsVolumeFiles {
 }
 
 impl RpsVolumeFiles {
+    /// rpsblast's `open_for` with an `.aux` without a token as a refusal (the tests' files).
+    #[cfg(test)]
+    pub(crate) fn open(base: &Path, lengths: &[u32]) -> Result<Self, RpsOpenError> {
+        Self::open_for(base, lengths, "RPSBLAST").map_err(|fault| match fault {
+            RpsVolumeFault::Files(error) => error,
+            RpsVolumeFault::NoMatrix => RpsOpenError::Refused(
+                "a profile database whose .aux file is not NCBI's text (matrix, gap costs, statistics, scale, then pairs of a length and a K) is not supported by LOSAT's RPSBLAST".to_string(),
+            ),
+        })
+    }
+
     /// Opens the RPS files of the volume `base` (its path without extension) whose sequence part
     /// holds the profiles' consensus sequences of `lengths` letters (by local ordinal id).
     ///
@@ -303,17 +314,8 @@ impl RpsVolumeFiles {
     ///     }
     /// ```
     /// (The `.rps` file's check, rps_aux.cpp:338-348, is the same.)
-    pub(crate) fn open(base: &Path, lengths: &[u32]) -> Result<Self, RpsOpenError> {
-        Self::open_for(base, lengths, "RPSBLAST").map_err(|fault| match fault {
-            RpsVolumeFault::Files(error) => error,
-            RpsVolumeFault::NoMatrix => RpsOpenError::Refused(
-                "a profile database whose .aux file is not NCBI's text (matrix, gap costs, statistics, scale, then pairs of a length and a K) is not supported by LOSAT's RPSBLAST".to_string(),
-            ),
-        })
-    }
-
-    /// `open` for the program `program` (the name in LOSAT's refusals), which tells an `.aux`
-    /// without a token apart (`RpsVolumeFault::NoMatrix`) from the other faults of the files.
+    /// `program` is the name in LOSAT's refusals; an `.aux` without a token is
+    /// `RpsVolumeFault::NoMatrix`, NCBI's engine error of each query (review A of PS12a, N2).
     pub(crate) fn open_for(
         base: &Path,
         lengths: &[u32],

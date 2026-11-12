@@ -70,29 +70,98 @@ pub struct RpsSearch {
     pub(crate) sum_stats: bool,
 }
 
-/// One user query as the search reads it.
+/// The contexts of a translated query.
+pub(crate) const NUM_FRAMES: usize = 6;
+
+/// One user query as the search reads it: its contexts, one for a protein query (rpsblast) and
+/// the six frames of a nucleotide query (rpstblastn), which the reversed search scans as its
+/// subjects.
 pub(crate) struct RpsQuery<'a> {
-    /// The query's letters between two sentinels (`QueryContext::aa_seq`).
-    pub(crate) aa_seq: &'a [u8],
-    /// Whether its Karlin-Altschul parameters exist (an invalid query gets no HSP: its cutoffs
-    /// are `INT4_MAX`, blast_parameters.c:916-919).
-    pub(crate) valid: bool,
-    /// `kbp_std`: the query's composition with BLOSUM62.
-    pub(crate) kbp_std: KarlinParams,
-    /// The length of the first query of the query's batch (`-qcov_hsp_perc`).
-    pub(crate) first_query_length: usize,
+    /// The contexts in NCBI's order (frame 0; or +1, +2, +3, -1, -2, -3).
+    pub(crate) frames: Vec<RpsFrame<'a>>,
     /// The ungapped block of the first valid query of the query's batch: `kbp_psi[0]` of the
     /// score block that the composition-based redo copies, which stays where the profile has no
     /// score frequencies.
     pub(crate) batch_kbp: KarlinParams,
-    /// The query's letters as read (between two sentinels) where the searched ones differ (SEG,
-    /// lower-case masks, `Blast_MaskUnsupportedAA`): the reports' identities count on them
-    /// (`traceback::formatter_identities`).
+}
+
+/// One context of a user query: a protein query's letters (frame 0) or one frame of a
+/// nucleotide query (NCBI's `subject->frame`, `subject->sequence` and `subject->length` of the
+/// frame loop).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-813
+/// ```c
+///     for (context=first_context; context<=last_context; context++) {
+///         BlastHSPList* hsp_list_for_chunks = NULL;
+///
+///         if (kTranslatedSubject) {
+///             Uint4 i;
+///             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+///             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+///             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+///             if (subject->length > 0) stat_length = subject->length;
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RpsFrame<'a> {
+    /// 0 for a protein query; +1, +2, +3, -1, -2 or -3.
+    pub(crate) frame: i8,
+    /// The letters between two sentinels as searched (SEG, lower-case masks,
+    /// `Blast_MaskUnsupportedAA`); a frame without letters is two sentinels.
+    pub(crate) aa_seq: &'a [u8],
+    /// The letters as read (between two sentinels) where the searched ones differ: the reports'
+    /// identities count on them (`traceback::formatter_identities`).
     pub(crate) aa_seq_nomask: Option<&'a [u8]>,
-    /// `query_info->contexts[0].eff_searchsp` of the query in this volume (NCBI's `Int8`): what
-    /// the e-values and the hit cutoff read without the Gumbel block (`EvalueStats`), and the
-    /// Smith-Waterman redo with it (series PR, item PS11c-3). 0 for an invalid query.
+    /// Whether its Karlin-Altschul parameters exist (an invalid context gets no HSP: its cutoffs
+    /// are `INT4_MAX`, blast_parameters.c:916-919).
+    pub(crate) valid: bool,
+    /// `kbp_std[context]`: the context's composition with BLOSUM62.
+    pub(crate) kbp_std: KarlinParams,
+    /// `query_info->contexts[context].eff_searchsp` in this volume (NCBI's `Int8`): what the
+    /// e-values and the hit cutoff read without the Gumbel block (`EvalueStats`), and the
+    /// Smith-Waterman redo with it (series PR, item PS11c-3). 0 for an invalid context.
     pub(crate) search_space: i64,
+    /// The length of the first query of the query's batch at this context (`-qcov_hsp_perc`).
+    pub(crate) first_query_length: usize,
+}
+
+impl RpsFrame<'_> {
+    /// The letters without the sentinels (`subject->length`).
+    pub(crate) fn length(&self) -> usize {
+        self.aa_seq.len().saturating_sub(2)
+    }
+
+    /// What the context's e-values read (`EvalueStats`): the Gumbel block, if any, and the
+    /// context's search space.
+    pub(super) fn stats<'g>(&self, gumbel: Option<&'g BlastGumbelBlk>) -> EvalueStats<'g> {
+        EvalueStats::new(gumbel, self.search_space)
+    }
+}
+
+impl RpsQuery<'_> {
+    /// The context of `frame` (`BLAST_FrameToContext`; 0 for frame 0).
+    pub(crate) fn context(&self, frame: i32) -> &RpsFrame<'_> {
+        &self.frames[crate::core::blast_util::frame_to_context(frame)]
+    }
+
+    /// The length of the query's translation buffer, its frames with a sentinel between each two
+    /// (NCBI's `one_query->length`, `Blast_GetOneQueryStructs`; a protein query's length).
+    pub(crate) fn translation_length(&self) -> usize {
+        self.frames.iter().map(RpsFrame::length).sum::<usize>() + self.frames.len() - 1
+    }
+
+    /// `stat_length` of the preliminary e-values: the length of the last context that has
+    /// letters (a protein query's length; frame -3 with both strands, +3 with `-strand plus`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:813 (quoted at
+    /// `RpsFrame`)
+    pub(crate) fn stat_length(&self) -> usize {
+        self.frames
+            .iter()
+            .rev()
+            .map(RpsFrame::length)
+            .find(|&length| length > 0)
+            .unwrap_or(0)
+    }
 }
 
 /// What the search of every query of a volume reads besides the volume.
@@ -219,15 +288,9 @@ struct RpsCutoffs {
 }
 
 impl RpsRun<'_> {
-    /// What the query's e-values and hit cutoff read in this volume: the Gumbel block, if any,
-    /// and the query's effective search space.
-    fn stats(&self, query: &RpsQuery<'_>) -> EvalueStats<'_> {
-        EvalueStats::new(self.gumbel, query.search_space)
-    }
-
     /// The query's cutoffs; the refusal where the ungapped X-drop (`-xdrop_ungap`) or a scaled
     /// cutoff leaves `i32`.
-    fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Result<RpsCutoffs> {
+    fn cutoffs(&self, query: &RpsFrame<'_>, frames: usize, scale: f64) -> Result<RpsCutoffs> {
         let int_scale = scale as i32;
         let x_dropoff = ungapped_x_dropoff(self.x_drop_ungapped_bits, query.kbp_std.lambda, scale)
             .ok_or_else(|| {
@@ -238,8 +301,17 @@ impl RpsRun<'_> {
                     scale,
                 )
             })?;
-        let hit_cutoff = self
-            .stats(query)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-931
+        // ```c
+        //          searchsp = query_info->contexts[context].eff_searchsp;
+        //
+        //          /* translated RPS searches must scale the search space down */
+        //          /** @todo FIXME why only scale down rpstblastn search space?  */
+        //          if (program_number == eBlastTypeRpsTblastn)
+        //             searchsp /= NUM_FRAMES;
+        // ```
+        // (`frames` is 1 for rpsblast, `NUM_FRAMES` for rpstblastn.)
+        let hit_cutoff = EvalueStats::new(self.gumbel, query.search_space / frames as i64)
             .hit_cutoff(
                 self.prelim_evalue,
                 &self.gapped,
@@ -394,15 +466,21 @@ impl RpsRun<'_> {
             .queries
             .iter()
             .map(|query| {
-                if query.valid {
-                    self.cutoffs(query, scale)
-                } else {
-                    Ok(RpsCutoffs {
-                        x_dropoff: 0,
-                        word_cutoff: 0,
-                        hit_cutoff: 0,
+                query
+                    .frames
+                    .iter()
+                    .map(|frame| {
+                        if frame.valid {
+                            self.cutoffs(frame, query.frames.len(), scale)
+                        } else {
+                            Ok(RpsCutoffs {
+                                x_dropoff: 0,
+                                word_cutoff: 0,
+                                hit_cutoff: 0,
+                            })
+                        }
                     })
-                }
+                    .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1862-1895
@@ -468,56 +546,60 @@ impl RpsRun<'_> {
                 hit_list: None,
                 k_mark: None,
             };
-            if !query.valid {
-                return Ok(none);
+            // The contexts one after the other (NCBI's frame loop), each scanned as a subject
+            // with its own cutoffs; their HSPs combine in the context order (`search_frame`).
+            let mut searched = None;
+            for (frame, cutoffs) in query.frames.iter().zip(&cutoffs[q_idx]) {
+                if !frame.valid {
+                    continue;
+                }
+                let prelim = RpsPrelim {
+                    word: RpsWordParams {
+                        rows: RpsRows { rows },
+                        table,
+                        window: self.window,
+                        cutoff: cutoffs.word_cutoff,
+                        dropoff: cutoffs.x_dropoff,
+                    },
+                    rows,
+                    offsets,
+                    gap_open,
+                    gap_extend,
+                    x_drop_gapped,
+                    hit_cutoff: cutoffs.hit_cutoff,
+                    karlin: prelim_karlin,
+                    stats: frame.stats(self.gumbel),
+                    prelim_evalue: self.prelim_evalue,
+                    prelim_hitlist_size: self.prelim_hitlist_size,
+                    query_index: q_idx as u32,
+                };
+                prelim.search_frame(&mut scratch.0, &frame.aa_seq[1..], frame.frame)?;
+                searched = Some(prelim);
             }
-            let cutoffs = &cutoffs[q_idx];
-            let prelim = RpsPrelim {
-                word: RpsWordParams {
-                    rows: RpsRows { rows },
-                    table,
-                    window: self.window,
-                    cutoff: cutoffs.word_cutoff,
-                    dropoff: cutoffs.x_dropoff,
-                },
-                rows,
-                offsets,
-                gap_open,
-                gap_extend,
-                x_drop_gapped,
-                hit_cutoff: cutoffs.hit_cutoff,
-                karlin: prelim_karlin,
-                stats: self.stats(query),
-                prelim_evalue: self.prelim_evalue,
-                prelim_hitlist_size: self.prelim_hitlist_size,
-                query_index: q_idx as u32,
+            let Some(prelim) = searched else {
+                return Ok(none);
             };
-            let subject_seq = &query.aa_seq[1..];
-            let Some(mut lists) = prelim.search_query(&mut scratch.0, subject_seq)? else {
+            let Some(mut lists) = prelim.finish(&mut scratch.0, query.stat_length()) else {
                 return Ok(none);
             };
             if cbs_close {
                 lists.cbs_close_trim(self.hitlist_size);
             }
-            let letters = &query.aa_seq[1..query.aa_seq.len() - 1];
-            let mut traced = traceback.trace_query(
-                lists,
-                letters,
-                q_idx as u32,
-                &query.batch_kbp,
-                self.stats(query),
-                &mut scratch.1,
-            )?;
-            if let (Some(hit_list), Some(nomask)) = (traced.hit_list.as_mut(), query.aa_seq_nomask)
-            {
-                formatter_identities(hit_list, &nomask[1..nomask.len() - 1], consensus, offsets);
-            }
+            let mut traced =
+                traceback.trace_query(lists, query, q_idx as u32, self.gumbel, &mut scratch.1)?;
             if let Some(hit_list) = traced.hit_list.as_mut() {
+                if query
+                    .frames
+                    .iter()
+                    .any(|frame| frame.aa_seq_nomask.is_some())
+                {
+                    formatter_identities(hit_list, query, consensus, offsets);
+                }
                 finish_volume_list(
                     hit_list,
                     self.options.max_hsps_per_subject,
                     self.options.query_cov_hsp_perc,
-                    query.first_query_length,
+                    query,
                     self.hitlist_size,
                 );
             }
@@ -622,10 +704,12 @@ fn finish_volume_list(
     hit_list: &mut crate::algorithm::blastp::hsp::BlastpHitList,
     max_hsps: usize,
     query_cov_hsp_perc: f64,
-    first_query_length: usize,
+    query: &RpsQuery<'_>,
     hitlist_size: usize,
 ) {
-    filter_results(hit_list, max_hsps, query_cov_hsp_perc, first_query_length);
+    filter_results(hit_list, max_hsps, query_cov_hsp_perc, |frame| {
+        query.context(frame).first_query_length
+    });
     hit_list.sort_by_evalue();
     hit_list.prune_by_size(hitlist_size);
 }
@@ -709,26 +793,24 @@ mod tests {
 
     /// A valid query of `len` letters (between two sentinels) with BLOSUM62's ungapped block.
     fn cutoff_query(letters: &[u8], search_space: i64) -> RpsQuery<'_> {
+        let kbp = KarlinParams {
+            lambda: 0.3176,
+            k: 0.134,
+            h: 0.4012,
+            alpha: 0.0,
+            beta: 0.0,
+        };
         RpsQuery {
-            aa_seq: letters,
-            valid: true,
-            kbp_std: KarlinParams {
-                lambda: 0.3176,
-                k: 0.134,
-                h: 0.4012,
-                alpha: 0.0,
-                beta: 0.0,
-            },
-            first_query_length: letters.len() - 2,
-            batch_kbp: KarlinParams {
-                lambda: 0.3176,
-                k: 0.134,
-                h: 0.4012,
-                alpha: 0.0,
-                beta: 0.0,
-            },
-            aa_seq_nomask: None,
-            search_space,
+            frames: vec![RpsFrame {
+                frame: 0,
+                aa_seq: letters,
+                aa_seq_nomask: None,
+                valid: true,
+                kbp_std: kbp,
+                search_space,
+                first_query_length: letters.len() - 2,
+            }],
+            batch_kbp: kbp,
         }
     }
 
@@ -746,23 +828,29 @@ mod tests {
         let mut run = x_drop_run(&gumbel, &options, 15.0, 25.0);
         run.cutoff_subject_length = 250;
         let query = cutoff_query(&letters, 1_000_000);
-        let with_block = run.cutoffs(&query, 100.0).unwrap();
+        let with_block = run.cutoffs(&query.frames[0], 1, 100.0).unwrap();
         assert_eq!(
             with_block.hit_cutoff,
             crate::stats::blast_spouge_etos(10.0, &run.gapped, &gumbel, 300, 250) * 100
         );
         // Without the block: ceil(ln(K * searchsp / E) / Lambda) = ceil(ln(4100) / 0.267) = 32.
         run.gumbel = None;
-        let without = run.cutoffs(&query, 100.0).unwrap();
+        let without = run.cutoffs(&query.frames[0], 1, 100.0).unwrap();
         assert_eq!(without.hit_cutoff, 3_200);
         // The search space is the query's, not a constant.
         let other = cutoff_query(&letters, 1_000_000_000);
-        assert_eq!(run.cutoffs(&other, 100.0).unwrap().hit_cutoff, 5_800);
+        assert_eq!(
+            run.cutoffs(&other.frames[0], 1, 100.0).unwrap().hit_cutoff,
+            5_800
+        );
         // The word cutoff is the gap trigger, at most the hit cutoff (blast_parameters.c:370).
         assert!(without.word_cutoff <= without.hit_cutoff);
         // The preliminary e-value is `-evalue` as given (the stretch is the caller's).
         run.prelim_evalue = 1e300;
-        assert_eq!(run.cutoffs(&query, 100.0).unwrap().hit_cutoff, 100);
+        assert_eq!(
+            run.cutoffs(&query.frames[0], 1, 100.0).unwrap().hit_cutoff,
+            100
+        );
     }
 
     // blast_parameters.c:455-469 (quoted at `RpsRun::gapped_x_drops`): each X-drop truncated
@@ -1026,7 +1114,23 @@ mod tests {
         let offsets = [0, 6, 18];
         // The query as read (its searched letters could have had X over KTAY, a lower-case run;
         // the traceback's count of 5 below is that of the masked letters).
-        let query = enc("GMKTAYIAKQ");
+        let letters = enc("GMKTAYIAKQ");
+        // The letters as read between two sentinels (`RpsFrame::aa_seq_nomask`).
+        let mut nomask = vec![0u8];
+        nomask.extend(&letters);
+        nomask.push(0);
+        let query = RpsQuery {
+            frames: vec![RpsFrame {
+                frame: 0,
+                aa_seq: &nomask,
+                aa_seq_nomask: Some(&nomask),
+                valid: true,
+                kbp_std: KarlinParams::default(),
+                search_space: 0,
+                first_query_length: letters.len(),
+            }],
+            batch_kbp: KarlinParams::default(),
+        };
         // Query 2..10 against profile 1..11: MKTAY / MKTAY, a gap of WW in the query, IAKQ / IAKQ.
         let mut aligned = hsp(1, 1e-5, 2, 10);
         aligned.s_start = 1;
@@ -1070,6 +1174,20 @@ mod tests {
 
     #[test]
     fn a_coverage_filter_that_removes_a_best_hsp_reorders_and_cuts_the_volumes_list() {
+        // The batch's first query has 100 letters.
+        let letters = [0u8; 102];
+        let query = RpsQuery {
+            frames: vec![RpsFrame {
+                frame: 0,
+                aa_seq: &letters,
+                aa_seq_nomask: None,
+                valid: true,
+                kbp_std: KarlinParams::default(),
+                search_space: 0,
+                first_query_length: 100,
+            }],
+            batch_kbp: KarlinParams::default(),
+        };
         use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
         let list = |oid: u32, hsps: Vec<_>, best: f64| BlastpHspList {
             oid,
@@ -1099,15 +1217,15 @@ mod tests {
         assert_eq!(oids(&hit_list), vec![1, 2]);
         // 50 % coverage drops subject 1's best HSP: its best E-value becomes 1e-3, after 2's.
         let mut hit_list = build();
-        finish_volume_list(&mut hit_list, 0, 50.0, 100, 10);
+        finish_volume_list(&mut hit_list, 0, 50.0, &query, 10);
         assert_eq!(oids(&hit_list), vec![2, 1]);
         // And the list is cut to the hit list size after the sort.
         let mut hit_list = build();
-        finish_volume_list(&mut hit_list, 0, 50.0, 100, 1);
+        finish_volume_list(&mut hit_list, 0, 50.0, &query, 1);
         assert_eq!(oids(&hit_list), vec![2]);
         // Without a filter the order is the list's own.
         let mut hit_list = build();
-        finish_volume_list(&mut hit_list, 0, 0.0, 100, 10);
+        finish_volume_list(&mut hit_list, 0, 0.0, &query, 10);
         assert_eq!(oids(&hit_list), vec![1, 2]);
     }
 }

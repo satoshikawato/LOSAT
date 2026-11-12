@@ -479,6 +479,7 @@ fn parse_tblastx_args(
         archive: None,
         tabular_taxdb: None,
         first_query_ordinal: 0,
+        matrix_file: None,
     };
 
     let mut index = 0;
@@ -654,6 +655,7 @@ fn parse_blastp_args(
         inclusion_ethresh: None,
         first_query_ordinal: 0,
         psiblast_pssm: None,
+        formatting: Default::default(),
         rps: None,
     };
 

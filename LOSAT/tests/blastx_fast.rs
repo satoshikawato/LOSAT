@@ -1,6 +1,6 @@
 //! BLASTX `-task blastx-fast` on the call ABRicate makes (bin/abricate:129-141): the query comes on
 //! stdin and there is no `-query`. The expected bytes are the frozen NCBI BLAST+ 2.17.0 row
-//! `db.bxfast.abr.6` of `db_search_manifest.tsv`, the same search with `-query`.
+//! `db.bxfast.abr.6` of `db_search_manifest/blastx.tsv`, the same search with `-query`.
 
 use std::io::Write;
 use std::path::Path;

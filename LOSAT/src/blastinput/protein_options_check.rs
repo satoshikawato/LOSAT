@@ -23,13 +23,16 @@ pub struct ProteinOptionsCheck<'a> {
     pub evalue: f64,
     /// The program is psiblast (`eBlastTypePsiBlast`) rather than blastp or tblastn.
     pub psiblast: bool,
+    /// The ungapped X-drop in bits (`word_options->x_dropoff`) where the command line gives it
+    /// (rpsblast's `-xdrop_ungap`); `None`: the program's default, which is above 0.
+    pub x_dropoff: Option<f64>,
 }
 
 /// NCBI's `BLAST_ValidateOptions` for blastp and tblastn, in its order, with NCBI's
-/// messages (`CInputException`): the scoring options, the lookup table options, the hit
-/// saving options and the word size of the identity matrix. LOSAT has no greedy or
-/// Smith-Waterman extension option, `-xdrop_ungap` or cutoff score option for these
-/// programs, so NCBI's other checks cannot fail.
+/// messages (`CInputException`): the scoring options, the lookup table options, the
+/// ungapped X-drop (rpsblast's `-xdrop_ungap`), the hit saving options and the word size of the
+/// identity matrix. LOSAT has no greedy or Smith-Waterman extension option or cutoff score
+/// option for these programs, so NCBI's other checks cannot fail.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:1759-1776
 /// ```c
@@ -173,6 +176,25 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
             "Compressed alphabet lookup table requires word size 5, 6 or 7",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:608-618 (the initial
+    // word check of BLAST_ValidateOptions, after the lookup table's and before the hit saving
+    // options')
+    // ```c
+    //    /* PHI-BLAST has no ungapped extension phase.  Megablast may not have it,
+    //     but generally does now. */
+    //    if (program_number != eBlastTypeBlastn  &&
+    //        program_number != eBlastTypeMapping &&
+    //        (!Blast_ProgramIsPhiBlast(program_number)) &&
+    //        options->x_dropoff <= 0.0)
+    //    {
+    //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //                             "x_dropoff must be greater than zero");
+    //          return BLASTERR_OPTION_VALUE_INVALID;
+    //    }
+    // ```
+    if check.x_dropoff.is_some_and(|x_dropoff| x_dropoff <= 0.0) {
+        return Err(options_error("x_dropoff must be greater than zero"));
+    }
     // NCBI reference: c++/src/algo/blast/core/blast_options.c:1511-1517 (the hit saving
     // check of the hit list size, before the e-value's)
     // ```c
@@ -271,6 +293,7 @@ mod tests {
                 hitlist_size: 500,
                 evalue: 10.0,
                 psiblast,
+                x_dropoff: None,
             })
             .map_err(|error| error.to_string())
         };

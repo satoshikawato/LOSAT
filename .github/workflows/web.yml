@@ -84,6 +84,9 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    # About three times the longest of 60 passing runs (13.6 min, 2026-11-11), as for the other
+    # jobs here: a job that hangs (2026-11-11, below) gives its runner back.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: web/app
@@ -96,7 +99,10 @@ jobs:
           cache-dependency-path: web/app/package-lock.json
       - run: npm ci
       - run: npm run check
+      # Usually 40 to 100 s. On 2026-11-11 the runners could not resolve the Ubuntu archive and apt
+      # waited on every package, holding the job for hours; this step stops it instead.
       - run: npx playwright install --with-deps chromium firefox webkit
+        timeout-minutes: 10
       - run: npm run e2e
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
@@ -111,6 +117,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -126,14 +133,20 @@ jobs:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
         run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
 
-  # The engine adapter (web/adapter): build identity with the certified engine builds
-  # (plan TD-6), the index-scan property tests (TD-8), the two reactors, and V-ABI:
-  # every supported format of every program through ABI v2, compared with the native
-  # CLI of the same commit (plan §6.2).
+  # The engine adapter (web/adapter) over five jobs that run side by side: the build identity
+  # with the certified engine builds (plan TD-6) and the index-scan property tests (TD-8) here;
+  # the two reactors (`reactors`) and the native CLI of the same commit (`native`), each built
+  # once on a runner of its own and kept as an artifact; V-ABI (`v-abi`): every supported format
+  # of every program through ABI v2, compared with that CLI (plan §6.2); and V-BR
+  # (`browser-engine`). Until 2026-11 the first four were steps of one job, 27 min in series,
+  # and the browser job waited for all of them; each build is its own (the adapter tests in
+  # web/adapter/target, the reactors in their own target directory, the CLI in LOSAT/target), so
+  # nothing was shared between the steps.
   adapter:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -148,19 +161,25 @@ jobs:
       - name: Adapter tests
         working-directory: web/adapter
         run: cargo test --locked
-      - name: Native LOSAT, the V-ABI expectation
-        working-directory: LOSAT
-        run: cargo build --release --locked
+
+  reactors:
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1, wasm32-wasip1-threads
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      # build_reactors.py runs the build identity check (plan TD-6) itself before it builds.
       - name: Reactors
         run: python3 web/adapter/tools/build_reactors.py --target-dir ${{ runner.temp }}/adapter-target --output-dir ${{ runner.temp }}/reactors
-      - name: V-ABI (quick suite)
-        run: |
-          python3 web/adapter/tools/v_abi_cases.py --suite quick --out ${{ runner.temp }}/v-abi-cases.json
-          node web/adapter/tests/v_abi.js --native LOSAT/target/release/losat \
-            --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
-            --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
-            --cases ${{ runner.temp }}/v-abi-cases.json
-      - name: Keep the reactors for the browser job
+      - name: Keep the reactors for the V-ABI and browser jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: reactors
@@ -169,23 +188,79 @@ jobs:
             ${{ runner.temp }}/reactors/losat-web-serial.wasm
             ${{ runner.temp }}/reactors/losat-web-threads.wasm
           retention-days: 3
-      - name: Keep the native CLI for the browser job
+
+  native:
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+      - name: Native LOSAT, the V-ABI and V-BR expectation
+        working-directory: LOSAT
+        run: cargo build --release --locked
+      - name: Keep the native CLI for the V-ABI and browser jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native
           path: LOSAT/target/release/losat
           retention-days: 3
 
+  v-abi:
+    needs: [changes, reactors, native]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: reactors
+          path: ${{ runner.temp }}/reactors
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native
+          path: ${{ runner.temp }}/native
+      - run: chmod +x ${{ runner.temp }}/native/losat
+      - name: V-ABI (quick suite)
+        run: |
+          python3 web/adapter/tools/v_abi_cases.py --suite quick --out ${{ runner.temp }}/v-abi-cases.json
+          node web/adapter/tests/v_abi.js --native ${{ runner.temp }}/native/losat \
+            --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
+            --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
+            --cases ${{ runner.temp }}/v-abi-cases.json
+
   # V-BR (plan §6.2): the application's EngineGateway and Engine worker with the reactors
-  # of the adapter job, in Chromium, Firefox and WebKit, compared with the native CLI of the
+  # of the reactors job, in Chromium, Firefox and WebKit, compared with the native CLI of the
   # same commit and NCBI's frozen bytes (tests/e2e/engine.spec.ts); the other E2E tests on
   # the application built with the engine; and the reactor tests in Node (the RecordScanner
   # contract on the serial reactor, responses of more than 1 MiB, and the inflation of
   # compressed sources and Example sets with the engine's decoders: bytes, sentences, limit).
+  # One job per browser (until 2026-11 one job ran the three, 31 min): `--project` selects the
+  # same tests that the browser ran there, with the same two workers. Each job installs Chromium
+  # as well, for the storage tests' Chromium profile (tests/e2e/support/profile.ts).
   browser-engine:
-    needs: [changes, adapter]
+    name: browser-engine (${{ matrix.project }})
+    needs: [changes, reactors, native]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browsers: chromium
+          - project: firefox
+            browsers: chromium firefox
+          - project: webkit
+            browsers: chromium webkit
     defaults:
       run:
         working-directory: web/app
@@ -206,20 +281,24 @@ jobs:
           path: ${{ runner.temp }}/native
       - run: chmod +x ${{ runner.temp }}/native/losat
       - run: npm ci
-      - run: npx playwright install --with-deps chromium firefox webkit
+      # Usually 40 to 100 s. On 2026-11-11 the runners could not resolve the Ubuntu archive and apt
+      # waited on every package, holding the job for hours; this step stops it instead.
+      - run: npx playwright install --with-deps ${{ matrix.browsers }}
+        timeout-minutes: 10
       - name: RecordScanner contract and inflation on the serial reactor (Node)
+        if: matrix.project == 'chromium'
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
         run: npx vitest run tests/unit/engine-runtime.test.ts
-      - name: V-BR and every E2E test with the engine in the build
+      - name: V-BR and every E2E test with the engine in the build (${{ matrix.project }})
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
           LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/losat
-        run: npm run e2e
+        run: npx playwright test --project=${{ matrix.project }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: playwright-engine-results
+          name: playwright-engine-results-${{ matrix.project }}
           path: web/app/test-results/
           retention-days: 7
 
@@ -233,7 +312,7 @@ jobs:
   result:
     name: ${{ github.event_name == 'pull_request' && 'web result' || 'web result (push)' }}
     if: always()
-    needs: [changes, app, engine-web-api, adapter, browser-engine]
+    needs: [changes, app, engine-web-api, adapter, reactors, native, v-abi, browser-engine]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

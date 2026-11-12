@@ -2562,7 +2562,8 @@ Rebuilding less:
   the same best, length and stop. The word loop is unrolled for three letters and the walks take two steps a
   loop. A block with another word size (blastp-fast, `-word_size`), an X-drop outside 1..=127 or a code
   >= 32, and a subject with a code >= 32, run the plain closure (`extend_two_hit_blosum62`); so does `-window_size 0` (no fused loop). BLASTX has its
-  own switch, `LOSAT_X_BXUNGAPSENT`; its reference extension is `extend_two_hit_blosum62`.
+  own switch, `LOSAT_X_BXUNGAPSENT`; its reference extension is `extend_two_hit_blosum62`, or with another
+  matrix (item SC6b of line NP) `extend_two_hit` with that matrix.
   Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight, their HT siblings
   idle, warmed 3 s before every run, arm order reversed every other round, one warm-up round + 8 rounds at one
   thread and 2 rounds at eight, medians of the per-round ratios against dev 7cfec941, the binary before the switch;
@@ -4346,7 +4347,7 @@ Scheduling (each value computed by one thread with the original function; order 
   or several one at a time under `LOSAT_X_BNFEWSUBJ`): the preliminary gapped
   loop of a subject chunk and the traceback of the subject run per query on the search pool instead of on the thread
   that owns the subject over all queries in one order (`blastn/blast_engine/x_qgroup_par.rs`, dispatched in
-  `search_query_batch`). NCBI runs both loops of a subject on one thread with one interval tree
+  `search_query_batch` for the preliminary loop and in `traceback_list::traceback_subject_hits` for the traceback). NCBI runs both loops of a subject on one thread with one interval tree
   (`blast_gapalign.c:3850,3917-3922`, `blast_traceback.c:375,404-405`); with one subject (`-subject` with one record,
   the loop's batches of a query file) the look-ahead helpers only computed alignments ahead of that loop, and the two
   loops with the purges and sorts around them were 57 % of a blastn batch's wall at 16 threads (5,000 and 31,168 cDNAs
@@ -4355,7 +4356,7 @@ Scheduling (each value computed by one thread with the original function; order 
   comparator (stable), runs the same loop body (the loop is a closure, `x_prelim_list`, called once on the owner with
   the look-ahead helpers or once per query without them) and purges its list; the purged lists are concatenated in query
   order and sorted by score as before (rayon's stable `par_sort_by` on the search pool). The kept HSPs of the traceback
-  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`x_trace_list`, no
+  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`trace_hsp_list`, no
   helpers and no speculative batches in a task), the passes up to the second purge (`traceback_post_purge`) and the score sort,
   final tree and e-values (`traceback_final_list`); the final lists are concatenated in query order and sorted stably by score.
   The queries are handed out from an atomic counter, the query with the most HSPs first (ungapped hits per query before
@@ -7232,8 +7233,13 @@ Scheduling (each value computed by one thread with the original function; order 
   residue codes below 32 and the sentinels per query batch, codes and sentinels per subject; the X-drop
   (1..=127) per candidate (the X-drops are the contexts' parameters). Off the path (the reference
   extension): a word size other than 3 (`-word_size 5`), `-window_size 0` (one-hit), a query batch of more
-  than `i32::MAX / 16` letters, a candidate whose context's X-drop is outside 1..=127, and the searches
-  where `word_finder` runs (the diagnostic stages that trace the seeds).
+  than `i32::MAX / 16` letters (another matrix: `i32::MAX / 32`), a candidate whose context's X-drop is
+  outside 1..=127, and the searches where `word_finder` runs (the diagnostic stages that trace the seeds).
+  Another matrix than BLOSUM62 (item SC6b of line NP, 2026-11-11) takes the same walks with the keys of its
+  byte table (blastp's `x_ungapped_sent::keys_of`, which every matrix of BLASTX's table and IDENTITY has: the
+  sentinel scores -128 against every code and the largest score is at most 31, so the argument holds with a
+  query batch of at most `i32::MAX / 32` letters), and its reference is `extend_two_hit` with the matrix; the
+  walks' matrix is a type (`XSent<S: BxScoring>`), so BLOSUM62's loops keep their code.
   Measured 2026-10-23 on the workstation (node 1, CPU 40 with its HT sibling and CPUs 41-47 idle, warmed 3 s
   before every run, arm order reversed every other round, one warm-up round + 5 rounds (4 for the UniRef50
   case, 3 for SwissProt), medians of the per-round ratios against dev cd8e0f89, the binary before the switch;
@@ -7252,7 +7258,7 @@ Scheduling (each value computed by one thread with the original function; order 
   AP027133 x0.987 (5.63 -> 5.56 s, 8 of 8 rounds below 1), 50 fly cDNAs x the yeast proteome (`-subject`)
   x0.974 (4.28 -> 4.17 s, 8 of 8), the same output bytes.
 - `LOSAT_X_BXUNGAPSENTSHADOW=1` shadow of `LOSAT_X_BXUNGAPSENT` (turns the path on): every extension of the
-  path also runs `extend_two_hit_blosum62` and the results (score, offsets, length, `right_extend`,
+  path also runs `extend_two_hit_blosum62` (another matrix: `extend_two_hit` with it) and the results (score, offsets, length, `right_extend`,
   `s_last_off`, and the early return) must be equal; any difference panics with the inputs. One line at exit,
   after a subject took the path: `[X_SHADOW] BXUNGAPSENT subjects= compared=` (`subjects=`: the pairs of a
   query batch and a subject made ready for the path).
@@ -7269,7 +7275,8 @@ Scheduling (each value computed by one thread with the original function; order 
   own and keep `score_block`. NCBI computes the score block once in the query setup and creates a chunk's own only
   for a split query (`prelim_stage.cpp:243-246`). The ideal block (`Blast_ScoreBlkKbpIdealCalc`: the standard
   composition against itself) takes no input, and `score_block` computed it on each call; with the switch it is a
-  `OnceLock` (`parameters.rs`; a constant because BLASTX accepts only BLOSUM62), which acts on every BLASTX search.
+  `OnceLock` (`parameters.rs`; BLOSUM62's, a constant; another matrix's searches compute theirs in
+  `score_block_of`, item SC6), which acts on every BLASTX search with BLOSUM62.
   Reach: the own side is recorded where a batch that is not split runs through the serial chunk loop; the
   reference side (`score_block` on a chunk) only where a split query runs through that loop (1 thread, or
   `LOSAT_X_BXCHUNKFLOW`), not in the chunk waves at 2+ threads (`x_compute_chunk`, which keeps `score_block`).

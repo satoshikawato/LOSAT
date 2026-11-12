@@ -63,6 +63,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         archive: None,
         tabular_taxdb: None,
         first_query_ordinal: 0,
+        matrix_file: None,
     };
 
     run(

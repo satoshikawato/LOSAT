@@ -2629,18 +2629,29 @@ mod tests {
     // without cells (more threads than blocks), is the serial build's (`x_bn_csr::serial`: every
     // run, the presence vector and the counters) and lists the loop's chains, newest first and in
     // reading order; `csr` builds on the pool there and on this thread off it.
+    //
+    // Cost: each chunk takes about four passes of the pool's `SpinBarrier`, where a thread spins 2^16
+    // times before it yields its CPU, so a pool of more threads than CPUs (8 and 40 threads on a CI
+    // runner's 4) waits at every pass for threads that are not running. The one-position chunks of
+    // those pools therefore read small cases (`random_case(.., 2, 40)`: 85 to 165 letters, no masked
+    // interval), the pool of 8 threads with one cell of 256 words (one past a byte's count) instead
+    // of `x_with_repeats`; the repeat cells are read at the other chunk sizes (on the pool of 40
+    // threads, in round 2 at chunks of 5,000 positions), and the pools of 2 and 3 threads read every
+    // case at every chunk size.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     #[test]
     fn csr_on_a_pool_is_the_serial_build() {
-        use super::super::x_bn_csr::tests::{chains, pv_params, random_case, x_with_repeats};
+        use super::super::x_bn_csr::tests::{
+            chains, pv_params, random_case, x_push_query, x_with_repeats,
+        };
         use super::super::x_bn_csr::{serial, x_assert_runs_are_the_chains};
         let mut rng = Lcg(0xB4C5_0003);
         for threads in [2usize, 3, 8, 40] {
             crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
-                let rounds = if threads == 40 { 2 } else { 8 };
+                let rounds = if threads == 40 { 3 } else { 8 };
                 for round in 0..rounds {
                     // lut 8 has 32 blocks of 2,048 cells: 40 threads leave owners without cells
                     // one table of LOSAT_X_MBCSR's 4^12 cells, newest first, with repeats
@@ -2653,20 +2664,34 @@ mod tests {
                     };
                     // both orders for every lut and every chunk size
                     let ascending = (round + round / 4) % 2 == 1;
-                    let mut case = random_case(&mut rng, 2 + round, 2_000 + 900 * round);
-                    if round % 2 == 0 {
+                    let chunk = if lut == 12 {
+                        chunk_positions(threads)
+                    } else if threads == 40 && round == 2 {
+                        // owners without cells with the repeat cells (lut 8, descending: the
+                        // packed head and its map of the words past 255), in a few chunks
+                        assert!(lut == 8 && !ascending, "round 2 at 40 threads is packed");
+                        5000
+                    } else {
+                        [1usize, 97, 5000, chunk_positions(threads)][(round / 2) % 4]
+                    };
+                    // one-position chunks on a pool of more threads than a CI runner's 4 CPUs (above)
+                    let small = chunk == 1 && threads > 3;
+                    let mut case = if small {
+                        random_case(&mut rng, 2, 40)
+                    } else {
+                        random_case(&mut rng, 2 + round, 2_000 + 900 * round)
+                    };
+                    if round % 2 == 0 && !small {
                         // cells of more words than a byte of LOSAT_X_BNCSRPACK's counts holds
                         x_with_repeats(&mut case, lut);
+                    } else if round % 2 == 0 && threads == 8 {
+                        // one cell of 256 words (letter G), each in a chunk of its own
+                        x_push_query(&mut case, vec![2u8; 256 + lut - 1]);
                     }
                     let refs = case.refs();
                     let words = case.words(&refs, lut + rng.below(4) as usize, lut, ascending);
                     let cells = 1usize << (2 * lut);
                     let (pv_len, bts) = pv_params(&case, lut);
-                    let chunk = if lut == 12 {
-                        chunk_positions(threads)
-                    } else {
-                        [1usize, 97, 5000, chunk_positions(threads)][(round / 2) % 4]
-                    };
                     let what = format!("threads {threads} round {round} lut {lut} chunk {chunk}");
                     let mut pv = vec![0 as PvArrayType; pv_len];
                     let mut helper = vec![0u32; cells >> 11];

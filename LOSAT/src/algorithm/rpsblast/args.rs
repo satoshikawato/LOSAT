@@ -281,7 +281,7 @@ pub struct RpsblastArgs {
 }
 
 /// An `-mt_mode` value of rpsblast: an integer from 0 to 1.
-fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
+pub(crate) fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
     let mode = ncbi_integer_at_least(value, 0)?;
     u8::try_from(mode)
         .ok()
@@ -291,7 +291,7 @@ fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
 
 /// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween(0, 4,
 /// true)`, quoted at `RpsblastArgs::line_length`).
-fn rpsblast_sort_option(value: &str) -> Result<u8, String> {
+pub(crate) fn rpsblast_sort_option(value: &str) -> Result<u8, String> {
     let option = ncbi_integer_at_least(value, 0)?;
     u8::try_from(option)
         .ok()
@@ -301,7 +301,7 @@ fn rpsblast_sort_option(value: &str) -> Result<u8, String> {
 
 /// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual(1)`,
 /// quoted at `RpsblastArgs::line_length`).
-fn rpsblast_line_length(value: &str) -> Result<usize, String> {
+pub(crate) fn rpsblast_line_length(value: &str) -> Result<usize, String> {
     let length = ncbi_integer_at_least(value, 1)?;
     usize::try_from(length).map_err(|_| "Illegal value: expected an integer >= 1".to_string())
 }

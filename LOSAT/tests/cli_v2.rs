@@ -197,6 +197,11 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.evalue, Some(0.001));
                 assert_eq!(a.max_target_seqs, Some(9));
             }
+            Commands::Rpstblastn(a) => {
+                assert_eq!(a.num_threads, 4);
+                assert_eq!(a.evalue, Some(0.001));
+                assert_eq!(a.max_target_seqs, Some(9));
+            }
             Commands::Makedb(_) => unreachable!("{program} is a search program"),
         }
     }

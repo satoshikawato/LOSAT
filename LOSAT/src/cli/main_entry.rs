@@ -338,6 +338,25 @@ pub fn main_entry() -> Result<()> {
                 return Err(error);
             }
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:319-322
+        // ```c++
+        // int main(int argc, const char* argv[] /*, const char* envp[]*/)
+        // {
+        //     return CRPSTBlastnApp().AppMain(argc, argv);
+        // }
+        // ```
+        Commands::Rpstblastn(args) => {
+            // rpstblastn is an NCBI application as blastx: its application layer reads its
+            // environment and registry files (`rpstblastn.ini`, then `.ncbirc`) before its own
+            // code runs; LOSAT rejects the settings that change the output, before its own
+            // refusals. BLASTX's driver reads them again by the same name (`native::run`).
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpstblastn")
+                .map_err(anyhow::Error::msg)?;
+            if let Err(error) = crate::algorithm::rpstblastn::run(args) {
+                blastx::native::exit_on_native_error(&error);
+                return Err(error);
+            }
+        }
         Commands::Tblastn(args) => {
             // NCBI's application layer reads its environment and registry files before
             // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change

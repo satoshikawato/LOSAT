@@ -10,7 +10,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 //     arg.Reset(new CProgramDescriptionArgs(kProgram,
 //                                   "Translated Query-Protein Subject BLAST"));
 // ```
-use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, tblastn, tblastx};
+use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // ```c++
@@ -211,6 +211,21 @@ pub enum Commands {
     /// Reverse Position Specific BLAST (rpsblast)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpsblast(rpsblast::RpsblastArgs),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-50
+    // ```c++
+    //     static const string kProgram("rpstblastn");
+    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
+    //                                "Translated Reverse Position Specific BLAST"));
+    // ```
+    // `-h` and `-help` write NCBI's frozen texts (`rpstblastn::args::{USAGE, HELP}`; the
+    // reader stops at them, `try_parse_from_command`).
+    /// Translated Reverse Position Specific BLAST (rpstblastn)
+    #[command(
+        help_template = "{before-help}",
+        before_help = rpstblastn::args::USAGE,
+        before_long_help = rpstblastn::args::HELP
+    )]
+    Rpstblastn(rpstblastn::RpstblastnArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
     //     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
@@ -260,7 +275,13 @@ where
         .filter(|program| {
             matches!(
                 program.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
+                "blastn"
+                    | "blastp"
+                    | "tblastn"
+                    | "tblastx"
+                    | "psiblast"
+                    | "rpsblast"
+                    | "rpstblastn"
             )
         })
     {
@@ -290,8 +311,14 @@ where
             translated.push(token);
             continue;
         }
+        // NCBI's reader stops at its help flags (`CArgDescriptions::x_CheckAutoHelp`, the words
+        // before them read first); rpstblastn writes NCBI's texts and reads no word after them.
+        let stops_at_help = scope.get_name() == "rpstblastn";
         if matches!(text, "-help" | "--help") {
             translated.push("--help".into());
+            if stops_at_help {
+                break;
+            }
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
@@ -302,6 +329,9 @@ where
         // `-h` is the short usage of every NCBI program (rc 0); clap's `-h` is its short help.
         if text == "-h" {
             translated.push("-h".into());
+            if stops_at_help {
+                break;
+            }
             continue;
         }
         if text == "--version" && std::ptr::eq(scope, &command) {
@@ -332,6 +362,7 @@ where
                     | "tblastx"
                     | "psiblast"
                     | "rpsblast"
+                    | "rpstblastn"
                     | "makeblastdb"
             )
         {
@@ -422,7 +453,14 @@ fn inline_value(token: &std::ffi::OsStr) -> OsString {
 fn is_ncbi_search_program(scope: &clap::Command) -> bool {
     matches!(
         scope.get_name(),
-        "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
+        "blastn"
+            | "blastp"
+            | "blastx"
+            | "tblastn"
+            | "tblastx"
+            | "psiblast"
+            | "rpsblast"
+            | "rpstblastn"
     )
 }
 
@@ -468,10 +506,17 @@ pub fn render_message(error: &clap::Error) -> String {
             }
         }
     }
-    message
+    let message = message
         .replace("'-h'", "'-help'")
         .replace("-h, --help", "-help")
-        .replace("-V, --version", "--version")
+        .replace("-V, --version", "--version");
+    // NCBI's `rpstblastn -help` ends with an empty line, which clap's help writer trims.
+    if error.kind() == ErrorKind::DisplayHelp
+        && message.trim_end() == rpstblastn::args::HELP.trim_end()
+    {
+        return rpstblastn::args::HELP.to_string();
+    }
+    message
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
@@ -622,6 +667,19 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (quoted at
+// `algorithm::rpstblastn::args`)
+/// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote and search
+/// strategy options of every program. The options of a later item that NCBI reads with the others
+/// (`-searchsp`, `-dbsize`, composition-based statistics) are refused with them
+/// (`RpstblastnArgs::rps_search`).
+fn is_unported_rpstblastn_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "entrez_query" | "export_search_strategy" | "html" | "import_search_strategy" | "remote"
+    )
+}
+
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
@@ -682,8 +740,20 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSBLAST"),
         );
     }
+    if scope.get_name() == "rpstblastn" && is_unported_rpstblastn_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSTBLASTN"),
+        );
+    }
     if let Some(program) = [
-        "blastn", "blastp", "tblastn", "tblastx", "psiblast", "rpsblast",
+        "blastn",
+        "blastp",
+        "tblastn",
+        "tblastx",
+        "psiblast",
+        "rpsblast",
+        "rpstblastn",
     ]
     .into_iter()
     .find(|program| scope.get_name() == *program)
@@ -753,6 +823,7 @@ where
         "tblastx" => "tblastx",
         "psiblast" => "psiblast",
         "rpsblast" => "rpsblast",
+        "rpstblastn" => "rpstblastn",
         "makeblastdb" => "makeblastdb",
         _ => return None,
     };

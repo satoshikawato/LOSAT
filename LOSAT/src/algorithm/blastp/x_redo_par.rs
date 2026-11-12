@@ -2455,7 +2455,6 @@ mod tests {
                 let encoded = super::super::encoding::encode_protein_sequence(query);
                 QueryContext {
                     q_idx: q_idx as u32,
-                    f_idx: 0,
                     frame: 0,
                     aa_seq: encoded.aa_seq,
                     aa_seq_nomask: None,
@@ -2520,28 +2519,21 @@ mod tests {
             gapping_params: BlastCompoGappingParams {
                 gap_open: 11 * SCALE as i32,
                 gap_extend: SCALE as i32,
-                decline_align: 0,
                 x_dropoff: (25.0 * std::f64::consts::LN_2 / scaled_lambda) as i32,
                 context: std::cell::Cell::new(None),
             },
             compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
             alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            unified_p: false,
             log_k: fixture.gapped_params.k.ln(),
             score_divisor: SCALE,
-            restricted_alignment: false,
             smith_waterman: false,
-            is_same_adjustment: false,
             near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: fixture.contexts[q_idx].aa_len as i32,
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 1,
-            cutoff_evalue: 10.0,
-            do_link_hsps: false,
         }
     }
 

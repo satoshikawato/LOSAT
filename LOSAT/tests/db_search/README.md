@@ -781,7 +781,7 @@ NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Databas
 (row `db.sl.bp.noacc.6`, rc 2).
 
 A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
-exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `tests/cli_v2.rs`, not by a row.
+exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `src/cli_v2_tests.rs`, not by a row.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 

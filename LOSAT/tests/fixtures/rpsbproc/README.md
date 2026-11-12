@@ -39,7 +39,8 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 `case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `refuse`: LOSAT refuses until a later
 item: XML input needs the XML reader, PS16d), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
-directory `<dir>/` holding the data files with those of `data_with/<dir>/` in their place), `arguments` (split on
+directory `<dir>/` holding the data files with those of `data_with/<dir>/` in their place; `data-with:<a>+<dir>`: the
+same with those of `data_with/<a>/` first, then those of `data_with/<dir>/`), `arguments` (split on
 spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `refuse_*` until PS16b) are `t_feats`,
 `t_both` and `t_default`.
 
@@ -68,4 +69,15 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
     PROSITE parser refuses (exit 3, the output ends inside `SITES`).
 - For every PS16b case, NCBI's output with the cut data equals its output with the full files (`ctprev/`: the full
   v3.22 files with the preview `cdtrack.txt`), and Bioconda's rpsbproc 0.5.1 gave the same bytes as NCBI's binary.
-
+- The cases of the PS16b review (2026-11-12; oracle requests R1, R2, R5, R6, R20, R21; NCBI's binary and Bioconda's
+  gave the same bytes), run as above. `data_with/rd1/`, `rd5/`, `rd4/`, `rd13/` and `rd14/` hold only `cddannot.dat`,
+  that of `sites/` with the motif of cd00438 "catalytic site" (`HKY`) replaced; the cases lay them over `sites/`
+  (`data-with:sites+rd1`):
+  - `rd1` `Hx(0,10)K` and `rd5` `H{P}(0,10)K`: NCBI's match reads the residues `HKY` of the site beyond their end
+    (the query has 185), but every byte there gives the same answer: the site prints.
+  - `rd4` `K` 0xE9 `R`: a parse error whose message quotes the byte as it is (exit 3).
+  - `rd13` `Hx(99999999999999999999)K` (`atol` gives `LONG_MAX`) and `rd14` `Hx(200000000000000)K`: the minimal map
+    passes the string's `max_size()` (`basic_string::_M_replace_aux`) or needs 2e14 bytes (`std::bad_alloc`); exit 3,
+    the report cut as for a parse error (NCBI run under `prlimit --as=4294967296`).
+  - `arch/mfirst_delta.asn`: `mfirst.asn` with its query as `repr delta`, the residues in two `ext delta` literals
+    (NCBIeaa, 100 and 85 residues); case `both.mfirst_delta` with `sites/`.

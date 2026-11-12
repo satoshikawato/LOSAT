@@ -38,7 +38,7 @@ pub use args::RpsbprocArgs;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufReader, Read, Write};
 
-use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::ncbi_exception::{err_post_x, err_post_x_bytes, NcbiException};
 
 use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
 use args::TargetData;
@@ -47,6 +47,7 @@ use domains::{
     domain_records, feature_records, map_seg_set, translated_pos_map, DataMode, FeatureRecord,
     Record,
 };
+use prosite::{MapEnd, MatchError};
 use query::{check_masks, choice_selection, process_blast_results, DomQuery, ProcessError};
 use segset::SegSet;
 use sites::{MotifError, MotifState};
@@ -179,8 +180,13 @@ fn log_post(text: &str) {
 /// exception 9. The report is flushed before every line that rpsbproc writes to standard error
 /// (`Report::progress`, `Report::stopped`), so it holds no bytes then.
 pub(crate) fn write_stderr(text: &str) {
+    write_stderr_bytes(text.as_bytes());
+}
+
+/// `write_stderr` of bytes (a message that quotes data bytes as NCBI writes them).
+fn write_stderr_bytes(bytes: &[u8]) {
     let mut stderr = std::io::stderr().lock();
-    if stderr.write_all(text.as_bytes()).is_err() {
+    if stderr.write_all(bytes).is_err() {
         std::process::exit(E_OUTPUT_FILE_OPEN_ERROR);
     }
 }
@@ -1275,18 +1281,14 @@ fn run_sessions<R: Read>(
                             return Outcome::Exit(E_OK);
                         }
                         return match error {
-                            // `THROW_SIMPLE` leaves `Run`: `CNcbiApplication` reports a
-                            // `std::exception` of the execution (probe 3 of PS16b: the line
-                            // below, exit 3, the report ends before the site's line).
-                            PrintError::MotifParse { motif, position } => {
-                                write_stderr(&err_post_x(
-                                    CORELIB_APP,
-                                    7,
-                                    &format!(
-                                        "Application's execution failed: Motif string parse error -- Motif = {}, error position: {position}",
-                                        String::from_utf8_lossy(&motif)
-                                    ),
-                                ));
+                            // A `std::exception` leaves `Run`: `CNcbiApplication` reports it
+                            // (ncbiapp.cpp:730-734; probe 3 of PS16b and review oracles R6, R20,
+                            // R21: the line below with `what()` as bytes, exit 3, the report
+                            // ends before the site's line).
+                            PrintError::Exception(what) => {
+                                let mut message = b"Application's execution failed: ".to_vec();
+                                message.extend_from_slice(&what);
+                                write_stderr_bytes(&err_post_x_bytes(CORELIB_APP, 7, &message));
                                 Outcome::Exit(3)
                             }
                             PrintError::Unsupported(message) => Outcome::Refused(message),
@@ -1494,8 +1496,9 @@ fn print_dom_query(
 
 /// Why the report of a query stops.
 enum PrintError {
-    /// A motif that NCBI's parser refuses (`THROW_SIMPLE`).
-    MotifParse { motif: Vec<u8>, position: usize },
+    /// The `what()` of a `std::exception` that ends NCBI's rpsbproc: a motif that its parser
+    /// refuses (`THROW_SIMPLE`), or a minimal map that its string cannot hold.
+    Exception(Vec<u8>),
     /// A case LOSAT does not reproduce.
     Unsupported(String),
 }
@@ -1503,9 +1506,22 @@ enum PrintError {
 impl From<MotifError> for PrintError {
     fn from(error: MotifError) -> Self {
         match error {
-            MotifError::Parse { motif, position } => PrintError::MotifParse { motif, position },
-            MotifError::ReadPast => PrintError::Unsupported(
-                "a motif match that reads the residues of a site beyond their end (undefined in NCBI's rpsbproc) is not supported by LOSAT's rpsbproc".to_string(),
+            MotifError::Parse { motif, position } => {
+                // `CSimpleException`'s text: the motif's bytes as the data file has them.
+                let mut what = b"Motif string parse error -- Motif = ".to_vec();
+                what.extend_from_slice(&motif);
+                what.extend_from_slice(format!(", error position: {position}").as_bytes());
+                PrintError::Exception(what)
+            }
+            MotifError::Map(MapEnd::Throw(what)) => PrintError::Exception(what.as_bytes().to_vec()),
+            MotifError::Map(MapEnd::HostDependent(bytes)) => PrintError::Unsupported(format!(
+                "a motif whose minimal map makes NCBI's rpsbproc allocate {bytes} bytes at once (from 1 GiB to below 2^47 bytes, where NCBI's result depends on the host's memory) is not supported by LOSAT's rpsbproc"
+            )),
+            MotifError::Match(MatchError::ReadPast) => PrintError::Unsupported(
+                "a motif match whose result depends on the memory that NCBI's rpsbproc reads beyond the residues of a site, or that may read beyond its buffer of them (undefined), is not supported by LOSAT's rpsbproc".to_string(),
+            ),
+            MotifError::Match(MatchError::Exhausted) => PrintError::Unsupported(
+                "a motif match whose records make NCBI's rpsbproc allocate 1 GiB or more at once (a repeat that does not advance; NCBI's result depends on the host's memory) is not supported by LOSAT's rpsbproc".to_string(),
             ),
         }
     }
@@ -1818,17 +1834,19 @@ fn print_features(
             map_seg_set(&mut featsegs, align);
             if mostly_mapped(&featsegs, motif.site) {
                 let (res0, res1) = (featsegs.left(), featsegs.right());
+                // The residues first: a refusal leaves no part of the line.
+                let (letter0, letter1) = (upper_residue(query, res0)?, upper_residue(query, res1)?);
                 report.write(session.as_bytes());
                 report.write(b"\t");
                 report.write(&query.accession);
                 report.write(b"\t");
                 report.write(data.text(motif.site.title));
                 report.write(b"\t");
-                report.write(&[upper_residue(query, res0)?]);
+                report.write(&[letter0]);
                 report.write((res0 + 1).to_string().as_bytes());
                 report.write(b"\t");
                 report.write((res1 + 1).to_string().as_bytes());
-                report.write(&[upper_residue(query, res1)?]);
+                report.write(&[letter1]);
                 report.write(b"\t");
                 write_source(report, data, motif.source);
                 report.write(b"\n");
@@ -1862,6 +1880,13 @@ fn print_site(
     if motif_state.motif_check(data, site, &mapped_positions, &query.residues)? > 0 {
         return Ok(());
     }
+    // The residues first: a refusal leaves no part of the line.
+    let mut residues = Vec::new();
+    for seg in featsegs.segs() {
+        for res in seg.from..=seg.to {
+            residues.push((upper_residue(query, res)?, res));
+        }
+    }
     report.write(session.as_bytes());
     report.write(b"\t");
     report.write(&query.accession);
@@ -1870,16 +1895,13 @@ fn print_site(
     report.write(b"\t");
     report.write(data.text(site.title));
     report.write(b"\t");
-    let mut mapped = 0usize;
+    let mapped = residues.len();
     let mut delimit: &[u8] = b"";
-    for seg in featsegs.segs() {
-        for res in seg.from..=seg.to {
-            report.write(delimit);
-            report.write(&[upper_residue(query, res)?]);
-            report.write((res + 1).to_string().as_bytes());
-            delimit = b",";
-            mapped += 1;
-        }
+    for (letter, res) in residues {
+        report.write(delimit);
+        report.write(&[letter]);
+        report.write((res + 1).to_string().as_bytes());
+        delimit = b",";
     }
     let complete: i64 = data
         .site_segs(site)

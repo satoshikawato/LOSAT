@@ -152,3 +152,42 @@ fn a_motif_that_does_not_parse_is_an_error_with_its_position() {
     // The list was filled before the parse (basedata.cpp:675-676).
     assert_eq!(state.positions, [10, 11, 12]);
 }
+
+// Review oracles R1, R4, R20, R21 (`mfirst.asn`'s catalytic site, its positions mapped to the
+// residues `HKY` of a query of 185): the read past the residues that does not decide NCBI's
+// answer passes, the one that does is refused; the minimal maps that NCBI's string cannot hold
+// end as NCBI's exceptions, and one that NCBI may or may not allocate is refused.
+#[test]
+fn the_motif_check_of_the_review_oracles() {
+    let data = load(&[
+        ("A", "Hx(0,10)K", "10,11,12"),
+        ("B", "Hx(0,10)W", "10,11,12"),
+        ("C", "Hx(99999999999999999999)K", "10,11,12"),
+        ("D", "Hx(200000000000000)K", "10,11,12"),
+        ("E", "Hx(1073741823)K", "10,11,12"),
+    ]);
+    let mut residues = vec![b'A'; 185];
+    residues[61..64].copy_from_slice(b"HKY");
+    let map = mapped(&[(61, 10), (62, 11), (63, 12)]);
+    let check = |index: usize| {
+        MotifState::default().motif_check(&data, site(&data, index), &map, &residues)
+    };
+    assert_eq!(check(0), Ok(0));
+    assert_eq!(check(1), Err(MotifError::Match(MatchError::ReadPast)));
+    assert_eq!(
+        check(2),
+        Err(MotifError::Map(MapEnd::Throw(
+            super::super::prosite::LENGTH_ERROR
+        )))
+    );
+    assert_eq!(
+        check(3),
+        Err(MotifError::Map(MapEnd::Throw(
+            super::super::prosite::BAD_ALLOC
+        )))
+    );
+    assert_eq!(
+        check(4),
+        Err(MotifError::Map(MapEnd::HostDependent((1 << 30) + 1)))
+    );
+}

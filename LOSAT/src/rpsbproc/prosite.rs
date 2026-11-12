@@ -35,7 +35,223 @@
 //! NCBI's `Match` reads `text[pos]` for every `pos < tlen`, and rpsbproc passes the length of the
 //! whole query as `tlen` while the text holds only the mapped residues of a site (basedata.cpp:731).
 //! A read at `text.size()` is the string's terminating 0 (defined); a read beyond it is
-//! undefined in C++ (heap bytes). `Matcher` reports such a read (`ReadPast`) instead of guessing.
+//! undefined in C++ (bytes of NCBI's memory). `ProSite::matches` gives NCBI's answer where it does
+//! not depend on those bytes (DECISIONS 37, Owner-delegated 2026-11-12): the match is run once
+//! with every such read failing and once with every such read passing; NCBI's search tries every
+//! count of every position, so a match of the first run is a match for any bytes and a failure
+//! of the second run a failure for any bytes. The two runs differing, or a read that may leave
+//! NCBI's own string buffer (memory that may not be mapped), is refused (`MatchError::ReadPast`).
+//!
+//! NCBI's `Match` stores one record (`size_t`) per step of a position in a vector; a step that
+//! does not advance (an anchor, a negation of anchors only) repeats at the same position up to the
+//! maximal count, and a lazy position that does not advance is revisited for ever, until the
+//! memory runs out. `Record` keeps the counts instead of the records, and one allocation of
+//! NCBI's of 1 GiB or more for them is refused (`MatchError::Exhausted`; NCBI's result depends on
+//! the host's memory). `ProSite::minimal_map` follows `GetMinimalXMap`'s string by its length and
+//! capacity, with the exceptions that its `append` throws (`MapEnd`).
+
+/// One allocation of NCBI's of this many bytes or more is refused: below 2^47 bytes the
+/// allocation succeeds or throws `std::bad_alloc` by the host's memory and overcommit
+/// (DECISIONS 37, Owner-delegated 2026-11-12: NCBI's rpsbproc uses about 130 MB, and a 64-bit
+/// host that processes CDD gives it 1 GiB).
+pub(crate) const HOST_DEPENDENT_BYTES: u64 = 1 << 30;
+
+/// The user address space of x86-64 (4-level paging): `operator new` of this many bytes or more
+/// fails on every host and throws `std::bad_alloc`.
+pub(crate) const USER_SPACE_BYTES: u64 = 1 << 47;
+
+/// How NCBI's `GetMinimalXMap` ends instead of returning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MapEnd {
+    /// An exception of libstdc++, by its `what()`: `LENGTH_ERROR` or `BAD_ALLOC`.
+    Throw(&'static str),
+    /// An allocation of this many bytes, from `HOST_DEPENDENT_BYTES` up to `USER_SPACE_BYTES`.
+    HostDependent(u64),
+}
+
+/// `what()` of the `std::length_error` of `_M_check_length` in `append` (the length passes
+/// `max_size()`).
+pub(crate) const LENGTH_ERROR: &str = "basic_string::_M_replace_aux";
+
+/// `what()` of `std::bad_alloc` (an allocation of `USER_SPACE_BYTES` or more).
+pub(crate) const BAD_ALLOC: &str = "std::bad_alloc";
+
+/// `operator new(bytes)` of NCBI's for a string.
+fn allocate_string(bytes: u64) -> Result<(), MapEnd> {
+    if bytes >= USER_SPACE_BYTES {
+        Err(MapEnd::Throw(BAD_ALLOC))
+    } else if bytes >= HOST_DEPENDENT_BYTES {
+        Err(MapEnd::HostDependent(bytes))
+    } else {
+        Ok(())
+    }
+}
+
+/// The length and capacity of a `std::string` of libstdc++ (the C++11 ABI) whose bytes LOSAT
+/// does not need: `GetMinimalXMap`'s `minMap` and the text that `MotifCheck` builds in it.
+/// `max_size()` is `(PTRDIFF_MAX - 1) / 2` = 2^62 - 1 (GCC 9 and later; NCBI's rpsbproc 0.5.1
+/// throws `length_error` for an `append` of `LONG_MAX` characters, review oracle R20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CxxString {
+    pub(crate) len: u64,
+    /// `capacity()`: the bytes `0..=capacity` are NCBI's buffer (`_M_local_buf[16]` while it
+    /// is 15).
+    pub(crate) capacity: u64,
+}
+
+impl CxxString {
+    const LOCAL_CAPACITY: u64 = 15;
+    const MAX_SIZE: u64 = (1 << 62) - 1;
+
+    /// An empty string (`string minMap(k_strEmptyString)`).
+    pub(crate) fn new() -> Self {
+        CxxString {
+            len: 0,
+            capacity: Self::LOCAL_CAPACITY,
+        }
+    }
+
+    // libstdc++ (GCC 13): bits/basic_string.tcc:139-160
+    // ```c++
+    //   _M_create(size_type& __capacity, size_type __old_capacity)
+    //   {
+    //     // _GLIBCXX_RESOLVE_LIB_DEFECTS
+    //     // 83.  String::npos vs. string::max_size()
+    //     if (__capacity > max_size())
+    // 	std::__throw_length_error(__N("basic_string::_M_create"));
+    //
+    //     // The below implements an exponential growth policy, necessary to
+    //     // meet amortized linear time requirements of the library: see
+    //     // http://gcc.gnu.org/ml/libstdc++/2001-07/msg00085.html.
+    //     if (__capacity > __old_capacity && __capacity < 2 * __old_capacity)
+    // 	{
+    // 	  __capacity = 2 * __old_capacity;
+    // 	  // Never allocate a string bigger than max_size.
+    // 	  if (__capacity > max_size())
+    // 	    __capacity = max_size();
+    // 	}
+    //
+    //     // NB: Need an array of char_type[__capacity], plus a terminating
+    //     // null char_type() element.
+    //     return _S_allocate(_M_get_allocator(), __capacity + 1);
+    //   }
+    // ```
+    // (The callers never ask for more than `max_size()`: `append` checks the length first.)
+    fn create(&mut self, mut capacity: u64) -> Result<(), MapEnd> {
+        if capacity > self.capacity && capacity < 2 * self.capacity {
+            capacity = (2 * self.capacity).min(Self::MAX_SIZE);
+        }
+        allocate_string(capacity + 1)?;
+        self.capacity = capacity;
+        Ok(())
+    }
+
+    // libstdc++ (GCC 13): bits/basic_string.tcc:305-320
+    // ```c++
+    //     reserve(size_type __res)
+    //     {
+    //       const size_type __capacity = capacity();
+    //       // _GLIBCXX_RESOLVE_LIB_DEFECTS
+    //       // 2968. Inconsistencies between basic_string reserve and
+    //       // vector/unordered_map/unordered_set reserve functions
+    //       // P0966 reserve should not shrink
+    //       if (__res <= __capacity)
+    // 	return;
+    //
+    //       pointer __tmp = _M_create(__res, __capacity);
+    //       this->_S_copy(__tmp, _M_data(), length() + 1);
+    //       _M_dispose();
+    //       _M_data(__tmp);
+    //       _M_capacity(__res);
+    //     }
+    // ```
+    // (GCC before 11 also shrinks; `minMap` is empty and local when `GetMinimalXMap` reserves,
+    // so both give this.)
+    fn reserve(&mut self, res: u64) -> Result<(), MapEnd> {
+        if res <= self.capacity {
+            return Ok(());
+        }
+        self.create(res)
+    }
+
+    // libstdc++ (GCC 13): bits/basic_string.tcc:451-468
+    // ```c++
+    //     _M_replace_aux(size_type __pos1, size_type __n1, size_type __n2,
+    // 		   _CharT __c)
+    //     {
+    //       _M_check_length(__n1, __n2, "basic_string::_M_replace_aux");
+    //
+    //       const size_type __old_size = this->size();
+    //       const size_type __new_size = __old_size + __n2 - __n1;
+    //
+    //       if (__new_size <= this->capacity())
+    // 	{
+    // 	  ...
+    // 	}
+    //       else
+    // 	this->_M_mutate(__pos1, __n1, 0, __n2);
+    // ```
+    // libstdc++ (GCC 13): bits/basic_string.h:397-401,1084-1085,1487-1488
+    // ```c++
+    //       _M_check_length(size_type __n1, size_type __n2, const char* __s) const
+    //       {
+    // 	if (this->max_size() - (this->size() - __n1) < __n2)
+    // 	  __throw_length_error(__N(__s));
+    //       }
+    //       ...
+    //       max_size() const _GLIBCXX_NOEXCEPT
+    //       { return (_Alloc_traits::max_size(_M_get_allocator()) - 1) / 2; }
+    //       ...
+    //       append(size_type __n, _CharT __c)
+    //       { return _M_replace_aux(this->size(), size_type(0), __n, __c); }
+    // ```
+    // libstdc++ (GCC 13): bits/basic_string.tcc:326-332
+    // ```c++
+    //     _M_mutate(size_type __pos, size_type __len1, const _CharT* __s,
+    // 	      size_type __len2)
+    //     {
+    //       const size_type __how_much = length() - __pos - __len1;
+    //
+    //       size_type __new_capacity = length() + __len2 - __len1;
+    //       pointer __r = _M_create(__new_capacity, capacity());
+    // ```
+    /// `append(n, c)`.
+    pub(crate) fn append(&mut self, n: u64) -> Result<(), MapEnd> {
+        if Self::MAX_SIZE - self.len < n {
+            return Err(MapEnd::Throw(LENGTH_ERROR));
+        }
+        let len = self.len + n;
+        if len > self.capacity {
+            self.create(len)?;
+        }
+        self.len = len;
+        Ok(())
+    }
+
+    // libstdc++ (GCC 13): bits/basic_string.h:1561-1568
+    // ```c++
+    //       push_back(_CharT __c)
+    //       {
+    // 	const size_type __size = this->size();
+    // 	if (__size + 1 > this->capacity())
+    // 	  this->_M_mutate(__size, size_type(0), 0, size_type(1));
+    // 	traits_type::assign(this->_M_data()[__size], __c);
+    // 	this->_M_set_length(__size + 1);
+    //       }
+    // ```
+    pub(crate) fn push_back(&mut self) -> Result<(), MapEnd> {
+        if self.len + 1 > self.capacity {
+            self.create(self.len + 1)?;
+        }
+        self.len += 1;
+        Ok(())
+    }
+
+    /// `clear()`: the capacity stays.
+    pub(crate) fn clear(&mut self) {
+        self.len = 0;
+    }
+}
 
 /// `CProSite::EParseError` without `eNoError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,16 +263,17 @@ pub(crate) enum ParseError {
 
 const NEGATIVE_FILTER: u32 = 0x1;
 const LAZY_MATCH: u32 = 0x2;
-/// `(size_t)-1`: the biggest possible count.
-const INFINITE: usize = usize::MAX;
+/// `(size_t)-1`: the biggest possible count. The counts are NCBI's `size_t` of x86-64, `u64`
+/// on every target.
+const INFINITE: u64 = u64::MAX;
 
 /// `CProSite::TPatternPos`.
 #[derive(Clone, Debug)]
 struct PatternPos {
     flags: u32,
     alt_chars: Vec<u8>,
-    min_count: usize,
-    max_count: usize,
+    min_count: u64,
+    max_count: u64,
 }
 
 impl PatternPos {
@@ -148,29 +365,144 @@ impl PatternPos {
     }
 }
 
-/// A read of `text` beyond its terminating 0 (see the module comment).
+/// Why `ProSite::matches` or `ProSite::match_at` gives no answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ReadPast;
+pub(crate) enum MatchError {
+    /// NCBI's answer depends on the bytes it reads beyond the text's terminating 0, or the
+    /// match may read beyond NCBI's buffer of the text (see the module comment).
+    ReadPast,
+    /// One allocation of NCBI's match records reaches `HOST_DEPENDENT_BYTES`.
+    Exhausted,
+}
+
+/// What a read beyond the text's terminating 0 gives in one of the two runs of `matches`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Past {
+    /// The letter does not match; a negation fails.
+    Fail,
+    /// Any letter matches; a negation passes.
+    Pass,
+}
 
 /// The text of a match with NCBI's `tlen` (the length that bounds the positions) and the read of
 /// `text[pos]`.
 struct Matcher<'a> {
     text: &'a [u8],
     tlen: usize,
+    past: Past,
     read_past: std::cell::Cell<bool>,
 }
 
 impl Matcher<'_> {
-    /// `text[pos]` of a `std::string`: the terminating 0 at `size()`.
-    fn at(&self, pos: usize) -> u8 {
+    /// `text[pos]` of a `std::string`: the terminating 0 at `size()`; `None` beyond it.
+    fn at(&self, pos: usize) -> Option<u8> {
         match pos.cmp(&self.text.len()) {
-            std::cmp::Ordering::Less => self.text[pos],
-            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Less => Some(self.text[pos]),
+            std::cmp::Ordering::Equal => Some(0),
             std::cmp::Ordering::Greater => {
                 self.read_past.set(true);
-                0
+                None
             }
         }
+    }
+}
+
+/// The bytes of `sizeof(size_t)`, one match record.
+const RECORD_BYTES: u64 = 8;
+
+/// One allocation of `records` match records (`vector<size_t>`) of NCBI's.
+fn allocate_records(records: u64) -> Result<(), MatchError> {
+    if u128::from(records) * u128::from(RECORD_BYTES) >= u128::from(HOST_DEPENDENT_BYTES) {
+        Err(MatchError::Exhausted)
+    } else {
+        Ok(())
+    }
+}
+
+/// `push_back` of records into the vector of `capacity` until it holds `len`: libstdc++ makes
+/// room for twice the records it holds when it is full (one when it is empty).
+// libstdc++ (GCC 13): bits/stl_vector.h:1281-1293,1896-1903
+// ```c++
+//       push_back(const value_type& __x)
+//       {
+// 	if (this->_M_impl._M_finish != this->_M_impl._M_end_of_storage)
+// 	  {
+// 	    ...
+// 	  }
+// 	else
+// 	  _M_realloc_insert(end(), __x);
+//       }
+//       ...
+//       _M_check_len(size_type __n, const char* __s) const
+//       {
+// 	if (max_size() - size() < __n)
+// 	  __throw_length_error(__N(__s));
+//
+// 	const size_type __len = size() + (std::max)(size(), __n);
+// 	return (__len < size() || __len > max_size()) ? max_size() : __len;
+//       }
+// ```
+// libstdc++ (GCC 13): bits/vector.tcc:446,453-455
+// ```c++
+//       _M_realloc_insert(iterator __position, _Args&&... __args)
+//     ...
+//     {
+//       const size_type __len =
+// 	_M_check_len(size_type(1), "vector::_M_realloc_insert");
+// ```
+// (`max_size()` is 2^60 - 1 records; the allocation of 1 GiB stops the growth long before.)
+fn grow_records(capacity: &mut u64, len: u64) -> Result<(), MatchError> {
+    while *capacity < len {
+        *capacity = if *capacity == 0 { 1 } else { 2 * *capacity };
+        allocate_records(*capacity)?;
+    }
+    Ok(())
+}
+
+/// `rMatchRec` of one position, by its counts: the records are `start`, then one per step,
+/// each the position after the step. The steps that advance (by one residue) come first; a
+/// step that does not advance (an anchor, or a negation of anchors and `X` only) depends only
+/// on the position, so every later step repeats it: those are counted in `still`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Record {
+    /// `rMatchRec.size()`; 0 is empty.
+    len: u64,
+    start: usize,
+    still: u64,
+}
+
+impl Record {
+    /// `rMatchRec.back()`.
+    fn last(&self) -> usize {
+        // The steps that advanced are fewer than `tlen`.
+        self.start + (self.len - 1 - self.still) as usize
+    }
+
+    /// `rMatchRec.push_back(start_pos)` of the first visit.
+    fn begin(&mut self, start: usize) {
+        *self = Record {
+            len: 1,
+            start,
+            still: 0,
+        };
+    }
+
+    /// The record of a step that advanced.
+    fn advance(&mut self) {
+        debug_assert_eq!(self.still, 0, "a step at a position that did not advance");
+        self.len += 1;
+    }
+
+    /// The records of steps that do not advance, up to `len` records.
+    fn stay_until(&mut self, len: u64) {
+        self.still += len - self.len;
+        self.len = len;
+    }
+
+    /// `rMatchRec.pop_back()`.
+    fn pop(&mut self) {
+        self.still = self.still.saturating_sub(1);
+        self.len -= 1;
     }
 }
 
@@ -238,13 +570,21 @@ impl PatternPos {
                 }
                 _ => {
                     if pos < m.tlen {
-                        let mut c = m.at(pos);
                         adv = 1;
-                        if c.is_ascii_lowercase() {
-                            c -= 0x20;
-                        }
-                        if ch == c {
-                            return None;
+                        match m.at(pos) {
+                            Some(mut c) => {
+                                if c.is_ascii_lowercase() {
+                                    c -= 0x20;
+                                }
+                                if ch == c {
+                                    return None;
+                                }
+                            }
+                            None => {
+                                if m.past == Past::Fail {
+                                    return None;
+                                }
+                            }
                         }
                     } else {
                         return None;
@@ -312,12 +652,20 @@ impl PatternPos {
                 }
                 _ => {
                     if pos < m.tlen {
-                        let mut c = m.at(pos);
-                        if c.is_ascii_lowercase() {
-                            c -= 0x20;
-                        }
-                        if ch == c {
-                            return Some(1);
+                        match m.at(pos) {
+                            Some(mut c) => {
+                                if c.is_ascii_lowercase() {
+                                    c -= 0x20;
+                                }
+                                if ch == c {
+                                    return Some(1);
+                                }
+                            }
+                            None => {
+                                if m.past == Past::Pass {
+                                    return Some(1);
+                                }
+                            }
                         }
                     }
                 }
@@ -403,28 +751,55 @@ impl PatternPos {
     // }
     // ```
     // (A lazy position whose `matched` is above `m_ulMaxCount` on a revisit leaves `retVal` 0
-    // and the record as it is.)
-    fn match_at(&self, m: &Matcher, record: &mut Vec<usize>, mut start_pos: usize) -> i32 {
-        let mut matched = record.len();
+    // and the record as it is.) `capacity` is the capacity of NCBI's `curr.flex`, the vector
+    // that holds `rMatchRec`.
+    //
+    // A step that does not advance gives the same at every later step (it depends only on the
+    // position): NCBI's loops repeat it up to the count they stop at, which `Record::stay_until`
+    // counts at once. A revisit starts where the rest of the pattern has just failed: one that
+    // does not advance (a lazy step, or the pop of a record of a step that did not advance)
+    // leaves the rest to fail again from the same position, so NCBI revisits until the count
+    // runs out (a lazy `{X}*` for ever) and then fails; LOSAT goes there at once.
+    fn match_at(
+        &self,
+        m: &Matcher,
+        record: &mut Record,
+        capacity: &mut u64,
+        mut start_pos: usize,
+    ) -> Result<i32, MatchError> {
+        let matched = record.len;
         let ret;
         if self.flags & LAZY_MATCH != 0 {
             if matched == 0 {
-                record.push(start_pos);
-                while record.len() <= self.min_count {
+                record.begin(start_pos);
+                grow_records(capacity, 1)?;
+                while record.len <= self.min_count {
                     let Some(adv) = self.step(m, start_pos) else {
-                        return -1;
+                        return Ok(-1);
                     };
-                    start_pos = start_pos.wrapping_add(adv);
-                    record.push(start_pos);
+                    if adv == 0 {
+                        let len = self.min_count.saturating_add(1);
+                        grow_records(capacity, len)?;
+                        record.stay_until(len);
+                        break;
+                    }
+                    start_pos += adv;
+                    record.advance();
+                    grow_records(capacity, record.len)?;
                 }
                 ret = i32::from(self.max_count > self.min_count);
             } else if matched <= self.max_count {
-                start_pos = record[matched - 1];
+                start_pos = record.last();
                 match self.step(m, start_pos) {
                     None => ret = -1,
+                    Some(0) => {
+                        grow_records(capacity, self.max_count.saturating_add(1))?;
+                        ret = -1;
+                    }
                     Some(adv) => {
-                        start_pos = start_pos.wrapping_add(adv);
-                        record.push(start_pos);
+                        debug_assert_eq!(adv, 1);
+                        record.advance();
+                        grow_records(capacity, record.len)?;
                         ret = i32::from(self.max_count > matched);
                     }
                 }
@@ -432,24 +807,38 @@ impl PatternPos {
                 ret = 0;
             }
         } else {
+            let need = self.min_count.wrapping_add(1);
             if matched == 0 {
-                record.push(start_pos);
-                loop {
-                    matched = record.len();
-                    if matched > self.max_count {
-                        break;
-                    }
+                record.begin(start_pos);
+                grow_records(capacity, 1)?;
+                while record.len <= self.max_count {
                     let Some(adv) = self.step(m, start_pos) else {
                         break;
                     };
-                    start_pos = start_pos.wrapping_add(adv);
-                    record.push(start_pos);
+                    if adv == 0 {
+                        let len = self.max_count.saturating_add(1);
+                        grow_records(capacity, len)?;
+                        record.stay_until(len);
+                        break;
+                    }
+                    start_pos += adv;
+                    record.advance();
+                    grow_records(capacity, record.len)?;
                 }
             } else {
+                if record.still > 0 {
+                    // The pops down to the advanced records keep `rMatchRec.back()`; they end
+                    // the position (`retVal` 0 or -1 at `need`) or reach the advanced records.
+                    let advanced = record.len - record.still;
+                    if need >= advanced {
+                        return Ok(-1);
+                    }
+                    record.len = advanced;
+                    record.still = 0;
+                }
                 record.pop();
-                matched = record.len();
             }
-            let need = self.min_count.wrapping_add(1);
+            let matched = record.len;
             ret = if matched < need {
                 -1
             } else if matched > need {
@@ -458,7 +847,34 @@ impl PatternPos {
                 0
             };
         }
-        ret
+        Ok(ret)
+    }
+
+    /// Whether a step can succeed without advancing: a positive position with an anchor (`<` at
+    /// 0, `>` at `tlen`), or a negation of anchors and `X` only.
+    fn may_stay(&self) -> bool {
+        if self.negative() {
+            !self.reads()
+        } else {
+            self.alt_chars.iter().any(|&c| c == b'<' || c == b'>')
+        }
+    }
+
+    /// Whether a step reads `text` (an alternative that is not an anchor or `X`).
+    fn reads(&self) -> bool {
+        self.alt_chars
+            .iter()
+            .any(|&c| c != b'<' && c != b'>' && c != b'X')
+    }
+
+    /// Whether a step can advance: a positive position with an alternative that is not an
+    /// anchor, or a negation that reads.
+    fn may_advance(&self) -> bool {
+        if self.negative() {
+            self.reads()
+        } else {
+            self.alt_chars.iter().any(|&c| c != b'<' && c != b'>')
+        }
     }
 }
 
@@ -482,14 +898,14 @@ enum Status {
 }
 
 /// `(size_t)atol(text)` of digits: glibc's `strtol` saturates at `LONG_MAX`.
-fn atol(digits: &[u8]) -> usize {
+fn atol(digits: &[u8]) -> u64 {
     let mut value: i64 = 0;
     for &digit in digits {
         value = value
             .saturating_mul(10)
             .saturating_add(i64::from(digit - b'0'));
     }
-    value as usize
+    value as u64
 }
 
 impl ProSite {
@@ -886,48 +1302,128 @@ impl ProSite {
     // }
     // ```
     // `Ok(None)` is `string::npos`. A pattern without a position (only `-`) matches at
-    // `start_pos`. `Err(ReadPast)`: the match read `text` beyond its terminating 0.
-    pub(crate) fn match_at(
+    // `start_pos`. The second value says whether the match read `text` beyond its terminating 0
+    // (answered by `past`). `capacity` follows `curr.flex`: a copy onto the stack allocates the
+    // records it holds, a copy back allocates when they do not fit (libstdc++'s `vector` copy
+    // constructor and assignment, bits/stl_vector.h:601-609, bits/vector.tcc:235-246).
+    fn run(
         &self,
         text: &[u8],
         tlen: usize,
         mut start_pos: usize,
-    ) -> Result<Option<usize>, ReadPast> {
+        past: Past,
+    ) -> (Result<Option<usize>, MatchError>, bool) {
         if start_pos >= tlen {
-            return Ok(None);
+            return (Ok(None), false);
         }
         let matcher = Matcher {
             text,
             tlen,
+            past,
             read_past: std::cell::Cell::new(false),
         };
-        let mut stack: Vec<(usize, Vec<usize>)> = Vec::new();
+        let mut stack: Vec<(usize, Record)> = Vec::new();
         let mut pos = 0usize;
-        let mut flex: Vec<usize> = Vec::new();
+        let mut flex = Record::default();
+        let mut capacity = 0u64;
         let result = loop {
             if pos == self.pattern.len() {
-                break Some(start_pos);
+                break Ok(Some(start_pos));
             }
-            let matched = self.pattern[pos].match_at(&matcher, &mut flex, start_pos);
-            if matcher.read_past.get() {
-                return Err(ReadPast);
-            }
+            let matched =
+                match self.pattern[pos].match_at(&matcher, &mut flex, &mut capacity, start_pos) {
+                    Ok(matched) => matched,
+                    Err(error) => break Err(error),
+                };
             if matched < 0 {
                 let Some((top_pos, top_flex)) = stack.pop() else {
-                    break None;
+                    break Ok(None);
                 };
+                if top_flex.len > capacity {
+                    if let Err(error) = allocate_records(top_flex.len) {
+                        break Err(error);
+                    }
+                    capacity = top_flex.len;
+                }
                 pos = top_pos;
                 flex = top_flex;
             } else {
                 if matched > 0 {
-                    stack.push((pos, flex.clone()));
+                    if let Err(error) = allocate_records(flex.len) {
+                        break Err(error);
+                    }
+                    stack.push((pos, flex));
                 }
-                start_pos = *flex.last().expect("a matched position records its start");
+                start_pos = flex.last();
                 pos += 1;
-                flex.clear();
+                flex.len = 0;
             }
         };
-        Ok(result)
+        (result, matcher.read_past.get())
+    }
+
+    /// Whether NCBI's `Match` finds a match (`MotifCheck` asks no more), also where it reads
+    /// bytes beyond the text's terminating 0 when its answer does not depend on them (the module
+    /// comment; DECISIONS 37). `buffer` is the capacity of NCBI's string that holds the text: its
+    /// bytes `0..=buffer` are NCBI's own, a read beyond them may fault.
+    pub(crate) fn matches(
+        &self,
+        text: &[u8],
+        tlen: usize,
+        start_pos: usize,
+        buffer: u64,
+    ) -> Result<bool, MatchError> {
+        let (result, read_past) = self.run(text, tlen, start_pos, Past::Fail);
+        if !read_past {
+            return result.map(|end| end.is_some());
+        }
+        // The runs that NCBI makes for other bytes go through other positions and counts:
+        // every read must stay in NCBI's buffer, and no record may reach the allocation that
+        // `Exhausted` refuses.
+        if self.may_exhaust(tlen) || self.max_read(tlen, start_pos) > buffer {
+            return Err(MatchError::ReadPast);
+        }
+        if let Ok(Some(_)) = result {
+            return Ok(true);
+        }
+        match self.run(text, tlen, start_pos, Past::Pass).0 {
+            Ok(None) => Ok(false),
+            _ => Err(MatchError::ReadPast),
+        }
+    }
+
+    /// The highest position that a step that reads can be at, for any bytes of the text: each
+    /// step advances by one at most, each position up to its maximal count, a step that reads
+    /// advances, and reads stop before `tlen`.
+    fn max_read(&self, tlen: usize, start_pos: usize) -> u64 {
+        let advance = self
+            .pattern
+            .iter()
+            .filter(|pos| pos.may_advance())
+            .fold(0u64, |sum, pos| sum.saturating_add(pos.max_count));
+        (start_pos as u64)
+            .saturating_add(advance)
+            .saturating_sub(1)
+            .min((tlen as u64).saturating_sub(1))
+    }
+
+    /// Whether the records of a position can reach `2^26 + 1`, the fewest whose growth
+    /// allocates 1 GiB (twice 2^26 records of 8 bytes): a position that may not advance
+    /// repeats up to its maximal count (a lazy one for ever), one that advances up to `tlen`.
+    fn may_exhaust(&self, tlen: usize) -> bool {
+        const FEWEST: u64 = (1 << 26) + 1;
+        self.pattern.iter().any(|pos| {
+            let records = if pos.may_stay() {
+                if pos.flags & LAZY_MATCH != 0 {
+                    u64::MAX
+                } else {
+                    pos.max_count.saturating_add(1)
+                }
+            } else {
+                pos.max_count.min(tlen as u64).saturating_add(1)
+            };
+            records >= FEWEST
+        })
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:700-742
@@ -960,13 +1456,22 @@ impl ProSite {
     // 	}
     // }
     // ```
-    // The only use of the map is its length (basedata.cpp:696), which is all this returns: the
-    // sum of the minimal counts of the positions that have alternatives.
-    pub(crate) fn minimal_map_len(&self) -> usize {
-        self.pattern
-            .iter()
-            .filter(|pos| pos.min_count > 0 && !pos.alt_chars.is_empty())
-            .fold(0usize, |sum, pos| sum.saturating_add(pos.min_count))
+    // The map's letters are not used (basedata.cpp:696 takes its length; the residues are
+    // pushed into the same string after `clear()`, basedata.cpp:723-728): this follows the
+    // string's length and capacity through `reserve` and the `append`s, which end NCBI's
+    // rpsbproc with an exception (`MapEnd`) for a length or an allocation that cannot be held.
+    pub(crate) fn minimal_map(&self) -> Result<CxxString, MapEnd> {
+        let mut map = CxxString::new();
+        let total = self.pattern.len() as u64;
+        if total > 0 {
+            map.reserve(total + total)?;
+            for pos in &self.pattern {
+                if pos.min_count > 0 && !pos.alt_chars.is_empty() {
+                    map.append(pos.min_count)?;
+                }
+            }
+        }
+        Ok(map)
     }
 }
 

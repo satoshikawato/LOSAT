@@ -19,7 +19,7 @@
 //! with other runs (the library, the Web), so the list belongs to the run: `MotifState`.
 
 use super::data::{CddData, Site};
-use super::prosite::{ProSite, ReadPast};
+use super::prosite::{MapEnd, MatchError, ProSite};
 
 /// A mapped residue (`TSeg_base::TResiduePos`): its position on the query (`curr`) and the
 /// position on the model it came from (`ori`).
@@ -44,8 +44,10 @@ pub(crate) struct MotifState {
 pub(crate) enum MotifError {
     /// `THROW_SIMPLE("Motif string parse error -- Motif = " << m_strMotif << ", error position: " << errPos)`.
     Parse { motif: Vec<u8>, position: usize },
-    /// The match read the residues beyond their end (`ProSite::match_at`): C++ undefined.
-    ReadPast,
+    /// `GetMinimalXMap` throws, or allocates what the host decides (`ProSite::minimal_map`).
+    Map(MapEnd),
+    /// The match of the residues (`ProSite::matches`).
+    Match(MatchError),
 }
 
 impl MotifState {
@@ -144,9 +146,10 @@ impl MotifState {
             motif: motif.to_vec(),
             position,
         })?;
-        let motif_len = pattern.minimal_map_len();
+        let map = pattern.minimal_map().map_err(MotifError::Map)?;
+        let motif_len = map.len;
         let (mut motif_idx, mut map_idx) = (0usize, 0usize);
-        while motif_idx < motif_len {
+        while (motif_idx as u64) < motif_len {
             loop {
                 if map_idx >= mapped.len() {
                     // Exhausted, fail.
@@ -172,15 +175,21 @@ impl MotifState {
             motif_idx += 1;
         }
         if !residues.is_empty() {
-            let text: Vec<u8> = mapped
-                .iter()
-                .filter(|res| res.curr >= 0 && (res.curr as usize) < residues.len())
-                .map(|res| residues[res.curr as usize])
-                .collect();
-            return match pattern.match_at(&text, residues.len(), 0) {
-                Ok(None) => Ok(2),
-                Ok(Some(_)) => Ok(0),
-                Err(ReadPast) => Err(MotifError::ReadPast),
+            // `minMap` holds the residues now: its capacity bounds the bytes beyond them that
+            // are NCBI's own (`ProSite::matches`).
+            let mut buffer = map;
+            buffer.clear();
+            let mut text = Vec::new();
+            for res in mapped {
+                if res.curr >= 0 && (res.curr as usize) < residues.len() {
+                    text.push(residues[res.curr as usize]);
+                    buffer.push_back().map_err(MotifError::Map)?;
+                }
+            }
+            return match pattern.matches(&text, residues.len(), 0, buffer.capacity) {
+                Ok(false) => Ok(2),
+                Ok(true) => Ok(0),
+                Err(error) => Err(MotifError::Match(error)),
             };
         }
         Ok(0)

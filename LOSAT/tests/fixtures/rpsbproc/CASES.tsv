@@ -124,3 +124,9 @@ ctprev.sdsite	compare	-	data-with:ctprev	-i arch/sdsite.asn -d ctprev
 rootpid.gen2	compare	-	data-with:rootpid	-i arch/gen2.asn -d rootpid
 badmotif.mfirst	compare	-	data-with:badmotif	-i arch/mfirst.asn -d badmotif
 badmotif.mfirst.doms	compare	-	data-with:badmotif	-i arch/mfirst.asn -d badmotif -t doms
+rd1.mfirst	compare	-	data-with:sites+rd1	-i arch/mfirst.asn -d rd1
+rd5.mfirst	compare	-	data-with:sites+rd5	-i arch/mfirst.asn -d rd5
+both.mfirst_delta	compare	-	data-with:sites	-i arch/mfirst_delta.asn -d sites
+rd4.mfirst	compare	-	data-with:sites+rd4	-i arch/mfirst.asn -d rd4
+rd13.mfirst	compare	-	data-with:sites+rd13	-i arch/mfirst.asn -d rd13
+rd14.mfirst	compare	-	data-with:sites+rd14	-i arch/mfirst.asn -d rd14

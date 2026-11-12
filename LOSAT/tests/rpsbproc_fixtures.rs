@@ -114,9 +114,15 @@ fn rpsbproc_gives_ncbis_bytes() {
         }
         let _ = fs::remove_file(dir.join("out.txt"));
         let _ = fs::remove_dir_all(dir.join("data_missing"));
+        // `data-with:<a>+<b>`: the directory `<b>/` holds the data files with those of
+        // `data_with/<a>/` and then of `data_with/<b>/` in their place.
         if let Some(with) = setup.strip_prefix("data-with:") {
-            copy_files(&dir.join("data"), &dir.join(with));
-            copy_files(&fixtures().join("data_with").join(with), &dir.join(with));
+            let layers: Vec<&str> = with.split('+').collect();
+            let target = dir.join(layers[layers.len() - 1]);
+            copy_files(&dir.join("data"), &target);
+            for layer in layers {
+                copy_files(&fixtures().join("data_with").join(layer), &target);
+            }
         }
         if let Some(without) = setup.strip_prefix("data-without:") {
             fs::create_dir_all(dir.join("data_missing")).unwrap();
@@ -135,16 +141,18 @@ fn rpsbproc_gives_ncbis_bytes() {
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
         let expected = |suffix: &str| fs::read(oracle.join(format!("{case}.{suffix}"))).unwrap();
-        assert_eq!(
-            String::from_utf8_lossy(&out),
-            String::from_utf8_lossy(&expected("out")),
-            "{case}: stdout"
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&err),
-            String::from_utf8_lossy(&expected("err")),
-            "{case}: stderr"
-        );
+        // The bytes are compared; the text is only shown.
+        for (name, got, want) in [
+            ("stdout", &out, expected("out")),
+            ("stderr", &err, expected("err")),
+        ] {
+            assert!(
+                *got == want,
+                "{case}: {name}\nLOSAT:\n{}\nNCBI:\n{}",
+                String::from_utf8_lossy(got),
+                String::from_utf8_lossy(&want)
+            );
+        }
         let rc: i32 = String::from_utf8(expected("rc"))
             .unwrap()
             .trim()
@@ -161,7 +169,7 @@ fn rpsbproc_gives_ncbis_bytes() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 124);
+    assert_eq!(compared, 130);
 }
 
 #[test]

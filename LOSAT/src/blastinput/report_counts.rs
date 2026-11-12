@@ -24,15 +24,59 @@ pub const DEFAULT_NUM_DESCRIPTIONS: usize = 500;
 /// See [`DEFAULT_NUM_DESCRIPTIONS`].
 pub const DEFAULT_NUM_ALIGNMENTS: usize = 250;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2683-2721
+// ```c++
+//     arg_desc.AddOptionalKey(kArgLineLength, "line_length",
+//     		                "Line length for formatting alignments\n"
+//     						"Not applicable for outfmt > 4\n"
+//     		   			    "Default = `"+ NStr::NumericToString(align_format::kDfltLineLength) + "'",
+//     		                CArgDescriptions::eInteger);
+//     arg_desc.SetConstraint(kArgLineLength,
+//                            new CArgAllowValuesGreaterThanOrEqual(1));
+//     ...
+//         arg_desc.AddOptionalKey(kArgSortHits, "sort_hits",
+//                            "Sorting option for hits:\n"
+//                            "alignment view options:\n"
+//                            "  0 = Sort by evalue,\n"
+//                            "  1 = Sort by bit score,\n"
+//                            "  2 = Sort by total score,\n"
+//                            "  3 = Sort by percent identity,\n"
+//                            "  4 = Sort by query coverage\n"
+//                            "Not applicable for outfmt > 4\n",
+//                            CArgDescriptions::eInteger);
+//         arg_desc.SetConstraint(kArgSortHits,
+//                            new CArgAllowValuesBetween(CAlignFormatUtil::eEvalue,
+//                                                       CAlignFormatUtil::eQueryCoverage,
+//                                                       true));
+//         arg_desc.AddOptionalKey(kArgSortHSPs, "sort_hsps",
+//                            "Sorting option for hps:\n"
+//                            "  0 = Sort by hsp evalue,\n"
+//                            "  1 = Sort by hsp score,\n"
+//                            "  2 = Sort by hsp query start,\n"
+//                            "  3 = Sort by hsp percent identity,\n"
+//                            "  4 = Sort by hsp subject start\n"
+//                            "Not applicable for outfmt != 0\n",
+//                            CArgDescriptions::eInteger);
+//         arg_desc.SetConstraint(kArgSortHSPs,
+//                            new CArgAllowValuesBetween(CAlignFormatUtil::eHspEvalue,
+//                                                       CAlignFormatUtil::eSubjectStart,
+//                                                       true));
+// ```
 /// The formatting handler's options besides the counts, as the command line gives them:
-/// `-line_length`, `-sorthits` and `-sorthsps` (`CFormattingArgs`). rpsblast reads them (the
-/// other programs' parsers refuse them); the default is none given.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// `-line_length`, `-sorthits` and `-sorthsps` (`CFormattingArgs`), one definition that every
+/// program's parser flattens in (BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX, psiblast and
+/// rpsblast); the default is none given. The five programs hand all three to the formatter
+/// (`blastn_app.cpp:251-253` and the others' alike); psiblast and rpsblast only the line length
+/// (`psiblast_app.cpp:502`, `rpsblast_app.cpp:187`): their `report_sort` is none.
+#[derive(clap::Args, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FormattingArgs {
     /// `-line_length`: the width of the pairwise alignment rows (60 when it is not given).
+    #[arg(long = "line_length", value_name = "line_length", value_parser = formatting_line_length, help = "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]")]
     pub line_length: Option<usize>,
     /// `-sorthits` and `-sorthsps` (0 to 4).
+    #[arg(long = "sorthits", value_name = "sort_hits", value_parser = formatting_sort_option, help = "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4")]
     pub sort_hits: Option<u8>,
+    #[arg(long = "sorthsps", value_name = "sort_hsps", value_parser = formatting_sort_option, help = "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0")]
     pub sort_hsps: Option<u8>,
 }
 
@@ -43,6 +87,48 @@ impl FormattingArgs {
         self.line_length
             .unwrap_or(crate::report::pairwise::DEFAULT_LINE_LENGTH)
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:251-253
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2943-2946
+    // ```c++
+    //     	if(args.Exist(kArgSortHits) && args[kArgSortHits])
+    //     	{
+    //     		m_HitsSortOption = args[kArgSortHits].AsInteger();
+    //     	}
+    // ```
+    /// `-sorthits` and `-sorthsps` as one of the five search programs' pairwise reports reads
+    /// them (blastp_app.cpp:246-248, blastx_app.cpp:247-249, tblastn_app.cpp:263-265 and
+    /// tblastx_app.cpp:166-168 hand them over as blastn_app.cpp does). `m_HitsSortOption` is read
+    /// for the output formats up to 4 and `m_HspsSortOption` for format 0 only; only format 0
+    /// sorts (`ReportCounts::warnings_with` warns about the others).
+    pub fn report_sort(&self) -> crate::report::hit_sort::ReportSort {
+        crate::report::hit_sort::ReportSort {
+            hits: self.sort_hits,
+            hsps: self.sort_hsps,
+        }
+    }
+}
+
+/// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween(0, 4,
+/// true)`, quoted at `FormattingArgs`).
+fn formatting_sort_option(value: &str) -> Result<u8, String> {
+    let option = crate::blastinput::value_parsers::ncbi_integer_at_least(value, 0)?;
+    u8::try_from(option)
+        .ok()
+        .filter(|option| *option <= 4)
+        .ok_or_else(|| "Illegal value: expected an integer from 0 to 4".to_string())
+}
+
+/// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual(1)`,
+/// quoted at `FormattingArgs`).
+fn formatting_line_length(value: &str) -> Result<usize, String> {
+    let length = crate::blastinput::value_parsers::ncbi_integer_at_least(value, 1)?;
+    usize::try_from(length).map_err(|_| "Illegal value: expected an integer >= 1".to_string())
 }
 
 /// The numbers that one output format of a run uses.
@@ -164,7 +250,7 @@ impl ReportCounts {
         )
     }
 
-    /// `warnings` with the formatting options `formatting` (rpsblast's), in NCBI's order: for an
+    /// `warnings` with the formatting options `formatting`, in NCBI's order: for an
     /// output format above 4 the ignored `-num_descriptions`, `-line_length` and `-sorthits`,
     /// then the few matches, then the ignored `-sorthsps` of a format other than 0.
     ///
@@ -289,9 +375,9 @@ pub fn run_report_counts(
     )
 }
 
-/// `run_report_counts` of a run with the formatting options `formatting` (rpsblast's
-/// `-line_length`, `-sorthits`, `-sorthsps`), whose warnings come with the counts' in NCBI's
-/// order (`ReportCounts::warnings_with`).
+/// `run_report_counts` of a run with the formatting options `formatting` (`-line_length`,
+/// `-sorthits`, `-sorthsps`), whose warnings come with the counts' in NCBI's order
+/// (`ReportCounts::warnings_with`).
 pub fn run_report_counts_with(
     program: &str,
     outfmts: &[i32],

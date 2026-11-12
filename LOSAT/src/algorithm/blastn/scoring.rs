@@ -5,7 +5,7 @@ use super::args::BlastnArgs;
 use super::blast_engine::NO_DATA_MESSAGE;
 use super::coordination::determine_scoring_params;
 use super::pairwise::query_ungapped_karlin_blastna;
-use crate::blastinput::report_counts::{run_report_counts, ReportCounts};
+use crate::blastinput::report_counts::{run_report_counts_with, ReportCounts};
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
 use crate::stats::{ungapped_beta, KarlinParams, NuclValues};
@@ -451,12 +451,13 @@ pub(crate) fn report_counts_of(
     args: &BlastnArgs,
     outfmts: &[i32],
 ) -> anyhow::Result<(ReportCounts, Vec<u8>)> {
-    run_report_counts(
+    run_report_counts_with(
         "blastn",
         outfmts,
         args.max_target_seqs,
         args.num_descriptions,
         args.num_alignments,
+        &args.formatting,
     )
 }
 

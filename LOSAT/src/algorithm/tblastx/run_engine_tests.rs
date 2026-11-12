@@ -33,6 +33,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         subject: Some(subject.clone()),
         db: None,
         db_filter: Default::default(),
+        formatting: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,

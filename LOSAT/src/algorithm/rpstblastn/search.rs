@@ -48,20 +48,18 @@ use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, Consensus,
     RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
-use crate::blastinput::report_counts::FormattingArgs;
 use crate::core::blast_util::frame_to_context;
 use crate::stats::KarlinParams;
 
 /// The program of LOSAT's refusals.
 const PROGRAM: &str = "RPSTBLASTN";
 
-/// The RPS search of an RPSTBLASTN run: `RpsSearch` (rpsblast's options of the RPS engine), the
-/// formatting options that BLASTX does not have, `-ungapped`, and what the run's database tells
-/// (`for_database`).
+/// The RPS search of an RPSTBLASTN run: `RpsSearch` (rpsblast's options of the RPS engine),
+/// `-ungapped`, and what the run's database tells (`for_database`). The formatting options are
+/// BLASTX's (`BlastxArgs::formatting`; `ResolvedOptions::report_sort` keeps NCBI's no-sort).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TranslatedRpsSearch {
     pub(crate) search: RpsSearch,
-    pub(crate) formatting: FormattingArgs,
     /// `-ungapped` (with composition-based statistics 0: NCBI's options error at the others is
     /// BLASTX's `resolve`).
     pub(crate) ungapped: bool,
@@ -180,10 +178,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             )
         })?;
         Ok(processed)
-    }
-
-    fn formatting(&self) -> FormattingArgs {
-        self.formatting
     }
 
     fn merges_volumes(&self) -> bool {
@@ -858,7 +852,6 @@ mod tests {
     fn sum_statistics_and_an_ungapped_search_are_refused_before_the_reports() {
         let mut search = TranslatedRpsSearch {
             search: RpsSearch::default(),
-            formatting: FormattingArgs::default(),
             ungapped: false,
             use_sw_tback: false,
             comp_based_stats: "0".to_string(),
@@ -879,10 +872,5 @@ mod tests {
             .to_string()
             .contains("crashes after an ungapped search"));
         assert!(!search.merges_volumes());
-        assert_eq!(
-            search.formatting(),
-            FormattingArgs::default(),
-            "the formatting options reach BLASTX's reports"
-        );
     }
 }

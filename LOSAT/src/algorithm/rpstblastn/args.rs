@@ -8,10 +8,7 @@ use std::sync::Arc;
 use super::search::TranslatedRpsSearch;
 use crate::algorithm::blastx::BlastxArgs;
 use crate::algorithm::rps_search::engine::RpsSearch;
-use crate::algorithm::rpsblast::args::{
-    check_rps_outfmt, rps_composition_mode, rpsblast_line_length, rpsblast_mt_mode,
-    rpsblast_sort_option,
-};
+use crate::algorithm::rpsblast::args::{check_rps_outfmt, rps_composition_mode, rpsblast_mt_mode};
 use crate::blastinput::report_counts::FormattingArgs;
 use crate::blastinput::value_parsers::*;
 
@@ -108,15 +105,12 @@ pub struct RpstblastnArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count)]
     pub num_alignments: Option<usize>,
-    /// `-line_length`: the width of the outfmt 0 alignment rows. `-sorthits` and `-sorthsps` are
-    /// read with NCBI's warnings and sort nothing, as rpsblast's (`rpstblastn_app.cpp` hands
-    /// the formatter the line length only, as `rpsblast_app.cpp:187` does).
-    #[arg(long = "line_length", value_name = "line_length", value_parser = rpsblast_line_length)]
-    pub line_length: Option<usize>,
-    #[arg(long = "sorthits", value_name = "sort_hits", value_parser = rpsblast_sort_option)]
-    pub sorthits: Option<u8>,
-    #[arg(long = "sorthsps", value_name = "sort_hsps", value_parser = rpsblast_sort_option)]
-    pub sorthsps: Option<u8>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler, `FormattingArgs`),
+    /// handed to BLASTX's arguments: the width of the outfmt 0 alignment rows; the sorts are read
+    /// with NCBI's warnings and sort nothing (`ResolvedOptions::report_sort`: NCBI's
+    /// rpstblastn hands its formatter the line length only, as rpsblast's).
+    #[command(flatten)]
+    pub formatting: FormattingArgs,
     // *** Query filtering options
     #[arg(long, value_name = "SEG_options")]
     pub seg: Option<String>,
@@ -227,11 +221,6 @@ impl RpstblastnArgs {
                 x_drop_final_bits: self.xdrop_gap_final,
                 sum_stats: self.sum_stats == Some(true),
             },
-            formatting: FormattingArgs {
-                line_length: self.line_length,
-                sort_hits: self.sorthits,
-                sort_hsps: self.sorthsps,
-            },
             ungapped: self.ungapped,
             use_sw_tback: self.use_sw_tback,
             comp_based_stats: self.comp_based_stats.clone(),
@@ -325,6 +314,7 @@ impl RpstblastnArgs {
                 .map(|n| i32::try_from(n).unwrap_or(i32::MAX)),
             num_descriptions: self.num_descriptions,
             num_alignments: self.num_alignments,
+            formatting: self.formatting,
             // `-num_threads 0`: one thread per volume of the database (NCBI's "auto"), set once
             // the database is open (`RpsSearch::auto_threads`).
             num_threads: self.num_threads.max(1),
@@ -669,8 +659,10 @@ mod tests {
             ),
             (Some(3.0), None, Some(0.0))
         );
+        // The formatting options are BLASTX's (one owner): the line length reaches the report, the
+        // sorts sort nothing (NCBI's rpstblastn hands its formatter the line length only).
         assert_eq!(
-            rps.formatting,
+            args.formatting,
             FormattingArgs {
                 line_length: Some(70),
                 sort_hits: Some(1),
@@ -678,6 +670,8 @@ mod tests {
             }
         );
         let resolved = args.resolve().unwrap();
+        assert_eq!(resolved.formatting.line_length(), 70);
+        assert_eq!(resolved.report_sort(), Default::default());
         // RPS-BLAST prints no word threshold (`blast_rps_options.cpp:60-67`, quoted above).
         assert_eq!(resolved.threshold, 0.0);
         assert!(!resolved.sum_stats);

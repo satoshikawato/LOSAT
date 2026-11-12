@@ -1,0 +1,3 @@
+Warning: [tblastn] The parameter -line_length is not applicable for output formats > 4 .
+Warning: [tblastn] The parameter -sorthits is ignored for output formats > 4.
+Warning: [tblastn] The parameter -sorthsps is ignored for output formats != 0.

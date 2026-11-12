@@ -128,53 +128,13 @@ pub struct RpsblastArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2683-2721
-    // ```c++
-    //     arg_desc.AddOptionalKey(kArgLineLength, "line_length",
-    //     		                "Line length for formatting alignments\n"
-    //     						"Not applicable for outfmt > 4\n"
-    //     		   			    "Default = `"+ NStr::NumericToString(align_format::kDfltLineLength) + "'",
-    //     		                CArgDescriptions::eInteger);
-    //     arg_desc.SetConstraint(kArgLineLength,
-    //                            new CArgAllowValuesGreaterThanOrEqual(1));
-    //     ...
-    //         arg_desc.AddOptionalKey(kArgSortHits, "sort_hits",
-    //                            "Sorting option for hits:\n"
-    //                            "alignment view options:\n"
-    //                            "  0 = Sort by evalue,\n"
-    //                            "  1 = Sort by bit score,\n"
-    //                            "  2 = Sort by total score,\n"
-    //                            "  3 = Sort by percent identity,\n"
-    //                            "  4 = Sort by query coverage\n"
-    //                            "Not applicable for outfmt > 4\n",
-    //                            CArgDescriptions::eInteger);
-    //         arg_desc.SetConstraint(kArgSortHits,
-    //                            new CArgAllowValuesBetween(CAlignFormatUtil::eEvalue,
-    //                                                       CAlignFormatUtil::eQueryCoverage,
-    //                                                       true));
-    //         arg_desc.AddOptionalKey(kArgSortHSPs, "sort_hsps",
-    //                            "Sorting option for hps:\n"
-    //                            "  0 = Sort by hsp evalue,\n"
-    //                            "  1 = Sort by hsp score,\n"
-    //                            "  2 = Sort by hsp query start,\n"
-    //                            "  3 = Sort by hsp percent identity,\n"
-    //                            "  4 = Sort by hsp subject start\n"
-    //                            "Not applicable for outfmt != 0\n",
-    //                            CArgDescriptions::eInteger);
-    //         arg_desc.SetConstraint(kArgSortHSPs,
-    //                            new CArgAllowValuesBetween(CAlignFormatUtil::eHspEvalue,
-    //                                                       CAlignFormatUtil::eSubjectStart,
-    //                                                       true));
-    // ```
-    /// `-line_length`: the width of the outfmt 0 alignment rows. `-sorthits` and `-sorthsps` are
-    /// read with NCBI's warnings and sort nothing: NCBI's rpsblast does not hand them to its
-    /// formatter (`app/rpsblast_app.cpp:187`, `SetLineLength` only).
-    #[arg(long = "line_length", value_name = "line_length", value_parser = rpsblast_line_length, help = "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]")]
-    pub line_length: Option<usize>,
-    #[arg(long = "sorthits", value_name = "sort_hits", value_parser = rpsblast_sort_option, help = "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4")]
-    pub sorthits: Option<u8>,
-    #[arg(long = "sorthsps", value_name = "sort_hsps", value_parser = rpsblast_sort_option, help = "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0")]
-    pub sorthsps: Option<u8>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// blast_args.cpp:2683-2721, quoted at `FormattingArgs`): the width of the outfmt 0
+    /// alignment rows; the sorts are read with NCBI's warnings and sort nothing: NCBI's
+    /// rpsblast does not hand them to its formatter (`app/rpsblast_app.cpp:187`,
+    /// `SetLineLength` only).
+    #[command(flatten)]
+    pub formatting: FormattingArgs,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
@@ -309,23 +269,6 @@ pub(crate) fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
         .ok_or_else(|| "Illegal value: expected an integer from 0 to 1".to_string())
 }
 
-/// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween(0, 4,
-/// true)`, quoted at `RpsblastArgs::line_length`).
-pub(crate) fn rpsblast_sort_option(value: &str) -> Result<u8, String> {
-    let option = ncbi_integer_at_least(value, 0)?;
-    u8::try_from(option)
-        .ok()
-        .filter(|option| *option <= 4)
-        .ok_or_else(|| "Illegal value: expected an integer from 0 to 4".to_string())
-}
-
-/// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual(1)`,
-/// quoted at `RpsblastArgs::line_length`).
-pub(crate) fn rpsblast_line_length(value: &str) -> Result<usize, String> {
-    let length = ncbi_integer_at_least(value, 1)?;
-    usize::try_from(length).map_err(|_| "Illegal value: expected an integer >= 1".to_string())
-}
-
 /// The composition-based statistics mode of a `-comp_based_stats` value as RPS-BLAST reads it:
 /// its first letter only, `D`/`d` and any unknown letter as 0, `T`/`t` as 1.
 ///
@@ -447,11 +390,7 @@ impl RpsblastArgs {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
-            formatting: FormattingArgs {
-                line_length: self.line_length,
-                sort_hits: self.sorthits,
-                sort_hsps: self.sorthsps,
-            },
+            formatting: self.formatting,
             rps: Some(RpsSearch {
                 max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
                 query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
@@ -711,7 +650,10 @@ mod tests {
             assert!(parse(extra).is_err(), "{extra:?}");
         }
         assert_eq!(
-            parse(&["-line_length", "2147483647"]).unwrap().line_length,
+            parse(&["-line_length", "2147483647"])
+                .unwrap()
+                .formatting
+                .line_length,
             Some(2_147_483_647)
         );
         // `-sum_stats true` reaches the search, which refuses it (`rps_hooks::rps_search`).

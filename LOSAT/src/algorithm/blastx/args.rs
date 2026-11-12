@@ -397,6 +397,10 @@ pub struct BlastxArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3158-3161
     // ```c++
     //     arg_desc.AddDefaultKey(kArgNumThreads, "int_value",
@@ -479,9 +483,6 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut super::native::BatchRender<'_>,
     ) -> Result<usize>;
-    /// `-line_length`, `-sorthits` and `-sorthsps`, which BLASTX does not have: the formatting
-    /// handler's warnings (`native::warnings_of`) and the pairwise report's line length.
-    fn formatting(&self) -> crate::blastinput::report_counts::FormattingArgs;
     /// Whether the batches' results are merged over a database of several volumes, as NCBI's
     /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no
     /// query warning, `report::query_warning`) and gives a batch that was not searched an empty
@@ -541,6 +542,22 @@ impl ResolvedOptions {
             usize::try_from(self.hitlist_size).unwrap_or(0)
         } else {
             usize::MAX
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:184 (blastx_app.cpp:247-249
+    // hands the sorts over too, quoted at `formatting`)
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    // ```
+    /// The sorts of the pairwise report (`-sorthits`, `-sorthsps`): BLASTX's; none for an
+    /// RPSTBLASTN run, whose application hands its formatter the line length only, as rpsblast's
+    /// and psiblast's (`blastp::args`, `hit_sort::ReportSort`): its sorts are read with NCBI's
+    /// warnings (`native::warnings_of`) and sort nothing.
+    pub(crate) fn report_sort(&self) -> crate::report::hit_sort::ReportSort {
+        match self.rpstblastn {
+            Some(_) => Default::default(),
+            None => self.formatting.report_sort(),
         }
     }
 }
@@ -781,6 +798,14 @@ pub struct ResolvedOptions {
     pub hitlist_size: i32,
     pub num_descriptions: i32,
     pub num_alignments: i32,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:247-249
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
+    /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     pub outfmt: u8,
     /// The fields of the default tabular report (outfmt 6 and 7 without `tabular`: the `std`
     /// fields), by name; empty for outfmt 0.
@@ -1428,6 +1453,7 @@ impl BlastxArgs {
             hitlist_size,
             num_descriptions: counts.num_descriptions as i32,
             num_alignments: counts.num_alignments as i32,
+            formatting: self.formatting,
             outfmt,
             fields,
             tabular,

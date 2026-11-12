@@ -9,6 +9,11 @@ export interface DownloadRequest {
   readonly url: string;
   /** The download stops ('too-large') once the decompressed bytes pass this. */
   readonly maxBytes: number;
+  /**
+   * The name of the file decompressed (the set's `fileName`); a gzip body is inflated as the file
+   * `<fileName>.gz`, which names it in the engine's sentence when its data is damaged.
+   */
+  readonly fileName: string;
 }
 
 /** Bytes downloaded so far, and the whole download when the site says it (Content-Length). */
@@ -24,7 +29,7 @@ export type DownloadResult =
   | { readonly ok: false; readonly reason: 'unreachable'; readonly detail: string }
   /** An HTTP status other than 200 (such as 404, or a 500 that may pass on another try). */
   | { readonly ok: false; readonly reason: 'refused'; readonly status: number }
-  /** The gzip data could not be decompressed (cut short or damaged). */
+  /** The gzip data could not be decompressed (cut short or damaged): the engine's sentence. */
   | { readonly ok: false; readonly reason: 'corrupt'; readonly detail: string }
   | { readonly ok: false; readonly reason: 'too-large' };
 

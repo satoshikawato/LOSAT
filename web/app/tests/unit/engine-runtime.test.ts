@@ -1,15 +1,20 @@
 // Pure parts of the engine runtime: the thread and renewal policy, the check of an engine
 // module before it is compiled, and the message of an instance that stopped. With
 // LOSAT_WEB_REACTORS, the module check also runs on the built reactors, and the
-// RecordScanner contract runs against the serial reactor in Node.
+// RecordScanner contract and the inflation of compressed sources run against the serial
+// reactor in Node.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { constants as zlib, gzipSync, zstdCompressSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { findReactors } from '../../build/reactors';
-import { ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
+import { EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../src/infra/reactor/artifact';
 import { instantiateSerial, loadReactor } from '../../src/infra/reactor/instance';
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
+import { ReactorInflater } from '../../src/infra/reactor/inflater';
+import { inflateFile } from '../../src/infra/data/inflate';
+import { INFLATED_TOO_LARGE } from '../../src/ports/inflate';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
 import type { FastaParserKind } from '../../src/domain/dataset';
@@ -280,6 +285,7 @@ describe('ReactorAbi', () => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     let next = 1024;
     const released: number[] = [];
+    const ended: number[] = [];
     const bytes = new TextEncoder().encode(response);
     const ref: { abi?: ReactorAbi } = {};
     const send = () => {
@@ -309,9 +315,24 @@ describe('ReactorAbi', () => {
         released.push(handle);
         return 0;
       },
+      losat_web2_inflate_begin: () => {
+        send();
+        return 5;
+      },
+      // Inflated bytes on stream 5, and a stream that inflation never sends.
+      losat_web2_inflate_chunk: () => {
+        new Uint8Array(memory.buffer, 60_000, 3).set([1, 2, 3]);
+        ref.abi!.emit(5, 60_000, 3);
+        ref.abi!.emit(6, 60_000, 1);
+        return 0;
+      },
+      losat_web2_inflate_end: (handle: number) => {
+        ended.push(handle);
+        return 0;
+      },
     } as unknown as AbiExports;
     ref.abi = new ReactorAbi(exports);
-    return { abi: ref.abi, released };
+    return { abi: ref.abi, released, ended };
   }
 
   it('joins a response that the engine sends in several chunks (1 MiB each in the adapter)', () => {
@@ -324,6 +345,125 @@ describe('ReactorAbi', () => {
     const { abi, released } = fakeReactor('{"handle": 7, "records": [', 4);
     expect(() => abi.register('blastn', 1, new Uint8Array([62, 115]))).toThrow(SyntaxError);
     expect(released).toEqual([7]);
+  });
+
+  /**
+   * Instances that answer `inflate_begin` for a `.gz` name with the gzip response, as a list: each
+   * records the handles its `inflate_end` was called with, the `trapAt`-th instance opened
+   * (counting from 0) traps in `inflate_chunk` and the `beginTrapAt`-th in `inflate_begin`.
+   */
+  function fakeInstances(trapAt?: number, beginTrapAt?: number) {
+    const opened: Array<{ readonly abi: ReactorAbi; readonly ended: number[] }> = [];
+    const open = async () => {
+      const trap = opened.length === trapAt;
+      const beginTrap = opened.length === beginTrapAt;
+      const ended: number[] = [];
+      const memory = new WebAssembly.Memory({ initial: 2 });
+      let next = 1024;
+      let handles = 0;
+      const ref: { abi?: ReactorAbi } = {};
+      const put = (bytes: Uint8Array, stream: number) => {
+        new Uint8Array(memory.buffer, 60_000, bytes.length).set(bytes);
+        ref.abi!.emit(stream, 60_000, bytes.length);
+      };
+      const exports = {
+        memory,
+        losat_web2_alloc: (len: number) => {
+          const ptr = next;
+          next += len;
+          return ptr;
+        },
+        losat_web2_dealloc: () => 0,
+        losat_web2_inflate_begin: (ptr: number, len: number) => {
+          if (beginTrap) throw new WebAssembly.RuntimeError('unreachable');
+          // The engine's name rule, for `.gz` only.
+          if (!/\.gz$/i.test(new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len)))) return 0;
+          put(new TextEncoder().encode('{"compression":"gzip","plain_name":"a.fa"}'), 2);
+          return ++handles;
+        },
+        losat_web2_inflate_chunk: () => {
+          if (trap) throw new WebAssembly.RuntimeError('unreachable');
+          put(new TextEncoder().encode('>a\nACGT\n'), 5);
+          return 0;
+        },
+        losat_web2_inflate_end: (handle: number) => {
+          ended.push(handle);
+          return 0;
+        },
+      } as unknown as AbiExports;
+      ref.abi = new ReactorAbi(exports);
+      opened.push({ abi: ref.abi, ended });
+      return ref.abi;
+    };
+    return { opened, open };
+  }
+
+  it('opens an instance for each file, none of them the shared one, and lets it go at the end of its inflation', async () => {
+    const { opened, open } = fakeInstances();
+    const shared = reopening(open);
+    const inflater = new ReactorInflater(shared, open);
+    const a = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'a.fa.gz'), inflater);
+    const b = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'b.fa.gz'), inflater);
+    expect(await a.text()).toBe('>a\nACGT\n');
+    expect(await b.text()).toBe('>a\nACGT\n');
+    // The shared instance (0) only read the name rule, twice, and ended what it began; each file ran on a new one.
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2], [1], [1]]);
+    expect(new Set(opened.map((instance) => instance.abi)).size).toBe(3);
+    // A plain name opens no instance, and a failed or cancelled inflation lets its instance go as well.
+    await inflateFile(new File(['>a\n'], 'plain.fa'), inflater);
+    expect(opened).toHaveLength(3);
+    const open1 = await inflater.open('c.fa.gz', () => undefined);
+    await open1!.cancel();
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2, 3], [1], [1], [1]]);
+    await expect(open1!.push(new Uint8Array([1]))).rejects.toThrow('the inflation has ended');
+  });
+
+  it('stops the inflation of an instance that traps, ends none on it, and leaves the other inflations and the shared instance as they were', async () => {
+    // Instance 0 is the shared one; the first inflation's instance (1) traps in `inflate_chunk`.
+    const { opened, open } = fakeInstances(1);
+    const shared = reopening(open);
+    const inflater = new ReactorInflater(shared, open);
+    const first = await inflater.open('a.fa.gz', () => undefined);
+    const second = await inflater.open('b.fa.gz', () => undefined);
+    await expect(first!.push(new Uint8Array([1]))).rejects.toThrow(EngineStoppedError);
+    // Its instance is dead (ABI v2: no call after a trap) and is not called again.
+    await first!.cancel();
+    await expect(first!.push(new Uint8Array([1]))).rejects.toThrow('the inflation has ended');
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2], [], []]);
+    // The other inflation runs on its own instance and goes on.
+    await second!.push(new Uint8Array([1]));
+    await second!.end();
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2], [], [1]]);
+    // The shared instance still works, and the next file opens a new instance.
+    expect(opened[0]!.abi.stoppedBy).toBeUndefined();
+    const file = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'c.fa.gz'), inflater);
+    expect(await file.text()).toBe('>a\nACGT\n');
+    expect(opened).toHaveLength(4);
+  });
+
+  it('refuses the file whose name-rule call traps the shared instance, and the next file reopens the shared instance', async () => {
+    // Instance 0, the first shared one, traps in `inflate_begin`; `reopening` replaces it at its next use.
+    const { opened, open } = fakeInstances(undefined, 0);
+    const inflater = new ReactorInflater(reopening(open), open);
+    await expect(inflater.open('a.fa.gz', () => undefined)).rejects.toThrow(EngineStoppedError);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.abi.stoppedBy).toBeDefined();
+    const file = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'b.fa.gz'), inflater);
+    expect(await file.text()).toBe('>a\nACGT\n');
+    // A new shared instance (1) read the name rule and ended it; the file ran on instance 2.
+    expect(opened.map((instance) => instance.ended)).toEqual([[], [1], [1]]);
+  });
+
+  it('reads the inflate response, gives stream 5 of a chunk to its sink only, and ends an inflation whose response cannot be read', () => {
+    const { abi, ended } = fakeReactor('{"compression":"zstd","plain_name":"a.fa"}', 7);
+    expect(abi.inflateBegin('a.fa.zst')).toEqual({ handle: 5, compression: 'zstd', plainName: 'a.fa' });
+    const received: number[][] = [];
+    abi.inflateChunk(5, new Uint8Array([9]), (bytes) => received.push([...bytes]));
+    expect(received).toEqual([[1, 2, 3]]);
+    expect(ended).toEqual([]);
+    const broken = fakeReactor('{"compression":', 4);
+    expect(() => broken.abi.inflateBegin('a.fa.zst')).toThrow(SyntaxError);
+    expect(broken.ended).toEqual([5]);
   });
 });
 
@@ -490,4 +630,150 @@ describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () 
     expect(abi.stoppedBy).toBeUndefined();
     expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa'])).toBe(true);
   });
+});
+
+describe.skipIf(reactors === undefined)("the serial reactor inflates sources with the command line's decoders", () => {
+  const module = reactors === undefined ? undefined : new WebAssembly.Module(reactors.serial.bytes as BufferSource);
+  const instantiate = async () => (await instantiateSerial(module!)).abi;
+  const inflater = new ReactorInflater(reopening(instantiate), instantiate);
+  const decoder = new TextDecoder();
+  const A = '>a one\nACGT\n';
+  const B = '>b two\nGGCC\nTT\n';
+  // pzstd output: a skippable frame, then one frame of `>a\nACGT…` and `>b\nTTTT…`.
+  const PZSTD =
+    'UCpNGAQAAAA/AAAAKLUv/QRYlQEAhAI+YQpBQ0dUQUFBQ0NDR0dHVFRUCj5iClRUVFRHR0dHQ0NDQ0FBQUEKAgCYibw/ZwTZFtvJ';
+  const AB_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
+  // `bzip2 -9c` of A, then of B: two bzip2 streams one after the other (as pbzip2 or `cat` writes them).
+  const TWO_BZIP2 =
+    'QlpoOTFBWSZTWa6jEEsAAAHfAAAQQAAAASiABAAiAaAAMQDTTQQBppoCaYaTyXi7kinChIV1GIJYQlpoOTFBWSZTWf/ayGYAAAJfgAAQQAAAAQiABAAQAISAIAAiDRppoQAwKKwKAaT5+LuSKcKEh/7WQzA=';
+  const sentence = (name: string, suffix: string, format: string, fault: string) =>
+    `'${name}' is named ${suffix} but is not ${format} data (${fault}); LOSAT reads a file named ${suffix} through ${format}`;
+  const inflated = async (bytes: Uint8Array | string, name: string) => {
+    const file = await inflateFile(new File([bytes as BlobPart], name), inflater);
+    return { name: file.name, text: decoder.decode(await file.arrayBuffer()) };
+  };
+  const failure = async (bytes: Uint8Array | string, name: string) => {
+    try {
+      await inflateFile(new File([bytes as BlobPart], name), inflater);
+    } catch (error) {
+      return (error as Error).message;
+    }
+    throw new Error(`${name} was inflated`);
+  };
+
+  it('keeps a plain name as it is, and inflates every member and frame under the plain name', async () => {
+    expect(await inflated(A, 'a.fa')).toEqual({ name: 'a.fa', text: A });
+    expect(await inflated(Buffer.concat([gzipSync(A), gzipSync(B)]), 'two.fa.GZ')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(Buffer.concat([zstdCompressSync(A), zstdCompressSync(B)]), 'two.fa.zst')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(Buffer.from(PZSTD, 'base64'), 'p.fa.zst')).toEqual({ name: 'p.fa', text: AB_TEXT });
+    expect(await inflated(Buffer.from(TWO_BZIP2, 'base64'), 'two.fa.Bz2')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(gzipSync(''), '.gz')).toEqual({ name: 'input', text: '' });
+  });
+
+  it('inflates a file of several 8 MiB slices into several 8 MiB parts', async () => {
+    // 17 MiB of bytes that do not compress (xorshift32): each compressed file holds three slices.
+    let state = 2463534242;
+    const bytes = new Uint8Array(17 * 1024 * 1024 + 5).map(() => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return state & 0xff;
+    });
+    const MIB = 1024 * 1024;
+    for (const [suffix, pack] of [
+      ['gz', gzipSync],
+      ['zst', zstdCompressSync],
+    ] as const) {
+      const packed = pack(bytes);
+      expect(packed.length).toBeGreaterThan(16 * MIB);
+      // The sizes of the Blobs made while the file inflates: its parts.
+      const parts: number[] = [];
+      const RealBlob = globalThis.Blob;
+      vi.stubGlobal(
+        'Blob',
+        class extends RealBlob {
+          constructor(blobParts?: BlobPart[], options?: BlobPropertyBag) {
+            super(blobParts, options);
+            parts.push(this.size);
+          }
+        },
+      );
+      let file: File;
+      try {
+        file = await inflateFile(new File([packed as BlobPart], `big.fa.${suffix}`), inflater);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      expect(file.name).toBe('big.fa');
+      expect(Buffer.compare(new Uint8Array(await file.arrayBuffer()), bytes)).toBe(0);
+      // Parts of 8 MiB and at most one engine chunk more (emit.rs CHUNK, 1 MiB), the last one with the
+      // rest: two or three parts for these 17 MiB, as the chunks fall.
+      expect(parts.reduce((sum, size) => sum + size, 0)).toBe(bytes.length);
+      expect(parts.length).toBeGreaterThanOrEqual(2);
+      for (const size of parts.slice(0, -1)) {
+        expect(size).toBeGreaterThanOrEqual(8 * MIB);
+        expect(size).toBeLessThanOrEqual(9 * MIB);
+      }
+      expect(parts.at(-1)).toBeGreaterThan(0);
+      expect(parts.at(-1)).toBeLessThanOrEqual(9 * MIB);
+    }
+  }, 60_000);
+
+  it("refuses a damaged, cut, mislabelled or empty file with the command line's sentence, and goes on", async () => {
+    const text = Array.from({ length: 300 }, (_, i) => `>r${i}\n${'ACGTTGCAAGTC'.repeat(30)}\n`).join('');
+    const checked = Buffer.from(zstdCompressSync(text, { params: { [zlib.ZSTD_c_checksumFlag]: 1 } }));
+    checked[checked.length - 1]! ^= 1;
+    expect(await failure(checked, 'bad.fa.zst')).toBe(sentence('bad.fa.zst', '.zst', 'zstd', "a zstd frame's checksum does not match its data"));
+    const gz = gzipSync(text);
+    expect(await failure(gz.subarray(0, gz.length >> 1), 'cut.fa.gz')).toBe(sentence('cut.fa.gz', '.gz', 'gzip', 'incomplete deflate stream'));
+    expect(await failure(A, 'text.fa.gz')).toBe(sentence('text.fa.gz', '.gz', 'gzip', 'invalid gzip header'));
+    expect(await failure('', 'e.fa.gz')).toBe(sentence('e.fa.gz', '.gz', 'gzip', 'the file is empty'));
+    expect(await failure('', 'e.fa.zst')).toBe(sentence('e.fa.zst', '.zst', 'zstd', 'the file is empty'));
+    expect(await failure(A, 'a.fa.bz2')).toBe(sentence('a.fa.bz2', '.bz2', 'bzip2', 'bzip2: bz2 header missing'));
+    expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
+  });
+
+  it('stops a downloaded Example set past its limit of inflated bytes, and goes on', async () => {
+    const big = new File([gzipSync('>r\n' + 'ACGT'.repeat(1 << 20))], 'set.fna.gz');
+    await expect(inflateFile(big, inflater, 1_000_000)).rejects.toMatchObject({ name: INFLATED_TOO_LARGE });
+    expect((await inflateFile(big, inflater, 5 * 1024 * 1024)).size).toBe(3 + 4 * (1 << 20));
+    expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
+  });
+
+  it("grows the linear memory of an instance by less than 1.5 windows when a zstd file's frame declares a window W", async () => {
+    // A frame of window 32 MiB (windowLog 25, header Window_Descriptor checked below) over 40 MiB of
+    // bytes that do not compress. The decoder's ring buffer is reserved at the frame's window
+    // (ruzstd `DecodeBuffer::reset`, at the first frame as at later ones: LOSAT/src/blastinput/compressed.rs
+    // `ZstdFrames::step`); where it grows by doubling instead, each step allocates the larger buffer
+    // while the smaller lives, a Wasm allocator cannot reuse the smaller regions for it, and the
+    // memory ends near 2 W, which no instance gives back. The reserved buffer is W and a little over; the
+    // 8 MiB slice of the file that inflateFile hands the engine at once adds to it.
+    const MIB = 1024 * 1024;
+    const W = 32 * MIB;
+    let state = 2463534242;
+    const bytes = new Uint8Array(40 * MIB).map(() => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return state & 0xff;
+    });
+    const packed = zstdCompressSync(bytes, { params: { [zlib.ZSTD_c_windowLog]: 25 } });
+    // Window_Descriptor (byte 5 without Single_Segment_Flag): exponent 15 above 2^10, no mantissa.
+    expect(packed[4]! & 0x20).toBe(0);
+    expect(1 << (10 + (packed[5]! >> 3))).toBe(W);
+    const instances: ReactorAbi[] = [];
+    const instantiate = async () => {
+      const { abi } = await instantiateSerial(module!);
+      instances.push(abi);
+      return abi;
+    };
+    const own = new ReactorInflater(reopening(instantiate), instantiate);
+    const file = await inflateFile(new File([packed as BlobPart], 'w.fa.zst'), own);
+    expect(file.size).toBe(bytes.length);
+    // Instance 0 is the shared one (the name rule); instance 1 inflated the file.
+    expect(instances).toHaveLength(2);
+    const grown = instances[1]!.memoryBytes() - instances[0]!.memoryBytes();
+    expect(grown).toBeGreaterThan(W);
+    expect(grown).toBeLessThan(1.5 * W);
+  }, 60_000);
 });

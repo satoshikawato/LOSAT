@@ -422,8 +422,8 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-sum_stats`, `-strand`, `-subject_besthit`, `-xdrop_ungap`,
-    // `-parse_deflines`): the list that NCBI would record is what the archive's model knows
+    // (`-sum_stats`, `-strand`, `-subject_besthit`, `-parse_deflines`; `-xdrop_ungap`, which NCBI
+    // does not record, is read since line RG X1): the list that NCBI would record is what the archive's model knows
     // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def_sub", &[], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
@@ -531,9 +531,8 @@ mod tests {
                     by_hand.push((extra[index], ""));
                     index += 1;
                 }
-                // Not recorded (the ungapped X-drop is never set by the application, the strand
-                // is not an option of the request).
-                "-xdrop_ungap" | "-strand" => index += 2,
+                // Not recorded (the strand is not an option of the request).
+                "-strand" => index += 2,
                 "-parse_deflines" => index += 1,
                 other => {
                     parsed.push(other);

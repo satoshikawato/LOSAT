@@ -18,7 +18,7 @@
 use super::{
     diagnostics_enabled, generate_frames, lookup_protein_params_ungapped, trace_hsp_target,
     x_drop_raw_score, x_pair_par, x_query_frames, DiagnosticCounters, GeneticCode, KarlinParams,
-    QueryContext, QueryFrame, SegMasker, Subjects, TblastxArgs, TbxScore, X_DROP_UNGAPPED_BITS,
+    QueryContext, QueryFrame, SegMasker, Subjects, TblastxArgs, TbxScore,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -543,9 +543,11 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // For TBLASTX, x_dropoff_init is non-zero, so this dynamic update is not triggered.
     // However, we store x_dropoff_init here and apply the logic during subject processing
     // where cutoff_score is available.
+    // The X-drop in bits: `-xdrop_ungap` or TBLASTX's default (`TblastxArgs::x_drop_ungapped_bits`).
+    let x_drop_ungapped_bits = args.x_drop_ungapped_bits();
     let x_dropoff_per_context: Vec<i32> = contexts
         .iter()
-        .map(|ctx| x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ctx.karlin_params, 1.0))
+        .map(|ctx| x_drop_raw_score(x_drop_ungapped_bits, &ctx.karlin_params, 1.0))
         .collect();
     BatchLookup {
         x_soft_subjects,

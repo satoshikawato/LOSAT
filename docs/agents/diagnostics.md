@@ -406,6 +406,7 @@ export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_BXTASKRES=1
 export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
+export LOSAT_X_BXW4CAP=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DCSEEDLEAN=1
@@ -6675,6 +6676,21 @@ Scheduling (each value computed by one thread with the original function; order 
   EDL933 x AMRProt 16 threads 484 vs 124 MiB. BLASTX without `-word_size 5`: 8 pairs, cycles 0.9971 (byte copy of dev
   1.0005) on 60 Trinity transcripts x Swiss-Prot at one thread, instructions x1.00001, `Lookup::Compressed` keeps one
   variant so that the standard table's loops keep their match (a separate variant cost x1.003 to x1.006 there).
+- `LOSAT_X_BXW4CAP=1` or `=K` (BLASTX `-word_size 4`, memory; in the strict set from the pull request that added it,
+  2026-11-12: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, K from 1 to 4,096, otherwise 1; acts where the
+  4-letter lookup table is used and `LOSAT_X_BXUNITCAP` is on): `LOSAT_X_BXUNITCAP`'s K is at most this K, or
+  ceil(threads / subjects) where that is more (the form of `LOSAT_X_BXCLUTCAP`), and a capped unit of this table is left
+  ceil(threads / K) threads, also where its subjects are one task (no `ONE_TASK_SHARE` bound), on which its table is
+  built in parts (`LOSAT_X_BXBUILDPAR`; `blastx/x_bx_mem.rs`). The order of the report is the writing order of the units
+  and of the subjects' tasks, as for `LOSAT_X_BXUNITCAP`, so reports do not change (`tests/blastx_unit_cap.rs`: 4
+  threads with the switch on, `=0` and every BLASTX memory switch off, several batches, one subject task per batch, a
+  split query, both sides of the rule). A 10,002-base batch's 4-letter table holds about 97 MB (NCBI builds one per
+  query chunk); with a unit per thread 50 cDNAs x scer_pep at 8 threads held 820 MB (NCBI 241 MB). Experiment binary
+  746db9813 (ws node 0, 8 cores, 3 rounds, reports equal in every arm), 8 threads: 50 cDNAs K = 8 1.044 s 820 MB, K = 1
+  with the build on one thread 2.945 s 163 MB, K = 1 with the build in 8 parts 0.991 s 189 MB, K = 2 in 4 parts
+  0.890 s 286 MB (NCBI 9.32 s 241 MB); 800 cDNAs 18.28 s 1,222 MB / 64.7 s 397 MB / 21.27 s 463 MB / 18.74 s 558 MB
+  (NCBI 48.4 s 1,491 MB). A rule the Owner approved as a deadline fallback (2026-11-12,
+  `docs/decisions/SWITCH_APPROVALS.md`), until the table's memory is reduced in shape (line NP, SC9b).
 - `LOSAT_X_BXCLUTPOOL=1` (BLASTX `-task blastx-fast` and `-word_size 5`, memory; in the strict set from the pull
   request that added it, 2026-11-01: on unless `=0` or `LOSAT_X_DEFAULT=0`): the flat compressed lookup tables are
   built on vectors kept between builds: a table's starts, hits and pv when the table is dropped

@@ -51,6 +51,10 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
     inputs.matrix = args.matrix.clone();
+    // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
+    // `-xdrop_ungap` has no entry (NCBI records none).
+    inputs.xdrop_gap = args.xdrop_gap;
+    inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps;
@@ -833,20 +837,18 @@ mod tests {
         }
     }
 
-    /// The inputs of a command line that LOSAT's `blastx` parser refuses (an X-dropoff or
-    /// `-use_sw_tback`, which it does not search with): the options model must still write the list NCBI
+    /// The inputs of a command line that LOSAT's `blastx` parser refuses (`-use_sw_tback`, which it
+    /// does not search with): the options model must still write the list NCBI
     /// wrote for it. The options LOSAT takes come from its arguments, the refused ones are set by
     /// hand.
     fn refused_inputs(extra: &[&str]) -> OptionInputs {
-        const REFUSED: [&str; 8] = [
+        const REFUSED: [&str; 6] = [
             "-task",
             "-matrix",
             "-word_size",
             "-gapopen",
             "-gapextend",
             "-comp_based_stats",
-            "-xdrop_gap",
-            "-xdrop_gap_final",
         ];
         let mut kept = Vec::new();
         let mut refused: Vec<(&str, &str)> = Vec::new();
@@ -856,9 +858,9 @@ mod tests {
             if REFUSED.contains(&flag) {
                 refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
                 index += 2;
-            } else if matches!(flag, "-use_sw_tback" | "-xdrop_ungap") {
-                refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
-                index += if flag == "-use_sw_tback" { 1 } else { 2 };
+            } else if flag == "-use_sw_tback" {
+                refused.push((flag, ""));
+                index += 1;
             } else {
                 kept.push(flag);
                 index += 1;
@@ -872,8 +874,6 @@ mod tests {
                 "-word_size" => inputs.word_size = value.parse().ok(),
                 "-gapopen" => inputs.gapopen = value.parse().ok(),
                 "-gapextend" => inputs.gapextend = value.parse().ok(),
-                "-xdrop_gap" => inputs.xdrop_gap = value.parse().ok(),
-                "-xdrop_gap_final" => inputs.xdrop_gap_final = value.parse().ok(),
                 "-comp_based_stats" => {
                     inputs.comp_based_stats =
                         i32::from(crate::algorithm::blastx::args::composition_mode(value));
@@ -938,8 +938,8 @@ mod tests {
         // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
         // matrix and composition mode since series SC, SC6; the word sizes LOSAT does not search
         // with since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them):
-        // 4 of the 80 are refused (`-xdrop_*`, `-use_sw_tback`).
-        assert!(refused >= 4 && CASES.len() - refused > 60, "{refused}");
+        // 2 of the 80 are refused (`-use_sw_tback`; the X-drop cases parse since line RG X1).
+        assert!(refused == 2 && CASES.len() - refused > 60, "{refused}");
     }
 
     #[test]

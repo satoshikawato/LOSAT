@@ -624,7 +624,7 @@ pub(super) fn prescan_queries(
     }
     let mut stream = settings.stream_before_search(file);
     scan_queries(options, holds_back, &mut |deliver| {
-        super::input::parse_fasta_stream_keeping(
+        super::input::read_fasta_stream_batches(
             &mut stream,
             false,
             lowercase,
@@ -634,7 +634,6 @@ pub(super) fn prescan_queries(
             deliver,
             &mut |_| Ok(()),
         )
-        .map(drop)
     })
 }
 

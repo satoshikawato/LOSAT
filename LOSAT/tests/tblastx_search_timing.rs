@@ -24,8 +24,8 @@ const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// The lines `LOSAT_TIMING` printed for a TBLASTX batch before the stage lines were added, in
-/// their order.
-const OLD_LINES: [&str; 10] = [
+/// their order, except `identity_calc` (always 0, no longer printed).
+const OLD_LINES: [&str; 9] = [
     "read_queries",
     "build_lookup",
     "read_subjects",
@@ -33,7 +33,6 @@ const OLD_LINES: [&str; 10] = [
     "ungapped_extend",
     "reevaluate",
     "sum_stats_linking",
-    "identity_calc",
     "search_total",
     "total",
 ];

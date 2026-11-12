@@ -1,7 +1,7 @@
 //! The outfmt 0 of a database without parsed Seq-ids whose sequence has an empty title and taxid
 //! 9606 (`tests/db_search/ids/nbare_t`, `pbare_t`; line DBID H3), for the programs that write the
 //! head of their report before they read a reported sequence's title, so that a refusal leaves
-//! output (BLASTN, TBLASTX, BLASTX; the `db.id.bare.*` rows of `db_search_manifest.tsv` have the
+//! output (BLASTN, TBLASTX, BLASTX; the `db.id.bare.*` rows of `db_search_manifest/` have the
 //! others): NCBI BLAST+ 2.17.0 makes the title from the taxid where the taxonomy database names it
 //! (`Homo sapiens`, `unnamed protein product [Homo sapiens]`), which LOSAT refuses; with a
 //! taxonomy database that names no taxid (`no_btd`) it writes the stored title, as LOSAT does.

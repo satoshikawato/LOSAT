@@ -10,7 +10,7 @@
 //! error archive holds no sequence. Where NCBI writes the title (with `#` and its `Bad char`
 //! messages), LOSAT refuses it before the first byte; where NCBI does not, LOSAT writes NCBI's
 //! output (the `arch_title*` rows of `tests/fasta_input_fixtures.py` and `db.archtitle.*` of
-//! `tests/db_search_manifest.tsv` hold NCBI's bytes; this test adds BLASTX's `-subject`, which
+//! `tests/db_search_manifest/` hold NCBI's bytes; this test adds BLASTX's `-subject`, which
 //! the first harness does not run, LOSAT's experimental reading and report paths of BLASTN, and
 //! the library API's `-subject` searches with a batch size, which no harness runs).
 //!
@@ -493,7 +493,7 @@ fn database_without_headers(dir: &Path, name: &str, dbtype: &str, sequences: &[S
 /// `-db` without its header file (line NP, series SM, DECISIONS 25): NCBI reads a definition
 /// line first where it makes the Seq-aligns of a batch with hits, and fails that batch (`BLAST
 /// Database error: Error: File (<path>) not found.`, status 2; the path is absolute, so no row of
-/// `tests/db_search_manifest.tsv` freezes it) after the archives of the batches before. The query
+/// `tests/db_search_manifest/` freezes it) after the archives of the batches before. The query
 /// files hold two records of X (protein) or N (nucleotide) only, which have no valid context (NCBI
 /// does not search their batch, reads no definition line for it and writes its archive), then two
 /// records that hit the database, the first with a hyphen (the reader's warning, read with its

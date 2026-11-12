@@ -1,7 +1,7 @@
 //! `tblastx -outfmt 11` (the BLAST archive) against the bytes that NCBI BLAST+ 2.17.0 `tblastx
 //! -num_threads 1` writes, for the cases that need an environment variable or a failing run (the
 //! searches without them are the `sa.arch.tbx.*` rows of `outfmt0_manifest.tsv` and the
-//! `db.sa.arch.tbx.*` rows of `db_search_manifest.tsv`): `BATCH_SIZE` (one archive per query
+//! `db.sa.arch.tbx.*` rows of `db_search_manifest/tblastx.tsv`): `BATCH_SIZE` (one archive per query
 //! batch, `EffectiveSearchSpace` per batch, an unsearched batch repeating the last value, a
 //! batch whose first query has no valid context 0, queries of different lengths in a batch, the
 //! batch's own SEG masks), a reader error in the second batch (the archive of the first batch,

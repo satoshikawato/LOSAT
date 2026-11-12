@@ -32,7 +32,7 @@ run of `-outfmt 11` reads its files that way (`LOSAT/src/algorithm/blastn/blast_
 `LOSAT/src/algorithm/blastp/blast_engine.rs:5493,5636`,
 `LOSAT/src/algorithm/tblastn/args.rs:902,1224`; BLASTX: `LOSAT/src/algorithm/blastx/input.rs:697`), so the command line equals NCBI, which the
 frozen archive rows check (`LOSAT/tests/outfmt0_manifest.tsv` rows `sa.arch.bn.*` and
-`sa.arch.tbn.*`; `LOSAT/tests/db_search_manifest.tsv` rows `db.sa.arch.bn.*`,
+`sa.arch.tbn.*`; `LOSAT/tests/db_search_manifest/` rows `db.sa.arch.bn.*`,
 `db.sa.arch.tbn.*`).
 
 A record that has no kept definition line gets `>` followed by its title

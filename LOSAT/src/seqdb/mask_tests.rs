@@ -87,7 +87,7 @@ fn truncate(path: &Path, len: usize) {
 }
 
 fn open_masked(name: &str) -> Result<SeqDb, SeqDbError> {
-    SeqDb::open_with_masks(name, SeqType::Nucleotide)
+    SeqDb::open(name, SeqType::Nucleotide)
 }
 
 fn format_message(error: &SeqDbError) -> &str {
@@ -137,8 +137,8 @@ fn expected_ids(text: &str) -> Vec<i32> {
 #[test]
 fn descriptions_and_ids_equal_ncbi_for_every_fixture() {
     for (name, seqtype) in DATABASES {
-        let db = SeqDb::open_with_masks(&db_name(name), seqtype)
-            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let db =
+            SeqDb::open(&db_name(name), seqtype).unwrap_or_else(|error| panic!("{name}: {error}"));
         let algorithms = db.mask_algorithms().unwrap();
         let expected = read_expected(&format!("{name}.algorithms.txt"));
         assert_eq!(algorithms.descriptions().unwrap(), expected, "{name}");
@@ -176,7 +176,7 @@ fn volume_name(db: &SeqDb, ordinal: u32) -> String {
 #[test]
 fn mask_ranges_equal_ncbi_for_every_fixture_row() {
     for (name, seqtype) in DATABASES {
-        let db = SeqDb::open_with_masks(&db_name(name), seqtype).unwrap();
+        let db = SeqDb::open(&db_name(name), seqtype).unwrap();
         let rows = expected_rows(name);
         assert!(!rows.is_empty(), "{name}");
         let mut not_in_volume: Vec<(i32, String)> = Vec::new();
@@ -212,7 +212,7 @@ fn mask_ranges_equal_ncbi_for_every_fixture_row() {
 /// z); LOSAT answers `AlgorithmNotInVolume` there and equals the file everywhere else.
 #[test]
 fn mask_remap_algorithm_not_in_volume_pairs() {
-    let db = SeqDb::open_with_masks(&db_name("mask_remap"), SeqType::Nucleotide).unwrap();
+    let db = SeqDb::open(&db_name("mask_remap"), SeqType::Nucleotide).unwrap();
     let volumes: Vec<String> = (0..db.num_seqs())
         .step_by(8)
         .map(|ordinal| volume_name(&db, ordinal))
@@ -292,7 +292,7 @@ fn mask_remap_algorithm_not_in_volume_pairs() {
 
 #[test]
 fn unknown_algorithm_and_names_of_algorithms() {
-    let db = SeqDb::open_with_masks(&db_name("mask_nucl_ids"), SeqType::Nucleotide).unwrap();
+    let db = SeqDb::open(&db_name("mask_nucl_ids"), SeqType::Nucleotide).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
     let table = read_expected("mask_nucl_ids.algorithms.txt");
     let error = algorithms.details(77).unwrap_err();
@@ -315,7 +315,7 @@ fn unknown_algorithm_and_names_of_algorithms() {
     assert_eq!(algorithms.id_of("nothing"), None);
 
     // A description of two items is its own name: the key is the whole text.
-    let db = SeqDb::open_with_masks(&db_name("mask_nucl_v4"), SeqType::Nucleotide).unwrap();
+    let db = SeqDb::open(&db_name("mask_nucl_v4"), SeqType::Nucleotide).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
     assert_eq!(algorithms.id_of("30:"), Some(30));
     assert_eq!(
@@ -329,7 +329,7 @@ fn unknown_algorithm_and_names_of_algorithms() {
     );
     assert_eq!(algorithms.details(11).unwrap().program_name, "dust");
 
-    let db = SeqDb::open_with_masks(&db_name("mask_remap"), SeqType::Nucleotide).unwrap();
+    let db = SeqDb::open(&db_name("mask_remap"), SeqType::Nucleotide).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
     assert_eq!(algorithms.id_of("dustX"), Some(100));
     assert_eq!(algorithms.id_of("wmY"), Some(101));
@@ -342,19 +342,46 @@ fn unknown_algorithm_and_names_of_algorithms() {
     ));
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3394-3401
+// ```c++
+// int CSeqDBVol::GetColumnId(const string   & title,
+//                            CSeqDBLockHold & locked)
+// {
+//     //m_Atlas.Lock(locked);
+//
+//     if (! m_HaveColumns) {
+//         x_OpenAllColumns(locked);
+//     }
+// ```
+/// The columns are opened by their readers only (`x_OpenAllColumns`), never when the database
+/// is opened or its sequences and headers are read, as a search reads them: a column whose index
+/// is not a column index changes nothing until the masks are asked for (line SW, SW8 follow-up 2;
+/// NCBI's searches of such a copy write the bytes of the copy without columns).
 #[test]
-fn search_open_still_rejects_masked_databases() {
+fn a_search_reads_no_column_file() {
     for (name, seqtype) in DATABASES {
-        let error = SeqDb::open(&db_name(name), seqtype).unwrap_err();
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("column data")),
-            "{name}: {error}"
-        );
-        assert!(
-            SeqDb::open_with_masks(&db_name(name), seqtype).is_ok(),
-            "{name}"
-        );
+        assert!(SeqDb::open(&db_name(name), seqtype).is_ok(), "{name}");
     }
+    let intact = SeqDb::open(&db_name("mask_prot_v4"), SeqType::Protein).unwrap();
+    let dir = TempDir::new("junk-index");
+    copy_files(
+        "mask_prot_v4",
+        &["pin", "psq", "phr", "paa", "pab", "pac"],
+        &dir,
+    );
+    std::fs::write(dir.path("mask_prot_v4.paa"), b"column").unwrap();
+    let db = SeqDb::open(&dir.name("mask_prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(db.num_seqs(), intact.num_seqs());
+    for ordinal in 0..db.num_seqs() {
+        let (block, intact_block) = (
+            db.read_sequence(ordinal).unwrap(),
+            intact.read_sequence(ordinal).unwrap(),
+        );
+        assert_eq!(block.protein(0), intact_block.protein(0), "{ordinal}");
+        db.read_header(ordinal).unwrap();
+    }
+    assert!(db.mask_algorithms().is_err());
+    assert_eq!(intact.mask_algorithms().unwrap().ids(), [21]);
 }
 
 #[test]
@@ -624,7 +651,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
     // (line SW8's probe Q01, NCBI's `%o\t%m21` of this copy, 2026-11-08).
     let dir = TempDir::new("prot-big");
     copy_files("mask_prot_v4", &["pin", "psq", "phr", "paa", "pab"], &dir);
-    let db = SeqDb::open_with_masks(&dir.name("mask_prot_v4"), SeqType::Protein).unwrap();
+    let db = SeqDb::open(&dir.name("mask_prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(db.mask_algorithms().unwrap().ids(), [21]);
     assert!(db.volumes()[0].columns().unwrap()[0]
         .data_path()
@@ -644,7 +671,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
 /// a user column's values.
 #[test]
 fn ncbi_s_user_column_reads_from_its_big_endian_data_file() {
-    let db = SeqDb::open_with_masks(&db_name("user-column-db"), SeqType::Protein).unwrap();
+    let db = SeqDb::open(&db_name("user-column-db"), SeqType::Protein).unwrap();
     let columns = db.volumes()[0].columns().unwrap();
     assert_eq!(columns.len(), 1);
     let column = &columns[0];

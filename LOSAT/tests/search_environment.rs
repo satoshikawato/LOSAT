@@ -1,7 +1,7 @@
 //! The environment that NCBI BLAST+ reads around its search and report, in a search of
 //! `-subject` sequences by blastp, psiblast, tblastn, tblastx and blastn (BLASTX's cases are in
 //! `run_local_blastx.rs`; the `-db` cases are the `db.envshared.*` rows of
-//! `db_search_manifest.tsv`): `BL2SEQ_LEGACY` makes NCBI search each subject on its own and
+//! `db_search_manifest/`): `BL2SEQ_LEGACY` makes NCBI search each subject on its own and
 //! write the bl2seq report, a `PRE_FETCH_SEQS_LIMIT` that `NStr::StringToInt` cannot convert
 //! (an empty one too) stops NCBI before each batch's report, except for the archive of outfmt 11,
 //! which NCBI's apps but psiblast write without the prefetch (line DBID N2e probe: NCBI 2.17.0

@@ -36,8 +36,8 @@ All of these must hold; otherwise LOSAT equals NCBI byte for byte:
    `genetic_code` in `LOSAT/src/blastinput/value_parsers.rs:728`: 1-6, 9-16, 21-31, 33).
 
 `-db` searches with a non-default `-db_gencode` are identical to NCBI's (frozen rows
-`db.tblastx.gc4.6` and `db.tblastx.gc11.6` in `LOSAT/tests/db_search_manifest.tsv`, lines 125
-and 126, and `db.sa.tblastx.gc.15` / `.16`, lines 332 and 333). The default code 1 and every
+`db.tblastx.gc4.6` and `db.tblastx.gc11.6` in `LOSAT/tests/db_search_manifest/tblastx.tsv`,
+and `db.sa.tblastx.gc.15` / `.16`). The default code 1 and every
 `-query_gencode` value are identical to NCBI's (case `p14_ap027131_ap027133_query4`,
 `-query_gencode 4 -db_gencode 1`: raw-byte identical, 14,871 rows;
 `docs/release/tblastx_v0.1.0_certification.md`, "Approved local-subject `db-gencode`

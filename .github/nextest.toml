@@ -1,0 +1,8 @@
+# cargo-nextest configuration of ci.yml's `rust-tests` (archive) and `rust-tests-run` (shards),
+# passed with --config-file. The archive of the test binaries also carries the examples:
+# tests/library_api.rs, outfmt11_titles.rs and outfmt13_16_titles.rs run them from the
+# directory of `losat` (target/debug/examples) and build them with cargo only when missing.
+[profile.default.archive]
+include = [
+  { path = "debug/examples", relative-to = "target", on-missing = "error" },
+]

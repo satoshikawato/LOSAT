@@ -17,8 +17,12 @@
 //! That those bytes equal NCBI's is the business of the fixture suites.
 //!
 //! The queries are 300 reads of 40 to 52 letters every 27 letters of the first 8,100 letters of
-//! LC738874, every third one with its middle letter changed; the subjects 150 windows of 4,000
-//! letters every 30 letters of the same genome.
+//! LC738874, every third one with its middle letter changed; the subjects 50 windows of 4,000
+//! letters every 30 letters of the same genome. The searches take `-evalue 10`: blastn-short's
+//! default of 1000 gave 1.44 million rows a search with 150 windows (12 to 18 CPU s each, 570 to
+//! 829 s for the test in CI); at 10 a subject still has rows for up to 230 queries, 7 rows per
+//! query and subject on average, more than one for 6,240 of the 11,232 pairs (80,000 rows, about
+//! 1 CPU s a search), and megablast's default is 10.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -92,7 +96,7 @@ fn inputs(dir: &TestDir) -> (PathBuf, PathBuf, String) {
     let query = dir.0.join("reads.fna");
     std::fs::write(&query, reads).expect("write the reads");
     let mut windows = String::new();
-    for j in 0..150 {
+    for j in 0..50 {
         let start = j * 30;
         windows.push_str(&format!(">w{j}\n{}\n", &genome[start..start + 4_000]));
     }
@@ -128,7 +132,7 @@ fn search(
         .arg("-query")
         .arg(query)
         .args(target)
-        .args(["-task", task, "-outfmt", "6"])
+        .args(["-task", task, "-evalue", "10", "-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
         .envs(switches.iter().copied())
         .output()

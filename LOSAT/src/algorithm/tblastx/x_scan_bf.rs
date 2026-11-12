@@ -65,7 +65,8 @@ pub(crate) fn x_scan_bf_for(lookup: &BlastAaLookupTable) -> bool {
 }
 
 // No NCBI counterpart: the choice of `x_scan_bf_for` without the record of `LOSAT_X_REACH`, for
-// the table of the reference frame loop, which that loop records where it scans (`run_impl.rs`).
+// the table of the reference frame loop, which is recorded for a batch without the unit path
+// (`blast_engine/seed_tables.rs` `scan_tables`).
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): `x_scan_bf_for` without the record of `LOSAT_X_REACH`.
 pub(crate) fn x_scan_bf_choice(lookup: &BlastAaLookupTable) -> bool {
     x_tbx_scan_bf() && x_table_sparse(lookup)

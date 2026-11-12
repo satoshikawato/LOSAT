@@ -60,11 +60,11 @@ import certify_platform_native_v010 as certify  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 # psiblast (line PS) has no capture case: its fixtures are rows of outfmt0_manifest.tsv and
-# db_search_manifest.tsv; rpsblast's (line PS, PS11a) are rows of db_search_manifest.tsv.
+# db_search_manifest/psiblast.tsv; rpsblast's (line PS, PS11a) are rows of db_search_manifest/rpsblast.tsv.
 PROGRAMS = capture_outputs.PROGRAMS + ("psiblast", "rpsblast")
 FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")  # the programs of fasta_input_fixtures.py
 OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx", "psiblast")  # the programs of outfmt0_manifest.tsv
-DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast")  # the programs of db_search_manifest.tsv
+DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast")  # the programs of db_search_manifest/ (a file each)
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.

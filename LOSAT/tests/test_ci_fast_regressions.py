@@ -197,11 +197,15 @@ class XincludeFixtureTests(unittest.TestCase):
         for cells in rows:
             row = dict(zip(header, cells))
             self.assertEqual(run_oracle.row_cells(header, row), cells, cells[0])
-        # the -db manifest likewise, and its header is the old one only while no row has the columns
-        header, rows = self.manifest_lines(db_fixtures.MANIFEST)
+        # the -db manifest likewise (each program's file), and its header is the old one only while no row has the columns
         parsed = db_fixtures.read_manifest()[1]
-        self.assertEqual(header, db_fixtures.header_cells(parsed))
-        for cells, row in zip(rows, parsed):
+        listed = []
+        for program in db_fixtures.PROGRAMS:
+            header, rows = self.manifest_lines(db_fixtures.manifest_file(program))
+            self.assertEqual(header, db_fixtures.header_cells(parsed), program)
+            listed += rows
+        self.assertEqual(len(listed), len(parsed))
+        for cells, row in zip(listed, parsed):
             self.assertEqual(db_fixtures.row_cells(row), cells, cells[0])
         old = {column: "" for column in db_fixtures.COLUMNS}
         self.assertEqual(db_fixtures.header_cells([old]), db_fixtures.COLUMNS)

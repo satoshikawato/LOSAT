@@ -995,7 +995,7 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
 }
 
 // The eight NCBI-frozen rows `db.sa.bpqb.{5,8,9,12,15,16}`, `db.sa.bpqb.taxdb.16` and
-// `db.sa.bpqb.taxdb.lastoff.15` (`tests/db_search_manifest.tsv`; the last two have a taxonomy
+// `db.sa.bpqb.taxdb.lastoff.15` (`tests/db_search_manifest/blastp.tsv`; the last two have a taxonomy
 // database on `BLASTDB`): their 30
 // queries have 11,940 letters, which is one block at the default `LOSAT_X_BPQBLOCK` (the fixture
 // script drops `LOSAT_*`, so CI's db_search check never leaves the search of all queries for
@@ -1004,7 +1004,7 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
 #[test]
 fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
     let manifest = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest.tsv"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest/blastp.tsv"),
     )
     .unwrap();
     let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));
@@ -1854,7 +1854,7 @@ fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// The frozen NCBI rows `db.sa.bpqb.{13,14,taxdb.13,taxdb.14}` (`tests/db_search_manifest.tsv`; the
+// The frozen NCBI rows `db.sa.bpqb.{13,14,taxdb.13,taxdb.14}` (`tests/db_search_manifest/blastp.tsv`; the
 // last two have a taxonomy database on `BLASTDB`): 30 queries are one block at the default
 // `LOSAT_X_BPQBLOCK`, so with `LOSAT_X_BPQBLOCK=1` the two blocks (one per NCBI batch) must write the
 // master and the 30 side files that NCBI froze, and its standard error, at one thread (the reports
@@ -1862,7 +1862,7 @@ fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
 #[test]
 fn the_frozen_ncbi_rows_of_outfmt_13_and_14_are_written_by_two_blocks() {
     let manifest = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest.tsv"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest/blastp.tsv"),
     )
     .unwrap();
     let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));

@@ -995,7 +995,7 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
     }
     // Seq-align ids that NCBI's formatters do not find (`nord_v5`: `gnl|BL_ORD_ID|3`) or find in
     // another sequence first (`nlook_v5`: `lcl|300`), which the third batch reports
-    // (`db_search_manifest.tsv` refuses them in one batch).
+    // (`db_search_manifest/` refuses them in one batch).
     for (db, queries, refusal, threads) in [
         ("nord_v5", "nord_qall.fna", "gnl|BL_ORD_ID|3", 1),
         ("nlook_v5", "nlook_qall.fna", "lcl|300", 4),

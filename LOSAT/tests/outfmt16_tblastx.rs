@@ -3,7 +3,7 @@
 //! of a run with no query, the query of an unsearched batch (no `hits`, no `query-masking`, the
 //! ` \nNo hits found` suffix), the searches LOSAT refuses before the first byte (a byte >= 0x80 in a
 //! title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS 30: the
-//! rows `db.sa.x16_xtaxid.nonascii.*` of `db_search_manifest.tsv`), the taxonomy database that only
+//! rows `db.sa.x16_xtaxid.nonascii.*` of `db_search_manifest/tblastx.tsv`), the taxonomy database that only
 //! outfmt 15 and 16 read, and the sink of a file. The bytes of NCBI BLAST+ 2.17.0 are in
 //! `tests/fixtures/outfmt16` (`*_tblastx_{sub,db}_{15,16}.out`: `tblastx -query QUERY -subject
 //! snucl.fna | -db db/snucl -evalue 1e-20 -max_hsps 2 -num_threads 1 -outfmt N`, run in that
@@ -483,7 +483,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
     }
 }
 
-/// The rows `db.sa.x16_xtaxid.*` of `db_search_manifest.tsv` (OF5b part 3: outfmt 15 and 16 with
+/// The rows `db.sa.x16_xtaxid.*` of `db_search_manifest/tblastx.tsv` (OF5b part 3: outfmt 15 and 16 with
 /// a taxonomy database in `BLASTDB`; the rows with `warn` in their name also have a query file with
 /// a reader warning, and some a `BATCH_SIZE`), at one, four, eight and sixteen threads: the bytes
 /// of NCBI BLAST+ 2.17.0 (`tblastx -num_threads 1`) for stdout, stderr and the exit status; the
@@ -493,7 +493,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
 #[test]
 fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
+    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest/tblastx.tsv")).unwrap();
     let mut rows = 0;
     let mut warn_rows = 0;
     for line in manifest

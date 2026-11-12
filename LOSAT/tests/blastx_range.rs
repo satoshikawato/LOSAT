@@ -2,7 +2,7 @@
 //!
 //! That the reports equal NCBI's is the business of the fixtures: the `sxd.blastx.*` and
 //! `sxd2.blastx.*` rows of `tests/outfmt0_manifest.tsv`, the `blastx.*` rows of
-//! `tests/fixtures/range_regression/` and the `db.bxloc.*` rows of `tests/db_search_manifest.tsv`.
+//! `tests/fixtures/range_regression/` and the `db.bxloc.*` rows of `tests/db_search_manifest/blastx.tsv`.
 //! Here: what a run writes with a range does not depend on the threads or on the path its query
 //! batches take (`LOSAT_X_BXFLOW`, the serial batches of `-parse_deflines`), also when a later
 //! batch holds only skipped records (NCBI's `Empty CBlastQueryVector` after the reports of the

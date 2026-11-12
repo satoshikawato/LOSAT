@@ -248,12 +248,7 @@ fn exercise(dir: &Path, name: &str, seqtype: SeqType, masks: bool, tally: &mut T
     let path = SearchPath::new(dir, None, None).unwrap();
     tally.check(SeqDb::info_volumes(name, seqtype, &path));
     tally.check(SeqDb::volume_and_alias_paths(name, seqtype, &path));
-    let opened = if masks {
-        SeqDb::open_with_masks(name, seqtype)
-    } else {
-        SeqDb::open(name, seqtype)
-    };
-    let Some(db) = tally.check(opened) else {
+    let Some(db) = tally.check(SeqDb::open(name, seqtype)) else {
         return;
     };
     tally.opened += 1;

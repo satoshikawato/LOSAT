@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Real native/WASI threading gates with raw NCBI 2.17.0 oracle output."""
 import argparse
-import csv
 import hashlib
 import json
 import os
@@ -13,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "LOSAT/tests"
 sys.path.insert(0, str(TESTS))
+import db_search_fixtures
 from wasm_performance import validate_thread_evidence
 
 
@@ -164,11 +164,9 @@ def main():
     # ```
     # A database file is opened once for the process and read by every thread. -db at every
     # thread count, against the frozen NCBI bytes of one outfmt 6 row per program
-    # (LOSAT/tests/db_search_manifest.tsv; the Node host's threads read a descriptor that
+    # (LOSAT/tests/db_search_manifest/<program>.tsv; the Node host's threads read a descriptor that
     # another thread opened).
-    with (TESTS / "db_search_manifest.tsv").open() as handle:
-        manifest = {row["row_id"]: row for row in csv.DictReader(
-            (line for line in handle if not line.startswith("#")), delimiter="\t")}
+    manifest = {row["row_id"]: row for row in db_search_fixtures.read_manifest()[1]}
     for row_id in ["db.blastn.mega.6", "db.d1.6", "db.blastx.default.6", "db.tblastn.default.6", "db.tblastx.default.6"]:
         row = manifest[row_id]
         assert row["kind"] == "ncbi" and not row["extra_args"], row_id

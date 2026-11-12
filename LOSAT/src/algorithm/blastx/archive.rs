@@ -173,7 +173,7 @@ pub(crate) fn prescan_query_titles(
     let start = (&*file).stream_position()?;
     let mut stream = settings.stream_before_search(file.try_clone()?);
     let found = batches_may_refuse(options, &mut |deliver| {
-        super::input::parse_fasta_stream_keeping(
+        super::input::read_fasta_stream_batches(
             &mut stream,
             false,
             lowercase,
@@ -183,7 +183,6 @@ pub(crate) fn prescan_query_titles(
             deliver,
             &mut |_| Ok(()),
         )
-        .map(drop)
     });
     drop(stream);
     (&*file).seek(std::io::SeekFrom::Start(start))?;

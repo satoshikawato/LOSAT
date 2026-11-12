@@ -51,20 +51,21 @@
 //!   ordered by context first, so this concatenation is the serial purge's output itself, and the
 //!   stable score sort after it (unchanged) gives the serial `chunk_prelim_hits` element for
 //!   element: the merge of a subject's chunks and `-subject_besthit` see the same list.
-//! - Traceback (`process_subject` with the kept HSPs): the kept HSPs are the hit lists of the
-//!   queries one after another (`prelim_hits_by_subject`), so each query's HSPs are one slice. Each
-//!   slice runs the traceback loop, the first purge (trimmed HSPs at its end), the re-evaluation of
-//!   the trimmed HSPs, the second purge, the score sort, the final tree and the e-values; the final
-//!   lists are concatenated in query order and sorted by score with the same stable sort. The
-//!   first purge leaves the HSPs it keeps in context order, then the HSPs its second pass trimmed,
-//!   then those its first pass trimmed, each group in the reverse order of trimming; one query's
-//!   trims happen in the same relative order in both forms, so its HSPs come in the same relative
-//!   order, and the re-evaluation takes the same HSPs (the trimmed ones). The second purge orders
-//!   by context first and keeps, within a context, the input's relative order for its ties, so a
-//!   query's list after it is the serial list's part for that query; the score sort, the tree and
-//!   the e-values keep that per query; and the serial score sort leaves ties between queries in
-//!   the order of its input, which is query order, as the stable sort of the concatenation does.
-//!   So the subject's final list is the serial one element for element.
+//! - Traceback (`traceback_list::traceback_subject_hits`, which `process_subject` calls with the
+//!   kept HSPs): the kept HSPs are the hit lists of the queries one after another
+//!   (`prelim_hits_by_subject`), so each query's HSPs are one slice. Each slice runs the traceback
+//!   loop, the first purge (trimmed HSPs at its end), the re-evaluation of the trimmed HSPs, the
+//!   second purge, the score sort, the final tree and the e-values; the final lists are
+//!   concatenated in query order and sorted by score with the same stable sort. The first purge
+//!   leaves the HSPs it keeps in context order, then the HSPs its second pass trimmed, then those
+//!   its first pass trimmed, each group in the reverse order of trimming; one query's trims happen
+//!   in the same relative order in both forms, so its HSPs come in the same relative order, and the
+//!   re-evaluation takes the same HSPs (the trimmed ones). The second purge orders by context first
+//!   and keeps, within a context, the input's relative order for its ties, so a query's list after
+//!   it is the serial list's part for that query; the score sort, the tree and the e-values keep
+//!   that per query; and the serial score sort leaves ties between queries in the order of its
+//!   input, which is query order, as the stable sort of the concatenation does. So the subject's
+//!   final list is the serial one element for element.
 //!
 //! The queries are handed out to the threads from an atomic counter, the query with the most HSPs
 //! first (the counts are known before each stage), each thread with its own tree and alignment

@@ -617,6 +617,8 @@ pub(super) struct QueryScan {
     /// written where the document holds it back (`written_queries`). `None` when the run reads
     /// to the end of the file, or stops at its first batch.
     pub stops_after: Option<usize>,
+    /// The ids of the queries read, where the read collects them (`prescan_queries`).
+    pub query_ids: Option<crate::blastinput::query_batch::QueryScope>,
 }
 
 /// Reads the query file once before the search (`scan_queries`), with the search's reader
@@ -626,7 +628,9 @@ pub(super) struct QueryScan {
 /// line that is not a defline; the run reads the file again and fails there as it always did,
 /// after the reports of the batches before it), and so does a record it refuses for every format
 /// (a title that is not UTF-8). A batch size of 0 reads no query (NCBI's first batch is empty and
-/// the search stops at it): nothing is checked.
+/// the search stops at it): nothing is checked. With `collect_ids` the read also collects the ids
+/// of the queries it reads under `-parse_deflines` (`QueryScan::query_ids`; `query_batch::
+/// QueryScopes::with_whole_run`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prescan_queries(
     file: std::fs::File,
@@ -636,12 +640,14 @@ pub(super) fn prescan_queries(
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     holds_back: bool,
+    collect_ids: bool,
 ) -> Result<QueryScan> {
     if batch_size == 0 {
         return Ok(QueryScan::default());
     }
     let mut stream = settings.stream_before_search(file);
-    scan_queries(options, holds_back, &mut |deliver| {
+    let mut ids = collect_ids.then(crate::blastinput::query_batch::QueryScope::default);
+    let mut scan = scan_queries(options, holds_back, &mut |deliver| {
         super::input::read_fasta_stream_batches(
             &mut stream,
             false,
@@ -649,10 +655,17 @@ pub(super) fn prescan_queries(
             batch_size,
             false,
             range,
-            deliver,
+            &mut |batch| {
+                if let Some(ids) = ids.as_mut() {
+                    ids.add_ids_of(batch.iter().filter_map(|record| record.believed()));
+                }
+                deliver(batch)
+            },
             &mut |_| Ok(()),
         )
-    })
+    })?;
+    scan.query_ids = ids;
+    Ok(scan)
 }
 
 /// Refuses the first query the writer would refuse (a title with a byte NCBI's XML stream cannot

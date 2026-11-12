@@ -175,6 +175,245 @@ impl BatchSizeMixer {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2313
+// ```c++
+// void CBlastFormat::ResetScopeHistory()
+// {
+//     // Do not reset the scope for BLAST2Sequences or else we'll loose the
+//     // sequence data! (see x_CreateSubjectBioseq)
+//     if (m_IsBl2Seq){
+//         return;
+//     }
+//     ...
+//     if (m_FormatType != CFormattingArgs::eXml)
+//     {
+//         m_Scope->ResetDataAndHistory();
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-258 (each program's batch loop)
+// ```c++
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+// ```
+/// The query records that NCBI's scope holds while it reports a query batch under
+/// `-parse_deflines` (`QueryScopes`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum QueryScopeSpan {
+    /// The batch's records: the batch reader adds them to the scope, and the formatter empties
+    /// it after the batch's reports.
+    Batch,
+    /// Every batch's: the formatter keeps them with `-subject` (bl2seq) and in outfmt 5, whose
+    /// XML document it writes after the last batch (NCBI BLAST+ 2.17.0 then shows a reported
+    /// database sequence with the id of a later batch's query as that query, or fails:
+    /// `Q/SURVEY_Q1c.md` of line RG).
+    Run,
+}
+
+impl QueryScopeSpan {
+    /// The span of a search with `-subject` (`subject`) or a database, whose reports `xml`
+    /// include outfmt 5 (where one call writes several formats, outfmt 5 among them gives the
+    /// larger span).
+    pub(crate) fn of(subject: bool, xml: bool) -> Self {
+        if subject || xml {
+            QueryScopeSpan::Run
+        } else {
+            QueryScopeSpan::Batch
+        }
+    }
+}
+
+/// Whether one of the `-outfmt` values `outfmts` is outfmt 5 (`QueryScopeSpan::of`).
+pub(crate) fn outfmts_have_xml<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> bool {
+    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+    outfmts.into_iter().any(|outfmt| {
+        parse_formatting_string(outfmt)
+            .is_ok_and(|choice| ReportFormat::from_number(choice.number) == Some(ReportFormat::Xml))
+    })
+}
+
+/// The ids of the query records of one scope (`QueryScopes`): the keys of each id
+/// (`seqid::defline_set::scope_keys`, and the own kind of `id_scope::version_keys` and
+/// `id_scope::name_keys`).
+#[derive(Debug, Default)]
+pub(crate) struct QueryScope {
+    keys: std::collections::HashSet<u64>,
+}
+
+impl QueryScope {
+    /// Adds the ids `ids` of a query record, or LOSAT's refusal of a record whose id another
+    /// record of the scope has (`believed::duplicate_id`).
+    fn add(&mut self, ids: &[crate::seqid::ParsedSeqId], program: &str) -> anyhow::Result<()> {
+        if let Some(refusal) = crate::blastinput::fasta_reader::believed::duplicate_id(
+            ids,
+            &mut self.keys,
+            "query",
+            program,
+        ) {
+            return Err(refusal);
+        }
+        // `duplicate_id` keeps the version's kind of two BLASTN queries only.
+        self.keys.extend(
+            ids.iter()
+                .filter_map(|id| crate::seqid::id_scope::version_keys(id).map(|(own, _)| own)),
+        );
+        Ok(())
+    }
+
+    /// Adds the ids `ids` of query records (`BelievedIds`), whatever ids the scope has
+    /// (`QueryScopes::with_whole_run`).
+    pub(crate) fn add_ids_of<'r>(
+        &mut self,
+        ids: impl IntoIterator<Item = &'r crate::blastinput::fasta_reader::believed::BelievedIds>,
+    ) {
+        let mut keys = Vec::new();
+        for id in ids.into_iter().flat_map(|believed| &believed.ids) {
+            keys.clear();
+            crate::seqid::defline_set::scope_keys(id, &mut keys);
+            self.keys.extend(keys.iter().copied());
+            self.keys
+                .extend(crate::seqid::id_scope::name_keys(id).map(|(own, _)| own));
+            self.keys
+                .extend(crate::seqid::id_scope::version_keys(id).map(|(own, _)| own));
+        }
+    }
+
+    /// Whether a query of the scope has an id with one of the keys `keys`.
+    pub(crate) fn has_key(&self, keys: &[u64]) -> bool {
+        keys.iter().any(|key| self.keys.contains(key))
+    }
+}
+
+/// The scopes of the query records of a search under `-parse_deflines`, by searched query:
+/// NCBI's scope finds a sequence by its id, so two queries of one scope with one id show as one
+/// (the first: its letters are searched for both), and a reported database sequence with the id
+/// of a query of its scope shows as that query (`DI7/DECISIONS.md` 8, 12 of the drop-in survey;
+/// `common::database::refuse_id_of_a_query`). LOSAT refuses both.
+#[derive(Debug)]
+pub(crate) struct QueryScopes {
+    span: QueryScopeSpan,
+    /// The program, for the refusals.
+    program: &'static str,
+    scopes: Vec<QueryScope>,
+    /// The first searched query of each scope.
+    starts: Vec<usize>,
+    /// The ids of every query of the run, for the reported database sequences where they come
+    /// before the batches add theirs (`with_whole_run`).
+    whole_run: Option<QueryScope>,
+}
+
+impl QueryScopes {
+    /// No scope yet: the batches add theirs (`add_batch`).
+    pub(crate) fn new(span: QueryScopeSpan, program: &'static str) -> Self {
+        Self {
+            span,
+            program,
+            scopes: Vec::new(),
+            starts: Vec::new(),
+            whole_run: None,
+        }
+    }
+
+    /// With `QueryScopeSpan::Run`, `whole_run`: the ids of every query of the run (`QueryScope::
+    /// add_ids_of`), which `of_query` gives. A reader that gives the batches one at a time
+    /// (BLASTX's) collects them before the search, where NCBI writes outfmt 5 after the last batch:
+    /// its scope then holds every batch's queries for the reported database sequences of the first.
+    /// The batches still add theirs, for two queries with one id.
+    pub(crate) fn with_whole_run(mut self, whole_run: QueryScope) -> Self {
+        if self.span == QueryScopeSpan::Run {
+            self.whole_run = Some(whole_run);
+        }
+        self
+    }
+
+    /// `new` for a search under `-parse_deflines` (`parse_deflines`; `None` without it), with
+    /// `QueryScopeSpan::of` of `subject` and `xml`.
+    pub(crate) fn of_search(
+        parse_deflines: bool,
+        subject: bool,
+        xml: bool,
+        program: &'static str,
+    ) -> Option<Self> {
+        parse_deflines.then(|| Self::new(QueryScopeSpan::of(subject, xml), program))
+    }
+
+    /// The scopes of `records`, the input records of one call of a search whose queries
+    /// (searched from the first, `-query_loc` cuts included) they all are: one batch.
+    pub(crate) fn of_records(
+        span: QueryScopeSpan,
+        program: &'static str,
+        records: &[FastaRecord],
+    ) -> anyhow::Result<Self> {
+        let mut scopes = Self::new(span, program);
+        scopes.add_batch(records, 0)?;
+        Ok(scopes)
+    }
+
+    /// Adds the batch of the input records `records`, whose first searched query is
+    /// `first_searched` (a new scope, or with `Run` the one scope), or LOSAT's refusal of a
+    /// record with the id of another of the scope.
+    pub(crate) fn add_batch(
+        &mut self,
+        records: &[FastaRecord],
+        first_searched: usize,
+    ) -> anyhow::Result<()> {
+        self.add_batch_ids(
+            records.iter().filter_map(FastaRecord::believed),
+            first_searched,
+        )
+    }
+
+    /// `add_batch` of the ids `ids` of a batch's records (`BelievedIds`; BLASTX's reader has
+    /// records of its own).
+    pub(crate) fn add_batch_ids<'r>(
+        &mut self,
+        ids: impl IntoIterator<Item = &'r crate::blastinput::fasta_reader::believed::BelievedIds>,
+        first_searched: usize,
+    ) -> anyhow::Result<()> {
+        if self.scopes.is_empty() || self.span == QueryScopeSpan::Batch {
+            self.scopes.push(QueryScope::default());
+            self.starts.push(first_searched);
+        }
+        let scope = self.scopes.last_mut().expect("pushed above");
+        for believed in ids {
+            scope.add(&believed.ids, self.program)?;
+        }
+        Ok(())
+    }
+
+    /// The scope of the searched query `query` (of the batches added; `whole_run` if set).
+    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+        if let Some(whole_run) = &self.whole_run {
+            return whole_run;
+        }
+        let after = self.starts.partition_point(|&start| start <= query);
+        &self.scopes[after.saturating_sub(1)]
+    }
+
+    /// The scopes of the searched queries from `first`, as one call that searches them numbers
+    /// them (`of_query` of its index).
+    pub(crate) fn from_query(&self, first: usize) -> QueryScopesFrom<'_> {
+        QueryScopesFrom {
+            scopes: self,
+            first,
+        }
+    }
+}
+
+/// `QueryScopes` of the searched queries from `first` (`QueryScopes::from_query`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct QueryScopesFrom<'a> {
+    scopes: &'a QueryScopes,
+    first: usize,
+}
+
+impl QueryScopesFrom<'_> {
+    /// The scope of the call's query `query`.
+    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+        self.scopes.of_query(self.first + query)
+    }
+}
+
 /// The query batches as NCBI's batch loop reads them, up to the batch that stops the run.
 pub(crate) struct QueryBatches {
     /// The reader's messages of each batch's records (skipped ones too), before the
@@ -188,6 +427,8 @@ pub(crate) struct QueryBatches {
     /// What stops the run at the batch after them: the messages that NCBI writes as it
     /// reads that batch, and its error.
     pub(crate) stop: Option<(Vec<u8>, anyhow::Error)>,
+    /// Under `-parse_deflines`, the scopes of those batches' queries (`QueryScopes`).
+    pub(crate) query_scopes: Option<QueryScopes>,
 }
 
 impl QueryBatches {
@@ -277,12 +518,18 @@ impl QueryBatches {
 ///
 /// A batch whose queries have letters but no Karlin-Altschul parameters is set up and not
 /// searched (`run_resolved_in_pool`).
+///
+/// Under `-parse_deflines` (`query_scopes`, without a batch yet) each batch that NCBI searches
+/// adds its records to the scopes (`QueryScopes::add_batch`), and LOSAT's refusal of two of one
+/// scope with one id stops the run at that batch, after the batch's errors of NCBI's own (a
+/// batch that NCBI does not search reports nothing of its scope).
 pub(crate) fn read_query_batches(
     input_records: &[FastaRecord],
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
     batch_size: u32,
+    query_scopes: Option<QueryScopes>,
 ) -> QueryBatches {
     read_batches(
         input_records,
@@ -291,6 +538,7 @@ pub(crate) fn read_query_batches(
         reading,
         batch_size,
         &no_data_batch_error,
+        query_scopes,
     )
 }
 
@@ -336,6 +584,7 @@ pub(crate) fn read_psiblast_query_batches(
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
+    query_scopes: Option<QueryScopes>,
 ) -> QueryBatches {
     read_batches(
         input_records,
@@ -344,6 +593,7 @@ pub(crate) fn read_psiblast_query_batches(
         reading,
         1,
         &psiblast_batch_error,
+        query_scopes,
     )
 }
 
@@ -356,6 +606,7 @@ fn read_batches(
     mut reading: QueryReading,
     batch_size: u32,
     batch_error: &dyn Fn(&[FastaRecord]) -> Option<anyhow::Error>,
+    mut query_scopes: Option<QueryScopes>,
 ) -> QueryBatches {
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); searched.len()];
     let mut starts = Vec::new();
@@ -407,6 +658,13 @@ fn read_batches(
         if stop_error.is_none() {
             stop_error = batch_error(&searched[start..end]);
         }
+        if stop_error.is_none() {
+            if let Some(scopes) = query_scopes.as_mut() {
+                stop_error = scopes
+                    .add_batch(&input_records[input_start..input_end], start)
+                    .err();
+            }
+        }
         if let Some(error) = stop_error {
             return QueryBatches {
                 warnings,
@@ -414,6 +672,7 @@ fn read_batches(
                 searched_done: start,
                 starts,
                 stop: Some((batch_warnings, error)),
+                query_scopes,
             };
         }
         warnings[start].extend_from_slice(&batch_warnings);
@@ -426,6 +685,7 @@ fn read_batches(
         searched_done: searched.len(),
         starts,
         stop: None,
+        query_scopes,
     }
 }
 
@@ -529,7 +789,7 @@ mod tests {
             .collect();
         let input = QueryInput::whole(&records);
         let batches =
-            super::read_query_batches(&records, &records, &input, QueryReading::Records, 10);
+            super::read_query_batches(&records, &records, &input, QueryReading::Records, 10, None);
         assert!(batches.stop.is_none());
         assert_eq!(batches.starts, vec![(0, 0), (2, 2), (4, 4)]);
         let starts: Vec<(usize, usize)> = (0..5).map(|q| batches.start_of(q)).collect();
@@ -554,7 +814,13 @@ mod tests {
         };
         let read = |records: &[FastaRecord]| {
             let input = QueryInput::whole(records);
-            super::read_psiblast_query_batches(records, records, &input, QueryReading::Records)
+            super::read_psiblast_query_batches(
+                records,
+                records,
+                &input,
+                QueryReading::Records,
+                None,
+            )
         };
         let whole = records(&[4, 7, 3]);
         let batches = read(&whole);
@@ -586,7 +852,8 @@ mod tests {
         // blastp's batches of the same records: the record without letters is searched with the
         // next one, without an error.
         let input = QueryInput::whole(&joined);
-        let blastp = super::read_query_batches(&joined, &joined, &input, QueryReading::Records, 1);
+        let blastp =
+            super::read_query_batches(&joined, &joined, &input, QueryReading::Records, 1, None);
         assert!(blastp.stop.is_none());
         assert_eq!(blastp.starts, vec![(0, 0), (1, 1)]);
     }

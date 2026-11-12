@@ -7712,8 +7712,7 @@ fn open_search_database(
                 list,
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis)
-            .in_id_scope(args.id_scope.clone());
+            .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -8316,11 +8315,6 @@ pub fn run_local_database(
     )?
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    args.id_scope = crate::algorithm::common::database::database_id_scope(
-        args.parse_deflines,
-        query_records,
-        "BLASTN",
-    )?;
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -9403,6 +9397,14 @@ fn run_in_pool(
     // sequences that the final hit lists of the batches name (`database::read_titles`).
     let shown = ShownSubjects::new(&args, source);
     let mut titles = database::DatabaseTitles::new();
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
+    // loop cuts the batches.
+    let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        matches!(source, SubjectSource::Prepared(_)),
+        output_formats.contains(&BlastnOutputFormat::Xml),
+        "BLASTN",
+    );
     let megablast = args.task == "megablast";
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
     // ```c
@@ -9875,6 +9877,17 @@ fn run_in_pool(
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].append(&batch_title_warnings);
+        // LOSAT's refusal of two queries of the batch's scope with one id: the warnings of the
+        // batches read so far, as for its refusal of a title (below).
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
+                let written = if stream.acting() { start } else { 0 };
+                for query_warnings in &warnings[written..=start] {
+                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
+                }
+                return Err(error);
+            }
+        }
         check_batch_window(&args, batch_records.batch_queries().records())?;
         // NCBI restricts the lower-case runs of each whole record to the chunks of a split
         // batch, and of the letters outside a `-query_loc` interval the one before it reaches
@@ -10059,7 +10072,30 @@ fn run_in_pool(
                     );
                 }
             }
-            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+            let read =
+                database::read_titles(database, &batch_hit_lists, &mut titles).and_then(|()| {
+                    let Some(scopes) = query_scopes.as_ref() else {
+                        return Ok(());
+                    };
+                    crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                        &titles,
+                        batch_hit_lists
+                            .iter()
+                            .enumerate()
+                            .flat_map(|(query, hit_list)| {
+                                hit_list.iter().flat_map(move |hit_list| {
+                                    let count =
+                                        hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                                    hit_list.hsplist_array[..count]
+                                        .iter()
+                                        .map(move |hsp_list| (start + query, hsp_list.oid))
+                                })
+                            }),
+                        scopes,
+                        "BLASTN",
+                    )
+                });
+            if let Err(error) = read {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the

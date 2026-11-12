@@ -67,15 +67,6 @@ impl TblastxDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.
@@ -172,6 +163,7 @@ impl TblastxDatabase {
         &self,
         shown: ParsedShown,
         prefetch: bool,
+        queries: Option<&crate::blastinput::query_batch::QueryScope>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Option<shared::ReportRefusal> {
         shared::reports_may_refuse(
@@ -180,6 +172,7 @@ impl TblastxDatabase {
             false,
             self.taxdb_found(),
             prefetch,
+            queries,
             pool,
             PROGRAM,
         )
@@ -810,8 +803,8 @@ mod tests {
             ["nucl_v5", "nucl_v4", "nrefuse_v5", "njoined"].map(|name| {
                 let database = open(name);
                 (
-                    database.reports_may_refuse(tabular, false, pool),
-                    database.reports_may_refuse(pairwise, false, pool),
+                    database.reports_may_refuse(tabular, false, None, pool),
+                    database.reports_may_refuse(pairwise, false, None, pool),
                 )
             })
         };

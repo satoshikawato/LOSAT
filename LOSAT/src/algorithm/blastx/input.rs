@@ -1093,7 +1093,7 @@ fn read_believed_defline(
 ) -> Result<BelievedLine> {
     use crate::blastinput::fasta_reader::believed::{
         duplicate_id, generated_ids, named_molecule, parse_believed_defline,
-        refuse_range_in_archive, BelievedIds,
+        refuse_range_in_archive, refused_id, BelievedIds,
     };
     let mut written = Ok(());
     let parsed = parse_believed_defline(line, protein, "blastx", line_number, &mut |message| {
@@ -1122,7 +1122,15 @@ fn read_believed_defline(
     } else {
         parsed.ids
     };
-    if let Some(refusal) = duplicate_id(&ids, keys, role, "BLASTX") {
+    // Two queries with one id are the scopes' of the query batches (`QueryScopes`, which the
+    // search adds as the reader delivers the batches): NCBI's formatter empties the scope after
+    // each batch against a database.
+    let refusal = if protein {
+        duplicate_id(&ids, keys, role, "BLASTX")
+    } else {
+        refused_id(&ids, role, "BLASTX")
+    };
+    if let Some(refusal) = refusal {
         return Err(refusal);
     }
     Ok(BelievedLine {

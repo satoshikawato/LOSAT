@@ -1408,8 +1408,7 @@ fn open_search_database(
                 list,
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis)
-            .in_id_scope(args.id_scope.clone());
+            .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -1691,11 +1690,6 @@ pub fn run_local_database(
     args.archive = super::super::archive::handle_for(&args, archive_requested)?
         .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    args.id_scope = crate::algorithm::common::database::database_id_scope(
-        args.parse_deflines,
-        query_records,
-        "TBLASTX",
-    )?;
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -3253,6 +3247,16 @@ fn run_batch_loop(
     let mut done = SearchedBatches::default();
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); query_records.len()];
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
+    // loop reads the batches. A streamed run has none that refuses (`report_stream::check`).
+    let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        matches!(subjects.shown, ShownSubjects::Fasta { .. }),
+        crate::blastinput::query_batch::outfmts_have_xml(
+            outputs.formats.iter().map(|format| format.outfmt),
+        ),
+        "TBLASTX",
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
     // ```c++
     //     if (m_FormatType == CFormattingArgs::eAsnText
@@ -3393,6 +3397,11 @@ fn run_batch_loop(
                 outputs.diagnostics.write_all(&batch_warnings)?;
                 return Err(error);
             }
+        }
+        // LOSAT's refusal of two queries of the batch's scope with one id, as its refusal of a
+        // title (below).
+        if let Some(scopes) = query_scopes.as_mut() {
+            scopes.add_batch(&query_runs.input_records[input_start..input_end], start)?;
         }
         let batch_queries = &query_records[start..end];
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
@@ -3612,6 +3621,16 @@ fn run_batch_loop(
                     }
                     Err(error) => return Err(error),
                 }
+            }
+            if let Some(scopes) = query_scopes.as_ref() {
+                crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                    &reports.titles.borrow(),
+                    ordered
+                        .iter()
+                        .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+                    scopes,
+                    "TBLASTX",
+                )?;
             }
             // The sequences that the batch reports, read once each where NCBI fetches them before
             // the batch's reports (`BlastFormatter_PreFetchSequenceData`, below), when a report

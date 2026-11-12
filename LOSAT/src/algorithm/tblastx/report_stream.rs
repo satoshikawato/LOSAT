@@ -142,6 +142,9 @@ pub(super) enum Off {
     TaxonomyCache,
     /// A database sequence whose report could be refused (`ReportRefusal`).
     Database(crate::algorithm::common::database::ReportRefusal),
+    /// Under `-parse_deflines`, two query records of the run with one id, which a batch could
+    /// refuse (`query_batch::QueryScopes`).
+    QueryIds,
 }
 
 impl Off {
@@ -163,6 +166,7 @@ impl Off {
             Off::Database(ReportRefusal::Headers) => "database_headers",
             Off::Database(ReportRefusal::Joined) => "database_joined",
             Off::Database(ReportRefusal::Taxonomy) => "database_taxonomy",
+            Off::QueryIds => "query_ids",
         }
     }
 }
@@ -240,6 +244,21 @@ pub(super) fn check(
     {
         return Err(Off::SearchSpace);
     }
+    // Under `-parse_deflines`, two queries of the run with one id, which a batch's scope could
+    // hold (`QueryScopes`), and with `-db` the scope of every query for the database's sequences
+    // (`TblastxDatabase::reports_may_refuse`).
+    let queries = if args.parse_deflines {
+        Some(
+            crate::blastinput::query_batch::QueryScopes::of_records(
+                crate::blastinput::query_batch::QueryScopeSpan::Run,
+                "TBLASTX",
+                query_runs.input_records,
+            )
+            .map_err(|_| Off::QueryIds)?,
+        )
+    } else {
+        None
+    };
     match &subjects.shown {
         ShownSubjects::Fasta { records, .. } => {
             if format.is_tabular()
@@ -255,20 +274,17 @@ pub(super) fn check(
             database,
             format,
             crate::algorithm::common::database::PARSED_CHECK_SEQUENCES_MAX,
+            queries.as_ref().map(|scopes| scopes.of_query(0)),
             pool,
         ),
     }
 }
 
-/// The `-db` part of `check` for the report `format` (0, 6 or 7): a database with parsed Seq-ids
-/// of more than `max_parsed` sequences in its volumes is not read (`Off::LargeParsed`, NCBI's
-/// `nt` and `core_nt` with `common::database::PARSED_CHECK_SEQUENCES_MAX`: the reports after the
-/// loop, as blastn's), a run whose prefetch NCBI's taxonomy cache refuses is not streamed
-/// (`Off::TaxonomyCache`), else every header is read in `pool` (`TblastxDatabase::reports_may_refuse`).
 fn database_check(
     database: &crate::algorithm::tblastx::database::TblastxDatabase,
     format: report::TblastxOutputFormat,
     max_parsed: u32,
+    queries: Option<&crate::blastinput::query_batch::QueryScope>,
     pool: &SearchPool<'_>,
 ) -> Result<(), Off> {
     if database.parsed_beyond(max_parsed) {
@@ -292,7 +308,7 @@ fn database_check(
     if prefetch && database.prefetch_refused() {
         return Err(Off::TaxonomyCache);
     }
-    match database.reports_may_refuse(shown, prefetch, pool) {
+    match database.reports_may_refuse(shown, prefetch, queries, pool) {
         Some(refusal) => Err(Off::Database(refusal)),
         None => Ok(()),
     }
@@ -344,7 +360,7 @@ mod tests {
                 let database = open(name);
                 let count = database.num_oids();
                 formats.map(|format| {
-                    [count, count - 1].map(|max| database_check(&database, format, max, pool))
+                    [count, count - 1].map(|max| database_check(&database, format, max, None, pool))
                 })
             })
         };

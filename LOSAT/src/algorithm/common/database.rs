@@ -1530,7 +1530,6 @@ fn reported_header(
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
                 .and_then(|subject| {
-                    refuse_id_of_a_query(db, &subject, ordinal, program)?;
                     let (found, weak, also_held) = headers.found_instead(&subject, ordinal);
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
@@ -1553,41 +1552,56 @@ fn reported_header(
 }
 
 /// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
-/// the id of a query: NCBI's scope finds the query instead, so its reports show the query's title
-/// and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8).
-fn refuse_id_of_a_query(
-    db: &SeqDb,
+/// the id of a query of the scope `queries` (`query_batch::QueryScopes::of_query` of a query that
+/// reports it): NCBI's scope finds the query instead, so its reports show the query's title and
+/// letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8). Every report
+/// of a query batch asks for its own scope, also of a sequence whose header an earlier batch read.
+pub(crate) fn refuse_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,
     ordinal: u32,
+    queries: &crate::blastinput::query_batch::QueryScope,
     program: &str,
 ) -> Result<()> {
-    let Some(id_scope) = db.id_scope() else {
-        return Ok(());
-    };
-    let mut keys = Vec::new();
-    crate::report::db_subject::scope_keys(subject, &mut keys);
-    if id_scope.query_has_key(&keys) {
+    let keys = subject.query_scope_keys();
+    if queries.has_key(&keys.own) {
         return Err(parsed_refusal(
             ordinal,
-            "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \
-             for it in the reports of that query's batch)",
+            "has the Seq-id of a query read with -parse_deflines in the query batch that reports \
+             it (in any with outfmt 5; NCBI BLAST+ shows the query for it)",
             program,
         ));
     }
-    keys.clear();
-    crate::seqid::id_scope::weak_keys(subject.alignment_id(), &mut keys);
-    if id_scope.query_has_key(&keys) {
+    if queries.has_key(&keys.weak) {
         return Err(parsed_refusal(
             ordinal,
             &format!(
                 "has the Seq-align id {}, which NCBI BLAST+'s scope can match weakly to the id \
-                 of a query read with -parse_deflines (an accession with a version for one \
-                 without, a name with or without an accession, a pir or prf accession as a \
-                 name; NCBI BLAST+ then shows the query for it)",
+                 of a query read with -parse_deflines in the query batch that reports it (in any \
+                 with outfmt 5): an accession with a version for one without, a name with or \
+                 without an accession, a pir or prf accession as a name; NCBI BLAST+ then shows \
+                 the query for it",
                 String::from_utf8_lossy(&subject.alignment_fasta())
             ),
             program,
         ));
+    }
+    Ok(())
+}
+
+/// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
+/// in `scopes`, and a sequence that its report names, by ordinal id) whose header `titles` holds
+/// with parsed Seq-ids, with the scope of that query. A program calls it for each query batch
+/// after it reads the batch's titles: its cache of the titles keeps those of the batches before.
+pub(crate) fn refuse_reported_ids_of_queries(
+    titles: &std::collections::BTreeMap<u32, ReportedHeader>,
+    reported: impl IntoIterator<Item = (usize, u32)>,
+    scopes: &crate::blastinput::query_batch::QueryScopes,
+    program: &str,
+) -> Result<()> {
+    for (query, ordinal) in reported {
+        if let Some(ReportedHeader::Parsed(subject)) = titles.get(&ordinal) {
+            refuse_id_of_a_query(subject, ordinal, scopes.of_query(query), program)?;
+        }
     }
     Ok(())
 }
@@ -1994,34 +2008,6 @@ pub(crate) fn tabular_subject_ids(
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:202-208
-// ```c++
-//         SDataLoaderConfig dlconfig =
-//             InitializeQueryDataLoaderConfiguration(query_opts->QueryIsProtein(),
-//                                                    db_adapter);
-//         CBlastInputSourceConfig iconfig(dlconfig, query_opts->GetStrand(),
-//                                      query_opts->UseLowercaseMasks(),
-//                                      query_opts->GetParseDeflines(),
-//                                      query_opts->GetRange());
-// ```
-/// The scope of ids of a database search of records in memory under `-parse_deflines`
-/// (`seqid::id_scope`): the ids that the reader of `query_records` kept. The command line's
-/// reader adds them as it reads; a database only asks the scope for the queries' ids.
-pub(crate) fn database_id_scope(
-    parse_deflines: bool,
-    query_records: &[crate::blastinput::fasta_reader::FastaRecord],
-    program: &str,
-) -> Result<Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>> {
-    if !parse_deflines {
-        return Ok(None);
-    }
-    let scope = crate::seqid::id_scope::IdScope::default();
-    for believed in query_records.iter().filter_map(|record| record.believed()) {
-        scope.add_record(&believed.ids, None, "query", program)?;
-    }
-    Ok(Some(std::sync::Arc::new(scope)))
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
 // ```c++
 // const char* kDfltArgTabularOutputFmt =
@@ -2135,15 +2121,18 @@ pub(crate) enum ReportRefusal {
 /// again and compared (`joined_in_reports`, `joins_as_copy`). With `prefetch` (the batches' prefetch of a search with `taxdb.bti` on
 /// the search path) the taxids that the prefetch looks up must read (a stored title's first one,
 /// every one of a sequence with parsed Seq-ids, as `prefetch_messages` reads them) and no lookup
-/// of them may be refused (`taxids_may_refuse`). A reader error is a refusal too. The headers are
-/// read in `pool`; nothing is written and no state of the run changes. `None`: no report of any
-/// sequence can be refused.
+/// of them may be refused (`taxids_may_refuse`). Under `-parse_deflines` no sequence may have the
+/// id of a query of `queries` (`refuse_id_of_a_query`; the scope of every query of the run, a
+/// superset of each batch's). A reader error is a refusal too. The headers are read in `pool`;
+/// nothing is written and no state of the run changes. `None`: no report of any sequence can be
+/// refused.
 pub(crate) fn reports_may_refuse(
     db: &SeqDb,
     shown: ParsedShown,
     protein: bool,
     taxdb_found: bool,
     prefetch: bool,
+    queries: Option<&crate::blastinput::query_batch::QueryScope>,
     pool: &crate::utils::threading::SearchPool<'_>,
     program: &str,
 ) -> Option<ReportRefusal> {
@@ -2200,6 +2189,10 @@ pub(crate) fn reports_may_refuse(
                     program,
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
+                if let Some(queries) = queries {
+                    refuse_id_of_a_query(&subject, ordinal, queries, program)
+                        .map_err(|_| ReportRefusal::Headers)?;
+                }
                 if shown.joined {
                     let mut keys = Vec::new();
                     crate::report::db_subject::join_keys(&subject, &mut keys);
@@ -5330,7 +5323,16 @@ mod taxdb_prepass_tests {
                 };
                 let found = db.taxdb_found();
                 let refusal = |pairwise| {
-                    reports_may_refuse(&db, shown(pairwise), false, found, false, &pool, "TBLASTX")
+                    reports_may_refuse(
+                        &db,
+                        shown(pairwise),
+                        false,
+                        found,
+                        false,
+                        None,
+                        &pool,
+                        "TBLASTX",
+                    )
                 };
                 assert_eq!(
                     refusal(true),

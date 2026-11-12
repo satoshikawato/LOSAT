@@ -608,8 +608,7 @@ fn open_search_database(
                 list,
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis)
-            .in_id_scope(args.id_scope.clone());
+            .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -986,11 +985,6 @@ pub fn run_local_database(
     args.archive = super::archive::handle_for(&args, archive_requested)?
         .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    args.id_scope = crate::algorithm::common::database::database_id_scope(
-        args.parse_deflines,
-        query_records,
-        "TBLASTN",
-    )?;
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -1305,6 +1299,14 @@ fn search(
         &query_input,
         reading,
         batch_size,
+        crate::blastinput::query_batch::QueryScopes::of_search(
+            args.parse_deflines,
+            database.is_none(),
+            crate::blastinput::query_batch::outfmts_have_xml(
+                outputs.formats.iter().map(|format| format.outfmt),
+            ),
+            "TBLASTN",
+        ),
     );
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
     // that stops at its first batch gives NCBI's error.
@@ -1629,6 +1631,21 @@ fn search(
                         }
                         Err(error) => return Err(error),
                     }
+                }
+                if let Some(scopes) = batches.query_scopes.as_ref() {
+                    crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                        &titles,
+                        batch_results
+                            .iter()
+                            .enumerate()
+                            .flat_map(|(index, hitlist)| {
+                                hitlist.lists().iter().filter_map(move |list| {
+                                    Some((range.start + index, u32::try_from(list.oid).ok()?))
+                                })
+                            }),
+                        scopes,
+                        "TBLASTN",
+                    )?;
                 }
             }
             results.append(&mut batch_results);

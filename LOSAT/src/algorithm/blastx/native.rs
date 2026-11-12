@@ -653,8 +653,7 @@ fn run_inner(
         Some(name) => {
             let database =
                 BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
-                    .showing_gis(args.show_gis)
-                    .in_id_scope(id_scope.clone());
+                    .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
                 &args.db_filter,
@@ -730,6 +729,9 @@ fn run_inner(
     // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
     // The run stops at a batch after this many queries (`blast_xml::QueryScan::stops_after`).
     let mut stops_after = None;
+    // With outfmt 5 against a database under `-parse_deflines`, the ids of every query, which the
+    // read before the search collects (`QueryScopes::with_whole_run`).
+    let mut whole_run_ids = None;
     if let Some(held) = &held {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) or `-query -` cannot be read a second time: the read before the search would
@@ -765,8 +767,10 @@ fn run_inner(
             *batch_size.as_ref().unwrap_or(&0),
             query_range.as_ref(),
             holds_back,
+            args.parse_deflines && database.is_some() && choice.number == 5,
         )?;
         stops_after = scan.stops_after;
+        whole_run_ids = scan.query_ids;
         (&query_file)
             .seek(SeekFrom::Start(start))
             .map_err(|_| inaccessible("query", &args.query))?;
@@ -1012,12 +1016,33 @@ fn run_inner(
         }
         error
     };
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), which the
+    // batches add as the reader delivers them; with outfmt 5 against a database, every query's
+    // ids for the reported sequences (`whole_run_ids`).
+    let query_scopes = std::cell::RefCell::new(
+        crate::blastinput::query_batch::QueryScopes::of_search(
+            args.parse_deflines,
+            database.is_none(),
+            choice.number == 5,
+            "BLASTX",
+        )
+        .map(|scopes| match whole_run_ids {
+            Some(ids) => scopes.with_whole_run(ids),
+            None => scopes,
+        }),
+    );
     let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
                         results: &mut Vec<BatchResults>,
                         queries_before: usize|
      -> Result<()> {
+        if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
+            scopes.add_batch_ids(
+                queries.iter().filter_map(|record| record.believed()),
+                queries_before,
+            )?;
+        }
         if let Some(handle) = &archive {
             // The BLAST archive (outfmt 11): one document per query batch, written from the
             // data of outfmt 8's Seq-aligns.
@@ -1062,6 +1087,9 @@ fn run_inner(
                                 }
                             })?,
                         };
+                        if let Some(scopes) = query_scopes.borrow().as_ref() {
+                            reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
+                        }
                         (
                             None,
                             super::seqalign::SeqalignSubjects::Database {
@@ -1108,6 +1136,7 @@ fn run_inner(
                     &options,
                     ReportedAsks::of(&options),
                     results,
+                    query_scopes.borrow().as_ref(),
                     diagnostics,
                 )
                 .inspect_err(|error| {
@@ -1307,6 +1336,7 @@ pub(super) fn reported_batch(
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
+    query_scopes: Option<&crate::blastinput::query_batch::QueryScopes>,
     diagnostics: &mut dyn Write,
 ) -> Result<ReportedSubjects> {
     use super::x_timing::Run as XRun;
@@ -1358,6 +1388,9 @@ pub(super) fn reported_batch(
             Err(error) => error,
         },
     })?;
+    if let Some(scopes) = query_scopes {
+        reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // ```c++
     //                 BlastFormatter_PreFetchSequenceData(*results, scope,
@@ -1646,9 +1679,10 @@ pub(super) fn run_query_batches(
                 }
             }
             #[cfg(feature = "parallel")]
-            // With `-parse_deflines` a batch is searched and reported before the next is read: a
-            // reported database sequence is refused by the ids of the queries read so far
-            // (`common::database::read_header`), which must not depend on the threads.
+            // With `-parse_deflines` a batch is searched and reported before the next is read:
+            // the batches' scopes of query ids (`query_batch::QueryScopes`, added where each batch
+            // is reported) and the reader's refusals keep the order of the one-batch loop. The
+            // queued batches below have not been checked with them (line RG, Q1c).
             if let Some(pool) = x_pool.filter(|pool| pool.enabled() && !serial_batches) {
                 use rayon::prelude::*;
                 enum XEvent {

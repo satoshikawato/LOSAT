@@ -5383,8 +5383,7 @@ fn open_search_database(
                 list,
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis)
-            .in_id_scope(args.id_scope.clone());
+            .showing_gis(args.show_gis);
             if resolved.rps_search.is_some() {
                 rps_hooks::check_alias_keys(&database, args.app.name())?;
             }
@@ -5490,7 +5489,7 @@ fn search_cli(
         // FASTA query's (NCBI BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`), and
         // its id joins the search's scope as a FASTA query's does: NCBI shows a subject with that
         // id as the PSSM's query (its title and letters), refused as for a FASTA query
-        // (`IdScope::add_record`; a database sequence with it, `database_id_scope`).
+        // (`IdScope::add_record`; a database sequence with it, `query_batch::QueryScopes`).
         let mut query = psi.query().clone();
         if resolved.parse_deflines {
             query = query.believing_local_id();
@@ -5838,11 +5837,6 @@ pub fn run_local_database(
     args.archive = super::archive::handle_for(&args, archive_requested)?
         .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    args.id_scope = crate::algorithm::common::database::database_id_scope(
-        args.parse_deflines,
-        query_records,
-        args.app.name(),
-    )?;
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -6500,6 +6494,15 @@ fn search(
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.queries_begin();
     }
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`).
+    let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        database.is_none(),
+        crate::blastinput::query_batch::outfmts_have_xml(
+            outputs.formats.iter().map(|format| format.outfmt),
+        ),
+        args.app.name(),
+    );
     let batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // ```c++
@@ -6513,6 +6516,7 @@ fn search(
                 &query_input,
                 reading,
                 batch_size,
+                query_scopes,
             )
         }
         BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
@@ -6524,6 +6528,7 @@ fn search(
                 &searched_queries,
                 &query_input,
                 reading,
+                query_scopes,
             ),
         ),
     };
@@ -6629,6 +6634,10 @@ fn search(
             psi_round: None,
             stopped_pssms: Some(&stopped),
             titles_may_refuse,
+            query_scopes: batches
+                .query_scopes
+                .as_ref()
+                .map(|scopes| scopes.from_query(0)),
         };
         run_resolved_in_pool(
             args,
@@ -7003,6 +7012,10 @@ fn search(
                                 psi_round: None,
                                 stopped_pssms: None,
                                 titles_may_refuse,
+                                query_scopes: batches
+                                    .query_scopes
+                                    .as_ref()
+                                    .map(|scopes| scopes.from_query(block.start)),
                             },
                             x_block,
                         )
@@ -7953,6 +7966,7 @@ fn unsearched_batches_then_engine_error(
         // BLASTP only (`args.app` above): no psiblast PSSM stops here.
         stopped_pssms: None,
         titles_may_refuse: reports.titles_may_refuse,
+        query_scopes: reports.query_scopes,
     };
     if let Err(error) = run_resolved_in_pool(
         args.clone(),
@@ -8016,6 +8030,10 @@ struct BlastpReports<'a> {
     /// title the archive cannot write, so the call checks its own queries and subjects where it
     /// writes the archive (`run_resolved_in_pool`); without such a title no call can refuse.
     titles_may_refuse: bool,
+    /// Under `-parse_deflines` against a database, the scopes of the call's queries
+    /// (`query_batch::QueryScopes`, numbered from the call's first), whose ids the reported
+    /// subjects must not have (`ListedTitles::refuse_ids_of_queries`); `None` elsewhere.
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
@@ -8211,6 +8229,7 @@ fn search_split_query_batches(
                     stopped_pssms: None,
                     // The call of the whole query writes the archive.
                     titles_may_refuse: false,
+                    query_scopes: None,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
             )?;
@@ -12561,6 +12580,9 @@ fn run_resolved_in_pool(
         }),
         _ => None,
     };
+    if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
+        titles.refuse_ids_of_queries(&hit_lists, scopes)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
     // ```c++
     //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));

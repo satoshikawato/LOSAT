@@ -78,15 +78,6 @@ impl BlastxDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
@@ -801,6 +792,39 @@ impl ReportedSubjects {
             Some([accession, version]) => [id, accession, version],
             None => [id, id, id],
         }
+    }
+
+    /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each reported sequence
+    /// with parsed Seq-ids of the batches `batches` (their hit lists named by their ranks,
+    /// `for_batch`), with the scope that `scopes` gives the query of its report
+    /// (`BatchResults::query_ordinal` and the query's index).
+    pub(crate) fn refuse_ids_of_queries(
+        &self,
+        batches: &[BatchResults],
+        gapped: bool,
+        scopes: &crate::blastinput::query_batch::QueryScopes,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for batch in batches {
+            for (qidx, lists) in batch.queries.iter().enumerate() {
+                for list in lists {
+                    if !super::report::reported(list, gapped) {
+                        continue;
+                    }
+                    if let Some(subject) = self.parsed_subject(list.oid) {
+                        shared::refuse_id_of_a_query(
+                            subject,
+                            self.ordinals[list.oid],
+                            scopes.of_query(batch.query_ordinal + qidx),
+                            PROGRAM,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none).

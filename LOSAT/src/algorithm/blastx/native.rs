@@ -476,7 +476,6 @@ fn run_inner(
     let subject_range = crate::blastinput::seq_range::parse_optional_range(
         args.subject_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Subject,
-        "BLASTX",
     )
     .map_err(early_archive_error)?;
     let mut subjects = match subject_file {
@@ -623,7 +622,6 @@ fn run_inner(
     let query_range = crate::blastinput::seq_range::parse_optional_range(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,
-        "BLASTX",
     )?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
@@ -720,8 +718,8 @@ fn run_inner(
     };
     // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
     // an empty query), which the reads before the search take too.
-    let batch_size = crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)
-        .map(|size| size as usize);
+    let batch_size =
+        crate::blastinput::app::query_batch_size(BATCH_SIZE as u32).map(|size| size as usize);
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
@@ -914,14 +912,9 @@ fn run_inner(
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
     // `BL2SEQ_LEGACY` makes NCBI search each `-subject` sequence on its own and write the
-    // bl2seq report, and a `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert stops it before each
-    // batch's report; LOSAT refuses both before the search, where an empty query has already
-    // ended the run as NCBI ends it (`Query is Empty!`, exit status 0).
-    app::check_search_environment(
-        "BLASTX",
-        database.is_none(),
-        format == Some(app::ReportFormat::ArchiveFormat),
-    )?;
+    // bl2seq report; LOSAT refuses it before the search, where an empty query has already ended
+    // the run as NCBI ends it (`Query is Empty!`, exit status 0).
+    app::check_search_environment("BLASTX", database.is_none())?;
     // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
     // volume is opened (`seqdb::Volume::open`).
     if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
@@ -1098,6 +1091,20 @@ fn run_inner(
             )
             .map_err(archive_error);
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288
+        // ```c++
+        //             if (fmt_args->ArchiveFormatRequested(args)) {
+        //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+        //                 m_Bah.ResetMessages();
+        //             } else {
+        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+        //                 		                            fmt_args->GetFormattedOutputChoice());
+        // ```
+        // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's
+        // search: a value that NCBI cannot convert stops the first batch here, after the outfmt 0
+        // prolog and the messages of its records, before its query warnings
+        // (`app::check_prefetch_environment`).
+        app::check_prefetch_environment(false)?;
         // The run stops after this batch (`stops_after`).
         let stops = stops_after == Some(queries_before + queries.len());
         match (&database, &pairwise_database) {
@@ -1461,9 +1468,11 @@ pub(super) fn database_search_error(
         }
         Err(error) => error,
     };
-    // LOSAT's refusal, not an error of NCBI's engine.
+    // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
+    // already (the exception of a query split size that NCBI cannot convert, `split::split_sizes`).
     if error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
+        || error.is::<NativeError>()
     {
         return error;
     }

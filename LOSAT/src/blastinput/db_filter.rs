@@ -462,10 +462,7 @@ impl DbFilterArgs {
         let bytes = path
             .resolve_file(value)
             .and_then(|file| std::fs::read(&file).ok())
-            .ok_or_else(|| NativeError {
-                exit: 255,
-                message: format!("Error: {}\n", missing_seqidlist_what()),
-            })?;
+            .ok_or_else(|| NativeError::exception(&missing_seqidlist_exception()))?;
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,
@@ -506,14 +503,13 @@ const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
     function: Some("ncbi::CMemoryFileMap::CMemoryFileMap"),
 };
 
-/// `e.what()` of the exception of a seqid list file that is not on the search path (the
-/// resolved name is empty): the report of the `CFileException`.
-fn missing_seqidlist_what() -> String {
+/// The exception of a seqid list file that is not on the search path (the resolved name is
+/// empty): the `CFileException` of its memory map.
+fn missing_seqidlist_exception() -> NcbiException {
     NcbiException::new(
         MEMORY_MAP_MISSING,
         "To be memory mapped the file must exist: ''",
     )
-    .what()
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:152-172

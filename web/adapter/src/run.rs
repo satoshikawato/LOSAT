@@ -242,8 +242,8 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
     // `run`, which has them.
-    let subject_range = |subject_loc: Option<&str>, program: &str| {
-        parse_optional_range(subject_loc, RangeRole::Subject, program).map(|_| ())
+    let subject_range = |subject_loc: Option<&str>| {
+        parse_optional_range(subject_loc, RangeRole::Subject).map(|_| ())
     };
     let (program, command, custom) = parse_run(words)?;
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
@@ -264,7 +264,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             .map_err(|error| format!("{error:#}"))?;
     }
     match command {
-        Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
+        Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| args.resolve_dust())
             .and_then(|()| {
                 if names_registered_counts(&args) {
@@ -275,8 +275,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
                 }
             })
             .and_then(|()| {
-                parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
-                    .map(|_| ())
+                parse_optional_range(args.query_loc.as_deref(), RangeRole::Query).map(|_| ())
             })
             .map_err(|error| format!("{error:#}"))
             // The formatting handler comes after the query options (`process_options`).
@@ -296,21 +295,21 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         // The checks of the options read the formats as without `-outfmt` (`parse_run`); with an
         // `-outfmt` whose custom delimiter the CLI rejects they read the argv's (`with_custom`),
         // and fail as the CLI's.
-        Commands::Tblastx(mut args) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
+        Commands::Tblastx(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
                 LOSAT::web_adapter::check_tblastx_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
-        Commands::Blastp(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTP")
+        Commands::Blastp(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
                 LOSAT::web_adapter::check_blastp_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
-        Commands::Tblastn(mut args) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
+        Commands::Tblastn(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
                 LOSAT::web_adapter::check_tblastn_options(&args)
@@ -539,13 +538,9 @@ impl FormatObserver for RangeRecorder {
 ///             continue; //SB-2307. ignore well formed, not found accession
 ///         }
 /// ```
-fn searched_queries(
-    query_loc: Option<&str>,
-    program: &str,
-    records: &[FastaRecord],
-) -> Option<Vec<usize>> {
+fn searched_queries(query_loc: Option<&str>, records: &[FastaRecord]) -> Option<Vec<usize>> {
     use LOSAT::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
-    let range = parse_optional_range(query_loc, RangeRole::Query, program).ok()??;
+    let range = parse_optional_range(query_loc, RangeRole::Query).ok()??;
     Some(
         records
             .iter()
@@ -780,23 +775,23 @@ fn search(
         };
         let result = match command {
             Commands::Blastp(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTP", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastp(args, query, subject, "", "", &mut outputs)
             }
             Commands::Tblastn(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTN", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_tblastn(args, query, subject, &mut outputs)
             }
             Commands::Blastn(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTN", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastn(args, query, subject, &mut outputs)
             }
             Commands::Tblastx(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_tblastx(args, query, subject, &mut outputs)
             }
             Commands::Blastx(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTX", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastx(args, query, subject, &mut outputs)
             }
             Commands::Psiblast(_)
@@ -1582,9 +1577,9 @@ mod tests {
         assert!(q_idx(&words).iter().all(|&index| index == 1));
         let ranged = [&words[..], &["-query_loc", "5-40"]].concat();
         assert!(q_idx(&ranged).iter().all(|&index| index == 1));
-        let ordinals = searched_queries(Some("5-40"), "BLASTP", &query).unwrap();
+        let ordinals = searched_queries(Some("5-40"), &query).unwrap();
         assert_eq!(ordinals, vec![2]);
-        assert_eq!(searched_queries(None, "BLASTP", &query), None);
+        assert_eq!(searched_queries(None, &query), None);
     }
 
     fn fasta(text: &[u8]) -> Vec<FastaRecord> {
@@ -3285,10 +3280,7 @@ mod tests {
         let records = text(&ranged[&1]);
         assert_eq!(records.lines().count(), 1);
         assert!(records.contains("\"q_idx\":1"), "{records}");
-        assert_eq!(
-            searched_queries(Some("31-198"), "BLASTX", &query),
-            Some(vec![1])
-        );
+        assert_eq!(searched_queries(Some("31-198"), &query), Some(vec![1]));
         // The errors of the argv, as the run reports them.
         for extra in [
             &["-subject_loc", "5-2", "-query_loc", "9-1"][..],

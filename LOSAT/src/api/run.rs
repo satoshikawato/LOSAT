@@ -506,17 +506,17 @@ pub(super) fn searched_queries(
     )
 }
 
-/// The `-query_loc` of the program's arguments and the program's name in NCBI's messages.
-fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
+/// The `-query_loc` of the program's arguments.
+fn query_loc(command: &Commands) -> Option<&str> {
     match command {
-        Commands::Blastp(a) => (a.query_loc.as_deref(), "BLASTP"),
-        Commands::Tblastn(a) => (a.query_loc.as_deref(), "TBLASTN"),
-        Commands::Blastn(a) => (a.query_loc.as_deref(), "BLASTN"),
-        Commands::Tblastx(a) => (a.query_loc.as_deref(), "TBLASTX"),
-        Commands::Blastx(a) => (a.query_loc.as_deref(), "BLASTX"),
-        Commands::Psiblast(a) => (a.query_loc.as_deref(), "BLASTP"),
-        Commands::Rpsblast(a) => (a.query_loc.as_deref(), "RPSBLAST"),
-        Commands::Makedb(_) | Commands::Rpsbproc(_) => (None, ""),
+        Commands::Blastp(a) => a.query_loc.as_deref(),
+        Commands::Tblastn(a) => a.query_loc.as_deref(),
+        Commands::Blastn(a) => a.query_loc.as_deref(),
+        Commands::Tblastx(a) => a.query_loc.as_deref(),
+        Commands::Blastx(a) => a.query_loc.as_deref(),
+        Commands::Psiblast(a) => a.query_loc.as_deref(),
+        Commands::Rpsblast(a) => a.query_loc.as_deref(),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
     }
 }
 
@@ -532,8 +532,7 @@ fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
 /// The `-query_loc` interval of the program's arguments. A value that the search will refuse
 /// has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
-    let (query_loc, program) = query_loc(command);
-    parse_optional_range(query_loc, RangeRole::Query, program)
+    parse_optional_range(query_loc(command), RangeRole::Query)
         .ok()
         .flatten()
 }

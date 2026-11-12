@@ -70,19 +70,21 @@ pub(super) fn search_rounds(
     // chunks of a split query are set up without the PSSM; `in_pssm::check_in_pssm_options`)
     // A query long enough to be split would have its later rounds' chunks searched without
     // their PSSM: refused before the search, as a PSSM query of that length (DESIGN_ps5 §6).
-    let sizes = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(
-        args.app.name(),
-        10000,
-    )?;
-    for &(_, query) in &batches.starts {
-        let length = searched_queries[query].seq().len();
-        if crate::algorithm::blastp::protein_query_split::split_protein_batch(&[length], sizes)
-            .is_some()
-        {
-            bail!(
+    // Sizes that NCBI cannot convert stop the first batch (`batches.stop`, below), which no
+    // batch is searched before.
+    if !batches.starts.is_empty() {
+        let sizes =
+            crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(10000)?;
+        for &(_, query) in &batches.starts {
+            let length = searched_queries[query].seq().len();
+            if crate::algorithm::blastp::protein_query_split::split_protein_batch(&[length], sizes)
+                .is_some()
+            {
+                bail!(
                 "a query of {length} letters, which NCBI BLAST+ splits into chunks that its later rounds search without the PSSM, with -num_iterations {} is not supported by LOSAT's PSIBLAST",
                 plan.num_iterations
             );
+            }
         }
     }
     let epilog = batches.stop.is_none();

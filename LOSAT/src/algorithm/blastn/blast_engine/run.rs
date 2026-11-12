@@ -104,7 +104,7 @@ use crate::blastinput::fasta_reader::{
     ReaderConfig,
 };
 use crate::blastinput::input_files::{
-    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
+    check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
 use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
@@ -7608,8 +7608,7 @@ fn read_cli_subjects(
     //         }
     // ```
     // The subject range is read after the subject file is opened, before it is read.
-    let subject_range =
-        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+    let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
     // ```c++
     //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
@@ -7989,7 +7988,7 @@ fn search_cli(
 ///     }
 /// ```
 fn parse_query_range(args: &BlastnArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
+    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
 }
 
 /// The ranges of a search: the query range as given, and the subjects' ranges.
@@ -8229,8 +8228,7 @@ fn run_local_formats(
     )?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
-    let subject_range =
-        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+    let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
     for record in &subject_records[..subjects_read(subject_records, subject_range.as_ref())] {
         outputs.diagnostics.write_all(&record.warnings)?;
     }
@@ -8622,25 +8620,25 @@ fn search(
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
     megablast_index.check()?;
-    app::check_search_environment(
-        "BLASTN",
-        !matches!(subjects, Subjects::Database(_)),
-        outputs.only_archive(),
-    )?;
-    let mut batching = query_batching_from_environment(
+    app::check_search_environment("BLASTN", !matches!(subjects, Subjects::Database(_)))?;
+    // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
+    let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
-    )?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
-    // ```c++
-    //         if (batch_size) {
-    //             input.SetBatchSize(batch_size);
-    // ```
-    // The caller's records are one batch (`BlastnArgs::one_query_batch`): a size that the
-    // records do not reach, fixed as `BATCH_SIZE` fixes it.
-    if args.one_query_batch {
-        batching.fixed_batch_size = i32::MAX;
-        batching.batch_size = i32::MAX as u32;
-    }
+    )
+    .map(|mut batching| {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
+        // ```c++
+        //         if (batch_size) {
+        //             input.SetBatchSize(batch_size);
+        // ```
+        // The caller's records are one batch (`BlastnArgs::one_query_batch`): a size that the
+        // records do not reach, fixed as `BATCH_SIZE` fixes it.
+        if args.one_query_batch {
+            batching.fixed_batch_size = i32::MAX;
+            batching.batch_size = i32::MAX as u32;
+        }
+        batching
+    });
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`cut_queries`): a record is searched cut, and one whose interval starts just past
     // its end is a query without data (`run_in_pool`).
@@ -8805,8 +8803,7 @@ pub(crate) struct QueryBatchSizes {
 impl QueryBatchSizes {
     pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<Self> {
         use crate::blastinput::seq_range::{record_interval, RecordInterval};
-        let subject_range =
-            parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+        let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
         let total_length: i64 = subjects
             .iter()
             .map(|record| match subject_range.as_ref() {
@@ -8901,35 +8898,21 @@ struct QueryBatching {
 ///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
 ///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
 /// ```
-/// A value that `NStr::StringToInt` cannot convert makes NCBI stop with its
-/// `CStringException`, whose text names the source path of the oracle's build (exit 255);
-/// LOSAT rejects it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where
-/// it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
+/// A `CHUNK_SIZE` or `BATCH_SIZE` that `NStr::StringToInt` cannot convert is the `Err`: its
+/// `CStringException` (`app::environment_int`), which stops NCBI after the outfmt 0 prolog and
+/// before the first batch is read (`run_in_pool`). `OVERLAP_CHUNK_SIZE` is read by the query
+/// splitter of each batch, after the batch is read: one that it cannot convert stops the first
+/// batch there (`app::check_query_split_environment` in `run_in_pool`), so no batch is split with
+/// it and it counts as unset here. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects
+/// it where it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
 fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
-    let read = |variable: &str| -> Result<Option<i32>> {
-        match std::env::var_os(variable) {
-            Some(value) if !is_blank(value.as_encoded_bytes()) => {
-                match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
-                    Some(number) => Ok(Some(number)),
-                    None => anyhow::bail!(
-                        "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
-                        value.to_string_lossy()
-                    ),
-                }
-            }
-            _ => Ok(None),
-        }
-    };
-    let chunk_size = read("CHUNK_SIZE")?;
+    use crate::blastinput::app::read_query_split_variable;
+    let chunk_size = read_query_split_variable("CHUNK_SIZE")?;
     let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
         std::env::var_os("BATCH_SIZE").as_deref(),
     )
-    .map_err(|value| {
-        anyhow::anyhow!(
-            "the environment variable BATCH_SIZE has the value {value:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN"
-        )
-    })?;
-    let overlap = read("OVERLAP_CHUNK_SIZE")?;
+    .map_err(|e| crate::cli::NativeError::exception(&e))?;
+    let overlap = read_query_split_variable("OVERLAP_CHUNK_SIZE").unwrap_or(None);
     let split = SplitSizes::new(megablast, chunk_size, overlap);
     Ok(QueryBatching {
         fixed_batch_size,
@@ -9345,7 +9328,7 @@ fn run_in_pool(
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    mut batching: QueryBatching,
+    batching: Result<QueryBatching>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
     // ```c++
@@ -9410,6 +9393,16 @@ fn run_in_pool(
     // throws at the prolog's first flush when the write fails (blast_format.cpp:118-119),
     // before any query is read or searched.
     write_pairwise_prologs(outputs, &output_formats, megablast, &shown, true)?;
+    // The mixer's `CHUNK_SIZE` and then `BATCH_SIZE` are read here, after the prolog and before
+    // the first batch: a value that NCBI cannot convert stops the run with its exception
+    // (`query_batching_from_environment`), as a batch size of 0 does below.
+    let mut batching = match batching {
+        Ok(batching) => batching,
+        Err(error) => {
+            write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
+            return Err(error);
+        }
+    };
     let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
     if batching.fixed_batch_size == 0 {
         // A database's total is the `Int8` of its index files (`GetDbTotalLength` sums
@@ -9687,6 +9680,44 @@ fn run_in_pool(
                 message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
             }
             .into());
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
+        // ```c++
+        //     SBlastSetupData(CRef<IQueryFactory> qf, CRef<CBlastOptions> opts)
+        //         : m_InternalData(new SInternalData),
+        //       m_QuerySplitter(new CQuerySplitter(qf, opts))
+        // ```
+        // The query splitter of the batch reads `CHUNK_SIZE` (read already by the mixer) and
+        // `OVERLAP_CHUNK_SIZE` before the batch's queries are set up (their masks below): a value
+        // that NCBI cannot convert stops the first batch here, after its reader's messages
+        // (`app::check_query_split_environment`).
+        if input_start == 0 {
+            if let Err(error) = crate::blastinput::app::check_query_split_environment(false, true) {
+                write_before_failed_batch(
+                    &args,
+                    queries.before(&kept, start),
+                    ReportSubjects {
+                        source,
+                        shown: &shown,
+                        titles: &titles,
+                    },
+                    &report_ranges,
+                    outputs,
+                    &output_formats,
+                    BatchResults {
+                        hit_lists,
+                        warnings: &warnings[..start],
+                        lengths: &lengths[..start],
+                        unsearched,
+                        query_masks: &query_masks,
+                        context_karlin: &context_karlin,
+                        query_eff_searchsp: &query_eff_searchsp,
+                        batches: &batch_spans,
+                    },
+                )?;
+                outputs.diagnostics.write_all(&batch_title_warnings)?;
+                return Err(error);
+            }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-530
         // ```c
@@ -10090,6 +10121,49 @@ fn run_in_pool(
                 outputs.diagnostics.write_all(&warnings[start])?;
                 return Err(error);
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-309
+        // ```c++
+        //             if (isArchiveFormat) {
+        //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+        //                 m_Bah.ResetMessages();
+        //             } else {
+        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+        //                 			                        fmt_args->GetFormattedOutputChoice());
+        // ```
+        // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's
+        // search (a database's titles are read in its traceback, above): a value that NCBI cannot
+        // convert stops the first batch here, after its reader's messages and before its query
+        // warnings (`app::check_prefetch_environment`).
+        if let Err(error) =
+            crate::blastinput::app::check_prefetch_environment(outputs.only_archive())
+        {
+            write_before_failed_batch(
+                &args,
+                queries.before(&kept, start),
+                ReportSubjects {
+                    source,
+                    shown: &shown,
+                    titles: &titles,
+                },
+                &report_ranges,
+                outputs,
+                &output_formats,
+                BatchResults {
+                    hit_lists,
+                    warnings: &warnings[..start],
+                    lengths: &lengths[..start],
+                    unsearched,
+                    query_masks: &query_masks,
+                    context_karlin: &context_karlin,
+                    query_eff_searchsp: &query_eff_searchsp,
+                    batches: &batch_spans,
+                },
+            )?;
+            outputs.diagnostics.write_all(&warnings[start])?;
+            return Err(error);
+        }
+        if let SubjectSource::Database(database) = source {
             for hit_list in batch_hit_lists.iter_mut().flatten() {
                 drop_hsps_of_score_zero(hit_list);
             }

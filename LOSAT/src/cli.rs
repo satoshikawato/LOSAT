@@ -1171,6 +1171,26 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+impl NativeError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
+    /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
+    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`). The one producer of this
+    /// report: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        NativeError {
+            exit: 255,
+            message: format!("Error: {}\n", e.what()),
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
 // ```c
 // {

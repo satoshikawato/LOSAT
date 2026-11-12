@@ -1272,7 +1272,7 @@ fn run_local_search_with_pool(
     .context("TBLASTN preliminary hit list size is not positive")?;
     let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
     let protein_split =
-        crate::algorithm::blastp::protein_query_split::protein_query_split_sizes("TBLASTN", 20000)?;
+        crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
     let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
     let preliminary_hitlists = match split_protein_batch(&batch_lengths, protein_split) {
         None => run_preliminary_subjects(

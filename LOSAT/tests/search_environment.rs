@@ -1,14 +1,20 @@
 //! The environment that NCBI BLAST+ reads around its search and report, in a search of
 //! `-subject` sequences by blastp, psiblast, tblastn, tblastx and blastn (BLASTX's cases are in
-//! `run_local_blastx.rs`; the `-db` cases are the `db.envshared.*` rows of
+//! `run_local_blastx.rs`; the `-db` cases are the `db.envshared.*` and `db.envconv.*` rows of
 //! `db_search_manifest/`): `BL2SEQ_LEGACY` makes NCBI search each subject on its own and
-//! write the bl2seq report, a `PRE_FETCH_SEQS_LIMIT` that `NStr::StringToInt` cannot convert
-//! (an empty one too) stops NCBI before each batch's report, except for the archive of outfmt 11,
-//! which NCBI's apps but psiblast write without the prefetch (line DBID N2e probe: NCBI 2.17.0
-//! exits 0 with the bytes it writes without the variable), and `OLD_FSC` (no Gumbel block) is
-//! read as `-searchsp` is read (env parity G1; the `-db` cases are the `db.oldfsc.*` rows).
+//! write the bl2seq report; a `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE`, `BATCH_SIZE` or
+//! `PRE_FETCH_SEQS_LIMIT` that `NStr::StringToInt` cannot convert stops NCBI where it reads it
+//! with its `CStringException` (exit 255), except `PRE_FETCH_SEQS_LIMIT` for the archive of
+//! outfmt 11, which NCBI's apps but psiblast write without the prefetch (line DBID N2e probe:
+//! NCBI 2.17.0 exits 0 with the bytes it writes without the variable); and `OLD_FSC` (no Gumbel
+//! block) is read as `-searchsp` is read (env parity G1; the `-db` cases are the `db.oldfsc.*`
+//! rows).
+
+mod run_local_support;
 
 use std::process::{Command, Output};
+
+use run_local_support::string_to_int_exception;
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
@@ -35,16 +41,19 @@ fn run(
         &format!("{INPUTS}/{subject}"),
         outfmt,
         variable,
+        &[],
     )
 }
 
-/// `run` with the paths of the query and subject files (relative to `LOSAT/`).
+/// `run` with the paths of the query and subject files (relative to `LOSAT/`) and the options
+/// `extra`.
 fn run_files(
     program: &str,
     query: &str,
     subject: &str,
     outfmt: &str,
     variable: Option<(&str, &str)>,
+    extra: &[&str],
 ) -> Output {
     let mut command = Command::new(BIN);
     command
@@ -52,7 +61,8 @@ fn run_files(
         .arg(program)
         .args(["-query", query])
         .args(["-subject", subject])
-        .args(["-outfmt", outfmt, "-num_threads", "1"]);
+        .args(["-outfmt", outfmt, "-num_threads", "1"])
+        .args(extra);
     for (name, _) in std::env::vars() {
         if name.starts_with("LOSAT_X_")
             || matches!(
@@ -80,39 +90,24 @@ fn run_files(
 // tblastn_app.cpp:294-299, tblastx_app.cpp:197-202, blastn_app.cpp:304-309 and
 // psiblast_app.cpp:262-266 (psiblast fetches ahead before it writes the archive).
 #[test]
-fn environment_that_ncbi_reads_around_the_report_is_refused_where_it_reads_it() {
+fn bl2seq_legacy_is_refused_and_the_archive_is_written_without_the_prefetch() {
     for case in PROGRAMS {
         let (program, _, _, name) = case;
         // psiblast does not write the archive (outfmt 11 is refused before the environment).
         let archive = if program == "psiblast" { "6" } else { "11" };
-        for (variable, value, outfmt, text) in [
-            (
-                "BL2SEQ_LEGACY",
-                "1",
-                "6",
-                "the environment variable BL2SEQ_LEGACY",
-            ),
-            (
-                "BL2SEQ_LEGACY",
-                "",
-                archive,
-                "the environment variable BL2SEQ_LEGACY",
-            ),
-            ("PRE_FETCH_SEQS_LIMIT", "abc", "6", "has the value \"abc\""),
-            ("PRE_FETCH_SEQS_LIMIT", "", "0", "has the value \"\""),
-        ] {
-            let output = run(case, outfmt, Some((variable, value)));
+        for (value, outfmt) in [("1", "6"), ("", archive)] {
+            let output = run(case, outfmt, Some(("BL2SEQ_LEGACY", value)));
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert_eq!(
                 output.status.code(),
                 Some(1),
-                "{program} {variable} {outfmt}: {output:?}"
+                "{program} BL2SEQ_LEGACY {outfmt}: {output:?}"
             );
             assert!(
                 output.stdout.is_empty()
-                    && stderr.contains(text)
+                    && stderr.contains("the environment variable BL2SEQ_LEGACY")
                     && stderr.contains(&format!("not supported by LOSAT's {name}")),
-                "{program} {variable} {outfmt}: {stderr}"
+                "{program} BL2SEQ_LEGACY {outfmt}: {stderr}"
             );
         }
         // The archive (not psiblast's), and an integer in any format, are written as without
@@ -137,6 +132,146 @@ fn environment_that_ncbi_reads_around_the_report_is_refused_where_it_reads_it() 
                 output.stdout == plain.stdout && output.stderr == plain.stderr,
                 "{program} {value} {outfmt}"
             );
+        }
+    }
+}
+
+/// NCBI's error archive of outfmt 11 for that exception (`PrintErrorArchive` after `CATCH_ALL`):
+/// the same 523 bytes for every input.
+const ABC_ERROR_ARCHIVE: &str = "Blast4-archive ::= {\n  request {\n    body get-request-info {\n      request-id \"Error\"\n    }\n  },\n  results {\n  },\n  messages {\n    {\n      code 2,\n      message \"Error: NCBI C++ Exception: T0 \"\"/home/coremake/release_build/bu\nild/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRele\nase_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp\n\"\", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() -\n Cannot convert string 'abc' to Int8 (m_Pos = 0)\"\n    }\n  }\n}\n";
+
+/// Where NCBI stops a `-subject` search of `program` at a value of `variable` that it cannot
+/// convert.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Stop {
+    /// Before anything is written.
+    Start,
+    /// After the outfmt 0 prolog, before the first query's report.
+    Prolog,
+    /// Nowhere: the program does not read the variable.
+    Never,
+}
+
+/// The outfmt 0 prolog of a report: its bytes up to the first query's report (psiblast's starts
+/// with the line of its round).
+fn prolog(report: &[u8]) -> &[u8] {
+    let text = String::from_utf8_lossy(report);
+    let at = ["\nResults from round ", "\n\n\nQuery= "]
+        .iter()
+        .filter_map(|start| text.find(start))
+        .min()
+        .expect("a query's report");
+    &report[..at + 1]
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+// ```c++
+//     catch (const CException& e) {                                           \
+//         LOG_POST(Error << "Error: " << e.what());                           \
+//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+//     }                                                                       \
+// ```
+// NCBI 2.17.0 (the official Linux x64 release) with each variable set to `abc` (env parity probe
+// h_probe of 2026-11-12, REPORT.md "Stop point"): `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` (the query
+// splitter of the first batch, local_blast.cpp:59-61, split_query_aux_priv.cpp:55-57) and
+// `PRE_FETCH_SEQS_LIMIT` (the first batch's prefetch, blast_app_util.cpp:732-734) stop after the
+// outfmt 0 prolog; `BATCH_SIZE` (blast_input_aux.cpp:86-88) before anything, in blastn after the
+// prolog (blastn_app.cpp:258-262), and psiblast does not read it (psiblast_app.cpp:468). The
+// archive of outfmt 11 is NCBI's error archive (not psiblast's, whose outfmt 11 LOSAT refuses;
+// not for `PRE_FETCH_SEQS_LIMIT`, above). These bytes are NCBI's for these inputs.
+#[test]
+fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
+    for case in PROGRAMS {
+        let (program, ..) = case;
+        for variable in [
+            "CHUNK_SIZE",
+            "OVERLAP_CHUNK_SIZE",
+            "BATCH_SIZE",
+            "PRE_FETCH_SEQS_LIMIT",
+        ] {
+            let stop = match (variable, program) {
+                ("BATCH_SIZE", "psiblast") => Stop::Never,
+                ("BATCH_SIZE", "blastn") => Stop::Prolog,
+                ("BATCH_SIZE", _) => Stop::Start,
+                _ => Stop::Prolog,
+            };
+            for outfmt in ["0", "6", "7", "11"] {
+                if outfmt == "11" && (program == "psiblast" || variable == "PRE_FETCH_SEQS_LIMIT") {
+                    continue;
+                }
+                let what = format!("{program} {variable}=abc -outfmt {outfmt}");
+                let plain = run(case, outfmt, None);
+                assert!(plain.status.success(), "{what}: {plain:?}");
+                let output = run(case, outfmt, Some((variable, "abc")));
+                if stop == Stop::Never {
+                    assert!(
+                        output.status.success()
+                            && output.stdout == plain.stdout
+                            && output.stderr == plain.stderr,
+                        "{what}: {output:?}"
+                    );
+                    continue;
+                }
+                assert_eq!(output.status.code(), Some(255), "{what}: {output:?}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    string_to_int_exception("abc", 861, 0),
+                    "{what}"
+                );
+                let expected: &[u8] = match (outfmt, stop) {
+                    ("11", _) => ABC_ERROR_ARCHIVE.as_bytes(),
+                    ("0", Stop::Prolog) => prolog(&plain.stdout),
+                    _ => b"",
+                };
+                assert!(
+                    output.stdout == expected,
+                    "{what}: {}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:159-160
+// ```c++
+//     int from = NStr::StringToInt(tokens.front());
+//     int to = NStr::StringToInt(tokens.back());
+// ```
+// NCBI 2.17.0 blastn and blastp `-query_loc` and `-subject_loc` (env parity probe h_probe of
+// 2026-11-12, cases `LOC.*`): a part that `NStr::StringToInt` cannot convert ends the program
+// with its `CStringException` before anything is written (exit 255), the start before the stop.
+#[test]
+fn a_location_part_that_ncbi_cannot_convert_is_its_exception() {
+    for (program, query, subject) in [
+        ("blastn", "arch_q.fna", "arch_s.fna"),
+        ("blastp", "arch_bp_q.faa", "arch_bp_s.faa"),
+    ] {
+        for option in ["-query_loc", "-subject_loc"] {
+            for (value, part, line, pos) in [
+                ("a-10", "a", 861, 0),
+                ("1-b", "b", 861, 0),
+                ("1-1.5", "1.5", 870, 1),
+            ] {
+                for outfmt in ["0", "6"] {
+                    let output = run_files(
+                        program,
+                        &format!("{INPUTS}/{query}"),
+                        &format!("{INPUTS}/{subject}"),
+                        outfmt,
+                        None,
+                        &[option, value],
+                    );
+                    let what = format!("{program} {option} {value} -outfmt {outfmt}");
+                    assert_eq!(output.status.code(), Some(255), "{what}: {output:?}");
+                    assert!(output.stdout.is_empty(), "{what}: {output:?}");
+                    assert_eq!(
+                        String::from_utf8_lossy(&output.stderr),
+                        string_to_int_exception(part, line, pos),
+                        "{what}"
+                    );
+                }
+            }
         }
     }
 }
@@ -185,7 +320,7 @@ fn old_fsc_is_the_statistics_of_searchsp_0() {
         ))
         .expect("frozen -searchsp 0 report");
         for value in ["1", ""] {
-            let output = run_files(program, query, subject, "0", Some(("OLD_FSC", value)));
+            let output = run_files(program, query, subject, "0", Some(("OLD_FSC", value)), &[]);
             assert_eq!(
                 output.status.code(),
                 Some(0),

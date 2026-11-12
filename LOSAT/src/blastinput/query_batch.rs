@@ -2,47 +2,10 @@
 
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 
-/// `NStr::StringToInt` with the default flags: an optional sign and decimal digits, within
-/// the range of an `int`, and nothing else (no spaces); `None` where NCBI throws its
-/// `CStringException`.
-///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:635-643
-/// ```c
-/// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-/// {
-///     S2N_CONVERT_GUARD_EX(flags);
-///     Int8 value = StringToInt8(str, flags, base);
-///     if ( value < kMin_Int  ||  value > kMax_Int ) {
-///         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-///     }
-///     return (int) value;
-/// }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:810-862
-/// ```c
-///     // Determine sign
-///     bool sign = false;
-///     switch (str[pos]) {
-///     case '-':
-///         sign = true;
-///         /*FALLTHRU*/
-///     case '+':
-///         pos++;
-///         break;
-///     ...
-///     // Last checks
-///     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-///         S2N_CONVERT_ERROR_INVAL(Int8);
-///     }
-/// ```
-/// `i32::from_str` reads the same strings.
-pub fn ncbi_string_to_int(value: &std::ffi::OsStr) -> Option<i32> {
-    value.to_str()?.parse::<i32>().ok()
-}
-
-/// The query batch size of blastn from the environment variable `BATCH_SIZE` (0 when it
-/// is not set: NCBI then uses `CBatchSizeMixer`). `Err` holds the value that NCBI cannot
-/// convert (an empty value too).
+/// The query batch size from the environment variable `BATCH_SIZE` (`value`; 0 when it is not
+/// set: blastn then uses `CBatchSizeMixer`, the other programs their default). `Err` is the
+/// `CStringException` of `NStr::StringToInt` (flags 0: an optional sign and decimal digits within
+/// the range of an `int`, no spaces) for a value it cannot convert, an empty one too.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
 /// ```c
@@ -58,12 +21,12 @@ pub fn ncbi_string_to_int(value: &std::ffi::OsStr) -> Option<i32> {
 /// ```c
 ///     if (! use_default) return 0;
 /// ```
-pub fn get_query_batch_size(value: Option<&std::ffi::OsStr>) -> Result<i32, String> {
+pub(crate) fn get_query_batch_size(
+    value: Option<&std::ffi::OsStr>,
+) -> Result<i32, crate::ncbi_exception::NcbiException> {
     match value {
         None => Ok(0),
-        Some(value) => {
-            ncbi_string_to_int(value).ok_or_else(|| value.to_string_lossy().into_owned())
-        }
+        Some(value) => crate::ncbi_str::string_to_int(value.as_encoded_bytes(), 0),
     }
 }
 
@@ -270,6 +233,9 @@ impl QueryBatches {
 /// - the batch has no query (a batch size of 0, a batch of records that `-query_loc`
 ///   skips, or a batch that an `eEOF` ends before its first record): `Empty
 ///   CBlastQueryVector`;
+/// - the batch's query splitter, made before its setup, cannot convert `CHUNK_SIZE` or (where
+///   it splits, `reads_overlap`: not RPS-BLAST) `OVERLAP_CHUNK_SIZE`
+///   (`app::check_query_split_environment`): the first batch stops there;
 /// - every query of the batch has no letters: the context of a protein query is valid at
 ///   the set-up exactly when it has letters, so NCBI's set-up fails with one `Sequence
 ///   contains no data` per query (`GetMessage` puts the severity first) and `CATCH_ALL`
@@ -283,6 +249,7 @@ pub(crate) fn read_query_batches(
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
     batch_size: u32,
+    reads_overlap: bool,
 ) -> QueryBatches {
     read_batches(
         input_records,
@@ -290,7 +257,11 @@ pub(crate) fn read_query_batches(
         input,
         reading,
         batch_size,
-        &no_data_batch_error,
+        &|batch| {
+            crate::blastinput::app::check_query_split_environment(false, reads_overlap)
+                .err()
+                .or_else(|| no_data_batch_error(batch))
+        },
     )
 }
 
@@ -330,21 +301,19 @@ pub(crate) fn read_query_batches(
 /// query` (exit 3). A batch of one query without letters (the last records, or a `-query_loc`
 /// interval that starts just past its record's end) crashes NCBI 2.17.0's psiblast (SIGSEGV);
 /// LOSAT rejects it there. A query whose Karlin-Altschul parameters cannot be computed stops the
-/// run at its batch too (`blast_engine.rs` `search`).
+/// run at its batch too (`blast_engine.rs` `search`). The query splitter of the batch's search
+/// (`CPsiBlast::Run`, after the constructor's check) stops the first batch where it cannot convert
+/// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` (`app::check_query_split_environment`).
 pub(crate) fn read_psiblast_query_batches(
     input_records: &[FastaRecord],
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
 ) -> QueryBatches {
-    read_batches(
-        input_records,
-        searched,
-        input,
-        reading,
-        1,
-        &psiblast_batch_error,
-    )
+    read_batches(input_records, searched, input, reading, 1, &|batch| {
+        psiblast_batch_error(batch)
+            .or_else(|| crate::blastinput::app::check_query_split_environment(false, true).err())
+    })
 }
 
 /// `read_query_batches`, where the batch errors after those of NCBI's batch reader (a reader
@@ -506,7 +475,7 @@ pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
 
 #[cfg(test)]
 mod tests {
-    use super::{get_query_batch_size, ncbi_string_to_int, BatchSizeMixer};
+    use super::{get_query_batch_size, BatchSizeMixer};
     use crate::blastinput::seq_range::next_ranged_batch_end;
 
     /// The end of the batch that starts at `start` when no record is skipped. The batch size
@@ -529,7 +498,7 @@ mod tests {
             .collect();
         let input = QueryInput::whole(&records);
         let batches =
-            super::read_query_batches(&records, &records, &input, QueryReading::Records, 10);
+            super::read_query_batches(&records, &records, &input, QueryReading::Records, 10, true);
         assert!(batches.stop.is_none());
         assert_eq!(batches.starts, vec![(0, 0), (2, 2), (4, 4)]);
         let starts: Vec<(usize, usize)> = (0..5).map(|q| batches.start_of(q)).collect();
@@ -586,7 +555,8 @@ mod tests {
         // blastp's batches of the same records: the record without letters is searched with the
         // next one, without an error.
         let input = QueryInput::whole(&joined);
-        let blastp = super::read_query_batches(&joined, &joined, &input, QueryReading::Records, 1);
+        let blastp =
+            super::read_query_batches(&joined, &joined, &input, QueryReading::Records, 1, true);
         assert!(blastp.stop.is_none());
         assert_eq!(blastp.starts, vec![(0, 0), (1, 1)]);
     }
@@ -597,34 +567,51 @@ mod tests {
         assert_eq!(next_query_batch_end(&[19_999, 2, 1], 2, 20_000), 3);
     }
 
+    // NCBI BLAST+ 2.17.0 with `BATCH_SIZE` set (env parity probe h_probe of 2026-11-12, cases
+    // `BATCH_SIZE.*`): `NStr::StringToInt` with flags 0 takes a sign and no spaces, and stops at
+    // the line and position of each error.
     #[test]
     fn batch_size_strings_are_read_as_ncbis_string_to_int() {
         use std::ffi::OsStr;
         for (text, value) in [
-            ("100", Some(100)),
-            ("+100", Some(100)),
-            ("-1", Some(-1)),
-            ("007", Some(7)),
-            ("2147483647", Some(i32::MAX)),
-            ("-2147483648", Some(i32::MIN)),
-            ("2147483648", None),
-            ("", None),
-            (" 100", None),
-            ("100 ", None),
-            ("1e5", None),
-            ("abc", None),
-            ("+", None),
-            ("1,000", None),
-            ("0x10", None),
+            ("100", 100),
+            ("+5", 5),
+            ("-1", -1),
+            ("0", 0),
+            ("007", 7),
+            ("2147483647", i32::MAX),
+            ("-2147483648", i32::MIN),
         ] {
-            assert_eq!(ncbi_string_to_int(OsStr::new(text)), value, "{text:?}");
+            assert_eq!(
+                get_query_batch_size(Some(OsStr::new(text))),
+                Ok(value),
+                "{text:?}"
+            );
+        }
+        for (text, line, pos) in [
+            ("abc", 861, 0),
+            ("", 861, 0),
+            (" 5", 861, 0),
+            ("5 ", 870, 1),
+            ("1.5", 870, 1),
+            ("5x", 870, 1),
+            ("+", 861, 1),
+            ("1,000", 870, 1),
+            ("0x10", 870, 1),
+            ("99999999999999999999", 852, 18),
+            ("-99999999999999999999", 852, 19),
+            ("2147483648", 640, 0),
+            ("-2147483649", 640, 0),
+        ] {
+            let error = get_query_batch_size(Some(OsStr::new(text))).unwrap_err();
+            assert_eq!(error.site().line, line, "{text:?}");
+            assert!(
+                error.what().ends_with(&format!("(m_Pos = {pos})\n")),
+                "{text:?}: {}",
+                error.what()
+            );
         }
         assert_eq!(get_query_batch_size(None), Ok(0));
-        assert_eq!(get_query_batch_size(Some(OsStr::new("5000"))), Ok(5000));
-        assert_eq!(
-            get_query_batch_size(Some(OsStr::new(""))),
-            Err(String::new())
-        );
     }
 
     #[test]

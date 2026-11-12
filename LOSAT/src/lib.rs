@@ -102,6 +102,9 @@ pub(crate) mod seqdb;
 // NCBI objects/seqloc (CSeq_id), objects/blastdb (CBlast_def_line_set) and the id helpers
 // of objtools/align_format: the Seq-ids of database sequences.
 pub(crate) mod seqid;
+
+/// The mask readers and writers of NCBI's masking tools (`dustmasker`).
+pub(crate) mod seqmasks_io;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
 pub(crate) mod writedb;

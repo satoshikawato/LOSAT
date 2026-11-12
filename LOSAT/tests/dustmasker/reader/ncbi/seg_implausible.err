@@ -1,0 +1,3 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objtools/readers/fasta.cpp", line 2217: Error: (CObjReaderParseException::eFormat) CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment. (m_Pos = 4)
+

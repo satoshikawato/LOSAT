@@ -1351,6 +1351,70 @@ mod tests {
             .any(|op| matches!(op, GapEditOp::Del(_))));
     }
 
+    // NCBI's `ALIGN_EX` (quoted at `semi_gapped_align_score_only`) raises an X-drop below the
+    // gap costs to `gap_open_extend`: X-drops of 0 and below (RPS-BLAST's `-xdrop_gap 0`, `-1`)
+    // align as the cost itself does, in `Int4` arithmetic.
+    #[test]
+    fn x_drops_at_or_below_zero_align_as_the_gap_costs() {
+        let query = encode("MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ");
+        let subject_letters =
+            encode("MKTAYIAKQRQISFVKSHFSRQDLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVKVKVKALPDAQ");
+        let mut subject = subject_letters.clone();
+        subject.push(0);
+        let rows = blosum62_pssm(&query);
+        let mut scratch = PssmGapScratch::new();
+        let (q_off, s_off) = (30usize, 31usize);
+        let score_only = |x_drop: i32, scratch: &mut PssmGapScratch| {
+            let found = pssm_score_only_gapped_alignment(
+                &rows,
+                &subject,
+                subject_letters.len(),
+                q_off,
+                s_off,
+                11,
+                1,
+                x_drop,
+                scratch,
+            );
+            (
+                found.query_start,
+                found.query_stop,
+                found.subject_start,
+                found.subject_stop,
+                found.score,
+            )
+        };
+        let traced = |x_drop: i32, scratch: &mut PssmGapScratch| {
+            let found = pssm_gapped_alignment_with_traceback(
+                &rows,
+                &subject,
+                subject_letters.len(),
+                q_off,
+                s_off,
+                11,
+                1,
+                x_drop,
+                scratch,
+            );
+            (
+                found.query_start,
+                found.query_stop,
+                found.subject_start,
+                found.subject_stop,
+                found.score,
+                found.edit_script,
+            )
+        };
+        let at_cost = score_only(12, &mut scratch);
+        let traced_at_cost = traced(12, &mut scratch);
+        for x_drop in [0, -1, -200, i32::MIN] {
+            assert_eq!(score_only(x_drop, &mut scratch), at_cost, "{x_drop}");
+            assert_eq!(traced(x_drop, &mut scratch), traced_at_cost, "{x_drop}");
+        }
+        // The cost is a real X-drop: a larger one can find more.
+        assert!(score_only(38, &mut scratch).4 >= at_cost.4);
+    }
+
     #[test]
     fn gapped_start_is_the_middle_of_the_best_window() {
         let query = encode("AAAAAAAAAAWWWWWWWWWWWWAAAA");

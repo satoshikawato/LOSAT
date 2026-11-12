@@ -17,7 +17,7 @@
 //! writes nothing to standard error and exits with 0. A `-subject` search's documents name no
 //! path, so the searches run from the fixture folder with its own file names. (The `-db`
 //! searches are compared by outfmt-20261019 `S/scripts/compare_samples_of3b1.py`; their frozen
-//! fixtures belong to `db_search_manifest.tsv`.)
+//! fixtures belong to `db_search_manifest/`.)
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++

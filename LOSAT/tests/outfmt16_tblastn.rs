@@ -3,7 +3,7 @@
 //! of a run with no query, the `-matrix blosum62` error that NCBI raises after the prolog, and
 //! the searches LOSAT refuses before the first byte (a byte >= 0x80 in a title or the `-db`
 //! name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS 30: the rows
-//! `db.sa.x16_ttaxid.nonascii.*` of `db_search_manifest.tsv`), the taxonomy database that only
+//! `db.sa.x16_ttaxid.nonascii.*` of `db_search_manifest/tblastn.tsv`), the taxonomy database that only
 //! outfmt 15 and 16 read, and the sink of a file. The bytes of NCBI BLAST+ 2.17.0 are in
 //! `tests/fixtures/outfmt16` (`*_tblastn_{sub,db}_{15,16}.out`: `tblastn -query QUERY -subject
 //! snucl.fna | -db db/snucl -num_threads 1 -outfmt N`, run in that directory; `badbatch` and
@@ -514,7 +514,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
     }
 }
 
-/// The rows `db.sa.x16_ttaxid.*` of `db_search_manifest.tsv` (OF5b part 2: outfmt 15 and 16 with
+/// The rows `db.sa.x16_ttaxid.*` of `db_search_manifest/tblastn.tsv` (OF5b part 2: outfmt 15 and 16 with
 /// a taxonomy database in `BLASTDB`; the rows with `warn` in their name also have a query file with
 /// a reader warning, and some a `BATCH_SIZE`), at one, four, eight and sixteen threads: the bytes
 /// of NCBI BLAST+ 2.17.0 (`tblastn -num_threads 1`) for stdout, stderr and the exit status; the
@@ -524,7 +524,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
 #[test]
 fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
+    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest/tblastn.tsv")).unwrap();
     let mut rows = 0;
     let mut warn_rows = 0;
     for line in manifest

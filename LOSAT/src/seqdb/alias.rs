@@ -2403,11 +2403,7 @@ pub(super) fn range_mask(
         };
         for path in &node.vol_names {
             let (start, end) = volume(path);
-            set_bits(
-                words,
-                lo.max(i64::from(start)),
-                hi.min(i64::from(end)),
-            );
+            set_bits(words, lo.max(i64::from(start)), hi.min(i64::from(end)));
         }
         for subnode in &node.subnodes {
             mark(subnode, lo, hi, volume, words);

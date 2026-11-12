@@ -1580,10 +1580,16 @@ impl TaxIdLookup<'_> {
         if oids.is_empty() {
             return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
-        // `x_CheckOrFindOID` keeps the OIDs of the database (and of its list, which a
-        // database opened without one does not have).
+        // `x_CheckOrFindOID` keeps the OIDs of the database that its OID list includes (the
+        // alias files' ranges; a database opened without a list has no other).
         let num_oids = self.db.volume_starts[self.db.volumes.len()];
-        Ok(oids.into_iter().filter(|&oid| oid < num_oids).collect())
+        Ok(oids
+            .into_iter()
+            .filter(|&oid| match &self.db.filter {
+                Some(filter) => filter.contains(oid),
+                None => oid < num_oids,
+            })
+            .collect())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1307-1323
@@ -3001,7 +3007,7 @@ mod tests {
             assert!(db.is_restricted());
             assert_eq!(db.num_seqs(), whole);
             assert_eq!(kept_ids(&db).len(), whole as usize);
-            assert!(db.min_length().is_some_and(|min| min > 0));
+            assert!(db.min_length() > 0);
         }
     }
 

@@ -1001,8 +1001,12 @@ impl Run<'_, '_> {
                     .to_string(),
             ));
         }
+        // `oid` is NCBI's OID, one the database includes (the lookups keep only those:
+        // `IdLookup::visible`); the formatters read ordinal ids, which differ from the OIDs
+        // where an alias file's range or a list leaves OIDs out.
+        let ordinal = self.source.db.ordinal_of(oid);
         self.formatter
-            .write(self.source, oid, config, target, self.out)
+            .write(self.source, ordinal, config, target, self.out)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416
@@ -1014,10 +1018,10 @@ impl Run<'_, '_> {
     // 	}
     // }
     // ```
-    /// `-entry all`: every sequence in the order of its ordinal id.
+    /// `-entry all`: every included sequence in the order of its OID.
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
-        for oid in 0..self.ids.num_seqs {
-            self.write(oid, config, None)?;
+        for ordinal in 0..self.ids.num_seqs {
+            self.write(self.source.db.oid(ordinal), config, None)?;
         }
         Ok(())
     }
@@ -1414,7 +1418,7 @@ impl Run<'_, '_> {
     fn tax_id_list(&mut self, tax_ids: &BTreeSet<i32>, config: &Config) -> Result<bool, Stop> {
         let db = self.source.db;
         let oids: Vec<u32> = if db.is_restricted() {
-            (0..db.num_seqs()).collect()
+            (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect()
         } else {
             db.tax_id_lookup()?.tax_ids_to_oids(tax_ids)?
         };

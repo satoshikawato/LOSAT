@@ -1317,7 +1317,11 @@ impl SeqDb {
             num_seqs: nseq,
             total_length: length,
             max_length: self.counts.max_length,
-            min_length: if min <= 0 { BLAST_SEQSRC_MINLENGTH } else { min },
+            min_length: if min <= 0 {
+                BLAST_SEQSRC_MINLENGTH
+            } else {
+                min
+            },
         };
         self.stats_num_seqs = totals.stats_nseq.as_ref().map_or(0, |&value| value as i32);
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);

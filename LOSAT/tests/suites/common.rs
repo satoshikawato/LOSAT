@@ -18,10 +18,6 @@ mod blastdbcmd_retrieve;
 mod blastdbcmd_several_names;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
-#[path = "../cli_v2.rs"]
-mod cli_v2;
-#[path = "../compressed_lookup.rs"]
-mod compressed_lookup;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]

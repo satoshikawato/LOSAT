@@ -1,12 +1,11 @@
-//! The executable called by a program's name (`cli::entry_argv`) and `losat --install-shims`
-//! (`cli::install_shims`). No NCBI counterpart: NCBI has one executable per program, and these
+//! `losat --install-shims` (`cli::install_shims`) and the executables it links, called by a
+//! program's name (`cli::entry_argv`; its rule is checked in `src/utils/entry_names_tests.rs`).
+//! No NCBI counterpart: NCBI has one executable per program, and these
 //! names stand for them on `PATH`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-
-use LOSAT::cli::{entry_argv, ENTRY_NAMES};
 
 fn losat() -> &'static str {
     env!("CARGO_BIN_EXE_losat")
@@ -46,38 +45,41 @@ fn install(dir: &Path) -> Output {
     run(losat(), &["--install-shims", dir.to_str().unwrap()])
 }
 
-#[test]
-fn the_name_of_a_program_is_its_subcommand() {
-    let words = |argv: &[&str]| -> Vec<String> {
-        entry_argv(argv.iter().copied())
-            .iter()
-            .map(|word| word.to_str().unwrap().to_string())
-            .collect()
-    };
-    let losat_name = format!("losat{}", std::env::consts::EXE_SUFFIX);
-    for name in ENTRY_NAMES {
-        let expected = [losat_name.as_str(), name, "-query", "q"];
-        assert_eq!(words(&[name, "-query", "q"]), expected);
-        assert_eq!(
-            words(&[&format!("/usr/bin/{name}"), "-query", "q"]),
-            expected
+/// The programs that the binary links, in the order it lists them.
+const PROGRAMS: [&str; 10] = [
+    "blastn",
+    "blastp",
+    "blastx",
+    "tblastn",
+    "tblastx",
+    "psiblast",
+    "rpsblast",
+    "makeblastdb",
+    "blastdbcmd",
+    "rpsbproc",
+];
+
+/// The program names that `losat --install-shims` listed on standard output (one path per
+/// line): the file names without the executable suffix. The list must hold `PROGRAMS`.
+fn installed_names(installed: &Output) -> Vec<String> {
+    let names: Vec<String> = String::from_utf8(installed.stdout.clone())
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let file = Path::new(line).file_name().unwrap().to_str().unwrap();
+            file.strip_suffix(std::env::consts::EXE_SUFFIX)
+                .unwrap_or(file)
+                .to_string()
+        })
+        .collect();
+    assert!(!names.is_empty(), "{installed:?}");
+    for program in PROGRAMS {
+        assert!(
+            names.iter().any(|name| name == program),
+            "{program}: {names:?}"
         );
-        assert_eq!(words(&[&format!("{name}.exe"), "-query", "q"]), expected);
-        assert_eq!(words(&[&format!("{name}.EXE"), "-query", "q"]), expected);
-        assert_eq!(words(&[name]), [losat_name.as_str(), name]);
     }
-    // Every other name is `losat`, whatever its words are.
-    for argv0 in [
-        "losat",
-        "/opt/losat",
-        "losat.wasm",
-        "blastn.1",
-        "my-blastn",
-        "blastn2",
-    ] {
-        assert_eq!(words(&[argv0, "blastn", "-h"]), [argv0, "blastn", "-h"]);
-    }
-    assert!(entry_argv(Vec::<String>::new()).is_empty());
+    names
 }
 
 #[test]
@@ -85,7 +87,7 @@ fn a_shim_prints_what_the_subcommand_prints() {
     let dir = temp_dir("texts");
     let installed = install(&dir);
     assert!(installed.status.success(), "{installed:?}");
-    for name in ENTRY_NAMES {
+    for name in installed_names(&installed).iter().map(String::as_str) {
         // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`; rpsbproc,
         // which is not part of BLAST+, has its own: `rpsbproc: 0.5.1`).
         let version = run(shim(&dir, name), &["-version"]);
@@ -175,7 +177,7 @@ fn installing_twice_is_fine_and_another_file_is_left_alone() {
         .map(PathBuf::from)
         .collect();
     let dir = fs::canonicalize(&dir).unwrap();
-    let names: Vec<PathBuf> = ENTRY_NAMES.iter().map(|name| shim(&dir, name)).collect();
+    let names: Vec<PathBuf> = PROGRAMS.iter().map(|name| shim(&dir, name)).collect();
     assert_eq!(listed, names);
     let again = install(&dir);
     assert!(again.status.success(), "{again:?}");

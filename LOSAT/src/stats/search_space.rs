@@ -1,4 +1,4 @@
-use super::length_adjustment::{compute_length_adjustment_ncbi, compute_length_adjustment_simple};
+use super::length_adjustment::compute_length_adjustment_ncbi;
 use super::tables::KarlinParams;
 
 /// Effective search space with length-adjusted values
@@ -14,41 +14,13 @@ impl SearchSpace {
     /// Create a simple search space without length adjustment (BLEMIR default)
     ///
     /// This is the original BLEMIR behavior for backward compatibility.
-    /// For NCBI-compatible E-values, use `with_length_adjustment` or `for_database_search`.
+    /// For NCBI-compatible E-values, use `for_database_search`.
     pub fn simple(query_len: usize, db_len: usize) -> Self {
         let q = query_len as f64;
         let d = db_len as f64;
         Self {
             effective_space: q * d,
             length_adjustment: 0,
-        }
-    }
-
-    /// Create search space with NCBI-style length adjustment for single-sequence comparison.
-    ///
-    /// This uses the NCBI BLAST algorithm for computing length adjustment,
-    /// which accounts for the fact that alignments cannot extend beyond
-    /// sequence boundaries.
-    ///
-    /// The algorithm solves for the fixed point:
-    ///   ell = alpha/lambda * (logK + log(ss)) + beta
-    /// where ss = (m - ell) * (n - ell)
-    ///
-    /// For database searches with multiple sequences, use `for_database_search` instead.
-    pub fn with_length_adjustment(query_len: usize, db_len: usize, params: &KarlinParams) -> Self {
-        let m = query_len as f64;
-        let n = db_len as f64;
-
-        // Use NCBI-compatible length adjustment (single sequence = db_num_seqs = 1)
-        let result = compute_length_adjustment_simple(query_len as i64, db_len as i64, params);
-        let length_adj = result.length_adjustment as f64;
-
-        let effective_m = (m - length_adj).max(1.0);
-        let effective_n = (n - length_adj).max(1.0);
-
-        Self {
-            effective_space: effective_m * effective_n,
-            length_adjustment: result.length_adjustment,
         }
     }
 
@@ -110,54 +82,6 @@ mod tests {
     }
 
     #[test]
-    fn test_length_adjustment() {
-        let params = KarlinParams {
-            lambda: 0.267,
-            k: 0.041,
-            h: 0.14,
-            alpha: 1.9,
-            beta: -30.0,
-        };
-
-        let ss = SearchSpace::with_length_adjustment(100, 1000, &params);
-
-        // Effective lengths should be smaller than original
-        assert!(ss.length_adjustment > 0);
-        assert!(ss.effective_space < 100000.0);
-
-        // The space is the product of the two adjusted lengths
-        let adj = ss.length_adjustment as f64;
-        let expected_m = (100.0_f64 - adj).max(1.0);
-        let expected_n = (1000.0_f64 - adj).max(1.0);
-        assert_eq!(ss.effective_space, expected_m * expected_n);
-
-        // But still positive
-        assert!(ss.effective_space > 0.0);
-    }
-
-    #[test]
-    fn test_length_adjustment_convergence() {
-        let params = KarlinParams {
-            lambda: 0.267,
-            k: 0.041,
-            h: 0.14,
-            alpha: 1.9,
-            beta: -30.0,
-        };
-
-        // Test with various sequence lengths using the new NCBI-compatible function
-        for (m, n) in [(100, 1000), (1000, 10000), (50, 500)] {
-            let result = compute_length_adjustment_simple(m, n, &params);
-
-            // Adjustment should be non-negative
-            assert!(result.length_adjustment >= 0);
-
-            // Adjustment should be less than the shorter sequence
-            assert!(result.length_adjustment < m.min(n));
-        }
-    }
-
-    #[test]
     fn test_database_search_space() {
         let params = KarlinParams {
             lambda: 0.267,
@@ -179,6 +103,55 @@ mod tests {
         let expected_m = (100.0_f64 - adj).max(1.0);
         let expected_n = (10000.0_f64 - adj * 10.0).max(1.0);
         assert_eq!(ss.effective_space, expected_m * expected_n);
+    }
+
+    #[test]
+    fn test_effective_search_space_variation() {
+        // Test that effective search space changes correctly with sequence length
+        // This catches bugs where length adjustment is not applied correctly
+        //
+        // **Important**: We test the *direction* of change and *sign* of values,
+        // not exact values, because NCBI BLAST's effective length calculation
+        // is extremely complex and may differ slightly in implementation.
+
+        let params = crate::stats::tables::KarlinParams {
+            lambda: 1.28,
+            k: 0.46,
+            h: 0.85,
+            alpha: 1.5,
+            beta: -2.0,
+        };
+
+        // Test with different sequence lengths
+        let test_lengths = vec![
+            (100, 1000, 1),      // Short sequences
+            (1000, 10000, 5),    // Medium sequences
+            (10000, 100000, 10), // Long sequences
+        ];
+
+        for (q_len, db_len, db_num_seqs) in test_lengths {
+            let ss1 = SearchSpace::for_database_search(q_len, db_len, db_num_seqs, &params, false);
+            let ss2 = SearchSpace::for_database_search(q_len, db_len, db_num_seqs, &params, true);
+
+            // With length adjustment, effective space should be smaller
+            assert!(
+                ss2.effective_space < ss1.effective_space,
+                "Length adjustment should reduce effective search space"
+            );
+
+            // But still positive
+            assert!(ss2.effective_space > 0.0);
+
+            // The space is (m - adj) * (n - N * adj), as the constructor computes it
+            let adj = ss2.length_adjustment as f64;
+            let expected_m = (q_len as f64 - adj).max(1.0);
+            let expected_n = (db_len as f64 - adj * db_num_seqs as f64).max(1.0);
+            assert_eq!(ss2.effective_space, expected_m * expected_n);
+
+            // Length adjustment should be reasonable (not larger than sequence length)
+            assert!(ss2.length_adjustment >= 0);
+            assert!(ss2.length_adjustment < q_len.min(db_len) as i64);
+        }
     }
 }
 

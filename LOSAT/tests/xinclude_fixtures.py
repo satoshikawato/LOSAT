@@ -4,7 +4,7 @@ master file), and psiblast's ASCII PSSM (`-out_ascii_pssm`).
 
 An `-outfmt 13` or `14` run needs `-out FILE`: it writes the report of the n-th query to
 `<base>_<n>.json` / `<base>_<n>.xml` next to FILE and a master file at FILE that lists them
-(DESIGN_OF5 1.7). The manifests `outfmt0_manifest.tsv` and `db_search_manifest.tsv` name such a row
+(DESIGN_OF5 1.7). The manifests `outfmt0_manifest.tsv` and `db_search_manifest/` name such a row
 with two more columns after the others (a row without them is a row of the old form):
 
 - `files`: empty (the output is on standard output) or `xinclude` (a row of outfmt 13 or 14). The

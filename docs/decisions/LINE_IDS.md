@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree, 116 of them in
-`CHANGELOG.md`, `changelog.d/` and `docs/`; 166 rows below. State: 148 done, 18 in progress, 0 stopped.
+As of dev b3b82f9ea with line PS's PS7 (2026-11-12): 198 IDs cited in the tree, 119 of them in
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 167 rows below. State: 149 done, 18 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -156,7 +156,7 @@ As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree,
 | `PS4b` | PS stage 4b: psiblast -in_pssm with the position-based composition-based statistics (-comp_based_stats 1, and 2 and 3 run as 1 with NCBI's warning; the default), the zero-ratio warning and PSSMs of frequency ratios only, byte for byte as NCBI BLAST+ 2.17.0. | done | #917 | changelog entry `feature-ps-ps4b` |
 | `PS5a` | PS stage 5a: psiblast's rounds of FASTA queries (-num_iterations N, convergence, the two-part description table, the PSSM files of every round) and -comp_based_stats 0, with -subject or -db, for outfmt 0, 6, 7, 10 and 20, byte for byte as NCBI BLAST+ 2.17.0. | done | #936 | changelog entry `feature-ps-ps5` |
 | `PS5b` | PS stage 5b: psiblast -in_pssm with -num_iterations other than 1 and with the PSSM files (the input PSSM written back as NCBI's object holds it, the K/A write-back, the short and long ASCII PSSM of a file), byte for byte as NCBI BLAST+ 2.17.0. | done | #973 | changelog entry `feature-ps-ps5b` |
-| `PS5c` | PS stage 5c: psiblast -searchsp and the environment variable OLD_FSC in every round (round 1, -in_pssm and the later rounds: the cutoffs and E-values without the Gumbel block), byte for byte as NCBI BLAST+ 2.17.0. | in progress | none | changelog entry `feature-ps-ps5c` |
+| `PS5c` | PS stage 5c: psiblast -searchsp and the environment variable OLD_FSC in every round (round 1, -in_pssm and the later rounds: the cutoffs and E-values without the Gumbel block), byte for byte as NCBI BLAST+ 2.17.0. | done | #1007 | changelog entry `feature-ps-ps5c` |
 | `PS7` | PS stage 7: tblastn -in_pssm (PSI-TBLASTN): tblastn's search with the PSSM's scores and Karlin-Altschul values (composition-based statistics 0, no sum statistics unless -sum_stats true, genetic code 1), -subject and -db, outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps7` |
 | `PS11` | PS stage 11 (series PR): `losat rpsblast`, NCBI BLAST+ 2.17.0 rpsblast against profile databases (makeprofiledb -dbtype rps); split into PS11a and PS11b. | in progress | none | changelog entry `feature-ps-ps11` |
 | `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #941 | changelog entry `feature-ps-ps11` |

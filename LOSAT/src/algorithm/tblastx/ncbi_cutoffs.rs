@@ -246,6 +246,9 @@ pub fn cutoff_score_from_evalue(
     // word cutoff 1, so more ungapped HSPs reach its sum statistics (NCBI 2.17.0 320 rows, LOSAT
     // 262 for a 6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue
     // 1e-300`): a difference of NCBI's undefined behaviour that LOSAT keeps (line PS DECISIONS 30).
+    // With the default options ordinary genome pairs reach it too (MG1655 1.2 Mb x Sakai 5.5 Mb:
+    // NCBI out of memory or time with no output, LOSAT 88,562 rows); LOSAT keeps the finite value
+    // there as well (Owner 2026-11-12, line PS DECISIONS 36; PD-LOSAT-NCBI-DEFECTS exception 8).
     let log_value = if k_times_searchsp_over_e.is_finite() {
         k_times_searchsp_over_e.ln()
     } else {

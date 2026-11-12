@@ -287,16 +287,25 @@ pub(super) fn volume_search_space(
         gapped,
     )
     .length_adjustment;
+    adjusted_search_space(query_length, db_length, num_seqs, adjustment).ok_or_else(overflow)
+}
+
+/// `(db_length - num_seqs * adjustment) * (query_length - adjustment)` in NCBI's `Int8`, with the
+/// effective database length raised to 1 when it is 0 or below; `None` where a product leaves
+/// `Int8`.
+fn adjusted_search_space(
+    query_length: i64,
+    db_length: i64,
+    num_seqs: i64,
+    adjustment: i64,
+) -> Option<i64> {
     let mut effective_db_length = num_seqs
         .checked_mul(adjustment)
-        .and_then(|adjusted| db_length.checked_sub(adjusted))
-        .ok_or_else(overflow)?;
+        .and_then(|adjusted| db_length.checked_sub(adjusted))?;
     if effective_db_length <= 0 {
         effective_db_length = 1;
     }
-    effective_db_length
-        .checked_mul(query_length - adjustment)
-        .ok_or_else(overflow)
+    effective_db_length.checked_mul(query_length - adjustment)
 }
 
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread
@@ -650,26 +659,28 @@ pub(super) fn rps_search(
                 .zip(&masked)
                 .zip(&batch_kbp)
                 .zip(&search_spaces)
-                .map(|((((ctx, &first), masked), &batch_kbp), &search_space)| RpsQuery {
-                    search_space,
-                    aa_seq: masked.as_deref().unwrap_or(&ctx.aa_seq),
-                    valid: ctx.is_valid && ctx.aa_len > 0,
-                    kbp_std: ctx.karlin_params,
-                    first_query_length: first,
-                    batch_kbp,
-                    // The letters as read where the searched ones are masked: before SEG and the
-                    // lower-case masks (`aa_seq_nomask`), else before the 26-column mask. The
-                    // tabular report with a field list counts its identities on the rows itself,
-                    // inside NCBI's alignment block, which the engine's count opens
-                    // (`tabular::needs_rows`): it keeps that count.
-                    aa_seq_nomask: if recount_identities {
-                        ctx.aa_seq_nomask
-                            .as_deref()
-                            .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice()))
-                    } else {
-                        None
+                .map(
+                    |((((ctx, &first), masked), &batch_kbp), &search_space)| RpsQuery {
+                        search_space,
+                        aa_seq: masked.as_deref().unwrap_or(&ctx.aa_seq),
+                        valid: ctx.is_valid && ctx.aa_len > 0,
+                        kbp_std: ctx.karlin_params,
+                        first_query_length: first,
+                        batch_kbp,
+                        // The letters as read where the searched ones are masked: before SEG and the
+                        // lower-case masks (`aa_seq_nomask`), else before the 26-column mask. The
+                        // tabular report with a field list counts its identities on the rows itself,
+                        // inside NCBI's alignment block, which the engine's count opens
+                        // (`tabular::needs_rows`): it keeps that count.
+                        aa_seq_nomask: if recount_identities {
+                            ctx.aa_seq_nomask
+                                .as_deref()
+                                .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice()))
+                        } else {
+                            None
+                        },
                     },
-                })
+                )
                 .collect(),
             gapped: *run.gapped_params,
             gumbel,
@@ -967,6 +978,50 @@ mod tests {
             .iter()
             .map(|list| list.oid)
             .collect()
+    }
+
+    fn blosum62_gapped() -> KarlinParams {
+        KarlinParams {
+            lambda: 0.267,
+            k: 0.041,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        }
+    }
+
+    // blast_setup.c:826-846 (quoted at `volume_search_space`): each volume's space reads the
+    // given length and its own sequence count; an effective database length of 0 or below is 1.
+    #[test]
+    fn a_volumes_search_space_reads_its_own_sequence_count() {
+        use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
+        let gapped = blosum62_gapped();
+        for (query, db_length, seqs) in [
+            (302usize, 5_000i64, 1i64),
+            (302, 5_000, 3),
+            (40, 100_000, 7),
+        ] {
+            let adjustment = compute_length_adjustment_ncbi(query as i64, db_length, seqs, &gapped)
+                .length_adjustment;
+            assert_eq!(
+                volume_search_space(query, db_length, seqs, &gapped).unwrap(),
+                (db_length - seqs * adjustment) * (query as i64 - adjustment),
+                "{query} {db_length} {seqs}"
+            );
+        }
+        let one = volume_search_space(302, 5_000, 1, &gapped).unwrap();
+        let three = volume_search_space(302, 5_000, 3, &gapped).unwrap();
+        assert_ne!(one, three);
+        // The floor: an effective database length of 0 or below is 1 (NCBI's length adjustment
+        // keeps it above 0, so the arithmetic is tried on given adjustments).
+        assert_eq!(adjusted_search_space(302, 100, 10, 10), Some(292));
+        assert_eq!(adjusted_search_space(302, 100, 10, 11), Some(291));
+        assert_eq!(adjusted_search_space(302, 100, 10, 9), Some(10 * 293));
+        // A product past `Int8` is refused.
+        assert!(volume_search_space(302, i64::MAX, 1, &gapped)
+            .unwrap_err()
+            .to_string()
+            .contains("overflows NCBI BLAST+'s 64-bit effective search space"));
     }
 
     #[test]

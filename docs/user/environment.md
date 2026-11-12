@@ -64,7 +64,7 @@ These change the output as they change NCBI BLAST+'s output. They are not needed
 | `ARCHIVE_FORMAT` | The encoding of `-outfmt 11`: unset or empty for text ASN.1, a value starting with `bin` (any case) for binary ASN.1, `xml` (any case) for XML; any other value writes no archive, as in NCBI BLAST+. |
 | `ADAPTIVE_CBS` | Any value, an empty one too, with composition-based statistics: `blastp`, `psiblast`, `rpsblast`, `blastx` and `tblastn` keep a larger preliminary hit list (1,500 subjects, or twice the hit list size and 50 more from a hit list size of 1,000), and with a hit list size (`-max_target_seqs`) below 1,000 all of them but `psiblast` cut that list by E-value before the final alignments, as NCBI BLAST+ does. The reported hits can grow or shrink. |
 | `CTOOLKIT_COMPATIBLE` | Any value: `-outfmt 0` writes `(bits)` in place of `(Bits)` above the hit list. |
-| `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx`, `tblastn` and `psiblast` (every round) compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. `rpsblast` refuses it (see [Variables that LOSAT refuses](#variables-that-losat-refuses)). |
+| `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx`, `tblastn`, `psiblast` (every round) and `rpsblast` compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. |
 | `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not an integer stops the run (NCBI BLAST+ stops before its report), except when every format is `-outfmt 11`, which `psiblast` and `rpsblast` do not write. |
 
 ## makeblastdb
@@ -90,7 +90,6 @@ giving a different output.
 | Variable | Where | What it does in NCBI BLAST+ |
 | :--- | :--- | :--- |
 | `BL2SEQ_LEGACY` | a search with `-subject` | Searches each subject on its own and writes the legacy bl2seq report. |
-| `OLD_FSC` | `rpsblast` | Computes E-values without the finite-size correction. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` | the search programs, with a `-db` built with `-parse_seqids` | Changes which id of a sequence is shown. |
 | `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` (a non-empty value) | makeblastdb | Stores other titles for some FASTA definition lines (with a tab, a Ctrl-A, or white space at their ends). |
 | `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`, `[BLAST] MAX_SEQID_LENGTH` (a value other than 0 that NCBI converts) | `makeblastdb -parse_seqids` | Sets the longest Seq-id that makeblastdb parses. |

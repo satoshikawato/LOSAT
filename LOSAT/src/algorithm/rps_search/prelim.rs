@@ -12,11 +12,11 @@ use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, Tr
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
+use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::gapalign::{
     pssm_get_start_for_gapped_alignment, pssm_score_only_gapped_alignment, PssmGapScratch,
 };
 use crate::algorithm::pssm_search::prelim::{purge_hsps_with_common_endpoints, score_compare};
-use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::stats::KarlinParams;
 
 /// What the preliminary stage of every query of a volume reads besides the query.
@@ -499,6 +499,63 @@ impl RpsPrelim<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
+
+    fn prelim_list(oid: u32, score: i32, e_value: f64) -> BlastpHspList<XPrelimHsp> {
+        BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![XPrelimHsp {
+                hsp: BlastpPreliminaryHsp {
+                    query_start: 0,
+                    query_end: 10,
+                    subject_start: 0,
+                    subject_end: 10,
+                    gapped_query_start: 0,
+                    gapped_subject_start: 0,
+                    raw_score: score,
+                    query_context: 0,
+                    query_frame: 0,
+                    subject_frame: 0,
+                    query_length: 100,
+                    q_idx: 0,
+                    s_idx: oid,
+                },
+                e_value,
+            }],
+            best_evalue: f64::MAX,
+        }
+    }
+
+    // blast_engine.c:874-899, blast_hits.c (`Blast_HitListUpdate`, `s_EvalueCompareHSPLists`):
+    // without the Gumbel block every preliminary HSP has the e-value 0, so the lists are ordered
+    // by the first HSP's score (down), then the ordinal id (down), which is the order of the
+    // composition-based redo's reads: the last list read is the lowest, and its profile's K is
+    // the batch's (`RpsTraceback::trace_query_redo`).
+    #[test]
+    fn lists_of_e_value_zero_are_ordered_by_score_then_ordinal_id() {
+        let mut hit_list = BlastpHitList::new(10);
+        for (oid, score) in [(0, 50), (1, 80), (2, 80), (3, 65)] {
+            hit_list.update(prelim_list(oid, score, 0.0));
+        }
+        hit_list.sort_by_evalue();
+        let oids: Vec<u32> = hit_list.hsplist_array[..hit_list.hsplist_count]
+            .iter()
+            .map(|list| list.oid)
+            .collect();
+        assert_eq!(oids, vec![2, 1, 3, 0]);
+        // With e-values the best e-value decides first.
+        let mut hit_list = BlastpHitList::new(10);
+        for (oid, score, e_value) in [(0, 50, 1e-5), (1, 80, 1e-2), (2, 80, 1e-9)] {
+            hit_list.update(prelim_list(oid, score, e_value));
+        }
+        hit_list.sort_by_evalue();
+        let oids: Vec<u32> = hit_list.hsplist_array[..hit_list.hsplist_count]
+            .iter()
+            .map(|list| list.oid)
+            .collect();
+        assert_eq!(oids, vec![2, 0, 1]);
+    }
 
     #[test]
     fn the_context_of_an_offset_is_the_profile_that_holds_it() {

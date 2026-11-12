@@ -287,7 +287,7 @@ impl RpsRun<'_> {
                 self.cutoff_subject_length,
             )
             .checked_mul(int_scale)
-        .ok_or_else(|| scale_overflow(scale))?;
+            .ok_or_else(|| scale_overflow(scale))?;
         let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
             / query.kbp_std.lambda) as i32;
         Ok(RpsCutoffs {
@@ -745,6 +745,64 @@ mod tests {
             gap_trigger_bits: 22.0,
             options,
         }
+    }
+
+    /// A valid query of `len` letters (between two sentinels) with BLOSUM62's ungapped block.
+    fn cutoff_query(letters: &[u8], search_space: i64) -> RpsQuery<'_> {
+        RpsQuery {
+            aa_seq: letters,
+            valid: true,
+            kbp_std: KarlinParams {
+                lambda: 0.3176,
+                k: 0.134,
+                h: 0.4012,
+                alpha: 0.0,
+                beta: 0.0,
+            },
+            first_query_length: letters.len() - 2,
+            batch_kbp: KarlinParams {
+                lambda: 0.3176,
+                k: 0.134,
+                h: 0.4012,
+                alpha: 0.0,
+                beta: 0.0,
+            },
+            aa_seq_nomask: None,
+            search_space,
+        }
+    }
+
+    // blast_parameters.c:922-945 and 978-990 (quoted at `RpsCutoffs`): with the Gumbel block the
+    // hit cutoff is `BLAST_SpougeEtoS` of the preliminary e-value, without it
+    // `BLAST_Cutoffs(.., kbp_gap, eff_searchsp)`, both times the scale (100 here).
+    #[test]
+    fn the_hit_cutoff_reads_the_gumbel_block_or_the_search_space_at_the_scale() {
+        use crate::config::ProteinScoringSpec;
+        let letters = vec![1u8; 302];
+        let options = RpsSearch::default();
+        let gumbel =
+            crate::stats::lookup_protein_gumbel_params(&ProteinScoringSpec::default(), 3_234_567)
+                .unwrap();
+        let mut run = x_drop_run(&gumbel, &options, 15.0, 25.0);
+        run.cutoff_subject_length = 250;
+        let query = cutoff_query(&letters, 1_000_000);
+        let with_block = run.cutoffs(&query, 100.0).unwrap();
+        assert_eq!(
+            with_block.hit_cutoff,
+            crate::stats::blast_spouge_etos(10.0, &run.gapped, &gumbel, 300, 250) * 100
+        );
+        // Without the block: ceil(ln(K * searchsp / E) / Lambda) = ceil(ln(4100) / 0.267) = 32.
+        run.gumbel = None;
+        let without = run.cutoffs(&query, 100.0).unwrap();
+        assert_eq!(without.hit_cutoff, 3_200);
+        // The search space is the query's, not a constant.
+        let other = cutoff_query(&letters, 1_000_000_000);
+        assert_eq!(run.cutoffs(&other, 100.0).unwrap().hit_cutoff, 5_800);
+        // The word cutoff is the gap trigger, at most the hit cutoff (blast_parameters.c:370).
+        assert!(without.word_cutoff <= without.hit_cutoff);
+        // The preliminary e-value is `-evalue` as given (the stretch is the caller's).
+        run.prelim_evalue = 1e300;
+        assert_eq!(run.cutoffs(&query, 100.0).unwrap().hit_cutoff, 100);
     }
 
     // blast_parameters.c:455-469 (quoted at `RpsRun::gapped_x_drops`): each X-drop truncated

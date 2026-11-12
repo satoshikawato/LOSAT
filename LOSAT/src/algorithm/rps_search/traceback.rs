@@ -11,11 +11,11 @@ use super::rescale::{residue_probabilities, rps_rescale_pssm};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHsp, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
+use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::traceback0::{trace_hsps, TraceHsps};
 use crate::common::GapEditOp;
-use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::stats::KarlinParams;
 
 /// What the traceback of every query of a volume reads besides the query.

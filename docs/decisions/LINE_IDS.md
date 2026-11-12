@@ -7,7 +7,7 @@ This file gives each cited ID one row: what it is, its state, its main pull requ
 in this repository that holds its fullest record ("external" when there is none).
 
 As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree, 116 of them in
-`CHANGELOG.md`, `changelog.d/` and `docs/`; 166 rows below. State: 148 done, 18 in progress, 0 stopped.
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 167 rows below. State: 149 done, 18 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -161,7 +161,8 @@ As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree,
 | `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #941 | changelog entry `feature-ps-ps11` |
 | `PS11b` | PS stage 11b: `losat rpsblast` with composition-based statistics 1, 2 and 3 (the default 1; `.freq` ratios, the PSSM redo), databases of several volumes (merged per query as NCBI does), `-dbsize` and the 32-bit score bound, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11b` |
 | `PS11c` | PS stage 11c: the options of `losat rpsblast` that PS11a refuses and PS11b leaves refused (-searchsp with the old Karlin-Altschul statistics and OLD_FSC, -seg, -soft_masking, -lcase_masking, -xdrop_*, -use_sw_tback, -sum_stats, -line_length, -sorthits, -sorthsps); split into PS11c-1, PS11c-2 (-searchsp, OLD_FSC) and PS11c-3 (-use_sw_tback). | in progress | none | changelog entry `feature-ps-ps11b` |
-| `PS11c-1` | PS stage 11c part 1: `losat rpsblast` -seg, -soft_masking, -lcase_masking, -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -line_length, -sorthits, -sorthsps and -sum_stats false (true refused: NCBI reads past its arrays), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11c-1` |
+| `PS11c-1` | PS stage 11c part 1: `losat rpsblast` -seg, -soft_masking, -lcase_masking, -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -line_length, -sorthits, -sorthsps and -sum_stats false (true refused: NCBI reads past its arrays), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #1000 | changelog entry `feature-ps-ps11c-1` |
+| `PS11c-2` | PS stage 11c part 2: `losat rpsblast` -searchsp and the environment variable OLD_FSC (no Gumbel block: the cutoffs and E-values on the query's effective search space, per volume with -dbsize and several volumes), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11c-2` |
 
 ### RL: the v0.2.0 release
 

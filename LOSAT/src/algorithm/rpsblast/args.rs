@@ -584,6 +584,32 @@ mod tests {
         assert!(parse(&["-mt_mode", "2"]).is_err());
     }
 
+    // blast_args.cpp:234-238 and 303-307 (quoted at the field), ncbiargs.cpp:118-129: `-searchsp`
+    // takes NCBI's `Int8` forms at 0 or above and, at any value (0 too), the search runs without
+    // the Gumbel block; the same parser as psiblast's and blastp's.
+    #[test]
+    fn searchsp_takes_ncbis_int8_forms_and_drops_the_gumbel_block() {
+        for (value, space) in [
+            ("+1000000000", 1_000_000_000),
+            ("0x3B9ACA00", 1_000_000_000),
+            ("9223372036854775807", i64::MAX),
+            ("0", 0),
+        ] {
+            let args = parse(&["-searchsp", value]).unwrap();
+            assert_eq!(args.searchsp, Some(space), "{value}");
+            let resolved = args.into_blastp_args().unwrap().resolve().unwrap();
+            assert_eq!(resolved.searchsp, Some(space), "{value}");
+            assert!(resolved.old_fsc, "{value}");
+        }
+        assert_eq!(parse(&[]).unwrap().searchsp, None);
+        for value in [" 1", "1e6", "1.5", "", "-1", "-5", "9223372036854775808"] {
+            assert!(
+                parse(&["-searchsp", value]).is_err(),
+                "-searchsp {value:?} is refused"
+            );
+        }
+    }
+
     // blast_args.cpp:209-244, 332-342, 1939-1942, 2683-2721 (quoted at the fields): the masks, the
     // X-drops, the formatting options and `-sum_stats false` reach blastp's arguments.
     #[test]

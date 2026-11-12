@@ -225,6 +225,10 @@ fn run_body(
     if tail.is_none_or(|error| error.ncbi_message().is_some()) {
         let _ = out.write_all(&text);
         let _ = out.flush();
+        // `cerr`'s tie flushed the output before the error: a closed pipe ends the program.
+        if out.closed() {
+            return 0;
+        }
     }
     match masks {
         Ok(_) => 0,
@@ -519,17 +523,74 @@ mod tests {
         );
         assert!(written.starts_with(b">"));
         assert_eq!(run_on(&words, batch, &mut FullDisk), expected);
-        // A closed pipe ends NCBI's process by SIGPIPE (exit status 141, no message) outside
-        // Windows: the retrieval ends with exit status 0 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-        // exception 10). This short output meets it at its last flush, after the entries'
-        // messages, as NCBI's buffered output does. On Windows it is a failed write like the
-        // others.
+        // A closed pipe ends NCBI's process by SIGPIPE (exit status 141) outside Windows before
+        // the `Skipped` line, as `cerr`'s tie flushes the output first: the retrieval ends with
+        // exit status 0 and no message (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). On
+        // Windows it is a failed write like the others.
         let closed = if cfg!(windows) {
-            expected.clone()
+            expected
         } else {
-            (0, expected.1.clone())
+            (0, String::new())
         };
         assert_eq!(run_on(&words, batch, &mut ClosedPipe), closed);
+    }
+
+    /// Standard output and standard error into one file (`2>&1`).
+    #[derive(Clone)]
+    struct Merged(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+    impl Write for Merged {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // `cerr` is tied to `cout`: NCBI flushes the output before each diagnostic, so with `2>&1`
+    // the sequences of the entries before a missing id come before its `Skipped` line, and an
+    // unfinished line before an `-outfmt` error (review of line RG item K1b, R2-F1).
+    #[test]
+    fn diagnostics_come_after_the_output_written_before_them() {
+        let db = fixture_db("blastdbcmd/db/p5");
+        for (words, batch, error) in [
+            (
+                vec!["-db", db.as_str(), "-entry_batch", "-", "-outfmt", "%a"],
+                "XP_000001.1\nnosuchid\n",
+                "Error: [blastdbcmd] Skipped NOSUCHID\n",
+            ),
+            (
+                vec![
+                    "-db",
+                    db.as_str(),
+                    "-entry",
+                    "XP_000001.1",
+                    "-outfmt",
+                    "%a %Z",
+                ],
+                "",
+                "Error: [blastdbcmd] Unrecognized format specification: '%Z'\n",
+            ),
+        ] {
+            let mut alone = Vec::new();
+            let (status, err) = run_on(&words, batch, &mut alone);
+            assert_eq!(err, error, "{words:?}");
+            let merged = Merged(Default::default());
+            let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let status_merged = run_with(
+                &words,
+                &mut batch.as_bytes(),
+                &mut merged.clone(),
+                &mut merged.clone(),
+            );
+            assert_eq!(status_merged, status);
+            let mut expected = alone;
+            expected.extend_from_slice(error.as_bytes());
+            assert_eq!(*merged.0.borrow(), expected, "{words:?}");
+        }
     }
 
     // NCBI 2.17.0 with `-out /dev/full` (F2): the serial stream of `-metadata` reports the

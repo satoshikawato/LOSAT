@@ -430,6 +430,15 @@ impl<'a> Ostream<'a> {
     }
 }
 
+/// `cerr`'s tie to `cout` for an output buffered over an `Ostream`: before a diagnostic line
+/// NCBI's stream flushes the output (to the file or the pipe), so the two come out in the order
+/// they were written. Flushes `sink`; whether the pipe is closed, which ends the program
+/// before the line (SIGPIPE ends NCBI's process there).
+pub(crate) fn flush_before_diagnostic(sink: &mut std::io::BufWriter<&mut Ostream<'_>>) -> bool {
+    let _ = sink.flush();
+    sink.get_ref().closed()
+}
+
 impl Write for Ostream<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if self.closed {
@@ -593,6 +602,48 @@ mod tests {
             let piece = self.0.remove(0);
             buf[..piece.len()].copy_from_slice(piece);
             Ok(piece.len())
+        }
+    }
+
+    /// A source that hands out `piece` bytes at a time.
+    struct Pieces<'a>(&'a [u8], usize);
+
+    impl Read for Pieces<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.1.min(buf.len()).min(self.0.len());
+            buf[..count].copy_from_slice(&self.0[..count]);
+            self.0 = &self.0[count..];
+            Ok(count)
+        }
+    }
+
+    // The stream reads what the text mode makes of the file on each platform, whatever pieces
+    // the source and the reader take (the read loop of Windows runs on every host here).
+    #[test]
+    fn a_text_reader_reads_the_text_mode_of_its_platform() {
+        use LineEnds::{Darwin, Unix, Windows};
+        let inputs: &[&[u8]] = &[b"a\r\nb\r\n", b"a\r\rb\r", b"a\n\x1ab\n", b"x\r", b""];
+        for &bytes in inputs {
+            for platform in [Unix, Windows, Darwin] {
+                let expected = text_mode(bytes, platform, bytes.len());
+                for piece in 1..4 {
+                    for chunk in [1, 2, 8192] {
+                        let mut reader = TextReader::new(Pieces(bytes, piece), platform);
+                        let mut read = Vec::new();
+                        let mut buf = vec![0u8; chunk];
+                        loop {
+                            let count = reader.read(&mut buf).unwrap();
+                            if count == 0 {
+                                break;
+                            }
+                            read.extend_from_slice(&buf[..count]);
+                        }
+                        assert_eq!(read, expected, "{bytes:?} {platform:?} {piece} {chunk}");
+                        // Ended: nothing more, and an empty buffer does not end it early.
+                        assert_eq!(reader.read(&mut buf).unwrap(), 0);
+                    }
+                }
+            }
         }
     }
 

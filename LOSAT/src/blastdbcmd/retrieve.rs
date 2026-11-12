@@ -300,9 +300,9 @@ pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
 /// entries are still looked up and their errors posted, and the exit status is theirs (NCBI
 /// 2.17.0 with `-out /dev/full` and an id that is not found after it: `Skipped`, exit status 1;
 /// review 2 of line RG item K1, F3). A closed pipe ends the retrieval at once, with exit
-/// status 0 and no message, where SIGPIPE ends NCBI's (`Stop::ClosedPipe`); the output is
-/// buffered, as NCBI's is, so a short one meets the closed pipe only at its last flush, after
-/// the messages of the entries (as NCBI's, which SIGPIPE then ends).
+/// status 0 and no message, where SIGPIPE ends NCBI's (`Stop::ClosedPipe`): the output is
+/// flushed before each diagnostic (`Run::post`, `cerr`'s tie to `cout`), so a closed pipe is
+/// met before any message is written.
 pub(super) fn process(
     db: &SeqDb,
     args: &Args,
@@ -315,7 +315,14 @@ pub(super) fn process(
 ) -> i32 {
     let source = Source::new(db, path, dbtype_protein);
     let mut sink = BufWriter::new(&mut *out);
-    let status = match request(args, &source, tax_ids, diag, stdin, &mut sink) {
+    let result = request(args, &source, tax_ids, diag, stdin, &mut sink);
+    // The output is flushed before the last diagnostic, as `cerr`'s tie flushes NCBI's.
+    let _ = sink.flush();
+    drop(sink);
+    if out.closed() {
+        return 0;
+    }
+    match result {
         Ok(false) => 0,
         Ok(true) => 1,
         Err(Stop::Ncbi(message)) => {
@@ -328,13 +335,7 @@ pub(super) fn process(
         }
         Err(Stop::Refused(reason)) => diag.refuse(&reason),
         Err(Stop::ClosedPipe) => 0,
-    };
-    let _ = sink.flush();
-    drop(sink);
-    if out.closed() {
-        return 0;
     }
-    status
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:869-896
@@ -1005,7 +1006,18 @@ struct Run<'a, 'b, 'c> {
     out: &'a mut dyn Write,
 }
 
+// NCBI's `cerr` is tied to `cout` (the C++ standard's `cerr.tie()`): before each line of
+// diagnostics NCBI's stream flushes the output, so the two come out in the order they were
+// written, and on a closed pipe SIGPIPE ends NCBI's process before the line is written.
 impl Run<'_, '_, '_> {
+    /// `ERR_POST(Error << message)` of the retrieval: the output is flushed first (to the file
+    /// or the pipe, `cerr`'s tie), and a closed pipe ends the retrieval without the line.
+    fn post(&mut self, message: &str) -> Result<(), Stop> {
+        self.out.flush().map_err(Stop::write)?;
+        self.diag.err_post(message);
+        Ok(())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:457-462
     // ```c++
     // 	if(config.m_Strand == eNa_strand_minus) {
@@ -1104,7 +1116,7 @@ impl Run<'_, '_, '_> {
                     }
                 }
                 Lookup::NotFound(acc) => {
-                    self.diag.err_post(&format!("Entry not found: {acc}"));
+                    self.post(&format!("Entry not found: {acc}"))?;
                     err_found += 1;
                 }
                 Lookup::Stop(stop) => return Err(stop),
@@ -1234,12 +1246,12 @@ impl Run<'_, '_, '_> {
             }
             let Some(oid) = oid else {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped {id}"));
+                self.post(&format!("Skipped {id}"))?;
                 continue;
             };
             if self.modify_config_for_batch_entry(&lines[i].1, config)? != 0 {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped {id}"));
+                self.post(&format!("Skipped {id}"))?;
                 continue;
             }
             self.write(oid, config, self.target_only.then_some(id))?;
@@ -1295,7 +1307,7 @@ impl Run<'_, '_, '_> {
         for (id, format) in &lines {
             if self.modify_config_for_batch_entry(format, config)? != 0 {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped {id}"));
+                self.post(&format!("Skipped {id}"))?;
                 continue;
             }
             match get_oids(self.ids, id) {
@@ -1305,9 +1317,9 @@ impl Run<'_, '_, '_> {
                     }
                 }
                 Lookup::NotFound(acc) => {
-                    self.diag.err_post(&format!("Entry not found: {acc}"));
+                    self.post(&format!("Entry not found: {acc}"))?;
                     err_found = true;
-                    self.diag.err_post(&format!("Skipped {id}"));
+                    self.post(&format!("Skipped {id}"))?;
                 }
                 Lookup::Stop(stop) => return Err(stop),
             }
@@ -1416,7 +1428,7 @@ impl Run<'_, '_, '_> {
         for (id, format) in &lines {
             if self.modify_config_for_batch_entry(format, config)? != 0 {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped IPG : {id}"));
+                self.post(&format!("Skipped IPG : {id}"))?;
                 continue;
             }
             let pig = args::string_to_int8_message(id)
@@ -1427,7 +1439,7 @@ impl Run<'_, '_, '_> {
                 Some(oid) => self.write(oid, config, None)?,
                 None => {
                     err_found = true;
-                    self.diag.err_post(&format!("Skipped IPG: {id}"));
+                    self.post(&format!("Skipped IPG: {id}"))?;
                 }
             }
         }
@@ -1465,7 +1477,7 @@ impl Run<'_, '_, '_> {
             db.tax_id_lookup()?.tax_ids_to_oids(tax_ids)?
         };
         if oids.is_empty() {
-            self.diag.err_post("No seq found in db for taxonomy list");
+            self.post("No seq found in db for taxonomy list")?;
             return Ok(true);
         }
         for oid in oids {

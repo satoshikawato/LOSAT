@@ -7,7 +7,9 @@ use std::io::{BufWriter, Write};
 
 use crate::blastinput::db_filter::{NO_TAXONOMY_WARNING, TAXONOMY_FILE};
 use crate::ncbi_app::args::{arg_message, Args};
-use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds};
+use crate::ncbi_app::files::{
+    flush_before_diagnostic, input_lines, read_input_file, Cin, LineEnds, Ostream,
+};
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
@@ -402,7 +404,7 @@ pub(super) fn tax_info(
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
-    out: &mut dyn Write,
+    out: &mut Ostream<'_>,
 ) -> i32 {
     let fmt = args.value("outfmt").unwrap_or("%f");
     let Ok(fields) = TaxFields::parse(fmt.as_bytes()) else {
@@ -436,14 +438,18 @@ pub(super) fn tax_info(
             match taxdb.names(taxid, &mut messages) {
                 Ok(names) if messages.is_empty() => names,
                 Ok(_) => {
-                    let _ = sink.flush();
+                    if flush_before_diagnostic(&mut sink) {
+                        return 0;
+                    }
                     return diag.refuse(&refusal(&format!(
                         "a taxonomy database NCBI opens with a diagnostic ({})",
                         messages[0]
                     )));
                 }
                 Err(error) => {
-                    let _ = sink.flush();
+                    if flush_before_diagnostic(&mut sink) {
+                        return 0;
+                    }
                     return database_error(diag, error);
                 }
             }
@@ -454,7 +460,9 @@ pub(super) fn tax_info(
             match lookup.tax_ids_to_oids(&BTreeSet::from([taxid])) {
                 Ok(oids) => oids.len(),
                 Err(error) => {
-                    let _ = sink.flush();
+                    if flush_before_diagnostic(&mut sink) {
+                        return 0;
+                    }
                     return database_error(diag, error);
                 }
             }

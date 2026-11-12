@@ -8210,8 +8210,9 @@ fn run_local_formats(
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
-    // Web's registered inputs); a caller that gives none has no file to read. The directory of
-    // `-window_masker_taxid` is the registry's that the caller read; LOSAT Web has none.
+    // Web's registered inputs); a caller that gives none has no file to read. The file of
+    // `-window_masker_taxid` is looked for in the caller's directory (the registry's that the
+    // command line read; LOSAT Web's directory of registered inputs) and source.
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
             "-window_masker_db (a WindowMasker counts file) is not supported in the browser yet"

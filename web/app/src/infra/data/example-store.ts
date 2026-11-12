@@ -8,6 +8,7 @@
 import type { ExampleId } from '../../domain/examples';
 import type { ExampleCopy, ExampleStore, SavedExample } from '../../ports/example';
 import { isStorageFull, StorageFullError } from './block-store';
+import { ignoreNotFound, readText, removeEntry, writeFile } from './opfs-files';
 import type { SessionLocks } from './session';
 
 /** The OPFS directory of the saved copies. Shared by every release. */
@@ -17,17 +18,6 @@ export const EXAMPLE_LOCK_PREFIX = 'losat-web:example:';
 
 const DATA_NAME = 'data';
 const META_NAME = 'meta.json';
-/** Bytes copied from the downloaded Blob at once. */
-const WRITE_CHUNK_BYTES = 8 * 1024 * 1024;
-
-interface SyncAccessHandle {
-  write(buffer: BufferSource, options?: { at?: number }): number;
-  truncate(size: number): void;
-  flush(): void;
-  close(): void;
-}
-
-type SyncFileHandle = FileSystemFileHandle & { createSyncAccessHandle?: () => Promise<SyncAccessHandle> };
 
 export class OpfsExampleStore implements ExampleStore {
   constructor(
@@ -101,60 +91,12 @@ export async function opfsExampleStore(locks: SessionLocks): Promise<OpfsExample
 }
 
 async function readCopy(directory: FileSystemDirectoryHandle, id: ExampleId): Promise<ExampleCopy | undefined> {
-  let text: string;
-  try {
-    text = await (await (await directory.getFileHandle(META_NAME)).getFile()).text();
-  } catch (error) {
-    ignoreNotFound(error);
-    return undefined;
-  }
+  const text = await readText(directory, META_NAME);
+  if (text === undefined) return undefined;
   try {
     const copy = JSON.parse(text) as ExampleCopy;
     return copy.id === id && typeof copy.url === 'string' && Number.isSafeInteger(copy.bytes) ? copy : undefined;
   } catch {
     return undefined;
   }
-}
-
-async function writeFile(directory: FileSystemDirectoryHandle, name: string, data: Blob): Promise<void> {
-  const file = (await directory.getFileHandle(name, { create: true })) as SyncFileHandle;
-  if (typeof file.createSyncAccessHandle !== 'function') {
-    throw new Error('this browser cannot write OPFS files from a worker (no createSyncAccessHandle)');
-  }
-  const handle = await file.createSyncAccessHandle();
-  try {
-    handle.truncate(0);
-    for (let at = 0; at < data.size; at += WRITE_CHUNK_BYTES) {
-      const bytes = new Uint8Array(await data.slice(at, at + WRITE_CHUNK_BYTES).arrayBuffer());
-      if (handle.write(bytes, { at }) !== bytes.length) throw new StorageFullError();
-    }
-    handle.flush();
-  } finally {
-    handle.close();
-  }
-}
-
-/**
- * Removes an entry and what it holds. A synchronous access handle releases its file shortly
- * after `close` returns, so a removal right after a close can see the file still in use; it
- * is tried again for up to a second.
- */
-async function removeEntry(directory: FileSystemDirectoryHandle, name: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await directory.removeEntry(name, { recursive: true });
-      return;
-    } catch (error) {
-      const busy = (error as { name?: unknown }).name === 'NoModificationAllowedError';
-      if (!busy || attempt >= 40) {
-        ignoreNotFound(error);
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-}
-
-function ignoreNotFound(error: unknown): void {
-  if ((error as { name?: unknown }).name !== 'NotFoundError') throw error;
 }

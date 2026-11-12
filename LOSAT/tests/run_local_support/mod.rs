@@ -85,6 +85,12 @@ pub fn subject_cli(
         .env_remove("LOSAT_TIMING")
         .env_remove("BATCH_SIZE")
         .env_remove("OLD_FSC")
+        // `cargo test --all-features` builds the probe of blastx's pool workers, which needs a log.
+        .env(
+            "LOSAT_BLASTX_WORKER_LOG",
+            std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+                .unwrap_or_else(|| temp_path("subject_cli_worker.log").into_os_string()),
+        )
         .envs(env.iter().copied());
     let output = command.output().expect("run LOSAT CLI");
     (

@@ -1032,10 +1032,21 @@ pub fn check_search_environment(program: &str, fasta_subjects: bool) -> anyhow::
 /// nothing to standard output and exits 0; LOSAT gives NCBI's `-num_threads 1` output at any thread
 /// count (env-parity DECISIONS 11).
 pub fn check_prefetch_environment(archive: bool) -> anyhow::Result<()> {
-    match std::env::var_os("PRE_FETCH_SEQS_LIMIT").filter(|_| !archive) {
-        Some(value) => environment_int(&value).map(drop),
-        None => Ok(()),
+    if archive {
+        return Ok(());
     }
+    prefetch_seqs_limit().map(drop)
+}
+
+/// `PRE_FETCH_SEQS_LIMIT` as NCBI's prefetch converts it (`s_PreFetchSeqs`, quoted at
+/// `check_prefetch_environment`): `None` when it is not set; `Err` is the `CStringException` of a
+/// value that `NStr::StringToInt` cannot convert ([`environment_int`]). The one reader of the
+/// variable: the check of the first batch's prefetch, and the limit that decides whether a batch's
+/// prefetch is on (`common::database::prefetch_off`).
+pub(crate) fn prefetch_seqs_limit() -> anyhow::Result<Option<i32>> {
+    std::env::var_os("PRE_FETCH_SEQS_LIMIT")
+        .map(|value| environment_int(&value))
+        .transpose()
 }
 
 /// The query batch size of blastp, tblastn or tblastx (`GetQueryBatchSize`, with the

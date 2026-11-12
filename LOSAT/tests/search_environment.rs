@@ -1,7 +1,7 @@
 //! The environment that NCBI BLAST+ reads around its search and report, in a search of
-//! `-subject` sequences by blastp, psiblast, tblastn, tblastx and blastn (BLASTX's cases are in
-//! `run_local_blastx.rs`; the `-db` cases are the `db.envshared.*` and `db.envconv.*` rows of
-//! `db_search_manifest/`): `BL2SEQ_LEGACY` makes NCBI search each subject on its own and
+//! `-subject` sequences by blastp, psiblast, tblastn, tblastx, blastn and blastx (BLASTX's library
+//! cases are in `run_local_blastx.rs`; the `-db` cases are the `db.envshared.*`, `db.envconv.*` and
+//! `db.bxenv.*` rows of `db_search_manifest/`): `BL2SEQ_LEGACY` makes NCBI search each subject on its own and
 //! write the bl2seq report; a `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE`, `BATCH_SIZE` or
 //! `PRE_FETCH_SEQS_LIMIT` that `NStr::StringToInt` cannot convert stops NCBI where it reads it
 //! with its `CStringException` (exit 255), except `PRE_FETCH_SEQS_LIMIT` for the archive of
@@ -20,12 +20,13 @@ const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const INPUTS: &str = "tests/fasta/outfmt11";
 
 /// The programs with their query and subject files and NCBI's name in LOSAT's messages.
-const PROGRAMS: [(&str, &str, &str, &str); 5] = [
+const PROGRAMS: [(&str, &str, &str, &str); 6] = [
     ("blastp", "arch_bp_q.faa", "arch_bp_s.faa", "BLASTP"),
     ("psiblast", "arch_bp_q.faa", "arch_bp_s.faa", "PSIBLAST"),
     ("tblastn", "arch_tbn_q.faa", "arch_tbn_s.fna", "TBLASTN"),
     ("tblastx", "arch_tbx_q.fna", "arch_tbx_s.fna", "TBLASTX"),
     ("blastn", "arch_q.fna", "arch_s.fna", "BLASTN"),
+    ("blastx", "arch_bx_q.fna", "arch_bx_s.faa", "BLASTX"),
 ];
 
 /// One run of `losat <program> -query <query> -subject <subject> -outfmt <outfmt>` from
@@ -193,9 +194,11 @@ fn prolog(report: &[u8]) -> &[u8] {
 // splitter of the first batch, local_blast.cpp:59-61, split_query_aux_priv.cpp:55-57) and
 // `PRE_FETCH_SEQS_LIMIT` (the first batch's prefetch, blast_app_util.cpp:732-734) stop after the
 // outfmt 0 prolog; `BATCH_SIZE` (blast_input_aux.cpp:86-88) before anything, in blastn after the
-// prolog (blastn_app.cpp:258-262), and psiblast does not read it (psiblast_app.cpp:468). The
-// archive of outfmt 11 is NCBI's error archive (not psiblast's, whose outfmt 11 LOSAT refuses;
-// not for `PRE_FETCH_SEQS_LIMIT`, above). These bytes are NCBI's for these inputs.
+// prolog (blastn_app.cpp:258-262), and psiblast does not read it (psiblast_app.cpp:468); blastx
+// does not read `OVERLAP_CHUNK_SIZE` for a batch of several queries (`SplitQuery_ShouldSplit`,
+// split_query_aux_priv.cpp:88-91; `arch_bx_q.fna` has 3). The archive of outfmt 11 is NCBI's error
+// archive (not psiblast's, whose outfmt 11 LOSAT refuses; not for `PRE_FETCH_SEQS_LIMIT`, above).
+// These bytes are NCBI's for these inputs (blastx's measured with the official build, h_probe/bx).
 #[test]
 fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
     for case in PROGRAMS {
@@ -207,7 +210,7 @@ fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
             "PRE_FETCH_SEQS_LIMIT",
         ] {
             let stop = match (variable, program) {
-                ("BATCH_SIZE", "psiblast") => Stop::Never,
+                ("BATCH_SIZE", "psiblast") | ("OVERLAP_CHUNK_SIZE", "blastx") => Stop::Never,
                 ("BATCH_SIZE", "blastn") => Stop::Prolog,
                 ("BATCH_SIZE", _) => Stop::Start,
                 _ => Stop::Prolog,

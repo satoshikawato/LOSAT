@@ -8625,7 +8625,7 @@ fn search(
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )
-    .map(|mut batching| {
+    .map(|(mut batching, overlap_error)| {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
         // ```c++
         //         if (batch_size) {
@@ -8637,7 +8637,7 @@ fn search(
             batching.fixed_batch_size = i32::MAX;
             batching.batch_size = i32::MAX as u32;
         }
-        batching
+        (batching, overlap_error)
     });
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`cut_queries`): a record is searched cut, and one whose interval starts just past
@@ -8844,7 +8844,7 @@ impl QueryBatchSizes {
     }
 
     fn of_total_length(args: &BlastnArgs, total_length: i64) -> Result<Self> {
-        let mut batching = query_batching_from_environment(
+        let (mut batching, _) = query_batching_from_environment(
             super::super::coordination::task_uses_megablast_chunks(&args.task),
         )?;
         let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
@@ -8901,24 +8901,31 @@ struct QueryBatching {
 /// A `CHUNK_SIZE` or `BATCH_SIZE` that `NStr::StringToInt` cannot convert is the `Err`: its
 /// `CStringException` (`app::environment_int`), which stops NCBI after the outfmt 0 prolog and
 /// before the first batch is read (`run_in_pool`). `OVERLAP_CHUNK_SIZE` is read by the query
-/// splitter of each batch, after the batch is read: one that it cannot convert stops the first
-/// batch there (`app::check_query_split_environment` in `run_in_pool`), so no batch is split with
-/// it and it counts as unset here. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects
-/// it where it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
-fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
+/// splitter of each batch, after the batch is read: one that it cannot convert is the second
+/// value, its exception, which stops the first batch there (`run_in_pool`); no batch is split
+/// with it, so the sizes count it as unset. The batch sizes alone (`QueryBatchSizes`) do not
+/// depend on it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where it splits
+/// a query batch (`search_query_chunks`), and otherwise searches as NCBI.
+fn query_batching_from_environment(megablast: bool) -> Result<(QueryBatching, Result<()>)> {
     use crate::blastinput::app::read_query_split_variable;
     let chunk_size = read_query_split_variable("CHUNK_SIZE")?;
     let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
         std::env::var_os("BATCH_SIZE").as_deref(),
     )
     .map_err(|e| crate::cli::NativeError::exception(&e))?;
-    let overlap = read_query_split_variable("OVERLAP_CHUNK_SIZE").unwrap_or(None);
+    let (overlap, overlap_error) = match read_query_split_variable("OVERLAP_CHUNK_SIZE") {
+        Ok(overlap) => (overlap, Ok(())),
+        Err(error) => (None, Err(error)),
+    };
     let split = SplitSizes::new(megablast, chunk_size, overlap);
-    Ok(QueryBatching {
-        fixed_batch_size,
-        batch_size: fixed_batch_size as u32,
-        split,
-    })
+    Ok((
+        QueryBatching {
+            fixed_batch_size,
+            batch_size: fixed_batch_size as u32,
+            split,
+        },
+        overlap_error,
+    ))
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -9328,7 +9335,7 @@ fn run_in_pool(
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    batching: Result<QueryBatching>,
+    batching: Result<(QueryBatching, Result<()>)>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
     // ```c++
@@ -9396,7 +9403,7 @@ fn run_in_pool(
     // The mixer's `CHUNK_SIZE` and then `BATCH_SIZE` are read here, after the prolog and before
     // the first batch: a value that NCBI cannot convert stops the run with its exception
     // (`query_batching_from_environment`), as a batch size of 0 does below.
-    let mut batching = match batching {
+    let (mut batching, mut overlap_error) = match batching {
         Ok(batching) => batching,
         Err(error) => {
             write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
@@ -9687,12 +9694,12 @@ fn run_in_pool(
         //         : m_InternalData(new SInternalData),
         //       m_QuerySplitter(new CQuerySplitter(qf, opts))
         // ```
-        // The query splitter of the batch reads `CHUNK_SIZE` (read already by the mixer) and
+        // The query splitter of the batch reads `CHUNK_SIZE` (converted already by the mixer) and
         // `OVERLAP_CHUNK_SIZE` before the batch's queries are set up (their masks below): a value
         // that NCBI cannot convert stops the first batch here, after its reader's messages
-        // (`app::check_query_split_environment`).
+        // (`query_batching_from_environment`).
         if input_start == 0 {
-            if let Err(error) = crate::blastinput::app::check_query_split_environment(false, true) {
+            if let Err(error) = std::mem::replace(&mut overlap_error, Ok(())) {
                 write_before_failed_batch(
                     &args,
                     queries.before(&kept, start),
@@ -10568,8 +10575,8 @@ fn x_query_batch_letters(task: &str) -> u64 {
     match query_batching_from_environment(super::super::coordination::task_uses_megablast_chunks(
         task,
     )) {
-        Ok(batching) if batching.fixed_batch_size != 0 => u64::from(batching.batch_size),
-        Ok(batching) => u64::from(batching.split.mixer_max_batch_size() as u32),
+        Ok((batching, _)) if batching.fixed_batch_size != 0 => u64::from(batching.batch_size),
+        Ok((batching, _)) => u64::from(batching.split.mixer_max_batch_size() as u32),
         Err(_) => 0,
     }
 }

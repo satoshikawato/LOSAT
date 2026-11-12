@@ -67,6 +67,13 @@ export interface WorkerPrepare {
   readonly argv?: readonly string[];
 }
 
+/**
+ * Test builds only (`__LOSAT_TEST_HOOKS__`): the BroadcastChannel on which a page arms the
+ * Engine worker's next search to stop at its first output ({type: 'arm'}, answered by
+ * {type: 'armed'}).
+ */
+export const STOP_AT_OUTPUT_CHANNEL = 'losat-web:test:stop-at-output';
+
 /** Test builds only (`__LOSAT_TEST_HOOKS__`): drives the run output writer of the worker. */
 export type WorkerTestCommand =
   | { readonly type: 'test-open'; readonly id: number; readonly port: MessagePort }

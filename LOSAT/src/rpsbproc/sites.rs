@@ -120,7 +120,7 @@ impl MotifState {
     // end of the list when the motif's minimal map is longer than the first motif site's
     // positions (`mtfIdx >= st_motif_pos.size()`, the compare at :704 reads heap bytes: C++
     // undefined behavior). LOSAT treats the check as failed (returns 1), as the loop does when
-    // the mapped residues are exhausted. PD-LOSAT-NCBI-DEFECTS exception 9 (version 1.13).
+    // the mapped residues are exhausted. PD-LOSAT-NCBI-DEFECTS exception 10 (version 1.14).
     pub(crate) fn motif_check(
         &mut self,
         data: &CddData,

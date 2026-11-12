@@ -82,6 +82,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
         });
     inputs.soft_masking = Some(args.soft_masking());
     inputs.window_masker_db = args.window_masker_db.clone();
+    inputs.window_masker_taxid = args.window_masker_taxid;
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
     // The X-drops and the window as given (CGenericSearchArgs and CWindowSizeArg set them

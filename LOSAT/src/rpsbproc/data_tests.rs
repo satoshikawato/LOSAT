@@ -210,7 +210,7 @@ fn cdtrack_lines_read_as_ncbi() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// PD-LOSAT-NCBI-DEFECTS exception 8: PSSM-IDs of 2^31 and more are compared as signed values
+// PD-LOSAT-NCBI-DEFECTS exception 9: PSSM-IDs of 2^31 and more are compared as signed values
 // without the overflow of NCBI's `int` difference. The rows are those of the PS16a review's
 // oracle A2 data `D2` (the fixture's `cddid.tbl` with eight PSSM-IDs near 2^31 among its domain
 // rows and 2^31 at the end), where a wrapping difference misses rows; every id is found.

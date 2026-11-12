@@ -14,25 +14,39 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run of its older head. On dev and main a run that has
+# started ends (a newer one waits for it): each run of dev (a person's merge, or dev-head.yml's
+# dispatch every four hours) gives a verdict on its commit. Until 2026-11, 95 of 165 such runs on
+# dev were cancelled by the next one; the runs of dev are a few a day (merges by Auto-merge start
+# none), against about 50 pull request runs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The checks of `rust` other than cargo test; the tests run in `rust-tests`, the public API check in
-  # `public-api`, and `rust` (the check the rulesets require) passes when all three jobs do.
+  # The checks of `rust` other than cargo test; the tests are built in `rust-tests` and run in
+  # `rust-tests-run`, the public API check in `public-api`, and `rust` (the check the rulesets
+  # require) passes when all four jobs do.
   rust-lint:
     name: rust lint
     runs-on: ubuntu-latest
+    # About twice the longest of 59 passing runs (21.8 min with a cold cache, 2026-11-11).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
           components: clippy, rustfmt
+      # Every rust-cache step saves only on dev and main: a pull request's cache can be read only
+      # by runs of that pull request, and dev's copy serves every pull request into dev. Copies
+      # saved by pull requests filled the 10 GiB of Actions cache (2026-11-12: 106 caches, 71 of
+      # them for pull requests, 49 never read again), so that a cache unread for a day or two was
+      # evicted.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: LOSAT -> target
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
       # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
       # calls qsort for HSP ordering. This fail-fast ratchet prevents LOSAT from
       # adding another project-owned native implementation boundary.
@@ -55,6 +69,12 @@ jobs:
         run: python3 LOSAT/tests/check_program_edges.py --root .
       - name: Program-edge ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_program_edges.py'
+      # No NCBI counterpart: LOSAT/tests/db_search_manifest/ keeps one fixture list per program; a file over
+      # 512 KiB is split by row family before it reaches the 1 MB limit on committed files.
+      - name: Manifest size check
+        run: python3 LOSAT/tests/check_manifest_sizes.py --root .
+      - name: Manifest size check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_manifest_sizes.py'
       # No NCBI counterpart: CI wiring. Every test_*.py and test_*.js file is named in a `run:`
       # command of a workflow that runs on push, pull request or schedule, or one it calls (SWEBOK
       # 2026-11-04 audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a
@@ -158,20 +178,24 @@ jobs:
           done
           exit "$status"
 
-  # cargo test --all-features in two shards on two runners (cargo-nextest, `--partition count:k/2`:
-  # each test binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores
-  # and their hyperthreads) stayed busy: the tests of all binaries packed by nextest ran only 10 %
-  # faster than cargo test's one binary at a time (2026-10-22); the blastp integration tests search
-  # a proteome pair dozens of times each.
+  # cargo test --all-features: the test binaries built once (`cargo nextest archive`), then run
+  # in three shards on three runners from that archive (`--partition count:k/3`: each test
+  # binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores and
+  # their hyperthreads) stayed busy: the tests of all binaries packed by nextest ran only 10 %
+  # faster than cargo test's one binary at a time (2026-10-22); the blastp integration tests
+  # search a proteome pair dozens of times each. Until 2026-11 each of two shards built every
+  # test binary itself (9 min of a 15 to 34 min shard).
+  #
+  # The archive holds the test binaries, the `losat` binary the integration tests run and the
+  # examples some of them run (.github/nextest.toml). The shards extract it into LOSAT/target,
+  # the path it was built in: the tests name these files by compile-time paths
+  # (`env!("CARGO_BIN_EXE_losat")`, `env!("CARGO_MANIFEST_DIR")`), the same on every runner.
+  # The job id stays `rust-tests` so that rust-cache keeps the dependencies' cache key.
   rust-tests:
-    name: cargo test (${{ matrix.shard }}/2)
+    name: cargo test (build)
     runs-on: ubuntu-latest
-    # About twice the longest shard of 40 passing runs (39.8 min, 2026-11-04).
-    timeout-minutes: 80
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
+    # About twice the longest build of 60 passing runs (9.4 min, 2026-11-11) with a cold cache.
+    timeout-minutes: 40
     env:
       # Optimized test code; the test profile keeps the dev profile's debug assertions and
       # overflow checks. Set for the job, so that rust-cache's key (it hashes the CARGO_*
@@ -190,18 +214,58 @@ jobs:
         with:
           workspaces: LOSAT -> target
           cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-nextest@0.9.148
-      - name: cargo nextest run --all-features
-        run: cd LOSAT && cargo nextest run --locked --all-features --no-fail-fast --partition count:${{ matrix.shard }}/2
-        env:
-          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
+      - name: cargo nextest archive --all-features
+        run: |
+          cd LOSAT && cargo nextest archive --locked --all-features \
+            --config-file ../.github/nextest.toml --archive-file ${{ runner.temp }}/tests.tar.zst
       # nextest runs no doc tests. The crate has none yet (`running 0 tests`, 2026-11-04): the
       # step stays so that the first doc example is run without a change here.
       - name: cargo test --all-features --doc
-        if: matrix.shard == 1
         run: cd LOSAT && cargo test --locked --all-features --doc
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nextest-archive
+          path: ${{ runner.temp }}/tests.tar.zst
+          retention-days: 1
+          compression-level: 0
+
+  rust-tests-run:
+    name: cargo test (${{ matrix.shard }}/3)
+    needs: [rust-tests]
+    runs-on: ubuntu-latest
+    # About twice the longest shard of 40 passing runs of the two-shard form (39.8 min,
+    # 2026-11-04) less its build; to be narrowed once this form has 40 runs.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # cargo runs cargo-nextest; the tests build nothing when the archive holds the examples.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+        with:
+          tool: cargo-nextest@0.9.148
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nextest-archive
+          path: ${{ runner.temp }}
+      # target/tmp = CARGO_TARGET_TMPDIR, which cargo makes when it builds and the archive does not hold.
+      - name: cargo nextest run --all-features (shard ${{ matrix.shard }}/3)
+        run: |
+          mkdir -p LOSAT/target/tmp
+          cd LOSAT && cargo nextest run --config-file ../.github/nextest.toml \
+            --archive-file ${{ runner.temp }}/tests.tar.zst --extract-to . --extract-overwrite \
+            --workspace-remap . --no-fail-fast --partition count:${{ matrix.shard }}/3
+        env:
+          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
 
   # No NCBI counterpart: the library's own surface (docs/losat_library_surface_plan.md §14). The
   # public API of `LOSAT::api`, as cargo-public-api lists it, must equal LOSAT/tests/public_api.txt,
@@ -224,6 +288,7 @@ jobs:
         with:
           workspaces: LOSAT -> target
           key: public-api
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
       # Built from its crates.io source: the release has no binaries and install-action has no
       # manifest for it (its fallback would take a third-party binary or rebuild with --force).
       # rust-cache keeps ~/.cargo/bin, so a cached run finds it installed.
@@ -259,10 +324,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: nightly-2026-05-24
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: LOSAT -> target
-          key: semver-checks
+      # No rust-cache: the job runs only on pull requests, and a pull request's cache serves only
+      # that pull request (2026-11-12: 35 copies of 65 MiB; 32 of 45 runs found none). Without it
+      # the check step took 28.5 s instead of 20.
       - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-semver-checks@0.51.0
@@ -292,7 +356,7 @@ jobs:
   rust:
     name: rust
     if: always()
-    needs: [rust-lint, rust-tests, public-api]
+    needs: [rust-lint, rust-tests, rust-tests-run, public-api]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -311,6 +375,8 @@ jobs:
   regressions:
     name: fast output regressions
     runs-on: ubuntu-24.04
+    # About twice the longest of 60 passing runs (16.1 min, 2026-11-11).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -334,6 +400,7 @@ jobs:
         if: steps.select.outputs.programs != 'none'
         with:
           workspaces: LOSAT -> target
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
       - name: Build release binary
         if: steps.select.outputs.programs != 'none'
         run: cd LOSAT && cargo build --release --locked --bin losat --example library_command_line

@@ -1481,7 +1481,7 @@ fn site_data_segs(residues: &mut [i32]) -> Vec<[i32; 2]> {
 }
 
 /// The sign of NCBI's `int` difference `a - b` of two ids (`TSortByPssmId`, `TSortByClusterId`),
-/// computed without its overflow. PD-LOSAT-NCBI-DEFECTS exception 8 (version 1.12): two ids whose
+/// computed without its overflow. PD-LOSAT-NCBI-DEFECTS exception 9 (version 1.13): two ids whose
 /// `int` values are 2^31 or more apart overflow NCBI's difference (undefined in C++); NCBI's
 /// binary sorts its maps by the signed values (GCC folds `a - b < 0` to `a < b`) but its search
 /// reads the wrapped difference, and can miss such an id (PS16a review oracle A2, run 2). LOSAT

@@ -7930,6 +7930,8 @@ fn unsearched_batches_then_engine_error(
         // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
         last_call: true,
         psi_round: None,
+        // BLASTP only (`args.app` above): no psiblast PSSM stops here.
+        stopped_pssms: None,
         titles_may_refuse: reports.titles_may_refuse,
     };
     if let Err(error) = run_resolved_in_pool(

@@ -1423,7 +1423,8 @@ impl SeqDb {
     /// The number of included OIDs: ordinal ids run from 0 to this number minus one. They are
     /// the OIDs of the volumes that the alias files' ranges (`FIRST_OID`, `LAST_OID`) and a list
     /// ([`SeqDb::restrict`]) include; iterations and schedules count them. NCBI's
-    /// `GetNumSeqs` is [`SeqDb::ncbi_num_seqs`].
+    /// `GetNumSeqs` is another number, which the statistics ([`SeqDb::statistics_numbers`]) and
+    /// the warning of [`SeqDb::filtered_empty`] read.
     pub fn num_seqs(&self) -> u32 {
         self.num_seqs
     }
@@ -1437,6 +1438,7 @@ impl SeqDb {
     /// `CSeqDB::GetNumSeqs` of the search: the walk of `NSEQ` (the volumes' OIDs below the
     /// alias files without the key) without a list, the included OIDs with one. It is not the
     /// number of included OIDs ([`SeqDb::num_seqs`]) when an alias file has `NSEQ` or a range.
+    #[cfg(test)]
     pub fn ncbi_num_seqs(&self) -> i32 {
         self.counts.num_seqs
     }
@@ -1464,11 +1466,13 @@ impl SeqDb {
     }
 
     /// `CSeqDB::GetNumSeqsStats`: the walk of `STATS_NSEQ`, 0 without the key.
+    #[cfg(test)]
     pub fn num_seqs_stats(&self) -> i32 {
         self.stats_num_seqs
     }
 
     /// `CSeqDB::GetTotalLengthStats`: the walk of `STATS_TOTLEN`, 0 without the key.
+    #[cfg(test)]
     pub fn total_length_stats(&self) -> u64 {
         self.stats_total_length
     }
@@ -1568,6 +1572,38 @@ impl SeqDb {
             Some(length) => (length, 1),
             None => (0, 0),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
+    // ```c++
+    //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);
+    //     if (total_length <= 0)
+    //         total_length = BlastSeqSrcGetTotLen(seqsrc);
+    // ```
+    /// Whether the total length of the statistics is not positive before their fallback to the
+    /// length of OID 0 (`STATS_TOTLEN` and `GetTotalLength` are not: a list that kept no
+    /// sequence, without `STATS_TOTLEN`): the effective search space that NCBI's BLAST archive
+    /// records is then computed with a database length of 0 (`note_archive_database_filter`).
+    pub fn statistics_length_is_empty(&self) -> bool {
+        self.statistics_total_length() <= 0
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-975
+    // ```c
+    //    if (sbp->gbp) {
+    //    ...
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    // ```
+    /// Whether the statistics read 0 sequences of a positive total length
+    /// ([`SeqDb::statistics_numbers`]: an alias file's `NSEQ 0` without `STATS_NSEQ`, or a list
+    /// that kept no sequence under a `STATS_TOTLEN`). The programs without the Gumbel block
+    /// (BLASTN, TBLASTX, and the protein programs with `-ungapped`, `-searchsp` or `OLD_FSC`)
+    /// divide the total by it, and NCBI BLAST+ 2.17.0 crashes (SIGFPE).
+    pub fn statistics_count_is_zero(&self) -> bool {
+        let (total, count) = self.statistics_numbers();
+        total > 0 && count == 0
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:199-209

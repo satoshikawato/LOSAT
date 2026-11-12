@@ -563,34 +563,56 @@ pub fn effective_lengths(
 //       else
 //          curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
 // ```
+/// The numbers of the subjects that the parameters of a search read (`Subjects::numbers`), as
+/// NCBI's sequence source answers them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SubjectNumbers {
+    /// The total length of the statistics (blast_setup.c:908-911): `STATS_TOTLEN` or
+    /// `BlastSeqSrcGetTotLen` (`SeqDb::statistics_numbers`), the sum of a FASTA set's records.
+    pub total: i64,
+    /// The number of sequences of the statistics (blast_setup.c:925-928): `STATS_NSEQ` or
+    /// `GetNumSeqs`, 0 for an alias file's `NSEQ 0`; a FASTA set's records.
+    pub count: i64,
+    /// `BlastSeqSrcGetMinSeqLen` (blast_setup.c:969-973): a database's `GetMinLength`
+    /// (`SeqDb::min_length`), a FASTA set's shortest record raised to `BLAST_SEQSRC_MINLENGTH`.
+    pub shortest: usize,
+    /// `BlastSeqSrcGetAvgSeqLen` (blast_engine.c:1372-1374, the word parameters): a database's
+    /// `GetTotalLength / MAX(1, GetNumSeqs)` (`SeqDb::average_length`, no `STATS_*` key), a
+    /// FASTA set's total over its records.
+    pub average: i32,
+}
+
+impl SubjectNumbers {
+    /// The numbers of one FASTA subject of `length` residues.
+    #[cfg(test)]
+    pub fn one(length: usize) -> Self {
+        Self {
+            total: length as i64,
+            count: 1,
+            shortest: length.max(super::subjects::BLAST_SEQSRC_MINLENGTH),
+            average: length as i32,
+        }
+    }
+}
+
 pub fn subject_parameters(
     batch: &PreparedQueryBatch,
     parameters: &mut [ContextParameters],
     options: &ResolvedOptions,
-    db_length: i64,
-    db_count: i64,
-    min_subject_length: usize,
+    numbers: SubjectNumbers,
     fixed_spaces: Option<&[i64]>,
 ) -> Result<i32> {
-    let avg_subject_length = i32::try_from(db_length / db_count)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:233-239
-    // ```c++
-    //     for (index=0; index<(*seq_info)->GetNumSeqs(); ++index)
-    //         retval = MIN(retval, (*seq_info)->GetSeqBlk(index)->length);
-    //
-    //     if(retval < BLAST_SEQSRC_MINLENGTH)
-    // 	retval = BLAST_SEQSRC_MINLENGTH;
-    //
-    //     return retval;
-    // ```
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205-205
-    // ```c++
-    // #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
-    // ```
+    let SubjectNumbers {
+        total: db_length,
+        count: db_count,
+        shortest,
+        average,
+    } = numbers;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // ```c
     //    if (sbp->gbp) {
-    //    ...
+    //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+    //        ...
     //    } else {
     //        min_subject_length = (Int4) (total_length/num_seqs);
     //    }
@@ -599,17 +621,28 @@ pub fn subject_parameters(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
+    // BLASTX's subject is not translated, so the shortest length is not divided by 3. Without the
+    // Gumbel block (`-ungapped`, `-searchsp`, `OLD_FSC`) the statistics' average divides by their
+    // number of sequences, which an alias file's `NSEQ 0` makes 0: NCBI crashes there (SIGFPE),
+    // LOSAT refuses (`common::database::check_statistics_count`, DECISIONS 14 of line RG).
+    let gumbel_block_used = options.gapped && !options.old_fsc;
+    if !gumbel_block_used && db_count == 0 && db_length > 0 {
+        return Err(crate::algorithm::common::database::refusal(
+            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
+            "BLASTX",
+        ));
+    }
+    let n = if gumbel_block_used {
+        i32::try_from(shortest)?
+    } else {
+        i32::try_from(db_length / db_count.max(1))?
+    };
     // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
     // length is too short"; LOSAT refuses the search instead.
     ensure!(
-        !options.old_fsc || avg_subject_length > 0,
+        !options.old_fsc || n > 0,
         "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
     );
-    let n = if options.gapped && !options.old_fsc {
-        i32::try_from(min_subject_length.max(10))?
-    } else {
-        avg_subject_length
-    };
     effective_lengths(
         batch,
         parameters,
@@ -673,7 +706,7 @@ pub fn subject_parameters(
             // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
             // c++/include/algo/blast/core/blast_parameters.h:78:
             // #define CUTOFF_E_BLASTX 1.0
-            cutoff_score_sum_stats(c.length as i32, avg_subject_length, decay, &ka)
+            cutoff_score_sum_stats(c.length as i32, average, decay, &ka)
                 .max(1)
                 .min(trigger)
         }

@@ -120,6 +120,12 @@ impl BlastxDatabase {
         self.db.filtered_empty()
     }
 
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(crate) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
+    }
+
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(crate) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()

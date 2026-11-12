@@ -155,6 +155,12 @@ impl TblastnDatabase {
         self.db.filtered_empty()
     }
 
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(super) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
+    }
+
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
@@ -164,6 +170,12 @@ impl TblastnDatabase {
     /// batch fails, also with a list or an alias file's range or `NSEQ`.
     pub(super) fn num_oids(&self) -> u32 {
         self.db.num_oids()
+    }
+
+    /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
+    /// (`shared::check_statistics_count`).
+    pub(super) fn check_statistics_count(&self) -> Result<()> {
+        shared::check_statistics_count(&self.db, PROGRAM)
     }
 
     /// What the `Database:` lines of the pairwise report show

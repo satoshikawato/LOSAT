@@ -171,8 +171,12 @@ the walks. `VDBLIST` is ignored (NCBI's `CSeqDB` does not read it). Refused unti
 `NSEQ` negative as NCBI's `int`, `LENGTH` 0 or at least 2^63 while sequences are included,
 `LENGTH` of 10^18 or more (NCBI's commas lose digits), `FIRST_OID` or `LAST_OID` of 2^31 or
 more, and the OID range of a top alias file that NCBI sets as its iteration range while other
-OIDs are included (another name of the same `-db`). Refused for good: BLASTN and TBLASTX with
-a statistics count of 0 (an alias file's `NSEQ 0`), where NCBI divides by zero (SIGFPE).
+OIDs are included (another name of the same `-db`). Refused for good: a statistics count of 0
+(an alias file's `NSEQ 0`) in a search without the Gumbel block (BLASTN, TBLASTX, and BLASTP,
+BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX also with `-ungapped`), where
+NCBI divides by zero (SIGFPE). With the Gumbel block, a TBLASTN database whose `GetMinLength` is
+below 3 (an alias file's `MIN_SEQ_LENGTH` 1 or 2) fails as NCBI's does: `BLAST engine error: The
+average subject length is too short`, exit status 3.
 
 Version 1.3 (line DBID): databases with parsed Seq-ids are searched, NCBI's distributed
 databases included (section "Databases with parsed Seq-ids").

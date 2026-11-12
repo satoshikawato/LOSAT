@@ -114,7 +114,6 @@ fn read_error(error: crate::seqdb::SeqDbError) -> anyhow::Error {
 pub(crate) struct XStreamDb<'a> {
     db: &'a SeqDb,
     count: usize,
-    total_length: u64,
     /// The residues of the longest sequence (`BlastxDatabase::x_open_stream`).
     longest: usize,
     block_bytes: u64,
@@ -144,7 +143,6 @@ impl<'a> XStreamDb<'a> {
         Self {
             db,
             count: db.num_seqs() as usize,
-            total_length: db.statistics_numbers().0,
             longest,
             block_bytes,
             x_checked: std::sync::atomic::AtomicBool::new(false),
@@ -214,8 +212,20 @@ impl<'a> XStreamDb<'a> {
         self.count
     }
 
+    /// `GetTotalLength` (`SeqDb::total_length`).
     pub(crate) fn total_length(&self) -> u64 {
-        self.total_length
+        self.db.total_length()
+    }
+
+    /// The total length and the number of sequences of the statistics
+    /// (`SeqDb::statistics_numbers`).
+    pub(crate) fn statistics_numbers(&self) -> (u64, u32) {
+        self.db.statistics_numbers()
+    }
+
+    /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
+    pub(crate) fn average_length(&self) -> i32 {
+        self.db.average_length()
     }
 
     pub(crate) fn longest(&self) -> usize {

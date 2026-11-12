@@ -514,7 +514,7 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.total_length()?,
+        db_length: subjects.numbers()?.total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -564,7 +564,7 @@ pub(crate) fn search_internal_observed<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.total_length()?,
+        db_length: subjects.numbers()?.total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -1460,9 +1460,7 @@ impl PreliminarySink for Runtime<'_> {
             batch,
             &mut full,
             self.options,
-            self.db_length,
-            self.subjects.statistics_len() as i64,
-            self.subjects.shortest_length(),
+            self.subjects.numbers()?,
             None,
         )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846

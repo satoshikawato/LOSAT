@@ -213,6 +213,12 @@ impl BlastpDatabase {
         self.db.filtered_empty()
     }
 
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(super) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
+    }
+
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
@@ -221,6 +227,12 @@ impl BlastpDatabase {
     /// The number of sequences the statistics read (`SeqDb::statistics_numbers`).
     pub(super) fn statistics_num_sequences(&self) -> u32 {
         self.db.statistics_numbers().1
+    }
+
+    /// LOSAT's refusal of statistics of 0 sequences for a search of `program` without the
+    /// Gumbel block (`shared::check_statistics_count`).
+    pub(super) fn check_statistics_count(&self, program: &str) -> Result<()> {
+        shared::check_statistics_count(&self.db, program)
     }
 
     /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query

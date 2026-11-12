@@ -406,6 +406,9 @@ impl BlastnDatabase {
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
+        // number of sequences (`shared::check_statistics_count`).
+        shared::check_statistics_count(&db, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
             .ok()
@@ -619,6 +622,23 @@ impl BlastnDatabase {
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(super) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()
+    }
+
+    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
+    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    pub(super) fn num_oids(&self) -> u32 {
+        self.db.num_oids()
+    }
+
+    /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
+    pub(super) fn average_length(&self) -> i32 {
+        self.db.average_length()
+    }
+
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(super) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).

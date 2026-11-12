@@ -146,15 +146,17 @@ fn apply_list(
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
-/// makes of its request (`ArchiveHandle::set_database_filter`). `dbsize` is whether `-dbsize` is
-/// given: with a list that keeps no sequence the `EffectiveSearchSpace` option then counts the
-/// length adjustment with no sequence, which the searches do not compute (probes E14 and E17 of
-/// line DI-8): LOSAT refuses it.
+/// makes of its request (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
+/// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
+/// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
+/// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
+/// searches read the length of OID 0 as one sequence (probes E14 and E17 of line DI-8): LOSAT
+/// refuses it.
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
-    filtered_empty: bool,
+    empty_length: bool,
     searchsp: bool,
     dbsize: bool,
     program: &str,
@@ -162,14 +164,14 @@ pub(crate) fn note_archive_database_filter(
     let Some(handle) = archive else {
         return Ok(());
     };
-    if filtered_empty && dbsize {
+    if empty_length && dbsize {
         anyhow::bail!(
             "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
     handle.set_database_filter(
         filter.archive_parameter(list_taxids),
-        filtered_empty && !searchsp,
+        empty_length && !searchsp,
     );
     Ok(())
 }
@@ -234,6 +236,19 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
 /// LOSAT's refusal of a database that `program` does not search as NCBI does.
 pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
+}
+
+/// LOSAT's refusal of statistics that read 0 sequences of a positive total length
+/// (`SeqDb::statistics_count_is_zero`), for a search of `program` without the Gumbel block:
+/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG).
+pub(crate) fn check_statistics_count(db: &SeqDb, program: &str) -> Result<()> {
+    if db.statistics_count_is_zero() {
+        return Err(refusal(
+            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
+            program,
+        ));
+    }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251

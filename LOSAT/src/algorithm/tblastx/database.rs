@@ -97,6 +97,9 @@ impl TblastxDatabase {
         // NCBI's choice of its Seq-ids.
         let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
+        // number of sequences (`shared::check_statistics_count`).
+        shared::check_statistics_count(&db, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -211,6 +214,12 @@ impl TblastxDatabase {
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(crate) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()
+    }
+
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(crate) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).

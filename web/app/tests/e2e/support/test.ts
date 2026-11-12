@@ -7,12 +7,21 @@
 // call" and the page closed in the middle of its test, more often on a busy machine. The test of
 // the wake lock replaces navigator.wakeLock with its own double in every browser; Chromium and
 // Firefox keep the real API in the others.
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test as base } from '@playwright/test';
 
 export const test = base.extend({
-  context: async ({ context, browserName }, use) => {
+  context: async ({ context, browserName }, use, testInfo) => {
     if (browserName === 'webkit') await context.addInitScript(standInWakeLock);
     await use(context);
+    // DIAGNOSTIC ONLY (branch diag/ph-webkit-hang, not for merge): when a WebKit test fails, ask the
+    // root watcher (.github/ph-diag/watch.py) to dump every web process while its pages are still open.
+    const dir = process.env['PH_DIAG_DIR'];
+    if (dir === undefined || browserName !== 'webkit' || testInfo.status === testInfo.expectedStatus) return;
+    const id = `${Date.now()}-${process.pid}`;
+    writeFileSync(join(dir, `fail-${id}.txt`), `${testInfo.titlePath.join(' > ')}\n${testInfo.error?.message ?? ''}\n`);
+    for (let i = 0; i < 240 && !existsSync(join(dir, `done-${id}`)); i++) await new Promise((r) => setTimeout(r, 1000));
   },
 });
 

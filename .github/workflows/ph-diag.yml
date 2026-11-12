@@ -1,6 +1,7 @@
 # DIAGNOSTIC ONLY (line WFL item PH, losat-baselines-98, 2026-11-11): not for merge. Runs the WebKit E2E
 # tests with the engine many times and, when a web process's main thread stays in a futex, saves every
-# thread's stack (.github/ph-diag/watch.py), to find where CI's WebKit page stops answering.
+# thread's stack (.github/ph-diag/watch.py), and a failed WebKit test has every web process of its worker
+# dumped before its pages close (tests/e2e/support/test.ts), to find where CI's WebKit page stops answering.
 name: PH diag (WebKit hang capture)
 
 on:
@@ -48,7 +49,7 @@ jobs:
   webkit:
     needs: [build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 170
     strategy:
       fail-fast: false
       matrix:
@@ -83,13 +84,14 @@ jobs:
         run: |
           mkdir -p ${{ runner.temp }}/ph
           sudo -b sh -c 'python3 -I ${{ github.workspace }}/.github/ph-diag/watch.py ${{ runner.temp }}/ph > ${{ runner.temp }}/ph/watcher.out 2>&1'
-      - name: WebKit E2E with the engine, three times
+      - name: WebKit E2E with the engine, five times
         continue-on-error: true
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
           LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/losat
           CI: '1'
-        run: npx playwright test --project=webkit --repeat-each=3 --reporter=list,github > ${{ runner.temp }}/ph/e2e.log 2>&1
+          PH_DIAG_DIR: ${{ runner.temp }}/ph
+        run: npx playwright test --project=webkit --repeat-each=5 --reporter=list,github > ${{ runner.temp }}/ph/e2e.log 2>&1
       - name: Summary
         if: always()
         run: |

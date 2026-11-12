@@ -2433,15 +2433,15 @@ xdp.blastp.unan	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/ou
 xdp.blastp.f4.2e8	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap_final 4.2e8	0	ed7b2d600ca861f654a4e01c6e14dce7eecf232ae77b97e302bdfbd6b539aac7	25300				
 xdp.blastx.f4.2e8	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap_final 4.2e8	0	fa0aa23cd6cef75ab02ce2f2c906d6565e6b2e577d34eb44f41110b7b5e22360	13669				
 xdp.tblastn.f4.2e8	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_gap_final 4.2e8	0	6da842f85df44d8f1c028fb0aa94fcf6f79b6453d592847aa6ee19e4a34476b1	16349				
-xdp.bn.f1e9	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e9	0						
-xdp.bn.f1e9.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e9	6						
-xdp.bn.g1e10.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap 1e10	6						
-xdp.bn.f1e10.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e10	6						
-xdp.bn.u1e10.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_ungap 1e10	6						
-xdp.bn.um1.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_ungap -1	6						
-xdp.dc.f1e9.6	blastn	dc-megablast	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e9	6						
-xdp.mb.g1e10.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap 1e10	6						
-xdp.mb.f1e10.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e10	6						
-xdp.mb.gf1e10	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap 1e10 -xdrop_gap_final 1e10	0						
-xdp.mb.gm5.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap -5	6						
-xdp.mb.a22g1e10.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-gapopen 2 -gapextend 2 -xdrop_gap 1e10	6						
+xdp.bn.f1e9	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e9	0	e632c3f00e5ed5ad7ac51f70ae725dc8a9aa0682063cd5a847bcb1d3dfc3caa9	47258	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.bn.f1e9.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e9	6	47fb22293ec7c8f2df6c4a994c234fd3f23a4e0adb94d62d44e01a6b7a8c6cb5	1679	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.bn.g1e10.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap 1e10	6	500dd93e428effe55140bb89ed7d75f9799aad42fe6ea9a194d84e6a195c4eee	1777	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.bn.f1e10.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e10	6	cb27cf01c134b80b2d5b788a5b24397de9e75c5a3a604ddcdc1438a0d64bfc9a	1792	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.bn.u1e10.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_ungap 1e10	6	62498df5b4a751dafc9cc20b97ec554e468cda4a88c92b0370ec728f2aaa5434	1732	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.bn.um1.6	blastn	blastn	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_ungap -1	6	5623af0c802ede8823267e765787448a31c861a6b0f29a6fac1462d3f89a599f	1161	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.dc.f1e9.6	blastn	dc-megablast	tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e9	6	c9b12ca361477ffb75f411dfdcb0030cd617d9ff9a0c8d4736e4000671d339b7	1109	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.mb.g1e10.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap 1e10	6	9068eb7d10c5d7cf79e5c2a67d9a9cc35d9cd8c85e37098d0eee37a1ae66d663	1180	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.mb.f1e10.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap_final 1e10	6	e78b93acbe6cc0c8aa42f1dbde94de735d8becfe99479e4a2cc258506e16a200	1271	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.mb.gf1e10	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap 1e10 -xdrop_gap_final 1e10	0	4c541652711e5e24bbc4b8b320d48b035efe8c0a13eb7f25d64148485855ecd6	30254	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.mb.gm5.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-xdrop_gap -5	6	9068eb7d10c5d7cf79e5c2a67d9a9cc35d9cd8c85e37098d0eee37a1ae66d663	1180	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			
+xdp.mb.a22g1e10.6	blastn		tests/fasta/outfmt11/arch_multi_q.fna	tests/fasta/outfmt11/arch_multi_s.fna	-gapopen 2 -gapextend 2 -xdrop_gap 1e10	6	5153136d14e20da55d326b2dc076aa6ba27f8e20a0ddb49f0a256158a560bcb9	1159	394dcc9d106fc2900611c8db024edc265554c520d06dfb632f8cdfa48c9febbd			

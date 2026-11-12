@@ -10,6 +10,7 @@ import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { EnginePrepareHint, ValidationResult } from '../../src/ports/engine';
+import { NodeInflater } from './support/node-inflater';
 
 function setup(
   options: {
@@ -23,6 +24,7 @@ function setup(
   const data = new DataService({
     store: new MemoryBlockStore(),
     scanner: new FakeScanner(),
+    inflater: new NodeInflater(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,

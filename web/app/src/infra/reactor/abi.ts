@@ -1,15 +1,18 @@
 // The ABI v2 binding (docs/web/abi_v2.md) over one reactor instance: memory for the
 // arguments (§6), the error text of a failed call (§4), and the `losat_host.emit` stream
-// receiver (§5). The Engine worker (searches) and the Data worker (index scan, describe,
-// validate) both use it.
+// receiver (§5). The Engine worker (searches) and the Data worker (index scan, input check,
+// describe, validate, and one instance for each inflation) both use it.
 //
 // Pointers and lengths are unsigned 32-bit values (ABI v2 §6). JavaScript receives a Wasm
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { RecordKey } from '../../domain/dataset';
+import type { Compression } from '../../ports/inflate';
 
-/** Stream 2: the JSON response of describe, register and scan_end. */
+/** Stream 2: the JSON response of describe, register, scan_end and inflate_begin. */
 export const RESPONSE_STREAM = 2;
+/** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
+export const INFLATED_STREAM = 5;
 export const ROLE_QUERY = 0;
 export const ROLE_SUBJECT = 1;
 /** The kind of a named input file (`file_begin`, ABI v2 §4): a WindowMasker unit counts file, BLASTN's `-window_masker_db`. */
@@ -31,6 +34,9 @@ export interface AbiExports {
   readonly losat_web2_scan_begin: Export;
   readonly losat_web2_scan_chunk: Export;
   readonly losat_web2_scan_end: Export;
+  readonly losat_web2_inflate_begin: Export;
+  readonly losat_web2_inflate_chunk: Export;
+  readonly losat_web2_inflate_end: Export;
   readonly losat_web2_run: Export;
   readonly losat_web2_file_begin: Export;
   readonly losat_web2_file_chunk: Export;
@@ -98,6 +104,13 @@ export interface FileInfo {
 export interface ChunkBuffer {
   readonly ptr: number;
   readonly capacity: number;
+}
+
+/** An inflation that `inflate_begin` started, with its *inflate* response (ABI v2 §9). */
+export interface BegunInflation {
+  readonly handle: number;
+  readonly compression: Compression;
+  readonly plainName: string;
 }
 
 const encoder = new TextEncoder();
@@ -238,11 +251,55 @@ export class ReactorAbi {
     this.check(this.call(this.exports.losat_web2_file_release, [file]));
   }
 
+  /**
+   * Starts the inflation of a file named `name` (ABI v2 §4): the engine's name rule gives the
+   * compression and the plain name; undefined when the name is plain.
+   */
+  inflateBegin(name: string): BegunInflation | undefined {
+    const handle = this.check(this.call(this.exports.losat_web2_inflate_begin, [encoder.encode(name)]));
+    if (handle === 0) return undefined;
+    try {
+      const response = this.response() as { compression: Compression; plain_name: string };
+      return { handle, compression: response.compression, plainName: response.plain_name };
+    } catch (error) {
+      // An inflation whose response cannot be read is not used: free it.
+      if (this.stopped === undefined) {
+        try {
+          this.inflateEnd(handle, () => undefined);
+        } catch {
+          // The response's error is the one to report.
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** Inflates the next bytes of a file; the inflated bytes go to `sink` during the call. */
+  inflateChunk(inflation: number, bytes: Uint8Array, sink: (bytes: Uint8Array) => void): void {
+    this.inflating(sink, () => this.check(this.call(this.exports.losat_web2_inflate_chunk, [inflation, bytes])));
+  }
+
+  /** Ends a file: the rest of its inflated bytes go to `sink`; throws the engine's sentence for data cut short. */
+  inflateEnd(inflation: number, sink: (bytes: Uint8Array) => void): void {
+    this.inflating(sink, () => this.check(this.call(this.exports.losat_web2_inflate_end, [inflation])));
+  }
+
   /** Runs one search (ABI v2 §4); the output streams go to `sink` during the call. */
   run(argv: readonly string[], query: number, subject: number, sink: StreamSink): void {
     this.sink = sink;
     try {
       this.check(this.call(this.exports.losat_web2_run, [encoder.encode(argv.join('\0')), query, subject]));
+    } finally {
+      this.sink = undefined;
+    }
+  }
+
+  private inflating(sink: (bytes: Uint8Array) => void, body: () => void): void {
+    this.sink = (stream, bytes) => {
+      if (stream === INFLATED_STREAM) sink(bytes);
+    };
+    try {
+      body();
     } finally {
       this.sink = undefined;
     }

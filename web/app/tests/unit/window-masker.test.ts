@@ -21,6 +21,7 @@ import type { EngineCommand, EngineEvent, WorkerCounts, WorkerRun } from '../../
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { NodeInflater } from './support/node-inflater';
 import { EngineCallError, EngineStoppedError, FILE_WINDOW_MASKER_COUNTS, ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports, type FileInfo } from '../../src/infra/reactor/abi';
 import { instantiateSerial } from '../../src/infra/reactor/instance';
 import type { EngineRunRequest } from '../../src/ports/engine';
@@ -67,6 +68,7 @@ function draftSetup() {
   const data = new DataService({
     store: new MemoryBlockStore(),
     scanner: new FakeScanner(),
+    inflater: new NodeInflater(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,

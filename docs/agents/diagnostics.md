@@ -74,6 +74,8 @@ give.
 The variables of the diagnostic build (the entries marked "(diagnostic build)" below):
 
 ```text
+BLEMIR_DEBUG
+BLEMIR_DEBUG_WINDOW
 LOSAT_DEBUG_BLASTP_TRACE_HSP
 LOSAT_DEBUG_BLASTP_WSSV
 LOSAT_DEBUG_CHAINING
@@ -257,12 +259,16 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_BLASTX_WORKER_LOG=<file>` (cargo feature `blastx-worker-probe` only) the file that the
   probe appends its lines to (BLASTX's workers and every program's search pool); without it a run
   with `-num_threads` above 1 panics.
-- `BLEMIR_DEBUG=1` BLASTN lookup-table sizes and engine debug lines on stderr (any value turns it
-  on; `blastn/lookup.rs`, `blastn/blast_engine/run.rs`). Like `LOSAT_DEBUG_BLASTN`, it turns off the
-  streamed reports of BLASTN (`x_debug_output`); the report bytes do not change.
-  `BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end"` adds a `Focusing on window` line under
-  `BLEMIR_DEBUG` and filters no line; set on its own, it turns off some faster BLASTN paths
-  (`LOSAT_X_QGROUPPAR`, `LOSAT_X_DIAGLV`) without changing the report bytes.
+- `BLEMIR_DEBUG=1` (diagnostic build) BLASTN lookup-table sizes and engine debug lines on stderr
+  (any value turns it on; `blastn/lookup.rs`, `blastn/blast_engine/run.rs`). Like
+  `LOSAT_DEBUG_BLASTN`, it turns off the streamed reports of BLASTN (`x_debug_output`); the report
+  bytes do not change.
+  `BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end"` (diagnostic build) adds a `Focusing on
+  window` line under `BLEMIR_DEBUG` and filters no line; set on its own, it turns off some faster
+  BLASTN paths (`LOSAT_X_QGROUPPAR`, `LOSAT_X_DIAGLV`: the `diagnostics` fields and `x_lv_ref` of
+  `blastn/blast_engine/run.rs`) without changing the report bytes. Both are read through
+  `utils/xdiag.rs`: a build without the `diagnostics` feature ignores them, so they turn nothing
+  off there, and `main` writes the one notice line for each that is set.
 
 ## Performance switches (on by default)
 
@@ -4347,16 +4353,16 @@ Scheduling (each value computed by one thread with the original function; order 
   or several one at a time under `LOSAT_X_BNFEWSUBJ`): the preliminary gapped
   loop of a subject chunk and the traceback of the subject run per query on the search pool instead of on the thread
   that owns the subject over all queries in one order (`blastn/blast_engine/x_qgroup_par.rs`, dispatched in
-  `search_query_batch`). NCBI runs both loops of a subject on one thread with one interval tree
+  `prelim_hsp_list::gapped_hsp_list` for the preliminary loop and in `traceback_list::traceback_subject_hits` for the traceback). NCBI runs both loops of a subject on one thread with one interval tree
   (`blast_gapalign.c:3850,3917-3922`, `blast_traceback.c:375,404-405`); with one subject (`-subject` with one record,
   the loop's batches of a query file) the look-ahead helpers only computed alignments ahead of that loop, and the two
   loops with the purges and sorts around them were 57 % of a blastn batch's wall at 16 threads (5,000 and 31,168 cDNAs
   against 3 Mb of 2L; v4-D session 8 probe, `results/s8_probe_i9/REPORT.md`). Form: the chunk's ungapped hits are split
   by query in the order the seed stage saved them (a counting sort), each query task sorts its hits with the batch's
-  comparator (stable), runs the same loop body (the loop is a closure, `x_prelim_list`, called once on the owner with
+  comparator (stable), runs the same loop body (the loop is `prelim_hsp_list::gapped_score_list`, called once on the owner with
   the look-ahead helpers or once per query without them) and purges its list; the purged lists are concatenated in query
   order and sorted by score as before (rayon's stable `par_sort_by` on the search pool). The kept HSPs of the traceback
-  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`x_trace_list`, no
+  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`trace_hsp_list`, no
   helpers and no speculative batches in a task), the passes up to the second purge (`traceback_post_purge`) and the score sort,
   final tree and e-values (`traceback_final_list`); the final lists are concatenated in query order and sorted stably by score.
   The queries are handed out from an atomic counter, the query with the most HSPs first (ungapped hits per query before

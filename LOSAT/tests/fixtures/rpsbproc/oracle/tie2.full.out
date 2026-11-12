@@ -1,0 +1,55 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/tie2.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	2e-06
+QUERY	Query_1	Peptide	430	NP_415929.1 phosphatase domain-containing protein YnbD [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	350376	295	429	3.06789e-55	179.393	cd14527	DSP_bac	-	531719
+1	Query_1	Specific	513744	306	428	2.2919e-36	129.694	pfam00782	DSPc	-	531719
+1	Query_1	Specific	214551	299	430	7.20422e-36	128.94	smart00195	DSPc	-	531719
+1	Query_1	Specific	239481	47	197	9.57818e-33	122.036	cd03386	PAP2_Aur1_like	-	529117
+1	Query_1	Specific	441989	306	430	9.62303e-28	106.979	COG2453	CDC14	-	-
+1	Query_1	Non-specific	350348	305	414	2.50828e-16	75.2751	cd14498	DSP	-	531719
+1	Query_1	Non-specific	350374	300	416	3.739e-13	66.9012	cd14524	PTPMT1	-	531719
+1	Query_1	Non-specific	350364	321	414	9.61681e-13	65.2678	cd14514	DUSP14-like	N	531719
+1	Query_1	Non-specific	350354	339	430	7.25655e-11	59.9835	cd14504	DUSP23	N	531719
+1	Query_1	Non-specific	350368	369	428	5.1612e-09	55.0169	cd14518	DSP_fungal_YVH1	N	531719
+1	Query_1	Non-specific	350365	363	411	6.04278e-09	54.5254	cd14515	DUSP3-like	N	531719
+1	Query_1	Non-specific	350413	357	414	2.69768e-08	52.3898	cd14565	DSP_MKP_classI	N	531719
+1	Query_1	Non-specific	238813	79	193	4.89683e-08	51.3071	cd01610	PAP2_like	-	529117
+1	Query_1	Non-specific	350510	348	424	6.9707e-08	50.9948	cd18534	DSP_plant_IBR5-like	N	531719
+1	Query_1	Non-specific	350369	336	413	1.36895e-07	50.4402	cd14519	DSP_DUSP22_15	N	531719
+1	Query_1	Non-specific	350426	365	411	3.0183e-07	49.8373	cd14578	DUSP26	N	531719
+1	Query_1	Non-specific	350375	354	413	4.03023e-07	49.5021	cd14526	DSP_laforin-like	N	531719
+1	Query_1	Non-specific	350414	357	414	4.57943e-07	48.854	cd14566	DSP_MKP_classII	N	531719
+1	Query_1	Non-specific	350356	339	429	5.3259e-07	50.0402	cd14506	PTP_PTPDC1	N	531719
+1	Query_1	Non-specific	350373	339	414	5.74055e-07	48.504	cd14523	DSP_DUSP19	N	531719
+1	Query_1	Non-specific	350421	300	414	9.49554e-07	48.6327	cd14573	DUSP18_21	C	531719
+1	Query_1	Non-specific	214649	335	424	1.04403e-06	46.9683	smart00404	PTPc_motif	-	531719
+1	Query_1	Non-specific	214469	335	424	1.04403e-06	46.9683	smart00012	PTPc_DSPc	-	531719
+1	Query_1	Non-specific	350416	355	414	1.24451e-06	47.7966	cd14568	DSP_MKP_classIII	N	531719
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

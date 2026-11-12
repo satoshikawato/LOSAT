@@ -20,6 +20,12 @@ clap = { version = "4.5", features = ["derive"] }
 # The SHA-256 of a named input file (`files.rs`), counted over its chunks as they come.
 sha2 = { version = "0.10", default-features = false }
 
+# Compressed inputs for the inflation tests (tests/inflate.rs), the engine's own encoders with its
+# features (LOSAT/Cargo.toml), so the lock gains no package.
+[dev-dependencies]
+bzip2 = "0.6"
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs", "runtime_detection"] }
+
 [features]
 default = []
 # The threaded reactor: wasm32-wasip1-threads with the engine's parallel search.

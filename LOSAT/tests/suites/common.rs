@@ -4,6 +4,8 @@
 //! two lines in its suite (`common` for the command line, the output formats and shared parts;
 //! `tests/suite_layout.rs` checks that every file is in exactly one test binary).
 
+#[path = "../blastdbcmd_alias_keys.rs"]
+mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
 mod blastdbcmd_batch_line_ends;
 #[path = "../blastdbcmd_discovery.rs"]
@@ -16,6 +18,8 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastx_library_db_hold.rs"]
+mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../db_empty_title.rs"]

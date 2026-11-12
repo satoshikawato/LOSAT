@@ -3,7 +3,8 @@
 // thread against bounds that are stale after another thread grew the shared memory, and the
 // search traps. The test reads the module from the production build (`vite preview`) and
 // checks it with the guard's own verifier (LOSAT/tests/wasi_shared_memory.js), which accepts
-// only the guard's helpers, call sites and counts. The serial module needs no guard.
+// only the guard's helpers, call sites and counts, and that its waits can end with their worker
+// (worker-end.spec.ts). The serial module needs no guard.
 import { createRequire } from 'node:module';
 import { expect } from '@playwright/test';
 import { test } from './support/test';
@@ -13,6 +14,7 @@ test.skip(ENGINE === undefined, NO_ENGINE_REASON);
 
 const guard = createRequire(import.meta.url)('../../../../LOSAT/tests/wasi_shared_memory.js') as {
   verifyGuarded(bytes: Uint8Array): { version: number; fill: number; copy: number; grow: number; atomic: number };
+  slicesWaits(bytes: Uint8Array): boolean;
 };
 
 test('the site serves the threaded engine module with the shared-memory guard', async ({ request, browserName }) => {
@@ -26,4 +28,6 @@ test('the site serves the threaded engine module with the shared-memory guard', 
   expect(record.fill + record.copy).toBeGreaterThan(0);
   expect(record.grow).toBeGreaterThan(0);
   expect(record.atomic).toBeGreaterThan(0);
+  // Its waits can end with their worker in WebKit (worker-end.spec.ts).
+  expect(guard.slicesWaits(bytes)).toBe(true);
 });

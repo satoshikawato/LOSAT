@@ -218,3 +218,54 @@ fn the_root_type_name_is_checked() {
     let unnamed = text.replacen("Blast4-archive ::=", "::=", 1);
     assert_eq!(read_all(unnamed.as_bytes()).len(), 1);
 }
+
+// `Seq-inst.ext`: the literals of a `delta` with their `seq-data` (review oracle R5:
+// `mfirst_delta.asn`, two NCBIeaa literals); a `loc` item, a literal without data or with `gap`
+// data and the other `Seq-ext` variants give none; a literal without its `length` ends the
+// input as NCBI's typed reader does.
+#[test]
+fn delta_literals_are_read() {
+    let delta: &[u8] = include_bytes!("../../tests/fixtures/rpsbproc/arch/mfirst_delta.asn");
+    let literals = |text: &[u8]| {
+        let archives = read_all(text);
+        let archive = archives[0].as_ref().unwrap();
+        let RequestBody::QueueSearch(search) = &archive.body else {
+            panic!("queue-search");
+        };
+        let Queries::BioseqSet(entries) = &search.queries else {
+            panic!("bioseq-set");
+        };
+        let SeqEntry::Seq(query) = &entries[0] else {
+            panic!("seq");
+        };
+        assert!(query.seq_data.is_none());
+        query
+            .delta_literals
+            .iter()
+            .map(|(name, data)| (*name, data.len()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(literals(delta), [("ncbieaa", 100), ("ncbieaa", 85)]);
+    let text = String::from_utf8(delta.to_vec()).unwrap();
+    let first = "                literal {\n                  length 100,";
+    assert!(text.contains(first));
+    let edited = text.replacen(
+        first,
+        "                loc whole local str \"Query_1\",\n                literal {\n                  length 3\n                },\n                literal {\n                  length 5,\n                  seq-data gap {\n                    type unknown\n                  }\n                },\n                literal {\n                  length 100,\n                  fuzz lim unk,",
+        1,
+    );
+    assert_eq!(
+        literals(edited.as_bytes()),
+        [("ncbieaa", 100), ("ncbieaa", 85)]
+    );
+    let start = text.find("ext delta {").unwrap();
+    let end = text[start..].find("\n              }\n").unwrap() + start;
+    let seg = format!(
+        "{}ext seg {{\n                whole local str \"Query_1\"\n{}",
+        &text[..start],
+        &text[end + 1..]
+    );
+    assert!(literals(seg.as_bytes()).is_empty());
+    let no_length = text.replacen("                  length 100,\n", "", 1);
+    assert!(read_all(no_length.as_bytes()).is_empty());
+}

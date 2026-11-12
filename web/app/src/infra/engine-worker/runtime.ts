@@ -6,17 +6,19 @@
 // -num_threads and validate that argv (ABI v2 §7), register the query and, unless the
 // instance holds it, the subject, compare the records that the engine read with the
 // record tables (plan §5.4; a difference stops the run before any output), run, and send
-// the output streams to the Data worker's port.
+// the output streams to the Data worker's port. A BLASTN search with -window_masker_db also
+// gives the engine the counts file, which the instance holds for later BLASTN searches.
 import { recordMismatch, type RecordKey } from '../../domain/dataset';
 import { InputMismatchError, type EnginePhase } from '../../ports/engine';
 import { OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
-import { EngineCallError, ROLE_QUERY, ROLE_SUBJECT } from '../reactor/abi';
+import type { CountsRecord } from '../../domain/run';
+import { EngineCallError, FILE_WINDOW_MASKER_COUNTS, ROLE_QUERY, ROLE_SUBJECT, type ChunkBuffer, type FileInfo } from '../reactor/abi';
 import type { ReactorArtifact } from '../reactor/artifact';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance';
 import { createSharedMemory } from '../reactor/shared-memory';
 import { RunOutputWriter } from '../run-output/writer';
 import type { InstanceUse } from './instance-use';
-import type { RuntimePath, WorkerRun, WorkerRunResult } from './protocol';
+import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol';
 import { ThreadHost } from './thread-host';
 import { warmUp } from './warm-up';
 
@@ -46,12 +48,24 @@ interface Retained {
   readonly records: readonly RecordKey[];
 }
 
+/** The WindowMasker counts file that the instance holds: at most one (DESIGN_ww1 §5). */
+interface HeldCounts {
+  readonly key: string;
+  readonly handle: number;
+  readonly info: FileInfo;
+}
+
+/** Bytes of a counts file given to the engine at a time, through one buffer of engine memory. */
+export const COUNTS_CHUNK_BYTES = 8 * 1024 * 1024;
+
 interface Loaded {
   readonly path: RuntimePath;
   readonly instance: ReactorInstance;
   readonly threads?: ThreadHost;
   runs: number;
   retained: Retained | undefined;
+  /** The counts file of BLASTN's -window_masker_db that the instance holds. */
+  counts: HeldCounts | undefined;
   /** The argvs (without -num_threads) of the searches and warm-ups that ran on this instance. */
   readonly ran: Set<string>;
 }
@@ -101,10 +115,25 @@ export class EngineRuntime {
     // The calls into the threaded instance are a use from the first until the last has
     // returned; its threads count themselves (ThreadHost.spawn). The search is synchronous.
     const use = loaded.path === 'threaded' ? this.options.use : undefined;
+    // The counts file first: `validate` (in `search`) checks it where the command line does
+    // (after -dust, before the query range and the other options; ABI v2 §4), and the command
+    // line reads it before the queries. A counts file that is released or loaded here is not
+    // held together with the inputs of this run, and a replaced one is not held with its
+    // successor. Its calls into the instance are uses of their own, with the file's chunks read
+    // between them.
+    let windowMasker: CountsRecord | undefined;
+    try {
+      windowMasker = await this.counts(loaded, request, use);
+    } catch (error) {
+      // A trap while the file was given to the engine: the next search loads the module again
+      // (a stopped threaded instance is ended by the Gateway, as in `search`).
+      if (loaded.instance.abi.stoppedBy !== undefined && loaded.path === 'serial') this.dispose();
+      throw error;
+    }
     if (use !== undefined && !use.enter()) throw new Error(ENDING);
     try {
       if (use !== undefined) this.options.onUse?.();
-      return this.search(loaded, request, fallbackReason, phase);
+      return this.search(loaded, request, fallbackReason, phase, windowMasker);
     } finally {
       use?.leave();
     }
@@ -116,6 +145,7 @@ export class EngineRuntime {
     request: WorkerRun,
     fallbackReason: string | undefined,
     phase: (phase: EnginePhase) => void,
+    windowMasker: CountsRecord | undefined,
   ): WorkerRunResult {
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
@@ -163,6 +193,8 @@ export class EngineRuntime {
         ...(fallbackReason === undefined ? {} : { fallbackReason }),
         memory: { linearBytesBefore, linearBytesAfter, instanceRuns: loaded.runs },
         subjectRetained,
+        ...(windowMasker === undefined ? {} : { windowMasker }),
+        ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
       };
     } finally {
       if (abi.stoppedBy === undefined) releaseQuery();
@@ -241,6 +273,78 @@ export class EngineRuntime {
     return true;
   }
 
+  /**
+   * The counts file of the search, by the rules of retention (DESIGN_ww1 §5): the instance holds
+   * at most one; the same one (key) is used again; it is released before a search of another
+   * program (the memory goes back to that search), before a different one is loaded (never two at
+   * once), and with the instance (`dispose`). A BLASTN search without -window_masker_db keeps
+   * it. A file is given to the engine in the 'preparing' phase only. Returns what the search did
+   * with the file, if it has one.
+   */
+  private async counts(loaded: Loaded, request: WorkerRun, use: InstanceUse | undefined): Promise<CountsRecord | undefined> {
+    const wanted = request.windowMasker;
+    if (request.program !== 'blastn') {
+      this.releaseCounts(loaded, use);
+      return undefined;
+    }
+    if (wanted === undefined) return undefined;
+    const key = `${wanted.key} ${await edgeDigest(wanted.blob)}`;
+    const held = loaded.counts;
+    if (held?.key === key) {
+      return { name: wanted.name, size: held.info.size, sha256: held.info.sha256, retained: true, loadMs: 0 };
+    }
+    this.releaseCounts(loaded, use);
+    const started = performance.now();
+    const info = await this.loadCounts(loaded, wanted, key, use);
+    return { name: wanted.name, size: info.size, sha256: info.sha256, retained: false, loadMs: Math.round(performance.now() - started) };
+  }
+
+  private releaseCounts(loaded: Loaded, use: InstanceUse | undefined): void {
+    const held = loaded.counts;
+    if (held === undefined) return;
+    loaded.counts = undefined;
+    inUse(use, () => loaded.instance.abi.fileRelease(held.handle));
+  }
+
+  /** Gives the file to the engine in chunks, ends it, and holds it. */
+  private async loadCounts(loaded: Loaded, wanted: WorkerCounts, key: string, use: InstanceUse | undefined): Promise<FileInfo> {
+    const { abi } = loaded.instance;
+    const size = wanted.blob.size;
+    const handle = inUse(use, () => abi.fileBegin(FILE_WINDOW_MASKER_COUNTS, wanted.name, size));
+    let buffer: ChunkBuffer | undefined;
+    try {
+      buffer = inUse(use, () => abi.chunkBuffer(Math.max(1, Math.min(COUNTS_CHUNK_BYTES, size))));
+      for (let offset = 0; offset < size; offset += COUNTS_CHUNK_BYTES) {
+        const bytes = new Uint8Array(await wanted.blob.slice(offset, offset + COUNTS_CHUNK_BYTES).arrayBuffer());
+        inUse(use, () => abi.fileChunk(handle, bytes, buffer!));
+      }
+      const info = inUse(use, () => abi.fileEnd(handle));
+      loaded.counts = { key, handle, info };
+      return info;
+    } catch (error) {
+      // The engine drops a file whose chunk or end it refused; one that it still holds (the file
+      // could not be read) is released, so that the name is free for the next search. Not when
+      // the runtime is ending: the instance goes with it.
+      if (abi.stoppedBy === undefined) {
+        try {
+          inUse(use, () => abi.fileRelease(handle));
+        } catch {
+          // Already dropped by the engine, or the runtime is ending.
+        }
+      }
+      throw error;
+    } finally {
+      if (buffer !== undefined) {
+        const taken = buffer;
+        try {
+          inUse(use, () => abi.freeChunkBuffer(taken));
+        } catch {
+          // The runtime is ending: the instance goes with it.
+        }
+      }
+    }
+  }
+
   /** The subject handle: the retained one if its key matches, else a new registration. */
   private subject(loaded: Loaded, request: WorkerRun): Retained {
     const abi = loaded.instance.abi;
@@ -261,7 +365,7 @@ export class EngineRuntime {
     if (!this.dispose()) throw new Error(ENDING);
     if (path === 'serial') {
       const instance = await instantiateSerial(await this.options.serial());
-      this.loaded = { path, instance, runs: 0, retained: undefined, ran: new Set() };
+      this.loaded = { path, instance, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
       return this.loaded;
     }
     const unsupported = threadedSupport();
@@ -276,7 +380,7 @@ export class EngineRuntime {
     const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel, use });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
-      this.loaded = { path, instance, threads, runs: 0, retained: undefined, ran: new Set() };
+      this.loaded = { path, instance, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
       return this.loaded;
     } catch (error) {
       threads.terminate();
@@ -288,6 +392,36 @@ export class EngineRuntime {
 /** A runtime that the Gateway ends starts nothing and makes no call into its threaded instance. */
 const ENDING = 'the runtime is ending';
 
+/**
+ * Calls into the instance without a wait between them, counted as a use of the threaded
+ * instance (instance-use.ts): `use` is undefined for the serial instance.
+ */
+function inUse<T>(use: InstanceUse | undefined, body: () => T): T {
+  if (use !== undefined && !use.enter()) throw new Error(ENDING);
+  try {
+    return body();
+  } finally {
+    use?.leave();
+  }
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Bytes at each end of a counts file that its key includes (`edgeDigest`). */
+export const COUNTS_EDGE_BYTES = 64 * 1024;
+
+/**
+ * The SHA-256 of the first and the last `COUNTS_EDGE_BYTES` of a file, in hex: with the name, size
+ * and last-modified time, the key that tells a held counts file from another one without reading
+ * it whole (the SHA-256 of the whole file is known only after the engine read it). The ends hold
+ * the counts' metadata and parameters, and the end of their last table.
+ */
+export async function edgeDigest(blob: Blob): Promise<string> {
+  const head = blob.slice(0, COUNTS_EDGE_BYTES);
+  const tail = blob.slice(Math.max(COUNTS_EDGE_BYTES, blob.size - COUNTS_EDGE_BYTES));
+  const bytes = await new Blob([head, tail]).arrayBuffer();
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

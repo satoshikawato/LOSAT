@@ -1,0 +1,61 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q1
+# Database: tests/db_search/ids/prd_as1
+# Fields: query id, evalue
+# 2 hits found
+q1	9.43e-135
+q1	2.84e-133
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: q1
+# Database: tests/db_search/ids/prd_as1
+# Fields: query id, evalue
+# 4 hits found
+q1	1.31e-164
+q1	3.56e-109
+q1	1.3
+q1	9.0
+
+Search has CONVERGED!
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q2 with O
+# Database: tests/db_search/ids/prd_as1
+# Fields: query id, evalue
+# 2 hits found
+q2	1.06e-133
+q2	5.37e-133
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: q2 with O
+# Database: tests/db_search/ids/prd_as1
+# Fields: query id, evalue
+# 4 hits found
+q2	2.54e-164
+q2	8.74e-109
+q2	1.3
+q2	9.1
+
+Search has CONVERGED!
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q3
+# Database: tests/db_search/ids/prd_as1
+# Fields: query id, evalue
+# 2 hits found
+q3	9.43e-135
+q3	2.84e-133
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: q3
+# Database: tests/db_search/ids/prd_as1
+# Fields: query id, evalue
+# 4 hits found
+q3	1.31e-164
+q3	3.56e-109
+q3	1.3
+q3	9.0
+
+Search has CONVERGED!
+# BLAST processed 6 queries

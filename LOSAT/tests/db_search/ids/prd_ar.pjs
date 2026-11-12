@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "prd_ar",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_ar (parsed Seq-ids)",
+  "number-of-letters": 750,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-11T12:57:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50389,
+  "bytes-to-cache": 882,
+  "files": [
+    "prd_ar.pdb",
+    "prd_ar.phr",
+    "prd_ar.pin",
+    "prd_ar.pog",
+    "prd_ar.pos",
+    "prd_ar.pot",
+    "prd_ar.psq",
+    "prd_ar.ptf",
+    "prd_ar.pto"
+  ]
+}

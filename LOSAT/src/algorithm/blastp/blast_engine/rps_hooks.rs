@@ -308,9 +308,23 @@ fn adjusted_search_space(
     effective_db_length.checked_mul(query_length - adjustment)
 }
 
+/// LOSAT's refusal of an RPS-BLAST database whose alias files give an OID range or a key of the
+/// statistics or the shortest length (`SeqDb::alias_ranges_or_statistics`): NCBI's RPS search
+/// opens each volume alone and searches every profile of its lookup files
+/// (rpsblast_local.cpp:341-400), which LOSAT has not traced for these keys (line RG, D1a-2).
+pub(super) fn check_alias_keys(database: &database::BlastpDatabase, program: &str) -> Result<()> {
+    if database.seqdb().alias_ranges_or_statistics() {
+        return Err(crate::algorithm::common::database::refusal(
+            "an alias file's FIRST_OID, LAST_OID, STATS_NSEQ, STATS_TOTLEN or MIN_SEQ_LENGTH over an RPS-BLAST database",
+            program,
+        ));
+    }
+    Ok(())
+}
+
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread
-/// for each: NCBI's "auto"). (A volume listed twice is refused by the database layer, as for every
-/// program.)
+/// for each: NCBI's "auto"). A volume that the alias files reach twice is one volume of the
+/// database's set (`SeqDb`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:419-424
 /// ```c++

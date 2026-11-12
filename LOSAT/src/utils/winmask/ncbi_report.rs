@@ -52,6 +52,19 @@ const fn create_site(line: u32) -> ThrowSite {
 
 const CREATE_FAIL: &str = "could not create a unit counts container";
 
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:461-463
+/// ```c
+///     case eValidation:
+///
+///         return "validation error";
+/// ```
+const WINDOW_SIZE: ThrowSite = ThrowSite {
+    file: "src/algo/winmask/seq_masker.cpp",
+    line: 126,
+    kind: "CSeqMaskerException::validation error",
+    function: Some("ncbi::CSeqMasker::CSeqMasker"),
+};
+
 /// The factory's rethrow of the exception of a reader (line 358).
 fn rethrown(e: NcbiException) -> NcbiException {
     e.rethrow(create_site(358), CREATE_FAIL)
@@ -68,8 +81,8 @@ impl WinMaskError {
     }
 
     /// The report (`what()`) of the exception of `CSeqMaskerIstatFactory::create`: the
-    /// reader's exception and the factory's rethrow. `None` for the errors that are not
-    /// NCBI's exceptions there (the formats that LOSAT does not read, the masker's checks, a
+    /// reader's exception and the factory's rethrow, or the masker's window check. `None` for
+    /// the errors that are not NCBI's exceptions there (LOSAT's checks of the masker's input, a
     /// bad index of the hash table).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:336-340
@@ -91,8 +104,22 @@ impl WinMaskError {
             Self::CreateFail { message } => {
                 rethrown(NcbiException::new(create_site(340), message.as_str()))
             }
-            Self::UnsupportedFormat(_)
-            | Self::WindowSize { .. }
+            Self::Exception { exception, .. } => rethrown((**exception).clone()),
+            // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:121-126
+            // ```c
+            //     if( window_size < ustat->UnitSize() ) {
+            //         std::ostringstream os;
+            //         os << "window size (" << (int)window_size << ") "
+            //               "must be greater or equal to unit size (" <<
+            //               (int)ustat->UnitSize() << ")";
+            //         NCBI_THROW( CSeqMaskerException, eValidation, os.str() );
+            //     }
+            // ```
+            // Thrown by the masker after the factory returned, so not rethrown by it;
+            // `s_BuildSeqMasker` gives its `what()` to blastn's error (`winmask_filter.cpp:147-151`).
+            Self::WindowSize { .. } => NcbiException::new(WINDOW_SIZE, self.to_string()),
+            Self::UnitSize { .. }
+            | Self::UnsetHashParameter { .. }
             | Self::EmptyCacheBitArray { .. }
             | Self::SequenceTooLong { .. }
             | Self::BadIndex { .. } => return None,
@@ -103,7 +130,9 @@ impl WinMaskError {
     /// The warnings that NCBI posts while it reads the file, before the error.
     pub fn warnings(&self) -> &[String] {
         match self {
-            Self::Format { warnings, .. } => warnings,
+            Self::Format { warnings, .. }
+            | Self::Exception { warnings, .. }
+            | Self::WindowSize { warnings, .. } => warnings,
             _ => &[],
         }
     }
@@ -136,6 +165,14 @@ mod tests {
             (FormatSite::BinFileSize, "seq_masker_istat_bin.cpp\", line 79: Error: (Exception::file format error) ncbi::CSeqMaskerIstatBin::CSeqMaskerIstatBin() - wrong file size"),
             (FormatSite::BinUnitSize, "seq_masker_istat_bin.cpp\", line 99: Error: (Exception::file format error) ncbi::CSeqMaskerIstatBin::CSeqMaskerIstatBin() - illegal unit size"),
             (FormatSite::BinLength, "seq_masker_istat_bin.cpp\", line 108: Error: (Exception::file format error) ncbi::CSeqMaskerIstatBin::CSeqMaskerIstatBin() - wrong length"),
+            // `-window_masker_taxid` with optimized ascii counts (line NP M3d).
+            (FormatSite::OAsciiUnitSize, "seq_masker_istat_oascii.cpp\", line 101: Error: (Exception::bad parameter) ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii() - unit size must be in [1,16]"),
+            (FormatSite::OAsciiHashKeySize, "seq_masker_istat_oascii.cpp\", line 114: Error: (Exception::bad hash parameter) ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii() - hash key size must be in [1,2*unit_size - 1]"),
+            (FormatSite::OAsciiHashOffset, "seq_masker_istat_oascii.cpp\", line 119: Error: (Exception::bad hash parameter) ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii() - offset must by in [0,32 - hash_key_size]"),
+            (FormatSite::OAsciiHashShift, "seq_masker_istat_oascii.cpp\", line 124: Error: (Exception::bad hash parameter) ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii() - shift must be in [1, 32 - hash_key_size]"),
+            (FormatSite::OAsciiFileTooShort, "seq_masker_istat_oascii.cpp\", line 145: Error: (Exception::format error) ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii() - file too short"),
+            (FormatSite::OAsciiHashTable, "seq_masker_istat_oascii.cpp\", line 176: Error: (Exception::format error) ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii() - not enough lines to fill the hash table"),
+            (FormatSite::OAsciiValuesTable, "seq_masker_istat_oascii.cpp\", line 192: Error: (Exception::format error) ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii() - not enough lines to fill the values table"),
         ];
         for (site, line) in cases {
             assert_eq!(

@@ -294,7 +294,7 @@ impl RpstblastnArgs {
             // `-max_hsps` and `-qcov_hsp_perc` filter in the RPS traceback (`RpsSearch`).
             max_hsps: None,
             qcov_hsp_perc: None,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1460-1471
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1460-1465
             // ```c
             //    /* By default, sum statistics is used for all translated searches
             //     * (except RPS BLAST), and for all ungapped searches.

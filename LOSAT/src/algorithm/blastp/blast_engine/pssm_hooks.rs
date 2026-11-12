@@ -515,8 +515,10 @@ fn pssm_redo(
     .run(preliminary_hit_lists, compact_hit_lists)
 }
 
-/// The warning line of a PSSM query (psiblast `-in_pssm`): its label is the PSSM's Seq-id (the
-/// record's local id, DECISIONS 12 of line PS) and the title of `CBlastQuerySourceBioseqSet`
+/// The warning line of a PSSM query (psiblast `-in_pssm`, and the later rounds of a FASTA query):
+/// its label is the PSSM's Seq-id (`GetSeqIdString()`: the record's local id, DECISIONS 12 of line
+/// PS, or the `warning_id` of the Seq-align id that `-parse_deflines` read, `P69905` of
+/// `sp|P69905.2|`) and the title of `CBlastQuerySourceBioseqSet`
 /// (`PsiSearch::warning_title`; a FASTA query's later rounds keep the record's title), and its
 /// messages add those of
 /// `PsiBlastSetupScoreBlock` (`PsiSearch::setup_messages`), which NCBI keeps with the query's
@@ -545,7 +547,7 @@ pub(super) fn pssm_query_warning(
     };
     crate::report::query_warnings::query_warning_with_seq_id(
         program,
-        record.local_id.as_bytes(),
+        record.warning_id(),
         &title,
         &all,
     )

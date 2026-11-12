@@ -1521,7 +1521,14 @@ impl ListedTitles<'_> {
 
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
     fn reported(hit_lists: &[Option<BlastpHitList>]) -> std::collections::BTreeSet<usize> {
-        Self::reported_ranks(hit_lists).collect()
+        // Inserted one by one: collecting would first gather the rank of every HSP of every query
+        // in a vector and sort it (with a scratch of the same size, as `BTreeSet::from_iter` does),
+        // 8 MB for 1,000 queries of 500 hits, to keep a few hundred ranks.
+        let mut reported = std::collections::BTreeSet::new();
+        for rank in Self::reported_ranks(hit_lists) {
+            reported.insert(rank);
+        }
+        reported
     }
 
     /// What the batches read of the subjects with rows in `hit_lists`, by rank: `prefetch`

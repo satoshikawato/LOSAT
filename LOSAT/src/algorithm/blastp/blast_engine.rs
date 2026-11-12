@@ -8886,13 +8886,17 @@ fn run_resolved_in_pool(
     let x_drop_bits = (args.x_drop_gapped_bits, args.x_drop_final_bits);
     let (x_drop_gapped, x_drop_gapped_final) =
         crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
+    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
+    // after IDENTITY's reset too; the same choice as `ordinary_traceback` below).
     if !args.ungapped {
         crate::core::x_drop::check_gapped_x_dropoffs(
             "BLASTP",
             x_drop_bits,
             (x_drop_gapped, x_drop_gapped_final),
-            args.scoring.gap_open,
-            args.scoring.gap_extend,
+            (args.scoring.gap_open, args.scoring.gap_extend),
+            args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats
+                || args.psi_search.is_some()
+                || args.rps_search.is_some(),
         )?;
     }
     let batch_size = args.query_batch_size()?;

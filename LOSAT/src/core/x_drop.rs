@@ -14,7 +14,12 @@
 //! outputs deterministically (line RG X1 probe: `-xdrop_ungap 1e9` to `1e300`, `-xdrop_gap 1e9`
 //! and `1e300`, the redo of `-xdrop_gap_final 1e8`), so they are reproduced. Only the sizes of
 //! the gapped kernels' work areas, `Int4` arithmetic that overflows (undefined behaviour), are
-//! refused (`kernel_x_drop_fits`).
+//! refused (`kernel_x_drop_fits`). A large X-drop inside `Int4` makes NCBI's `ALIGN_EX` reserve a
+//! chunk of about `1.33 * x_dropoff / gap_extend` bytes per row (`s_GapGetState`) of which it
+//! touches only the sequence's cells: NCBI then needs that much address space, not memory (the
+//! probe's BLASTX `-comp_based_stats 0 -xdrop_gap_final 1e8` stops with SIGSEGV under a 256 GiB
+//! limit and gives the report of `1e7` under 8 TiB, RSS 88 MB). LOSAT's kernels size their rows by
+//! the sequences and give that report.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:426-429 (the same at
 //! 783-786 in `Blast_SemiGappedAlign`, 1032-1035, 1387-1390 and 2003-2006)
@@ -153,20 +158,35 @@ pub(crate) fn kernel_x_drop_error(program: &str, option: &str, bits: f64) -> any
 
 /// The check of the preliminary and final gapped X-drops (raw, `gapped_x_dropoffs`) against
 /// NCBI's kernels with the search's gap costs, before the search: the preliminary stage runs
-/// `Blast_SemiGappedAlign` with the preliminary X-drop, and the traceback without
-/// composition-based statistics `ALIGN_EX` with the final one (the composition-based redo runs
-/// with its scaled gap costs, under which every `Int4` X-drop fits).
+/// `Blast_SemiGappedAlign` with the preliminary X-drop at every mode, and the traceback runs
+/// `ALIGN_EX` with the final one only without the composition-based redo
+/// (`final_in_unscaled_kernel`: the program's own choice of its ordinary traceback). The redo runs
+/// with its own X-drop (`redo_x_dropoff`) and the gap costs scaled by 32, under which every `Int4`
+/// X-drop fits (the quotient stays below 2^26), as rpsblast's engine checks it.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1496
+/// ```c
+///     if ((ext_options->compositionBasedStats != eNoCompositionBasedStats) ||
+///         ext_options->eTbackExt == eSmithWatermanTbck) {
+///         Int2 status = 0;
+///         ...
+///             status =
+///                 Blast_RedoAlignmentCore_MT(program_number, num_threads, queryBlk,
+///                                            query_info, sbp, NULL, seq_src, gen_code_string,
+///                                            pHspStream, extend_params, hit_params,
+///                                            psi_options, results);
+/// ```
 pub(crate) fn check_gapped_x_dropoffs(
     program: &str,
     (gap_bits, final_bits): (f64, f64),
     (gapped, finale): (i32, i32),
-    gap_open: i32,
-    gap_extend: i32,
+    (gap_open, gap_extend): (i32, i32),
+    final_in_unscaled_kernel: bool,
 ) -> anyhow::Result<()> {
     if !kernel_x_drop_fits(gapped, gap_open, gap_extend) {
         return Err(kernel_x_drop_error(program, "-xdrop_gap", gap_bits));
     }
-    if !kernel_x_drop_fits(finale, gap_open, gap_extend) {
+    if final_in_unscaled_kernel && !kernel_x_drop_fits(finale, gap_open, gap_extend) {
         return Err(kernel_x_drop_error(program, "-xdrop_gap_final", final_bits));
     }
     Ok(())

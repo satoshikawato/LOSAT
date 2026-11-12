@@ -1565,6 +1565,8 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-version"]),
         // Line RG X1 ported the X-drops to BLASTP, not to PSIBLAST.
         ("psiblast", &["-xdrop_gap_final", "30"]),
+        ("psiblast", &["-xdrop_gap", "30"]),
+        ("psiblast", &["-xdrop_ungap", "3"]),
         ("blastn", &["-logfile", "log"]),
         ("blastp", &["-xmlhelp"]),
         ("tblastn", &["-version-full"]),

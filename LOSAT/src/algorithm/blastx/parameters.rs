@@ -713,11 +713,13 @@ pub(crate) fn check_gapped_x_drops(options: &ResolvedOptions) -> Result<()> {
     if !options.gapped {
         return Ok(());
     }
+    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback
+    // (composition 0, `runtime.rs`).
     crate::core::x_drop::check_gapped_x_dropoffs(
         "BLASTX",
         (options.gap_x_dropoff, options.gap_x_dropoff_final),
         gapped_x_drops(options, &gapped_karlin(options)),
-        options.gap_open,
-        options.gap_extend,
+        (options.gap_open, options.gap_extend),
+        options.composition == 0,
     )
 }

@@ -938,7 +938,7 @@ mod tests {
         // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
         // matrix and composition mode since series SC, SC6; the word sizes LOSAT does not search
         // with since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them):
-        // 2 of the 80 are refused (`-use_sw_tback`; the X-drops since line RG X1).
+        // 2 of the 80 are refused (`-use_sw_tback`; the X-drop cases parse since line RG X1).
         assert!(refused == 2 && CASES.len() - refused > 60, "{refused}");
     }
 

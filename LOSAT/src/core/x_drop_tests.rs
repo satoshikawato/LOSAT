@@ -85,15 +85,17 @@ fn the_kernels_size_x_drops_below_their_limit() {
     assert!(kernel_x_drop_fits(i32::MAX, 11 * 32, 32));
     assert!(kernel_x_drop_fits(i32::MIN, 11, 1));
     assert!(kernel_x_drop_fits(i32::MAX, 11, 0));
-    assert!(check_gapped_x_dropoffs("BLASTP", (15.0, 25.0), (38, 64), 11, 1).is_ok());
-    let error = check_gapped_x_dropoffs("BLASTP", (5e8, 25.0), (limit, limit), 11, 1)
+    assert!(check_gapped_x_dropoffs("BLASTP", (15.0, 25.0), (38, 64), (11, 1), true).is_ok());
+    let error = check_gapped_x_dropoffs("BLASTP", (5e8, 25.0), (limit, limit), (11, 1), false)
         .unwrap_err()
         .to_string();
     assert!(
         error.starts_with("an -xdrop_gap of 500000000.0 bits"),
         "{error}"
     );
-    let error = check_gapped_x_dropoffs("BLASTX", (15.0, 5e8), (38, limit), 11, 1)
+    // The final X-drop reaches the unscaled kernel only without the composition-based redo.
+    assert!(check_gapped_x_dropoffs("BLASTX", (15.0, 5e8), (38, limit), (11, 1), false).is_ok());
+    let error = check_gapped_x_dropoffs("BLASTX", (15.0, 5e8), (38, limit), (11, 1), true)
         .unwrap_err()
         .to_string();
     assert!(

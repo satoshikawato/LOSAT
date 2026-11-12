@@ -1391,13 +1391,25 @@ mod tests {
                 "{value}: {error:#}"
             );
         }
-        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103; an
-        // ungapped search has no gapped kernels.
-        for option in ["-xdrop_gap", "-xdrop_gap_final"] {
-            let error = parse(&[option, "4.2e8"]).resolve().unwrap_err();
+        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
+        // preliminary X-drop at every mode, the final one only in mode 0 (the redo of modes 1 to 3
+        // converts its own at the scaled costs); an ungapped search has no gapped kernels.
+        for extra in [
+            &["-xdrop_gap", "4.2e8"][..],
+            &["-xdrop_gap", "4.2e8", "-comp_based_stats", "2"],
+            &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
+        ] {
+            let error = parse(extra).resolve().unwrap_err();
             assert!(
-                format!("{error:#}").starts_with(&format!("an {option} of 420000000.0 bits")),
-                "{option}: {error:#}"
+                format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
+                "{extra:?}: {error:#}"
+            );
+        }
+        for cbs in ["1", "2", "3"] {
+            assert!(
+                parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
+                    .resolve()
+                    .is_ok()
             );
         }
         assert!(

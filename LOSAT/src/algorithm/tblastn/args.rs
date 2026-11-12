@@ -673,12 +673,16 @@ impl TblastnArgs {
                 gap_open,
                 gap_extend,
             });
+            // The final X-drop reaches the unscaled `ALIGN_EX` only without the
+            // composition-based redo: mode 0, or IDENTITY's reset (`search_settings`).
             crate::core::x_drop::check_gapped_x_dropoffs(
                 "TBLASTN",
                 (xdrop_gap, xdrop_gap_final),
                 crate::core::x_drop::gapped_x_dropoffs(xdrop_gap, xdrop_gap_final, gapped.lambda),
-                gap_open,
-                gap_extend,
+                (gap_open, gap_extend),
+                composition_mode
+                    == crate::blastinput::app::CompositionMode::NoCompositionBasedStats
+                    || matrix_name.eq_ignore_ascii_case("identity"),
             )?;
         }
         Ok(ResolvedTblastnArgs {
@@ -1286,12 +1290,25 @@ mod tests {
                 "{value}: {error:#}"
             );
         }
-        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103.
-        for (option, value) in [("-xdrop_gap", "4.2e8"), ("-xdrop_gap_final", "4.2e8")] {
-            let error = parse(&[option, value]).unwrap().resolve().unwrap_err();
+        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
+        // preliminary X-drop at every mode, the final one only without the redo (mode 0, or
+        // IDENTITY's reset).
+        for extra in [
+            &["-xdrop_gap", "4.2e8"][..],
+            &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
+        ] {
+            let error = parse(extra).unwrap().resolve().unwrap_err();
             assert!(
-                format!("{error:#}").starts_with(&format!("an {option} of 420000000.0 bits")),
-                "{option}: {error:#}"
+                format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
+                "{extra:?}: {error:#}"
+            );
+        }
+        for cbs in ["1", "2", "3"] {
+            assert!(
+                parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
+                    .unwrap()
+                    .resolve()
+                    .is_ok()
             );
         }
     }

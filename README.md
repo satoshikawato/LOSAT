@@ -457,7 +457,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-use_sw_tback`: `blastp`, `blastx`.
 - `-max_intron_length`: `tblastn`.
 - `-window_size 0`: `tblastn`, `tblastx`.
-- A gapped X-drop (`-xdrop_gap`, `-xdrop_gap_final`) whose raw score makes the sizes of NCBI's gapped alignment kernels leave 32-bit integers (about 4.1e8 bits and more with BLOSUM62 11/1; NCBI's arithmetic overflows): `blastp`, `blastx`, `tblastn`.
+- A gapped X-drop whose raw score makes the sizes of NCBI's gapped alignment kernels leave 32-bit integers (about 4.14e8 bits and more with BLOSUM62 11/1; NCBI's arithmetic overflows): `-xdrop_gap` at every `-comp_based_stats`, and `-xdrop_gap_final` with `-comp_based_stats 0` (the redo of modes 1 to 3 runs with its own X-drop): `blastp`, `blastx`, `tblastn`.
 - `-ungapped`: `blastp`, `tblastn`.
 - `-strand` and `-sum_stats`: `tblastx`.
 - `-best_hit_overhang` and `-best_hit_score_edge`: all five programs.

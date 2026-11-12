@@ -146,7 +146,7 @@ On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can
 
 ## Quick Start
 
-Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `makeblastdb`, `blastdbcmd` and `rpsbproc` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. It stops without changing anything if a file of one of these names is already there, such as NCBI's own program.
+Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `makeblastdb`, `blastdbcmd`, `dustmasker` and `rpsbproc` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. It stops without changing anything if a file of one of these names is already there, such as NCBI's own program.
 
 LOSAT adopts the standard NCBI single-dash command-line syntax:
 
@@ -507,7 +507,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-input_type blastdb`, `asn1_txt` and `asn1_bin` (`fasta` works).
 
 **Programs LOSAT does not provide**
-- `rpstblastn`, `deltablast`, `makeprofiledb`, `blast_formatter`, `blastdb_aliastool`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastdbcheck`, `blastn_vdb`, `tblastn_vdb`, `makembindex`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh`, `cleanup-blastdb-volumes.py`.
+- `rpstblastn`, `deltablast`, `makeprofiledb`, `blast_formatter`, `blastdb_aliastool`, `segmasker`, `windowmasker`, `convert2blastmask`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastdbcheck`, `blastn_vdb`, `tblastn_vdb`, `makembindex`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh`, `cleanup-blastdb-volumes.py`.
 
 **Out of scope** (they need NCBI's servers or its GI / IPG databases)
 - `-remote` and `-entrez_query`: all programs.

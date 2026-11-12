@@ -22,15 +22,12 @@ mod retrieve;
 mod taxonomy;
 
 use std::ffi::OsString;
-use std::fs::File;
 use std::io::Write;
 
-use crate::blastinput::ncbi_environment::{
-    application_start_of_process, diag_target, log_file, preparse, DiagTarget, Preparsed,
-};
+use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::ncbi_app::args::Args;
+use crate::ncbi_app::{Diag, Tool};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
-
-use args::ArgsError;
 
 /// The name in LOSAT's refusals.
 const PROGRAM: &str = "BLASTDBCMD";
@@ -45,218 +42,46 @@ const PROGRAM: &str = "BLASTDBCMD";
 /// argument errors print.
 const HELP: &str = include_str!("help.txt");
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
 // ```c++
-//     if (detailed) {
-//         x.AddDetails(arr);
-//     } else {
-//         arr.push_back(kEmptyStr);
-//         arr.push_back("Use '-help' to print detailed descriptions of command line arguments");
-//     }
+//     SetDiagPostLevel(eDiag_Warning);
+//     SetDiagPostPrefix("blastdbcmd");
 // ```
-/// The text of `blastdbcmd -h`: the usage and the description, then NCBI's pointer to `-help`.
-fn short_usage() -> String {
-    let end = HELP.find("OPTIONAL ARGUMENTS").unwrap_or(HELP.len());
-    format!(
-        "{}Use '-help' to print detailed descriptions of command line arguments\n",
-        &HELP[..end]
-    )
-}
+/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` is that of BLAST+
+/// (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the prefix `[blastdbcmd]`.
+static TOOL: Tool = Tool {
+    program: "blastdbcmd",
+    refusal_name: PROGRAM,
+    version: crate::NCBI_BLAST_VERSION,
+    help: HELP,
+    descs: args::DESCS,
+    dependencies: args::dependencies,
+    post_prefix: Some("blastdbcmd"),
+};
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`) on the process's
 /// standard streams; the exit status.
 pub fn run(words: &[OsString]) -> i32 {
-    let stdout = std::io::stdout();
-    let stderr = std::io::stderr();
-    let mut out = stdout.lock();
-    let mut err = stderr.lock();
-    let status = run_with(words, &mut out, &mut err);
-    let _ = out.flush();
-    let _ = err.flush();
-    status
+    crate::ncbi_app::run(&TOOL, words, run_body)
 }
 
-struct Diag<'a> {
-    target: DiagTarget,
-    stderr: &'a mut dyn Write,
+/// The run of one command line, its output on `out` and its errors on `err`; the exit status
+/// (NCBI's application around blastdbcmd's `Run`: `ncbi_app::run_with`).
+pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    crate::ncbi_app::run_with(&TOOL, words, out, err, run_body)
 }
 
-impl Diag<'_> {
-    /// Posts one diagnostic line (`LOG_POST`, `ERR_POST`).
-    fn post(&mut self, line: &str) {
-        self.target
-            .write_text(format!("{line}\n").as_bytes(), self.stderr);
-    }
-
-    /// LOSAT's refusal: a diagnostic line, exit status 1.
-    fn refuse(&mut self, reason: &str) -> i32 {
-        self.post(&format!("Error: {reason}"));
-        1
-    }
-
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-    // ```c++
-    //     SetDiagPostLevel(eDiag_Warning);
-    //     SetDiagPostPrefix("blastdbcmd");
-    // ```
-    /// `ERR_POST(Error << message)` inside `Run`: the severity, the prefix of the
-    /// application, the message.
-    fn err_post(&mut self, message: &str) {
-        self.post(&format!("Error: [blastdbcmd] {message}"));
-    }
-
-    /// `err_post` of a message that is not UTF-8.
-    fn err_post_bytes(&mut self, message: &[u8]) {
-        let mut line = b"Error: [blastdbcmd] ".to_vec();
-        line.extend_from_slice(message);
-        self.post_bytes(&line);
-    }
-
-    /// `post` of a line that is not UTF-8.
-    fn post_bytes(&mut self, message: &[u8]) {
-        let mut line = message.to_vec();
-        line.push(b'\n');
-        self.target.write_text(&line, self.stderr);
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112
-// ```c++
-//     catch (const CArgException& e) {
-//         // Print USAGE and the exception error message
-//         if ( e.GetErrCode() != CArgException::eNoValue &&  m_ArgDesc.get() ) {
-//             x_AddDefaultArgs();
-//             string str;
-//             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fNoUsage) ) {
-//                 m_ArgDesc->PrintUsage(str);
-//                 cerr << str;
-//             }
-//             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fDupErrToCerr) ) {
-//                 CStreamDiagHandler* errh =
-//                     dynamic_cast<CStreamDiagHandler*>(GetDiagHandler());
-//                 if (!errh  ||  errh->GetStream() != &cerr) {
-//                     cerr << "Error in command-line arguments. "
-//                         "See error logs for more details." << endl;
-//                 }
-//             }
-//             ...
-//             cerr << string(72, '=') << endl << endl;
-//         }
-//         SetDiagPostAllFlags(eDPF_Severity);
-//         NCBI_REPORT_EXCEPTION_X(18, "", e);
-//         got_exception = true;
-//         exit_code = 1;
-//     }
-// ```
-/// The run of one command line, its output on `out` and its errors on `err`; the exit status.
+/// blastdbcmd's `Run` (`CBlastDBCmdApp::Run`) on the arguments that NCBI's reader read.
 ///
-/// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
-/// it cannot be opened), then `-version` is read, then the arguments; an argument error prints
-/// the usage and a line of `=` on stderr and NCBI's report of the exception as diagnostics.
 /// LOSAT's refusals come where NCBI would start the work they stand for, and before anything is
 /// written: the program's other uses after the arguments are read, the database where it is
 /// opened (after `-out` is opened, as NCBI's `Run` opens it first).
-pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    let Some(words) = words
-        .iter()
-        .map(|word| word.to_str().map(str::to_string))
-        .collect::<Option<Vec<String>>>()
-    else {
-        let _ = writeln!(
-            err,
-            "Error: a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, which \
-             is not supported by LOSAT's {PROGRAM}"
-        );
-        return 1;
-    };
-    let mut diag = Diag {
-        target: diag_target(log_file(&words)),
-        stderr: err,
-    };
-    // NCBI's application start (`ncbi_environment::ApplicationStart`), which the command line's
-    // entry has made: the file of `-logfile` gets the usage report's messages when NCBI opens it,
-    // before `-version`.
-    let start = application_start_of_process();
-    if let Some(start) = start {
-        start.write_log_setup(&mut diag.target);
-    }
-    let (words, dryrun) = match preparse(&words) {
-        Preparsed::Version => {
-            let _ = write!(
-                out,
-                "blastdbcmd: {}\n Package: LOSAT {}, output compatible with blast {}\n",
-                crate::NCBI_BLAST_VERSION,
-                env!("CARGO_PKG_VERSION"),
-                crate::NCBI_BLAST_RELEASE
-            );
-            return 0;
-        }
-        Preparsed::Refused(word) => return diag.refuse(&unsupported_option(word)),
-        Preparsed::Words { conffile: true, .. } => {
-            return diag.refuse(&unsupported_option("-conffile"))
-        }
-        Preparsed::Words { words, dryrun, .. } => (words, dryrun),
-    };
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit` loads the
-    // configuration before the arguments are read; quoted at `ApplicationStart`)
-    // ```c++
-    // void CNcbiApplicationAPI::x_TryInit(EAppDiagStream diag, const char* conf)
-    // {
-    //     // Load registry from the config file
-    //     if ( conf ) {
-    //         string x_conf(conf);
-    //         LoadConfig(*m_Config, &x_conf);
-    // ```
-    // The configuration's messages go where the diagnostics go; a `blastdbcmd.ini` that NCBI
-    // reports as malformed ends the run with exit status 2 (NCBI BLAST+ 2.17.0, g_reg probes
-    // `o2`, `inibad_null`).
-    if let Some(start) = start {
-        match start.write_config_load(&mut diag.target, diag.stderr) {
-            Ok(None) => {}
-            Ok(Some(status)) => return status,
-            Err(reason) => return diag.refuse(&reason),
-        }
-    }
-    let args = match args::parse(&words) {
-        Ok(args) => args,
-        Err(ArgsError::Usage) => {
-            let _ = out.write_all(short_usage().as_bytes());
-            return 0;
-        }
-        Err(ArgsError::Help) => {
-            let _ = out.write_all(HELP.as_bytes());
-            return 0;
-        }
-        Err(ArgsError::Invalid { code, messages }) => {
-            // `eNoValue` (which prints no usage) is not raised by this reader. The diagnostics
-            // of a `-logfile` go to a stream that is not `cerr`: NCBI then says where they are.
-            let _ = diag.stderr.write_all(short_usage().as_bytes());
-            if !matches!(diag.target, DiagTarget::Stderr) {
-                let _ = writeln!(
-                    diag.stderr,
-                    "Error in command-line arguments. See error logs for more details."
-                );
-            }
-            let _ = write!(diag.stderr, "{}\n\n", "=".repeat(72));
-            let _ = diag.stderr.flush();
-            for message in &messages {
-                diag.post(&format!("Error: {message}"));
-            }
-            if let Some(last) = messages.last() {
-                diag.post(&format!("Error:  (CArgException::{code}) {last}"));
-            }
-            return 1;
-        }
-        Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
-    };
-    if dryrun {
-        return diag.refuse(&unsupported_option("-dryrun"));
-    }
-    let settings =
-        match crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastdbcmd") {
-            Ok(settings) => settings,
-            Err(reason) => return diag.refuse(&reason),
-        };
+fn run_body(
+    args: &Args,
+    settings: &ApplicationSettings,
+    out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
     let registry = match &settings.blastdb {
         Ok(value) => value.as_deref(),
         Err(reason) => return diag.refuse(&refusal(reason)),
@@ -266,43 +91,24 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
     //     try {
     //         CNcbiOstream& out = args["out"].AsOutputFile();
     // ```
-    let mut file;
-    let out: &mut dyn Write = match args.value("out").unwrap_or("-") {
-        "-" => out,
-        name => match File::create(name) {
-            Ok(created) => {
-                file = created;
-                &mut file
-            }
-            Err(_) => {
-                // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-620
-                // ```c++
-                // void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-                // {
-                //     if ( !m_Ios ) {
-                //         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-                //             "File is not accessible",AsString()));
-                //     }
-                // }
-                // ```
-                // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-                // ```c++
-                //     catch (const CArgException& e) {                                        \
-                //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-                //         exit_code = BLAST_INPUT_ERROR;                                      \
-                //     }                                                                       \
-                // ```
-                diag.post(&format!(
-                    "Command line argument error: {}",
-                    args::arg_message("out", "File is not accessible", name)
-                ));
-                return 1;
-            }
-        },
+    let mut out = match args.output_file("out", out) {
+        Ok(out) => out,
+        Err(error) => {
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
+            // ```c++
+            //     catch (const CArgException& e) {                                        \
+            //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
+            //         exit_code = BLAST_INPUT_ERROR;                                      \
+            //     }                                                                       \
+            // ```
+            diag.post(&format!("Command line argument error: {}", error.message()));
+            return 1;
+        }
     };
+    let out: &mut dyn Write = &mut out;
     let path = match SearchPath::from_environment(registry) {
         Ok(path) => path,
-        Err(error) => return database_error(&mut diag, error),
+        Err(error) => return database_error(diag, error),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
     // ```c++
@@ -316,7 +122,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         return 0;
     }
     if args.given("list") {
-        return list::list(&args, &path, &mut diag, out);
+        return list::list(args, &path, diag, out);
     }
     let name = args.value("db").unwrap_or("nr");
     let dbtype = args.value("dbtype").unwrap_or("guess");
@@ -342,7 +148,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         // of the type: a protein database the list fails on is then looked for as a
         // nucleotide one (probe J111 of line BDC: `No alias or index file found for
         // nucleotide database [db/p4]`).
-        let tax_ids = match taxonomy::tax_id_list(&args, &path, &mut diag) {
+        let tax_ids = match taxonomy::tax_id_list(args, &path, diag) {
             Ok(tax_ids) => tax_ids,
             Err(taxonomy::Ended(status)) => return status,
         };
@@ -356,32 +162,24 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         };
         let (db, _) = match open_database(name, dbtype, &path, &restrict) {
             Ok(opened) => opened,
-            Err(error) => return database_error(&mut diag, error),
+            Err(error) => return database_error(diag, error),
         };
         let dbtype_protein = dbtype == "prot";
-        return retrieve::process(
-            &db,
-            &args,
-            &path,
-            &mut diag,
-            out,
-            Some(&tax_ids),
-            dbtype_protein,
-        );
+        return retrieve::process(&db, args, &path, diag, out, Some(&tax_ids), dbtype_protein);
     }
     let (db, volumes) = match open_database(name, dbtype, &path, &|_| Ok(())) {
         Ok(opened) => opened,
-        Err(error) => return database_error(&mut diag, error),
+        Err(error) => return database_error(diag, error),
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, &args, &path, &mut diag, out);
+            return metadata::metadata(&db, name, args, &path, diag, out);
         }
         if args.given("tax_info") {
-            return taxonomy::tax_info(&db, &args, &path, &mut diag, out);
+            return taxonomy::tax_info(&db, args, &path, diag, out);
         }
         let protein = db.seqtype() == SeqType::Protein;
-        return retrieve::process(&db, &args, &path, &mut diag, out, None, protein);
+        return retrieve::process(&db, args, &path, diag, out, None, protein);
     }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
@@ -411,13 +209,8 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
     }
     match masks {
         Ok(_) => 0,
-        Err(error) => database_error(&mut diag, error),
+        Err(error) => database_error(diag, error),
     }
-}
-
-/// LOSAT's refusal of the option `word`.
-fn unsupported_option(word: &str) -> String {
-    format!("the NCBI BLAST+ option {word} is not supported by LOSAT's {PROGRAM}")
 }
 
 /// LOSAT's refusal of a database (`algorithm::common::database::refusal`).
@@ -623,7 +416,7 @@ mod tests {
 
     #[test]
     fn the_short_usage_is_the_head_of_the_help() {
-        let usage = short_usage();
+        let usage = crate::ncbi_app::short_usage(HELP);
         assert_eq!(usage.len(), 780);
         assert!(usage.starts_with("USAGE\n  blastdbcmd [-h] [-help] [-db dbname]"));
         assert!(usage.ends_with(

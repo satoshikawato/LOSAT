@@ -5,9 +5,9 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
 
+use crate::ncbi_app::args::Args;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
-use super::args::Args;
 use super::{refusal, Diag};
 
 /// The separator NCBI puts after a directory (`CDirEntry::GetPathSeparator`).

@@ -6,12 +6,13 @@ use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
 use crate::blastinput::db_filter::{string_to_int, NO_TAXONOMY_WARNING, TAXONOMY_FILE};
+use crate::ncbi_app::args::{arg_message, Args};
+use crate::ncbi_app::files::{input_lines, read_input_file, LineEnds};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
 use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
 use crate::seqdb::{SearchPath, SeqDb};
 
-use super::args::{self, Args};
 use super::{database_error, refusal, Diag};
 
 /// What ends the reading of the taxids before the database opens: the exit status, the
@@ -84,7 +85,7 @@ pub(super) fn tax_id_list(
         (Some(""), _) => Vec::new(),
         (Some(input), _) => input.split(',').map(|id| id.as_bytes().to_vec()).collect(),
         (None, Some(file)) => {
-            let Ok(bytes) = args::read_input_file("taxidlist", file) else {
+            let Ok(bytes) = read_input_file("taxidlist", file) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
                 // ```c++
                 //     catch (const CArgException& e) {                                        \
@@ -94,11 +95,11 @@ pub(super) fn tax_id_list(
                 // ```
                 diag.post(&format!(
                     "Command line argument error: {}",
-                    args::arg_message("taxidlist", "File is not accessible", file)
+                    arg_message("taxidlist", "File is not accessible", file)
                 ));
                 return Err(Ended(1));
             };
-            args::input_lines(&bytes, args::LineEnds::HOST)
+            input_lines(&bytes, LineEnds::HOST)
                 .into_iter()
                 .map(<[u8]>::to_vec)
                 .collect()

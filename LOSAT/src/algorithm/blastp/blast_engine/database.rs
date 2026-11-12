@@ -69,14 +69,6 @@ pub(super) use x_listed_lean::x_assert_same_titles_and_letters;
 pub(super) use x_listed_lean::x_bp_listed_lean;
 pub(super) use x_redo_db_subjects::XShownResidues;
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
-// ```c
-// #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
-// ```
-/// The length that a database answers for its shortest sequence
-/// (`BlastSeqSrcGetMinSeqLen`, seqdbimpl.cpp:128-136).
-pub(super) const BLAST_SEQSRC_MINLENGTH: i32 = 10;
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
 // ```c
 // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
@@ -204,13 +196,11 @@ impl BlastpDatabase {
     // }
     // ```
     /// The shortest sequence length of the preliminary hit cutoff (`BlastSeqSrcGetMinSeqLen`,
-    /// `min_subject_length` of `BLAST_GapAlignSetUp`): `BLAST_SEQSRC_MINLENGTH` for a whole
-    /// database, the scanned shortest length with a list (line DI-8: `SeqDb::min_length`).
+    /// `min_subject_length` of `BLAST_GapAlignSetUp`): `CSeqDB::GetMinLength`
+    /// (`SeqDb::min_length`: the alias files' `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH`
+    /// without a list, the scanned shortest length with one, line DI-8).
     pub(super) fn cutoff_subject_length(&self) -> i32 {
-        match self.db.min_length() {
-            Some(shortest) => i32::try_from(shortest).unwrap_or(i32::MAX),
-            None => BLAST_SEQSRC_MINLENGTH,
-        }
+        self.db.min_length()
     }
 
     /// The total length the statistics read (`SeqDb::statistics_numbers`).

@@ -2018,24 +2018,30 @@ pub(super) fn walk_title(
 // ```
 // Every volume a node names is in the volume set (`volumes_in_order` takes them all), so
 // `GetVol` finds it; a volume that several nodes name is accumulated once per node.
-/// NCBI's `WalkNodes` with a walker whose key is `key`: `add_string` takes the value of a node
-/// that has the key (the walk does not go below that node), `accumulate` the path of each
-/// volume of the nodes without it. The first exception of `add_string` ends the walk, as the
-/// exception of `AddString` leaves NCBI's.
-fn walk_nodes(
-    node: &AliasNode,
+/// What NCBI's `WalkNodes` hands its walker: the value of a node that has the walker's key
+/// (`AddString`; the walk does not go below that node) or a volume of a node without it
+/// (`Accumulate`).
+enum Reached<'a> {
+    Value(&'a [u8]),
+    Volume(&'a str),
+}
+
+/// NCBI's `WalkNodes` with a walker whose key is `key`: `visit` takes what the walk reaches in
+/// NCBI's order. The first exception of `visit` ends the walk, as the exception of `AddString`
+/// leaves NCBI's.
+fn walk_nodes<'a>(
+    node: &'a AliasNode,
     key: &str,
-    add_string: &mut dyn FnMut(&[u8]) -> Result<(), NcbiException>,
-    accumulate: &mut dyn FnMut(&str),
+    visit: &mut dyn FnMut(Reached<'a>) -> Result<(), NcbiException>,
 ) -> Result<(), NcbiException> {
     if let Some(value) = node.value(key) {
-        return add_string(value);
+        return visit(Reached::Value(value));
     }
     for subnode in &node.subnodes {
-        walk_nodes(subnode, key, add_string, accumulate)?;
+        walk_nodes(subnode, key, visit)?;
     }
     for volume in &node.vol_names {
-        accumulate(volume);
+        visit(Reached::Volume(volume))?;
     }
     Ok(())
 }
@@ -2068,6 +2074,20 @@ pub(super) struct AliasTotals {
     /// `CSeqDBAliasNode::GetTotalLengthStats`: `STATS_TOTLEN`, 0 for a branch of volumes
     /// alone.
     pub stats_totlen: Result<u64, NcbiException>,
+}
+
+impl Default for AliasTotals {
+    /// The walks of a tree without the keys and without volumes (a placeholder until
+    /// `walk_totals` runs).
+    fn default() -> Self {
+        Self {
+            nseq: Ok(0),
+            length: Ok(0),
+            min_seq_length: Ok(0),
+            stats_nseq: Ok(0),
+            stats_totlen: Ok(0),
+        }
+    }
 }
 
 impl AliasTotals {
@@ -2153,59 +2173,51 @@ impl AliasTotals {
 /// `STATS_TOTLEN`: `StringToUInt8`; `MIN_SEQ_LENGTH`: `StringToUInt`, read as an `int`).
 pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&str) -> (u32, u64)) -> AliasTotals {
     let mut nseq: i64 = 0;
-    let nseq = walk_nodes(
-        root,
-        "NSEQ",
-        &mut |value| {
-            nseq = nseq.wrapping_add(string_to_int8(value, 0)?);
-            Ok(())
-        },
-        &mut |path| nseq = nseq.wrapping_add(i64::from(volume(path).0)),
-    )
+    let nseq = walk_nodes(root, "NSEQ", &mut |reached| {
+        let add = match reached {
+            Reached::Value(value) => string_to_int8(value, 0)?,
+            Reached::Volume(path) => i64::from(volume(path).0),
+        };
+        nseq = nseq.wrapping_add(add);
+        Ok(())
+    })
     .map(|()| nseq);
     let mut length: u64 = 0;
-    let length = walk_nodes(
-        root,
-        "LENGTH",
-        &mut |value| {
-            length = length.wrapping_add(string_to_uint8(value)?);
-            Ok(())
-        },
-        &mut |path| length = length.wrapping_add(volume(path).1),
-    )
+    let length = walk_nodes(root, "LENGTH", &mut |reached| {
+        let add = match reached {
+            Reached::Value(value) => string_to_uint8(value)?,
+            Reached::Volume(path) => volume(path).1,
+        };
+        length = length.wrapping_add(add);
+        Ok(())
+    })
     .map(|()| length);
     let mut min = i32::MAX;
-    let min_seq_length = walk_nodes(
-        root,
-        "MIN_SEQ_LENGTH",
-        &mut |value| {
-            min = min.min(string_to_uint(value)? as i32);
-            Ok(())
-        },
-        &mut |_| min = min.min(0),
-    )
+    let min_seq_length = walk_nodes(root, "MIN_SEQ_LENGTH", &mut |reached| {
+        // `int new_min = NStr::StringToUInt(value)`: a value of 2^31 or more is a negative `int`.
+        let new_min = match reached {
+            Reached::Value(value) => string_to_uint(value)? as i32,
+            Reached::Volume(_) => 0,
+        };
+        min = min.min(new_min);
+        Ok(())
+    })
     .map(|()| min);
     let mut stats_nseq: i64 = 0;
-    let stats_nseq = walk_nodes(
-        root,
-        "STATS_NSEQ",
-        &mut |value| {
+    let stats_nseq = walk_nodes(root, "STATS_NSEQ", &mut |reached| {
+        if let Reached::Value(value) = reached {
             stats_nseq = stats_nseq.wrapping_add(string_to_int8(value, 0)?);
-            Ok(())
-        },
-        &mut |_| {},
-    )
+        }
+        Ok(())
+    })
     .map(|()| stats_nseq);
     let mut stats_totlen: u64 = 0;
-    let stats_totlen = walk_nodes(
-        root,
-        "STATS_TOTLEN",
-        &mut |value| {
+    let stats_totlen = walk_nodes(root, "STATS_TOTLEN", &mut |reached| {
+        if let Reached::Value(value) = reached {
             stats_totlen = stats_totlen.wrapping_add(string_to_uint8(value)?);
-            Ok(())
-        },
-        &mut |_| {},
-    )
+        }
+        Ok(())
+    })
     .map(|()| stats_totlen);
     AliasTotals {
         nseq,

@@ -136,7 +136,7 @@ const SUPER_WORDS: usize = 8;
 impl OidFilter {
     /// The filter of the OIDs whose bits are set in `words` (bits at `num_oids` and above
     /// are cleared).
-    fn new(mut words: Vec<u64>, num_oids: u32) -> Self {
+    pub(super) fn new(mut words: Vec<u64>, num_oids: u32) -> Self {
         words.resize((num_oids as usize).div_ceil(64), 0);
         if !num_oids.is_multiple_of(64) {
             if let Some(last) = words.last_mut() {
@@ -1650,9 +1650,10 @@ impl SeqDb {
         }
     }
 
-    /// Whether the database is restricted by a list ([`SeqDb::restrict`]).
+    /// Whether the database is restricted by a list ([`SeqDb::restrict`]); the alias files'
+    /// ranges alone do not make it so.
     pub fn is_restricted(&self) -> bool {
-        self.filter.is_some()
+        self.list_applied
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:275-286
@@ -2143,7 +2144,7 @@ impl SeqDb {
             ids
         } else {
             if list.file.info.db_vol_length > 0
-                && list.file.info.db_vol_length != self.whole_total_length
+                && list.file.info.db_vol_length != self.volume_set_length
             {
                 warnings.push(ListWarning::Posted(DB_INFO_WARNING.to_string()));
             }
@@ -2406,14 +2407,34 @@ impl SeqDb {
         Ok(())
     }
 
-    /// Makes `words` (bit `oid` set for an included OID) the database's OID set: the
-    /// ordinal ids, NCBI's scanned totals and the definition lines `rule` keeps.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:100-112
+    // ```c++
+    //     if (gi_list.NotEmpty()) {
+    //         x_ApplyUserGiList(*gi_list);
+    //     }
+    //     else if (neg_list.NotEmpty()) {
+    //         x_ApplyNegativeList(*neg_list, lmdb_set.IsBlastDBVersion5());
+    //     }
+    //     else if (lmdb_set.IsBlastDBVersion5()) {
+    //     ...
+    // ```
+    // The user list narrows the OID list of the alias files' ranges (`x_ApplyUserGiList`
+    // intersects `m_AllBits`; a negative list clears bits of it): an OID is included when both
+    // include it. NCBI's `CSeqDBImpl` then scans the totals of the included OIDs.
+    /// Makes `words` (bit `oid` set for an OID the list includes) and the alias files' ranges
+    /// the database's OID set: the ordinal ids, NCBI's scanned totals and the definition lines
+    /// `rule` keeps.
     fn apply_filter(
         &mut self,
-        words: Vec<u64>,
+        mut words: Vec<u64>,
         num_oids: u32,
         rule: Option<DeflineRule>,
     ) -> Result<(), SeqDbError> {
+        if let Some(mask) = &self.alias_mask {
+            for (word, range) in words.iter_mut().zip(mask) {
+                *word &= range;
+            }
+        }
         let filter = OidFilter::new(words, num_oids);
         let (total_length, max_length, min_length) = self.scan_totals(&filter)?;
         if let Some(rule) = rule.map(Arc::new) {
@@ -2421,21 +2442,18 @@ impl SeqDb {
                 volume.set_defline_rule(Arc::clone(&rule));
             }
         }
-        // OID 0 is the first OID of the first volume that has any.
-        let first_volume = self.volumes.iter().find(|volume| volume.num_oids() > 0);
-        self.empty_list_first_length = match first_volume {
-            Some(volume) if filter.count() == 0 => Some(match self.seqtype {
-                SeqType::Protein => u64::from(volume.protein_length(0)?),
-                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as u64,
-            }),
-            _ => None,
-        };
+        // `x_ScanTotals` counts the included OIDs in an `int` (the volume set holds fewer than
+        // 2^31 OIDs: `open_tree`) and keeps the shortest length without the `<= 0` fallback.
         self.num_seqs = filter.count();
-        self.total_length = total_length;
-        self.max_length = max_length;
-        self.min_length = min_length;
+        self.counts = super::Counts {
+            num_seqs: filter.count() as i32,
+            total_length,
+            max_length,
+            min_length: min_length as i32,
+        };
+        self.list_applied = true;
         self.filter = Some(Box::new(filter));
-        Ok(())
+        self.update_first_oid_length()
     }
 
     /// The database restricted to the OIDs that `keep` takes, as a list that names them does:

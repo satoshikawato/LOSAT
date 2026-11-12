@@ -258,8 +258,8 @@ impl<'a> XStreamDb<'a> {
         kept.or_else(|| x_check_whole(self.db).err())
     }
 
-    /// The scanned shortest length with a list (`SeqDb::min_length`), `None` for a whole database.
-    pub(crate) fn min_length(&self) -> Option<u32> {
+    /// `CSeqDB::GetMinLength` (`SeqDb::min_length`).
+    pub(crate) fn min_length(&self) -> i32 {
         self.db.min_length()
     }
 

@@ -700,10 +700,12 @@ fn read_registry_with(bytes: &[u8], layer: Layer, ends: LineEnds) -> Result<Regi
 /// ```
 /// `in_path` is empty (`error_reading_post`). `SplitInTwo` with no flag cuts at the first `=`. A
 /// comment changes no entry. `Set` keeps no entry before the first section (`IRWRegistry::Set`,
-/// ncbireg.cpp:833-837: the section "" is not a name). The warning of a repeated entry is not
-/// written: a release build posts nothing below `Error` (`CDiagBuffer::sm_PostSeverity`,
-/// ncbidiag.cpp:3975-3979), and NCBI 2.17.0 writes nothing for a repeated `[BLAST] BLASTDB` in
-/// `.ncbirc`, in its `-logfile` neither (g_reg probes `multi`, `multi_log`). The values of
+/// ncbireg.cpp:833-837: the section "" is not a name). The read records each repeated entry
+/// (`RepeatedEntry`), whose warning the application start does not write: a release build posts
+/// nothing below `Error` there (`CDiagBuffer::sm_PostSeverity`, ncbidiag.cpp:3975-3979), and NCBI
+/// 2.17.0 writes nothing for a repeated `[BLAST] BLASTDB` in `.ncbirc`, in its `-logfile` neither
+/// (g_reg probes `multi`, `multi_log`). A read while the program runs writes it (the registry of
+/// blastn's `-window_masker_taxid`, `ncbi_environment::window_masker_ncbirc`). The values of
 /// `[NCBI] .Inherits` that NCBI joins are kept as separate entries: no program of LOSAT reads the
 /// entry, which makes NCBI read further files (`ncbi_environment` refuses it).
 fn read_lines(data: &[u8], ends: LineEnds) -> Result<RegistryRead, String> {

@@ -16,6 +16,9 @@ pub const STREAM_DIAGNOSTICS: u32 = 3;
 /// The output of the argv's own `-outfmt`: a format besides 0, 6 and 7, or 6 or 7 with fields
 /// (docs/web/abi_v2.md §5, §7).
 pub const STREAM_CUSTOM: u32 = 4;
+/// The inflated bytes of a compressed source file (`inflate_chunk`, `inflate_end`;
+/// docs/web/abi_v2.md §4, §5).
+pub const STREAM_INFLATED: u32 = 5;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "losat_host")]

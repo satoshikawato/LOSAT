@@ -120,6 +120,17 @@ pub struct PsiblastArgs {
     /// round (NCBI's `CLocalDbAdapter` of the first round searches every later one too).
     #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
+    // ```c++
+    //     if (!m_IsMapper) {
+    //         arg_desc.SetCurrentGroup("Statistical options");
+    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
+    //                                 "Effective length of the database ",
+    //                                 CArgDescriptions::eInt8);
+    //     }
+    // ```
+    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
+    pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
     // ```c++
     //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
@@ -142,17 +153,6 @@ pub struct PsiblastArgs {
         help = "Should the query and subject defline(s) be parsed?"
     )]
     pub parse_deflines: bool,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
-    // ```c++
-    //     if (!m_IsMapper) {
-    //         arg_desc.SetCurrentGroup("Statistical options");
-    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
-    //                                 "Effective length of the database ",
-    //                                 CArgDescriptions::eInt8);
-    //     }
-    // ```
-    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
-    pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
     // ```c++
     //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",

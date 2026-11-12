@@ -1,16 +1,16 @@
 import { createHash } from 'node:crypto';
-import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { MEMORY_FULL_MESSAGE, RESULTS_REMOVED_MESSAGE, StorageRemovedError } from '../../src/infra/data/block-store';
 import { CUSTOM_OUTPUT } from '../../src/domain/output-format';
 import { DataService, STORED_CHECK_READS, type DataServiceDeps } from '../../src/infra/data/data-service';
-import { compressionOfName, plainName } from '../../src/infra/data/inflate';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
+import type { Compression, FileInflater } from '../../src/ports/inflate';
 import type { RecordScanner } from '../../src/ports/scan';
+import { NodeInflater } from './support/node-inflater';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -22,6 +22,7 @@ function service(overrides: Partial<DataServiceDeps> & { store?: MemoryBlockStor
   const data = new DataService({
     store,
     scanner: new FakeScanner(),
+    inflater: new NodeInflater(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,
@@ -407,107 +408,112 @@ describe('DataService checkStoredResults', () => {
   });
 });
 
-describe('DataService sources named .gz or .zst', () => {
-  const A = '>a one\nACGT\n';
-  const B = '>b two\nGGCC\nTT\n';
-  const RECORDS = [
-    ['a', 4],
-    ['b', 6],
-  ];
-  const bytes = (base64: string) => Buffer.from(base64, 'base64');
-  const A_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n';
-  const AB_TEXT = A_TEXT + '>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
-  // pzstd output: a skippable frame, then one frame.
-  const PZSTD =
-    'UCpNGAQAAAA/AAAAKLUv/QRYlQEAhAI+YQpBQ0dUQUFBQ0NDR0dHVFRUCj5iClRUVFRHR0dHQ0NDQ0FBQUEKAgCYibw/ZwTZFtvJ';
+describe('DataService sources named .gz, .bz2 or .zst (the inflation port)', () => {
+  const MIB = 1024 * 1024;
 
-  const formats = [
-    { suffix: 'gz', label: 'gzip', pack: (t: string) => gzipSync(t), two: () => Buffer.concat([gzipSync(A), gzipSync(B)]) },
-    { suffix: 'zst', label: 'zstd', pack: (t: string) => zstdCompressSync(t), two: () => Buffer.concat([zstdCompressSync(A), zstdCompressSync(B)]) },
-  ] as const;
-
-  for (const f of formats) {
-    const { pack, two } = f;
-    it(`inflates every part of a concatenated .${f.suffix} file and keeps the plain name`, async () => {
-      const { data } = service({ readChunkBytes: 5 });
-      const source = await data.addSource(new File([two()], `two.fa.${f.suffix}`));
-      expect(source).toEqual({ sourceId: 'token-1', name: 'two.fa', size: (A + B).length });
-      const revision = await data.indexSource(source.sourceId, 1);
-      expect(revision.records.map((r) => [r.id, r.length])).toEqual(RECORDS);
-    });
-
-    it(`takes the .${f.suffix} suffix in any case`, async () => {
-      const { data } = service();
-      const source = await data.addSource(new File([pack(A)], `x.FA.${f.suffix.toUpperCase()}`));
-      expect(source).toMatchObject({ name: 'x.FA', size: A.length });
-    });
-
-    it(`refuses a file named .${f.suffix} that is not ${f.label} data`, async () => {
-      const { data } = service();
-      const message = `is named .${f.suffix} but is not ${f.label} data (`;
-      await expect(data.addSource(new File([A], `text.fa.${f.suffix}`))).rejects.toThrow(`text.fa.${f.suffix} ${message}`);
-      await expect(data.addSource(new File([], `empty.fa.${f.suffix}`))).rejects.toThrow(`empty.fa.${f.suffix} ${message}`);
-    });
+  /**
+   * An inflater that records its calls. Every name but those of `plain` is of `compression`; with
+   * no compression, every name is plain.
+   * Each pushed slice is "inflated" to itself and given to the sink in 1 MiB views of one buffer
+   * that the next view overwrites, as the engine's memory is valid only during the call.
+   */
+  function scripted(options: { compression?: Compression; plainName?: string; fail?: 'push' | 'end'; plain?: string } = {}) {
+    const calls: string[] = [];
+    const inflater: FileInflater = {
+      open: async (name, sink) => {
+        calls.push(`open ${name}`);
+        if (options.compression === undefined || name === options.plain) return undefined;
+        const failing = (step: 'push' | 'end') => {
+          if (options.fail === step) throw new Error(`the engine's sentence at ${step}`);
+        };
+        return {
+          compression: options.compression,
+          plainName: options.plainName ?? 'plain.fa',
+          push: async (bytes) => {
+            calls.push(`push ${bytes.length}`);
+            failing('push');
+            const buffer = new Uint8Array(MIB);
+            for (let offset = 0; offset < bytes.length; offset += MIB) {
+              const view = buffer.subarray(0, Math.min(MIB, bytes.length - offset));
+              view.set(bytes.subarray(offset, offset + view.length));
+              sink(view);
+              buffer.fill(0);
+            }
+          },
+          end: async () => {
+            calls.push('end');
+            failing('end');
+          },
+          cancel: async () => {
+            calls.push('cancel');
+          },
+        };
+      },
+    };
+    return { inflater, calls };
   }
 
-  it('refuses a file named .bz2 in any case and adds no source', async () => {
-    const { data } = service();
-    for (const name of ['x.fa.bz2', 'x.fa.BZ2', 'x.fa.Bz2']) {
-      await expect(data.addSource(new File([A], name))).rejects.toThrow(
-        `'${name}' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)`,
-      );
+  async function rejection(promise: Promise<unknown>): Promise<string> {
+    try {
+      await promise;
+    } catch (error) {
+      return (error as Error).message;
     }
-    // A refused file takes no token: the next source is the first.
-    expect(await data.addSource(new File([A], 'ok.fa'))).toMatchObject({ sourceId: 'token-1' });
-  });
-
-  it('inflates a pzstd file: a skippable frame and then a frame', async () => {
-    const { data } = service();
-    const source = await data.addSource(new File([bytes(PZSTD)], 'p.fa.zst'));
-    expect(source).toMatchObject({ name: 'p.fa', size: AB_TEXT.length });
-    expect(decoder.decode(await data.previewSource(source.sourceId, 1000))).toBe(AB_TEXT);
-  });
-
-  const BIG_LINE = '>r\n' + 'ACGT'.repeat(15) + '\n';
-  // 9 MiB of plain text: more than one 8 MiB slice of the file and more than one Blob part.
-  const BIG_TEXT = BIG_LINE.repeat(Math.ceil((9 * 1024 * 1024) / BIG_LINE.length));
-
-  for (const [suffix, pack] of [
-    ['gz', gzipSync],
-    ['zst', zstdCompressSync],
-  ] as const) {
-    it(`inflates a .${suffix} file read in several slices`, async () => {
-      const { data } = service();
-      const source = await data.addSource(new File([pack(BIG_TEXT)], `big.fa.${suffix}`));
-      expect(source).toMatchObject({ name: 'big.fa', size: BIG_TEXT.length });
-      const head = decoder.decode(await data.previewSource(source.sourceId, BIG_LINE.length * 2));
-      expect(head).toBe(BIG_LINE + BIG_LINE);
-    });
+    throw new Error('the promise resolved');
   }
 
-  it('names the compression and the plain file', () => {
-    expect(['a.gz', 'a.GZ', 'a.bz2', 'a.Bz2', 'a.zst', 'a.ZST', 'q.zstd', 'q.bz', 'q.gzip', '-'].map(compressionOfName)).toEqual([
-      'gzip',
-      'gzip',
-      undefined,
-      undefined,
-      'zstd',
-      'zstd',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
-    expect(['a.fa.gz', 'a.FA.Gz', 'a.fa.bz2', 'a.fa.zst', '.gz', '.bz2', '.zst', 'a.fa', 'q.zstd'].map(plainName)).toEqual([
-      'a.fa',
-      'a.FA',
-      'a.fa.bz2',
-      'a.fa',
-      'input',
-      '.bz2',
-      'input',
-      'a.fa',
-      'q.zstd',
-    ]);
+  it('keeps a file whose name the engine reads as plain as it is', async () => {
+    const { inflater, calls } = scripted();
+    const { data } = service({ inflater });
+    const file = new File([THREE], 'three.fa.gzip');
+    expect(await data.addSource(file)).toEqual({ sourceId: 'token-1', name: 'three.fa.gzip', size: file.size });
+    expect(calls).toEqual(['open three.fa.gzip']);
+  });
+
+  it('pushes the file in 8 MiB slices and keeps every inflated byte, copied, under the plain name', async () => {
+    const { inflater, calls } = scripted({ compression: 'zstd', plainName: 'big.fa' });
+    const { data } = service({ inflater });
+    // 17 MiB and 5 bytes: three slices and three Blob parts; each byte tells its MiB.
+    const text = new Uint8Array(17 * MIB + 5).map((_, i) => 0x41 + ((i / MIB) | 0));
+    const source = await data.addSource(new File([text], 'big.fa.zst'));
+    expect(source).toEqual({ sourceId: 'token-1', name: 'big.fa', size: text.length });
+    expect(calls).toEqual(['open big.fa.zst', `push ${8 * MIB}`, `push ${8 * MIB}`, `push ${MIB + 5}`, 'end', 'cancel']);
+    const kept = new Uint8Array(await data.previewSource(source.sourceId, text.length));
+    expect(kept.length).toBe(text.length);
+    expect(kept.every((byte, i) => byte === text[i])).toBe(true);
+  });
+
+  it("refuses a file with the engine's sentence, at a slice or at the end, and adds no source", async () => {
+    for (const fail of ['push', 'end'] as const) {
+      const { inflater, calls } = scripted({ compression: 'gzip', fail, plain: 'ok.fa' });
+      const { data } = service({ inflater });
+      expect(await rejection(data.addSource(new File([THREE], 'x.fa.gz')))).toBe(`the engine's sentence at ${fail}`);
+      expect(calls).toEqual(fail === 'push' ? ['open x.fa.gz', `push ${THREE.length}`, 'cancel'] : ['open x.fa.gz', `push ${THREE.length}`, 'end', 'cancel']);
+      // A refused file takes no token: the next source is the first.
+      expect(await data.addSource(new File([THREE], 'ok.fa'))).toMatchObject({ sourceId: 'token-1', name: 'ok.fa' });
+    }
+  });
+
+  it('ends an empty file without a slice: the engine gives its sentence at the end', async () => {
+    const { inflater, calls } = scripted({ compression: 'zstd', fail: 'end' });
+    const { data } = service({ inflater });
+    expect(await rejection(data.addSource(new File([], 'e.fa.zst')))).toBe("the engine's sentence at end");
+    expect(calls).toEqual(['open e.fa.zst', 'end', 'cancel']);
+  });
+
+  it('reads a file that the engine names bzip2 as it reads gzip and zstd', async () => {
+    const { inflater, calls } = scripted({ compression: 'bzip2', plainName: 'x.fa' });
+    const { data } = service({ inflater });
+    expect(await data.addSource(new File([THREE], 'x.fa.Bz2'))).toEqual({ sourceId: 'token-1', name: 'x.fa', size: THREE.length });
+    expect(calls).toEqual(['open x.fa.Bz2', `push ${THREE.length}`, 'end', 'cancel']);
+  });
+
+  it('frees the inflation of a file that cannot be read', async () => {
+    const { inflater, calls } = scripted({ compression: 'gzip' });
+    const { data } = service({ inflater });
+    const file = new File([THREE], 'gone.fa.gz');
+    file.slice = () => ({ arrayBuffer: () => Promise.reject(new Error('the file is gone')) }) as unknown as Blob;
+    expect(await rejection(data.addSource(file))).toBe('the file is gone');
+    expect(calls).toEqual(['open gone.fa.gz', 'cancel']);
   });
 });

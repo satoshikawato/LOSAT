@@ -94,9 +94,12 @@ authoritative, current guidance for agent behavior in LOSAT.
      NCBI's `-taxids` of the root's children). Seqid lists with `-db`: an
      accession stored under more than about 500 sequences of a version 5
      database selects its first sequence (NCBI's LMDB lookup fails with
-     `Accessions to Oids lookup error`). rpsbproc: PSSM-IDs of 2^31 and more are
+     `Accessions to Oids lookup error`). TBLASTX: a cutoff whose quotient
+     `K * searchsp / E` passes the range of a double keeps the finite cutoff of
+     `ln K + ln searchsp - ln E` (NCBI's undefined conversion gives a cutoff of
+     1; version 1.12). rpsbproc: PSSM-IDs of 2^31 and more are
      compared as signed 32-bit values without NCBI's `int` overflow, so every row
-     of the data is found (version 1.12). Deterministic NCBI results, even wrong-looking ones, are
+     of the data is found (version 1.13). Deterministic NCBI results, even wrong-looking ones, are
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections. A sequence that a seqid list keeps without a
      definition line (NCBI drops its hits from every report without notice)

@@ -273,3 +273,8 @@ db_oidr_interval	-infmt blastdb -in db/oidr -outfmt interval
 db_oidr_fasta	-infmt blastdb -in db/oidr -outfmt fasta
 db_oidr_maskinfo_asn1_text	-infmt blastdb -in db/oidr -outfmt maskinfo_asn1_text
 db_oidr_seqloc_asn1_text	-infmt blastdb -in db/oidr -outfmt seqloc_asn1_text
+# -conffile (line RG item E1 on dev: the command line's application start loads it in place of dustmasker.ini): conf/blastdb.ini sets [BLAST] BLASTDB=db, conf/malformed.ini has a line without '='. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-2.
+conf_blastdb	-infmt blastdb -in basic -conffile conf/blastdb.ini
+conf_blastdb_eq	-infmt blastdb -in basic -outfmt maskinfo_asn1_text -conffile=conf/blastdb.ini
+conf_malformed	-in in/basic.fa -conffile conf/malformed.ini
+conf_missing	-in in/basic.fa -conffile conf/missing.ini

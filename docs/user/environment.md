@@ -43,9 +43,10 @@ run:
 | `WINDOW_MASKER_PATH` | The directory, after the variable above. |
 | `[WINDOW_MASKER] WINDOW_MASKER_PATH` in `.ncbirc` | The directory, after both variables: the first `.ncbirc` on the search path, also when `<program>.ini` sets `[NCBI] DONT_USE_NCBIRC`; `NCBI_DONT_USE_NCBIRC` and `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` skip it. `<program>.ini`'s entry is not read. |
 
-A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search with NCBI's error at the first query batch the file cannot mask (exit status 3). NCBI BLAST+ reads `.ncbirc` again for the directory each time it masks a query batch, and each chunk of a batch that it splits; a malformed `.ncbirc` gives its message each time, with `[blastn]` after the error code, and the directory comes from the entries above the line it reports; LOSAT does the same. LOSAT refuses, before any output:
+The file may be in any of the four counts formats of `windowmasker` (optimized binary, binary, optimized ascii, ascii), as in NCBI BLAST+. A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search with NCBI's error at the first query batch the file cannot mask (exit status 3). NCBI BLAST+ reads `.ncbirc` again for the directory each time it masks a query batch, and each chunk of a batch that it splits; a malformed `.ncbirc` gives its message each time, with `[blastn]` after the error code, and the directory comes from the entries above the line it reports; LOSAT does the same. LOSAT refuses, before any output:
 
-- a counts file in the ascii or optimized ascii format there (NCBI BLAST+ reads them);
+- an ascii counts file whose unit size is 17 to 251 (NCBI BLAST+ masks with units that do not fit its 32-bit units, an undefined result);
+- an optimized ascii counts file whose hash parameters line (its third) leaves unread a value that NCBI BLAST+ then checks (the line ends, or a word before it is not a number: NCBI checks it uninitialized, an undefined result);
 - a `.ncbirc` that sets `[NCBI] .Inherits`;
 - a directory or path that is not UTF-8, and a current directory it cannot read.
 
@@ -85,9 +86,12 @@ messages, before the options are read: its report, then every message so far aga
 go to the standard error stream, and with `-logfile` as in NCBI BLAST+: those of the start to the
 standard error stream and into the file, the others into the file (`-logfile /dev/null` and
 `-logfile ""` discard them), except that blastn, blastp, blastx, tblastn and psiblast write the
-messages again to the standard error stream. (The search programs then refuse `-logfile` as they
-read their options.) `-conffile`, which would load another file in place of `<program>.ini`, is
-refused before the configuration is loaded. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+messages again to the standard error stream. The messages of the run go into the file in
+tblastx and rpsblast, and to the standard error stream in the other search programs, as in NCBI
+BLAST+. `-conffile FILE` loads FILE in place of `<program>.ini` (a name without a directory is
+looked for where `<program>.ini` is looked for, a name with one is that file); a FILE that is not
+a file ends the program with NCBI BLAST+'s message and exit status 255, before `-h`. rpsbproc
+refuses `-logfile` and `-conffile`. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
 a file that NCBI BLAST+ reports.
 

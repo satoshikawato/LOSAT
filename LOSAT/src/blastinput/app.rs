@@ -462,8 +462,8 @@ impl Program {
 ///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
 ///     }                                                                       \
 /// ```
-/// `NStr::TruncateSpaces` removes the characters of C's `isspace`, and `NStr::StringToInt`
-/// reads what `i32::from_str` reads.
+/// `NStr::TruncateSpaces` removes the characters of C's `isspace`; `NStr::StringToInt` is
+/// `ncbi_str::string_to_int` (its digits end at a NUL, as NCBI's do).
 pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
     let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
     let choice = spec.trim_matches(is_space);
@@ -483,7 +483,7 @@ pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
             .trim_matches(is_space)
             .to_string();
     }
-    let Ok(number) = choice.parse::<i32>() else {
+    let Ok(number) = crate::ncbi_str::string_to_int(choice.as_bytes(), 0) else {
         return Err(options_error(&format!(
             "'{choice}' is not a valid output format"
         )));

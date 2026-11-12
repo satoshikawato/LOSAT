@@ -3,6 +3,6 @@
   of a BLAST database (`-infmt blastdb`) and writes them in the nine `-outfmt` forms (`interval`,
   `acclist`, `fasta` with `-hard_masking`, `seqloc_asn1_bin`/`_text`/`_xml`,
   `maskinfo_asn1_bin`/`_text`/`_xml`), with `-parse_seqids`, `-window`, `-level`, `-linker`, `-out`,
-  `-logfile`, and NCBI's error messages and exit codes. NCBI's `makeblastdb -mask_data` reads its
+  `-logfile`, `-conffile`, and NCBI's error messages and exit codes. NCBI's `makeblastdb -mask_data` reads its
   `maskinfo_*` files. `losat --install-shims` links `dustmasker` too. blastn's query masking uses the
   same DUST code; its output does not change and it runs no slower.

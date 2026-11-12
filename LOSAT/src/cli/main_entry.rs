@@ -34,6 +34,22 @@ use crate::cli::{Cli, Commands};
 /// calls `api` instead.
 #[doc(hidden)]
 pub fn main_entry() -> Result<()> {
+    let result = run_main_entry();
+    // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
+    // the standard error went to the `-logfile` target (tblastx and rpsblast,
+    // `ncbi_environment::run_messages_follow_log`): written as `main`'s `Result` writes them,
+    // exit status 1. NCBI's errors are written by the run itself (`exit_on_native_error`), where
+    // NCBI writes them. Line RG DECISIONS 32.
+    if let Err(error) = &result {
+        if let Some(mut terminal) = crate::blastinput::ncbi_environment::terminal_stderr() {
+            let _ = writeln!(terminal, "Error: {error:?}");
+            std::process::exit(1);
+        }
+    }
+    result
+}
+
+fn run_main_entry() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
     // counterpart; it reads the clock only with LOSAT_TIMING.
     crate::utils::xtiming::start();
@@ -91,7 +107,8 @@ pub fn main_entry() -> Result<()> {
         .get(1)
         .and_then(|word| word.to_str())
         .filter(|word| crate::cli::ENTRY_NAMES.contains(word));
-    let start = program.map(crate::blastinput::ncbi_environment::start_application);
+    let start = program
+        .map(|program| crate::blastinput::ncbi_environment::start_application(program, &argv[2..]));
     if let Some(start) = start {
         match start.usage_report() {
             Ok(text) => {
@@ -153,9 +170,8 @@ pub fn main_entry() -> Result<()> {
     // ```
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
     // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
-    // makes F, with the usage report's messages. Of LOSAT's programs here only makeblastdb runs
-    // with it; the search programs refuse it as they read their arguments (decision D9), after
-    // the file is made, as NCBI makes it.
+    // makes F, with the usage report's messages. rpsbproc refuses it as it reads its arguments
+    // (line RG item E1c), after the file is made, as NCBI makes it.
     let mut target = match program {
         Some(_) => {
             use crate::blastinput::ncbi_environment::{diag_target, log_file};
@@ -178,13 +194,16 @@ pub fn main_entry() -> Result<()> {
         return Ok(());
     }
     // NCBI reads the other words of that scan there too (`ncbi_environment::preparse`): a full
-    // version is printed, and a `-conffile` file is loaded in place of `<program>.ini`. LOSAT
-    // refuses both (`cli::ncbi_toolkit_word_error`) before the configuration load.
+    // version is printed, which LOSAT refuses (`cli::ncbi_toolkit_word_error`) before the
+    // configuration load. The file of `-conffile` is that load's (`start_application`); rpsbproc
+    // refuses it (line RG item E1c).
     if let Some(program) = program {
         use crate::blastinput::ncbi_environment::{preparse, Preparsed};
         let refused = match preparse(&argv[2..]) {
             Preparsed::Refused(word) => Some(word),
-            Preparsed::Words { conffile: true, .. } => Some("-conffile"),
+            Preparsed::Words {
+                conffile: Some(_), ..
+            } if program == "rpsbproc" => Some("-conffile"),
             _ => None,
         };
         if let Some(word) = refused {
@@ -206,12 +225,24 @@ pub fn main_entry() -> Result<()> {
             Err(reason) => return Err(anyhow::Error::msg(reason)),
         }
     }
-    drop(target);
+    let program_name = program.map(str::to_string);
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match crate::cli::try_parse_from(argv) {
         Ok(cli) => cli,
         Err(error) => exit_on_parse_error(&error, argv_is_rpsbproc),
     };
+    // The messages of tblastx's and rpsblast's runs go where the diagnostics go
+    // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
+    // target from here, where NCBI's `Run` makes its handler. LOSAT's parser errors above stay on
+    // the standard error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1).
+    match program_name.as_deref() {
+        Some(name) if crate::blastinput::ncbi_environment::run_messages_follow_log(name) => {
+            if let Err(reason) = target.into_standard_error(name) {
+                return Err(anyhow::Error::msg(reason));
+            }
+        }
+        _ => drop(target),
+    }
     if startup_trace {
         eprintln!("[startup] after clap parse");
     }

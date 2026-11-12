@@ -2,42 +2,12 @@
 
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 
-/// `NStr::StringToInt` with the default flags: an optional sign and decimal digits, within
-/// the range of an `int`, and nothing else (no spaces); `None` where NCBI throws its
+/// `NStr::StringToInt` with the default flags (`ncbi_str::string_to_int`): an optional sign and
+/// decimal digits, within the range of an `int`, and nothing else (no spaces; the digits end at
+/// a NUL, as NCBI's `while (char ch = str[pos])` ends there); `None` where NCBI throws its
 /// `CStringException`.
-///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:635-643
-/// ```c
-/// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-/// {
-///     S2N_CONVERT_GUARD_EX(flags);
-///     Int8 value = StringToInt8(str, flags, base);
-///     if ( value < kMin_Int  ||  value > kMax_Int ) {
-///         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-///     }
-///     return (int) value;
-/// }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:810-862
-/// ```c
-///     // Determine sign
-///     bool sign = false;
-///     switch (str[pos]) {
-///     case '-':
-///         sign = true;
-///         /*FALLTHRU*/
-///     case '+':
-///         pos++;
-///         break;
-///     ...
-///     // Last checks
-///     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-///         S2N_CONVERT_ERROR_INVAL(Int8);
-///     }
-/// ```
-/// `i32::from_str` reads the same strings.
 pub fn ncbi_string_to_int(value: &std::ffi::OsStr) -> Option<i32> {
-    value.to_str()?.parse::<i32>().ok()
+    crate::ncbi_str::string_to_int(value.as_encoded_bytes(), 0).ok()
 }
 
 /// The query batch size of blastn from the environment variable `BATCH_SIZE` (0 when it
@@ -616,6 +586,9 @@ mod tests {
             ("+", None),
             ("1,000", None),
             ("0x10", None),
+            // NCBI reads up to a NUL (`while (char ch = str[pos])`, ncbistr.cpp:841).
+            ("12\u{0}x", Some(12)),
+            ("\u{0}12", None),
         ] {
             assert_eq!(ncbi_string_to_int(OsStr::new(text)), value, "{text:?}");
         }

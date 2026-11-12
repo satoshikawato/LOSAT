@@ -209,7 +209,6 @@ mod tests {
             (&["-version-full"], "-version-full"),
             (&["-version-full-xml"], "-version-full-xml"),
             (&["-version-full-json"], "-version-full-json"),
-            (&["-conffile", "x.ini"], "-conffile"),
             (&["-dryrun"], "-dryrun"),
         ] {
             assert_eq!(
@@ -225,6 +224,23 @@ mod tests {
                 "{line:?}"
             );
         }
+    }
+
+    // The file of `-conffile` is read by the command line's application start; the library API,
+    // which these runs are (no start), refuses it as blastdbcmd's does.
+    #[test]
+    fn conffile_is_refused_without_the_command_line_s_application_start() {
+        assert_eq!(
+            run_words(&["-conffile", "x.ini"]),
+            (
+                1,
+                String::new(),
+                format!(
+                    "Error: {}\n",
+                    crate::cli::toolkit_file_word_refusal("dustmasker", "-conffile")
+                )
+            )
+        );
     }
 
     // `s_StringToInt8` reads a hexadecimal value of a key without a constraint (NCBI 2.17.0:

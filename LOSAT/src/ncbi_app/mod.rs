@@ -274,7 +274,8 @@ pub(crate) type Body =
 /// the run with exit status 2: g_reg probes `o2`, `inibad_null`), then the arguments; an
 /// argument error prints the usage and a line of `=` on stderr and NCBI's report of the
 /// exception as diagnostics. LOSAT's refusals come where NCBI would start the work they stand
-/// for, before anything is written: `-conffile` and the full versions where NCBI reads them,
+/// for, before anything is written: `-conffile` without the command line's application start
+/// (which loads its file) and the full versions where NCBI reads them,
 /// `-xmlhelp` where the reader takes it, `-dryrun` after the arguments. Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
@@ -321,8 +322,15 @@ pub(crate) fn run_with(
             return 0;
         }
         Preparsed::Refused(word) => return diag.refuse(&tool.unsupported_option(word)),
-        Preparsed::Words { conffile: true, .. } => {
-            return diag.refuse(&tool.unsupported_option("-conffile"))
+        // The file of `-conffile` is the configuration of the command line's application start
+        // (`start_application`); the library API runs none (`cli::toolkit_file_word_refusal`).
+        Preparsed::Words {
+            conffile: Some(_), ..
+        } if start.is_none() => {
+            return diag.refuse(&crate::cli::toolkit_file_word_refusal(
+                tool.program,
+                "-conffile",
+            ))
         }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };

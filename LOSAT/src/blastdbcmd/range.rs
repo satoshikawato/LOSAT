@@ -2,8 +2,6 @@
 //! clipping of the range to a sequence (`CBlastDB_FastaFormatter::Write`,
 //! `CBlastDB_SeqFormatter::x_GetSeq`).
 
-use super::args;
-
 /// `TSeqRange` as blastdbcmd holds it: 0-based, both ends inclusive, `to` unset (`u32::MAX`)
 /// for an open end; `from` above `to` is the empty range (`TSeqRange::GetEmpty()`, the range
 /// of no `-range`).
@@ -66,17 +64,11 @@ pub(super) const NO_RANGE: SeqRange = SeqRange {
 //     return (int) value;
 // }
 // ```
-/// `NStr::StringToInt(text)`: the number, or the message of NCBI's exception (`Int8` for the
-/// text that is not a number or passes a 64-bit integer, `int` for one that fits 64 bits but
-/// not 32).
+/// `NStr::StringToInt(text)` (`ncbi_str::string_to_int`): the number, or the message of NCBI's
+/// exception as `GetMsg` gives it (`Int8` for the text that is not a number or passes a 64-bit
+/// integer, `int` for one that fits 64 bits but not 32).
 fn string_to_int(text: &str) -> Result<i32, String> {
-    let number = args::string_to_int8_message(text)?;
-    i32::try_from(number).map_err(|_| {
-        format!(
-            "Cannot convert string '{}' to int, overflow",
-            crate::ncbi_str::printable_string(text.as_bytes())
-        )
-    })
+    crate::ncbi_str::string_to_int(text.as_bytes(), 0).map_err(|error| error.get_msg().to_string())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:181-219

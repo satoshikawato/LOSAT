@@ -364,8 +364,8 @@ fn request(
 ) -> Result<bool, Stop> {
     let (mut config, kind) = init_search_request(args, source, diag)?;
     let line_length = args
-        .value("line_length")
-        .and_then(|value| value.parse::<u32>().ok())
+        .integer("line_length")
+        .and_then(|value| u32::try_from(value).ok())
         .unwrap_or(80);
     let mut formatter = match kind {
         OutputKind::Fasta => {
@@ -438,9 +438,12 @@ fn request(
         (None, None) => {
             if let Some(pig) = args.value("ipg") {
                 // The reader took a value of `int` (`AsInteger`).
-                let pig = pig
-                    .parse::<i32>()
-                    .map_err(|_| Stop::refused(format!("-ipg {pig} is not a number of 32 bits")))?;
+                let pig = args
+                    .integer("ipg")
+                    .and_then(|value| i32::try_from(value).ok())
+                    .ok_or_else(|| {
+                        Stop::refused(format!("-ipg {pig} is not a number of 32 bits"))
+                    })?;
                 run.ipg(pig, &config)
             } else if let Some(file) = args.value("ipg_batch") {
                 run.batch_pig(file, &mut config)

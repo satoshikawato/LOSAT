@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.11
+- Version: 1.12
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -18,7 +18,8 @@
   word of an `lcl|Subject_N` id, and the reported sequences of a database with parsed Seq-ids
   that are refused, line DBID);
   1.11 2026-11-04 (the makeblastdb exception: a `-in` file of several bzip2 streams or zstd
-  frames, line GZ; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  frames, line GZ; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.12 2026-11-12 (exception 8, a TBLASTX cutoff quotient past the range of a double, line PS)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -189,7 +190,7 @@ maintainer to accept it.
    `LOSAT/tests/db_search/taxfilter/root/taxonomy4blast.sqlite3` (whose root has the one
    child 131567), LOSAT's `-taxids 1` writes NCBI's bytes of `-taxids 131567`
    (`LOSAT/tests/db_taxid_root.rs`, rows `db.tf.bp.root.6` and `db.tf.tbn.root.6` of
-   `LOSAT/tests/db_search_manifest.tsv`, BLASTP and TBLASTN) and fewer than the whole
+   `LOSAT/tests/db_search_manifest/`, BLASTP and TBLASTN) and fewer than the whole
    database, whose two taxids outside the file are not descendants.
    Version 1.8 (line BDC's BDC3a, the same standing delegation): `losat blastdbcmd -taxids`
    and `-taxidlist` expand their taxids with the same walk. NCBI's `blastdbcmd -db
@@ -272,6 +273,34 @@ do not build it in the tabular formats, and NCBI and LOSAT agree there, as excep
    `makeblastdb -in parts.fna`; a single-stream file builds the same files as makeblastdb
    (`LOSAT/tests/cli_smoke.rs`, `makeblastdb_reads_compressed_inputs_as_makeblastdb_does`).
    Line GZ, DECISIONS 9 (Owner-delegated).
+
+## Approved exception (TBLASTX, a cutoff quotient past the range of a double, version 1.12)
+
+Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
+
+8. **A cutoff whose quotient `K * searchsp / E` is past the range of a double.** NCBI computes a
+   cutoff score as `(Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))`
+   (`blast_stat.c:4059-4061`, with `E` at least `kSmallFloat`). When the quotient overflows to
+   infinity, the conversion to `Int4` is undefined in C; on x86-64 it gives `INT_MIN`, so
+   `BLAST_Cutoffs` keeps a cutoff of 1, and TBLASTX's word cutoff (the smallest of the update
+   cutoff, the gap trigger and `cutoff_score_max`) becomes 1, so every ungapped HSP reaches the
+   sum statistics. TBLASTX asks this cutoff for an E-value of `1e-300` (`CUTOFF_E_TBLASTX`) over
+   `MIN(subject length, query length) * subject length` (`blast_parameters.c:348-363`), so with
+   the default options the quotient overflows once K times that search space passes about 1.8e11
+   (the largest double times `kSmallFloat`), which ordinary genome pairs reach. On E. coli K-12
+   MG1655 positions 1 to 1,200,000 against the 5.5 Mb E. coli O157:H7 Sakai genome (outfmt 6,
+   one thread), NCBI BLAST+ 2.17.0 stopped with SIGSEGV in `BLAST_LinkHsps` after 12 min 58 s
+   and 43.8 GB under a 48 GB address-space limit, and
+   wrote nothing in 4 hours under a 300 GB limit (91.8 GB resident after 1.5 hours). With an
+   extreme `-searchsp` and `-evalue` on a small input NCBI does write rows: 320 for a
+   6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue 1e-300`.
+   A valid result exists and can be checked: LOSAT keeps the finite cutoff of the mathematically
+   equal `ln K + ln searchsp - ln E` (`algorithm::tblastx::ncbi_cutoffs`), and on a nearby pair
+   whose quotient stays finite (the same 1.2 Mb query against a 2 Mb subject made of 30 kb of
+   the Sakai genome inside N) NCBI and LOSAT write the same 457 rows byte for byte. On the
+   genome pair above LOSAT writes 88,562 rows in 2 minutes, and on the small input 262 rows. The
+   maintainer's rule of 2026-10-10 (no reproduction of NCBI's undefined behaviour or integer
+   overflow) applies, also on these ordinary inputs.
 
 ## Reproduced as NCBI (rule 2)
 

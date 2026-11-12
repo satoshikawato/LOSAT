@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Freeze tests/fixtures/winmask_blastn/: blastn -window_masker_db with counts files that cannot be read.
+"""Freeze tests/fixtures/winmask_blastn/: blastn -window_masker_db with counts files that cannot be read,
+and -window_masker_taxid with the directories of counts files made at run time.
 
 NCBI BLAST+ is the comparison oracle only. The exception reports of these runs name the source tree of
 the NCBI build, so the frozen bytes come from the official Linux x64 release of BLAST+ 2.17.0
@@ -7,7 +8,10 @@ the NCBI build, so the frozen bytes come from the official Linux x64 release of 
 line NP M/DECISIONS.md 14); other builds differ in that path only.
 
 - make_counts(): writes the counts files of the cases to LOSAT/target/winmask_blastn/ from
-  tests/winmask/counts/mg1655_u9.obinary (tests/blastn_window_masker.rs makes the same bytes).
+  tests/winmask/counts/mg1655_u9.obinary, and the -window_masker_taxid directory taxid/ (562 and -1:
+  that file, 7: the unit size 17, 8: unreadable, 9606: a directory in its place, 10: ascii counts)
+  with the registry files home_rc/.ncbirc and cfg_inidont/{blastn.ini,.ncbirc}
+  (tests/blastn_window_masker.rs makes the same bytes).
 - freeze --ncbi-bin DIR: runs `DIR/blastn <args> -num_threads 1` from LOSAT/ for each row of
   cases.tsv with the row's environment and writes <case>.out, <case>.err and <case>.rc.
 
@@ -70,6 +74,27 @@ def make_counts() -> None:
     if not unreadable.exists():
         unreadable.write_bytes(data)
         unreadable.chmod(0)
+    # -window_masker_taxid: <dir>/<taxid>/wmasker.obinary, the directory named by the registry files
+    # relative to LOSAT/ (NCBI joins the strings and opens the path from the current directory).
+    rc = b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = target/winmask_blastn/taxid\n"
+    taxid_files = {
+        "taxid/562/wmasker.obinary": data,
+        "taxid/-1/wmasker.obinary": data,
+        "taxid/7/wmasker.obinary": files["unit17.obinary"],
+        "taxid/10/wmasker.obinary": files["ascii.counts"],
+        "home_rc/.ncbirc": rc,
+        "cfg_inidont/blastn.ini": b"[NCBI]\nDONT_USE_NCBIRC = 1\n",
+        "cfg_inidont/.ncbirc": rc,
+    }
+    for name, content in taxid_files.items():
+        (WORK / name).parent.mkdir(parents=True, exist_ok=True)
+        (WORK / name).write_bytes(content)
+    (WORK / "taxid/9606/wmasker.obinary").mkdir(parents=True, exist_ok=True)
+    unreadable = WORK / "taxid/8/wmasker.obinary"
+    if not unreadable.exists():
+        unreadable.parent.mkdir(parents=True, exist_ok=True)
+        unreadable.write_bytes(data)
+        unreadable.chmod(0)
 
 
 def read_cases() -> list[tuple[str, str, list[str]]]:
@@ -83,12 +108,14 @@ def read_cases() -> list[tuple[str, str, list[str]]]:
 
 
 def command_freeze(args) -> int:
-    if any(key in os.environ for key in REPORT_ENV) or (Path.home() / ".ncbirc").exists():
+    if any(key in os.environ for key in (*REPORT_ENV, "NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH")) \
+            or (Path.home() / ".ncbirc").exists():
         raise SystemExit(f"unset {REPORT_ENV} and remove ~/.ncbirc before freezing")
     make_counts()
     blastn = str(Path(args.ncbi_bin).resolve() / "blastn")
     for case, env_text, argv in read_cases():
-        env = {key: value for key, value in os.environ.items() if not key.startswith(("LOSAT_", "RAYON_"))}
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(("LOSAT_", "RAYON_")) and key != "WINDOW_MASKER_PATH"}
         for item in env_text.split():
             key, _, value = item.partition("=")
             env[key] = value

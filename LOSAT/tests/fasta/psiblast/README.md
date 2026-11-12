@@ -1,6 +1,6 @@
 # Inputs of the psiblast fixtures
 
-Used by the `db.ps.*` rows of `LOSAT/tests/db_search_manifest.tsv` (against `tests/db_search/paja`) and
+Used by the `db.ps.*` rows of `LOSAT/tests/db_search_manifest/psiblast.tsv` (against `tests/db_search/paja`) and
 the `ps.subj.*` rows of `LOSAT/tests/outfmt0_manifest.tsv` (against `-subject tests/fasta/PajaWSV.faa`).
 The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
 
@@ -47,3 +47,10 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   `ps5_three.faa`: `tk.faa`, `ps5_nohit2.faa`, `qnone` (36 G, no hits) and `rnd.faa` (the rounds start again for
   each query; outfmt 7 counts the rounds); `ps5_subj_one.faa` (BDT63550.1) and `ps5_subj_two.faa` (BDT63550.1 and
   BDT63556.1) of `tests/fasta/PajaWSV.faa`, subject sets of one and two records (the two-part table with `-subject`).
+- `ps5c_big.faa` (PS5c): YP_009220597.1 of `tests/fasta/WSSV.faa` (capsid protein, 6,077 letters), searched
+  against itself with `-searchsp 9223372036854775807 -evalue 1e-300`: a hit cutoff whose `K × searchsp / E`
+  is past the double (`ncbi_cutoffs::cutoff_score_from_evalue`).
+- `ps5c_qx.faa` (PS5c): one query of 30 X, which gives no Karlin-Altschul parameters (NCBI does not search its
+  batch); `ps5c_qx_tk.faa`: `ps5c_qx.faa`, then `tk.faa`. With `BATCH_SIZE=1` and a search that fails in its
+  setup (here the empty database `tests/seqdb/db/empty`), NCBI reports the first batch, then the error of the
+  second (blastp rows `db.empty.unsearched.*`).

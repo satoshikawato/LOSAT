@@ -96,6 +96,8 @@ pub struct OptionInputs {
     pub dust: Option<Filter>,
     /// `-window_masker_db` (BLASTN) as given.
     pub window_masker_db: Option<String>,
+    /// `-window_masker_taxid` (BLASTN) as given.
+    pub window_masker_taxid: Option<i32>,
     pub threshold: Option<i32>,
     /// `-culling_limit` (also 0), when given.
     pub culling_limit: Option<i32>,
@@ -145,6 +147,7 @@ impl OptionInputs {
             seg: None,
             dust: None,
             window_masker_db: None,
+            window_masker_taxid: None,
             threshold: None,
             culling_limit: None,
             subject_besthit: false,
@@ -492,6 +495,20 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                         Filter::Seg { .. } => {}
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1357-1363
+                // ```c++
+                //     if (m_Remote) {
+                //         if (value) {
+                //             m_Remote->SetValue(eBlastOpt_WindowMaskerTaxId, value);
+                //         } else {
+                //             m_Remote->ResetValue(CBlast4Field::Get(eBlastOpt_WindowMaskerTaxId));
+                //         }
+                // ```
+                // (`SetWindowMaskerTaxId`, called by the filtering handler before it reads
+                // `-window_masker_db`, blast_args.cpp:437-444: the taxid 0 is no parameter.)
+                if let Some(taxid) = inputs.window_masker_taxid.filter(|&taxid| taxid != 0) {
+                    list.set("WindowMaskerTaxId", Integer(taxid));
+                }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-459
                 // ```c++
                 //     if (args.Exist(kArgWindowMaskerDatabase) &&
@@ -641,6 +658,27 @@ mod tests {
             .unwrap();
         assert_eq!(listed[at - 1], "MaskAtHash");
         assert_eq!(listed[at + 1], "UngappedMode");
+    }
+
+    // NCBI BLAST+ 2.17.0 blastn -window_masker_taxid (line NP M3, ws npm/m3 c01 and t00): the
+    // taxid takes the place of the database's parameter; the taxid 0 writes none
+    // (`SetWindowMaskerTaxId` resets it).
+    #[test]
+    fn the_window_masker_taxid_is_a_parameter_unless_it_is_0() {
+        let mut inputs = OptionInputs::new(Program::Blastn, "blastn");
+        inputs.window_masker_taxid = Some(562);
+        let params = algorithm_options(&inputs);
+        let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+        let at = listed
+            .iter()
+            .position(|&name| name == "WindowMaskerTaxId")
+            .unwrap();
+        assert_eq!(listed[at - 1], "MaskAtHash");
+        assert_eq!(params[at].value, ParamValue::Integer(562));
+        inputs.window_masker_taxid = Some(0);
+        assert!(!names(&inputs)
+            .iter()
+            .any(|name| name == "WindowMaskerTaxId"));
     }
 
     #[test]

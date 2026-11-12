@@ -42,7 +42,9 @@
 //! seeds of the piece are a chain of blocks in scan order. The arenas are a pool of
 //! `PIECES_PER_THREAD * threads + RESERVED` slots, allocated at their size once and kept in the
 //! subject scratch, so a stage holds at most that many pieces whatever the subject, the query or
-//! the density of the seeds; the strip the slowest partition is in (the lowest strip a partition has not folded all of)
+//! the density of the seeds (and arenas only for as many pieces as it had at once: a piece takes
+//! the slot of one every partition has folded before a slot no piece has used, `Sched::take`, as
+//! the strips stage takes a new buffer only when it has none to give back); the strip the slowest partition is in (the lowest strip a partition has not folded all of)
 //! alone may take the last `RESERVED` slots, so that it can always go on (no wait for a piece
 //! nobody frees). A participant produces one piece per turn and parks the rest of the strip, so
 //! that a helper never holds a strip half-scanned (it can leave a stalled stage at any turn).
@@ -281,11 +283,30 @@ struct Parked {
 }
 
 /// No NCBI counterpart (scheduling only): what the participants hand out under one lock: the
-/// parked strips, the free slots of the pool and the next strip nobody has scanned.
+/// parked strips, the free slots of the pool (those given back, `free`, and those no piece has
+/// used yet, `fresh` up to the pool's size) and the next strip nobody has scanned.
 struct Sched {
     parked: Vec<Parked>,
     free: Vec<u32>,
+    fresh: u32,
     cursor: usize,
+}
+
+impl Sched {
+    /// The free slots of a pool of `slots_n`.
+    fn avail(&self, slots_n: usize) -> usize {
+        self.free.len() + slots_n - self.fresh as usize
+    }
+
+    /// A free slot: one given back (the last one first), else the next one no piece has used, so
+    /// that a stage holds as many arenas as it ever had pieces at once (as the strips stage
+    /// takes a new buffer only when no strip it can give back is left).
+    fn take(&mut self) -> u32 {
+        self.free.pop().unwrap_or_else(|| {
+            self.fresh += 1;
+            self.fresh - 1
+        })
+    }
 }
 
 /// The lowest parked strip (`usize::MAX` if none).
@@ -346,14 +367,15 @@ where
     let pool: Vec<RwLock<Arena>> = arenas.into_iter().map(RwLock::new).collect();
     let sched = Mutex::new(Sched {
         parked: Vec::new(),
-        // (popped from the end: slot 0 first, so the arenas allocated are those the stage needed
-        // at once)
-        free: (0..slots_n as u32).rev().collect(),
+        free: Vec::with_capacity(slots_n),
+        fresh: 0,
         cursor: 0,
     });
-    // (hints read without the lock: the parked strips, the free slots, the next strip)
+    // (hints read without the lock: the parked strips, the free slots, the slots given back, the
+    // next strip)
     let parked_n = AtomicUsize::new(0);
     let free_n = AtomicUsize::new(slots_n);
+    let given_n = AtomicUsize::new(0);
     let cursor_hint = AtomicUsize::new(0);
     let low_parked = AtomicUsize::new(usize::MAX);
     let lanes: Vec<OwnLines<AtomicU64>> = (0..parts).map(|_| OwnLines(AtomicU64::new(0))).collect();
@@ -392,7 +414,8 @@ where
                         s.free.extend_from_slice(&pieces[from..to]);
                     }
                 }
-                free_n.store(s.free.len(), Ordering::Relaxed);
+                free_n.store(s.avail(slots_n), Ordering::Relaxed);
+                given_n.store(s.free.len(), Ordering::Relaxed);
             }
         }
         min_next
@@ -401,6 +424,11 @@ where
     // One piece of the lowest parked strip, or of the next strip within `ahead` strips of the
     // slowest partition's (`low`), if a slot of the pool is free for it; `false` if not.
     let produce = |low: usize| -> bool {
+        // (the pieces every partition has folded go back first, so that the piece takes one of
+        // their slots before one no piece has used)
+        if given_n.load(Ordering::Relaxed) == 0 {
+            slowest();
+        }
         if free_n.load(Ordering::Relaxed) <= RESERVED {
             slowest();
             // (the strip it would take: the lowest parked one, else the next one)
@@ -428,12 +456,14 @@ where
                 None if s.cursor < n && s.cursor < low + ahead => (None, s.cursor),
                 None => return false,
             };
-            let may = s.free.len() > RESERVED || (strip == low && !s.free.is_empty());
+            let avail = s.avail(slots_n);
+            let may = avail > RESERVED || (strip == low && avail > 0);
             if !may {
                 return false;
             }
-            let slot = s.free.pop().expect("a free slot");
-            free_n.store(s.free.len(), Ordering::Relaxed);
+            let slot = s.take();
+            free_n.store(s.avail(slots_n), Ordering::Relaxed);
+            given_n.store(s.free.len(), Ordering::Relaxed);
             let (from, k) = match at {
                 Some(at) => {
                     let p = s.parked.swap_remove(at);
@@ -468,7 +498,8 @@ where
             debug_assert!(next.is_none());
             let mut s = lock(&sched);
             s.free.push(slot);
-            free_n.store(s.free.len(), Ordering::Relaxed);
+            free_n.store(s.avail(slots_n), Ordering::Relaxed);
+            given_n.store(s.free.len(), Ordering::Relaxed);
             st.published.load(Ordering::Relaxed)
         } else {
             let mut pieces = lock(&st.pieces);
@@ -719,8 +750,7 @@ where
         sched
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .free
-            .len(),
+            .avail(slots_n),
         slots_n
     );
     scratch.parts = states;

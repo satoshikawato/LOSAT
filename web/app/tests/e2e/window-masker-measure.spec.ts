@@ -62,6 +62,7 @@ test('the human counts in the application', async ({ page, browserName }) => {
   await openFiles(page, 'subject', [{ name: 's1m.fa', text: readFileSync(join(dir, 's1m.fa')) }]);
   await openParameters(page);
   await page.getByTestId(`param-${FLAG}`).check();
+  await page.getByTestId(`param-${FLAG}-by`).selectOption('file');
   await page.getByTestId(`param-${FLAG}-file`).setInputFiles(join(dir, 'wmasker.obinary'));
   await expect(page.getByTestId(`param-${FLAG}-name`)).toContainText('wmasker.obinary');
   const runs: Searched[] = [];

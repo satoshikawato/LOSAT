@@ -1380,3 +1380,22 @@ fn cut_in_place_keeps_the_whole_letters_of_a_kept_source_as_cut_does() {
     assert!(plain.source.is_none());
     assert_eq!(plain.sequence, b"GTACG");
 }
+
+// psiblast `-in_pssm -parse_deflines` (line RG Q1): NCBI BLAST+ 2.17.0 shows the PSSM query's local
+// id as the ids `-parse_deflines` reads (`Query= Query_1 a title`, `qseqid` `Query_1`, the
+// warnings' label `Query_1`); an integer local id shows as its digits.
+#[test]
+fn a_local_id_is_believed_as_parse_deflines_reads_one() {
+    for local in ["Query_1", "5"] {
+        let record = FastaRecord::new(local, b"a title", b"MKV").believing_local_id();
+        assert_eq!(record.local_id, local);
+        assert_eq!(&*record.query_line(), format!("{local} a title").as_bytes());
+        assert_eq!(record.shown_id(), local.as_bytes());
+        assert_eq!(record.warning_id(), local.as_bytes());
+        assert!(record.believed().is_some());
+        assert_eq!(record.seq(), b"MKV");
+    }
+    let plain = FastaRecord::new("Query_1", b"a title", b"MKV");
+    assert_eq!(&*plain.query_line(), b"a title");
+    assert!(plain.believed().is_none());
+}

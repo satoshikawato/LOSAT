@@ -47,12 +47,12 @@ export interface WorkerInput {
 }
 
 /**
- * The WindowMasker counts file of a run (`-window_masker_db`). A File posted to the worker is
+ * The WindowMasker counts file of a run (`-window_masker_db` or `-window_masker_taxid`). A File posted to the worker is
  * shared, not copied. A file whose `key` equals the one the instance holds is not given to the
  * engine again (plan §5, DESIGN_ww1 §5).
  */
 export interface WorkerCounts {
-  /** The value of `-window_masker_db` in the argv. */
+  /** The value of `-window_masker_db` in the argv; for `-window_masker_taxid`, windowmasker/<taxid>/wmasker.obinary. */
   readonly name: string;
   readonly blob: Blob;
   /** Name, size and last-modified time of the file (counts-key); the runtime adds the SHA-256 of its ends (`edgeDigest`). */

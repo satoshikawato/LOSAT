@@ -14,6 +14,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use crate::ncbi_str::string_to_int;
+
 use super::column::{Blob, MASK_DATA_TITLE};
 use super::volume::Volume;
 use super::{SeqDb, SeqDbError};
@@ -52,97 +54,6 @@ pub enum MaskRanges {
     },
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
-// ```c++
-// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Int8 value = StringToInt8(str, flags, base);
-//     if ( value < kMin_Int  ||  value > kMax_Int ) {
-//         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-//     }
-//     return (int) value;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-873
-// ```c++
-// Int8 NStr::StringToInt8(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD(flags);
-//
-//     // Current position in the string
-//     SIZE_TYPE pos = 0;
-//
-//     // Skip allowed leading symbols
-//     if (flags & fAllowLeadingSymbols) {
-//         bool spaces = ((flags & fAllowLeadingSymbols) == fAllowLeadingSpaces);
-//         s_SkipAllowedSymbols(str, pos, spaces ? eSkipSpacesOnly : eSkipAllAllowed, flags);
-//     }
-//     // Determine sign
-//     bool sign = false;
-//     switch (str[pos]) {
-//     case '-':
-//         sign = true;
-//         /*FALLTHRU*/
-//     case '+':
-//         pos++;
-//         break;
-//     default:
-//         if (flags & fMandatorySign) {
-//             S2N_CONVERT_ERROR_INVAL(Int8);
-//         }
-//         break;
-//     }
-//     SIZE_TYPE pos0 = pos;
-//     // Check radix base
-//     if ( !s_CheckRadix(str, pos, base) ) {
-//         S2N_CONVERT_ERROR_RADIX(Int8, "bad numeric base '" +
-//                                 NStr::IntToString(base)+ "'");
-//     }
-//
-//     // Begin conversion
-//     Int8 n = 0;
-//     Int8 limdiv = base==10? kMax_I8 / 10: kMax_I8 / base;
-//     Int8 limoff = (base==10? kMax_I8 % 10: kMax_I8 % base) + (sign ? 1 : 0);
-//
-//     // Number of symbols between two commas. '-1' means -- no comma yet.
-//     int       comma  = -1;
-//     SIZE_TYPE numpos = pos;
-//
-//     while (char ch = str[pos]) {
-//         int  delta;   // corresponding numeric value of 'ch'
-//
-//         // Check on possible commas
-//         CHECK_COMMAS;
-//         // Sanity check
-//         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
-//             break;
-//         }
-//         // Overflow check
-//         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
-//             S2N_CONVERT_ERROR_OVERFLOW(Int8);
-//         }
-//         n *= base;
-//         n += delta;
-//         pos++;
-//     }
-//
-//     // Last checks
-//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-//         S2N_CONVERT_ERROR_INVAL(Int8);
-//     }
-//     // Skip allowed trailing symbols
-//     if (flags & fAllowTrailingSymbols) {
-//         bool spaces = ((flags & fAllowTrailingSymbols) == fAllowTrailingSpaces);
-//         s_SkipAllowedSymbols(str, pos, spaces ? eSkipSpacesOnly : eSkipAll, flags);
-//     }
-//     // Assign sign before the end pointer check
-//     n = sign ? -n : n;
-//     CHECK_ENDPTR(Int8);
-//
-//     return n;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2138-2141
 // ```c++
 // static bool s_IsNumericId(const string &id) {
@@ -150,25 +61,11 @@ pub enum MaskRanges {
 //     return NStr::StringToNumeric(id, &nid, NStr::fConvErr_NoThrow, 10);
 // }
 // ```
-/// `NStr::StringToInt(s)` (flags 0, base 10): an optional sign and at least one digit up
-/// to the first NUL, nothing else, within the range of an `int`.
-pub(super) fn string_to_int(s: &str) -> Option<i32> {
-    let bytes = s.as_bytes();
-    let bytes = &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())];
-    let (negative, digits) = match bytes.first() {
-        Some(b'-') => (true, &bytes[1..]),
-        Some(b'+') => (false, &bytes[1..]),
-        _ => (false, bytes),
-    };
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let mut value: i128 = 0;
-    for &digit in digits {
-        value = (value * 10 + i128::from(digit - b'0')).min(1 << 70);
-    }
-    let value = if negative { -value } else { value };
-    i32::try_from(value).ok()
+// `StringToNumeric(str, &int, flags, base)` is `NStr::StringToInt` that returns whether it
+// converted the text (`*value || !errno`; a converted 0 leaves `errno` at 0).
+/// `s_IsNumericId(id)`.
+fn is_numeric_id(id: &str) -> bool {
+    string_to_int(id.as_bytes(), 0).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-303
@@ -523,7 +420,7 @@ impl MaskAlgorithms {
             }
 
             for (key, description) in metadata {
-                let id = string_to_int(key).ok_or_else(|| SeqDbError::Format {
+                let id = string_to_int(key.as_bytes(), 0).map_err(|_| SeqDbError::Format {
                     path: path.to_path_buf(),
                     message: format!("the mask algorithm id {key:?} is not an integer"),
                 })?;
@@ -640,7 +537,7 @@ impl MaskAlgorithms {
             2 => {
                 // `NStr::StringToInt` throws a CStringException on a text that is no
                 // integer; `FindName(pid, false)` throws on a value the enum lacks.
-                let number = string_to_int(items[0]).ok_or_else(|| {
+                let number = string_to_int(items[0].as_bytes(), 0).map_err(|_| {
                     bad(format!(
                         "the program {:?} of the mask algorithm description {description:?} \
                          is not an integer",
@@ -778,7 +675,7 @@ impl MaskAlgorithms {
             } else {
                 details.options.as_str()
             };
-            let name = if string_to_int(&details.program).is_some() {
+            let name = if is_numeric_id(&details.program) {
                 &details.program_name
             } else {
                 &details.program

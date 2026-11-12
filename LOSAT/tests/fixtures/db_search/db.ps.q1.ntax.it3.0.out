@@ -1,0 +1,222 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: tfp
+           23 sequences; 3,263 total letters
+
+Results from round 1
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Ful...  286     3e-105
+P01979.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  282     2e-103
+Q7LZC3.1 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  281     3e-103
+P01986.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  278     5e-102
+P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  253     8e-92 
+P01966.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  252     1e-91 
+P07405.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  251     4e-91 
+P60529.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  243     6e-88 
+P01946.3 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Ful...  209     2e-74 
+P01994.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  207     4e-74 
+P01999.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  205     5e-73 
+P83135.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  195     4e-69 
+P06638.2 RecName: Full=Hemoglobin subunit alpha-5; AltName: Full=...  185     3e-65 
+Q9PRL9.1 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  173     2e-60 
+P06467.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=Alp...  173     2e-60 
+P11748.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  155     1e-53 
+P02018.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  154     1e-52 
+Q90487.3 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  152     3e-52 
+P11251.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  150     2e-51 
+
+
+>P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 286 bits (733),  Expect = 3e-105, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>P01979.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Ornithorhynchus anatinus]
+Length=141
+
+ Score = 282 bits (721),  Expect = 2e-103, Method: Compositional matrix adjust.
+ Identities = 140/141 (99%), Positives = 141/141 (100%), Gaps = 0/141 (0%)
+
+Query  2    VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  61
+            VLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK
+Sbjct  1    VLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  60
+
+Query  62   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  121
+            KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA
+Sbjct  61   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  120
+
+Query  122  VHASLDKFLASVSTVLTSKYR  142
+            VHASLDKFLASVSTVLTSKYR
+Sbjct  121  VHASLDKFLASVSTVLTSKYR  141
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 221508
+Results from round 2
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+P01986.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  248     3e-90
+P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Ful...  248     3e-90
+Q7LZC3.1 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  247     2e-89
+P01979.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  245     7e-89
+P07405.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  244     1e-88
+P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  242     9e-88
+P01966.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  238     3e-86
+
+Sequences not found previously or not previously below threshold:
+
+P60529.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  234     2e-84
+P01946.3 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Ful...  207     5e-74
+P01994.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  203     2e-72
+P01999.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  203     3e-72
+P83135.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  193     2e-68
+Q9PRL9.1 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  173     2e-60
+P06467.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=Alp...  171     1e-59
+P06638.2 RecName: Full=Hemoglobin subunit alpha-5; AltName: Full=...  171     2e-59
+P11251.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  155     2e-53
+P02018.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  154     6e-53
+P11748.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  152     4e-52
+Q90487.3 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  152     4e-52
+
+
+>P01986.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Anas platyrhynchos]
+Length=142
+
+ Score = 248 bits (634),  Expect = 3e-90, Method: Composition-based stats.
+ Identities = 138/142 (97%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADK+NVKAAWGKVG HAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKSNVKAAWGKVGGHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALT AV HVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTLAVGHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 248 bits (634),  Expect = 3e-90, Method: Composition-based stats.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.137    0.410    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0418    0.140     1.90     42.6     43.6 
+
+Effective search space used: 221508
+
+Search has CONVERGED!
+
+
+  Database: tfp
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 3,263
+  Number of sequences in database:  23
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

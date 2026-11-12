@@ -1225,3 +1225,15 @@ BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the rele
 bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
 `p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the
 developer machine.
+
+## psiblast's id options (line RG, series Q, Q1)
+
+- `q1_sq1` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/q1_subj_q1.faa -dbtype prot -parse_seqids
+  -out tests/db_search/q1_sq1` (NCBI BLAST+ 2.17.0, run from `LOSAT/`): its first sequence is `lcl|Query_1`, the
+  Seq-id of an `-in_pssm` query, which NCBI's `-parse_deflines` then shows as the PSSM's query (rows
+  `db.ps.q1.*q1db*`).
+- `tests/fixtures/pssm/q1_tfp.asn.gz`: NCBI BLAST+ 2.17.0 `psiblast -query tests/db_search/taxfilter/q.faa -db
+  tests/db_search/taxfilter/tfp -save_pssm_after_last_round -out_pssm` (gzip -n -9), the `-in_pssm` of the rows
+  `db.ps.q1.in.*`.
+- `tests/fixtures/pssm/q1_tfp_id5.asn.gz`: the same PSSM with its query's `local str "Query_1"` replaced by `local id 5`
+  by hand (rows `db.ps.q1.in.id5.*`).

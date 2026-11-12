@@ -340,6 +340,19 @@ impl DatabaseSource {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:444-450
+// ```c++
+// const char* CException::GetErrCodeString(void) const
+// {
+//     switch (GetErrCode()) {
+//     case eUnknown: return "eUnknown";
+//     default:       return "eInvalid";
+//     }
+// }
+// ```
+// (`CSeqDBException`, seqdbcommon.hpp:73-100, does not name its codes, so every one is reported
+// as `eInvalid`: `(CSeqDBException::eInvalid) No alias or index file found ...` for the
+// `eFileErr` of seqdbalias.cpp:311-321, fixture db_missing.)
 /// An error of the database reader: NCBI's `CSeqDBException` (`SeqDbError::ncbi_message`), or
 /// LOSAT's refusal.
 fn database_failure(error: crate::seqdb::SeqDbError) -> Failure {

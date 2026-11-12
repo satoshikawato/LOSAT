@@ -26,7 +26,8 @@ use crate::seqid::id_scope::{name_keys, version_keys, SharedRecord};
 use crate::seqid::label;
 use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best, text_score};
-use crate::writedb::fasta_source::defline_ids::{parse_range, process_ids};
+use crate::writedb::fasta_source::defline_ids::{parse_range, post_seq_id_warning_of, process_ids};
+use crate::writedb::fasta_source::reader::ReaderWarning;
 
 /// The Seq-ids of a record that `-parse_deflines` read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -215,15 +216,14 @@ pub(crate) fn parse_believed_defline(
     if id_string.iter().all(|&byte| space(byte)) {
         return Err("Unable to locate sequence id in definition line".to_string());
     }
-    // NCBI's diagnostics name the application; `process_ids` is makeblastdb's.
+    // A warning of the Seq-id parser names the application (`post_seq_id_warning_of`); the
+    // reader's own warnings are lines without a prefix.
     let name = program.to_ascii_lowercase();
-    let mut warn_named = |message: &[u8]| {
-        let text = String::from_utf8_lossy(message)
-            .replace("[makeblastdb]", &format!("[{name}]"))
-            .into_bytes();
-        warn(&text);
+    let mut warn_named = |warning: ReaderWarning<'_>| match warning {
+        ReaderWarning::Line(line) => warn(line),
+        ReaderWarning::SeqId(warning) => post_seq_id_warning_of(&name, warning, &mut *warn),
     };
-    let ids = process_ids(id_string, protein, line_number, &mut warn_named)
+    let ids = process_ids(id_string, protein, true, line_number, &mut warn_named)
         .map_err(|error| error.message)?;
     Ok(BelievedDefline {
         title_search: pos,

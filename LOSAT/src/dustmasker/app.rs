@@ -1,7 +1,7 @@
 //! dustmasker's `Run` (`CDustMaskApplication::Run`) on the arguments that NCBI's reader read
 //! (`ncbi_app::args::Args`): the streams of `-out` and `-in`, then `work::run`.
 
-use std::io::{BufReader, Write};
+use std::io::Write;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
@@ -57,7 +57,7 @@ pub(super) fn run(
     let parse_seqids = options.parse_seqids;
     let mut fasta_source = || -> Result<Box<dyn SequenceSource>, Failure> {
         let input = args.input_file("in").map_err(Failure::Arg)?;
-        Ok(super::fasta::source(BufReader::new(input), parse_seqids))
+        super::fasta::source(input, parse_seqids)
     };
     match work::run(&options, &mut fasta_source, &mut output) {
         Ok(()) => 0,

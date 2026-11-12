@@ -1899,7 +1899,7 @@ impl StringIsam {
         }
         if found {
             for line in &lines {
-                let oid = atoi(&line.data);
+                let oid = crate::ncbi_str::c_atoi(&line.data);
                 result
                     .oids
                     .push(u32::try_from(oid).map_err(|_| SeqDbError::Format {
@@ -2581,28 +2581,6 @@ impl ScanChunk {
 /// NCBI's `CSeqDBException(eArgErr, "Error: Unable to use ISAM index in batch mode.")`.
 fn batch_mode_error() -> SeqDbError {
     SeqDbError::NotFound("Error: Unable to use ISAM index in batch mode.".to_string())
-}
-
-/// `atoi` of the C library (C locale): leading white space, a sign, the digits; the `long` it
-/// reads, truncated to `int`.
-fn atoi(s: &[u8]) -> i32 {
-    let mut i = 0;
-    while i < s.len() && (s[i] == b' ' || (b'\t'..=b'\r').contains(&s[i])) {
-        i += 1;
-    }
-    let mut negative = false;
-    if i < s.len() && (s[i] == b'-' || s[i] == b'+') {
-        negative = s[i] == b'-';
-        i += 1;
-    }
-    let mut value: i64 = 0;
-    while i < s.len() && s[i].is_ascii_digit() {
-        value = value
-            .saturating_mul(10)
-            .saturating_add(i64::from(s[i] - b'0'));
-        i += 1;
-    }
-    (if negative { -value } else { value }) as i32
 }
 
 /// One entry of a list of string ids (`CSeqDBGiList::SSiOid`): the id and its OID, set by

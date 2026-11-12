@@ -132,6 +132,93 @@ impl BlastDefline {
 }
 
 impl DeflineSet {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:957-1019
+    // ```c++
+    // static void
+    // s_GetBioseqTitle(CRef<CBlast_def_line_set> deflines, string & title)
+    // {
+    //     title.erase();
+    //     ...
+    //     bool first_defline(true);
+    //
+    //     for(TDefIt iter = dl.begin(); iter != dl.end(); iter++) {
+    //         ostringstream oss;
+    //
+    //         const CBlast_def_line & defline = **iter;
+    //
+    //         if (! title.empty()) {
+    //             //oss << "\1";
+    //             oss << " ";
+    //         }
+    //
+    //         bool wrote_seqids(false);
+    //
+    //         if ((!first_defline) && defline.CanGetSeqid()) {
+    //             const list< CRef<CSeq_id > > & sl = defline.GetSeqid();
+    //
+    //             bool first_seqid(true);
+    //
+    //             // First should look like: "<title>"
+    //             // Others should look like: " ><seqid>|<seqid>|<seqid><title>"
+    //
+    //             for (TSeqIt seqit = sl.begin(); seqit != sl.end(); seqit++) {
+    //                 if (first_seqid) {
+    //                     oss << ">";
+    //                 } else {
+    //                     oss << "|";
+    //                 }
+    //
+    //                 (*seqit)->WriteAsFasta(oss);
+    //
+    //                 first_seqid = false;
+    //                 wrote_seqids = true;
+    //             }
+    //         }
+    //
+    //         // Omit seqids from first defline
+    //         first_defline = false;
+    //
+    //         if (defline.CanGetTitle()) {
+    //             if (wrote_seqids) {
+    //                 oss << " ";
+    //             }
+    //             oss << defline.GetTitle();
+    //         }
+    //
+    //         title += oss.str();
+    //     }
+    // }
+    // ```
+    /// The title of the Bioseq: the first definition line's title, then ` >` with the FASTA
+    /// strings of the ids of each later one (joined by `|`) and its title.
+    pub fn bioseq_title(&self) -> Vec<u8> {
+        let mut title = Vec::new();
+        let mut first_defline = true;
+        for defline in &self.deflines {
+            let mut oss = Vec::new();
+            if !title.is_empty() {
+                oss.push(b' ');
+            }
+            let mut wrote_seqids = false;
+            if !first_defline {
+                for (at, id) in defline.ids.iter().enumerate() {
+                    oss.push(if at == 0 { b'>' } else { b'|' });
+                    fasta(id, &mut oss);
+                    wrote_seqids = true;
+                }
+            }
+            first_defline = false;
+            if let Some(text) = &defline.title {
+                if wrote_seqids {
+                    oss.push(b' ');
+                }
+                oss.extend_from_slice(text);
+            }
+            title.extend_from_slice(&oss);
+        }
+        title
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1844-1864
     // ```c++
     // list< CRef<CSeq_id> > CSeqDBVol::GetSeqIDs(int  oid) const

@@ -9,10 +9,10 @@ use std::io::Write;
 
 use crate::report::defline::{bioseq_title_from_source, generate_bioseq_defline};
 use crate::seqid::accguide::parse_flags::PARTIAL_OK;
-use crate::seqid::label::{bare, fasta};
+use crate::seqid::label::{bare, bioseq_fasta, fasta};
 use crate::seqid::model::Dbtag;
 use crate::seqid::parse::parse_ids;
-use crate::seqid::rank::{fasta_aa_score, fasta_na_score, find_best, text_score};
+use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::letters::{apply_masks, reverse_complement};
@@ -251,19 +251,7 @@ impl FastaFormatter {
             }
         }
         out.push(b'>');
-        let best = if source.protein {
-            find_best(ids, fasta_aa_score)
-        } else {
-            find_best(ids, fasta_na_score)
-        }
-        .expect("the definition line has ids");
-        if let Some(gi) = ids.iter().find(|id| id.gi().is_some()) {
-            if best.gi().is_none() {
-                fasta(gi, out);
-                out.push(b'|');
-            }
-        }
-        fasta(best, out);
+        bioseq_fasta(ids, source.protein, out);
         if let Some((from, to)) = range {
             if config.strand_minus {
                 out.extend_from_slice(format!(":c{}-{}", to + 1, from + 1).as_bytes());
@@ -271,7 +259,7 @@ impl FastaFormatter {
                 out.extend_from_slice(format!(":{}-{}", from + 1, to + 1).as_bytes());
             }
         }
-        let mut title = bioseq_title(set);
+        let mut title = set.bioseq_title();
         if config.ctrl_a {
             title = rejoin_defline_title(&title, true)?;
         }
@@ -302,93 +290,6 @@ fn target_set(set: DeflineSet, target: &str) -> Result<DeflineSet, Stop> {
     Ok(DeflineSet {
         deflines: vec![set.deflines[index].clone()],
     })
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:957-1019
-// ```c++
-// static void
-// s_GetBioseqTitle(CRef<CBlast_def_line_set> deflines, string & title)
-// {
-//     title.erase();
-//     ...
-//     bool first_defline(true);
-//
-//     for(TDefIt iter = dl.begin(); iter != dl.end(); iter++) {
-//         ostringstream oss;
-//
-//         const CBlast_def_line & defline = **iter;
-//
-//         if (! title.empty()) {
-//             //oss << "\1";
-//             oss << " ";
-//         }
-//
-//         bool wrote_seqids(false);
-//
-//         if ((!first_defline) && defline.CanGetSeqid()) {
-//             const list< CRef<CSeq_id > > & sl = defline.GetSeqid();
-//
-//             bool first_seqid(true);
-//
-//             // First should look like: "<title>"
-//             // Others should look like: " ><seqid>|<seqid>|<seqid><title>"
-//
-//             for (TSeqIt seqit = sl.begin(); seqit != sl.end(); seqit++) {
-//                 if (first_seqid) {
-//                     oss << ">";
-//                 } else {
-//                     oss << "|";
-//                 }
-//
-//                 (*seqit)->WriteAsFasta(oss);
-//
-//                 first_seqid = false;
-//                 wrote_seqids = true;
-//             }
-//         }
-//
-//         // Omit seqids from first defline
-//         first_defline = false;
-//
-//         if (defline.CanGetTitle()) {
-//             if (wrote_seqids) {
-//                 oss << " ";
-//             }
-//             oss << defline.GetTitle();
-//         }
-//
-//         title += oss.str();
-//     }
-// }
-// ```
-/// The title of the Bioseq: the first definition line's title, then ` >` with the FASTA
-/// strings of the ids of each later one (joined by `|`) and its title.
-pub(super) fn bioseq_title(set: &DeflineSet) -> Vec<u8> {
-    let mut title = Vec::new();
-    let mut first_defline = true;
-    for defline in &set.deflines {
-        let mut oss = Vec::new();
-        if !title.is_empty() {
-            oss.push(b' ');
-        }
-        let mut wrote_seqids = false;
-        if !first_defline {
-            for (at, id) in defline.ids.iter().enumerate() {
-                oss.push(if at == 0 { b'>' } else { b'|' });
-                fasta(id, &mut oss);
-                wrote_seqids = true;
-            }
-        }
-        first_defline = false;
-        if let Some(text) = &defline.title {
-            if wrote_seqids {
-                oss.push(b' ');
-            }
-            oss.extend_from_slice(text);
-        }
-        title.extend_from_slice(&oss);
-    }
-    title
 }
 
 /// The ids `CSeq_id::ParseIDs(ids, text, fParse_PartialOK)` gives (none when it throws).
@@ -610,7 +511,7 @@ fn short_header(
             format!(":{}-{} ", from + 1, to + 1)
         }
     });
-    let title = bioseq_title(set);
+    let title = set.bioseq_title();
     out.push(b'>');
     match first {
         ParsedSeqId::General(Dbtag { db, .. }) if db == b"BL_ORD_ID" => {
@@ -1003,15 +904,15 @@ mod tests {
             ],
         };
         assert_eq!(
-            bioseq_title(&set),
+            set.bioseq_title(),
             b"alpha mRNA [Homo sapiens] >gb|AB000001.1| alpha cDNA >emb|X00001.2| no ids"
         );
-        let configured = configure_defline_title(&bioseq_title(&set), false).unwrap();
+        let configured = configure_defline_title(&set.bioseq_title(), false).unwrap();
         assert_eq!(
             configured,
             b"alpha mRNA [Homo sapiens] >AB000001.1 alpha cDNA >X00001.2 no ids"
         );
-        let with_ctrl_a = configure_defline_title(&bioseq_title(&set), true).unwrap();
+        let with_ctrl_a = configure_defline_title(&set.bioseq_title(), true).unwrap();
         assert_eq!(
             with_ctrl_a,
             b"alpha mRNA [Homo sapiens]\x01AB000001.1 alpha cDNA\x01X00001.2 no ids"

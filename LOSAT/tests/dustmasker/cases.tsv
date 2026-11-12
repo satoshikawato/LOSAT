@@ -207,3 +207,64 @@ mdefl_seqloc_xml	-in in/more_defl.fa -outfmt seqloc_xml
 mdefl_seqloc_xml_ps	-in in/more_defl.fa -outfmt seqloc_xml -parse_seqids
 mdefl_maskinfo_asn1_bin	-in in/more_defl.fa -outfmt maskinfo_asn1_bin
 mdefl_maskinfo_asn1_bin_ps	-in in/more_defl.fa -outfmt maskinfo_asn1_bin -parse_seqids
+# -infmt blastdb: the databases in db/ were made by NCBI makeblastdb 2.17.0 from in/ (basic, deflines -> defl, nruns, ambig, short, protfirst -> prot, more_defl -parse_seqids -> mdefl_ps); @CWD@ in the expected text is this directory.
+db_basic_interval	-infmt blastdb -in db/basic -outfmt interval
+db_basic_fasta	-infmt blastdb -in db/basic -outfmt fasta
+db_basic_acclist	-infmt blastdb -in db/basic -outfmt acclist
+db_basic_maskinfo_asn1_text	-infmt blastdb -in db/basic -outfmt maskinfo_asn1_text
+db_basic_maskinfo_asn1_bin	-infmt blastdb -in db/basic -outfmt maskinfo_asn1_bin
+db_basic_maskinfo_xml	-infmt blastdb -in db/basic -outfmt maskinfo_xml
+db_basic_seqloc_asn1_text	-infmt blastdb -in db/basic -outfmt seqloc_asn1_text
+db_basic_seqloc_asn1_bin	-infmt blastdb -in db/basic -outfmt seqloc_asn1_bin
+db_basic_seqloc_xml	-infmt blastdb -in db/basic -outfmt seqloc_xml
+db_basic_int_ps	-infmt blastdb -in db/basic -parse_seqids
+db_defl_interval	-infmt blastdb -in db/defl -outfmt interval
+db_defl_fasta	-infmt blastdb -in db/defl -outfmt fasta
+db_defl_acclist	-infmt blastdb -in db/defl -outfmt acclist
+db_defl_maskinfo_asn1_text	-infmt blastdb -in db/defl -outfmt maskinfo_asn1_text
+db_defl_maskinfo_asn1_bin	-infmt blastdb -in db/defl -outfmt maskinfo_asn1_bin
+db_defl_maskinfo_xml	-infmt blastdb -in db/defl -outfmt maskinfo_xml
+db_defl_seqloc_asn1_text	-infmt blastdb -in db/defl -outfmt seqloc_asn1_text
+db_defl_seqloc_asn1_bin	-infmt blastdb -in db/defl -outfmt seqloc_asn1_bin
+db_defl_seqloc_xml	-infmt blastdb -in db/defl -outfmt seqloc_xml
+db_defl_int_ps	-infmt blastdb -in db/defl -parse_seqids
+db_nruns_interval	-infmt blastdb -in db/nruns -outfmt interval
+db_nruns_fasta	-infmt blastdb -in db/nruns -outfmt fasta
+db_nruns_acclist	-infmt blastdb -in db/nruns -outfmt acclist
+db_nruns_maskinfo_asn1_text	-infmt blastdb -in db/nruns -outfmt maskinfo_asn1_text
+db_nruns_maskinfo_asn1_bin	-infmt blastdb -in db/nruns -outfmt maskinfo_asn1_bin
+db_nruns_maskinfo_xml	-infmt blastdb -in db/nruns -outfmt maskinfo_xml
+db_nruns_seqloc_asn1_text	-infmt blastdb -in db/nruns -outfmt seqloc_asn1_text
+db_nruns_seqloc_asn1_bin	-infmt blastdb -in db/nruns -outfmt seqloc_asn1_bin
+db_nruns_seqloc_xml	-infmt blastdb -in db/nruns -outfmt seqloc_xml
+db_nruns_int_ps	-infmt blastdb -in db/nruns -parse_seqids
+db_ambig_interval	-infmt blastdb -in db/ambig -outfmt interval
+db_ambig_fasta	-infmt blastdb -in db/ambig -outfmt fasta
+db_ambig_acclist	-infmt blastdb -in db/ambig -outfmt acclist
+db_ambig_maskinfo_asn1_text	-infmt blastdb -in db/ambig -outfmt maskinfo_asn1_text
+db_ambig_maskinfo_asn1_bin	-infmt blastdb -in db/ambig -outfmt maskinfo_asn1_bin
+db_ambig_maskinfo_xml	-infmt blastdb -in db/ambig -outfmt maskinfo_xml
+db_ambig_seqloc_asn1_text	-infmt blastdb -in db/ambig -outfmt seqloc_asn1_text
+db_ambig_seqloc_asn1_bin	-infmt blastdb -in db/ambig -outfmt seqloc_asn1_bin
+db_ambig_seqloc_xml	-infmt blastdb -in db/ambig -outfmt seqloc_xml
+db_ambig_int_ps	-infmt blastdb -in db/ambig -parse_seqids
+db_short_interval	-infmt blastdb -in db/short -outfmt interval
+db_short_fasta	-infmt blastdb -in db/short -outfmt fasta
+db_short_acclist	-infmt blastdb -in db/short -outfmt acclist
+db_short_maskinfo_asn1_text	-infmt blastdb -in db/short -outfmt maskinfo_asn1_text
+db_short_maskinfo_asn1_bin	-infmt blastdb -in db/short -outfmt maskinfo_asn1_bin
+db_short_maskinfo_xml	-infmt blastdb -in db/short -outfmt maskinfo_xml
+db_short_seqloc_asn1_text	-infmt blastdb -in db/short -outfmt seqloc_asn1_text
+db_short_seqloc_asn1_bin	-infmt blastdb -in db/short -outfmt seqloc_asn1_bin
+db_short_seqloc_xml	-infmt blastdb -in db/short -outfmt seqloc_xml
+db_short_int_ps	-infmt blastdb -in db/short -parse_seqids
+db_prot	-infmt blastdb -in db/prot
+db_missing	-infmt blastdb -in db/missing
+db_basic_fasta_hard	-infmt blastdb -in db/basic -outfmt fasta -hard_masking
+db_stdin	-infmt blastdb < in/basic.fa
+db_mdefl_ps_interval	-infmt blastdb -in db/mdefl_ps -outfmt interval
+db_mdefl_ps_interval_ps	-infmt blastdb -in db/mdefl_ps -outfmt interval -parse_seqids
+db_mdefl_ps_maskinfo_asn1_text	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_text
+db_mdefl_ps_maskinfo_asn1_text_ps	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_text -parse_seqids
+db_mdefl_ps_seqloc_asn1_text	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_text
+db_mdefl_ps_seqloc_asn1_text_ps	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_text -parse_seqids

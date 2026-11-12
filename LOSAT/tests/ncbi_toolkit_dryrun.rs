@@ -56,8 +56,10 @@ fn run_in(dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
     command.output().unwrap()
 }
 
-/// The words of each program's run in the probes (rpsblast's database is never opened).
-const RUNS: [(&str, &[&str]); 9] = [
+/// The words of each program's run in the probes (the RPS programs' database is never opened;
+/// rpstblastn: PS12a's probes of 2026-11-13, `dry*` of RG-E1's probe for rpstblastn, NCBI's
+/// official 2.17.0).
+const RUNS: [(&str, &[&str]); 10] = [
     (
         "blastn",
         &["-query", "arch_tbx_q.fna", "-subject", "arch_tbx_s.fna"],
@@ -86,12 +88,16 @@ const RUNS: [(&str, &[&str]); 9] = [
         "rpsblast",
         &["-query", "arch_bp_q.faa", "-db", "rpsdb/rps_mini"],
     ),
+    (
+        "rpstblastn",
+        &["-query", "arch_bx_q.fna", "-db", "rpsdb/rps_mini"],
+    ),
     // Its `-out` is the database's name: the cases below add one.
     ("makeblastdb", &["-in", "arch_bp_s.faa", "-dbtype", "prot"]),
     ("blastdbcmd", &["-db", "nodb", "-entry", "all"]),
 ];
 
-const SEARCHES: usize = 7;
+const SEARCHES: usize = 8;
 
 fn names(dir: &Path) -> BTreeSet<String> {
     fs::read_dir(dir)

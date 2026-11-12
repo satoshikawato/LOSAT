@@ -149,5 +149,32 @@ class Fixtures(unittest.TestCase):
         self.assertEqual({path.name for path in corpus.FROZEN.iterdir()}, expected)
 
 
+class NcbiRuns(unittest.TestCase):
+    """NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+    (blast_usage_report.cpp:195-220): `freeze` runs NCBI with it off, `check` runs LOSAT without it."""
+
+    @unittest.skipUnless(sys.platform != "win32", "the stand-in programs are shell scripts")
+    def test_freeze_runs_ncbi_with_the_usage_report_off(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
+            bin_dir.mkdir()
+            script = bin_dir / "blastn"
+            script.write_text('#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n')
+            script.chmod(0o755)
+            written = []
+            one = row()
+            with mock.patch.object(corpus, "read_manifest", lambda: ([], [one])), \
+                    mock.patch.object(corpus, "write_manifest", lambda *a: written.append(a)), \
+                    mock.patch.object(corpus, "FROZEN", frozen), \
+                    mock.patch.dict(corpus.os.environ, {"BLAST_USAGE_REPORT": "true"}):
+                args = corpus.argparse.Namespace(ncbi_bin=bin_dir, only="")
+                corpus.freeze(args)
+                self.assertEqual((frozen / "R1.out").read_bytes(), b"false")
+                # LOSAT's run (`check`'s environment) does not get it
+                env = corpus.clean_env(dict(corpus.os.environ), tmp)
+                self.assertEqual(corpus.run_row(script, False, one, env).stdout, b"unset")
+            self.assertEqual(len(written), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -108,6 +108,16 @@ impl PreparedQueryBatch {
 //     default:
 // ```
 pub const BATCH_SIZE: usize = 10002;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:136-139
+// ```c++
+//     case eBlastp:
+//     default:
+//         retval = 10000;
+//         break;
+// ```
+/// The letters of RPSTBLASTN's query batch (`GetQueryBatchSize(eRPSTblastn)`, the `default:`
+/// case; DECISIONS 38 D10): its batches are read with it, never split (`rps_search::translated`).
+pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
 // ```c++
 //

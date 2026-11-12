@@ -128,7 +128,10 @@ fn batch_sizes(command: &Commands, inputs: Inputs<'_>) -> anyhow::Result<BatchSi
         //             input.Reset(new CBlastInput(&*fasta, 1));
         // ```
         Commands::Psiblast(_) => BatchSizes::Fixed(1),
-        Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
+        Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     })
@@ -280,10 +283,11 @@ impl Batches<'_> {
             Commands::Tblastn(args) => args.first_query_ordinal = range.start,
             Commands::Tblastx(args) => args.first_query_ordinal = range.start,
             Commands::Psiblast(args) => args.first_query_ordinal = range.start,
-            // BLASTX's messages show the record's own id; rpsblast is refused by
-            // `Program::parse`.
+            // BLASTX's messages show the record's own id; rpsblast and rpstblastn are refused
+            // by `Program::parse`.
             Commands::Blastx(_)
             | Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {}
         }

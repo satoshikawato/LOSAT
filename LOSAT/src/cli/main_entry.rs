@@ -36,7 +36,7 @@ use crate::cli::{Cli, Commands};
 pub fn main_entry() -> Result<()> {
     let result = run_main_entry();
     // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
-    // the standard error went to the `-logfile` target (tblastx and rpsblast,
+    // the standard error went to the `-logfile` target (tblastx, rpsblast and rpstblastn,
     // `ncbi_environment::run_messages_follow_log`): written as `main`'s `Result` writes them,
     // exit status 1. NCBI's errors are written by the run itself (`exit_on_native_error`), where
     // NCBI writes them. Line RG DECISIONS 32.
@@ -266,7 +266,12 @@ fn run_main_entry() -> Result<()> {
     // `[Diag]`, `[LOG]`), let it through: LOSAT refuses the settings it refuses in a run, which
     // include those, with the same check (line RG DECISIONS E1b-6). rpsbproc has its own
     // `DryRun`, after its `Init` (`rpsbproc::dry_run`, which makes the same check; item E1c).
-    if dryrun {
+    // rpstblastn's `-help` and `-h` reach here as a parsed flag (`RpstblastnArgs::ncbi_help`);
+    // NCBI's reader writes their text before the application runs, `-dryrun` or not (NCBI BLAST+
+    // 2.17.0, PS12a probes `dry_h`, `dry_help`), as the parser's help of the other programs.
+    let help_flag =
+        matches!(&cli.command, Commands::Rpstblastn(args) if args.ncbi_help_text().is_some());
+    if dryrun && !help_flag {
         if let Commands::Rpsbproc(args) = cli.command {
             exit_rpsbproc(crate::rpsbproc::dry_run(
                 args,
@@ -280,7 +285,7 @@ fn run_main_entry() -> Result<()> {
         }
         return Ok(());
     }
-    // The messages of tblastx's and rpsblast's runs go where the diagnostics go
+    // The messages of tblastx's, rpsblast's and rpstblastn's runs go where the diagnostics go
     // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
     // target from here, where NCBI's `Run` makes its handler. LOSAT's parser errors above stay on
     // the standard error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1). rpsbproc posts its
@@ -507,6 +512,30 @@ fn run_main_entry() -> Result<()> {
                     .map_err(anyhow::Error::msg)?;
             if let Err(error) = crate::algorithm::rpsblast::run(args, settings) {
                 crate::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:319-322
+        // ```c++
+        // int main(int argc, const char* argv[] /*, const char* envp[]*/)
+        // {
+        //     return CRPSTBlastnApp().AppMain(argc, argv);
+        // }
+        // ```
+        Commands::Rpstblastn(args) => {
+            // NCBI's `-help` and `-h` texts, which its reader writes before the application runs.
+            if let Some(text) = args.ncbi_help_text() {
+                print!("{text}");
+                return Ok(());
+            }
+            // rpstblastn is an NCBI application as blastx: its application layer reads its
+            // environment and registry files (`rpstblastn.ini`, then `.ncbirc`) before its own
+            // code runs; LOSAT rejects the settings that change the output, before its own
+            // refusals. BLASTX's driver reads them again by the same name (`native::run`).
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpstblastn")
+                .map_err(anyhow::Error::msg)?;
+            if let Err(error) = crate::algorithm::rpstblastn::run(args) {
+                blastx::native::exit_on_native_error(&error);
                 return Err(error);
             }
         }

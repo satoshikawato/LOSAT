@@ -74,8 +74,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      every search result must still match NCBI. Non-UTF-8
      file names, `.ncbirc` keys that change output, and the NCBI C++ Toolkit
      words that LOSAT does not run (`-version-full*`, `-xmlhelp`, `-help-full`;
-     in rpsbproc also `-logfile`, `-conffile`, `-dryrun`; also in an option's
-     value) are explicit rejections, not exceptions. `-version`, and on the
+     also in an option's value) are explicit rejections, not exceptions. `-version`, and on the
      command line `-logfile`, `-conffile` and `-dryrun`, run as in NCBI
      (README, NCBI C++ Toolkit options).
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where

@@ -36,8 +36,8 @@ pub const SCAN_RANGE_MEGABLAST: usize = 0;
 // NCBI reference: blast_parameters.c:343-344: gap_trigger calculation
 // NCBI reference: blast_parameters.c:368-374: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
 // These constants are kept for backward compatibility but are no longer used in the main code path.
-pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: Use compute_blastn_cutoff_score() instead
-pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: Use compute_blastn_cutoff_score() instead
+pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: the cutoff is MIN(gap_trigger * scale_factor, cutoff_score_max) (ncbi_cutoffs.rs)
+pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: the cutoff is MIN(gap_trigger * scale_factor, cutoff_score_max) (ncbi_cutoffs.rs)
 
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 pub const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;

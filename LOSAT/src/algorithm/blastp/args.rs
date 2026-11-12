@@ -141,7 +141,7 @@ impl BlastpCompBasedStats {
     //     opt.SetUnifiedP(1);
     // }
     // ```
-    pub fn to_ncbi_cli_string(&self) -> String {
+    pub fn to_ncbi_cli_string(self) -> String {
         let mode = match self.mode {
             BlastpCompositionMode::NoCompositionBasedStats => '0',
             BlastpCompositionMode::CompositionBasedStats => '1',
@@ -168,6 +168,7 @@ impl BlastpCompBasedStats {
 //     opt.SetUnifiedP(1);
 // }
 // ```
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -715,9 +716,9 @@ pub struct ResolvedBlastpArgs {
     /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
     /// (blast_args.cpp:303-307, blast_stat.c:921-923).
     pub searchsp: Option<i64>,
-    /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP with the
-    /// environment variable `OLD_FSC` (`app::old_fsc_environment`; PSIBLAST and RPSBLAST
-    /// refuse it, `app::check_old_fsc`).
+    /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP and
+    /// PSIBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`; RPSBLAST
+    /// refuses it, `app::check_old_fsc`).
     pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
@@ -1272,9 +1273,11 @@ impl BlastpArgs {
             //     use_old_fsc = getenv("OLD_FSC");
             //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
             // ```
-            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
+            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307). RPSBLAST refuses the variable
+            // (`check_blastp_environment`).
             old_fsc: self.searchsp.is_some()
-                || (self.app == BlastpApp::Blastp && crate::blastinput::app::old_fsc_environment()),
+                || (self.app != BlastpApp::Rpsblast
+                    && crate::blastinput::app::old_fsc_environment()),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,

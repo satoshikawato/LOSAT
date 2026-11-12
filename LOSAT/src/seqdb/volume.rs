@@ -186,6 +186,12 @@ impl Volume {
         self.lazy_file(&self.seq, "sq")
     }
 
+    /// Opens the sequence file, as the first read of a sequence does (`seq_file`): its error
+    /// where it cannot be opened, as NCBI's first read of the volume throws it.
+    pub fn open_sequence_file(&self) -> Result<(), SeqDbError> {
+        self.seq_file().map(|_| ())
+    }
+
     fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
         self.lazy_file(&self.hdr, "hr")
     }
@@ -230,6 +236,7 @@ impl Volume {
     /// Bytes of the sequence file that a block of the sequences `first..end`
     /// occupies (protein: with the sentinel bytes around them; nucleotide:
     /// with their ambiguity data).
+    #[cfg(test)]
     pub fn block_bytes(&self, first: u32, end: u32) -> Result<u64, SeqDbError> {
         let (start, stop) = (
             self.index.sequence_start(first)?,
@@ -303,6 +310,13 @@ impl Volume {
     /// and a window of its own for every block. A block that passes the end of a window that
     /// starts at `first` is cut by `x_read_block_end`. The end is the one `block_end` gives
     /// (the same comparisons on the same entries); a read error leaves `window` empty.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     pub(super) fn x_listed_block_end(
         &self,
         first: u32,
@@ -398,6 +412,13 @@ impl Volume {
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
     /// (`File::x_read_range_into`; `SequenceBlock::x_into_data` gives the buffer back).
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     pub fn x_read_block_into(
         &self,
         first: u32,
@@ -435,6 +456,13 @@ impl Volume {
         let data = match buffer {
             BlockBuffer::New => file.read_range(data_start, data_end)?,
             BlockBuffer::Mapped => file.x_read_range_mapped(data_start, data_end)?,
+            #[cfg(any(
+                test,
+                all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                )
+            ))]
             BlockBuffer::Given(buf) => file.x_read_range_into(data_start, data_end, buf)?,
         };
         let block = SequenceBlock {
@@ -970,11 +998,25 @@ impl Volume {
 /// EXPERIMENT (LOSAT_X_BNDBSMALL): sequence offsets of one volume from `first` on, kept by
 /// `SeqDb::x_next_blocks` for `Volume::x_listed_block_end`.
 #[derive(Debug, Default)]
+#[cfg(any(
+    test,
+    all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )
+))]
 pub(super) struct XOffsetWindow {
     first: u32,
     offsets: Vec<u32>,
 }
 
+#[cfg(any(
+    test,
+    all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )
+))]
 impl XOffsetWindow {
     /// Whether the window holds the offset of `oid`.
     fn holds(&self, oid: u32) -> bool {
@@ -1003,6 +1045,13 @@ enum BlockBuffer {
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `File::x_read_range_mapped`'s buffer.
     Mapped,
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     Given(Vec<u8>),
 }
 
@@ -1065,6 +1114,7 @@ impl NucleotideAmbiguity {
     }
 
     /// The length of the sequence in bases.
+    #[cfg(test)]
     pub fn length(&self) -> usize {
         self.length
     }
@@ -1226,6 +1276,10 @@ impl SequenceBlock {
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): the block's buffer, for the next `x_read_block_into`. No
     /// NCBI counterpart: only where the bytes are kept.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub fn x_into_data(self) -> Vec<u8> {
         self.data
     }
@@ -1247,6 +1301,7 @@ impl SequenceBlock {
     }
 
     /// Sequence type of the block.
+    #[cfg(test)]
     pub fn seqtype(&self) -> SeqType {
         self.seqtype
     }
@@ -1259,16 +1314,6 @@ impl SequenceBlock {
     /// Number of sequences in the block.
     pub fn len(&self) -> usize {
         self.seq_offsets.len() - 1
-    }
-
-    /// Whether the block holds no sequence (never true for a block that was read).
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Bytes of the sequence file held by the block.
-    pub fn byte_len(&self) -> usize {
-        self.data.len()
     }
 
     fn slice(&self, start: u64, end: u64) -> &[u8] {

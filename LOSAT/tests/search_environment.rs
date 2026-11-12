@@ -146,31 +146,41 @@ fn environment_that_ncbi_reads_around_the_report_is_refused_where_it_reads_it() 
 //     use_old_fsc = getenv("OLD_FSC");
 //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
 // ```
-// NCBI sets OLD_FSC for any -searchsp (blast_args.cpp:303-307), so BLASTP, BLASTX and TBLASTN
-// with OLD_FSC (any value, the empty one too) write the frozen bytes of `-searchsp 0` (rows
-// sp.<program>.zero.0 of outfmt0_manifest.tsv; NCBI 2.17.0 writes the same bytes with
-// OLD_FSC=1). PSIBLAST, which takes no -searchsp, refuses it.
+// NCBI sets OLD_FSC for any -searchsp (blast_args.cpp:303-307), so BLASTP, BLASTX, TBLASTN and
+// PSIBLAST with OLD_FSC (any value, the empty one too) write the frozen bytes of `-searchsp 0`
+// (rows sp.<program>.zero.0 and ps.subj.sp.zero.tk.0 of outfmt0_manifest.tsv; NCBI 2.17.0 writes
+// the same bytes with OLD_FSC=1, and psiblast with OLD_FSC=true, probe `ofsctrue.tk.subj.0` of line
+// PS, item PS5c). RPSBLAST, which takes no -searchsp, refuses it (row db.oldfsc.rpsblast.rej).
 #[test]
-fn old_fsc_is_the_statistics_of_searchsp_0_and_psiblast_refuses_it() {
-    for (program, query, subject) in [
+fn old_fsc_is_the_statistics_of_searchsp_0() {
+    for (program, query, subject, frozen) in [
         (
             "blastp",
             "tests/db_search/bpqb_q.faa",
             "tests/db_search/bslice.faa",
+            "sp.blastp.zero.0",
         ),
         (
             "blastx",
             "tests/db_search/bslice_q.fna",
             "tests/db_search/bslice.faa",
+            "sp.blastx.zero.0",
         ),
         (
             "tblastn",
             "tests/db_search/tslice_q.faa",
             "tests/db_search/tslice.fna",
+            "sp.tblastn.zero.0",
+        ),
+        (
+            "psiblast",
+            "tests/fasta/psiblast/tk.faa",
+            "tests/fasta/PajaWSV.faa",
+            "ps.subj.sp.zero.tk.0",
         ),
     ] {
         let expected = std::fs::read(format!(
-            "{}/tests/fixtures/outfmt0/sp.{program}.zero.0.out",
+            "{}/tests/fixtures/outfmt0/{frozen}.out",
             env!("CARGO_MANIFEST_DIR")
         ))
         .expect("frozen -searchsp 0 report");
@@ -188,13 +198,4 @@ fn old_fsc_is_the_statistics_of_searchsp_0_and_psiblast_refuses_it() {
             );
         }
     }
-    let output = run(PROGRAMS[1], "6", Some(("OLD_FSC", "1")));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(
-        output.stdout.is_empty()
-            && stderr.contains("the environment variable OLD_FSC")
-            && stderr.contains("not supported by LOSAT's PSIBLAST"),
-        "{stderr}"
-    );
 }

@@ -69,13 +69,35 @@ impl<'a> Subjects<'a> {
         }
     }
 
-    /// The number of subjects the statistics read: one for a database that a list left without
-    /// sequences (`SeqDb::statistics_numbers`; a database without any sequence is `Unreadable`).
-    pub(crate) fn statistics_len(&self) -> usize {
-        match self {
-            Subjects::Stream(_) => self.len().max(1),
-            Subjects::Fasta(_) | Subjects::Unreadable => self.len(),
-        }
+    /// The numbers that the parameters of the search read (`SubjectNumbers`): a database's
+    /// statistics (`SeqDb::statistics_numbers`: `STATS_TOTLEN` or the total, `STATS_NSEQ` or
+    /// `GetNumSeqs`, the length of OID 0 and one sequence for a list that kept none),
+    /// `GetMinLength` and `BlastSeqSrcGetAvgSeqLen`; a FASTA set's total, records, shortest
+    /// record (raised to `BLAST_SEQSRC_MINLENGTH`) and average.
+    pub(crate) fn numbers(&self) -> Result<super::parameters::SubjectNumbers> {
+        let shortest = self.shortest_length();
+        Ok(match self {
+            Subjects::Stream(stream) => {
+                let (total, count) = stream.db.statistics_numbers();
+                super::parameters::SubjectNumbers {
+                    total: i64::try_from(total)
+                        .map_err(|_| anyhow!("BLASTX database length exceeds Int8"))?,
+                    count: i64::from(count),
+                    shortest,
+                    average: stream.db.average_length(),
+                }
+            }
+            Subjects::Fasta(_) | Subjects::Unreadable => {
+                let total = self.total_length()?;
+                let count = self.len() as i64;
+                super::parameters::SubjectNumbers {
+                    total,
+                    count,
+                    shortest,
+                    average: (total / count.max(1)) as i32,
+                }
+            }
+        })
     }
 
     /// Whether the subjects are `Unreadable`.
@@ -160,8 +182,9 @@ impl<'a> Subjects<'a> {
         }
     }
 
-    /// The total length (Int8): the sum of the records' lengths, or the database's
-    /// total of its index files (`BlastSeqSrcGetTotLen`).
+    /// The total length (Int8, `BlastSeqSrcGetTotLen`): the sum of the records' lengths, or the
+    /// database's `GetTotalLength` (`SeqDb::total_length`: the walk of `LENGTH`, not
+    /// `STATS_TOTLEN`), which the linking of an ungapped search reads (blast_engine.c:1407).
     pub(crate) fn total_length(&self) -> Result<i64> {
         match self {
             Subjects::Fasta(records) => records
@@ -176,18 +199,21 @@ impl<'a> Subjects<'a> {
         }
     }
 
-    /// The shortest subject length that the hit-saving cutoff reads before it is raised
-    /// to 10 (`BlastSeqSrcGetMinSeqLen`): the shortest record, the shortest sequence NCBI
-    /// scans in a database restricted by a list (`x_ScanTotals`, DI-8b DECISIONS 21), or 10
-    /// for an unrestricted database (D1; BLASTX translates the query, so the value is not
+    /// The shortest subject length that the hit-saving cutoff reads (`BlastSeqSrcGetMinSeqLen`):
+    /// the shortest record raised to `BLAST_SEQSRC_MINLENGTH` (seqsrc_multiseq.cpp:233-239), or
+    /// a database's `CSeqDB::GetMinLength` (`SeqDb::min_length`: the alias files'
+    /// `MIN_SEQ_LENGTH`, 10 where it is not positive, without a list, the shortest sequence NCBI
+    /// scans with one, DI-8b DECISIONS 21; BLASTX translates the query, so the value is not
     /// divided by 3, blast_setup.c:968-975).
     pub(crate) fn shortest_length(&self) -> usize {
         match self {
-            Subjects::Fasta(records) => records.iter().map(|s| s.sequence.len()).min().unwrap_or(0),
-            Subjects::Stream(stream) => stream
-                .db
-                .min_length()
-                .map_or(BLAST_SEQSRC_MINLENGTH, |shortest| shortest as usize),
+            Subjects::Fasta(records) => records
+                .iter()
+                .map(|s| s.sequence.len())
+                .min()
+                .unwrap_or(0)
+                .max(BLAST_SEQSRC_MINLENGTH),
+            Subjects::Stream(stream) => usize::try_from(stream.db.min_length()).unwrap_or(0),
             Subjects::Unreadable => BLAST_SEQSRC_MINLENGTH,
         }
     }

@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "prd_xga",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_xga (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-11T20:06:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50033,
+  "bytes-to-cache": 623,
+  "files": [
+    "prd_xga.pdb",
+    "prd_xga.phr",
+    "prd_xga.pin",
+    "prd_xga.pog",
+    "prd_xga.pos",
+    "prd_xga.pot",
+    "prd_xga.psq",
+    "prd_xga.ptf",
+    "prd_xga.pto"
+  ]
+}

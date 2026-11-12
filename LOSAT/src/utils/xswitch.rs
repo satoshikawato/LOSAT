@@ -210,6 +210,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXCLUTCAP` (BLASTX's units with a compressed lookup table searched at most K at a time,
 /// `blastx/x_bx_mem.rs`) joined the set in the pull request that added it, after it was verified
 /// and timed with it on and off.
+/// `LOSAT_X_BXW4CAP` (BLASTX's units with the 4-letter lookup table of `-word_size 4` searched at
+/// most K at a time, built-in K = 1, each built on the threads K leaves it, `blastx/x_bx_mem.rs`)
+/// joined the set in the pull request that added it, after it was verified and timed with it on and
+/// off; a rule the Owner approved as a deadline fallback (`docs/decisions/SWITCH_APPROVALS.md`).
 /// `LOSAT_X_BXCLUTPOOL` (BLASTX's flat compressed lookup tables built on vectors kept between
 /// builds, `tblastx/lookup/x_clut_direct.rs`) joined the set in the pull request that added it,
 /// after it was verified and timed with it on and off.
@@ -351,6 +355,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXTASKRES",
     "LOSAT_X_BXUNGAPSENT",
     "LOSAT_X_BXUNITCAP",
+    "LOSAT_X_BXW4CAP",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DCSEEDLEAN",

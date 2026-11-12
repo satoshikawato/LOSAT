@@ -1,0 +1,68 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/src2.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Standard
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	206	NP_417755.1 30S ribosomal subunit protein S4 [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	440288	1	206	1.46341e-134	375.182	COG0522	RpsD	-	-
+1	Query_1	Specific	504374	1	206	1.08282e-131	367.902	NF003717	PRK05327	-	-
+1	Query_1	Specific	200066	3	206	1.31e-111	317.323	TIGR01017	rpsD_bact	-	-
+1	Query_1	Specific	177038	1	205	1.0671e-60	188.115	CHL00113	rps4	-	-
+1	Query_1	Specific	513205	3	95	1.46116e-32	113.025	pfam00163	Ribosomal_S4	-	-
+1	Query_1	Specific	238095	97	156	4.82428e-18	74.9785	cd00165	S4	-	530405
+1	Query_1	Specific	214638	97	151	6.0747e-15	66.4625	smart00363	S4	-	530405
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	97	156	4.82428e-18	74.9785	cl09940	S4	-	-
+ENDSUPERFAMILIES
+SITES
+1	Query_1	Specific	RNA binding surface	R97,A109,T110,A112,E113,R115,Q116,S119,H120,A122,V129,V130,N131,I132,A133,S134,Y135,Q136,S138	19	19	238095
+ENDSITES
+ENDQUERY
+QUERY	Query_2	Peptide	140	NP_415914.1 phenylacetyl-CoA thioesterase [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_2	Specific	131339	19	132	5.5444e-60	180.694	TIGR02286	PaaD	-	529137
+1	Query_2	Specific	441653	1	134	1.77481e-36	121.974	COG2050	PaaI	-	-
+1	Query_2	Specific	239527	21	127	1.49164e-30	106.103	cd03443	PaaI_thioesterase	-	529137
+1	Query_2	Specific	515362	48	123	1.59904e-18	74.2083	pfam03061	4HBT	-	529137
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_2	Superfamily	0	19	132	5.5444e-60	180.694	cl00509	hot_dog	-	-
+ENDSUPERFAMILIES
+SITES
+1	Query_2	Specific	CoenzymeA binding site	C51,A77,F84,L85,R86,P87	6	6	239527
+1	Query_2	Specific	PHB binding site	G53,D61,T62,A65,Y66,A77	6	6	239527
+1	Query_2	Specific	subunit interaction site	H52,G54,F57,S78,A79,C80,T81,I82,F84	9	9	239527
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

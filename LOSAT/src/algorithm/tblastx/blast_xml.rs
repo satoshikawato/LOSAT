@@ -470,6 +470,7 @@ mod tests {
         let numbers = SubjectSetNumbers {
             total: 3_000,
             count: 3,
+            link_total: 3_000,
             dbsize: None,
             searchsp: None,
         };
@@ -489,6 +490,7 @@ mod tests {
             let numbers = SubjectSetNumbers {
                 total: 3_000,
                 count,
+                link_total: 3_000,
                 dbsize,
                 searchsp: None,
             };

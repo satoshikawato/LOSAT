@@ -111,7 +111,18 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    let x = -x_dropoff;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
+    // 913-917 and 1755-1759)
+    // ```c
+    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
+    //             }else {
+    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
+    //                                  -(cutoffs->x_dropoff), ungapped_data,
+    // ```
+    // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
+    // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
+    let x = x_dropoff.wrapping_neg();
     debug_assert!(q_off < q_seq.len() && s_off < subject_len);
     debug_assert!(subject_len.div_ceil(4) <= s_seq_packed.len());
     let q = q_seq.as_ptr();

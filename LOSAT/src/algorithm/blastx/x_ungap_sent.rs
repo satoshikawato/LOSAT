@@ -95,7 +95,7 @@ pub(crate) fn on() -> bool {
 }
 
 /// Whether a query batch is on the path (computed once per batch, `query_setup.rs`): the switch
-/// is on, the word size is 3 (not `-word_size 5`'s compressed table), the search has a two-hit
+/// is on, the word size is 3 (not 2 or 4, nor the compressed table of 5 to 7), the search has a two-hit
 /// window (not `-window_size 0`'s one-hit extension), and the buffer has a sentinel at each end,
 /// at most `i32::MAX / 16` letters and no code >= 32.
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.

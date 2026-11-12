@@ -2185,7 +2185,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
     query_gapped_k: Option<&[f64]>,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
@@ -2241,9 +2241,13 @@ pub fn write_blastp_pairwise_window<W: Write>(
         &hits_by_query,
         subject_titles,
         probe,
-        warnings,
+        warnings.as_deref_mut(),
         x_pool,
     )?;
+    // The warnings after the last query's report (`QueryWarnings::after_last_query`).
+    if let Some(warnings) = warnings.filter(|_| query_range.end == queries.len()) {
+        warnings.after_last_query(queries.len(), writer)?;
+    }
 
     // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
     // ```c++
@@ -5794,10 +5798,10 @@ mod tblastx_tests {
                         &report,
                         None,
                         None,
-                        Some(&mut crate::report::query_warnings::QueryWarnings {
-                            before: &before,
-                            sink: &mut diagnostics,
-                        }),
+                        Some(&mut crate::report::query_warnings::QueryWarnings::new(
+                            &before,
+                            &mut diagnostics,
+                        )),
                         x_pool,
                     )
                     .unwrap();

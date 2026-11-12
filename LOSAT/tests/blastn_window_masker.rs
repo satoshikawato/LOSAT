@@ -104,23 +104,51 @@ fn make_counts() {
         // `-window_masker_taxid`: <dir>/<taxid>/wmasker.obinary, the directory named by the
         // registry files relative to LOSAT/.
         let rc = b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = target/winmask_blastn/taxid\n".to_vec();
-        let taxid_files: [(&str, Vec<u8>); 7] = [
-            ("taxid/562/wmasker.obinary", data.clone()),
-            ("taxid/-1/wmasker.obinary", data.clone()),
+        // NCBI's system-wide file: `ncbi.ini` on Windows (`ncbi_environment`'s
+        // SYSTEM_WIDE_REGISTRY), whose NCBI reads it as the Linux build reads `.ncbirc`.
+        let system_wide = |dir: &str| {
+            format!(
+                "{dir}/{}",
+                if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" }
+            )
+        };
+        let ini_dont = b"[NCBI]\nDONT_USE_NCBIRC = 1\n".to_vec();
+        // Malformed system-wide files (line NP M3c): the entry above the line NCBI reports, the
+        // line before the entry, a file of one byte whose stream fails.
+        let rc_bad = [rc.as_slice(), b"[my blast]\nx = 1\n"].concat();
+        let rc_pre = [b"x y = 1\n".as_slice(), rc.as_slice()].concat();
+        // An entry set again (line NP M3c review): in a well-formed file, and above a malformed
+        // line.
+        let entry = &rc[rc.iter().position(|&byte| byte == b'\n').unwrap() + 1..];
+        let rc_dup = [rc.as_slice(), entry].concat();
+        let rc_dup_bad = [rc_dup.as_slice(), b"[my blast]\nx = 1\n"].concat();
+        let taxid_files: Vec<(String, Vec<u8>)> = vec![
+            ("taxid/562/wmasker.obinary".into(), data.clone()),
+            ("taxid/-1/wmasker.obinary".into(), data.clone()),
             (
-                "taxid/7/wmasker.obinary",
+                "taxid/7/wmasker.obinary".into(),
                 std::fs::read(work.join("unit17.obinary")).unwrap(),
             ),
             (
-                "taxid/10/wmasker.obinary",
+                "taxid/10/wmasker.obinary".into(),
                 std::fs::read(work.join("ascii.counts")).unwrap(),
             ),
-            ("home_rc/.ncbirc", rc.clone()),
-            (
-                "cfg_inidont/blastn.ini",
-                b"[NCBI]\nDONT_USE_NCBIRC = 1\n".to_vec(),
-            ),
-            ("cfg_inidont/.ncbirc", rc),
+            ("home_rc/.ncbirc".into(), rc.clone()),
+            ("cfg_inidont/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_inidont"), rc),
+            ("cfg_rcbad/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcbad"), rc_bad.clone()),
+            (system_wide("cfg_rcbadapp"), rc_bad),
+            ("cfg_rcpre/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcpre"), rc_pre),
+            ("cfg_rcbom/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcbom"), b"\xef".to_vec()),
+            ("cfg_rcdup/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcdup"), rc_dup),
+            ("cfg_rcdupbad/blastn.ini".into(), ini_dont),
+            (system_wide("cfg_rcdupbad"), rc_dup_bad),
+            // Subjects with fewer letters than subjects (the average subject length is 0).
+            ("short.fa".into(), b">s1\nA\n>s2\n\n".to_vec()),
         ];
         for (name, content) in taxid_files {
             let path = work.join(name);

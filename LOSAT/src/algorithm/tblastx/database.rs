@@ -96,7 +96,10 @@ impl TblastxDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
+        // number of sequences (`shared::check_statistics_count`).
+        shared::check_statistics_count(&db, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -148,11 +151,12 @@ impl TblastxDatabase {
     }
 
     /// Whether the database has parsed Seq-ids and more than `max_sequences` sequences in its
-    /// volumes (`SeqDb::printed_num_seqs`, also under a taxid list: the range walks of
-    /// `reports_may_refuse` decode a list's excluded sequences of every range they read): the
-    /// check before the search does not read its headers (`shared::PARSED_CHECK_SEQUENCES_MAX`).
+    /// volumes (`SeqDb::num_oids`, also under a taxid list or an alias file's range: the range
+    /// walks of `reports_may_refuse` decode the excluded sequences of every range they read):
+    /// the check before the search does not read its headers
+    /// (`shared::PARSED_CHECK_SEQUENCES_MAX`).
     pub(crate) fn parsed_beyond(&self, max_sequences: u32) -> bool {
-        self.parsed && self.db.printed_num_seqs() > max_sequences
+        self.parsed && self.db.num_oids() > max_sequences
     }
 
     /// Whether a prefetch of the run is refused because of NCBI's taxonomy cache
@@ -202,6 +206,7 @@ impl TblastxDatabase {
         SubjectSetNumbers {
             total: i64::try_from(total).expect("checked when opened"),
             count: i64::from(count),
+            link_total: i64::try_from(self.db.total_length()).expect("checked when opened"),
             dbsize,
             searchsp: None,
         }
@@ -212,15 +217,21 @@ impl TblastxDatabase {
         self.db.filtered_empty()
     }
 
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(crate) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
+    }
+
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(crate) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
     }
 
-    /// The number of sequences of the volumes (`SeqDb::printed_num_seqs`): none is the database
-    /// whose first query batch fails, also with a list.
-    pub(crate) fn printed_num_seqs(&self) -> u32 {
-        self.db.printed_num_seqs()
+    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
+    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    pub(crate) fn num_oids(&self) -> u32 {
+        self.db.num_oids()
     }
 
     /// The `Database:` lines of the pairwise report.

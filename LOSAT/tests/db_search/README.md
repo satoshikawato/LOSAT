@@ -606,8 +606,8 @@ following hits whose Seq-align ids `Match` (`gb|FFF00043.1|` and `gb|FFF00043|` 
 row of the PSSM's multiple alignment, make that PSSM as NCBI does (`db.id.wkb.ps.join.i2.6`, NCBI's bytes since line DBID
 pssmrows; weakbatch refused it). `ids/wkb_e3_v5` (`make_ids.py
 --weakbatch-only`, from `ids/wkb_e3.faa`) holds `gb|FFF00043.1|`, `gb|ZZZ00001.1|` and then `gb|FFF00043|`, which the
-lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, refused without the variable
-(`db.id.wkb.ps.e3.i2.7.reject`); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
+lookup finds as the first: beyond `-max_target_seqs 2` it is in round 1's PSSM, which reads the first one's letters
+for it (`db.id.wkb.ps.e3.s1.7`, NCBI's bytes since line DBID pssmread; refused before); `ids/wkb_p1_v5` makes it a weak hit above `-inclusion_ethresh` behind
 `gb|WWW00001.1|`, which the PSSM does not read (`db.id.wkb.ps.p1.i2.7`, NCBI's bytes); the query is `ids/wkb_qy.faa`.
 
 Rows `db.id.psr.*` (line DBID, pssmrows; databases `ids/psr_*` from `ids/psr_*.faa` by `make_ids.py --pssmrows-only`, all
@@ -642,8 +642,83 @@ rounds) and `db.id.psr.gim.s1q` (round 1 and its ASCII PSSM) are NCBI's bytes. `
 `gb|HHH00001|`) and `psr_vm` (`gb|AAA00001.1|`, then `gb|AAA00001|`) hold a sequence whose Seq-align id the lookup
 does not give back as that sequence; it is not included at `-inclusion_ethresh 1e-100` (`psr_jv`) and `1e-150`
 (`psr_vm`), so `db.id.psr.jv.r3q.6` and `db.id.psr.vm.r3q.6` (three rounds, `qseqid`) are NCBI's bytes. At the default
-threshold `psr_jv` includes it: NCBI warns `Failed to retrieve sequence gb|HHH00001|` and drops its letters, and LOSAT
-refuses (`db.id.psr.jv.r3q.i.reject`).
+threshold `psr_jv` includes it: NCBI warns `Failed to retrieve sequence gb|HHH00001|` (its lookup gives the shorter
+`gb|HHH00001.1|`) and the row, joined with `gb|HHH00001.1|`'s, becomes the query's; `db.id.psr.jv.r3q.i.6` is NCBI's bytes
+(pssmread writes it).
+
+Rows `db.id.prd.*` (line DBID, pssmread; databases `ids/prd_*` from `ids/prd_*.faa` by `make_ids.py --pssmread-only`, all
+version 5 but `prd_as1_4`; queries `ids/prd_q.faa`, `ids/prd_q2.faa` (two queries), `ids/prd_q3.faa` (three, the second with an
+`O`) and the PSSM query `ids/prd_q.asn.gz`, NCBI's `-out_pssm` of `prd_q.faa`): psiblast's PSSM reads the letters of each
+included subject by its Seq-align id, so a record whose id the lookup gives back as another sequence Y (A is
+`gb|AAA00001|`, Y `gb|AAA00001.1|`, listed first) has Y's letters in its row if A's HSP range fits in Y, and otherwise NCBI
+warns `Failed to retrieve sequence gb|AAA00001|` once for each such HSP and the row is the query's. `prd_av` (Y of A's
+length: read; `db.id.prd.av.s1`, the ASCII PSSM, and `.r3`, three rounds), `prd_ad` (Y as `dbj|AAA00001.1|`: read, no
+warning; `db.id.prd.ad.s1`), `prd_as1` (Y one letter shorter than A's HSP: one warning; `db.id.prd.as1.*`: round 1's ASCII PSSM
+(`s1`), two queries over three rounds (`r3q2`; each PSSM's warning comes after its round, before the next round's), two
+queries and the last round's PSSM (`s2q2`; a warning at each PSSM), three queries (`s1q3`, `r2q3`; each query's PSSM warning
+comes after its report, before the next query's warnings) and an `-in_pssm` search (`ip2`; the PSSM after round 1 warns)),
+`prd_as1_4` (the same in a version 4 database; `db.id.prd.as1v4.s1`), `prd_ar` (Y as `ref|AAA00001.1|`, whose ids do not
+compare equal to A's: the loader keeps none and NCBI warns; `db.id.prd.ar.r3`) and `prd_t2` (A in two HSPs over a short Y:
+two warnings; `db.id.prd.t2.s1`). The `.err` files are frozen (the warning counts are 0 for `av` and `ad`, 1 for `s1`,
+`as1v4.s1`, `ip2` and `ar.r3`, 2 for `r3q2` and `t2.s1`, 3 for `s1q3` and `r2q3`, 4 for `s2q2`).
+
+Review 1 of pssmread (rows `db.id.prd.*` over `ids/prd_unf.pal`, `prd_zunf.pal`, `prd_otag`, `prd_otag_4`, `prd_wk5`, `prd_ah4`
+and `prd_txself`, query `ids/prd_q.faa`, all psiblast against the same single query): `unf.s1`, `unf.r3` read an unfetchable
+subject (`lcl|777` before `gi|777`) whose lookup gives Y (`prd_u0y`, listed first) first, so NCBI reads Y's letters and does
+not warn; `zunf.s1`, `zunf.r3` do the same where Y's kept definition line is `lcl|777` and does not hold the id, so NCBI warns
+`Failed to retrieve sequence gi|777`; `otag.s1`, `otag.pf0.s1` (`PRE_FETCH_SEQS_LIMIT=0`) and `otag4.s1` (version 4) store
+`gnl|BL_ORD_ID|0` with a text tag, whose lookup throws: NCBI writes `Error pre-fetching sequence data` (prefetch on) and
+`Failed to retrieve sequence gnl|BL_ORD_ID|0` and exits 0. `txself.pf0` (A itself with taxid 99990 by `prd_txself.map`,
+`BLASTDB=tests/seqdb/taxdb/bad_magic` and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy
+database's text after the report; a refusal until review 3 of the line). Two `losat-rejection` rows (rc 1, with the `pssm`
+files kind: no PSSM file is written): `wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has
+read before: NCBI reads C's letters) and `ah4.reject` (another sequence that also holds A's id: NCBI's result depends on its
+reads and memory layout).
+
+Review 2 of pssmread (rows `db.id.prd2.*`; databases from `ids/prd_*.faa` and `ids/prdn_*.fna` by `make_ids.py
+--pssmread-only`, read through `ids/prd_xg.pal`, `prd_tw.pal`, `prd_tu.pal`, `prd_pah.pal`, `prdn_u.nal` and
+`prdn_z.nal`; the taxonomy databases of `tests/seqdb/taxdb`): `txself.tax.pf0.s1`, `txself.sid.pf0.r2` and
+`txself.lastoff.pf0.0` read A (taxid 99990) by the query's report one by one (`staxids`, `sseqid`, outfmt 0, the prefetch
+off) before the PSSM, so the taxonomy database's text (a wrong magic number, the offset error of taxid 99990) comes with
+the report's read and the PSSM's read loads nothing; `xg.s1`, `xg.r3`: A `gnl|DB|SEQA`, whose lookup gives Y
+(`gnl|DB|OTHER ^A gnl|DB|SEQA`) first: NCBI's reader keeps Y's second definition line, which holds the id, so the PSSM
+reads Y's letters; `tw.pf0.s1`: the lookup gives Y (`gb|AAA00002.1|gb|AAA00001.1|`, taxid 99990), whose definition line
+the reader's filter does not keep for A's `gb|AAA00001.1|` (`s_SeqDB_SeqIdIn` stops at the line's first comparable id,
+`gb|AAA00002.1|`): `GetBioseq` throws before its taxid lookup, so NCBI writes
+`Failed to retrieve sequence` and no taxonomy text; `tu.bad.s1` and `tu.lastoff.r1`: A `lcl|777 ^A gi|777` (unfetchable by
+its own ids) after Y (`gi|777|gb|YYY00001.1|`, 20 letters, taxid 99990): the prefetch reads Y and looks its taxid up, and
+the PSSM warns `Failed to retrieve sequence gi|777`; `tu.bad.pf0` (the same with the prefetch off: the PSSM's read loads Y
+first, so NCBI writes the text, then the warning; a refusal until review 3); one `losat-rejection` row, `pah.reject` (C
+`gi|888|gb|CCC00001.1| ^A gi|777` also holds A's `gi|777`: the refusal names database sequence 2). BLASTN (megablast) and TBLASTX with the
+minus-strand query `ids/prdn_qrc.fna` (the prefetch asks the length of a minus-strand Seq-align's subject): `bn.u.rc`,
+`tx.u.rc` (A `lcl|777 ^A gi|777` after Y `gi|777|gb|YYY00001.1|`: the scope gets Y's Bioseq, no warning) and `bn.z.rc`,
+`tx.z.rc` (A `gi|777` after Y `lcl|777 ^A gi|777`, whose kept line `lcl|777` does not hold the id: `Error pre-fetching
+sequence data`). `ids/prd_mb.pal` (`prd_mb0ys`: Y `gb|BBB00001.1|` of 100 letters; `prd_mbab`: A `gb|AAA00001.1|`, B
+`gb|BBB00001|`, C) is `tests/psiblast_pssm_read_order.rs`'s: with `-max_target_seqs 1` no report reads B, whose PSSM read
+fails, and the last query's warning comes before the epilog where both streams go to one file.
+
+Review 3 of pssmread (rows `db.id.prd3.*`; `ids/prd_np` and its version 4 copy `ids/prd_np_4` from `ids/prd_np.faa`, A and B
+without `-parse_seqids` and taxid 99990 by `-taxid 99990`, and `ids/prd_tc` from `ids/prd_tc.faa`, A taxid 99990 and B taxid
+150 by `prd_tc.map`, all by `make_ids.py --pssmread-only`; the prefetch off and a report that reads nothing of the subjects):
+psiblast's PSSM reads a subject without parsed Seq-ids by `gnl|BL_ORD_ID|n`, whose load looks its taxid up, so where that
+is the run's first lookup NCBI writes the taxonomy database's text after the query's report, before the PSSM's warnings and
+the next query's. `np.bad.pf0.s1` (a wrong magic number), `np4.lastoff.pf1.q3` (three queries, the offset error of taxid
+99990 after the first query's report and before the second query's O warning), `np.count.pf0.r2` (two rounds, a count larger
+than the entries: after round 1's report, before round 2's composition warning) and `np.bad.pf0.stop` (`-pseudocount -1`:
+the text, then NCBI's PSSM error, exit 1) are NCBI's bytes; `tc.lastoff.pf0.q2.reject` is refused: each query's PSSM
+reads B, then A; the second query reads B again, whose taxid takes the same slot of NCBI's 256-slot taxonomy cache of a
+volume only where NCBI's scope loads B again, so A's read again writes the offset error or not as the scope decides (it
+loads them again after 40 other included subjects, not after none).
+
+Review 4 of pssmread (rows `db.id.prd4.*`; `ids/prd_m`, `ids/prd_m2` and `ids/prd_ax` from the FASTA and maps of the same
+names by `make_ids.py --pssmread-only`, `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`, the prefetch off and a report that
+reads nothing of the subjects): NCBI's volume cache keeps one taxid per slot (`taxid & 255`), and each lookup of taxid 99990
+that finds another taxid of its slot (150) there writes the offset error again, in the order of the PSSM's reads and of the
+definition lines of each load. `m.lastoff.pf0.s1` (A's lines 99990, 150, 99990: twice), `m2.lastoff.pf0.s1` (A 99990 and 150,
+then B 99990: twice), `ax.lastoff.pf0.q2` and `ax.lastoff.pf0.r2` (A 99990 and X 150, which no PSSM includes: once, the second
+query's or round's read of A writes nothing whether NCBI's scope loads A again or not) are NCBI's bytes;
+`m2.lastoff.pf0.q2.reject` is refused: the second query reads A again, which puts 150 in the slot only where NCBI's scope
+loads A again, so B's read again writes the offset error or not as the scope decides.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
@@ -1126,3 +1201,22 @@ The other queries are `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and `taxfilt
 - `db.acbs.blastx.wrap*` and `db.acbs.blastx.rej*` search `bslice` with a `-max_target_seqs` whose preliminary
   size NCBI's 32-bit int wraps: 2147483647 (48 with composition-based statistics), 1073741824 without them
   (10), and 1073741824 with them (negative: NCBI crashes, LOSAT refuses).
+
+## Alias-file keys (line RG, series D, D1a)
+
+Rows `db.ak.*`: alias files of `aliaskeys/` over `taxfilter/tfp`, `taxfilter/tfn` (its volumes `tfn.00` and `tfn.01` too) and
+`multidb/p4a` (PSIBLAST reads databases without parsed Seq-ids), written by hand for the keys NCBI's `CSeqDB` reads
+(`remaining-gaps-20261112/D/fixtures/make_d1a_fixtures.py` writes them and the rows): `NSEQ` and `LENGTH` that are not the
+sums of the volumes (`p_nseq`, `p_nseqhi`, `p_nseqonly`, `p_nseqplus`, `p_nseq0`: each query's warning `Filtering resulted
+in an empty database.` and a search that goes on, `p_nseq4g`: NCBI's `int` of 4294967297 is 1, `n_nseq`, `n_nseq4g`,
+`s_range`), `STATS_NSEQ` and `STATS_TOTLEN` (`p_stats`, `p_statsn`, `p_statsl`, `p_statsz`, `p_statsnest`, `p_statsover`, the
+`-dbsize` row, `p_statsl` with `p_r123` in one `-db`, `n_stats`, `s_stats`), `MIN_SEQ_LENGTH` (`p_min`, `n_min1`: TBLASTN's
+`The average subject length is too short`, exit 3, `n_min1000`), `MAX_SEQ_LENGTH abc` (never read), `VDBLIST` (`p_vdb`),
+`FIRST_OID` / `LAST_OID` ranges (`p_range`, `p_nest` and `p_rin`: nested ranges ANDed, `p_union`: two alias files over one
+volume ORed, `p_twice`: an alias file and the volume itself, `p_dupvol`: one volume twice in a `DBLIST`, `p_first0`, `p_last2`,
+`p_empty`, `p_beyond`, `p_r312` and `p_r312s` with `-taxids` and `-negative_taxids`, `p_range` with `-seqidlist`, `n_range`,
+`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone). The ncbi rows were frozen with NCBI
+BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the release build on the developer machine, the same
+bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
+`p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the
+developer machine.

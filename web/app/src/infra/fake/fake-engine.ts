@@ -16,6 +16,7 @@ import {
   type ValidationResult,
 } from '../../ports/engine';
 import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../ports/run-output';
+import { sha256Hex } from '../browser/platform';
 import { toProgramDescription } from '../reactor/control';
 import { RunOutputWriter } from '../run-output/writer';
 import DESCRIBE from './describe.json';
@@ -83,10 +84,16 @@ export class FakeEngine implements EngineGateway {
     if (request.query.bytes.length === 0 || request.subject.bytes.length === 0) {
       throw new Error('No sequence input was provided');
     }
+    // The counts file is accepted and recorded, not used: the fake searches nothing.
+    const counts = request.windowMasker;
+    const windowMasker =
+      counts === undefined
+        ? undefined
+        : { name: counts.name, size: counts.file.size, sha256: await sha256Hex(new Uint8Array(await counts.file.arrayBuffer())), retained: false, loadMs: 0 };
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine' };
+    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', ...(windowMasker === undefined ? {} : { windowMasker }) };
   }
 
   cancel(runId: string): void {

@@ -24,8 +24,15 @@ export type InputRole = 'query' | 'subject';
  *   `subject_gencodes`) gives the choices.
  * - `filter`: a low complexity filter (`no`, `yes` or the filter's arguments): NCBI's "Low
  *   complexity regions" checkbox, with the value in a text box while it is checked.
+ * - `file`: an option whose value is the name of a file that the user chooses (BLASTN's
+ *   WindowMasker counts): a checkbox, as NCBI's "Species-specific repeats" has, with the file
+ *   chosen beside it. The value is `true` while the box is checked and no file is chosen
+ *   (the argv writes nothing, and the search cannot start), and the file's name once it is.
  */
-export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter';
+export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter' | 'file';
+
+/** BLASTN's option for the WindowMasker unit counts file, the one field of the form with the kind `file`. */
+export const WINDOW_MASKER_FLAG = '-window_masker_db';
 
 export interface ParameterField {
   readonly flag: string;
@@ -44,6 +51,8 @@ export interface ParameterField {
   readonly list?: readonly string[] | Readonly<Record<string, readonly string[]>>;
   /** NCBI's sentence beside the control ("Select the maximum number of aligned sequences to display"). */
   readonly hint?: string;
+  /** For `file` fields: the name of the file ("WindowMasker counts"), and the sentence that asks for it while the box is checked without one. */
+  readonly file?: { readonly label: string; readonly missing: string };
   /**
    * The name of a row that shows this field with its neighbours of the same row (NCBI's
    * "Match/Mismatch Scores", "Gap Costs", "Filter" and "Mask").
@@ -225,6 +234,16 @@ const compBasedStats: ParameterField = {
 const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions', kind: 'filter', row: 'Filter' };
 // NCBI's "Mask" row: two checkboxes.
 const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean', row: 'Mask' };
+// NCBI's "Species-specific repeats filter for:" (a select of organisms) is, here, the WindowMasker counts file
+// of the user's own (-window_masker_db); NCBI's list of organisms is not offered.
+const windowMasker: ParameterField = {
+  flag: WINDOW_MASKER_FLAG,
+  label: 'Species-specific repeats filter for:',
+  kind: 'file',
+  row: 'Filter',
+  file: { label: 'WindowMasker counts', missing: 'Choose the WindowMasker counts file.' },
+  hint: "wmasker.obinary from NCBI's windowmasker_files, or an obinary or binary file made by windowmasker -mk_counts",
+};
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
@@ -309,6 +328,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         placement: 'algorithm',
         fields: [
           { flag: '-dust', label: 'Low complexity regions', kind: 'filter', row: 'Filter' },
+          windowMasker,
           softMasking,
           lcaseMasking,
         ],
@@ -393,13 +413,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'General Parameters',
         placement: 'algorithm',
-        // LOSAT's BLASTX reads word sizes 3 and 5 only.
-        fields: [
-          maxTargetSeqs,
-          evalue,
-          { ...wordSize, list: ['3', '5'] },
-          cullingLimit,
-        ],
+        fields: [maxTargetSeqs, evalue, wordSize, cullingLimit],
       },
       {
         title: 'Scoring Parameters',

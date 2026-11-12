@@ -997,9 +997,7 @@ mod tests {
                 &batch,
                 &mut params,
                 &options,
-                s[0].sequence.len() as i64,
-                1,
-                s[0].sequence.len(),
+                parameters::SubjectNumbers::one(s[0].sequence.len()),
                 None,
             )
             .unwrap();

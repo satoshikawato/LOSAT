@@ -1,8 +1,7 @@
 //! Unit tests for common/diagnostics.rs
 
 use crate::algorithm::common::diagnostics::{
-    diagnostics_flag, BaseDiagnosticCounters, NucleotideDiagnosticCounters,
-    ProteinDiagnosticCounters,
+    diagnostics_flag, BaseDiagnosticCounters, ProteinDiagnosticCounters,
 };
 use std::env::VarError;
 use std::sync::atomic::Ordering;
@@ -108,27 +107,6 @@ fn test_protein_diagnostic_counters_atomic_operations() {
 }
 
 #[test]
-fn test_nucleotide_diagnostic_counters_initialization() {
-    let counters = NucleotideDiagnosticCounters::default();
-
-    // Base counters should be initialized
-    assert_eq!(counters.base.kmer_matches.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.base.seeds_passed.load(Ordering::Relaxed), 0);
-}
-
-#[test]
-fn test_nucleotide_diagnostic_counters_atomic_operations() {
-    let counters = NucleotideDiagnosticCounters::default();
-
-    // Test base counter operations
-    counters.base.kmer_matches.fetch_add(10, Ordering::Relaxed);
-    assert_eq!(counters.base.kmer_matches.load(Ordering::Relaxed), 10);
-
-    counters.base.seeds_passed.fetch_add(4, Ordering::Relaxed);
-    assert_eq!(counters.base.seeds_passed.load(Ordering::Relaxed), 4);
-}
-
-#[test]
 fn test_diagnostic_output_formatting() {
     let counters = ProteinDiagnosticCounters::default();
 
@@ -141,17 +119,5 @@ fn test_diagnostic_output_formatting() {
     // The print_summary function should not panic
     // We can't easily test the output format without capturing stderr,
     // but we can at least verify it doesn't crash
-    counters.print_summary(20);
-}
-
-#[test]
-fn test_diagnostic_output_formatting_nucleotide() {
-    let counters = NucleotideDiagnosticCounters::default();
-
-    // Set some values
-    counters.base.kmer_matches.store(200, Ordering::Relaxed);
-    counters.base.seeds_passed.store(100, Ordering::Relaxed);
-
-    // The print_summary function should not panic
     counters.print_summary(20);
 }

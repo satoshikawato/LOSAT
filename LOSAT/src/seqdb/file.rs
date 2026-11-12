@@ -17,6 +17,13 @@ enum RangeBuffer {
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `x_read_range_mapped`'s buffer.
     Mapped,
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer (`x_read_range_into`).
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     Given(Vec<u8>),
 }
 
@@ -187,6 +194,13 @@ impl DbFile {
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_range` into `buf`, whose bytes it replaces (its
     /// capacity is kept when it holds the range). No NCBI counterpart: only where the bytes are
     /// kept.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     pub fn x_read_range_into(
         &self,
         start: u64,
@@ -231,6 +245,13 @@ impl DbFile {
                 buf.resize(len, 0u8);
                 buf
             }
+            #[cfg(any(
+                test,
+                all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                )
+            ))]
             RangeBuffer::Given(mut buf) => {
                 // Only the bytes past its length are filled before the read writes them all.
                 if buf.capacity() < len {

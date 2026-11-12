@@ -1436,7 +1436,9 @@ pub(super) fn render_queries_with(
                         writeln!(writer, "# {count} hits found")?;
                     }
                 }
-                for list in lists.iter().take(options.shown_lists()) {
+                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
+                let listed = &lists[..lists.len().min(options.shown_lists())];
+                for list in listed {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
                         ids: shown.subject_ids(subject, list.oid),

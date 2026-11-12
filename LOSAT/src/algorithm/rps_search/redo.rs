@@ -115,7 +115,7 @@ impl RpsTraceback<'_> {
             if list.hsps.is_empty() {
                 continue;
             }
-            let consensus = &self.consensus[start..start + length];
+            let consensus = &self.consensus.letters()?[start..start + length];
             redo.files
                 .freq_ratios(start, length, &mut scratch.freq_bytes, &mut scratch.ratios)
                 .map_err(|error| {

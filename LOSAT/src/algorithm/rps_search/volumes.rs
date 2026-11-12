@@ -51,6 +51,12 @@ impl<'a> RpsVolumeSet<'a> {
             order,
         }
     }
+    /// The first volume searched (in path order), whose statistics the merged result keeps and
+    /// the reports print with `-dbsize` on several volumes (`s_CombineSearchSets`'s
+    /// `thread_results[0]`).
+    pub(crate) fn first(&self) -> &'a Volume {
+        &self.volumes[self.order[0]]
+    }
 }
 
 /// Whether the volumes of an RPS search have their own effective search spaces: `-dbsize`
@@ -60,11 +66,45 @@ pub(crate) fn per_volume_search_spaces(dbsize: i64, searchsp: i64, volumes: usiz
     dbsize > 0 && searchsp == 0 && volumes >= 2
 }
 
-/// One volume set up for a search: its files and the consensus letters of its profiles at their
-/// offsets (the traceback's letters and the reports' identities).
-pub(crate) struct RpsVolume {
-    pub(crate) files: RpsVolumeFiles,
-    pub(crate) consensus: Vec<u8>,
+/// The consensus letters of a volume's profiles at their offsets (the traceback's letters and the
+/// reports' identities), read when a search first needs them: NCBI reads a profile's sequence
+/// only when its list reaches the traceback, so a volume without `.psq` searches a batch that
+/// has no list, or no valid query, as NCBI does (review B of PS12a, S3).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1176-1177
+/// ```c
+///       if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0)
+///           continue;
+/// ```
+pub(crate) struct Consensus<'a> {
+    setup: &'a RpsVolumeSetup,
+    volume: &'a Volume,
+    files: &'a RpsVolumeFiles,
+    letters: std::sync::OnceLock<Vec<u8>>,
+}
+
+impl<'a> Consensus<'a> {
+    pub(crate) fn new(
+        setup: &'a RpsVolumeSetup,
+        volume: &'a Volume,
+        files: &'a RpsVolumeFiles,
+    ) -> Self {
+        Self {
+            setup,
+            volume,
+            files,
+            letters: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// The letters, read once (threads that ask together may each read them; one copy stays).
+    pub(crate) fn letters(&self) -> Result<&[u8]> {
+        if let Some(letters) = self.letters.get() {
+            return Ok(letters);
+        }
+        let letters = self.setup.consensus(self.volume, self.files)?;
+        Ok(self.letters.get_or_init(|| letters))
+    }
 }
 
 /// The set-up of the volumes of one run: the program of LOSAT's refusals, the word window (the
@@ -84,21 +124,21 @@ impl RpsVolumeSetup {
         }
     }
 
-    /// `volume` set up for a search, with its frequency ratios when `cbs` (composition-based
-    /// statistics), after LOSAT's checks (`check`): `Ok(Err(error))` is NCBI's own error of the
+    /// The files of `volume` (with its frequency ratios when `cbs`, composition-based
+    /// statistics) after LOSAT's checks (`check`): `Ok(Err(error))` is NCBI's own error of the
     /// files, which the caller reports where NCBI's search raises it; `Err` is LOSAT's refusal.
+    /// The consensus letters come when the search needs them (`Consensus`).
     pub(crate) fn open(
         &mut self,
         volume: &Volume,
         cbs: bool,
-    ) -> Result<std::result::Result<RpsVolume, RpsVolumeError>> {
+    ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let files = match self.files(volume, cbs)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
         self.check_files(volume, &files)?;
-        let consensus = self.consensus(volume, &files)?;
-        Ok(Ok(RpsVolume { files, consensus }))
+        Ok(Ok(files))
     }
 
     /// LOSAT's checks of `volume` alone, once per run before the first byte of output
@@ -116,9 +156,8 @@ impl RpsVolumeSetup {
         Ok(Ok(()))
     }
 
-    /// The files of `volume`, which `check` has checked in this run, opened again for a search;
-    /// the consensus letters come only for a batch that is searched (`consensus`: NCBI reads the
-    /// sequences only in the traceback, so a batch without a valid query reads no `.psq`).
+    /// The files of `volume`, which `check` has checked in this run, opened again for a search
+    /// (the consensus letters: `Consensus`).
     pub(crate) fn reopen(
         &self,
         volume: &Volume,
@@ -232,8 +271,8 @@ impl RpsVolumeSetup {
         Ok(())
     }
 
-    /// The consensus letters of the volume's profiles at their offsets.
-    pub(crate) fn consensus(&self, volume: &Volume, files: &RpsVolumeFiles) -> Result<Vec<u8>> {
+    /// The consensus letters of the volume's profiles at their offsets (`Consensus`).
+    fn consensus(&self, volume: &Volume, files: &RpsVolumeFiles) -> Result<Vec<u8>> {
         let num_seqs = volume.num_oids();
         let concat = files.rows().len();
         let offsets = files.offsets();

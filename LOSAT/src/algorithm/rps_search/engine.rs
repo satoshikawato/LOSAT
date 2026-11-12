@@ -73,6 +73,48 @@ pub struct RpsSearch {
 /// The contexts of a translated query.
 pub(crate) const NUM_FRAMES: usize = 6;
 
+impl RpsSearch {
+    /// The X-drops in bits, `-xdrop_ungap`, `-xdrop_gap` and `-xdrop_gap_final` as given or the
+    /// RPS options handle's defaults (7, 15 and 25 bits), and the gap trigger (22 bits): the
+    /// `RpsRun` fields of both RPS programs.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:76-89
+    /// ```c++
+    /// CBlastRPSOptionsHandle::SetInitialWordOptionsDefaults()
+    /// {
+    ///     SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_PROT);
+    ///     ...
+    /// CBlastRPSOptionsHandle::SetGappedExtensionDefaults()
+    /// {
+    ///     SetGapXDropoff(BLAST_GAP_X_DROPOFF_PROT);
+    ///     SetGapXDropoffFinal(BLAST_GAP_X_DROPOFF_FINAL_PROT);
+    ///     SetGapTrigger(BLAST_GAP_TRIGGER_PROT);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:122,128,137,144
+    /// ```c
+    /// #define BLAST_UNGAPPED_X_DROPOFF_PROT 7 /**< ungapped dropoff score for all
+    /// #define BLAST_GAP_X_DROPOFF_PROT 15 /**< default dropoff (all protein-
+    /// #define BLAST_GAP_TRIGGER_PROT 22.0 /**< default bit score that will trigger
+    /// #define BLAST_GAP_X_DROPOFF_FINAL_PROT 25 /**< default dropoff (all protein-
+    /// ```
+    pub(crate) fn x_drop_bits(&self) -> RpsXDropBits {
+        RpsXDropBits {
+            ungapped: self.x_drop_ungapped_bits.unwrap_or(7.0),
+            gapped: self.x_drop_gapped_bits.unwrap_or(15.0),
+            final_: self.x_drop_final_bits.unwrap_or(25.0),
+            gap_trigger: 22.0,
+        }
+    }
+}
+
+/// `RpsSearch::x_drop_bits`.
+pub(crate) struct RpsXDropBits {
+    pub(crate) ungapped: f64,
+    pub(crate) gapped: f64,
+    pub(crate) final_: f64,
+    pub(crate) gap_trigger: f64,
+}
+
 /// One user query as the search reads it: its contexts, one for a protein query (rpsblast) and
 /// the six frames of a nucleotide query (rpstblastn), which the reversed search scans as its
 /// subjects.
@@ -143,10 +185,35 @@ impl RpsQuery<'_> {
         &self.frames[crate::core::blast_util::frame_to_context(frame)]
     }
 
-    /// The length of the query's translation buffer, its frames with a sentinel between each two
-    /// (NCBI's `one_query->length`, `Blast_GetOneQueryStructs`; a protein query's length).
+    /// The length of the query's translation buffer (NCBI's `one_query->length`; a protein
+    /// query's length): the last context's offset plus its length, where each context starts
+    /// one sentinel after the previous one, an empty context taking no byte.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:72-77
+    /// ```c++
+    ///         Uint4 prev_loc = qinfo->contexts[index-1].query_offset;
+    ///         Uint4 prev_len = qinfo->contexts[index-1].query_length;
+    ///
+    ///         Uint4 shift = prev_len ? prev_len + 1 : 0;
+    ///
+    ///         qinfo->contexts[index].query_offset = prev_loc + shift;
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:379-381
+    /// ```c
+    ///     one_query->length =
+    ///         one_query_info->contexts[num_frames-1].query_offset +
+    ///         one_query_info->contexts[num_frames-1].query_length;
+    /// ```
     pub(crate) fn translation_length(&self) -> usize {
-        self.frames.iter().map(RpsFrame::length).sum::<usize>() + self.frames.len() - 1
+        let (last, earlier) = self.frames.split_last().expect("a query has a context");
+        earlier
+            .iter()
+            .map(|frame| match frame.length() {
+                0 => 0,
+                length => length + 1,
+            })
+            .sum::<usize>()
+            + last.length()
     }
 
     /// `stat_length` of the preliminary e-values: the length of the last context that has
@@ -440,7 +507,7 @@ impl RpsRun<'_> {
     pub(crate) fn search_volume(
         &self,
         files: &RpsVolumeFiles,
-        consensus: &[u8],
+        consensus: &super::volumes::Consensus<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<Vec<RpsTraced>> {
         let rows = files.rows();
@@ -606,7 +673,7 @@ impl RpsRun<'_> {
                     .iter()
                     .any(|frame| frame.aa_seq_nomask.is_some())
                 {
-                    formatter_identities(hit_list, query, consensus, offsets);
+                    formatter_identities(hit_list, query, consensus.letters()?, offsets);
                 }
                 finish_volume_list(
                     hit_list,

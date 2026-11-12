@@ -30,11 +30,8 @@ use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::rps_search::engine::{batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch};
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, shift_ordinal_ids, RpsVolume, RpsVolumeError,
+    mask_unsupported_letters, merge_volume, shift_ordinal_ids, Consensus, RpsVolumeError,
     RpsVolumeSet, RpsVolumeSetup,
-};
-use crate::algorithm::tblastx::constants::{
-    GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::{
     prepare_blosum62_lookup_query_for_word_size, BlastAaLookupTable, QueryContext,
@@ -43,9 +40,11 @@ use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 /// The error of the RPS files that NCBI reports itself (`BLAST engine error: <text>`, exit
-/// status 3), after what the first batch's search writes before (`preliminary_search_error`).
+/// status 3), after what the first batch's search writes before (`preliminary_search_error`);
+/// the second field is true for the error that NCBI raises in the first batch whatever its
+/// queries' validity (the score block of an `.aux` without a matrix name: review B of PS12a, N4).
 #[derive(Debug)]
-pub(super) struct RpsEngineError(pub(super) String);
+pub(super) struct RpsEngineError(pub(super) String, pub(super) bool);
 
 impl std::fmt::Display for RpsEngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -232,15 +231,11 @@ pub(super) fn dbsize_volume_num_seqs(
     if args.rps_search.is_none() || (args.dbsize <= 0 && args.searchsp.unwrap_or(0) == 0) {
         return None;
     }
-    let volumes = database.seqdb().volumes();
-    if volumes.len() < 2 {
+    let volumes = RpsVolumeSet::of(database.seqdb());
+    if volumes.order.len() < 2 {
         return None;
     }
-    let first = volumes
-        .iter()
-        .min_by(|a, b| crate::seqdb::SeqDb::compare_volume_paths(a.base(), b.base()))
-        .expect("not empty");
-    Some(first.num_oids() as usize)
+    Some(volumes.first().num_oids() as usize)
 }
 
 /// Whether the volumes of rpsblast's search have their own effective search spaces
@@ -419,31 +414,9 @@ pub(super) fn rps_search(
     } else {
         None
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:77-88
-    // ```c++
-    // CBlastRPSOptionsHandle::SetInitialWordOptionsDefaults()
-    // {
-    //     SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_PROT);
-    //     SetWindowSize(BLAST_WINDOW_SIZE_PROT);
-    //     // FIXME: extend_word_method is missing
-    // }
-    //
-    // void
-    // CBlastRPSOptionsHandle::SetGappedExtensionDefaults()
-    // {
-    //     SetGapXDropoff(BLAST_GAP_X_DROPOFF_PROT);
-    //     SetGapXDropoffFinal(BLAST_GAP_X_DROPOFF_FINAL_PROT);
-    // ```
-    // The X-drops in bits: `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or these defaults
-    // (7, 15, 25); the engine converts them at each volume's scale (`RpsRun::cutoffs`,
-    // `RpsRun::gapped_x_drops`).
-    let x_drop_ungapped_bits = rps.x_drop_ungapped_bits.unwrap_or(X_DROP_UNGAPPED_BITS);
-    let x_drop_gapped_bits = rps
-        .x_drop_gapped_bits
-        .unwrap_or(f64::from(X_DROP_GAPPED_PRELIM));
-    let x_drop_final_bits = rps
-        .x_drop_final_bits
-        .unwrap_or(f64::from(X_DROP_GAPPED_FINAL));
+    // The X-drops in bits and the gap trigger (`RpsSearch::x_drop_bits`); the engine converts
+    // them at each volume's scale (`RpsRun::cutoffs`, `RpsRun::gapped_x_drops`).
+    let x_drops = rps.x_drop_bits();
     // NCBI's reports count an HSP's identities on the sequences of their scope (outfmt 0 always,
     // the tabular formats inside their alignment block), not on the masked query of the
     // traceback's count (`rps_search::traceback::formatter_identities`). LOSAT's outfmt 0 and
@@ -491,13 +464,15 @@ pub(super) fn rps_search(
     for (position, &index) in order.iter().enumerate() {
         let volume = &db_volumes[index];
         let num_seqs = volume.num_oids();
-        let RpsVolume { files, consensus } = match setup.open(volume, cbs > 0)? {
-            Ok(volume) => volume,
-            Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text).into()),
+        let files = match setup.open(volume, cbs > 0)? {
+            Ok(files) => files,
+            Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text, false).into()),
             // N2 of review A (PS12a): the score block of each query of the first batch fails.
             Err(RpsVolumeError::NoMatrix) => {
                 let queries = run.batches.first().map_or(0, |batch| batch.len());
-                return Err(RpsEngineError("Error: Unknown error code -1 ".repeat(queries)).into());
+                return Err(
+                    RpsEngineError("Error: Unknown error code -1 ".repeat(queries), true).into(),
+                );
             }
         };
         let masked: Vec<Option<Vec<u8>>> = run
@@ -581,10 +556,10 @@ pub(super) fn rps_search(
             hitlist_size: args.traceback_hitlist_size(),
             prelim_hitlist_size: run.prelim_hitlist_size,
             window: args.window_size as i32,
-            x_drop_ungapped_bits,
-            x_drop_gapped_bits,
-            x_drop_final_bits,
-            gap_trigger_bits: GAP_TRIGGER_BIT_SCORE,
+            x_drop_ungapped_bits: x_drops.ungapped,
+            x_drop_gapped_bits: x_drops.gapped,
+            x_drop_final_bits: x_drops.final_,
+            gap_trigger_bits: x_drops.gap_trigger,
             options: rps,
             program: "RPSBLAST",
         };
@@ -612,12 +587,11 @@ pub(super) fn rps_search(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
             );
         }
-        let traced = engine.search_volume(&files, &consensus, pool)?;
+        let traced = engine.search_volume(&files, &Consensus::new(&setup, volume, &files), pool)?;
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.
         drop(engine);
         drop(masked);
-        drop(consensus);
         let aux_karlin_k = files.aux.karlin_k.clone();
         drop(files);
         // The volume's local ordinal ids become the database's.

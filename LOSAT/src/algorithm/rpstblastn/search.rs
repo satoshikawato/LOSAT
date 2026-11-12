@@ -45,7 +45,7 @@ use crate::algorithm::blastx::results::{Hsp, HspList};
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::rps_search::engine::{RpsFrame, RpsQuery, RpsRun, RpsSearch, NUM_FRAMES};
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids,
+    mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, Consensus,
     RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::blastinput::report_counts::FormattingArgs;
@@ -269,6 +269,14 @@ impl TranslatedRpsSearch {
         //        program == eBlastTypeRpsTblastn);
         // ```
         let mut parameters: Option<Vec<ContextParameters>> = None;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:178-181
+        // ```c++
+        // 		CRef<CSearchResults> aggregate_search_results (new CSearchResults(thread_results[0]->GetSeqId(),
+        // 														   	   	   	   	  align_set,
+        // 														   	   	   	   	  aggregate_messages,
+        // 														   	   	   	   	  thread_results[0]->GetAncillaryData(),
+        // ```
+        let mut reported: Option<Vec<ContextParameters>> = None;
         let mut searched = false;
         let gapped = gapped_karlin(options);
         let gumbel = gumbel_block(options, db_length);
@@ -293,7 +301,6 @@ impl TranslatedRpsSearch {
             if !parameters.iter().any(|p| p.valid) {
                 continue;
             }
-            let consensus = setup.consensus(volume, &files)?;
             // `-dbsize` on several volumes: each volume's statistics read the volume's own
             // number of sequences (`per_volume_search_spaces`, as rpsblast's).
             if per_volume_search_spaces(
@@ -304,6 +311,11 @@ impl TranslatedRpsSearch {
                 let num_seqs = i64::from(volume.num_oids());
                 effective_lengths(&prepared, parameters, options, db_length, num_seqs, None)
                     .map_err(RpsBatchError::Setup)?;
+                // The merged result keeps the first volume's statistics (in path order), which
+                // the reports print (`RpsVolumeSet::first`, as rpsblast's footers).
+                if position == 0 {
+                    reported = Some(parameters.clone());
+                }
             } else if !searched {
                 effective_lengths(&prepared, parameters, options, db_length, db_count, None)
                     .map_err(RpsBatchError::Setup)?;
@@ -320,6 +332,7 @@ impl TranslatedRpsSearch {
                     })?
                 })
                 .collect();
+            let x_drops = self.search.x_drop_bits();
             let run = RpsRun {
                 queries: frame_queries(&prepared, parameters, &masked),
                 gapped,
@@ -334,23 +347,14 @@ impl TranslatedRpsSearch {
                     options,
                 ),
                 window: options.window_size,
-                // The X-drops in bits as given or NCBI's protein defaults (7, 15, 25 bits; the
-                // gap trigger 22 bits), which BLASTX's options hold (`-xdrop_ungap` passes
-                // through them; RPSTBLASTN's gapped ones are the engine's, `RpsSearch`).
-                x_drop_ungapped_bits: options.x_dropoff,
-                x_drop_gapped_bits: self
-                    .search
-                    .x_drop_gapped_bits
-                    .unwrap_or(options.gap_x_dropoff),
-                x_drop_final_bits: self
-                    .search
-                    .x_drop_final_bits
-                    .unwrap_or(options.gap_x_dropoff_final),
-                gap_trigger_bits: options.gap_trigger,
+                x_drop_ungapped_bits: x_drops.ungapped,
+                x_drop_gapped_bits: x_drops.gapped,
+                x_drop_final_bits: x_drops.final_,
+                gap_trigger_bits: x_drops.gap_trigger,
                 options: &self.search,
                 program: PROGRAM,
             };
-            let traced = run.search_volume(&files, &consensus, pool)?;
+            let traced = run.search_volume(&files, &Consensus::new(setup, volume, &files), pool)?;
             drop(run);
             drop(files);
             let mut lists: Vec<Option<BlastpHitList>> = traced
@@ -371,7 +375,9 @@ impl TranslatedRpsSearch {
             }
             searched = true;
         }
-        let parameters = parameters.unwrap_or_else(|| score_block(&prepared));
+        let parameters = reported
+            .or(parameters)
+            .unwrap_or_else(|| score_block(&prepared));
         if !searched {
             return Ok(unsearched_batch(&prepared, parameters));
         }
@@ -656,6 +662,55 @@ mod tests {
         let lengths: Vec<usize> = queries[0].frames.iter().map(RpsFrame::length).collect();
         assert_eq!(lengths, [1, 1, 0, 1, 1, 0]);
         assert_eq!(queries[0].stat_length(), 1);
+    }
+
+    // blast_setup_cxx.cpp:72-77 and blast_query_info.c:379-381 (quoted at
+    // `RpsQuery::translation_length`): each context starts one sentinel after the previous one,
+    // an empty context takes no byte, and the buffer's length is the last context's offset plus
+    // its length; BLASTX's layout (`prepare_unit_queries`) is NCBI's.
+    #[test]
+    fn the_translation_buffer_has_ncbis_layout() {
+        let layout = |extra: &[&str], letters: &[u8]| -> (Vec<(usize, usize)>, usize) {
+            let options = options(extra);
+            let prepared = prepare_unit_queries(&[record("a", letters)], None, &options).unwrap();
+            let parameters = score_block(&prepared);
+            let masked = vec![None; prepared.contexts.len()];
+            let queries = frame_queries(&prepared, &parameters, &masked);
+            let first = prepared.contexts[0].offset;
+            let contexts: Vec<(usize, usize)> = prepared.contexts[..NUM_FRAMES]
+                .iter()
+                .map(|c| (c.offset - first, c.length))
+                .collect();
+            let (offset, length) = contexts[NUM_FRAMES - 1];
+            assert_eq!(
+                queries[0].translation_length(),
+                offset + length,
+                "{extra:?}"
+            );
+            (contexts, queries[0].translation_length())
+        };
+        // Both strands: six frames of 20, 19, 19 letters.
+        let (both, length) = layout(&[], DNA);
+        assert_eq!(
+            both,
+            [(0, 20), (21, 19), (41, 19), (61, 20), (82, 19), (102, 19)]
+        );
+        assert_eq!(length, 121);
+        // -strand plus: the minus frames are empty and start where the last plus frame ends.
+        let (plus, length) = layout(&["-strand", "plus"], DNA);
+        assert_eq!(
+            plus,
+            [(0, 20), (21, 19), (41, 19), (61, 0), (61, 0), (61, 0)]
+        );
+        assert_eq!(length, 61);
+        // -strand minus: the plus frames take no byte.
+        let (minus, length) = layout(&["-strand", "minus"], DNA);
+        assert_eq!(minus, [(0, 0), (0, 0), (0, 0), (0, 20), (21, 19), (41, 19)]);
+        assert_eq!(length, 60);
+        // A query of 4 letters: frames +3 and -3 are empty.
+        let (short, length) = layout(&[], b"ACGT");
+        assert_eq!(short, [(0, 1), (2, 1), (4, 0), (4, 1), (6, 1), (8, 0)]);
+        assert_eq!(length, 8);
     }
 
     fn hsp(frame: i32, score: i32, q: (usize, usize), s: (usize, usize)) -> BlastpHsp {

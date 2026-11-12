@@ -565,7 +565,7 @@ fn write_run(
     let keep_whole = archive.is_some();
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
-     -> Result<Vec<FastaRecord>> {
+     -> Result<()> {
         reader_batches(
             query_records,
             lowercase,
@@ -574,8 +574,7 @@ fn write_run(
             keep_whole,
             deliver,
             warn,
-        )?;
-        Ok(Vec::new())
+        )
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++

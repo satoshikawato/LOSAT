@@ -435,7 +435,7 @@ fn ncbis_pssm_with_zero_frequency_ratios_reads_and_writes_back() {
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-396 (quoted at
 // `report::serial::pssm`): psiblast's `-out_pssm` files from NCBI 2.17.0 (`db.ps.asn.*` rows of
-// LOSAT/tests/db_search_manifest.tsv, frozen when 64 KB or less), without the diagnostics of
+// LOSAT/tests/db_search_manifest/psiblast.tsv, frozen when 64 KB or less), without the diagnostics of
 // `-out_ascii_pssm` (`rnd`) and with them (`tkrnd`: the second query's), read and written again.
 #[test]
 fn psiblasts_pssm_files_read_and_write_back_byte_for_byte() {

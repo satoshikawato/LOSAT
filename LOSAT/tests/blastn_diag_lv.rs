@@ -12,14 +12,14 @@
 //! NCBI's is the business of the BLASTN fixtures.
 //!
 //! The query (LC738874, 287 kb) makes a query block longer than 8000 letters, so the searches
-//! use the diagonal hash. The folds reached: at one thread the reference fold
-//! (`process_offset_pairs`: its first retrieve for megablast, blastn and dc-megablast, whose
-//! tables have a word extension or a template; its second for blastn-short, whose table has
-//! none); at four threads with one subject the strips folds (PAIRPAR, which has no
-//! variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for dc-megablast when it is set), and
-//! with many subjects the reference fold on every worker, whose hash offset moves on from subject
-//! to subject. The searches that set `LOSAT_X_BNDCONE` take the dc-megablast strips stage at one
-//! thread too.
+//! use the diagonal hash. The folds reached: at one thread the reference folds
+//! (`extend_offset_pairs` in `pair_extend.rs` for megablast, blastn and dc-megablast, whose
+//! tables have a word extension or a template; the seed closure of the other tables in `run.rs`
+//! for blastn-short, whose table has none); at four threads with one subject the strips folds
+//! (PAIRPAR, which has no variable, for megablast and blastn; `LOSAT_X_PAIRPARDISC` for
+//! dc-megablast when it is set), and with many subjects the reference fold on every worker, whose
+//! hash offset moves on from subject to subject. The searches that set `LOSAT_X_BNDCONE` take the
+//! dc-megablast strips stage at one thread too.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

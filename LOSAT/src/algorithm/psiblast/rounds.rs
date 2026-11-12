@@ -127,8 +127,9 @@ pub(crate) enum SetKey {
 
 impl SetKey {
     /// The Seq-align id of an ordinal key (`gnl|BL_ORD_ID|oid`, as NCBI names a database sequence
-    /// without parsed Seq-ids; a `-subject` record's key is never compared with a parsed id:
-    /// psiblast has no `-parse_deflines`).
+    /// without parsed Seq-ids; a `-subject` record's key is never compared with a parsed id: the
+    /// keys of `-subject` records are their indices, with `-parse_deflines` too, whose reader
+    /// refuses the ids that NCBI's handles would take for one; RG DECISIONS 27).
     fn ordinal_id(index: u32) -> crate::seqid::model::ParsedSeqId {
         use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
         ParsedSeqId::General(Dbtag {

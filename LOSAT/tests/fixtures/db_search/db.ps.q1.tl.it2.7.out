@@ -1,0 +1,45 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 15 hits found
+P69905.2	P69905.2	100.000	142	0	0	1	142	1	142	2.27e-105	286
+P69905.2	P01923.1	99.291	141	1	0	2	142	1	141	1.22e-103	282
+P69905.2	Q9TS35.2	98.592	142	2	0	1	142	1	142	2.72e-103	281
+P69905.2	P63107.2	97.183	142	4	0	1	142	1	142	3.79e-102	278
+P69905.2	P67818.1	96.454	141	5	0	2	142	1	141	1.14e-100	275
+P69905.2	P01935.1	88.652	141	16	0	2	142	1	141	4.00e-97	266
+P69905.2	P01942.2	85.915	142	20	0	1	142	1	142	6.06e-92	253
+P69905.2	P01966.2	88.028	142	17	0	1	142	1	142	1.06e-91	252
+P69905.2	P07405.1	85.106	141	21	0	2	142	1	141	2.81e-91	251
+P69905.2	P60529.1	83.688	141	23	0	2	142	1	141	4.67e-88	243
+P69905.2	P01946.3	78.169	142	31	0	1	142	1	142	1.39e-74	209
+P69905.2	P01994.2	70.423	142	42	0	1	142	1	142	3.45e-74	207
+P69905.2	P09105.2	61.972	142	54	0	1	142	1	142	7.07e-64	182
+P69905.2	P02008.2	59.859	142	57	0	1	142	1	142	1.33e-61	176
+P69905.2	P06467.2	54.930	142	64	0	1	142	1	142	1.82e-60	173
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 15 hits found
+P69905.2	P69905.2	100.000	142	0	0	1	142	1	142	3.92e-88	243
+P69905.2	P63107.2	97.183	142	4	0	1	142	1	142	5.82e-88	243
+P69905.2	Q9TS35.2	98.592	142	2	0	1	142	1	142	1.88e-87	241
+P69905.2	P67818.1	96.454	141	5	0	2	142	1	141	6.79e-87	240
+P69905.2	P01923.1	99.291	141	1	0	2	142	1	141	8.19e-87	239
+P69905.2	P07405.1	85.106	141	21	0	2	142	1	141	1.64e-85	236
+P69905.2	P01942.2	85.915	142	20	0	1	142	1	142	4.90e-85	235
+P69905.2	P01966.2	88.028	142	17	0	1	142	1	142	1.09e-83	232
+P69905.2	P01935.1	88.652	141	16	0	2	142	1	141	1.29e-83	231
+P69905.2	P60529.1	83.688	141	23	0	2	142	1	141	5.30e-82	227
+P69905.2	P01946.3	78.169	142	31	0	1	142	1	142	1.90e-71	201
+P69905.2	P01994.2	70.423	142	42	0	1	142	1	142	4.05e-70	197
+P69905.2	P09105.2	61.972	142	54	0	1	142	1	142	5.61e-60	172
+P69905.2	P06467.2	54.930	142	64	0	1	142	1	142	2.32e-58	167
+P69905.2	P02008.2	59.859	142	57	0	1	142	1	142	7.15e-58	166
+
+Search has CONVERGED!
+# BLAST processed 2 queries

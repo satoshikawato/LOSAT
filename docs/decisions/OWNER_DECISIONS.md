@@ -158,7 +158,7 @@ entry's number in that log. 131 entries: 17 Owner, 3 Owner in part,
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 4 | 2026-10-29 | Owner-delegated |  | -version prints NCBI's two-line form for the six programs and makeblastdb, read anywhere in argv; -version-full*, -dryrun and -conffile stay refused. | losat CLI -version | `LOSAT/src/blastdbcmd/mod.rs:315`, `LOSAT/tests/blastdbcmd_info.rs:341` |
+| 4 | 2026-10-29 | Owner-delegated |  | -version prints NCBI's two-line form for the six programs and makeblastdb, read anywhere in argv; -version-full*, -dryrun and -conffile stay refused (-conffile and -logfile run since line RG item E1 after the Owner's words of 2026-11-12, remaining-gaps DECISIONS 1 and 27). | losat CLI -version | `LOSAT/src/blastdbcmd/mod.rs:315`, `LOSAT/tests/blastdbcmd_info.rs:341` |
 | 5 | 2026-10-29 | Owner-delegated |  | -mt_mode is accepted (0 to 2) for blastn, blastp, blastx and tblastn, with the same output as -num_threads 1; NCBI's query-split output is not reproduced. | losat CLI -mt_mode | `LOSAT/src/algorithm/tblastn/args.rs:267`, `LOSAT/src/algorithm/blastx/args.rs:400` and 3 more |
 
 ### `cli-compat-20261029/C2`: line CLI, stage C2

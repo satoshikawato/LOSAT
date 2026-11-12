@@ -531,6 +531,28 @@ fn run_query_pssm(
     alignments: &[PssmAlignment<'_>],
     subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
 ) -> Result<QueryPssm> {
+    let id = crate::report::serial::pssm::PssmSeqId::Local(
+        crate::report::serial::pssm::ObjectId::Str(b"Query_1".to_vec()),
+    );
+    run_query_pssm_of(
+        request,
+        inclusion_ethresh,
+        letters,
+        &id,
+        alignments,
+        subject,
+    )
+}
+
+/// `query_pssm` of a query of `letters` whose Seq-id is `id`.
+fn run_query_pssm_of(
+    request: &PssmRequest,
+    inclusion_ethresh: f64,
+    letters: &[u8],
+    id: &crate::report::serial::pssm::PssmSeqId,
+    alignments: &[PssmAlignment<'_>],
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
+) -> Result<QueryPssm> {
     query_pssm(
         request,
         SCORING,
@@ -538,7 +560,7 @@ fn run_query_pssm(
         inclusion_ethresh,
         PssmQueryRecord {
             letters,
-            id: &crate::report::serial::pssm::ObjectId::Str(b"Query_1".to_vec()),
+            id,
             title: b"a title",
         },
         alignments,
@@ -547,6 +569,74 @@ fn run_query_pssm(
         ANCILLARY,
         &mut Vec::new(),
     )
+}
+
+/// The first record of `fasta`, read as psiblast's query reader reads it with `-parse_deflines`.
+fn believed_query(fasta: &str) -> crate::blastinput::fasta_reader::FastaRecord {
+    use crate::blastinput::fasta_reader::{FastaInputSource, ReaderConfig};
+    let config = ReaderConfig::query("PSIBLAST", true, false).with_parse_deflines(true);
+    FastaInputSource::from_bytes(fasta.as_bytes(), config)
+        .next_sequence(&mut |_| Ok(()))
+        .expect("a record")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:150-155 (quoted at
+// `fasta_query_id`). NCBI BLAST+ 2.17.0 `psiblast -parse_deflines -num_iterations 2 -out_pssm`
+// (line RG Q1's probe `q.<form>.it2.pssm` on `tests/db_search/taxfilter/tfp`): the PSSM's query
+// Bioseq has the record's Seq-align id alone (of `gi|123|gb|AAA1.1|` the gi), as these lines.
+#[test]
+fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
+    let plain = crate::blastinput::fasta_reader::FastaRecord::new("Query_3", b"t", TK_1_40);
+    assert_eq!(
+        fasta_query_id(&plain, 3),
+        crate::report::serial::pssm::PssmSeqId::Local(crate::report::serial::pssm::ObjectId::Str(
+            b"Query_3".to_vec()
+        ))
+    );
+    let letters = std::str::from_utf8(TK_1_40).unwrap();
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
+    let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
+    let request = PssmRequest {
+        asn_path: Some("p.asn".to_string()),
+        ascii_path: None,
+        save_each: false,
+        pseudocount: 0,
+    };
+    for (defline, id) in [
+        ("gi|123|gb|AAA1.1| t", "        gi 123\n"),
+        ("lcl|123 t", "        local id 123\n"),
+        ("myquery t", "        local str \"myquery\"\n"),
+        (
+            "pdb|1A3N|A t",
+            "        pdb {\n          mol \"1A3N\",\n          chain 65,\n          chain-id \"A\"\n        }\n",
+        ),
+        (
+            "gnl|mydb|42 t",
+            "        general {\n          db \"mydb\",\n          tag id 42\n        }\n",
+        ),
+        (
+            "sp|P69905.2|HBA_HUMAN t",
+            "        swissprot {\n          name \"HBA_HUMAN\",\n          accession \"P69905\",\n          release \"reviewed\",\n          version 2\n        }\n",
+        ),
+        (
+            "ref|NP_000549.1| t",
+            "        other {\n          accession \"NP_000549\",\n          version 1\n        }\n",
+        ),
+    ] {
+        let record = believed_query(&format!(">{defline}\n{letters}\n"));
+        let pssm_id = fasta_query_id(&record, 1);
+        assert!(
+            matches!(pssm_id, crate::report::serial::pssm::PssmSeqId::Parsed(_)),
+            "{defline}"
+        );
+        let asn = run_query_pssm_of(&request, 0.002, TK_1_40, &pssm_id, &alignments, &subject)
+            .unwrap()
+            .asn
+            .unwrap();
+        let text = String::from_utf8(asn).unwrap();
+        let expected = format!("    query seq {{\n      id {{\n{id}      }},\n");
+        assert!(text.contains(&expected), "{defline}:\n{text:.400}");
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-903 and

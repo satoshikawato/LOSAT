@@ -61,21 +61,6 @@ use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::SegParams;
 use crate::utils::threading::{with_search_pool, SearchPool};
 
-/// NCBI's engine error of a batch whose setup fails (`CBlastException` "BLAST engine error",
-/// after the outfmt 0 prolog), with the text after `BLAST engine error: `: a PSSM query whose
-/// file's ungapped values make `kbp_psi` invalid (`query_set_setup`). `tblastn_app::search`
-/// fails the batch with it, as a read of the database that fails.
-#[derive(Debug)]
-pub(super) struct SetupEngineError(pub(super) &'static str);
-
-impl std::fmt::Display for SetupEngineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
-    }
-}
-
-impl std::error::Error for SetupEngineError {}
-
 // NCBI c++/src/algo/blast/core/blast_options.c:673-675;
 // c++/include/algo/blast/core/blast_options.h:128,144,163:
 // gap_x_dropoff = BLAST_GAP_X_DROPOFF_PROT; /* 15 */
@@ -1056,6 +1041,48 @@ fn run_local_search(
     )
 }
 
+/// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, blast_setup.c:888-1000):
+/// NCBI 2.17.0 tblastn writes the start of the outfmt 0 report (and the reports of the batches
+/// before), then `BLAST engine error: <text>`, exit status 3. `tblastn_app::batch_failure` fails
+/// the batch with it, as a read of the database that fails. The text is one of the constants.
+#[derive(Debug)]
+pub(crate) struct SetupEngineError(pub(crate) &'static str);
+
+impl SetupEngineError {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:433-437
+    // ```c
+    //    if (sbp->kbp) {
+    //       Blast_KarlinBlk* kbp = NULL;
+    //       Int2 status=0;
+    //       if ((status=s_BlastFindValidKarlinBlk(sbp->kbp, query_info, &kbp)) != 0)
+    //          return status;
+    // ```
+    /// `BlastExtensionParametersNew` (blast_setup.c:960, before the subject length) finds no valid
+    /// `sbp->kbp`: a PSSM query whose file's ungapped values make `kbp_psi` invalid
+    /// (`query_set_setup`; probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review).
+    pub(crate) const NO_VALID_KARLIN_BLOCK: Self =
+        Self(crate::report::query_warnings::INVALID_QUERY_MESSAGE);
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+    // ```c
+    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+    //         new_msg->message = strdup("The average subject length is too short");
+    //         new_msg->severity = eBlastSevFatal;
+    // ```
+    /// `BLASTERR_SUBJECT_LENGTH_INVALID` (`run_local_search_with_pool`, blast_setup.c:969-980):
+    /// `-subject` of three empty records, or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`
+    /// (env parity probe f_probe of 2026-11-12).
+    pub(crate) const SUBJECT_LENGTH_INVALID: Self = Self("The average subject length is too short");
+}
+
+impl std::fmt::Display for SetupEngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BLAST engine error: {}", self.0)
+    }
+}
+
+impl std::error::Error for SetupEngineError {}
+
 /// Diagnostic (LOSAT_TIMING): adds the time from `start` to its drop to the common line's `search`
 /// (utils/xtiming.rs). No NCBI counterpart; it reads the clock only with LOSAT_TIMING.
 struct XSearchTimer(Option<std::time::Instant>);
@@ -1112,6 +1139,28 @@ fn run_local_search_with_pool(
     let total_nt = usize::try_from(profile.subject_set.total_nt(&subjects))?;
     let stats_nt = usize::try_from(profile.subject_set.eff_length_nt(total_nt as u64))?;
     let num_subjects = profile.subject_set.num_seqs(&subjects);
+    let query_lengths: Vec<i32> = queries
+        .iter()
+        .map(|query| i32::try_from(query.len()))
+        .collect::<std::result::Result<_, _>>()?;
+    // NCBI c++/src/algo/blast/core/blast_options.c:908-936;
+    // core/blast_stat.c:2547-2605: reject scoring schemes absent from
+    // the pinned NCBI gapped table before any search.
+    let spec = ProteinScoringSpec {
+        matrix: scoring.matrix,
+        gap_open: scoring.gap_open,
+        gap_extend: scoring.gap_extend,
+    };
+    ensure!(
+        protein_scoring_supported(&spec),
+        "unsupported TBLASTN protein scoring scheme"
+    );
+    let gapped = lookup_protein_params(&spec);
+    let ungapped = lookup_protein_params_ungapped(scoring.matrix);
+    // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
+    // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
+    // BLAST_KarlinStoE_simple with the context's effective search space.
+    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
     // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // ```c
     //             if ( !m_Subjects.empty() ) {
@@ -1152,34 +1201,13 @@ fn run_local_search_with_pool(
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
     // answers `GetMinLength` (`SubjectSetNumbers::min_subject_length`); a quotient of 0 is
     // NCBI's engine error of the first searched batch (`tblastn_app.rs`).
-    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
-    let min_subject_length = if profile.subject_set.old_fsc {
+    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975). The block
+    // itself decides, as `sbp->gbp` does in NCBI, here and in the average-length error below.
+    let min_subject_length = if gumbel.is_none() {
         total_nt / num_subjects.max(1)
     } else {
         profile.subject_set.min_subject_length(&subjects)
     };
-    let query_lengths: Vec<i32> = queries
-        .iter()
-        .map(|query| i32::try_from(query.len()))
-        .collect::<std::result::Result<_, _>>()?;
-    // NCBI c++/src/algo/blast/core/blast_options.c:908-936;
-    // core/blast_stat.c:2547-2605: reject scoring schemes absent from
-    // the pinned NCBI gapped table before any search.
-    let spec = ProteinScoringSpec {
-        matrix: scoring.matrix,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
-    };
-    ensure!(
-        protein_scoring_supported(&spec),
-        "unsupported TBLASTN protein scoring scheme"
-    );
-    let gapped = lookup_protein_params(&spec);
-    let ungapped = lookup_protein_params_ungapped(scoring.matrix);
-    // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
-    // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
-    // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
     let options_searchsp = profile.subject_set.searchsp;
     let QuerySetSetup {
         working_frames,
@@ -1217,12 +1245,14 @@ fn run_local_search_with_pool(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
-    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
-    // length is too short"; LOSAT refuses the search instead.
-    ensure!(
-        !profile.subject_set.old_fsc || !valid_contexts.iter().any(|&valid| valid) || min_subject_length > 0,
-        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's TBLASTN"
-    );
+    // Without the Gumbel block (`-searchsp` or `OLD_FSC`; LOSAT's tblastn has no ungapped
+    // search, which has none either, blast_setup.c:517-527) a set of subjects whose average is
+    // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
+    // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
+    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`).
+    if gumbel.is_none() && valid_contexts.iter().any(|&valid| valid) && min_subject_length == 0 {
+        return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into());
+    }
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
         // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
@@ -2711,12 +2741,14 @@ fn query_set_setup(
         // the effective lengths keep `kbp_gap_std` and the gap trigger `kbp_std`
         // (`LocalKarlinBlocks`).
         Some(psi) => {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:182-184
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:960-961
             // ```c
-            //    if ((status=s_BlastFindValidKarlinBlk(sbp->kbp, query_info, &kbp)) != 0)
-            //          return status;
+            //    if((status=BlastExtensionParametersNew(program_number, ext_options, sbp,
+            //                                query_info, ext_params)) != 0)
             // ```
-            // `sbp->kbp` is `kbp_psi` (blast_stat.c:2826). A PSSM query whose letters give its
+            // `BlastExtensionParametersNew` looks for a valid `sbp->kbp`, which is `kbp_psi`
+            // (blast_stat.c:2826; quoted at `SetupEngineError::NO_VALID_KARLIN_BLOCK`), before the
+            // average subject length (`SUBJECT_LENGTH_INVALID`, below). A PSSM query whose letters give its
             // context a valid `kbp_std` but whose file's ungapped values make `kbp_psi` invalid
             // (`lambdaUngapped`, `kappaUngapped` or `hUngapped` negative) stops the search's
             // setup, before any subject is read, with NCBI's engine error of an invalid query
@@ -2727,9 +2759,7 @@ fn query_set_setup(
                     context.is_valid && psi.ungapped_karlin_valid(&context.karlin_params)
                 })
             {
-                return Err(
-                    SetupEngineError(crate::report::query_warnings::INVALID_QUERY_MESSAGE).into(),
-                );
+                return Err(SetupEngineError::NO_VALID_KARLIN_BLOCK.into());
             }
             let gapped_psi: Vec<_> = gapped_by_context
                 .iter()

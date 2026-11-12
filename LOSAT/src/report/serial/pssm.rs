@@ -154,6 +154,10 @@ pub enum PssmSeqId {
         db: Vec<u8>,
         tag: ObjectId,
     },
+    /// A Seq-id that `-parse_deflines` read from a FASTA query's defline (the Seq-align id,
+    /// `BelievedIds::best`): written by the report's Seq-id writer (`report::seqid::SeqId::Db`),
+    /// never read.
+    Parsed(crate::seqid::ParsedSeqId),
 }
 
 /// `Textseq-id`.
@@ -508,6 +512,8 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
 
 fn write_seq_id<E: Encoder>(enc: &mut E, id: &PssmSeqId) {
     match id {
+        // The report's writer opens and closes its own variant.
+        PssmSeqId::Parsed(id) => return crate::report::seqid::SeqId::Db(id).write(enc),
         PssmSeqId::Local(id) => {
             enc.variant("Seq-id", "local", 0);
             write_object_id(enc, id);

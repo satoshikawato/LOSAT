@@ -1,17 +1,19 @@
-//! The functions of NCBI's `NStr` (`c++/src/corelib/ncbistr.cpp`) that makeblastdb and
-//! rpsbproc's data loader (`rpsbproc::data`) use to convert numbers, as LOSAT's ports call them:
-//! base 10, the flags each caller passes, and the `CStringException` each throws, with the place
-//! it is thrown from ([`ThrowSite`]); with them `NStr::PrintableString`, which their messages
-//! quote the string with, `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`)
-//! and `NStr::StringToDouble` with glibc's `strtod` (rpsbproc's bit score thresholds, module
-//! `double`). Also the string functions that more than one port calls: `NStr::ParseEscapes`
-//! (makeblastdb's titles and the registry reader) and `NStr::TruncateSpaces`.
+//! The functions of NCBI's `NStr` (`c++/src/corelib/ncbistr.cpp`) that LOSAT's ports call to
+//! convert numbers (makeblastdb, the database readers, blastdbcmd, the Seq-id parser, the taxid
+//! lists and rpsbproc's data loader `rpsbproc::data`): base 10, the flags each caller passes, and
+//! the `CStringException` each throws, with the place it is thrown from ([`ThrowSite`]); with them
+//! `NStr::PrintableString`, which their messages quote the string with,
+//! `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`) and `NStr::StringToDouble`
+//! with glibc's `strtod` (rpsbproc's bit score thresholds, module `double`). Also the string
+//! functions that more than one port calls: `NStr::ParseEscapes` (makeblastdb's titles and the
+//! registry reader) and `NStr::TruncateSpaces`.
 //!
-//! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (no caller asks for
-//! them), the bases other than 10, and the flags no caller passes (`fMandatorySign`,
-//! `fAllowCommas`, the leading and trailing symbols other than spaces). Other modules keep copies
-//! of some of these conversions (`blastinput::query_batch`, `blastinput::value_parsers`,
-//! `seqdb::isam`, `seqdb::mask`, `blastdbcmd`), not yet folded here.
+//! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (a caller that passes
+//! `fConvErr_NoThrow` takes NCBI's 0 for an error itself), the bases other than 10, and the flags
+//! no caller passes (`fMandatorySign`, `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
+//! Also here: `NStr::StringToNonNegativeInt`. Copies of some of these functions remain elsewhere
+//! (`blastinput::query_batch`, `blastinput::value_parsers`, `seqdb::isam`, `blastdbcmd::args`,
+//! `report::archive::bioseq`, `writedb`), not yet folded here.
 
 mod data_size;
 mod double;
@@ -36,6 +38,8 @@ pub(crate) type Flags = u32;
 pub(crate) const ALLOW_LEADING_SPACES: Flags = 1 << 19;
 /// `NStr::fAllowTrailingSpaces`.
 pub(crate) const ALLOW_TRAILING_SPACES: Flags = 1 << 21;
+/// `NStr::fAllowTrailingSymbols`: any bytes after the number (white space included).
+pub(crate) const ALLOW_TRAILING_SYMBOLS: Flags = (1 << 22) | ALLOW_TRAILING_SPACES;
 
 /// `isspace` in the C locale.
 pub(crate) fn is_space(c: u8) -> bool {
@@ -58,6 +62,73 @@ pub(crate) fn is_space(c: u8) -> bool {
 /// `NStr::IsBlank(s)`: every byte is a C `isspace` space (an empty string included).
 pub(crate) fn is_blank(s: &[u8]) -> bool {
     s.iter().all(|&c| is_space(c))
+}
+
+/// `NStr::StringToNonNegativeInt(str)`: the value, or -1 (the `errno` it sets is not kept; no
+/// caller reads it).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:457-491
+/// ```c++
+/// int NStr::StringToNonNegativeInt(const CTempString str, TStringToNumFlags flags)
+/// {
+///     int error = 0, ret = -1;
+///     size_t len = str.size();
+///
+///     if (!len) {
+///         error = EINVAL;
+///     } else {
+///         size_t i = 0;
+///         // skip leading '+' if any
+///         if (str.data()[0] == '+'  &&  len > 1) {
+///             ++i;
+///         }
+///         unsigned v = 0;
+///         for (; i < len; ++i) {
+///             unsigned d = str.data()[i] - '0';
+///             if (d > 9) {
+///                 error = EINVAL;
+///                 break;
+///             }
+///             unsigned nv = v * 10 + d;
+///             const unsigned kOverflowLimit = (INT_MAX - 9) / 10 + 1;
+///             if (v >= kOverflowLimit) {
+///                 // possible overflow
+///                 if (v > kOverflowLimit || nv > INT_MAX) {
+///                     error = ERANGE;
+///                     break;
+///                 }
+///             }
+///             v = nv;
+///         }
+///         if (!error) {
+///             ret = static_cast<int>(v);
+///         }
+///     }
+/// ```
+/// It reads `str.size()` bytes: a NUL is not a digit here (unlike `StringToInt8`).
+pub(crate) fn string_to_non_negative_int(s: &[u8]) -> i32 {
+    if s.is_empty() {
+        return -1;
+    }
+    let digits = if s[0] == b'+' && s.len() > 1 {
+        &s[1..]
+    } else {
+        s
+    };
+    let mut value: u32 = 0;
+    for &c in digits {
+        let d = u32::from(c.wrapping_sub(b'0'));
+        if d > 9 {
+            return -1;
+        }
+        let next = value.wrapping_mul(10).wrapping_add(d);
+        const OVERFLOW_LIMIT: u32 = (i32::MAX as u32 - 9) / 10 + 1;
+        if value >= OVERFLOW_LIMIT && (value > OVERFLOW_LIMIT || next > i32::MAX as u32) {
+            return -1;
+        }
+        value = next;
+    }
+    value as i32
 }
 
 /// A throw of `S2N_CONVERT_ERROR` in `NStr::<function>` at `line` of ncbistr.cpp.
@@ -430,7 +501,7 @@ fn skip_spaces(s: &[u8], mut pos: usize) -> usize {
 }
 
 /// `NStr::StringToInt8(str, flags)` in base 10, `flags` [`ALLOW_LEADING_SPACES`] and
-/// [`ALLOW_TRAILING_SPACES`] or 0.
+/// [`ALLOW_TRAILING_SPACES`] or [`ALLOW_TRAILING_SYMBOLS`], or 0.
 pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiException> {
     let at = |pos: usize| s.get(pos).copied().unwrap_or(0);
     let error = |site: ThrowSite, msg: &str, pos: usize| convert_error(s, "Int8", msg, site, pos);
@@ -469,8 +540,25 @@ pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiExceptio
     if pos == pos0 {
         return Err(error(STRING_TO_INT8_INVAL, "", pos));
     }
-    if flags & ALLOW_TRAILING_SPACES != 0 {
-        pos = skip_spaces(s, pos);
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:740-748
+    // ```c++
+    // void s_SkipAllowedSymbols(const CTempString       str,
+    //                           SIZE_TYPE&              pos,
+    //                           ESkipMode               skip_mode,
+    //                           NStr::TStringToNumFlags flags)
+    // {
+    //     if (skip_mode == eSkipAll) {
+    //         pos = str.length();
+    //         return;
+    //     }
+    // ```
+    // `fAllowTrailingSymbols` skips to the end (`eSkipAll`), past any byte and any NUL.
+    if flags & ALLOW_TRAILING_SYMBOLS != 0 {
+        if flags & ALLOW_TRAILING_SYMBOLS == ALLOW_TRAILING_SPACES {
+            pos = skip_spaces(s, pos);
+        } else {
+            pos = s.len();
+        }
     }
     let n = if sign { n.wrapping_neg() } else { n };
     if at(pos) != 0 {
@@ -958,11 +1046,210 @@ mod tests {
         );
     }
 
-    // ncbistr.cpp:3736-3844 (`s_PrintableString`, quoted at `printable_string`): C escapes,
-    // `?` escaped only next to another `?`, other bytes outside 0x20..0x7e in octal, as short as
-    // the next byte allows (rpsbproc's data loader quotes its lines with it).
+    // `NStr::StringToInt(str, fConvErr_NoThrow | fAllowTrailingSymbols)` (the version of
+    // `CSeqDBVol::x_CheckVersions`, `seqdb::isam::check_versions`): the bytes after the digits
+    // are skipped, NUL included; `fConvErr_NoThrow` gives 0 for an error.
+    #[test]
+    fn trailing_symbols_skip_the_rest_of_the_string() {
+        let no_throw = |s: &[u8]| string_to_int(s, ALLOW_TRAILING_SYMBOLS).unwrap_or(0);
+        for (text, value) in [
+            (&b"12"[..], 12),
+            (b"12|HBA_HUMAN", 12),
+            (b"-5x", -5),
+            (b"+7", 7),
+            (b"3 4", 3),
+            (b"9\x00x", 9),
+            (b"", 0),
+            (b"x1", 0),
+            (b" 1", 0),
+            (b"2147483647", i32::MAX),
+            (b"2147483648", 0),
+            (b"-2147483648", i32::MIN),
+            (b"99999999999999999999", 0),
+            (b"-9223372036854775808", 0),
+        ] {
+            assert_eq!(no_throw(text), value, "{text:?}");
+        }
+        // `fAllowTrailingSpaces` alone still stops at a symbol.
+        assert!(string_to_int(b"12|x", ALLOW_TRAILING_SPACES).is_err());
+        assert_eq!(string_to_int(b"12 \t", ALLOW_TRAILING_SYMBOLS), Ok(12));
+        assert_eq!(string_to_int8(b"-12abc", ALLOW_TRAILING_SYMBOLS), Ok(-12));
+        // The overflow is still found before the trailing symbols.
+        assert_eq!(
+            failure(string_to_int8(b"99999999999999999999x", ALLOW_TRAILING_SYMBOLS).unwrap_err()),
+            (
+                "Cannot convert string '99999999999999999999x' to Int8, overflow".to_string(),
+                852,
+                "18".to_string()
+            )
+        );
+    }
+
+    // `NStr::StringToInt(str)` with the default flags, as `seqdb::mask` reads the mask
+    // algorithm ids and `s_IsNumericId` tests a program: a sign and digits only, up to the
+    // first NUL.
+    #[test]
+    fn default_flags_take_a_sign_and_digits_only() {
+        for (text, value) in [
+            (&b"0"[..], Some(0)),
+            (b"30", Some(30)),
+            (b"+30", Some(30)),
+            (b"-5", Some(-5)),
+            (b"007", Some(7)),
+            (b"2147483647", Some(i32::MAX)),
+            (b"-2147483648", Some(i32::MIN)),
+            (b"2147483648", None),
+            (b"-2147483649", None),
+            (b"99999999999999999999999999", None),
+            (b"", None),
+            (b"+", None),
+            (b"-", None),
+            (b" 5", None),
+            (b"5 ", None),
+            (b"5x", None),
+            (b"0x10", None),
+            (b"1,000", None),
+            (b"--5", None),
+            // The text ends at a NUL, as the C string does.
+            (b"5\x00x", Some(5)),
+            (b"\x005", None),
+        ] {
+            assert_eq!(string_to_int(text, 0).ok(), value, "{text:?}");
+        }
+        // `NStr::StringToNumeric<TGi>(acc)` of `CSeq_id::Set` (`seqid::parse`).
+        assert_eq!(string_to_int8(b"4294967296", 0).ok(), Some(4_294_967_296));
+        assert_eq!(string_to_int8(b"-5", 0).ok(), Some(-5));
+        assert_eq!(string_to_int8(b"9223372036854775808", 0).ok(), None);
+        assert_eq!(
+            string_to_int8(b"-9223372036854775808", 0).ok(),
+            Some(i64::MIN)
+        );
+        assert_eq!(string_to_int8(b"12\x0034", 0).ok(), Some(12));
+        // `NStr::StringToUInt(str)` of the string ISAM's data pages (`seqdb::isam`).
+        assert_eq!(string_to_uint(b"+5"), Ok(5));
+        assert!(string_to_uint(b"-5").is_err());
+        assert!(string_to_uint(b"4294967296").is_err());
+        assert!(string_to_uint(b"").is_err());
+        assert!(string_to_uint(b"5\x00").is_err());
+    }
+
+    // `NStr::StringToNumeric<TTaxId>(id, fAllowLeadingSpaces | fAllowTrailingSpaces)` of a taxid
+    // list entry (`blastinput::db_filter`, `blastdbcmd::taxonomy`).
+    #[test]
+    fn taxid_list_entries_take_spaces_around_the_number() {
+        let both = ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES;
+        for (text, value) in [
+            (&b"9606"[..], Some(9606)),
+            (b"+9606", Some(9606)),
+            (b"  -5 ", Some(-5)),
+            (b"2147483647", Some(i32::MAX)),
+            (b"-2147483648", Some(i32::MIN)),
+            (b"\x0b42\x0b", Some(42)),
+            (b"abc", None),
+            (b"# human", None),
+            (b"2147483648", None),
+            (b"9606.0", None),
+            (b"+", None),
+            (b"1 2", None),
+            (b"0x10", None),
+        ] {
+            assert_eq!(
+                string_to_int(text, both).ok(),
+                value,
+                "{}",
+                String::from_utf8_lossy(text)
+            );
+        }
+    }
+
+    /// The taxid of a `-taxid_map` line (`writedb::taxid_set`): `StringToNumeric<TTaxId>` with
+    /// leading spaces allowed; its errors are NCBI's (t03_taxmap_badnum, x_taxmap_trail,
+    /// x_taxmap_minus, x_taxmap_overflow).
+    #[test]
+    fn taxid_map_values_take_leading_spaces() {
+        let taxid = |s: &[u8]| string_to_int(s, ALLOW_LEADING_SPACES);
+        assert_eq!(taxid(b"9606"), Ok(9606));
+        assert_eq!(taxid(b"+9"), Ok(9));
+        assert_eq!(taxid(b"-8"), Ok(-8));
+        assert_eq!(taxid(b"\x0c19"), Ok(19));
+        assert_eq!(taxid(b"12\x0034"), Ok(12));
+        for (text, line, function, message) in [
+            (
+                &b"abc"[..],
+                861,
+                "StringToInt8",
+                "Cannot convert string 'abc' to Int8 (m_Pos = 0)",
+            ),
+            (
+                b"12ab",
+                870,
+                "StringToInt8",
+                "Cannot convert string '12ab' to Int8 (m_Pos = 2)",
+            ),
+            (
+                b"-",
+                861,
+                "StringToInt8",
+                "Cannot convert string '-' to Int8 (m_Pos = 1)",
+            ),
+            (
+                b"3000000000",
+                640,
+                "StringToInt",
+                "Cannot convert string '3000000000' to int, overflow (m_Pos = 0)",
+            ),
+        ] {
+            let error = taxid(text).unwrap_err().what();
+            assert!(
+                error.ends_with(&format!(
+                    "line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - \
+                     {message}\n"
+                )),
+                "{error}"
+            );
+            assert!(error.starts_with("NCBI C++ Exception:\n    T0 \""));
+        }
+    }
+
+    /// `NStr::StringToNonNegativeInt` (`CObject_id::SetStrOrId`, the versions of `CSeq_id`,
+    /// blastdbcmd's mask algorithm of a batch line): digits after an optional `+`, at most
+    /// `INT_MAX`, else -1; it reads every byte, so a NUL is not a digit.
+    #[test]
+    fn non_negative_ints_are_digits_only() {
+        for (text, value) in [
+            (&b"+12"[..], 12),
+            (b"+", -1),
+            (b"", -1),
+            (b"0", 0),
+            (b"2147483647", i32::MAX),
+            (b"2147483648", -1),
+            (b"9999999999", -1),
+            (b"-1", -1),
+            (b" 1", -1),
+            (b"1\x00", -1),
+            (b"\xb11", -1),
+            (b"++1", -1),
+        ] {
+            assert_eq!(string_to_non_negative_int(text), value, "{text:?}");
+        }
+    }
+
+    // ncbistr.cpp:3736-3844 (`s_PrintableString`, quoted at `printable_string`): C escapes for
+    // the quotes, the backslash, the control characters and `??` (`?` only next to another `?`),
+    // octal for the other bytes outside 0x20..0x7e, in as few digits as the next byte allows
+    // (blastdbcmd's messages and rpsbproc's data loader quote with it).
     #[test]
     fn printable_string_escapes_as_ncbi() {
+        let printable = |text: &str| printable_string(text.as_bytes());
+        assert_eq!(printable("a'b\"c\\d"), "a\\'b\\\"c\\\\d");
+        assert_eq!(printable("x\ty"), "x\\ty");
+        assert_eq!(printable("1\n2"), "1\\n2");
+        assert_eq!(printable("a??b?c"), "a\\?\\?b?c");
+        assert_eq!(printable("\u{1}9"), "\\19");
+        assert_eq!(printable("\u{1}1"), "\\0011");
+        assert_eq!(printable("é"), "\\303\\251");
+        assert_eq!(printable("a&b"), "a&b");
+        assert_eq!(printable("\u{7f}"), "\\177");
         assert_eq!(printable_string(b"a\tb"), "a\\tb");
         assert_eq!(printable_string(b"'\"\\"), "\\'\\\"\\\\");
         assert_eq!(printable_string(b"??x?"), "\\?\\?x?");

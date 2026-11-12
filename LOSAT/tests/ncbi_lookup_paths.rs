@@ -320,7 +320,8 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
 }
 
 /// The build tree that the official Linux x64 release of NCBI BLAST+ 2.17.0 names in its `T0`
-/// lines (as `ncbi_exception::NCBI_BUILD_ROOT`).
+/// lines (as `ncbi_exception::NCBI_BUILD_ROOT`). The registry tests that use it and the helpers
+/// below run on Unix only.
 #[cfg(unix)]
 const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
@@ -336,9 +337,9 @@ fn critical(line: usize) -> String {
 #[cfg(unix)]
 const INI_REPORT: &str = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
 
-/// The name of the system-wide registry file (`ncbi.ini` on Windows).
+/// The name of the system-wide registry file on Unix (Windows names it `ncbi.ini`).
 #[cfg(unix)]
-const NCBIRC: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+const NCBIRC: &str = ".ncbirc";
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663 and
 // c++/src/corelib/ncbiapp.cpp:669-674 (quoted at `ncbi_environment::ApplicationStart`). NCBI
@@ -638,9 +639,9 @@ fn a_malformed_ini_with_a_logfile_is_replayed_where_ncbi_replays_it() {
 // `ncbi_environment::preparse` and `cli::ncbi_toolkit_word_error`) and
 // c++/src/algo/blast/api/blast_usage_report.cpp:195-206 (quoted at
 // `ncbi_environment::usage_report_reads_ncbirc`). NCBI BLAST+ 2.17.0 (env parity review G, F2-F4):
-// `-conffile other.ini` loads that file in place of a malformed `blastn.ini` (LOSAT refuses it
-// before the configuration load); `BLAST_USAGE_REPORT=abc` aborts before `-version` (LOSAT
-// refuses there); `-logfile -version` logs to the file `-version` and prints no version.
+// `-conffile other.ini` loads that file in place of a malformed `blastn.ini`, which is not read
+// (line RG item E1); `BLAST_USAGE_REPORT=abc` aborts before `-version` (LOSAT refuses there);
+// `-logfile -version` logs to the file `-version` and prints no version.
 #[cfg(unix)]
 #[test]
 fn the_words_before_the_arguments_are_read_as_ncbi_reads_them() {
@@ -652,15 +653,17 @@ fn the_words_before_the_arguments_are_read_as_ncbi_reads_them() {
     for conffile in [&["-conffile", "other.ini"][..], &["-conffile=other.ini"]] {
         let mut args = vec!["blastn"];
         args.extend_from_slice(conffile);
-        args.extend(["-query", "q.fa"]);
-        let refused = run_in(losat, &args, &dir, &[], b"");
-        let stderr = text(&refused.stderr);
-        assert_ne!(refused.status.code(), Some(0));
+        args.extend(["-version"]);
+        let loaded = run_in(losat, &args, &dir, &[], b"");
+        assert_eq!(loaded.status.code(), Some(0), "{loaded:?}");
+        let mut args = vec!["blastn"];
+        args.extend_from_slice(conffile);
+        args.extend(["-h"]);
+        let loaded = run_in(losat, &args, &dir, &[], b"");
+        assert_eq!(loaded.status.code(), Some(0), "{loaded:?}");
         assert!(
-            stderr.contains(
-                "the NCBI C++ Toolkit option -conffile is not supported by LOSAT's BLASTN"
-            ) && !stderr.contains("Application's initialization failed"),
-            "{stderr}"
+            !text(&loaded.stderr).contains("Application's initialization failed"),
+            "{loaded:?}"
         );
     }
     fs::remove_file(dir.join("blastn.ini")).unwrap();

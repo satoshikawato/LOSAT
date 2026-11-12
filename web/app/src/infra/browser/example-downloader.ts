@@ -9,11 +9,9 @@
 // kept as it is. Nothing is sent but the request for the file's URL.
 import type { DownloadProgress, DownloadRequest, DownloadResult, FileDownloader } from '../../ports/example';
 import { INFLATED_TOO_LARGE, type WholeFileInflater } from '../../ports/inflate';
+import { dateOf } from '../../domain/download-sentences';
+import { ask, contentLength, messageOf, PART_BYTES } from './http';
 
-/** Milliseconds to the answer's headers; the body may take longer. */
-const TIMEOUT_MS = 60_000;
-/** Downloaded bytes gathered into one Blob, so that the parts held in memory stay small. */
-const PART_BYTES = 8 * 1024 * 1024;
 const GZIP_MAGIC = [0x1f, 0x8b] as const;
 
 export interface DownloaderOptions {
@@ -31,41 +29,17 @@ export class BrowserFileDownloader implements FileDownloader {
     onProgress: (progress: DownloadProgress) => void,
     signal: AbortSignal,
   ): Promise<DownloadResult> {
-    signal.throwIfAborted();
-    const controller = new AbortController();
-    const onAbort = () => controller.abort(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort(new DOMException('no answer in time', 'TimeoutError'));
-    }, this.options.timeoutMs ?? TIMEOUT_MS);
-    try {
-      let response: Response;
-      try {
-        response = await (this.options.fetch ?? fetch)(request.url, {
-          signal: controller.signal,
-          credentials: 'omit',
-          referrerPolicy: 'no-referrer',
-        });
-      } catch (error) {
-        if (signal.aborted) throw error;
-        return { ok: false, reason: 'unreachable', detail: timedOut ? 'no answer in time' : messageOf(error) };
-      } finally {
-        clearTimeout(timer);
-      }
-      if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
-        return { ok: false, reason: 'refused', status: response.status };
-      }
-      const result = await readBody(response, request, this.options.inflater, onProgress, signal);
-      if (!result.ok) return result;
-      const version = versionOf(response);
-      return { ...result, ...(version === undefined ? {} : { version }) };
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
+    const answer = await ask(request.url, {}, signal, { fetch: this.options.fetch, timeoutMs: this.options.timeoutMs });
+    if (!answer.ok) return { ok: false, reason: 'unreachable', detail: answer.detail };
+    const { response } = answer;
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      return { ok: false, reason: 'refused', status: response.status };
     }
+    const result = await readBody(response, request, this.options.inflater, onProgress, signal);
+    if (!result.ok) return result;
+    const version = versionOf(response);
+    return { ...result, ...(version === undefined ? {} : { version }) };
   }
 }
 
@@ -139,19 +113,9 @@ async function readBody(
   return { ok: true, data: new Blob([inflated], { type: 'text/plain' }), downloadedBytes: downloaded };
 }
 
-function contentLength(response: Response): number | undefined {
-  const value = Number(response.headers.get('Content-Length') ?? Number.NaN);
-  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-}
-
 /** UniProt's release (an exposed header), else the date of Last-Modified (a CORS-safelisted header). */
 function versionOf(response: Response): string | undefined {
   const release = response.headers.get('X-UniProt-Release');
   if (release !== null && release.trim() !== '') return `UniProt release ${release.trim()}`;
-  const modified = Date.parse(response.headers.get('Last-Modified') ?? '');
-  return Number.isNaN(modified) ? undefined : new Date(modified).toISOString().slice(0, 10);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return dateOf(response.headers.get('Last-Modified'));
 }

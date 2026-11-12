@@ -2354,37 +2354,37 @@ score.blastx.identity.ungap.0	blastx		tests/db_search/bslice_q.fna	tests/db_sear
 score.blastx.identity.ungap.big.6	blastx		tests/fasta/outfmt0/sc6_ap31_20k.fna	tests/fasta/AP027133.faa	-matrix IDENTITY -ungapped -comp_based_stats 0	6	74a87b5960995923ef639a61cef1e4a00f7f355941f964a42900f2670a18a689	7136				SC6: blastx -matrix IDENTITY -ungapped, 20 kb against 543 proteins
 score.blastx.identity.ungap.pos.6	blastx		tests/fasta/outfmt0/sc6_ap31_20k.fna	tests/fasta/AP027133.faa	-matrix IDENTITY -ungapped -comp_based_stats 0	6 std positive ppos btop	d95774e5350be721d28b77c91859e6f8f07a43ba59e4877e84b61b541d5cd48f	10893				SC6: blastx -matrix IDENTITY -ungapped, tabular fields (positives are identities)
 score.blastx.b62.ungap.g5_5.0	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-gapopen 5 -gapextend 5 -ungapped -comp_based_stats 0 -max_target_seqs 3	0	0f4ef53f880f4c0127cff10815d1c9aac53f174c1f3f09939a6495c06003b6f6	20008	3b3647ed4d2c9bcdb29fcd5fa9cc676532cecf308bf88f9140701e139ea69a54			SC6: blastx -ungapped with gap costs out of BLOSUM62's table (an ungapped search does not read them)
-xdp.blastp.u3	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 3	0								
-xdp.blastp.g5f8	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 5 -xdrop_gap_final 8	0								
-xdp.blastp.g30f10	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 30 -xdrop_gap_final 10	0								
-xdp.blastp.f100	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap_final 100	0								
-xdp.blastp.cbs0f12	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-comp_based_stats 0 -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0								
-xdp.blastp.def	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 7 -xdrop_gap 15 -xdrop_gap_final 25	0								
-xdp.blastp.u1e10	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 1e10	0								
-xdp.blastp.g1e300	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 1e300	0								
-xdp.blastp.f1e8	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap_final 1e8	0								
-xdp.blastp.ugf.6	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	6								
-xdp.blastp.gf.11	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 5 -xdrop_gap_final 30	11								
-xdp.blastx.u3	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 3	0								
-xdp.blastx.g5f8	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 5 -xdrop_gap_final 8	0								
-xdp.blastx.g30f10	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 30 -xdrop_gap_final 10	0								
-xdp.blastx.f100	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap_final 100	0								
-xdp.blastx.cbs0f12	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-comp_based_stats 0 -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0								
-xdp.blastx.def	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 7 -xdrop_gap 15 -xdrop_gap_final 25	0								
-xdp.blastx.u1e10	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 1e10	0								
-xdp.blastx.g1e300	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 1e300	0								
-xdp.blastx.f1e8	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap_final 1e8	0								
-xdp.blastx.ugf.6	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	6								
-xdp.blastx.gf.11	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 5 -xdrop_gap_final 30	11								
-xdp.blastp.fast.ugf	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-task blastp-fast -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0								
-xdp.blastp.u1e9	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e9	0								
-xdp.tblastn.u3	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 3	0								
-xdp.tblastn.cbs0u3	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-comp_based_stats 0 -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0								
-xdp.tblastn.def	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 7	0								
-xdp.tblastn.u1e10	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 1e10	0								
-xdp.tblastx.u3.6	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 3	6								
-xdp.tblastx.u1	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 1	6								
-xdp.tblastx.def.6	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 7	6								
-xdp.tblastx.u1e10	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 1e10	0								
-xdp.blastp.u1e10q	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e10	0								
-xdp.blastp.u1e8q	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e8	0								
+xdp.blastp.u3	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 3	0	71d095e8402b07b4e8cdc7914ab09510d9d4592388c2fe069ae258bb8dd50e78	32654				
+xdp.blastp.g5f8	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 5 -xdrop_gap_final 8	0	b9fa59aca4a614b7e89678cfd9c5d9dcccb802b13a36423155f2cf33c8f1a5d2	35605				
+xdp.blastp.g30f10	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 30 -xdrop_gap_final 10	0	6bfbd2a83dfedf9db0ec767d0928f7e2fc26d35f87f6b0a7e86325da0a8cb1a4	29801				
+xdp.blastp.f100	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap_final 100	0	f803e6a0fbae33a74a4c3334cbeee0df3746c893fd6c902301688a5ffd325fa8	35856				
+xdp.blastp.cbs0f12	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-comp_based_stats 0 -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0	b38b6979b35e125dff6a0e3cf13640d99de115613eeaa815a63eed12b592defb	102744				
+xdp.blastp.def	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 7 -xdrop_gap 15 -xdrop_gap_final 25	0	8490f138d942322c85f15c56de85415e2db297182f2fe55112fa0f6ecb2a18c4	35256				
+xdp.blastp.u1e10	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 1e10	0	da89341faedc7145e3af58a6f25475bd39cdfcbfddea6f9bc259817aab3744a1	3979				
+xdp.blastp.g1e300	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 1e300	0	380c54683f24fa54351bc3a35609f743527dba7b4f4ce472bb0bf05426635ad6	35202				
+xdp.blastp.f1e8	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap_final 1e8	0	ed7b2d600ca861f654a4e01c6e14dce7eecf232ae77b97e302bdfbd6b539aac7	25300				
+xdp.blastp.ugf.6	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	6	378e3d45103283b0d994e2770f6f31bb5c2bb327c96abed7d709663b3f7912c4	3200				
+xdp.blastp.gf.11	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-xdrop_gap 5 -xdrop_gap_final 30	11	f9aafb0a95178d55a09a86ac91112ac38d0ade35d395407697089395592b0cfc	99802				
+xdp.blastx.u3	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 3	0	8b7dde8b2fd5d751671903bf90c2ee40505ed92348f5dceb4a80b1de1ddb2447	22664				
+xdp.blastx.g5f8	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 5 -xdrop_gap_final 8	0	340290bab1f5eaa25d317412e5dd9aa25785d354cb7e7108768064c727932ac2	23141				
+xdp.blastx.g30f10	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 30 -xdrop_gap_final 10	0	18419c8f4b0acd04fb6bc639fc77bed9c5fe1e98e210ce17c3d31023bf3ea61c	17372				
+xdp.blastx.f100	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap_final 100	0	0ac4421d4f160d5857e935905b6a8a67e2053fe2fd9a275a3f2e1ac5e2223613	22061				
+xdp.blastx.cbs0f12	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-comp_based_stats 0 -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0	1919871d4a554b1b616ab6c9eb8aa9f6b57e7a76d63c01962cf49b1c85f82052	25821				
+xdp.blastx.def	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 7 -xdrop_gap 15 -xdrop_gap_final 25	0	e124982df24f92231d6edc416747892e91bfc5a22216a6b91ee949c0c7933bb9	22664				
+xdp.blastx.u1e10	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 1e10	0	d91a857bcffa5f454947ea46b74d02e4b2a0113cbd1446a1bddaccdd7ce95c7e	2439				
+xdp.blastx.g1e300	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 1e300	0	07022f23054fd2c8c5deb74e29753eac3c743297221aeacc8157769f165a11ad	22343				
+xdp.blastx.f1e8	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap_final 1e8	0	fa0aa23cd6cef75ab02ce2f2c906d6565e6b2e577d34eb44f41110b7b5e22360	13669				
+xdp.blastx.ugf.6	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	6	db6d6173616381f63b1d810677d5b78ef94d5355da367211d0546f08aab34934	2285				
+xdp.blastx.gf.11	blastx		tests/fasta/outfmt0/e2e_tblastn_subject.fna	tests/fasta/outfmt0/e2e_protein_query.faa	-xdrop_gap 5 -xdrop_gap_final 30	11	51a9e42e04648f2fcba349ee971c950375c067dfe74f2f5dfa44c2877e232b9e	213865				
+xdp.blastp.fast.ugf	blastp		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_protein_subject.faa	-task blastp-fast -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0	0249438548934654c8249c86b3a6d1ef3c4e41ef9316861b9a24e87553f91bd1	18172				
+xdp.blastp.u1e9	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e9	0	154ac62bb8f502cc0b17aea98cadecc98e92227c63f97e06c2b672787b6a428c	6287				
+xdp.tblastn.u3	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 3	0	7ee6c34f4046c3fd253cd890d2cdaed69cf1e2996b29f17b2bb4374f4ee3655d	24847				
+xdp.tblastn.cbs0u3	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-comp_based_stats 0 -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0	9c83b2472daff77529b9420f27f3e61ce2346491073b9d709cdcb0eaf96c314a	27776				
+xdp.tblastn.def	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 7	0	b1b45eda3eef8f3a054cc4b365851df21f368f2676fe96820a2c076fc23fb4f4	25421				
+xdp.tblastn.u1e10	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 1e10	0	855c492d74d510f3bc916414bcc6c20f2347e0e24bc29a44b91f930f5f9c041b	3627				
+xdp.tblastx.u3.6	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 3	6	a875817dd9628ee9d3a52a21d608a708d6117a6178dee522104d8042a3815210	267607				
+xdp.tblastx.u1	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 1	6	60af3b21b21d97680ae6f088d1f282cbf15be0324c57e77439a48e3d543c51cc	152949				
+xdp.tblastx.def.6	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 7	6	86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49	321589				
+xdp.tblastx.u1e10	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 1e10	0	030df237758fc38200ec74d8827d44b17f9acef8c7bbd727888fe99bbb1305fc	901				
+xdp.blastp.u1e10q	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e10	0	b55402c9ecbfbcf36b65484fe22e0c1da9fb8d594066e32f8ae9ab0f29f25bcf	3367				
+xdp.blastp.u1e8q	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e8	0	1d4888c289b21f9dde0edab76d389d67c971d7f1d5f6d0fa538a87d295b2a60b	15629				

@@ -9,7 +9,8 @@ line NP M/DECISIONS.md 14); other builds differ in that path only.
 
 - make_counts(): writes the counts files of the cases to LOSAT/target/winmask_blastn/ from
   tests/winmask/counts/mg1655_u9.obinary, and the -window_masker_taxid directory taxid/ (562 and -1:
-  that file, 7: the unit size 17, 8: unreadable, 9606: a directory in its place, 10: ascii counts)
+  that file, 7: the unit size 17, 8: unreadable, 9606: a directory in its place, 10: ascii counts, 11-59:
+  the ascii and optimized ascii counts of tests/winmask/text_counts.tsv)
   with the registry files home_rc/.ncbirc, cfg_inidont/{blastn.ini,.ncbirc} and the malformed
   .ncbirc files of cfg_rcbad, cfg_rcbadapp, cfg_rcpre and cfg_rcbom, the files with an entry set again
   of cfg_rcdup and cfg_rcdupbad, and short.fa, subjects with fewer letters than subjects
@@ -32,6 +33,7 @@ from pathlib import Path
 ENGINE = Path(__file__).resolve().parents[2]
 FIXTURES = ENGINE / "tests/fixtures/winmask_blastn"
 COUNTS = ENGINE / "tests/winmask/counts/mg1655_u9.obinary"
+TEXT_COUNTS = ENGINE / "tests/winmask/text_counts.tsv"
 WORK = ENGINE / "target/winmask_blastn"
 # NCBI reads these and each one changes the batches or the report (tests/blastn_regression_fixtures.py).
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS",
@@ -40,6 +42,43 @@ REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "
 
 def words(*values: int) -> bytes:
     return b"".join(struct.pack("<I", value) for value in values)
+
+
+def unescape(text: str) -> bytes:
+    """The escapes of text_counts.tsv: \\n, \\r, \\t and \\\\."""
+    out = bytearray()
+    i = 0
+    while i < len(text):
+        if text[i] == "\\":
+            out += {"n": b"\n", "r": b"\r", "t": b"\t", "\\": b"\\"}[text[i + 1]]
+            i += 2
+        else:
+            out += text[i].encode()
+            i += 1
+    return bytes(out)
+
+
+def text_counts() -> dict[str, bytes]:
+    """The files of tests/winmask/text_counts.tsv, by their path under WORK."""
+    files = {}
+    for row in TEXT_COUNTS.read_text().splitlines():
+        if not row or row.startswith("#"):
+            continue
+        taxid, base, *edits = row.split("\t")
+        lines = [b""] if base == "-" else (COUNTS.parent / base).read_bytes().split(b"\n")
+        cut, crlf = None, False
+        for edit in edits:
+            if edit == "crlf":
+                crlf = True
+            elif edit.startswith("cut="):
+                cut = int(edit[4:])
+            else:
+                number, _, text = edit.partition("=")
+                lines[int(number) - 1] = unescape(text)
+        if cut is not None:
+            lines = lines[:cut] + [b""]
+        files[f"taxid/{taxid}/wmasker.obinary"] = (b"\r\n" if crlf else b"\n").join(lines)
+    return files
 
 
 def make_counts() -> None:
@@ -104,6 +143,8 @@ def make_counts() -> None:
         "cfg_rcdupbad/.ncbirc": rc + rc.split(b"\n", 1)[1] + b"[my blast]\nx = 1\n",
         # subjects with fewer letters than subjects (the average subject length is 0)
         "short.fa": b">s1\nA\n>s2\n\n",
+        # the ascii and optimized ascii counts (line NP M3d)
+        **text_counts(),
     }
     for name, content in taxid_files.items():
         (WORK / name).parent.mkdir(parents=True, exist_ok=True)

@@ -431,6 +431,11 @@ pub struct BlastpArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`; psiblast's and rpsblast's from their own
+    /// parsers, `into_blastp_args`). Only blastp's report sorts (`ResolvedBlastpArgs::sort`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
     // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
@@ -614,10 +619,6 @@ pub struct BlastpArgs {
     /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
     #[arg(skip)]
     pub psiblast_pssm: Option<crate::algorithm::psiblast::pssm::PsiblastPssmOptions>,
-    /// The formatting handler's `-line_length`, `-sorthits` and `-sorthsps` (rpsblast's; none
-    /// for blastp and psiblast, whose parsers refuse them, `cli.rs` `is_unported_blastp_arg`).
-    #[arg(skip)]
-    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// rpsblast's options that its RPS engine applies (`algorithm::rps_search`); `None` for
     /// blastp and psiblast.
     #[arg(skip)]
@@ -779,9 +780,11 @@ pub struct ResolvedBlastpArgs {
     /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
     pub num_descriptions: usize,
     pub num_alignments: usize,
-    /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length` (rpsblast's),
-    /// or 60.
+    /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length`, or 60.
     pub line_length: usize,
+    /// `-sorthits` and `-sorthsps` of the pairwise report (`FormattingArgs::report_sort`):
+    /// blastp's; none for psiblast and rpsblast, which read them and sort nothing.
+    pub sort: crate::report::hit_sort::ReportSort,
     /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
     pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
@@ -1197,7 +1200,10 @@ impl BlastpArgs {
             .and_then(|pssm| pssm.in_pssm.as_deref())
         {
             Some(path) => {
-                let (mut search, file) = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
+                let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
+                    path,
+                    crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+                )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
@@ -1258,6 +1264,7 @@ impl BlastpArgs {
             hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
+            psi_tblastn: false,
             // blastp's `-xdrop_ungap`, or rpsblast's (`RpsSearch`); psiblast's parser refuses it.
             x_dropoff: self
                 .xdrop_ungap
@@ -1361,6 +1368,21 @@ impl BlastpArgs {
             // ```
             // (Read for the output formats up to 4, the others warn, `warnings_with`.)
             line_length: self.formatting.line_length(),
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:246-248
+            // ```c++
+            //         formatter.SetLineLength(fmt_args->GetLineLength());
+            //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+            //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+            // ```
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
+            // ```c++
+            //         formatter.SetLineLength(fmt_args->GetLineLength());
+            // ```
+            // (rpsblast_app.cpp:187 sets the line length only, as psiblast_app.cpp does.)
+            sort: match self.app {
+                BlastpApp::Blastp => self.formatting.report_sort(),
+                BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
+            },
             max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
             // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());

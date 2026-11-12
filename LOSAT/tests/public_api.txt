@@ -423,8 +423,9 @@ pub fn LOSAT::api::read_input_file(LOSAT::api::Role, &std::path::Path) -> core::
 pub fn LOSAT::api::read_inputs(&LOSAT::api::Search, &[u8], &[u8]) -> core::result::Result<(alloc::vec::Vec<LOSAT::api::FastaRecord>, alloc::vec::Vec<LOSAT::api::FastaRecord>), LOSAT::api::Error>
 pub fn LOSAT::api::run(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &mut [(&str, &mut (dyn std::io::Write + core::marker::Send))], &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_batches<'a>(&'a LOSAT::api::Search, LOSAT::api::Inputs<'a>) -> core::result::Result<LOSAT::api::Batches<'a>, LOSAT::api::Error>
-pub fn LOSAT::api::run_blastdbcmd(&[&str], &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
+pub fn LOSAT::api::run_blastdbcmd(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_collect(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &[&str]) -> core::result::Result<LOSAT::api::Outcome, LOSAT::api::Error>
+pub fn LOSAT::api::run_dustmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_makeblastdb(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_to_file(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &str, &std::path::Path, &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::validate(LOSAT::api::Program, &[&str]) -> core::result::Result<LOSAT::api::Search, LOSAT::api::Error>

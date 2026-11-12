@@ -81,7 +81,7 @@ _PSSM_INPUTS: list[Path] = []
 
 def query_argv(cell: str, root: Path) -> list[str]:
     """The arguments of a query cell (`root`: the directory the runs start in, LOSAT/): `-query
-    <cell>`, or for psiblast's PSSM query `-in_pssm <file>` (`pssm-gz:<path>` inflated into a
+    <cell>`, or for a PSSM query (psiblast, tblastn) `-in_pssm <file>` (`pssm-gz:<path>` inflated into a
     temporary directory, `pssm:<path>` as it is)."""
     if cell.startswith("pssm:"):
         return ["-in_pssm", cell.removeprefix("pssm:")]

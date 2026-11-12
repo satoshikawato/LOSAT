@@ -781,7 +781,8 @@ pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut dy
             Err(ListStop::Refused(reason)) => return diag.refuse(&reason),
         }
     }
-    // NCBI's stream ignores a failed write (no exception is enabled on it), so does this.
+    // NCBI's stream ignores a failed write (no exception is enabled on it), so does the run's
+    // `ncbi_app::files::Ostream` that `out` is.
     let _ = out.write_all(&text);
     let _ = out.flush();
     0

@@ -222,8 +222,9 @@ fn x_tbn_ungap(matrix: ScoringMatrix) -> (bool, Option<&'static x_ungapped_fast:
 }
 
 /// The byte-table walks of the two-hit loop (`XTwoHit::pairs_on`): BLOSUM62's (`XBlosum62Walks`)
-/// or another matrix's (`&MatrixTable`).
-trait XUngapWalks: Copy {
+/// or another matrix's (`&MatrixTable`), or the extension of a PSSM query's rows
+/// (`score::XPssmWalks`, tblastn `-in_pssm`).
+pub(super) trait XUngapWalks: Copy {
     /// `x_ungapped_fast::two_hit` with this table.
     #[allow(clippy::too_many_arguments)]
     fn two_hit(
@@ -725,6 +726,59 @@ impl<'a> XTwoHit<'a> {
             ),
         }
         self.diagonals.entries = entries;
+    }
+
+    /// `x_pairs_bf_of` with the walks `walks` of a PSSM query (`score::XPssmWalks`, whose
+    /// extension is the PSSM's in every case: the finder is made with `x_with_walks`). Its own
+    /// text, as `x_pairs_bf_of`'s, so that the matrices' keep their code.
+    #[inline(never)]
+    pub(super) fn x_pairs_bf_walks<W: XUngapWalks>(
+        &mut self,
+        walks: W,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        debug_assert!(self.x_ungap_fast && self.x_ungap_matrix.is_none());
+        if !super::x_tbn_hitbf::fits(self.window, self.word_size) {
+            self.pairs_with(walks, frame, chunk_offset, subject_sequence, pairs, hits);
+            return;
+        }
+        let mut entries =
+            std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        match &mut entries {
+            XDiagCells::Packed(cells) => self.x_pairs_bf_on(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.x_pairs_bf_on(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+        }
+        self.diagonals.entries = entries;
+    }
+
+    /// The finder whose extensions are always its walks' (`pairs_on` takes the walks when
+    /// `x_ungap_fast`): a PSSM query's (`x_pairs_bf_walks`), whatever `LOSAT_X_TBNUNGAP` and the
+    /// matrix say. No NCBI counterpart: the PSSM's extension is NCBI's `use_pssm` branch, the
+    /// reference of that query (`pssm_search::ungapped::pssm_extend_two_hit`).
+    pub(super) fn x_with_walks(mut self) -> Self {
+        self.x_ungap_fast = true;
+        self.x_ungap_matrix = None;
+        self
     }
 
     /// Another matrix's table of the byte-table walks (`x_tbn_ungap`): the caller of the word

@@ -22,10 +22,11 @@ mod retrieve;
 mod taxonomy;
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::{Cin, Ostream};
 use crate::ncbi_app::{Diag, Tool};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
@@ -65,10 +66,16 @@ pub fn run(words: &[OsString]) -> i32 {
     crate::ncbi_app::run(&TOOL, words, run_body)
 }
 
-/// The run of one command line, its output on `out` and its errors on `err`; the exit status
-/// (NCBI's application around blastdbcmd's `Run`: `ncbi_app::run_with`).
-pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    crate::ncbi_app::run_with(&TOOL, words, out, err, run_body)
+/// The run of one command line with `input` as its standard input (a batch file `-`), its
+/// output on `out` and its errors on `err`; the exit status (NCBI's application around
+/// blastdbcmd's `Run`: `ncbi_app::run_with`).
+pub(crate) fn run_with(
+    words: &[OsString],
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_with(&TOOL, words, input, out, err, run_body)
 }
 
 /// blastdbcmd's `Run` (`CBlastDBCmdApp::Run`) on the arguments that NCBI's reader read.
@@ -79,6 +86,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
 fn run_body(
     args: &Args,
     settings: &ApplicationSettings,
+    stdin: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
@@ -105,7 +113,9 @@ fn run_body(
             return 1;
         }
     };
-    let out: &mut dyn Write = &mut out;
+    // NCBI's `ostream` of `-out` for every mode: a failed write drops the later ones, and a
+    // closed pipe ends the program where SIGPIPE ends NCBI's (`files::Ostream`).
+    let mut out = Ostream::new(&mut out);
     let path = match SearchPath::from_environment(registry) {
         Ok(path) => path,
         Err(error) => return database_error(diag, error),
@@ -122,7 +132,7 @@ fn run_body(
         return 0;
     }
     if args.given("list") {
-        return list::list(args, &path, diag, out);
+        return list::list(args, &path, diag, &mut out);
     }
     let name = args.value("db").unwrap_or("nr");
     let dbtype = args.value("dbtype").unwrap_or("guess");
@@ -148,7 +158,7 @@ fn run_body(
         // of the type: a protein database the list fails on is then looked for as a
         // nucleotide one (probe J111 of line BDC: `No alias or index file found for
         // nucleotide database [db/p4]`).
-        let tax_ids = match taxonomy::tax_id_list(args, &path, diag) {
+        let tax_ids = match taxonomy::tax_id_list(args, &path, diag, stdin) {
             Ok(tax_ids) => tax_ids,
             Err(taxonomy::Ended(status)) => return status,
         };
@@ -165,7 +175,16 @@ fn run_body(
             Err(error) => return database_error(diag, error),
         };
         let dbtype_protein = dbtype == "prot";
-        return retrieve::process(&db, args, &path, diag, out, Some(&tax_ids), dbtype_protein);
+        return retrieve::process(
+            &db,
+            args,
+            &path,
+            diag,
+            stdin,
+            &mut out,
+            Some(&tax_ids),
+            dbtype_protein,
+        );
     }
     let (db, volumes) = match open_database(name, dbtype, &path, &|_| Ok(())) {
         Ok(opened) => opened,
@@ -173,13 +192,13 @@ fn run_body(
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, args, &path, diag, out);
+            return metadata::metadata(&db, name, args, &path, diag, &mut out);
         }
         if args.given("tax_info") {
-            return taxonomy::tax_info(&db, args, &path, diag, out);
+            return taxonomy::tax_info(&db, args, &path, diag, &mut out);
         }
         let protein = db.seqtype() == SeqType::Protein;
-        return retrieve::process(&db, args, &path, diag, out, None, protein);
+        return retrieve::process(&db, args, &path, diag, stdin, &mut out, None, protein);
     }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
@@ -443,5 +462,97 @@ mod tests {
              descriptions of command line arguments\n"
         ));
         assert_eq!(HELP.len(), 9450);
+    }
+
+    /// An output whose every write fails (a full disk).
+    struct FullDisk;
+
+    impl Write for FullDisk {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("no space left"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("no space left"))
+        }
+    }
+
+    /// A pipe whose reader has closed.
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The exit status and the diagnostics of `words` run with `input` as the standard input
+    /// and `out` as the standard output.
+    fn run_on(words: &[&str], input: &str, out: &mut dyn Write) -> (i32, String) {
+        let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let mut err = Vec::new();
+        let status = run_with(&words, &mut input.as_bytes(), out, &mut err);
+        (status, String::from_utf8(err).unwrap())
+    }
+
+    fn fixture_db(name: &str) -> String {
+        format!("{}/tests/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    // NCBI 2.17.0 with `-out /dev/full` (review 2 of line RG item K1, F3): a failed write leaves
+    // the retrieval going on, so an id that is not found after it is reported as without the
+    // failure (`Skipped NOSUCHID`, exit status 1). The batch is the standard input (`-`).
+    #[test]
+    fn a_failed_write_leaves_the_later_entries_of_a_batch_and_their_errors() {
+        let db = fixture_db("blastdbcmd/db/p5");
+        let words = ["-db", db.as_str(), "-entry_batch", "-"];
+        let batch = "XP_000001.1\nnosuchid\nP99999.2\n";
+        let mut written = Vec::new();
+        let expected = run_on(&words, batch, &mut written);
+        assert_eq!(
+            expected,
+            (1, "Error: [blastdbcmd] Skipped NOSUCHID\n".to_string())
+        );
+        assert!(written.starts_with(b">"));
+        assert_eq!(run_on(&words, batch, &mut FullDisk), expected);
+        // A closed pipe ends NCBI's process by SIGPIPE (exit status 141, no message) outside
+        // Windows: the retrieval ends with exit status 0 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+        // exception 10). This short output meets it at its last flush, after the entries'
+        // messages, as NCBI's buffered output does. On Windows it is a failed write like the
+        // others.
+        let closed = if cfg!(windows) {
+            expected.clone()
+        } else {
+            (0, expected.1.clone())
+        };
+        assert_eq!(run_on(&words, batch, &mut ClosedPipe), closed);
+    }
+
+    // NCBI 2.17.0 with `-out /dev/full` (F2): the serial stream of `-metadata` reports the
+    // failed write (five lines, exit status 6), which LOSAT refuses.
+    #[test]
+    fn a_failed_write_of_the_metadata_is_refused() {
+        let db = fixture_db("dustmasker/db/basic");
+        let words = ["-db", db.as_str(), "-metadata"];
+        let mut written = Vec::new();
+        assert_eq!(run_on(&words, "", &mut written), (0, String::new()));
+        assert!(written.ends_with(b"}\n"));
+        assert_eq!(
+            run_on(&words, "", &mut FullDisk),
+            (
+                1,
+                "Error: a failed write of the -metadata output (NCBI's serial stream reports it) \
+                 is not supported by LOSAT's BLASTDBCMD\n"
+                    .to_string()
+            )
+        );
+        // A closed pipe ends the program silently outside Windows, where SIGPIPE ends NCBI's.
+        if !cfg!(windows) {
+            assert_eq!(run_on(&words, "", &mut ClosedPipe), (0, String::new()));
+        }
     }
 }

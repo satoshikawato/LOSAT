@@ -373,7 +373,7 @@ fn queries_without_residues_are_kept_and_a_batch_of_them_stops() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
-// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `stage_d_pipeline::SubjectLengthInvalid`).
+// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `stage_d_pipeline::SetupEngineError`).
 // Without the Gumbel block (`-searchsp` or `OLD_FSC`) a set of subjects whose average is below one letter
 // fails the setup of a batch with NCBI's engine error (exit 3) after the start of the outfmt 0
 // report, and after the report of a first batch that NCBI does not search (`BATCH_SIZE=1`, an

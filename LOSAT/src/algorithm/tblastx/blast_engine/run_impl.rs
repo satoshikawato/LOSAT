@@ -4356,13 +4356,15 @@ fn search_query_batch<S: TbxScore>(
     let x_link_timer = XLinkTimer::new(timing_enabled);
 
     // NCBI verbose CLI flag is only present under _BLAST_DEBUG builds.
-    // ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
     // ```c
     // #if _BLAST_DEBUG
-    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                  true);
-    // arg_desc.AddFlag("remote_verbose",
-    //                  "Produce verbose output for remote searches", true);
+    // ...
+    //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+    //                      true);
+    //     arg_desc.AddFlag("remote_verbose",
+    //                      "Produce verbose output for remote searches", true);
+    // ...
     // #endif /* _BLAST_DEBUG */
     // ```
     let bar = ProgressBar::hidden();
@@ -6512,8 +6514,8 @@ fn search_query_batch<S: TbxScore>(
         // NCBI-style subject frame base offsets for sum-statistics linking
         // (`subject_link::subject_frame_bases`).
         let subject_frame_bases = subject_link::subject_frame_bases(s_frames_listed);
-        // Nothing below reads the preliminary frames (the seed stage has ended); they are freed
-        // before the linking call, where the heap peaks.
+        // Nothing after this reads the preliminary frames (the seed stage has ended); they are
+        // freed before the first linking call, where the heap peaks.
         drop(s_frames_preliminary_owned);
 
         // What the two linking calls and the stages between and after them read
@@ -6540,7 +6542,7 @@ fn search_query_batch<S: TbxScore>(
             diagnostics: &diagnostics,
             debug_output_filter,
         };
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
         // ```c
         // if (hit_params->link_hsp_params) {
         //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,

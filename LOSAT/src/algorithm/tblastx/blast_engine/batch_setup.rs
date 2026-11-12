@@ -167,13 +167,15 @@ pub(super) fn batch_flags<S: TbxScore>(
 
     let diag_enabled = diagnostics_enabled();
     let debug_cutoffs_all = crate::utils::xdiag::var_os("LOSAT_DEBUG_CUTOFFS_ALL").is_some();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
     // ```c
     // #if _BLAST_DEBUG
-    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                  true);
-    // arg_desc.AddFlag("remote_verbose",
-    //                  "Produce verbose output for remote searches", true);
+    // ...
+    //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+    //                      true);
+    //     arg_desc.AddFlag("remote_verbose",
+    //                      "Produce verbose output for remote searches", true);
+    // ...
     // #endif /* _BLAST_DEBUG */
     // ```
     let debug_output_filter = std::env::var_os("LOSAT_DEBUG_OUTPUT_FILTER").is_some();

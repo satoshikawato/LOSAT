@@ -243,7 +243,9 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
     // ```c
     // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
     //     continue;
-    // while (H->hsp_link.link[ordering_method]) { ... }
+    // ...
+    //             link = H->hsp_link.link[ordering_method];
+    //             while (link)
     // ```
     // The converted output hits are represented here by their original
     // internal HSP rows after e-value filtering and before common.rs

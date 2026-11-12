@@ -18,8 +18,8 @@ use super::{
 
 /// The HSP-saving statistics of a subject, which its frame loop and its re-evaluation counted.
 pub(super) struct HspSavingStats<'a> {
-    /// The subject is longer than 600,000 nt and LOSAT_DEBUG_HSP_SAVING or LOSAT_DIAGNOSTICS is
-    /// set.
+    /// The subject is longer than 600,000 nt and LOSAT_DEBUG_HSP_SAVING (diagnostic build) or
+    /// LOSAT_DIAGNOSTICS is set.
     pub(super) collect_hsp_saving_stats: bool,
     pub(super) stats_hsp_saved: usize,
     pub(super) stats_hsp_filtered_by_cutoff: usize,
@@ -52,11 +52,13 @@ pub(super) fn print_hsp_saving_stats(
         subject_len_nucl,
         cutoff_score_min,
     } = stats;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
     // ```c
     // #if _BLAST_DEBUG
-    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                  true);
+    // ...
+    //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+    //                      true);
+    // ...
     // #endif /* _BLAST_DEBUG */
     // ```
     // DEBUG: Print HSP statistics for long sequences only when requested.
@@ -138,11 +140,13 @@ pub(super) fn count_chain_roles(linked: &[UngappedHit], debug_output_filter: boo
     let mut stats_chain_heads = 0usize;
     let mut stats_chain_members = 0usize;
     if debug_output_filter {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
         // ```c
         // #if _BLAST_DEBUG
-        // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-        //                  true);
+        // ...
+        //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+        //                      true);
+        // ...
         // #endif /* _BLAST_DEBUG */
         // ```
         // DEBUG: Collect statistics before filtering only when requested.
@@ -179,11 +183,13 @@ pub(super) fn print_output_filter(
         stats_chain_heads,
         stats_chain_members,
     } = roles;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
     // ```c
     // #if _BLAST_DEBUG
-    // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                  true);
+    // ...
+    //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+    //                      true);
+    // ...
     // #endif /* _BLAST_DEBUG */
     // ```
     // DEBUG: Print output filtering statistics.

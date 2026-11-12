@@ -36,7 +36,8 @@ use crate::algorithm::tblastx::x_link_timing::XLinkTimer;
 // the linking calls run, not a value NCBI computes (see the note in the body).
 /// Dispatch point 5 of the seed release: ends the subject's lookup stage (`x_seed_stage`; when its
 /// end frees the batch's lookup table, the worker's diagonal table `diag_array` is dropped too)
-/// and the subject's part of the batch pipe's seed-stage end with its `hsps` HSPs, then sets the
+/// and the subject's part of the batch pipe's seed-stage end with its `hsps` HSPs (when
+/// `use_parallel`; otherwise `x_pipe_seed` ends with none when it drops), then sets the
 /// thread's helped mode for the linking calls (`x_on_board`: the batch is on the search's board).
 /// Returns whether the subject's linking calls may use the pool, and the helped mode's guard.
 pub(super) fn end_subject_seed_stage(
@@ -47,13 +48,13 @@ pub(super) fn end_subject_seed_stage(
     use_parallel: bool,
     x_on_board: bool,
 ) -> (bool, XHelped) {
-    // Dispatch point 5 of the seed release (per subject): the seed stage of
-    // this subject ends here; nothing after it reads the batch's lookup table (`end` consumes
-    // the stage that `lookup_ref` borrows from; the unit path's stage ended at dispatch
-    // point 3) or the worker's diagonal table. The batch's last lookup
-    // stage frees the lookup table and returns true, and this worker, which gets no
-    // further subject, drops its diagonal table before the subject's first linking call,
-    // where the heap of the search peaks.
+    // Dispatch point 5 of the seed release (per subject): the seed stage of this subject ends
+    // here; nothing after it reads the batch's lookup table (the closure moves the stage that
+    // its `lookup_ref` borrows from into this fn, and `end` consumes it; the unit path's stage
+    // ended at dispatch point 3) or the worker's diagonal table. The batch's last lookup stage
+    // frees the lookup table and returns true, and this worker, which gets no further subject,
+    // drops its diagonal table before the subject's first linking call, where the heap of the
+    // search peaks.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
     // ```c
@@ -113,7 +114,11 @@ pub(super) struct SubjectLinkArgs<'a> {
     pub(super) linking_params: &'a LinkingParams,
     pub(super) contexts_ref: &'a [QueryContext],
     pub(super) subject_frame_bases: &'a [i32],
+    /// NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context.
+    /// These values are stored in query_info->contexts[ctx] in NCBI and referenced
+    /// by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
     pub(super) length_adj_per_context: &'a [i64],
+    /// See `length_adj_per_context`.
     pub(super) eff_searchsp_per_context: &'a [i64],
     pub(super) x_link_on_pool: bool,
 }
@@ -207,7 +212,7 @@ pub(super) fn sort_and_reap_after_first_link(
         );
     }
     let prelim_linked_count = prelinked_ungapped_hits.len();
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:654-662
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:654-662
     // ```c
     //    cutoff = hit_params->prelim_evalue;
     // ...
@@ -330,9 +335,6 @@ pub(super) fn relink_subject_hits(
         diagnostics,
         ..
     } = stage;
-    // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
-    // These values are stored in query_info->contexts[ctx] in NCBI and referenced
-    // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
     let t_linking = if timing_enabled {
         Some(Instant::now())
     } else {
@@ -349,11 +351,14 @@ pub(super) fn relink_subject_hits(
     x_link_timer.arm(LinkCall::Second);
     let linked = link_subject_hits(link, ungapped_hits);
     x_link_timer.disarm();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:959-982
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:955-974
     // ```c
-    // H->hsp->evalue = (best_evalue == -1) ? H->hsp->evalue :
-    //                  MIN(H->hsp->evalue, best_evalue);
-    // H->ordering_method = ordering_method;
+    //          best[ordering_method]->start_of_chain = TRUE;
+    //          best[ordering_method]->hsp->evalue    = prob[ordering_method];
+    // ...
+    //             H->linked_set = linked_set;
+    //             H->ordering_method = ordering_method;
+    //             H->hsp->evalue = prob[ordering_method];
     // ```
     // Record linked_set/start_of_chain/order/e-value before output
     // coordinate conversion can obscure frame-relative HSP identity.

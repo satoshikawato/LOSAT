@@ -434,12 +434,12 @@ pub(crate) fn batch_error(
     Some((warnings, NativeError { exit: 3, message }))
 }
 
-/// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: a
-/// format LOSAT does not read (a counts source that names one after the check), the masker's
-/// window check (not reached with blastn's settings), a cache bit array of 0 words that NCBI
-/// reads past (`WinMaskError::EmptyCacheBitArray`), a query of 2^32 letters or more, and an
-/// error of the masks of a chunk of a split batch whose whole queries were masked (NCBI masks
-/// each chunk when it searches it, after the batch's set-up).
+/// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: an ascii
+/// file's unit size above 16 (`WinMaskError::UnitSize`, where NCBI's masker is undefined), a
+/// cache bit array of 0 words that NCBI reads past (`WinMaskError::EmptyCacheBitArray`), a
+/// query of 2^32 letters or more, an error of a counts source of LOSAT Web, and an error of the
+/// masks of a chunk of a split batch whose whole queries were masked (NCBI masks each chunk
+/// when it searches it, after the batch's set-up).
 pub(crate) fn rejection(name: &str, error: &WinMaskError) -> anyhow::Error {
     anyhow::anyhow!(
         "the windowmasker unit counts {name} give an error that LOSAT's BLASTN does not report as NCBI BLAST+ does ({error}); this is not supported by LOSAT's BLASTN"

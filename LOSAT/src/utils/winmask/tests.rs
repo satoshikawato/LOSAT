@@ -171,7 +171,14 @@ fn window_below_the_unit_is_ncbis_validation_error() {
         Err(e) => e,
         Ok(_) => panic!("a window of 5 letters with units of 9 must fail"),
     };
-    assert_eq!(err, WinMaskError::WindowSize { window: 5, unit: 9 });
+    assert_eq!(
+        err,
+        WinMaskError::WindowSize {
+            window: 5,
+            unit: 9,
+            warnings: Vec::new()
+        }
+    );
     let stderr =
         std::fs::read_to_string(fixture_dir().join("expected/mg1655_u9.p_window5.stderr")).unwrap();
     assert_eq!(
@@ -197,7 +204,7 @@ fn thresholds_come_from_the_file_unless_given() {
     assert!(ob.cache_bit_array().is_some());
     assert_eq!(
         ob.metadata()[0],
-        "##windowmasker-statistics-format-version:obinary 1.1.0"
+        b"##windowmasker-statistics-format-version:obinary 1.1.0"
     );
     let bin =
         UnitCounts::open(&dir.join("counts/dm2L_u9.binary"), &MaskerParams::default()).unwrap();
@@ -344,7 +351,7 @@ fn discover_stat_type_reads_the_first_word_after_the_metadata() {
     let with_md = [w(3), w(6), b"##a\0\0\0".to_vec(), w(2)].concat();
     let found = kind(&with_md);
     assert_eq!(found.stat_type, StatType::OBinary);
-    assert_eq!(found.metadata, vec!["##a".to_string()]);
+    assert_eq!(found.metadata, vec![b"##a".to_vec()]);
     assert_eq!(found.skip, 14);
     let text = kind(b"##windowmasker-statistics-format-version:oascii 1.1.0\n##x\nAAAA\n");
     assert_eq!(text.stat_type, StatType::OAscii);
@@ -944,13 +951,45 @@ fn the_masker_checks_the_unit_size_of_an_ascii_file() {
         SeqMasker::new(counts("255"), &params).err().unwrap(),
         WinMaskError::WindowSize {
             window: 3,
-            unit: 255
+            unit: 255,
+            warnings: Vec::new()
         }
     );
+    // The reader's warnings go with the error (review 1 F2).
+    let warned = read_counts(
+        b"255\n>t_low 74\n>t_extend 147\n>t_threshold 173\n>t_high 210\n>t_low 80\n".to_vec(),
+    )
+    .unwrap();
+    let error = SeqMasker::new(Arc::new(warned), &params).err().unwrap();
+    assert_eq!(error.warnings().len(), 1);
     // 17 to 251: refused (NCBI's reverse complement of the units is undefined).
     for unit in ["17", "251"] {
         let error = SeqMasker::new(counts(unit), &params).err().unwrap();
         assert!(matches!(error, WinMaskError::UnitSize { .. }), "{error}");
         assert!(error.create_report().is_none());
     }
+}
+
+// The metadata entries are NCBI's `std::string`s: bytes. `ExtractStatAlgoVersion` takes the name
+// from the third byte on, whatever the first two are (review 1 F3).
+#[test]
+fn the_version_of_binary_metadata_is_read_from_its_bytes() {
+    let data = std::fs::read(fixture_dir().join("counts/mg1655_u9.obinary")).unwrap();
+    let md_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+    let body = &data[8 + md_len..];
+    let with = |entry: &[u8]| {
+        let block = [entry, b"\0"].concat();
+        let len = (block.len() as u32).to_le_bytes();
+        read_counts([&3u32.to_le_bytes()[..], &len, &block, body].concat())
+    };
+    let error = with(b"\xff\xffwindowmasker-statistics-algorithm-version:99999999999.0.0")
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .ends_with("Cannot convert string '99999999999' to int, overflow"),
+        "{error}"
+    );
+    assert!(with(b"\xff\xffwindowmasker-statistics-algorithm-version:1.0.0").is_ok());
 }

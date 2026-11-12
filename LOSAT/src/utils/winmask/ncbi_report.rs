@@ -104,7 +104,7 @@ impl WinMaskError {
             Self::CreateFail { message } => {
                 rethrown(NcbiException::new(create_site(340), message.as_str()))
             }
-            Self::Exception { exception, .. } => rethrown(exception.clone()),
+            Self::Exception { exception, .. } => rethrown((**exception).clone()),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:121-126
             // ```c
             //     if( window_size < ustat->UnitSize() ) {
@@ -129,7 +129,9 @@ impl WinMaskError {
     /// The warnings that NCBI posts while it reads the file, before the error.
     pub fn warnings(&self) -> &[String] {
         match self {
-            Self::Format { warnings, .. } | Self::Exception { warnings, .. } => warnings,
+            Self::Format { warnings, .. }
+            | Self::Exception { warnings, .. }
+            | Self::WindowSize { warnings, .. } => warnings,
             _ => &[],
         }
     }

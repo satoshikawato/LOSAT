@@ -277,12 +277,13 @@ impl CountsSource for RegisteredCounts {
         }
         match &file.counts {
             Some(counts) => counts.clone(),
-            // The engine asks for the counts only after the check found a binary format.
-            None => Err(WinMaskError::UnsupportedFormat(
-                file.found
-                    .as_ref()
-                    .map_or(StatType::Unknown, |stat| stat.stat_type),
-            )),
+            // The engine asks for the counts only after the check found a binary format
+            // (`-window_masker_db`; LOSAT Web refuses `-window_masker_taxid`).
+            None => Err(WinMaskError::CreateFail {
+                message: format!(
+                    "LOSAT Web holds the WindowMasker counts {name} only in the two binary formats"
+                ),
+            }),
         }
     }
 }

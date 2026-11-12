@@ -89,11 +89,16 @@ pub enum WinMaskError {
     /// (`CStringException`). The factory rethrows it as "could not create a unit counts
     /// container" (`seq_masker_istat_factory.cpp:358-359`). `warnings` as for `Format`.
     Exception {
-        exception: NcbiException,
+        exception: Box<NcbiException>,
         warnings: Vec<String>,
     },
-    /// `CSeqMaskerException::eValidation` (`seq_masker.cpp:121-126`).
-    WindowSize { window: u8, unit: u8 },
+    /// `CSeqMaskerException::eValidation` (`seq_masker.cpp:121-126`). `warnings`: those the
+    /// counts reader posted before (`UnitCounts::warnings`).
+    WindowSize {
+        window: u8,
+        unit: u8,
+        warnings: Vec<String>,
+    },
     /// A unit size above 16 (from an ascii counts file, whose reader does not check it): the
     /// masker's units are 32-bit (`CSeqMaskerWindow::TUnit`) and NCBI's reverse complement of
     /// a unit (`CSeqMaskerUtil::reverse_complement`) then shifts it by 32 bits or more, which
@@ -130,7 +135,7 @@ impl fmt::Display for WinMaskError {
             //               "must be greater or equal to unit size (" <<
             //               (int)ustat->UnitSize() << ")";
             // ```
-            Self::WindowSize { window, unit } => write!(
+            Self::WindowSize { window, unit, .. } => write!(
                 f,
                 "window size ({window}) must be greater or equal to unit size ({unit})"
             ),
@@ -232,6 +237,7 @@ impl SeqMasker {
             return Err(WinMaskError::WindowSize {
                 window: window_size,
                 unit,
+                warnings: ustat.warnings().to_vec(),
             });
         }
         if unit > 16 {

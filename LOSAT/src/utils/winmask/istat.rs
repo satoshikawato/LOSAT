@@ -36,12 +36,12 @@ pub enum StatType {
     Unknown,
 }
 
-/// What `DiscoverStatType` finds: the format, the metadata lines, and the bytes before the
-/// counts (the binary metadata block).
+/// What `DiscoverStatType` finds: the format, the metadata lines (bytes, as NCBI's
+/// `std::string`s), and the bytes before the counts (the binary metadata block).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatFile {
     pub stat_type: StatType,
-    pub metadata: Vec<String>,
+    pub metadata: Vec<Vec<u8>>,
     pub skip: u64,
 }
 
@@ -390,7 +390,7 @@ pub(super) fn discover<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskErr
 /// of the 3 it replaces. A file shorter than its metadata block fails the skip in
 /// `DiscoverStatType`, which then returns eUnknown, so the block is read only as far as the
 /// file goes (NCBI's bytes past the end are uninitialized and never used).
-fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<String>, u64), WinMaskError> {
+fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<Vec<u8>>, u64), WinMaskError> {
     seek(r, 0)?;
     let mut word = [0u8; 4];
     read_up_to(r, &mut word);
@@ -407,7 +407,7 @@ fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<String>, u64), WinMa
         let metadata = data
             .split(|&b| b == 0)
             .take_while(|s| !s.is_empty())
-            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .map(<[u8]>::to_vec)
             .collect();
         return Ok((metadata, 8 + len as u64));
     }
@@ -427,7 +427,7 @@ fn metadata_lines<R: Read + Seek>(r: &mut R) -> Result<(Vec<String>, u64), WinMa
             line.pop();
         }
         if line.len() >= 2 && line[0] == b'#' && line[1] == b'#' {
-            metadata.push(String::from_utf8_lossy(&line).into_owned());
+            metadata.push(line.clone());
         } else {
             break;
         }
@@ -447,7 +447,7 @@ pub struct UnitCounts {
     /// The cache bit array of the optimized binary format (`optimization_data::cba_`).
     cba: Option<Vec<u32>>,
     uset: Uset,
-    metadata: Vec<String>,
+    metadata: Vec<Vec<u8>>,
     warnings: Vec<String>,
 }
 
@@ -553,10 +553,7 @@ impl UnitCounts {
                 })
             }
         }
-        check_stat_algo_version(&counts.metadata).map_err(|exception| WinMaskError::Exception {
-            exception,
-            warnings: counts.warnings.clone(),
-        })?;
+        check_stat_algo_version(&counts.metadata).map_err(|e| counts.exception(e))?;
         Ok(counts)
     }
 
@@ -953,7 +950,7 @@ impl UnitCounts {
     /// posted before it.
     fn exception(&self, exception: NcbiException) -> WinMaskError {
         WinMaskError::Exception {
-            exception,
+            exception: Box::new(exception),
             warnings: self.warnings.clone(),
         }
     }
@@ -1354,8 +1351,8 @@ impl UnitCounts {
         self.use_min_count
     }
 
-    /// The metadata lines of the file (`##...`).
-    pub fn metadata(&self) -> &[String] {
+    /// The metadata lines of the file (`##...`), as bytes.
+    pub fn metadata(&self) -> &[Vec<u8>] {
         &self.metadata
     }
 
@@ -1723,8 +1720,8 @@ impl<R: Read> Stream<'_, R> {
 /// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
 /// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. The percentages themselves
 /// are used only by the application's `-t_*_pct` settings, which are not ported.
-fn check_pct_lines(metadata: &[String], stat_type: StatType) -> Result<(), WinMaskError> {
-    let mut pct = metadata.iter().filter(|line| line.starts_with("##pct:"));
+fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinMaskError> {
+    let mut pct = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
     let short = match stat_type {
         StatType::Binary | StatType::OBinary => pct.next().is_some_and(|line| line.len() == 6),
         StatType::Ascii | StatType::OAscii => pct.any(|line| line.len() == 6),
@@ -1776,7 +1773,7 @@ fn check_pct_lines(metadata: &[String], stat_type: StatType) -> Result<(), WinMa
 /// `CSeqMaskerIstatFactory::create` calls it after the reader (`:343-348`), inside its `try`:
 /// a part of digits that `StringToInt` cannot convert (empty, or beyond `int`) is its
 /// exception, which the factory rethrows. The version itself is not used by the masker.
-fn check_stat_algo_version(metadata: &[String]) -> Result<(), NcbiException> {
+fn check_stat_algo_version(metadata: &[Vec<u8>]) -> Result<(), NcbiException> {
     const NAME: &[u8] = b"windowmasker-statistics-algorithm-version";
     let digits = |t: &[u8]| t.iter().all(u8::is_ascii_digit);
     let find = |line: &[u8], c: u8, from: usize| {
@@ -1785,7 +1782,7 @@ fn check_stat_algo_version(metadata: &[String]) -> Result<(), NcbiException> {
             .map(|at| from + at)
     };
     for line in metadata {
-        let line = line.as_bytes();
+        let line = line.as_slice();
         let Some(p) = find(line, b':', 2) else {
             continue;
         };

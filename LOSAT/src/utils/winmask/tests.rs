@@ -129,7 +129,9 @@ fn check_manifest(manifest: &Path) -> (usize, Vec<String>) {
 #[test]
 fn masks_equal_ncbi_windowmasker_intervals() {
     let (rows, failures) = check_manifest(&fixture_dir().join("manifest.tsv"));
-    assert_eq!(rows, 21);
+    // 21 rows of the binary formats, and the 17 of mg1655_u9.obinary again with the ascii and
+    // the optimized ascii counts (line NP M3d).
+    assert_eq!(rows, 55);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -355,9 +357,12 @@ fn discover_stat_type_reads_the_first_word_after_the_metadata() {
         "could not open /nonexistent/wmasker.obinary"
     );
     match read_counts(b"##m\nAAAA\n".to_vec()) {
-        Err(WinMaskError::UnsupportedFormat(StatType::OAscii)) => {}
+        Err(WinMaskError::Format {
+            site: FormatSite::OAsciiFileTooShort,
+            ..
+        }) => {}
         Err(e) => panic!("{e}"),
-        Ok(_) => panic!("oascii must be refused"),
+        Ok(_) => panic!("a header of one line is too short"),
     }
 }
 
@@ -662,4 +667,290 @@ fn a_bare_pct_line_is_the_factorys_substr_error() {
         &[],
     );
     assert!(read_counts(file).is_ok());
+}
+
+// ---------------------------------------------------------------------------------------------
+// The ascii and optimized ascii readers (line NP M3d). The texts are those of NCBI BLAST+ 2.17.0
+// blastn `-window_masker_taxid` with such files (M/m3d/ws/run2.sh; the blastn fixtures
+// `taxid_ascii_*` and `taxid_oascii_*` of tests/fixtures/winmask_blastn hold the same reports).
+
+/// The report of an error as blastn prints it: the reader's exception, then the factory's rethrow.
+fn reader_report(error: &WinMaskError) -> String {
+    error
+        .create_report()
+        .unwrap_or_else(|| panic!("no report: {error}"))
+}
+
+fn rethrown_report(thrown: &str) -> String {
+    let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
+    format!("NCBI C++ Exception:\n    T0 \"{root}/{thrown}\n    T0 \"{root}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n")
+}
+
+#[test]
+fn the_text_formats_hold_the_counts_of_the_optimized_binary_file() {
+    let open = |name: &str| {
+        UnitCounts::open(
+            &fixture_dir().join("counts").join(name),
+            &MaskerParams::default(),
+        )
+        .unwrap()
+    };
+    let ob = open("mg1655_u9.obinary");
+    let oascii_bytes = std::fs::read(fixture_dir().join("counts/mg1655_u9.oascii")).unwrap();
+    let crlf = String::from_utf8(oascii_bytes)
+        .unwrap()
+        .replace('\n', "\r\n");
+    let texts = [
+        open("mg1655_u9.ascii"),
+        open("mg1655_u9.oascii"),
+        read_counts(crlf.into_bytes()).unwrap(),
+    ];
+    for text in &texts {
+        assert_eq!(text.unit_size(), 9);
+        assert_eq!(
+            [
+                text.min_count(),
+                text.textend(),
+                text.threshold(),
+                text.max_count()
+            ],
+            [74, 147, 173, 210]
+        );
+        assert_eq!(
+            [text.use_min_count(), text.use_max_count()],
+            [ob.use_min_count(), ob.use_max_count()]
+        );
+        assert!(text.cache_bit_array().is_none() && text.warnings().is_empty());
+        for unit in 0..1u32 << 18 {
+            assert_eq!(
+                text.true_count(unit).unwrap(),
+                ob.true_count(unit).unwrap(),
+                "{unit:x}"
+            );
+            assert_eq!(text.at(unit).unwrap(), ob.at(unit).unwrap(), "{unit:x}");
+        }
+    }
+    assert!(ob.cache_bit_array().is_some());
+}
+
+#[test]
+fn the_ascii_reader_reads_as_ncbis() {
+    let md = "##windowmasker-statistics-format-version:ascii 1.1.0\n";
+    let params = ">t_low 74\n>t_extend 147\n>t_threshold 173\n>t_high 210\n";
+    let read = |text: String| read_counts(text.into_bytes());
+    // Comments, blank lines, white space, upper case, parameters in bases 0, 8 and 16, a
+    // parameter already set, one NCBI does not read, and a last line without its line feed.
+    let counts = read(format!(
+        "{md}#c\n\n+9\n  2\t76\n0x3 80\n#\n3FD00 100\n\n>t_low +74\n>t_extend 0223\n>t_threshold\t 0xad\n>t_threshold abc\n>t_x y\n>t_high 210"
+    ))
+    .unwrap();
+    assert_eq!(counts.unit_size(), 9);
+    assert_eq!(
+        [
+            counts.min_count(),
+            counts.textend(),
+            counts.threshold(),
+            counts.max_count()
+        ],
+        [74, 147, 173, 210]
+    );
+    assert_eq!([counts.use_min_count(), counts.use_max_count()], [37, 210]);
+    assert_eq!(
+        [2, 3, 0x3fd00, 4].map(|unit| counts.true_count(unit).unwrap()),
+        [76, 80, 100, 0]
+    );
+    // The parameters first: a unit below T_low is not kept, so its order is not checked.
+    let counts = read(format!("{md}{params}9\n3 80\n2 5\n")).unwrap();
+    assert_eq!(counts.true_count(2).unwrap(), 0);
+    assert_eq!(counts.true_count(3).unwrap(), 80);
+    // A second, higher t_low: NCBI's warning, and the higher value.
+    let counts = read(format!("{md}9\n2 76\n{params}>t_low 80\n")).unwrap();
+    assert_eq!(counts.min_count(), 80);
+    assert_eq!(counts.warnings(), ["Requested value of t_low (74) is less than the one stored with the N-mer counts (80).The value 80 will be used."]);
+    // No unit size line: the default 15; a unit size of 265 is 9 (`Uint1`).
+    assert_eq!(read(format!("{md}{params}")).unwrap().unit_size(), 15);
+    assert_eq!(read(format!("{md}265\n{params}")).unwrap().unit_size(), 9);
+    // A threshold of 0 is read again from a later line ("0x" is 0).
+    let counts = read(format!("{md}9\n>t_threshold 0x\n{params}")).unwrap();
+    assert_eq!(counts.threshold(), 173);
+
+    let ascii = "src/algo/winmask/seq_masker_istat_ascii.cpp\", line";
+    let new = "ncbi::CSeqMaskerIstatAscii::CSeqMaskerIstatAscii()";
+    let ncbistr = "src/corelib/ncbistr.cpp\", line";
+    let cases = [
+        (format!("{md}9\n2 76\n"), format!("{ascii} 169: Error: (Exception::bad parameter value) {new} - t_threhold t_extend t_high t_low ")),
+        (format!("{md}9\n2 76\n>t_low 74\n>t_threshold 173\n"), format!("{ascii} 169: Error: (Exception::bad parameter value) {new} - t_extend t_high ")),
+        (format!("{md}9\n>t_threshold\n"), format!("{ascii} 96: Error: (Exception::syntax error) {new} - at line 3")),
+        (format!("{md}9\n>t_threshold \t \n"), format!("{ascii} 96: Error: (Exception::syntax error) {new} - at line 3")),
+        (format!("{md}9\n2 76\n3\n"), format!("{ascii} 137: Error: (Exception::syntax error) {new} - at line 4")),
+        (format!("{md}9\n2 76\n3 \n"), format!("{ascii} 137: Error: (Exception::syntax error) {new} - at line 4")),
+        (format!("{md}9\n3 80\n3 76\n"), "src/algo/winmask/seq_masker_uset_simple.cpp\", line 62: Error: (Exception::bad unit order) ncbi::CSeqMaskerUsetSimple::add_info() - last unit: 3 ; adding 3".to_string()),
+        (format!("{md}9\n1f 80\n1e 76\n"), "src/algo/winmask/seq_masker_uset_simple.cpp\", line 62: Error: (Exception::bad unit order) ncbi::CSeqMaskerUsetSimple::add_info() - last unit: 1f ; adding 1e".to_string()),
+        (format!("{md}9x\n{params}"), format!("{ncbistr} 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '9x' to Uint8 (m_Pos = 1)")),
+        (format!("{md}9\r\n{params}"), format!("{ncbistr} 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '9\\r' to Uint8 (m_Pos = 1)")),
+        (format!("{md}9\n2 -5\n"), format!("{ncbistr} 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '-5' to Uint8 (m_Pos = 0)")),
+        (format!("{md}9\n2 76 1\n"), format!("{ncbistr} 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '76 1' to Uint8 (m_Pos = 2)")),
+        (format!("{md}9\n1g 76\n"), format!("{ncbistr} 980: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '1g' to Uint8 (m_Pos = 1)")),
+        (format!("{md}9\n1ffffffff 76\n"), format!("{ncbistr} 652: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt() - Cannot convert string '1ffffffff' to unsigned int, overflow (m_Pos = 0)")),
+        (format!("{md}9\n>t_low abc\n"), format!("{ncbistr} 973: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string 'abc' to Uint8 (m_Pos = 0)")),
+        // The version of the statistics algorithm in the metadata (`ExtractStatAlgoVersion`).
+        (format!("{md}##windowmasker-statistics-algorithm-version:99999999999.0.0\n9\n{params}"), format!("{ncbistr} 640: Error: (CStringException::eConvert) ncbi::NStr::StringToInt() - Cannot convert string '99999999999' to int, overflow (m_Pos = 0)")),
+        (format!("{md}##windowmasker-statistics-algorithm-version:.0.0\n9\n{params}"), format!("{ncbistr} 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '' to Int8 (m_Pos = 0)")),
+    ];
+    for (text, thrown) in cases {
+        let error = read(text.clone())
+            .err()
+            .unwrap_or_else(|| panic!("{text:?} was read"));
+        assert_eq!(reader_report(&error), rethrown_report(&thrown), "{text:?}");
+    }
+    // A version that is not all digits is skipped.
+    assert!(read(format!(
+        "{md}##windowmasker-statistics-algorithm-version:1.x.99999999999\n9\n{params}"
+    ))
+    .is_ok());
+    // A warning posted before the error goes with it.
+    let error = read(format!("{md}9\n>t_low 5\n>t_low 6\n2 x\n"))
+        .err()
+        .unwrap();
+    assert_eq!(error.warnings().len(), 1);
+    // Every `##pct:` line of an ascii file is read, the second one too.
+    let error = read(format!("{md}##pct: 0 0\n##pct:\n9\n{params}"))
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .ends_with("(which is 7) > this->size() (which is 6)"),
+        "{error}"
+    );
+}
+
+#[test]
+fn the_optimized_ascii_reader_reads_as_ncbis() {
+    let md = "##windowmasker-statistics-format-version:oascii 1.1.0\n";
+    // Units of 2 letters, a hash key of 3 bits, no offset, a 1-bit collision count, 2 values.
+    let table = "0\n0\n0\n0\n0\n0\n0\n0\n5\n6\n";
+    let read = |text: String| read_counts(text.into_bytes());
+    let counts = read(format!("{md}AAAA\n2\n2 3 0 1\n4\n5\n6\n7\n{table}")).unwrap();
+    assert_eq!(counts.unit_size(), 2);
+    assert_eq!(
+        [
+            counts.min_count(),
+            counts.textend(),
+            counts.threshold(),
+            counts.max_count()
+        ],
+        [4, 5, 6, 7]
+    );
+    // atoi: white space, a sign, the digits up to another byte; `Uint1` and `Uint2` truncate.
+    let counts = read(format!(
+        "{md}AAAAxyz\n 258x\n2 3 0 1 9 x\n-1\n+5\n6abc\n99999999999\n{table}"
+    ))
+    .unwrap();
+    assert_eq!(counts.unit_size(), 2);
+    assert_eq!(
+        [
+            counts.min_count(),
+            counts.textend(),
+            counts.threshold(),
+            counts.max_count()
+        ],
+        [u32::MAX, 5, 6, 0x4876_E7FF]
+    );
+    let oascii = "src/algo/winmask/seq_masker_istat_oascii.cpp\", line";
+    let new = "ncbi::CSeqMaskerIstatOAscii::CSeqMaskerIstatOAscii()";
+    let header = |unit: &str, hash: &str| format!("{md}AAAA\n{unit}\n{hash}\n4\n5\n6\n7\n{table}");
+    let cases = [
+        (header("0", "2 3 0 1"), format!("{oascii} 101: Error: (Exception::bad parameter) {new} - unit size must be in [1,16]")),
+        (header("abc", "2 3 0 1"), format!("{oascii} 101: Error: (Exception::bad parameter) {new} - unit size must be in [1,16]")),
+        (header("17", "2 3 0 1"), format!("{oascii} 101: Error: (Exception::bad parameter) {new} - unit size must be in [1,16]")),
+        (header("2", "2 4 0 1"), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
+        (header("2", "2 0 0 1"), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
+        (header("2", "2 3 30 1"), format!("{oascii} 119: Error: (Exception::bad hash parameter) {new} - offset must by in [0,32 - hash_key_size]")),
+        (header("2", "2 3 -1 1"), format!("{oascii} 119: Error: (Exception::bad hash parameter) {new} - offset must by in [0,32 - hash_key_size]")),
+        (header("2", "2 3 0 0"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
+        (header("2", "2 3 0 30"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
+        (header("2", "2 3 0 4294967296"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
+        // Values that `>>` does not reach (NCBI's are uninitialized): read as 0.
+        (header("2", "2 3 0"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
+        (header("2", "2 3 x 1"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
+        (header("2", "x 3 0 1"), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
+        (header("2", ""), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
+        (format!("{md}AAAA\n2\n2 3 0 1\n4\n5\n6\n"), format!("{oascii} 145: Error: (Exception::format error) {new} - file too short")),
+        (format!("{md}AAAA\n2\n2 3 0 1\n4\n5\n6\n7\n0\n0\n"), format!("{oascii} 176: Error: (Exception::format error) {new} - not enough lines to fill the hash table")),
+        (format!("{md}AAAA\n2\n2 3 0 1\n4\n5\n6\n7\n0\n0\n0\n0\n0\n0\n0\n0\n5\n"), format!("{oascii} 192: Error: (Exception::format error) {new} - not enough lines to fill the values table")),
+        // Sizes far beyond the file: no allocation of NCBI's size.
+        (format!("{md}AAAA\n16\n4000000000 31 0 1\n4\n5\n6\n7\n1\n"), format!("{oascii} 176: Error: (Exception::format error) {new} - not enough lines to fill the hash table")),
+        (format!("{md}AAAA\n2\n4000000000 3 0 1\n4\n5\n6\n7\n{table}"), format!("{oascii} 192: Error: (Exception::format error) {new} - not enough lines to fill the values table")),
+    ];
+    for (text, thrown) in cases {
+        let error = read(text.clone())
+            .err()
+            .unwrap_or_else(|| panic!("{text:?} was read"));
+        assert_eq!(reader_report(&error), rethrown_report(&thrown), "{text:?}");
+    }
+}
+
+#[test]
+fn hash_parameters_are_read_as_libstdcxx_reads_unsigned_ints() {
+    use super::istat::extract_uints;
+    assert_eq!(extract_uints::<4>(b"3694 17 0 2"), [3694, 17, 0, 2]);
+    assert_eq!(
+        extract_uints::<4>(b"\t3694\x0b17 0 2 99 x"),
+        [3694, 17, 0, 2]
+    );
+    assert_eq!(
+        extract_uints::<4>(b"+1 -1 -4294967295 2x"),
+        [1, u32::MAX, 1, 2]
+    );
+    // A failure stores 0 (no digit) or UINT_MAX (overflow); nothing is read after it.
+    assert_eq!(extract_uints::<4>(b"1 x 3 4"), [1, 0, 0, 0]);
+    assert_eq!(extract_uints::<4>(b"1 4294967296 3 4"), [1, u32::MAX, 0, 0]);
+    assert_eq!(extract_uints::<4>(b"1 - 3 4"), [1, 0, 0, 0]);
+    assert_eq!(extract_uints::<4>(b"1 2"), [1, 2, 0, 0]);
+    assert_eq!(extract_uints::<4>(b"1 2\r"), [1, 2, 0, 0]);
+    assert_eq!(extract_uints::<4>(b""), [0; 4]);
+}
+
+#[test]
+fn the_masker_checks_the_unit_size_of_an_ascii_file() {
+    let counts = |unit: &str| {
+        Arc::new(
+            read_counts(
+                format!("{unit}\n>t_low 74\n>t_extend 147\n>t_threshold 173\n>t_high 210\n")
+                    .into_bytes(),
+            )
+            .unwrap(),
+        )
+    };
+    let params = MaskerParams::default();
+    // 0 (and 256): a window of 4 letters, the units the last letter.
+    assert_eq!(
+        SeqMasker::new(counts("0"), &params).unwrap().window_size(),
+        4
+    );
+    assert_eq!(
+        SeqMasker::new(counts("16"), &params).unwrap().window_size(),
+        20
+    );
+    // 252 to 255: the window (`Uint1`) wraps, NCBI's error (not rethrown by the factory).
+    let error = SeqMasker::new(counts("252"), &params).err().unwrap();
+    let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
+    assert_eq!(
+        reader_report(&error),
+        format!("NCBI C++ Exception:\n    T0 \"{root}/src/algo/winmask/seq_masker.cpp\", line 126: Error: (CSeqMaskerException::validation error) ncbi::CSeqMasker::CSeqMasker() - window size (0) must be greater or equal to unit size (252)\n")
+    );
+    assert_eq!(
+        SeqMasker::new(counts("255"), &params).err().unwrap(),
+        WinMaskError::WindowSize {
+            window: 3,
+            unit: 255
+        }
+    );
+    // 17 to 251: refused (NCBI's reverse complement of the units is undefined).
+    for unit in ["17", "251"] {
+        let error = SeqMasker::new(counts(unit), &params).err().unwrap();
+        assert!(matches!(error, WinMaskError::UnitSize { .. }), "{error}");
+        assert!(error.create_report().is_none());
+    }
 }

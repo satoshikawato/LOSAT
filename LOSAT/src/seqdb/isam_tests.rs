@@ -973,9 +973,9 @@ fn string_to_int_with_trailing_symbols() {
     assert_eq!(string_to_int_trailing(b"2147483648"), 0);
     assert_eq!(string_to_int_trailing(b"-2147483648"), i32::MIN);
     assert_eq!(string_to_int_trailing(b"99999999999999999999"), 0);
-    assert_eq!(atoi(b" 42xyz"), 42);
-    assert_eq!(atoi(b"-3"), -3);
-    assert_eq!(atoi(b""), 0);
+    assert_eq!(crate::ncbi_str::c_atoi(b" 42xyz"), 42);
+    assert_eq!(crate::ncbi_str::c_atoi(b"-3"), -3);
+    assert_eq!(crate::ncbi_str::c_atoi(b""), 0);
     assert_eq!(string_to_uint(b"+5"), Some(5));
     assert_eq!(string_to_uint(b"-5"), None);
     assert_eq!(string_to_uint(b"4294967296"), None);

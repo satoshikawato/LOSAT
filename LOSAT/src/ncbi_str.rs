@@ -42,6 +42,35 @@ pub(crate) fn is_space(c: u8) -> bool {
     c == b' ' || (b'\t'..=b'\r').contains(&c)
 }
 
+/// `atoi` of glibc, which NCBI's Linux builds call: `(int) strtol(s, NULL, 10)` in the C locale
+/// (white space, a sign, the digits up to the first other byte; a value beyond `long` is
+/// `LONG_MAX` or `LONG_MIN`), truncated to `int`.
+pub(crate) fn c_atoi(s: &[u8]) -> i32 {
+    let mut i = 0;
+    while i < s.len() && is_space(s[i]) {
+        i += 1;
+    }
+    let mut negative = false;
+    if i < s.len() && (s[i] == b'-' || s[i] == b'+') {
+        negative = s[i] == b'-';
+        i += 1;
+    }
+    // The magnitude, up to that of LONG_MIN (2^63).
+    let mut value: u64 = 0;
+    while i < s.len() && s[i].is_ascii_digit() {
+        value = value
+            .saturating_mul(10)
+            .saturating_add(u64::from(s[i] - b'0'));
+        i += 1;
+    }
+    let long = if negative {
+        0i64.wrapping_sub_unsigned(value.min(1 << 63))
+    } else {
+        value.min(i64::MAX as u64) as i64
+    };
+    long as i32
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:106-115
 // ```c++
 // bool NStr::IsBlank(const CTempString str, SIZE_TYPE pos)
@@ -604,6 +633,182 @@ pub(crate) fn string_to_uint(s: &[u8]) -> Result<u32, NcbiException> {
         .map_err(|_| convert_error(s, "unsigned int", "overflow", STRING_TO_UINT_OVERFLOW, 0))
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:920-982
+// ```c++
+//     // Current position in the string
+//     SIZE_TYPE pos = 0, size = str.size();
+//     ...
+//     // Determine sign
+//     if (str[pos] == '+') {
+//         pos++;
+//     } else {
+//         if (flags & fMandatorySign) {
+//             S2N_CONVERT_ERROR_INVAL(Uint8);
+//         }
+//     }
+//     SIZE_TYPE pos0 = pos;
+//
+//     // Begin conversion
+//     Uint8 n = 0;
+//     // Check radix base
+//     if ( !s_CheckRadix(str, pos, base) ) {
+//     ...
+//     Uint8 limdiv = kMax_UI8 / base;
+//     int   limoff = int(kMax_UI8 % base);
+//     ...
+//     while (char ch = str[pos]) {
+//         int delta;  // corresponding numeric value of 'ch'
+//
+//         // Check on possible commas
+//         CHECK_COMMAS;
+//         // Sanity check
+//         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
+//             break;
+//         }
+//         // Overflow check
+//         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
+//             S2N_CONVERT_ERROR_OVERFLOW(Uint8);
+//         }
+//         n *= base;
+//         n += delta;
+//         pos++;
+//     }
+//
+//     // Last checks
+//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
+//         S2N_CONVERT_ERROR_INVAL(Uint8);
+//     }
+//     ...
+//     CHECK_ENDPTR_SIZE(Uint8);
+//     return n;
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:766-795
+// ```c++
+// bool s_CheckRadix(const CTempString str, SIZE_TYPE& pos, int& base)
+// {
+//     if ( base == 10  ||  base == 8 ) {
+//         // shortcut for most frequent case
+//         return true;
+//     }
+//     ...
+//     // Try to determine base using first chars of the string
+//     unsigned char ch   = str[pos];
+//     unsigned char next = str[pos+1];
+//     if ( base == 0 ) {
+//         if ( ch != '0' ) {
+//             base = 10;
+//         } else if (next == 'x' || next == 'X') {
+//             base = 16;
+//         } else {
+//             base = 8;
+//         }
+//     }
+//     // Remove leading '0x' for hex numbers
+//     if ( base == 16 ) {
+//         if (ch == '0'  &&  (next == 'x' || next == 'X')) {
+//             pos += 2;
+//         }
+//     }
+//     return true;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:684-713
+// ```c++
+// bool s_IsGoodCharForRadix(char ch, int base, int* value = 0)
+// {
+//     if ( base <= 10 ) {
+//         // shortcut for most frequent case
+//         int delta = ch-'0';
+//         if ( unsigned(delta) < unsigned(base) ) {
+//     ...
+//     if (!isalnum((unsigned char) ch)) {
+//         return false;
+//     }
+//     // Corresponding numeric value of *endptr
+//     int delta;
+//     if (isdigit((unsigned char) ch)) {
+//         delta = ch - '0';
+//     } else {
+//         ch = (char) tolower((unsigned char) ch);
+//         delta = ch - 'a' + 10;
+//     }
+//     ...
+//     return delta < base;
+// ```
+// `pos0` is taken before the "0x" is skipped, so "0x" alone is 0. The loop ends at the end of
+// the string and at an embedded NUL (`CTempString::operator[]`); the size check then fails on
+// the NUL, unlike `StringToInt8`'s check of `str[pos]`. NCBI BLAST+ 2.17.0 (line NP M3d, the
+// `>` lines of ascii unit counts) throws at lines 964 (overflow), 973 (no digit) and 980
+// (`CHECK_ENDPTR_SIZE`).
+const STRING_TO_UINT8_BASE_OVERFLOW: ThrowSite = convert_site(964, "ncbi::NStr::StringToUInt8");
+const STRING_TO_UINT8_BASE_INVAL: ThrowSite = convert_site(973, "ncbi::NStr::StringToUInt8");
+const STRING_TO_UINT8_BASE_ENDPTR: ThrowSite = convert_site(980, "ncbi::NStr::StringToUInt8");
+
+/// `NStr::StringToUInt8(str, 0, base)` with `base` 0 (from the string: `0x` hexadecimal, a
+/// leading `0` octal, else decimal) or 2 to 36; base 10 is the fast conversion
+/// ([`string_to_uint8`]).
+pub(crate) fn string_to_uint8_base(s: &[u8], base: u32) -> Result<u64, NcbiException> {
+    debug_assert!(base == 0 || (2..=36).contains(&base));
+    if base == 10 {
+        return string_to_uint8(s);
+    }
+    let at = |pos: usize| s.get(pos).copied().unwrap_or(0);
+    let error = |site: ThrowSite, msg: &str, pos: usize| convert_error(s, "Uint8", msg, site, pos);
+    let mut pos = 0;
+    if at(pos) == b'+' {
+        pos += 1;
+    }
+    let pos0 = pos;
+    let (ch, next) = (at(pos), at(pos + 1));
+    let base = match base {
+        0 if ch != b'0' => 10,
+        0 if next == b'x' || next == b'X' => 16,
+        0 => 8,
+        base => base,
+    };
+    if base == 16 && ch == b'0' && (next == b'x' || next == b'X') {
+        pos += 2;
+    }
+    let base = u64::from(base);
+    let limdiv = u64::MAX / base;
+    let limoff = u64::MAX % base;
+    let mut n: u64 = 0;
+    loop {
+        let ch = at(pos);
+        if ch == 0 {
+            break;
+        }
+        let delta = match ch {
+            b'0'..=b'9' => u64::from(ch - b'0'),
+            b'a'..=b'z' if base > 10 => u64::from(ch - b'a') + 10,
+            b'A'..=b'Z' if base > 10 => u64::from(ch - b'A') + 10,
+            _ => break,
+        };
+        if delta >= base {
+            break;
+        }
+        if n >= limdiv && (n > limdiv || delta > limoff) {
+            return Err(error(STRING_TO_UINT8_BASE_OVERFLOW, "overflow", pos));
+        }
+        n = n * base + delta;
+        pos += 1;
+    }
+    if pos == pos0 {
+        return Err(error(STRING_TO_UINT8_BASE_INVAL, "", pos));
+    }
+    if pos < s.len() {
+        return Err(error(STRING_TO_UINT8_BASE_ENDPTR, "", pos));
+    }
+    Ok(n)
+}
+
+/// `NStr::StringToUInt(str, 0, base)` (`base` as for [`string_to_uint8_base`]).
+pub(crate) fn string_to_uint_base(s: &[u8], base: u32) -> Result<u32, NcbiException> {
+    let value = string_to_uint8_base(s, base)?;
+    u32::try_from(value)
+        .map_err(|_| convert_error(s, "unsigned int", "overflow", STRING_TO_UINT_OVERFLOW, 0))
+}
+
 /// `NStr::ParseEscapes(str)` with its default mode (`eEscSeqRange_Standard`), as makeblastdb's
 /// title (`writedb::fasta_source::title`) and NCBI's registry reader
 /// (`blastinput::ncbi_registry`) call it. An error is the message of NCBI's `CStringException`
@@ -1020,5 +1225,116 @@ mod tests {
         assert_eq!(truncate_spaces(b"\x0b a b\r\n"), b"a b");
         assert_eq!(truncate_spaces(b"a"), b"a");
         assert_eq!(truncate_spaces(b"\0 \xa0"), b"\0 \xa0");
+    }
+
+    // NCBI BLAST+ 2.17.0 (line NP M3d, `M/m3d/ws/run2.sh`): the parameters (base 0) and units
+    // (base 16) of ascii unit counts, their messages, lines and positions.
+    #[test]
+    fn base_conversions_are_ncbis() {
+        assert_eq!(string_to_uint_base(b"0xad", 0).unwrap(), 173);
+        assert_eq!(string_to_uint_base(b"0XAD", 0).unwrap(), 173);
+        assert_eq!(string_to_uint_base(b"0255", 0).unwrap(), 173);
+        assert_eq!(string_to_uint_base(b"+173", 0).unwrap(), 173);
+        assert_eq!(string_to_uint_base(b"0x", 0).unwrap(), 0);
+        assert_eq!(string_to_uint_base(b"0", 0).unwrap(), 0);
+        assert_eq!(string_to_uint_base(b"3fd00", 16).unwrap(), 0x3fd00);
+        assert_eq!(string_to_uint_base(b"0x3FD00", 16).unwrap(), 0x3fd00);
+        assert_eq!(string_to_uint_base(b"173", 10).unwrap(), 173);
+        let failure = |e: NcbiException| {
+            let what = e.what();
+            let pos = what.rsplit_once("(m_Pos = ").unwrap().1;
+            (
+                e.get_msg().to_string(),
+                e.site().line,
+                pos.trim_end_matches(")\n").to_string(),
+            )
+        };
+        let cases: [(&[u8], u32, &str, u32, &str); 10] = [
+            (b"abc", 0, "Cannot convert string 'abc' to Uint8", 973, "0"),
+            (b"-5", 0, "Cannot convert string '-5' to Uint8", 973, "0"),
+            (b"08", 0, "Cannot convert string '08' to Uint8", 980, "1"),
+            (
+                b"173 ",
+                0,
+                "Cannot convert string '173 ' to Uint8",
+                980,
+                "3",
+            ),
+            (
+                b"173\r",
+                0,
+                "Cannot convert string '173\\r' to Uint8",
+                980,
+                "3",
+            ),
+            (
+                b"17\x003",
+                0,
+                "Cannot convert string '17\\0003' to Uint8",
+                980,
+                "2",
+            ),
+            (
+                b"99999999999999999999",
+                0,
+                "Cannot convert string '99999999999999999999' to Uint8, overflow",
+                964,
+                "19",
+            ),
+            (
+                b"0x10000000000000000",
+                0,
+                "Cannot convert string '0x10000000000000000' to Uint8, overflow",
+                964,
+                "18",
+            ),
+            (b"1g", 16, "Cannot convert string '1g' to Uint8", 980, "1"),
+            (
+                b"11111111111111111",
+                16,
+                "Cannot convert string '11111111111111111' to Uint8, overflow",
+                964,
+                "16",
+            ),
+        ];
+        for (input, base, message, line, pos) in cases {
+            assert_eq!(
+                failure(string_to_uint8_base(input, base).unwrap_err()),
+                (message.to_string(), line, pos.to_string()),
+                "{input:?}"
+            );
+        }
+        for (input, base) in [(&b"4294967296"[..], 0), (b"1ffffffff", 16)] {
+            assert_eq!(
+                failure(string_to_uint_base(input, base).unwrap_err()),
+                (
+                    format!(
+                        "Cannot convert string '{}' to unsigned int, overflow",
+                        String::from_utf8_lossy(input)
+                    ),
+                    652,
+                    "0".to_string()
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn c_atoi_is_glibcs() {
+        assert_eq!(c_atoi(b" 42xyz"), 42);
+        assert_eq!(c_atoi(b"\t\r\x0b+7"), 7);
+        assert_eq!(c_atoi(b"-3"), -3);
+        assert_eq!(c_atoi(b""), 0);
+        assert_eq!(c_atoi(b"x1"), 0);
+        assert_eq!(c_atoi(b"- 1"), 0);
+        assert_eq!(c_atoi(b"9\x001"), 9);
+        // `long` truncated to `int`: 99999999999 = 0x174876E7FF.
+        assert_eq!(c_atoi(b"99999999999"), 0x4876_E7FF);
+        assert_eq!(c_atoi(b"4294967297"), 1);
+        // Beyond `long`: LONG_MAX (-1 as `int`) and LONG_MIN (0).
+        assert_eq!(c_atoi(b"99999999999999999999"), -1);
+        assert_eq!(c_atoi(b"-99999999999999999999"), 0);
+        assert_eq!(c_atoi(b"-9223372036854775808"), 0);
+        assert_eq!(c_atoi(b"-9223372036854775807"), 1);
     }
 }

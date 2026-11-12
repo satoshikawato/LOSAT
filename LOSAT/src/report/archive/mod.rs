@@ -33,6 +33,7 @@
 pub mod bioseq;
 pub mod masks;
 pub mod options;
+pub mod strategy;
 pub mod writer;
 
 use std::borrow::Cow;
@@ -183,6 +184,44 @@ pub struct ArchiveRequest {
     pub database: Option<Vec<u8>>,
 }
 
+impl ArchiveRequest {
+    /// The request of a run of `inputs.program` (`ArchiveHandle::for_program` has the
+    /// refusals): `option` is what asks for it, `-outfmt 11` or `-export_search_strategy`.
+    pub(crate) fn for_inputs(
+        encoding: ArchiveEncoding,
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        label: &str,
+        option: &str,
+    ) -> anyhow::Result<Self> {
+        for (what, text) in [
+            ("-db name", database),
+            ("-window_masker_db path", inputs.window_masker_db.as_deref()),
+        ] {
+            if let Some(text) = text {
+                if !encoding.writes_text(text.as_bytes()) {
+                    anyhow::bail!(
+                        "a {what} with a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML) is not supported by LOSAT's {label} with {option}"
+                    );
+                }
+            }
+        }
+        let program = match inputs.program {
+            Program::Blastn => "blastn",
+            Program::Blastp => "blastp",
+            Program::Blastx => "blastx",
+            Program::Tblastn => "tblastn",
+            Program::Tblastx => "tblastx",
+        };
+        Ok(Self {
+            program,
+            service: options::service(inputs.program, &inputs.task),
+            algorithm: options::algorithm_options(inputs),
+            database: database.map(|name| name.as_bytes().to_vec()),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct RunState {
     log: DiagLog,
@@ -254,33 +293,9 @@ impl ArchiveHandle {
         database: Option<&str>,
         label: &str,
     ) -> anyhow::Result<Self> {
-        for (what, text) in [
-            ("-db name", database),
-            ("-window_masker_db path", inputs.window_masker_db.as_deref()),
-        ] {
-            if let Some(text) = text {
-                if !encoding.writes_text(text.as_bytes()) {
-                    anyhow::bail!(
-                        "a {what} with a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML) is not supported by LOSAT's {label} with -outfmt 11"
-                    );
-                }
-            }
-        }
-        let program = match inputs.program {
-            Program::Blastn => "blastn",
-            Program::Blastp => "blastp",
-            Program::Blastx => "blastx",
-            Program::Tblastn => "tblastn",
-            Program::Tblastx => "tblastx",
-        };
         Ok(Self::new(
             encoding,
-            ArchiveRequest {
-                program,
-                service: options::service(inputs.program, &inputs.task),
-                algorithm: options::algorithm_options(inputs),
-                database: database.map(|name| name.as_bytes().to_vec()),
-            },
+            ArchiveRequest::for_inputs(encoding, inputs, database, label, "-outfmt 11")?,
         ))
     }
 

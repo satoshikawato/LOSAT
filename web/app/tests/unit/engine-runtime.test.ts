@@ -28,6 +28,7 @@ import {
   DEFAULT_RENEWAL,
   renewalReason,
 } from '../../src/infra/engine-worker/policy';
+import { InstanceUse } from '../../src/infra/engine-worker/instance-use';
 import { EngineRuntime } from '../../src/infra/engine-worker/runtime';
 import { warmUp, warmUpInputs } from '../../src/infra/engine-worker/warm-up';
 
@@ -209,7 +210,7 @@ describe('loadReactor', () => {
 
 describe('EngineRuntime.prepare', () => {
   // A serial module whose ABI version export returns 2, as a reactor's does.
-  function setup() {
+  function setup(use?: InstanceUse) {
     const calls = { serial: 0, threads: 0 };
     const runtime = new EngineRuntime({
       serial: async () => {
@@ -223,6 +224,7 @@ describe('EngineRuntime.prepare', () => {
       builds: { serial: 'serial', threads: 'threads' },
       faultChannel: 'faults',
       keeperChannel: 'keeper',
+      use,
     });
     return { runtime, calls };
   }
@@ -253,6 +255,16 @@ describe('EngineRuntime.prepare', () => {
     expect(vi.mocked(warmUp).mock.calls.map(([, called]) => called)).toEqual([argv, [...argv, '-seg', 'no']]);
     expect(vi.mocked(warmUp).mock.results.map((result) => result.value)).toEqual([false, false]);
     expect(calls.serial).toBe(1);
+  });
+
+  it('starts no instance once the Gateway ends the runtime', async () => {
+    const use = InstanceUse.create();
+    const { runtime, calls } = setup(use);
+    expect(use.retire()).toBe(false);
+    // The keeper of a second threaded instance would answer on the Gateway's channel for its memory.
+    await expect(runtime.prepare(4)).rejects.toThrow('the runtime is ending');
+    await expect(runtime.prepare(1)).rejects.toThrow('the runtime is ending');
+    expect(calls).toEqual({ serial: 0, threads: 0 });
   });
 
   it('records that the threaded engine cannot start, and then prepares the serial one', async () => {

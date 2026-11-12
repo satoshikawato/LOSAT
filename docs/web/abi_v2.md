@@ -247,8 +247,8 @@ the WASI imports.
   `-num_alignments 3`).
 - A search of a two-search run that fails before it has written a byte of its formats does not fail the run when the
   other search succeeds, but only when the options' checks reject its hit list size, as the CLI rejects that format
-  alone: for BLASTN and BLASTX the checks of `validate` for that search's formats fail (`check_scoring_for_formats`,
-  `blastx::check_options`), for the other programs the search's hit list size is 0. This
+  alone: for BLASTN and BLASTX the checks of `validate` for that search's formats fail (the adapter's `blastn_group_check`:
+  `check_scoring_options` and `check_losat_limits`; `blastx::check_options`), for the other programs the search's hit list size is 0. This
   is `-num_alignments 0` for the tabular formats (NCBI's error `BLAST query/options error: No hits are being saved`
   for `-outfmt 6` and `-outfmt 7`, while `-outfmt 0` keeps its size, 500 or `-num_descriptions`), and for BLASTN's format
   0 a `-num_descriptions` of 2,147,483,598 or more (N + 50 overflows the 32-bit preliminary hit list size; LOSAT's

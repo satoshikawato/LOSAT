@@ -135,15 +135,6 @@ pub trait AlignSource {
     fn write<E: Encoder>(&mut self, out: &mut ArchiveOut<'_, E>) -> Result<()>;
 }
 
-/// A batch without alignments.
-pub struct NoAlignments;
-
-impl AlignSource for NoAlignments {
-    fn write<E: Encoder>(&mut self, _out: &mut ArchiveOut<'_, E>) -> Result<()> {
-        Ok(())
-    }
-}
-
 fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
     enc.element();
     enc.begin_sequence("Blast4-parameter");

@@ -1471,7 +1471,6 @@ fn run_local_search_with_pool(
         *query_lengths.iter().max().unwrap(),
         compo_adjust_mode,
         false,
-        profile.expect_value,
         do_sum_stats,
         scoring.final_xdrop_bits,
         local_extension_final_xdrop(
@@ -1734,7 +1733,6 @@ fn run_local_search_with_pool(
                     *query_lengths.iter().max().unwrap(),
                     compo_adjust_mode,
                     false,
-                    profile.expect_value,
                     do_sum_stats,
                     scoring.final_xdrop_bits,
                     local_extension_final_xdrop(

@@ -1,8 +1,8 @@
-use LOSAT::algorithm::tblastx::lookup::compressed::{
+use super::{
     build_blosum62_compressed_lookup, build_blosum62_compressed_score_matrix, compressed_pv_test,
     compute_compressed_index, compute_encoded_compressed_index, BlastCompressedAaLookupTable,
 };
-use LOSAT::utils::matrix::ncbistdaa;
+use crate::utils::matrix::ncbistdaa;
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849
 // ```c

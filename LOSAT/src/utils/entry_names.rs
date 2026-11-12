@@ -49,3 +49,7 @@ where
     }
     words
 }
+
+#[cfg(test)]
+#[path = "entry_names_tests.rs"]
+mod entry_names_tests;

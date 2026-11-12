@@ -511,12 +511,14 @@ pub struct BlastnArgs {
     /// system when `None`; LOSAT Web's adapter gives the counts files it holds under their names.
     #[arg(skip)]
     pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
-    /// The directory of `-window_masker_taxid` as the caller read it from NCBI's registry
-    /// (`ncbi_environment::ApplicationSettings::window_masker_path`), or LOSAT Web's directory of
-    /// the counts files it holds (`window_masker_counts`); `None` when the caller gives neither,
-    /// which `-window_masker_taxid` other than 0 then refuses (`run_local_formats`).
+    /// The registry of `-window_masker_taxid` as the caller read it (the directory of its files
+    /// and what each load writes, `ncbi_environment::ApplicationSettings::window_masker_registry`),
+    /// or LOSAT Web's registry of the counts files it holds (`window_masker_counts`: its directory,
+    /// no posts); `None` when the caller gives neither, which `-window_masker_taxid` other than 0
+    /// then refuses (`run_local_formats`).
     #[arg(skip)]
-    pub window_masker_path: Option<Result<Option<String>, String>>,
+    pub window_masker_registry:
+        Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
     /// by the command line before the search where a tabular field list shows a name of the
     /// taxonomy database (`algorithm::blastn::tabular`); `None` elsewhere (`run_local`'s callers
@@ -1007,11 +1009,11 @@ impl BlastnArgs {
         }
         let masker = match self.window_masker_taxid.filter(|&taxid| taxid != 0) {
             Some(taxid) => {
-                // The command line and the library give the registry's directory, LOSAT Web
-                // the directory of its counts files; a caller that gives none is refused before
+                // The command line and the library give the registry, LOSAT Web the registry of
+                // its counts files; a caller that gives none is refused before
                 // (`run_local_formats`).
-                let directory = self
-                    .window_masker_path
+                let registry = self
+                    .window_masker_registry
                     .as_ref()
                     .ok_or_else(|| {
                         anyhow::anyhow!(
@@ -1020,11 +1022,7 @@ impl BlastnArgs {
                     })?
                     .as_ref()
                     .map_err(|reason| anyhow::anyhow!("{reason}"))?;
-                Some(super::window_masker::open_taxid(
-                    taxid,
-                    directory.as_deref(),
-                    &*source,
-                )?)
+                Some(super::window_masker::open_taxid(taxid, registry, &*source)?)
             }
             None => database,
         };

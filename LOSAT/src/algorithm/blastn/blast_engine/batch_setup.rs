@@ -459,9 +459,9 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266, seqsrc_seqdb.cpp:203-209
     let x_avg_subject_length: u64 = if UNGAPPED {
         match subjects {
-            SubjectSource::Database(_) => {
-                ungapped::average_subject_length_database(db_len_total as u64, db_num_seqs as u64)
-            }
+            // `BlastSeqSrcGetAvgSeqLen` reads `GetTotalLength` and `GetNumSeqs`, not the
+            // statistics' `STATS_*` keys (`SeqDb::average_length`).
+            SubjectSource::Database(database) => database.average_length() as u32 as u64,
             SubjectSource::Prepared(_) => ungapped::average_subject_length_subject_set(
                 db_len_total as u64,
                 db_num_seqs as u64,

@@ -998,12 +998,15 @@ fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
 }
 
 /// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` LOSAT Web's
-/// directory of counts files (`files::WINDOW_MASKER_PATH`), where the command line gives the
-/// directory of NCBI's registry.
+/// registry of counts files, where the command line gives NCBI's registry: the directory
+/// `files::WINDOW_MASKER_PATH`, and no posts of a `.ncbirc` (LOSAT Web reads none).
 fn give_blastn_counts(args: &mut LOSAT::web_adapter::BlastnArgs, counts: &Arc<dyn CountsSource>) {
     args.window_masker_counts = Some(counts.clone());
     if args.window_masker_taxid.is_some() {
-        args.window_masker_path = Some(Ok(Some(crate::files::WINDOW_MASKER_PATH.to_string())));
+        args.window_masker_registry = Some(Ok(Default::default()));
+        if let Some(Ok(registry)) = &mut args.window_masker_registry {
+            registry.path = Some(crate::files::WINDOW_MASKER_PATH.to_string());
+        }
     }
 }
 

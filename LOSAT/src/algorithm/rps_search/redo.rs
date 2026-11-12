@@ -58,6 +58,14 @@ pub(crate) struct RpsRedoParams<'a> {
     pub(crate) x_drop_final_bits: f64,
 }
 
+/// The statistics the traceback of one query reads: the batch's ungapped Karlin block and the
+/// query's E-value statistics in this volume.
+#[derive(Clone, Copy)]
+pub(super) struct RpsQueryStats<'a> {
+    pub(super) batch_kbp: &'a KarlinParams,
+    pub(super) stats: EvalueStats<'a>,
+}
+
 impl RpsTraceback<'_> {
     /// The redo of the query of letters `query` (without sentinels) from its preliminary hit
     /// list. NCBI reads the lists in the order of the stream: sorted by best E-value, then the
@@ -86,9 +94,10 @@ impl RpsTraceback<'_> {
         mut prelim: BlastpHitList<XPrelimHsp>,
         query: &[u8],
         q_idx: u32,
-        batch_kbp: &KarlinParams,
+        statistics: RpsQueryStats<'_>,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
+        let RpsQueryStats { batch_kbp, stats } = statistics;
         prelim.sort_by_evalue();
         let count = prelim.hsplist_count;
         let mut hit_list: Option<BlastpHitList> = None;
@@ -169,9 +178,10 @@ impl RpsTraceback<'_> {
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redone = RedoMatch {
                 info: &info,
-                // RPS-BLAST's search has the Gumbel block (its parser refuses `-searchsp` and
-                // `check_blastp_environment` `OLD_FSC`, item PS11c).
-                stats: EvalueStats::spouge(self.gumbel),
+                // The query's statistics in this volume: the Gumbel block, or without it
+                // (`-searchsp`, `OLD_FSC`) the search space the redo copy of the score block
+                // keeps (the user query's, blast_traceback.c:1238-1255).
+                stats,
                 expect_value: self.expect_value,
                 query_length: length as i32,
                 rps_roles: true,

@@ -150,7 +150,8 @@ fn environment_that_ncbi_reads_around_the_report_is_refused_where_it_reads_it() 
 // PSIBLAST with OLD_FSC (any value, the empty one too) write the frozen bytes of `-searchsp 0`
 // (rows sp.<program>.zero.0 and ps.subj.sp.zero.tk.0 of outfmt0_manifest.tsv; NCBI 2.17.0 writes
 // the same bytes with OLD_FSC=1, and psiblast with OLD_FSC=true, probe `ofsctrue.tk.subj.0` of line
-// PS, item PS5c). RPSBLAST, which takes no -searchsp, refuses it (row db.oldfsc.rpsblast.rej).
+// PS, item PS5c). RPSBLAST reads it too, against profile databases (rows db.rps.mini.oldfsc.q40.6 and
+// db.rps.mini.sp0.xoj.0 of rpsblast.tsv).
 #[test]
 fn old_fsc_is_the_statistics_of_searchsp_0() {
     for (program, query, subject, frozen) in [

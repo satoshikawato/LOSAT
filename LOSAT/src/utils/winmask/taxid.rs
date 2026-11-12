@@ -15,7 +15,7 @@ const STAT_FILE_NAME: &str = "wmasker.obinary";
 
 /// `WindowMaskerTaxidToDb(taxid)`: the counts file of `taxid` under `directory` (the registry
 /// entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`,
-/// `ncbi_environment::ApplicationSettings::window_masker_path`; `None` or empty: the current
+/// `ncbi_environment::WindowMaskerRegistry::path`; `None` or empty: the current
 /// directory), or `None` when `source` has no file (or link to one) at that path (the file
 /// system for the command line, the registered files for LOSAT Web). Only the name decides:
 /// NCBI does not check the format of the file it finds (an ascii counts file under that name

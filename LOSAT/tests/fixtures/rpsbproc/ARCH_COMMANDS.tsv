@@ -12,3 +12,8 @@ parsed.asn	rpsblast -query q/parsed.faa -parse_deflines -db Cdd -evalue 0.01 -ou
 bin.asn	env ARCHIVE_FORMAT=bin rpsblast -query q/one.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/bin.asn
 one.xml	rpsblast -query q/one.faa -db Cdd -evalue 0.01 -outfmt 5 -out arch/one.xml
 lcl.asn	rpsblast -query q/lcl.faa -db prof_rps -outfmt 11 -out arch/lcl.asn
+mstate.asn	env BATCH_SIZE=1 rpsblast -query q/mstate.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/mstate.asn
+mfirst.asn	rpsblast -query q/mfirst.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/mfirst.asn
+gen2.asn	rpsblast -query q/gen2.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/gen2.asn
+motdom.asn	rpsblast -query q/motdom.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/motdom.asn
+sdsite.asn	rpsblast -query q/sdsite.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/sdsite.asn

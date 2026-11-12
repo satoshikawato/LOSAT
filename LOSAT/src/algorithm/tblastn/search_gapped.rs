@@ -151,8 +151,14 @@ fn score_gapped_chunk<S: super::score::TbnScore>(
         //     max_offset - init_hsp->offsets.qs_offsets.q_off;
         // init_hsp->offsets.qs_offsets.q_off = max_offset;
         // status = s_BlastProtGappedAlignment(...);
-        let q_gapped_start =
-            score.gapped_start(query_sequence, subject_sequence, q_start, length, s_start, matrix);
+        let q_gapped_start = score.gapped_start(
+            query_sequence,
+            subject_sequence,
+            q_start,
+            length,
+            s_start,
+            matrix,
+        );
         let s_gapped_start = i64::from(hit.s_seed) + i64::try_from(q_gapped_start)?
             - i64::from(hit.q_seed - u32::try_from(context_offset)?);
         let s_gapped_start =

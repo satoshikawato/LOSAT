@@ -135,6 +135,10 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
     for row in run_oracle.read_manifest()[2]:
         if row["program"] not in FORMATS:
             continue
+        # A PSSM query (tblastn -in_pssm, PSI-TBLASTN; the query cell `pssm:` or `pssm-gz:` names
+        # the PSSM file) is not a Web input yet (line PS, item PSW1): the adapter refuses it.
+        if row["query"].startswith(("pssm:", "pssm-gz:")):
+            continue
         outfmt = run_oracle.outfmt(row)
         # The rows of outfmt 13 and 14 (the `files` column: side files and a master file next to
         # `-out`) are searches whose output is the ZIP archive of those files.

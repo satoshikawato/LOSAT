@@ -734,7 +734,10 @@ impl TblastnArgs {
         // The PSSM is read by the last handler of tblastn's options (`CPsiBlastArgs`, after the
         // composition-based statistics, tblastn_args.cpp:128-130), before `Validate`.
         let pssm = match self.in_pssm.as_deref() {
-            Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(path, &matrix_name)?)),
+            Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
+                path,
+                &matrix_name,
+            )?)),
             None => None,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1050-1055
@@ -1145,7 +1148,7 @@ mod tests {
         );
         for extra in [
             &["-ungapped", "-comp_based_stats", "F"][..],
-            &["-max_intron_length", "100"],
+            &["-max_intron_length", "100", "-sum_stats", "true"],
             &["-window_size", "0"],
             &["-word_size", "5", "-window_size", "0"],
             &["-max_target_seqs", "1073741799"],
@@ -1349,6 +1352,133 @@ mod tests {
                 error.contains("is not supported by LOSAT's TBLASTN"),
                 "{extra:?}: {error}"
             );
+        }
+    }
+
+    /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.
+    fn parse_pssm(extra: &[&str]) -> std::result::Result<TblastnArgs, clap::Error> {
+        let pssm = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/db_search/db.ps.asn.rnd.6.asn"
+        );
+        let mut argv = vec!["losat", "tblastn", "-in_pssm", pssm, "-subject", "s.fna"];
+        argv.extend_from_slice(extra);
+        let cli: Cli = try_parse_from(argv)?;
+        let Commands::Tblastn(args) = cli.command else {
+            unreachable!()
+        };
+        Ok(args)
+    }
+
+    // NCBI tblastn_args.cpp:138-149, psiblast_options.cpp:69-75 and blast_args.cpp:866-868,
+    // 1050-1055: PSI-TBLASTN is psiblast's handle with tblastn's threshold and genetic code 1, no
+    // sum statistics, composition-based statistics 0 whatever `-comp_based_stats` says, and
+    // `-task tblastn-fast` without effect (line PS, DECISIONS 35).
+    #[test]
+    fn in_pssm_takes_psi_tblastns_options() {
+        let resolved = parse_pssm(&[]).unwrap().resolve().unwrap();
+        assert!(resolved.pssm.is_some());
+        assert!(!resolved.sum_stats && !resolved.compressed_lookup);
+        assert_eq!((resolved.word_size, resolved.threshold), (3, 13.0));
+        assert_eq!(resolved.db_gencode, 1);
+        assert_eq!(
+            resolved.composition_mode,
+            crate::blastinput::app::CompositionMode::NoCompositionBasedStats
+        );
+        for value in ["0", "1", "2", "3", "D", "t", "x", "", "2u"] {
+            let resolved = parse_pssm(&["-comp_based_stats", value])
+                .unwrap()
+                .resolve()
+                .unwrap();
+            assert_eq!(
+                resolved.composition_mode,
+                crate::blastinput::app::CompositionMode::NoCompositionBasedStats,
+                "{value:?}"
+            );
+        }
+        let fast = parse_pssm(&["-task", "tblastn-fast"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!(
+            (fast.word_size, fast.threshold, fast.compressed_lookup),
+            (3, 13.0, false)
+        );
+        let resolved = parse_pssm(&["-db_gencode", "4", "-sum_stats", "true"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.db_gencode, resolved.sum_stats), (1, true));
+        // The matrix's suggestion replaces the default threshold 13 (+2 for a translated subject).
+        let resolved = parse_pssm(&["-matrix", "BLOSUM45"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.threshold, resolved.window_size), (16.0, 60));
+        // A matrix query keeps tblastn's handle.
+        assert!(parse(&[]).unwrap().resolve().unwrap().pssm.is_none());
+    }
+
+    // NCBI blast_options.c:910-936 (`std_matrix_only` for a program that is neither blastp nor
+    // tblastn) and 1358-1363 (the word size of PSI-TBLASTN); the code 32 is not NCBI's
+    // (blast_args.cpp:1011-1015); `-query` and `-query_loc` exclude `-in_pssm`
+    // (blast_args.cpp:1241-1247).
+    #[test]
+    fn in_pssm_errors_are_ncbis_and_losats() {
+        let error = |extra: &[&str]| {
+            parse_pssm(extra)
+                .unwrap()
+                .resolve()
+                .unwrap_err()
+                .to_string()
+        };
+        for size in ["5", "6", "7", "8"] {
+            assert_eq!(
+                error(&["-word_size", size]),
+                "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the BLAST+ user manual.\n",
+                "{size}"
+            );
+        }
+        assert!(error(&["-task", "tblastn-fast", "-word_size", "6"])
+            .contains("Word-size must be less than 6 for protein comparison"));
+        let identity = error(&["-matrix", "IDENTITY"]);
+        assert!(
+            identity.starts_with(
+                "BLAST query/options error: IDENTITY is not a supported matrix, supported matrices are:\nBLOSUM80 \n"
+            ),
+            "{identity}"
+        );
+        assert!(!identity[40..].contains("IDENTITY"), "{identity}");
+        assert!(error(&["-db_gencode", "32"]).contains("-db_gencode 32 with -in_pssm"));
+        assert!(error(&["-threshold", "0"]).contains("Non-zero threshold required"));
+        let pssm = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/db_search/db.ps.asn.rnd.6.asn"
+        );
+        for extra in [&["-query", "q.faa"][..], &["-query_loc", "1-10"]] {
+            let mut argv = vec!["losat", "tblastn", "-in_pssm", pssm, "-subject", "s.fna"];
+            argv.extend_from_slice(extra);
+            assert!(try_parse_from::<Cli, _, _>(argv).is_err(), "{extra:?}");
+        }
+    }
+
+    // NCBI blast_parameters.c:781-787: the largest intron is read by the linking only (DECISIONS
+    // 35 Q3 of line PS: accepted without `-sum_stats true`, refused with it as before).
+    #[test]
+    fn the_largest_intron_is_refused_with_sum_statistics_only() {
+        let settings = |args: TblastnArgs| search_settings(&args.resolve().unwrap()).map(|_| ());
+        assert!(settings(parse_pssm(&["-max_intron_length", "100"]).unwrap()).is_ok());
+        assert!(
+            settings(parse(&["-max_intron_length", "100", "-sum_stats", "false"]).unwrap()).is_ok()
+        );
+        for args in [
+            parse_pssm(&["-max_intron_length", "100", "-sum_stats", "true"]).unwrap(),
+            parse(&["-max_intron_length", "100"]).unwrap(),
+        ] {
+            assert!(settings(args)
+                .unwrap_err()
+                .to_string()
+                .contains("-max_intron_length 100 (uneven gap linking) is not supported"));
         }
     }
 }

@@ -13,6 +13,8 @@ mod tblastn_culling;
 mod tblastn_db_search;
 #[path = "../tblastn_db_stream.rs"]
 mod tblastn_db_stream;
+#[path = "../tblastn_in_pssm.rs"]
+mod tblastn_in_pssm;
 #[path = "../tblastn_link_ctx.rs"]
 mod tblastn_link_ctx;
 #[path = "../tblastn_link_window.rs"]

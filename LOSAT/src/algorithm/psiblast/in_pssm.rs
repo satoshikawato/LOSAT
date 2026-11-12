@@ -268,11 +268,28 @@ pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSe
     // ```
     // `-in_pssm -` is the standard input (`kArgPSIInputChkPntFile` is an `eInputFile`), as
     // `-query -` is; NCBI's messages name the file `-`.
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:726-731
+    // ```c++
+    //             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+    //             if ( !fstrm->is_open() ) {
+    //                 delete fstrm;
+    //                 fstrm = NULL;
+    //             } else {
+    //                 m_DeleteFlag = true;
+    // ```
+    // Only a file that cannot be opened is "not accessible": one that opens and cannot be read (a
+    // directory) gives the reader no bytes, which NCBI's format guess takes as an unsupported
+    // format (probe `pf.dir` of line PS PS7).
     let bytes = if path.as_os_str() == "-" {
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes).map(|_| bytes)
     } else {
-        std::fs::read(path)
+        std::fs::File::open(path).map(|mut file| {
+            // The bytes the stream gave before it failed (none from a directory).
+            let mut bytes = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut file, &mut bytes);
+            bytes
+        })
     }
     .map_err(|_| crate::cli::inaccessible("in_pssm", path))?;
     match guess_format(&bytes) {
@@ -422,9 +439,8 @@ pub(crate) fn psi_search_and_object(
     // NCBI's application takes the query's Bioseq here (a PSSM without one ends with a C++
     // exception of the release build); the reader has refused a Seq-entry set.
     let Some(query) = pssm.pssm.query.as_ref() else {
-        return Err(reader.refuse(
-            "a PSSM without a query sequence (NCBI BLAST+'s psiblast stops with a C++ exception)",
-        ));
+        return Err(reader
+            .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
     };
     let validation_error = validation_error(&pssm);
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine

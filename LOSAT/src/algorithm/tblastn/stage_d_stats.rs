@@ -608,6 +608,91 @@ mod tests {
         );
     }
 
+    // NCBI blast_setup.c:766-768 (the effective lengths from `kbp_gap_std`), blast_parameters.c:
+    // 204-221 (the word X-drop from `kbp`), 338-345 (the gap trigger from `kbp_std`) and 902-999
+    // (the cutoffs from `kbp_gap`): each block of a PSSM query is read where NCBI reads it (tblastn
+    // `-in_pssm`, line PS item PS7).
+    #[test]
+    fn each_karlin_block_is_read_where_ncbi_reads_it() {
+        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let options = LocalParameterOptions {
+            expect_value: 10.0,
+            do_sum_stats: false,
+            max_intron_length: 0,
+            gap_trigger_bits: 22.0,
+            word_xdrop_bits: 7.0,
+            scale_factor: 1.0,
+            gumbel: None,
+            eff_searchsp_override: None,
+        };
+        let call = LocalParameterCall::Initial {
+            min_subject_length: 1000,
+            composition_based_stats: 0,
+        };
+        let run = |blocks: LocalKarlinBlocks<'_>| {
+            local_parameters_for_blocks(&[(300, true)], 3_000_000, 10, blocks, options, call)
+        };
+        let base = local_parameters_for_call(
+            &[(300, true)],
+            3_000_000,
+            10,
+            &[gapped],
+            &[ungapped],
+            options,
+            call,
+        );
+        let same = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_eq!(base, same);
+        // Another gapped block for the cutoffs only: the lengths stay the matrix's.
+        let psi_gapped = KarlinParams {
+            lambda: gapped.lambda * 0.8,
+            k: gapped.k * 2.0,
+            ..gapped
+        };
+        let cutoffs = run(LocalKarlinBlocks {
+            gapped: &[psi_gapped],
+            lengths: &[gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_eq!(cutoffs.lengths, base.lengths);
+        assert_ne!(cutoffs.cutoffs[0].hit_cutoff, base.cutoffs[0].hit_cutoff);
+        let lengths = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[psi_gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_ne!(lengths.lengths, base.lengths);
+        // Another ungapped block for the X-drop only: the gap trigger stays `kbp_std`'s.
+        let psi_ungapped = KarlinParams {
+            lambda: ungapped.lambda * 0.5,
+            ..ungapped
+        };
+        let xdrop = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[gapped],
+            ungapped: &[ungapped],
+            x_dropoff: &[psi_ungapped],
+        });
+        assert_eq!(xdrop.cutoffs[0].word_cutoff, base.cutoffs[0].word_cutoff);
+        assert_ne!(xdrop.cutoffs[0].word_xdrop, base.cutoffs[0].word_xdrop);
+        let trigger = run(LocalKarlinBlocks {
+            gapped: &[gapped],
+            lengths: &[gapped],
+            ungapped: &[psi_ungapped],
+            x_dropoff: &[ungapped],
+        });
+        assert_eq!(trigger.cutoffs[0].word_xdrop, base.cutoffs[0].word_xdrop);
+        assert_ne!(trigger.cutoffs[0].word_cutoff, base.cutoffs[0].word_cutoff);
+    }
+
     // NCBI c++/src/algo/blast/core/link_hsps.c:1788-1802;
     // c++/src/algo/blast/core/blast_hits.c:1811-1926:
     // Blast_HSPListGetEvalues receives translated subject_length/3 and

@@ -289,7 +289,8 @@ pub(super) fn lookup_table(
     word_length: usize,
     threshold: i32,
 ) -> BlastAaLookupTable {
-    let masks = super::search_seed::encode_tblastn_lookup_query(query, seg, mask_lowercase).seg_masks;
+    let masks =
+        super::search_seed::encode_tblastn_lookup_query(query, seg, mask_lowercase).seg_masks;
     let segments = lookup_segments(query.len(), &masks);
     crate::algorithm::pssm_search::lookup::build_pssm_lookup_in(
         rows,

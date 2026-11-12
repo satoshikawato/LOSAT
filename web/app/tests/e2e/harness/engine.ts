@@ -13,7 +13,7 @@ import { sha256Hex } from '../../../src/infra/browser/platform';
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
 import { WasmEngine, type RuntimeEnd } from '../../../src/infra/engine-worker/gateway';
 import type { RenewalLimits } from '../../../src/infra/engine-worker/policy';
-import { STOP_AT_OUTPUT_CHANNEL, type EngineEvent, type WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
+import { HOLD_USE_CHANNEL, STOP_AT_OUTPUT_CHANNEL, type EngineEvent, type WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
 import type { EngineGateway, EngineInput, RuntimeInfo } from '../../../src/ports/engine';
 import type { OutputStream } from '../../../src/ports/run-output';
 import { runCases, type CaseResult } from '../../contract/contract';
@@ -298,6 +298,77 @@ export async function stopDuringSearch(search: SearchCase): Promise<StopResult> 
   // The test's timeout bounds the wait.
   await firstEnd;
   return { stopped, runtimeEnds: [...runtimeEnds] };
+}
+
+export interface WarmUpCancelResult {
+  /** The status of the search that was cancelled while the warm-up before it used the threaded instance. */
+  readonly cancelled: RunStatus;
+  /** The same search afterwards, in the same application. */
+  readonly next: SearchResult;
+  /** How the runtimes ended until the next search completed (gateway.ts, RuntimeEnd). */
+  readonly runtimeEnds: readonly RuntimeEnd[];
+}
+
+/**
+ * Has the engine prepare the threaded runtime of `search` with its argv, so that the Engine
+ * worker warms the threaded instance up (runtime.ts, warmUp), with that warm-up armed to hold
+ * at its start until the Gateway ends the runtime (engine-worker.ts, test builds); then queues
+ * `search` behind it, cancels it once the Gateway has posted it, and runs `search` again.
+ */
+export async function cancelDuringWarmUp(search: SearchCase): Promise<WarmUpCancelResult> {
+  const runtimeEnds: RuntimeEnd[] = [];
+  let firstEnded: () => void = () => undefined;
+  const firstEnd = new Promise<void>((resolve) => (firstEnded = resolve));
+  const session = new SearchSession({
+    onRuntimeEnd: (end) => {
+      runtimeEnds.push(end);
+      firstEnded();
+    },
+  });
+  // The gateway that the draft holds; the application exposes no engine of its own.
+  const { engine } = (session.app.draft as unknown as { readonly deps: { readonly engine: EngineGateway } }).deps;
+  const [query, subject] = await Promise.all([fetchFile(search.query), fetchFile(search.subject)]);
+  const hint = { requestedThreads: search.threads, inputBytes: query.size + subject.size };
+  const channel = new BroadcastChannel(HOLD_USE_CHANNEL);
+  const heard = (type: string) =>
+    new Promise<void>((resolve) => channel.addEventListener('message', (event: MessageEvent<{ type?: string }>) => event.data?.type === type && resolve()));
+  const armed = heard('armed');
+  const holding = heard('holding');
+  const gateway = engine as { run: EngineGateway['run'] };
+  try {
+    // The Engine worker and its threaded instance start; the worker listens once its script runs.
+    engine.prepare?.(hint);
+    let answered = false;
+    void armed.then(() => (answered = true));
+    while (!answered) {
+      channel.postMessage({ type: 'arm' });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const argv = buildArgv({ program: search.program, queryName: search.query.name, subjectName: search.subject.name, parameters: parameters(search.options) });
+    engine.prepare?.({ ...hint, argv });
+    await holding;
+    const run = gateway.run.bind(engine);
+    let posted: () => void = () => undefined;
+    const runPosted = new Promise<void>((resolve) => (posted = resolve));
+    gateway.run = (request, output, onPhase) => {
+      const result = run(request, output, onPhase);
+      posted();
+      return result;
+    };
+    const runId = await session.enqueue(search);
+    await runPosted;
+    // The Gateway posts the search after the compiled modules' promise, which has settled.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    session.app.coordinator.cancel(runId);
+    const cancelled = (await session.until(runId, ['cancelled'])).status;
+    // The test's timeout bounds the wait.
+    await firstEnd;
+    delete (gateway as { run?: unknown }).run;
+    const next = await session.search(search);
+    return { cancelled, next, runtimeEnds: [...runtimeEnds] };
+  } finally {
+    channel.close();
+  }
 }
 
 export interface RetentionResult {

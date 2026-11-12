@@ -37,7 +37,8 @@ joined with `,`).
   BLASTN X-drop / `-no_greedy` searches (DI-6).
 
 Both suites add a TBLASTX search over several subjects, which the threaded reactor
-reduces in the wasm-threads-only path. `--group fasta_input` writes that group of the full
+reduces in the wasm-threads-only path, and the BLASTN `-window_masker_db` searches
+(`window_masker`), whose counts files the host registers by name (abi_v2.md §4 `file_begin`). `--group fasta_input` writes that group of the full
 suite alone.
 
 Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
@@ -252,6 +253,69 @@ def direct_tblastx() -> dict:
             "cwd": str(REPO), "cases": ["tblastx-threaded-direct"], "frozen": {}}
 
 
+def window_masker() -> list[dict]:
+    """BLASTN `-window_masker_db` (line NP WW1): the host registers the counts file that the argv
+    names, under the argv's value, before the run (`file_begin`, abi_v2.md §4), and keeps it for the
+    next searches of the same name; a value that is not a regular file is not registered, as a file
+    that the CLI cannot open. The NCBI-frozen rows of LOSAT/tests/fixtures/blastn_regression/
+    manifest.tsv (`wm.*`) without an environment, in their format (0, 6 and 7 compared with the CLI,
+    another format as the search's `-outfmt`), and the rows of LOSAT/tests/fixtures/winmask_blastn/
+    cases.tsv with `-window_masker_db` and without an environment whose counts are a file (the counts that cannot be read, from
+    `make_counts`) or a name of no file, in outfmt 0, 6 and 7: those that fail, with the CLI's error
+    and its place among the other errors."""
+    sys.path.insert(0, str(REPO / "LOSAT/tests"))
+    sys.path.insert(0, str(REPO / "LOSAT/tests/winmask"))
+    import blastn_regression_fixtures as regression  # noqa: E402  (the manifest reader)
+    import make_blastn_error_fixtures as errors  # noqa: E402  (the unreadable counts files)
+
+    engine = REPO / "LOSAT"
+    searches: dict[tuple, dict] = {}
+
+    def add(case_id: str, argv: list[str], frozen: str | None, failure: bool, prolog: bool = True) -> None:
+        outfmt, argv = split(argv)
+        outfmt = outfmt or "0"
+        custom = custom_outfmt(outfmt)
+        if failure and outfmt not in FORMATS["blastn"]:
+            return  # a failure is compared in the formats of every run
+        key = (tuple(argv), outfmt if custom else None)
+        search = searches.setdefault(key, {"program": "blastn", "argv": argv, "cwd": str(engine), "cases": [],
+                                           "frozen": {}})
+        if custom:
+            search["outfmt"] = outfmt
+        if failure:
+            search["expect"] = "failure"
+            if not prolog:
+                search["prolog"] = False
+        search["cases"].append(case_id)
+        if frozen:
+            search["frozen"]["custom" if custom else outfmt] = frozen
+
+    for row in regression.read_manifest():
+        if (row["case_id"].startswith("wm.") and not row["env"] and not row["losat_extra"]
+                and "-window_masker_db" in shlex.split(row["argv"])):
+            add(row["case_id"], ["blastn", *shlex.split(row["argv"])], row["stdout_sha256"], row["exit"] != "0")
+    errors.make_counts()
+    for case, env, argv in errors.read_cases():
+        if "-window_masker_db" not in argv:
+            continue  # -window_masker_taxid (line NP WW2)
+        value = argv[argv.index("-window_masker_db") + 1]
+        counts = engine / value
+        if env or "-db" in argv or (value and counts.exists() and not counts.is_file()) or case == "unreadable":
+            continue  # LOSAT Web gives a file's bytes only: no directory, no file it cannot read, no -db
+        rc = int((errors.FIXTURES / f"{case}.rc").read_text())
+        # Exit 255 and 1 are the errors of the options and their files, before the first query
+        # batch: the CLI writes no output. Exit 3 is the first batch's error, after the outfmt 0 prolog.
+        add(f"winmask_blastn.{case}", ["blastn", *argv], None, rc != 0, prolog=rc == 3)
+        # The counts file's error before the options checked after it (the query range, the
+        # expect value of each search's checks), in validate as in run.
+        if case == "ascii":
+            for option in (["-query_loc", "5-1"], ["-evalue", "0"]):
+                at = argv.index("-outfmt")
+                add(f"winmask_blastn.ascii{option[0]}", ["blastn", *argv[:at], *option, *argv[at:]], None, True,
+                    prolog=False)
+    return list(searches.values())
+
+
 def quick() -> list[dict]:
     cases = []
     blastp = capture.audit_blastp_v010.load_manifest(capture.TESTS / "blastp_v010_parity_manifest.tsv", REPO)
@@ -326,6 +390,7 @@ def main() -> int:
         searches = quick()
     if not args.group:
         searches.append(direct_tblastx())
+        searches += window_masker()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

@@ -10,7 +10,7 @@ import type { DraftState, SearchDraft } from '../application/draft';
 import { geneticCodeLabel } from '../domain/genetic-codes';
 import { effectiveValue, fieldChoices, fieldList, knownDefault, writtenValue } from '../domain/parameters';
 import { programById, type ParameterField } from '../domain/programs';
-import { optionHelp } from './format';
+import { formatBytes, optionHelp } from './format';
 import HelpTip from './HelpTip.vue';
 import { refusal, refusedMark } from './refusal';
 
@@ -42,8 +42,13 @@ const boxChecked = computed(() => (props.field.kind === 'flag' ? value.value ===
 const filterOn = computed(() => shown.value !== '' && shown.value !== 'no');
 /** The filter's text box stays while it has the focus, also when emptying it turns the filter off. */
 const filterEditing = ref(false);
+/** A file option is on while its box is checked: no file chosen yet (`true`), or the file's name. */
+const fileOn = computed(() => props.field.kind === 'file' && (value.value === true || text.value.trim() !== ''));
+/** The file chosen for the option, which the run reads under the option's value. */
+const chosenFile = computed(() => props.state.files[props.state.program][props.field.flag]);
+const fileInput = ref<HTMLInputElement | null>(null);
 /** A checkbox of a row carries its name after the box, as NCBI's checkboxes of a row do. */
-const boxInRow = computed(() => props.inline === true && (asCheckbox.value || props.field.kind === 'filter'));
+const boxInRow = computed(() => props.inline === true && (asCheckbox.value || props.field.kind === 'filter' || props.field.kind === 'file'));
 /** A choice whose default is one of its choices shows it; otherwise "Default" stands for it. */
 const defaultChosen = computed(() => fallback.value !== undefined && choices.value.includes(fallback.value));
 
@@ -94,6 +99,20 @@ function toggleFilter(on: boolean): void {
   const filters = fallback.value !== undefined && fallback.value !== 'no';
   if (on) set(filters ? '' : 'yes');
   else set(filters ? 'no' : '');
+}
+
+/** The box of a file option: checked, it waits for a file (the run cannot start without one); unchecked, it lets the file go. */
+function toggleFile(on: boolean): void {
+  if (on) props.draft.setField(props.field.flag, true);
+  else props.draft.setFile(props.field.flag, undefined);
+}
+
+function onFile(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file !== undefined) props.draft.setFile(props.field.flag, file);
+  // The same file can be chosen again after the box is unchecked.
+  input.value = '';
 }
 
 function onList(next: string): void {
@@ -170,6 +189,40 @@ function onList(next: string): void {
           />
           <span :id="`${id}-value-name`" class="visually-hidden">arguments</span>
         </template>
+      </template>
+      <template v-else-if="field.kind === 'file'">
+        <input
+          :id="id"
+          type="checkbox"
+          :checked="fileOn"
+          v-bind="mark(!fileOn)"
+          :data-testid="id"
+          @change="toggleFile(($event.target as HTMLInputElement).checked)"
+        />
+        <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
+          <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
+          {{ field.label }} <span class="flag">{{ field.flag }}</span>
+          <span v-if="changed" class="visually-hidden">, changed from the default</span>
+        </label>
+        <!-- The file of the option, chosen beside the box as NCBI's "Species-specific repeats" has its select. -->
+        <span v-if="fileOn" class="file-pick">
+          <button type="button" :data-testid="`${id}-choose`" @click="fileInput?.click()">{{ chosenFile ? 'Change file…' : 'Choose file…' }}</button>
+          <!-- Opened by the button: out of the accessibility tree, as the inputs' file field (WA2-AX-13). -->
+          <input
+            ref="fileInput"
+            class="visually-hidden"
+            type="file"
+            tabindex="-1"
+            aria-hidden="true"
+            :aria-label="field.file?.label"
+            :data-testid="`${id}-file`"
+            @change="onFile"
+          />
+          <span v-if="chosenFile" class="file-name" :data-testid="`${id}-name`">
+            {{ field.file?.label }}: {{ chosenFile.name }} ({{ formatBytes(chosenFile.size) }})
+          </span>
+          <span v-else class="file-missing" role="status" :data-testid="`${id}-missing`">{{ field.file?.missing }}</span>
+        </span>
       </template>
       <template v-else-if="asCheckbox">
         <input
@@ -264,7 +317,7 @@ function onList(next: string): void {
           <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
         </select>
       </span>
-      <span v-if="field.hint" class="param-hint">{{ field.hint }}</span>
+      <span v-if="field.hint && (field.kind !== 'file' || fileOn)" class="param-hint">{{ field.hint }}</span>
       <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
       <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
     </div>

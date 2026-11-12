@@ -267,7 +267,7 @@ flowchart LR
 | masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`); the encoding in `batch_setup.rs` (`encode_query_block`) | SEG in `blastp/encoding.rs` |
 | setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | the head of `run_resolved_in_pool` |
 | lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks |
-| scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`; `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges` and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
+| scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`; `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges`, the extension of the offset pairs in `pair_extend.rs` (`extend_offset_pairs`, with the word extension `word_extend_pair` and the off-diagonal search `off_diagonal_found`), and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `prelim_hsp_list.rs` (`gapped_hsp_list`, its loop `gapped_score_list`, per subject chunk) with `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
 | purge, reap, collect | `Blast_HSPListPurgeHSPsWithCommonEndpoints`, `s_Blast_HSPListReapByPrelimEvalue`, `s_BlastHSPCollectorRun` | `purge_prelim_hits_with_common_endpoints`, `PrelimHitCollector` | `prepare_preliminary_hits_for_kappa_in_place`, `PrelimCollector` |
 | traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `process_subject` (`run.rs`, its second call per subject) calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
@@ -339,10 +339,12 @@ blastx, tblastn and tblastx follow the same stages with their own drivers: blast
 `blastx/native.rs`, `search.rs` and `runtime.rs`; tblastn in `tblastn/tblastn_app.rs` and
 `stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
 sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tables.rs`, runs its
-subject loop with `subject_loop.rs` and ends with `batch_finish.rs`. rpsblast has no driver of its
-own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_search` from
-`blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the profiles are the
-"query" and the user's query is the "subject".
+subject loop with `subject_loop.rs` and ends with `batch_finish.rs`; its `process_subject` ends a
+subject with `subject_link.rs` (the seed stage's end, the linking calls, the reap and the
+re-evaluation), `subject_report.rs` (the report hits) and `subject_debug.rs` (their debugging
+output). rpsblast has no driver of its own: it runs blastp's (`BlastpApp::Rpsblast`), which
+hands the search to `rps_search` from `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are
+swapped as in NCBI: the profiles are the "query" and the user's query is the "subject".
 
 | | blastx | tblastn | tblastx | rpsblast |
 | :--- | :--- | :--- | :--- | :--- |

@@ -88,6 +88,9 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-gapextend", resolved.scoring.gap_extend.to_string());
             put("-threshold", resolved.threshold.to_string());
             put("-window_size", resolved.window_size.to_string());
+            put("-xdrop_ungap", resolved.x_drop_ungapped_bits.to_string());
+            put("-xdrop_gap", resolved.x_drop_gapped_bits.to_string());
+            put("-xdrop_gap_final", resolved.x_drop_final_bits.to_string());
             put("-seg", resolved.seg.to_ncbi_cli_string());
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
@@ -104,6 +107,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-gapextend", resolved.gap_extend.to_string());
             put("-threshold", resolved.threshold.to_string());
             put("-window_size", resolved.window_size.to_string());
+            put("-xdrop_ungap", resolved.xdrop_ungap.to_string());
             put("-xdrop_gap", resolved.xdrop_gap.to_string());
             put("-xdrop_gap_final", resolved.xdrop_gap_final.to_string());
             put("-sum_stats", bool_text(resolved.sum_stats));
@@ -120,6 +124,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-matrix", args.matrix_name().to_string());
             put("-threshold", args.word_threshold().to_string());
             put("-window_size", args.window().to_string());
+            put("-xdrop_ungap", args.x_drop_ungapped_bits().to_string());
             put(
                 "-seg",
                 args.seg_spec()
@@ -144,6 +149,9 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-gapextend", resolved.gap_extend.to_string());
             put("-threshold", resolved.threshold.to_string());
             put("-window_size", resolved.window_size.to_string());
+            put("-xdrop_ungap", resolved.x_dropoff.to_string());
+            put("-xdrop_gap", resolved.gap_x_dropoff.to_string());
+            put("-xdrop_gap_final", resolved.gap_x_dropoff_final.to_string());
             put("-sum_stats", bool_text(resolved.sum_stats));
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
@@ -586,12 +594,21 @@ mod tests {
                 program.name()
             );
         }
-        // BLASTX's parser reads word sizes 3 and 5 only.
+        // BLASTX reads NCBI's word sizes, 2 to 7 (item SC9 of line NP); above 4 each sets its
+        // threshold as BLASTP's (blast_args.cpp:288-300).
         let blastx = defaults(Program::Blastx).unwrap();
         assert_eq!(
             blastx.by["-word_size"].keys().collect::<Vec<_>>(),
-            ["3", "5"]
+            ["2", "3", "4", "5", "6", "7"]
         );
+        for (word_size, threshold) in [("6", "21"), ("7", "20.25")] {
+            for task in ["blastx", "blastx-fast"] {
+                assert_eq!(
+                    blastx.by["-word_size"][word_size][task]["-threshold"], threshold,
+                    "{word_size} {task}"
+                );
+            }
+        }
         // TBLASTX's threshold does not follow the word size.
         assert!(!defaults(Program::Tblastx)
             .unwrap()

@@ -1,6 +1,5 @@
 //! Source-derived TBLASTN Kappa redo parameters for local subjects.
 
-use crate::core::blast_util::ncbi_int4_from_double;
 use std::cell::Cell;
 
 use anyhow::{ensure, Context, Result};
@@ -41,12 +40,9 @@ pub(super) fn local_extension_final_xdrop(
     min_lambda: f64,
 ) -> Result<i32> {
     ensure!(min_lambda > 0.0, "TBLASTN gapped lambda must be positive");
-    // The MAX is taken of doubles and then converted as the x86-64 build does
-    // (`core/blast_util.rs` `ncbi_int4_from_double`: INT_MIN beyond Int4).
-    let prelim = ncbi_int4_from_double((prelim_bits * std::f64::consts::LN_2) / min_lambda);
-    Ok(ncbi_int4_from_double(
-        ((final_bits * std::f64::consts::LN_2) / min_lambda).max(f64::from(prelim)),
-    ))
+    // The MAX is taken of doubles and then converted as the x86-64 build does (INT_MIN beyond
+    // Int4), as every protein program converts it (`core::x_drop::gapped_x_dropoffs`).
+    Ok(crate::core::x_drop::gapped_x_dropoffs(prelim_bits, final_bits, min_lambda).1)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1316-1324
@@ -84,7 +80,6 @@ pub(super) fn local_kappa_redo_params(
     max_query_length: i32,
     mode: BlastCompoAdjustMode,
     unified_p: bool,
-    expect_value: f64,
     do_sum_stats: bool,
     final_xdrop_bits: f64,
     extension_final_xdrop: i32,
@@ -141,10 +136,8 @@ pub(super) fn local_kappa_redo_params(
     // gapping_params->x_dropoff = (Int4)
     //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
     //         extendParams->gap_x_dropoff_final);
-    let redo_xdrop = ncbi_int4_from_double(
-        ((final_xdrop_bits * std::f64::consts::LN_2) / scaled_lambda)
-            .max(f64::from(extension_final_xdrop)),
-    );
+    let redo_xdrop =
+        crate::core::x_drop::redo_x_dropoff(final_xdrop_bits, scaled_lambda, extension_final_xdrop);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852;
     // blast_kappa.c:2216-2231:
     // Blast_ScoreBlkKbpIdealCalc(sbp);
@@ -171,22 +164,17 @@ pub(super) fn local_kappa_redo_params(
         gapping_params: BlastCompoGappingParams {
             gap_open: ((gap_open as f64) * scale).round() as i32,
             gap_extend: ((gap_extend as f64) * scale).round() as i32,
-            decline_align: 0,
             x_dropoff: redo_xdrop,
             context: Cell::new(None),
         },
         compo_adjust_mode: mode,
         alphsize: BLASTAA_SIZE as i32,
         composition_test_index: i32::from(unified_p),
-        unified_p,
         log_k: 0.0,
         score_divisor: scale,
-        restricted_alignment: false,
         smith_waterman: false,
-        is_same_adjustment: false,
         near_identical_cutoff: (1.74 * std::f64::consts::LN_2) / first_valid_scaled_lambda,
         position_based: false,
-        re_matrix_adjustment_pseudocounts: 20,
         ccat_query_length: max_query_length,
         query_is_translated: false,
         subject_is_translated: true,
@@ -195,8 +183,6 @@ pub(super) fn local_kappa_redo_params(
         } else {
             1
         },
-        cutoff_evalue: expect_value,
-        do_link_hsps: do_sum_stats,
     })
 }
 
@@ -252,7 +238,6 @@ mod tests {
             120,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            10.0,
             true,
             30.0,
             70,

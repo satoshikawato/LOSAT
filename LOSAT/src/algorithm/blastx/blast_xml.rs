@@ -57,7 +57,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -81,9 +80,9 @@ use crate::report::blast_xml::{
     filter, hit_ranges, written_queries, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp,
     XmlQuery, XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
 };
-use crate::report::blast_xml2::framing::{side_file_open_error, side_file_write_error};
+use crate::report::blast_xml2::framing::side_file_open_error;
 use crate::report::blast_xml2::{
-    FsSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
+    RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
 use crate::report::query_warnings::{EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
 use crate::report::serial::seqalign::seqalign_evalue;
@@ -117,6 +116,18 @@ impl XmlRefusal {
             error
         }
     }
+}
+
+/// Whether `error` is one of LOSAT's refusals for which a run that holds its BLAST XML, XML2 or
+/// JSON document drops what it holds, so that the refusal follows no byte: a title or name NCBI's
+/// XML stream cannot write (`XmlRefusal`), a reported database sequence with parsed Seq-ids
+/// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`). After any other
+/// error the run writes what it holds, the bytes of the batches before it, as the run without a
+/// hold does (the command line's `HeldOutput`; a library call's `archive::ArchiveHold`).
+pub(super) fn drops_held_document(error: &anyhow::Error) -> bool {
+    error.is::<XmlRefusal>()
+        || error.is::<crate::algorithm::common::database::ParsedRefusal>()
+        || error.is::<TaxonomyRefusal>()
 }
 
 fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
@@ -419,17 +430,18 @@ impl Drop for HeldState {
     }
 }
 
-/// The side files of an outfmt 13 or 14 run (`FsSideFiles`), which a hold keeps in memory: the
-/// n-th report is written to its file at once, or, while the run holds its output, at `release`
-/// (the epilog) in the order of the reports. A refusal found while the batches are reported
-/// drops them, so that the run leaves no side file (design OF5 4.4); any other error ends the
-/// run with the side files of the earlier reports written (`SideState::drop`), as NCBI leaves
-/// them.
+/// The side files of an outfmt 13 or 14 run (the files next to `-out`, `FsSideFiles`, or a
+/// caller's receiver of them), which a hold keeps in memory: the n-th report is written at once,
+/// or, while the run holds its output, at `release` (the epilog) in the order of the reports. A
+/// refusal found while the batches are reported drops them, so that the run leaves no side file
+/// (design OF5 4.4); any other error ends the run with the side files of the earlier reports
+/// written (`SideState::drop`), as NCBI leaves them. The hold of the command line's document
+/// (`HeldOutput`) and of a library call's formats (`archive::ArchiveHold`) lead it.
 #[derive(Clone)]
 pub(super) struct HeldSideFiles(Arc<Mutex<SideState>>);
 
 struct SideState {
-    files: FsSideFiles,
+    files: RunSideFiles,
     holding: bool,
     discarded: bool,
     /// The reports held, as `(n, bytes)` in the order they were made.
@@ -437,7 +449,7 @@ struct SideState {
 }
 
 impl HeldSideFiles {
-    pub(super) fn new(files: FsSideFiles) -> Self {
+    pub(super) fn new(files: RunSideFiles) -> Self {
         HeldSideFiles(Arc::new(Mutex::new(SideState {
             files,
             holding: false,
@@ -452,60 +464,52 @@ impl HeldSideFiles {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn hold(&self) {
+    pub(super) fn hold(&self) {
         self.state().holding = true;
     }
 
-    fn discard(&self) {
+    pub(super) fn discard(&self) {
         let mut state = self.state();
         state.discarded = true;
         state.held.clear();
     }
 
-    /// Writes the held side files, each to a new file (truncating one of that name).
-    fn release(&self) -> Result<()> {
+    /// Writes the held side files, each whole (a file is created, truncating one of that name).
+    pub(super) fn release(&self) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
         state.write_held()
+    }
+
+    /// The n-th report, whole: dropped after `discard`; kept while the run holds its output, once
+    /// its file can be opened (where NCBI opens it, `SideFiles::check_openable`: a failure is
+    /// NCBI's "Cannot open output file"); else written at once.
+    fn put(&self, n: u32, report: &[u8]) -> Result<()> {
+        let mut state = self.state();
+        if state.discarded {
+            return Ok(());
+        }
+        if state.holding {
+            state
+                .files
+                .check_openable(n)
+                .map_err(|_| side_file_open_error())?;
+            state.held.push((n, report.to_vec()));
+            return Ok(());
+        }
+        state.files.write_file(n, report)
     }
 }
 
 impl SideState {
     /// A file that cannot be created is NCBI's "Cannot open output file"; a write to one that was
-    /// opened is the side-file write error of every program (`side_file_write_error`).
+    /// opened is the side-file write error of every program (`SideFiles::write_file`).
     fn write_held(&mut self) -> Result<()> {
         let held = std::mem::take(&mut self.held);
         for (n, bytes) in held {
-            let mut file =
-                std::fs::File::create(self.files.path(n)).map_err(|_| side_file_open_error())?;
-            file.write_all(&bytes)
-                .map_err(|_| side_file_write_error())?;
+            self.files.write_file(n, &bytes)?;
         }
         Ok(())
-    }
-}
-
-/// Opens the side file of the n-th report as NCBI does when it writes the report, without
-/// leaving a mark: a path that exists is opened for writing and not truncated (a directory or a
-/// file without write permission fails), a path that does not exist is created and removed. The
-/// run that holds its side files makes this check when the report is made, so that an
-/// unopenable file stops it where NCBI's run stops, not at the epilog after every later batch
-/// was searched (DECISIONS 35 S1). The bytes are written at `release`, which creates the file
-/// again.
-fn check_side_file_openable(path: &Path) -> io::Result<()> {
-    match std::fs::OpenOptions::new().write(true).open(path) {
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            // A dangling link is created through (`File::create` follows it); only a path that
-            // did not exist at all is removed again.
-            let existed = path.symlink_metadata().is_ok();
-            std::fs::File::create(path)?;
-            if !existed {
-                std::fs::remove_file(path)?;
-            }
-            Ok(())
-        }
-        Err(error) => Err(error),
     }
 }
 
@@ -517,11 +521,23 @@ impl Drop for SideState {
     }
 }
 
-/// A report held for its side file: it joins the held reports when the document is done with it.
+/// A report from `HeldSideFiles::create`: its bytes go to the side files (`HeldSideFiles::put`) at
+/// its first flush, or when it is dropped without one.
 struct HeldReport {
     side: HeldSideFiles,
     n: u32,
     bytes: Vec<u8>,
+    put: bool,
+}
+
+impl HeldReport {
+    fn put(&mut self) -> io::Result<()> {
+        if std::mem::replace(&mut self.put, true) {
+            return Ok(());
+        }
+        let bytes = std::mem::take(&mut self.bytes);
+        self.side.put(self.n, &bytes).map_err(io::Error::other)
+    }
 }
 
 impl Write for HeldReport {
@@ -531,40 +547,42 @@ impl Write for HeldReport {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.put()
     }
 }
 
 impl Drop for HeldReport {
     fn drop(&mut self) {
-        let mut state = self.side.state();
-        if !state.discarded {
-            state.held.push((self.n, std::mem::take(&mut self.bytes)));
-        }
+        let _ = self.put();
     }
 }
 
 impl SideFiles for HeldSideFiles {
+    /// A writer that hands the report over when it is flushed or dropped (the trait's other
+    /// callers; a run writes through `write_file`). A run that holds its side files checks here
+    /// that the file can be opened.
     fn create(&mut self, n: u32) -> io::Result<Box<dyn Write + '_>> {
         let state = self.state();
         if state.discarded {
             return Ok(Box::new(io::sink()));
         }
         if state.holding {
-            check_side_file_openable(&state.files.path(n))?;
-            return Ok(Box::new(HeldReport {
-                side: self.clone(),
-                n,
-                bytes: Vec::new(),
-            }));
+            state.files.check_openable(n)?;
         }
-        Ok(Box::new(io::BufWriter::new(std::fs::File::create(
-            state.files.path(n),
-        )?)))
+        Ok(Box::new(HeldReport {
+            side: self.clone(),
+            n,
+            bytes: Vec::new(),
+            put: false,
+        }))
     }
 
     fn listed(&self, n: u32) -> Vec<u8> {
         self.state().files.listed(n)
+    }
+
+    fn write_file(&mut self, n: u32, report: &[u8]) -> Result<()> {
+        self.put(n, report)
     }
 }
 
@@ -1150,7 +1168,7 @@ mod held_side_files_tests {
     //! after `discard`, and the files made so far when the run ends with another error.
     use super::*;
     use crate::cli::NativeError;
-    use crate::report::blast_xml2::Xml2Kind;
+    use crate::report::blast_xml2::{FsSideFiles, Xml2Kind};
     use std::path::{Path, PathBuf};
 
     fn work(stem: &str) -> PathBuf {
@@ -1164,14 +1182,16 @@ mod held_side_files_tests {
     /// A held output over `<dir>/o.out` and its side files `<dir>/o.out_<n>.xml`.
     fn run(dir: &Path) -> (HeldOutput, HeldSideFiles) {
         let master = std::fs::File::create(dir.join("o.out")).unwrap();
-        let side = HeldSideFiles::new(FsSideFiles::new(&dir.join("o.out"), Xml2Kind::Files14));
+        let side = HeldSideFiles::new(Box::new(FsSideFiles::new(
+            &dir.join("o.out"),
+            Xml2Kind::Files14,
+        )));
         (HeldOutput::new(Box::new(master), Some(side.clone())), side)
     }
 
+    /// A report as a run writes it (`SideFiles::write_file`).
     fn report(side: &mut HeldSideFiles, n: u32, bytes: &[u8]) {
-        let mut file = side.create(n).unwrap();
-        file.write_all(bytes).unwrap();
-        file.flush().unwrap();
+        side.write_file(n, bytes).unwrap();
     }
 
     fn names(dir: &Path) -> Vec<String> {
@@ -1255,6 +1275,13 @@ mod held_side_files_tests {
         assert_eq!(names(&dir), ["o.out", "o.out_2.xml"]);
         let error = side.create(2).err().expect("a directory cannot be opened");
         assert!(error.raw_os_error().is_some(), "{error:?}");
+        // The run's route: NCBI's error of the file, and nothing of the report is kept.
+        let error = side.write_file(2, b"two").unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(
+            native.message,
+            "Command line argument error: Cannot open output file\n"
+        );
         let mut master = held.clone();
         master.write_all(b"master").unwrap();
         drop((held, side, master));

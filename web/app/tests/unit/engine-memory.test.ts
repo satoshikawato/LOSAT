@@ -5,7 +5,9 @@
 // heap above 2 GiB and gives the bytes of an ordinary instance.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { Worker as NodeWorker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 import { findReactors } from '../../build/reactors';
 import { OUTPUT_FORMATS } from '../../src/domain/output-format';
@@ -13,7 +15,16 @@ import { MemoryKeeper } from '../../src/infra/engine-worker/memory-keeper';
 import type { KeeperGrown } from '../../src/infra/engine-worker/protocol';
 import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../src/infra/reactor/abi';
 import { instantiateSerial } from '../../src/infra/reactor/instance';
-import { candidateMaximums, createSharedMemory, growToMaximum, STEP_DOWN_PAGES } from '../../src/infra/reactor/shared-memory';
+import {
+  candidateMaximums,
+  createSharedMemory,
+  endWaits,
+  growToMaximum,
+  STEP_DOWN_PAGES,
+  WAIT_TABLE_ADDRESS,
+  WAIT_TABLE_SLOTS,
+  WAITS_ENDING_ADDRESS,
+} from '../../src/infra/reactor/shared-memory';
 import { createWasi, unsignedImports } from '../../src/infra/reactor/wasi';
 
 const PAGE = 65_536;
@@ -152,6 +163,52 @@ describe('growToMaximum', () => {
   });
 });
 
+describe('endWaits', () => {
+  const ENDING = WAITS_ENDING_ADDRESS / 4;
+  const TABLE = WAIT_TABLE_ADDRESS / 4;
+
+  it("uses the cells of the shared-memory guard's waits", () => {
+    const guard = createRequire(import.meta.url)('../../../../LOSAT/tests/wasi_shared_memory.js') as Record<string, number>;
+    expect([WAITS_ENDING_ADDRESS, WAIT_TABLE_ADDRESS, WAIT_TABLE_SLOTS]).toEqual([guard['WAITS_ENDING'], guard['WAIT_TABLE'], guard['WAIT_SLOTS']]);
+  });
+
+  it('sets WAITS_ENDING and wakes each wait recorded in the table, until the table is empty', async () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 1, shared: true });
+    const view = new Int32Array(memory.buffer);
+    // Two threads that wait as the guard's waits do: record the address plus 1, wait without a timeout, clear it.
+    const waiter = (slot: number, address: number) =>
+      new NodeWorker(
+        `const { workerData, parentPort } = require('node:worker_threads');
+         const view = new Int32Array(workerData.buffer);
+         Atomics.store(view, workerData.table + workerData.slot, workerData.address + 1);
+         const result = Atomics.wait(view, workerData.address >> 2, 0);
+         Atomics.store(view, workerData.table + workerData.slot, 0);
+         parentPort.postMessage(result);`,
+        { eval: true, workerData: { buffer: memory.buffer, table: TABLE, slot, address } },
+      );
+    const workers = [waiter(3, 4096), waiter(9, 8192)];
+    const woken = workers.map((worker) => new Promise((resolve) => worker.once('message', resolve)));
+    while (Atomics.load(view, TABLE + 3) === 0 || Atomics.load(view, TABLE + 9) === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    endWaits(memory);
+    expect(await Promise.all(woken)).toEqual(['ok', 'ok']);
+    expect(Atomics.load(view, ENDING)).toBe(1);
+    expect([...view.subarray(TABLE, TABLE + WAIT_TABLE_SLOTS)].every((cell) => cell === 0)).toBe(true);
+    await Promise.all(workers.map((worker) => worker.terminate()));
+  });
+
+  it('stops after its deadline when a recorded wait does not go, and leaves a memory without the cells as it is', () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 1, shared: true });
+    Atomics.store(new Int32Array(memory.buffer), TABLE, 4097);
+    const start = performance.now();
+    endWaits(memory, 30);
+    expect(performance.now() - start).toBeGreaterThanOrEqual(29);
+    const plain = new WebAssembly.Memory({ initial: 1, maximum: 1 });
+    endWaits(plain);
+    expect(new Int32Array(plain.buffer)[ENDING]).toBe(0);
+  });
+});
+
 describe('MemoryKeeper', () => {
   it('grows the memory to its maximum when asked on its channel, and answers there', async () => {
     const keeper = new MemoryKeeper();
@@ -166,6 +223,30 @@ describe('MemoryKeeper', () => {
       gateway.postMessage({ type: 'grow' });
       expect(await answer).toEqual({ type: 'grown' });
       expect(memory.buffer.byteLength).toBe(6 * PAGE);
+      // and ended the waits of the memory's threads (endWaits).
+      expect(Atomics.load(new Int32Array(memory.buffer), WAITS_ENDING_ADDRESS / 4)).toBe(1);
+    } finally {
+      gateway.close();
+      keeper.close();
+    }
+  });
+
+  it('answers also when the grow throws: the Gateway ends the runtime only on the answer', async () => {
+    const keeper = new MemoryKeeper();
+    const broken = {
+      get buffer(): ArrayBuffer {
+        throw new Error('not readable');
+      },
+    } as unknown as WebAssembly.Memory;
+    const name = `test-keeper-${Math.random()}`;
+    keeper.receive({ type: 'keep', memory: broken, maximumPages: 6, channel: name });
+    const gateway = new BroadcastChannel(name);
+    try {
+      const answer = new Promise<KeeperGrown>((resolve) => {
+        gateway.onmessage = (event: MessageEvent<KeeperGrown>) => resolve(event.data);
+      });
+      gateway.postMessage({ type: 'grow' });
+      expect(await answer).toEqual({ type: 'grown' });
     } finally {
       gateway.close();
       keeper.close();

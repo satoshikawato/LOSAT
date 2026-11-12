@@ -154,6 +154,10 @@ pub enum PssmSeqId {
         db: Vec<u8>,
         tag: ObjectId,
     },
+    /// A Seq-id that `-parse_deflines` read from a FASTA query's defline (the Seq-align id,
+    /// `BelievedIds::best`): written by the report's Seq-id writer (`report::seqid::SeqId::Db`),
+    /// never read.
+    Parsed(crate::seqid::ParsedSeqId),
 }
 
 /// `Textseq-id`.
@@ -400,12 +404,8 @@ pub struct FinalKarlin {
     pub h_ungapped: f64,
 }
 
-/// Writes `value` as a document (`WriteFileHeader`, the object, `EndOfWrite` and the separator).
-pub fn write_pssm_with_parameters<E: Encoder>(enc: &mut E, value: &PssmWithParameters) {
-    write_document(enc, value, None);
-}
-
-/// `write_pssm_with_parameters`, with `karlin` in place of the six values of `finalData`.
+/// The document of a PSSM (`WriteFileHeader`, the object, `EndOfWrite` and the separator), with
+/// `karlin` in place of the six values of `finalData`.
 fn write_document<E: Encoder>(
     enc: &mut E,
     value: &PssmWithParameters,
@@ -512,6 +512,8 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
 
 fn write_seq_id<E: Encoder>(enc: &mut E, id: &PssmSeqId) {
     match id {
+        // The report's writer opens and closes its own variant.
+        PssmSeqId::Parsed(id) => return crate::report::seqid::SeqId::Db(id).write(enc),
         PssmSeqId::Local(id) => {
             enc.variant("Seq-id", "local", 0);
             write_object_id(enc, id);

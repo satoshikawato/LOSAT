@@ -4,7 +4,7 @@
 //!
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
-use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, truncate_spaces, ReportContext};
+use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, truncate_spaces};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
@@ -52,8 +52,6 @@ pub const DEFAULT_LINE_LENGTH: usize = 60;
 pub struct PairwiseConfig {
     /// Line length for sequence display
     pub line_length: usize,
-    /// Show GI numbers if available
-    pub show_gi: bool,
     /// Show frame information (for translated searches)
     pub show_frame: bool,
     /// Program type for proper formatting
@@ -66,7 +64,6 @@ impl Default for PairwiseConfig {
     fn default() -> Self {
         Self {
             line_length: DEFAULT_LINE_LENGTH,
-            show_gi: false,
             show_frame: true,
             program: "tblastx".to_string(),
             protein_matrix: ScoringMatrix::Blosum62,
@@ -1182,34 +1179,6 @@ fn is_positive_match(a: char, b: char, matrix: ScoringMatrix) -> bool {
     protein_display_score(matrix, a as u8, b as u8) > 0
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:790-803
-// ```c
-// if (m_IsDbScan)
-//     dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
-// else
-//     dbname = m_DbName;
-// ```
-fn write_database_header<W: Write>(writer: &mut W, context: &ReportContext) -> io::Result<()> {
-    if let Some(ref dbname) = context.database_name {
-        writeln!(writer, "Database: {}", dbname)?;
-        if let (Some(num_sequences), Some(total_letters)) = (
-            context.database_num_sequences,
-            context.database_total_letters,
-        ) {
-            writeln!(
-                writer,
-                "           {} sequences; {} total letters",
-                num_sequences, total_letters
-            )?;
-        }
-        writeln!(writer)?;
-    } else if let Some(ref db) = context.subject_name {
-        writeln!(writer, "Database: {}", db)?;
-        writeln!(writer)?;
-    }
-    Ok(())
-}
-
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:75-83
 // ```c
 // static const char*  kHeader = "Sequences producing significant alignments:";
@@ -1232,38 +1201,6 @@ fn ncbi_k_bits_for(ctoolkit_compatible: bool) -> &'static str {
     } else {
         "(Bits)"
     }
-}
-
-// The description table of a report whose subjects are named by `subject_ids` and the
-// title of their first HSP (BLASTX and `write_pairwise`).
-//
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4299-4302
-// ```c++
-//         if (bits > highest_bits) {
-//             highest_bits = bits;
-//             lowest_evalue = evalue;
-//         }
-// ```
-// The rows, the widths and the N column follow `x_InitDeflineTable` as in every other
-// program's table (`write_description_table`): each row shows the subject's highest bit
-// score and that HSP's E-value, which need not be the subject's first HSP (the first
-// one by E-value, which sum statistics can give to a lower score).
-fn write_subject_summary_table<W: Write>(
-    writer: &mut W,
-    subject_order: &[u32],
-    subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_ids: &[Arc<str>],
-) -> io::Result<()> {
-    // Every subject of the list is described, so the last one is NCBI's "last hit"
-    // (showdefline.cpp:1133-1134).
-    write_subject_summary_table_with_sum_n(
-        writer,
-        subject_order,
-        true,
-        subject_hits,
-        subject_ids,
-        false,
-    )
 }
 
 fn write_subject_summary_table_with_sum_n<W: Write>(
@@ -2248,7 +2185,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
     query_gapped_k: Option<&[f64]>,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
@@ -2304,9 +2241,13 @@ pub fn write_blastp_pairwise_window<W: Write>(
         &hits_by_query,
         subject_titles,
         probe,
-        warnings,
+        warnings.as_deref_mut(),
         x_pool,
     )?;
+    // The warnings after the last query's report (`QueryWarnings::after_last_query`).
+    if let Some(warnings) = warnings.filter(|_| query_range.end == queries.len()) {
+        warnings.after_last_query(queries.len(), writer)?;
+    }
 
     // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
     // ```c++
@@ -2581,7 +2522,7 @@ pub struct BlastnPairwiseReport {
 }
 
 // The description table of a report: BLASTN's, BLASTP's, TBLASTN's and TBLASTX's
-// (`write_blastn_description_table`), BLASTX's and `write_pairwise`'s
+// (`write_blastn_description_table`), BLASTX's
 // (`write_subject_summary_table_with_sum_n`), which differ only in the line that names a
 // subject (`label_of`).
 //
@@ -3728,7 +3669,7 @@ fn write_tblastx_epilog<W: Write>(
 
 /// A `double` written to a C++ stream with the default flags: `%g` with precision 6
 /// (`1e+06` for 1000000, `1.23457e+06` for 1234567).
-fn cpp_default_double(value: f64) -> String {
+pub(crate) fn cpp_default_double(value: f64) -> String {
     fn trim(text: &str) -> &str {
         if text.contains('.') {
             text.trim_end_matches('0').trim_end_matches('.')
@@ -3995,139 +3936,6 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 // =============================================================================
 // Main pairwise output function
 // =============================================================================
-
-/// Write hits in pairwise format (outfmt 0)
-///
-/// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp DisplaySeqalign()
-pub fn write_pairwise<W: Write>(
-    hits: &[PairwiseHit],
-    writer: &mut W,
-    config: &PairwiseConfig,
-    _query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
-    context: &ReportContext,
-) -> io::Result<()> {
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1408-1469
-    // ```c
-    // string CDisplaySeqalign::x_DisplayRowData(SAlnRowInfo *alnRoInfo)
-    // {
-    //     ...
-    //     CNcbiOstrstream out;
-    //     ...
-    // }
-    //
-    // void CDisplaySeqalign::x_DisplayRowData(SAlnRowInfo *alnRoInfo, CNcbiOstream& out)
-    // {
-    //     ...
-    //     out << rowdata;
-    // }
-    // ```
-    let mut buffered = io::BufWriter::new(writer);
-    let writer = &mut buffered;
-
-    // Write program header
-    let version = crate::NCBI_BLAST_VERSION;
-    writeln!(writer, "{} {}", context.program.to_uppercase(), version)?;
-    writeln!(writer)?;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:790-803
-    // ```c
-    // dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
-    // ...
-    // tabinfo.PrintHeader(..., dbname, ...);
-    // ```
-    write_database_header(writer, context)?;
-
-    // Write query info
-    if let Some(ref query) = context.query_name {
-        writeln!(writer, "Query= {}", query)?;
-        writeln!(writer)?;
-        if let Some(query_length) = context.query_length {
-            writeln!(writer, "Length={}", query_length)?;
-        }
-        writeln!(writer)?;
-    }
-
-    if hits.is_empty() {
-        writeln!(writer, " ***** No hits found *****")?;
-        writer.flush()?;
-        return Ok(());
-    }
-
-    // Group hits by subject
-    use std::collections::HashMap;
-    let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
-    let mut subject_order: Vec<u32> = Vec::new();
-
-    for hit in hits {
-        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:2278-2315
-        // ```c
-        // string CDisplaySeqalign::x_PrintDefLine(...)
-        // {
-        //     ...
-        //     out << ">";
-        //     ...
-        // }
-        // ```
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
-        let s_idx = hit.hit.s_idx;
-        if !subject_hits.contains_key(&s_idx) {
-            subject_order.push(s_idx);
-        }
-        subject_hits.entry(s_idx).or_default().push(hit);
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:75-83
-    // ```c
-    // static const char*  kHeader = "Sequences producing significant alignments:";
-    // ...
-    // static const char*  kBits = (getenv("CTOOLKIT_COMPATIBLE") ? "(bits)" : "(Bits)");
-    // ...
-    // static const char*  kValue = "Value";
-    // ```
-    write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
-
-    // Write each subject's hits
-    for s_idx in subject_order {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
-        let subject_id = subject_ids
-            .get(s_idx as usize)
-            .map(|id| id.as_ref())
-            .unwrap_or("unknown");
-        let shits = subject_hits.get(&s_idx).unwrap();
-        let first_hit = shits.first().unwrap();
-
-        // Subject header
-        write_subject_header(
-            writer,
-            subject_id.as_bytes(),
-            first_hit.subject_title.as_deref().map(str::as_bytes),
-            first_hit.subject_length,
-        )?;
-
-        // Each HSP
-        for hit in shits {
-            write_hsp_info(writer, hit, config)?;
-            write_alignment(writer, hit, config)?;
-        }
-    }
-
-    writer.flush()
-}
 
 #[cfg(test)]
 mod tests {
@@ -5987,10 +5795,10 @@ mod tblastx_tests {
                         &report,
                         None,
                         None,
-                        Some(&mut crate::report::query_warnings::QueryWarnings {
-                            before: &before,
-                            sink: &mut diagnostics,
-                        }),
+                        Some(&mut crate::report::query_warnings::QueryWarnings::new(
+                            &before,
+                            &mut diagnostics,
+                        )),
                         x_pool,
                     )
                     .unwrap();
@@ -6352,7 +6160,6 @@ mod tblastx_tests {
         };
         let config = PairwiseConfig {
             line_length: 60,
-            show_gi: false,
             show_frame: false,
             program: "rpsblast".to_string(),
             protein_matrix: ScoringMatrix::Blosum62,

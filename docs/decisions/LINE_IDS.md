@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree, 116 of them in
-`CHANGELOG.md`, `changelog.d/` and `docs/`; 166 rows below. State: 148 done, 18 in progress, 0 stopped.
+As of dev a7f197a76 with line PS's PS11c-2 (2026-11-12): 197 IDs cited in the tree, 119 of them in
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 170 rows below. State: 149 done, 21 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -161,7 +161,11 @@ As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree,
 | `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #941 | changelog entry `feature-ps-ps11` |
 | `PS11b` | PS stage 11b: `losat rpsblast` with composition-based statistics 1, 2 and 3 (the default 1; `.freq` ratios, the PSSM redo), databases of several volumes (merged per query as NCBI does), `-dbsize` and the 32-bit score bound, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11b` |
 | `PS11c` | PS stage 11c: the options of `losat rpsblast` that PS11a refuses and PS11b leaves refused (-searchsp with the old Karlin-Altschul statistics and OLD_FSC, -seg, -soft_masking, -lcase_masking, -xdrop_*, -use_sw_tback, -sum_stats, -line_length, -sorthits, -sorthsps); split into PS11c-1, PS11c-2 (-searchsp, OLD_FSC) and PS11c-3 (-use_sw_tback). | in progress | none | changelog entry `feature-ps-ps11b` |
-| `PS11c-1` | PS stage 11c part 1: `losat rpsblast` -seg, -soft_masking, -lcase_masking, -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -line_length, -sorthits, -sorthsps and -sum_stats false (true refused: NCBI reads past its arrays), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11c-1` |
+| `PS11c-1` | PS stage 11c part 1: `losat rpsblast` -seg, -soft_masking, -lcase_masking, -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -line_length, -sorthits, -sorthsps and -sum_stats false (true refused: NCBI reads past its arrays), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #1000 | changelog entry `feature-ps-ps11c-1` |
+| `PS11c-2` | PS stage 11c part 2: `losat rpsblast` -searchsp and the environment variable OLD_FSC (no Gumbel block: the cutoffs and E-values on the query's effective search space, per volume with -dbsize and several volumes), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11c-2` |
+| `PS16` | PS stage 16 (series PR, the rpsbproc chain): `losat rpsbproc`, NCBI's post-RPSBLAST processing utility rpsbproc 0.5.1 (package of 2025-05-13); split into PS16a (domain hits), PS16b (sites and motifs), PS16c (nucleotide queries of rpstblastn), PS16d (XML input). | in progress | none | changelog entry `feature-ps-ps16a` |
+| `PS16a` | PS stage 16a: `losat rpsbproc` with `-t doms` for protein queries: the ASN.1 text Blast4-archive reader (streaming, one lexer with the PSSM reader), the six CDD data files, the domain classification (`-m rep`, `std`, `full`, `-f`) with libstdc++'s `std::sort`, NCBI's header, messages and exit codes, byte for byte as NCBI's rpsbproc 0.5.1. | in progress | none | changelog entry `feature-ps-ps16a` |
+| `PS16b` | PS stage 16b: `losat rpsbproc` with `-t feats` and `-t both` (the default) for protein queries: site storage from `cddannot.dat` and `cddannot_generic.dat`, the hierarchy roots, the feature records and the structural-domain clipping, the mapping of sites and motifs to the query (the 80 % rule), NCBI's PROSITE parser and matcher (`CProSite`) and `MotifCheck` with its process-wide motif positions (kept per run; a read past the list counts as failed, PD-LOSAT-NCBI-DEFECTS 1.14), the `SITES` and `MOTIFS` output and header lines, byte for byte as NCBI's rpsbproc 0.5.1. | in progress | none | changelog entry `feature-ps-ps16b` |
 
 ### RL: the v0.2.0 release
 
@@ -182,7 +186,7 @@ As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree,
 | ID | Meaning | State | Main pull requests | Record in this repository |
 | --- | --- | --- | --- | --- |
 | `SW` | Line SW (Nov 2026): the revision of LOSAT after its SWEBOK audit, in stages SW1-SW11: CI and configuration, records and decision registries, unsafe code, lints, duplication and cycles, large functions, test adequacy, dependencies and release integrity, engine documents. | in progress | #825, #853, #857, #865, #873, #914, #960, #885, #950, #967 | [docs/decisions/OWNER_DECISIONS.md](../../docs/decisions/OWNER_DECISIONS.md) |
-| `SW SW8` | Stage SW8: test adequacy (damaged-input tests, coverage in the nightly run, orphan tests, the NCBI unit-case ledger) and the checkout prefix of frozen outputs replaced when comparing; follow-ups such as `losat blastdbcmd` reading a column's big-endian data file as NCBI does (DECISIONS 40). | in progress | #885, #886, #888, #897, #925, #931, #935, #945, #947, #953, #954 | [docs/evidence/ncbi_unit_cases/LEDGER.tsv](../../docs/evidence/ncbi_unit_cases/LEDGER.tsv) |
+| `SW SW8` | Stage SW8: test adequacy (damaged-input tests, coverage in the nightly run, orphan tests, the NCBI unit-case ledger) and the checkout prefix of frozen outputs replaced when comparing; follow-ups such as `losat blastdbcmd` reading a column's big-endian data file as NCBI does (DECISIONS 40), searches of databases with column files and LOSAT Web inflating compressed sources with the engine's decoders (D2, DECISIONS 44). | in progress | #885, #886, #888, #897, #925, #931, #934, #935, #945, #947, #953, #954, #965, #972, #975, #977, #980, #997, #1008 | [docs/evidence/ncbi_unit_cases/LEDGER.tsv](../../docs/evidence/ncbi_unit_cases/LEDGER.tsv) |
 
 ### Plan v4 (speed and memory lines)
 

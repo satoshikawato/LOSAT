@@ -34,14 +34,16 @@ import {
 } from '../domain/accession';
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
+import { parseTaxid, WINDOW_MASKER_TAXID_FLAG, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
 import { inputLead, type InputLead } from '../domain/input-format';
-import { formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
+import { describedSections, formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import {
   fastaParser,
   PROGRAMS,
   programById,
   sequenceKind,
+  WINDOW_MASKER_FLAG,
   type InputRole,
   type ProgramId,
   type SequenceKind,
@@ -148,12 +150,30 @@ export type Validation =
   | { readonly state: 'idle' | 'checking' | 'ok' }
   | { readonly state: 'invalid'; readonly message: string };
 
+/** The counts of a taxonomy ID that the draft can search with. */
+export interface SavedCountsFile {
+  readonly file: File;
+  readonly origin: CountsOrigin;
+}
+
 export interface DraftState {
   readonly program: ProgramId;
   readonly query: RoleDraft;
   readonly subject: RoleDraft;
   /** The form's values of each program: what the user set, nothing else. */
   readonly values: Readonly<Record<ProgramId, FormValues>>;
+  /**
+   * The files chosen for the options of the kind `file` (BLASTN's WindowMasker counts), by program
+   * and flag; the field's value holds the file's name. They stay in the working session, as the
+   * sources do.
+   */
+  readonly files: Readonly<Record<ProgramId, Readonly<Record<string, File>>>>;
+  /**
+   * The WindowMasker counts that the browser keeps for the taxonomy IDs (line WW2), by the ID in
+   * decimal: the file, and where it came from. A search with `-window_masker_taxid` reads the file
+   * of its ID (CountsLoader hands them over: setCounts).
+   */
+  readonly counts: Readonly<Record<string, SavedCountsFile>>;
   /** The "Additional options" of each program, as typed: other options, as on a command line (`splitOptions`). */
   readonly extra: Readonly<Record<ProgramId, string>>;
   /** The Job Title of the next runs, as typed ('' for none); never part of the argv. */
@@ -244,6 +264,8 @@ export class SearchDraft {
       query: emptyRole(),
       subject: emptyRole(),
       values,
+      files: Object.fromEntries(PROGRAMS.map((program) => [program.id, Object.freeze({})])) as Record<ProgramId, Readonly<Record<string, File>>>,
+      counts: Object.freeze({}),
       extra: Object.fromEntries(PROGRAMS.map((program) => [program.id, ''])) as Record<ProgramId, string>,
       title: '',
       threads: 'auto',
@@ -296,14 +318,69 @@ export class SearchDraft {
   }
 
   /**
+   * Chooses the file of an option of the kind `file`: the option's value becomes the file's name,
+   * which the argv gives the option, and the run reads the file under it. Without a file the
+   * option is cleared (the box is unchecked).
+   */
+  setFile(flag: string, file: File | undefined): void {
+    const { program, files } = this.state.get();
+    const next = { ...files[program] };
+    if (file === undefined) delete next[flag];
+    else next[flag] = file;
+    this.set({ files: { ...files, [program]: Object.freeze(next) } });
+    this.setField(flag, file === undefined ? '' : file.name);
+  }
+
+  /**
+   * Chooses how the row "Species-specific repeats filter for:" names the counts (BLASTN): not at
+   * all (the box is unchecked), by a taxonomy ID, or by a file. The box checked waits for the ID or
+   * the file (the search cannot start without it), and a chosen file is let go whichever way the
+   * row changes.
+   */
+  setRepeats(mode: 'off' | 'taxid' | 'file'): void {
+    const { program, files } = this.state.get();
+    const next = { ...files[program] };
+    delete next[WINDOW_MASKER_FLAG];
+    this.set({ files: { ...files, [program]: Object.freeze(next) } });
+    this.setFields([
+      [WINDOW_MASKER_FLAG, mode === 'file' ? true : ''],
+      [WINDOW_MASKER_TAXID_FLAG, mode === 'taxid' ? true : ''],
+    ]);
+  }
+
+  /** Types the taxonomy ID of the row (an empty box stays checked and waits for it). */
+  setTaxid(text: string): void {
+    this.setField(WINDOW_MASKER_TAXID_FLAG, text.trim() === '' ? true : text);
+  }
+
+  /**
+   * Hands the draft the whole counts file that the browser keeps for a taxonomy ID, or takes it
+   * back (undefined: it was deleted, or is not whole). A search with that ID reads this file.
+   */
+  setCounts(taxid: number, saved: SavedCountsFile | undefined): void {
+    const counts = { ...this.state.get().counts };
+    if (saved === undefined) delete counts[taxid];
+    else counts[taxid] = saved;
+    this.set({ counts: Object.freeze(counts) });
+  }
+
+  /**
    * Clears the values of some fields of the program ("Restore default search parameters"):
-   * the engine's defaults apply to them again.
+   * the engine's defaults apply to them again, and a chosen file is let go.
    */
   resetFields(flags: readonly string[]): void {
-    const { program, values } = this.state.get();
+    const { program, values, files } = this.state.get();
     const next: Record<string, FieldValue> = { ...values[program] };
-    for (const flag of flags) delete next[flag];
-    this.set({ values: { ...values, [program]: Object.freeze(next) }, message: undefined });
+    const nextFiles: Record<string, File> = { ...files[program] };
+    for (const flag of flags) {
+      delete next[flag];
+      delete nextFiles[flag];
+    }
+    this.set({
+      values: { ...values, [program]: Object.freeze(next) },
+      files: { ...files, [program]: Object.freeze(nextFiles) },
+      message: undefined,
+    });
     this.scheduleValidation();
   }
 
@@ -809,6 +886,8 @@ export class SearchDraft {
       const problem = this.inputProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
     }
+    const fileProblem = this.fileProblem();
+    if (fileProblem !== undefined) return { ok: false, message: fileProblem };
     // Everything from one state, before any wait.
     const groups = { query: this.inputGroups('query'), subject: this.inputGroups('subject') };
     // Their sources stay until the runs have their inputs, also when the form lets them go meanwhile.
@@ -817,6 +896,12 @@ export class SearchDraft {
       [...groups.query, ...groups.subject].flatMap((group) => group.sources.map((source) => source.sourceId!)),
     );
     const parameters = this.parameters();
+    // The file of -window_masker_db, when the argv has it (a file chosen and then unchecked is not in the form).
+    let windowMasker = parameters.some(([flag]) => flag === WINDOW_MASKER_FLAG) ? this.state.get().files[program][WINDOW_MASKER_FLAG] : undefined;
+    // Or the file kept for the taxonomy ID of -window_masker_taxid (line WW2).
+    const taxid = parseTaxid(String(parameters.find(([flag]) => flag === WINDOW_MASKER_TAXID_FLAG)?.[1] ?? ''));
+    const kept = taxid === undefined ? undefined : this.state.get().counts[taxid];
+    if (kept !== undefined) windowMasker = kept.file;
     let extra: readonly string[];
     try {
       extra = this.extraWords();
@@ -837,6 +922,8 @@ export class SearchDraft {
           parameters,
           ...(extra.length === 0 ? {} : { extra }),
           requestedThreads: threads,
+          ...(windowMasker === undefined ? {} : { windowMasker }),
+          ...(kept === undefined ? {} : { windowMaskerOrigin: kept.origin }),
           ...(title.trim() === '' ? {} : { title }),
         });
       }
@@ -857,6 +944,29 @@ export class SearchDraft {
     for (const role of ROLES) {
       const problem = this.problemOf(role);
       if (problem !== undefined) return problem.short;
+    }
+    return this.fileProblem();
+  }
+
+  /**
+   * A box of an option of the kind `file` that is checked while no file is chosen (BLASTN's
+   * WindowMasker counts), or while the taxonomy ID of its row is not typed or its counts are not
+   * downloaded: the sentence that asks for it; undefined when there is none.
+   */
+  private fileProblem(): string | undefined {
+    const { program, values, description, counts } = this.state.get();
+    for (const section of describedSections(programById(program), description?.parameters)) {
+      for (const field of section.fields) {
+        if (field.kind !== 'file') continue;
+        if (values[program][field.flag] === true) return field.file?.missing ?? `Choose the file for ${field.label}`;
+        // The taxonomy ID of the same row: typed, and its counts downloaded.
+        const taxid = field.file?.taxid;
+        const typed = taxid === undefined ? undefined : values[program][taxid.flag];
+        if (taxid === undefined || (typed !== true && (typeof typed !== 'string' || typed.trim() === ''))) continue;
+        const id = typeof typed === 'string' ? parseTaxid(typed) : undefined;
+        if (id === undefined) return taxid.missing;
+        if (counts[id] === undefined) return `Download the counts for ${id}.`;
+      }
     }
     return undefined;
   }

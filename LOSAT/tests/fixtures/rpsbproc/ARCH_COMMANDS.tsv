@@ -1,0 +1,19 @@
+three.asn	rpsblast -query q/three.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/three.asn
+tiny3.asn	env BATCH_SIZE=1 rpsblast -query q/tiny3.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/tiny3.asn
+sd2.asn	rpsblast -query q/sd2.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/sd2.asn
+src2.asn	rpsblast -query q/src2.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/src2.asn
+qgap.asn	rpsblast -query q/qgap.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/qgap.asn
+dctr_e10.asn	rpsblast -query q/dctr.faa -db Cdd -outfmt 11 -out arch/dctr_e10.asn
+tie2.asn	rpsblast -query q/tie2.faa -db Cdd -evalue 2e-6 -outfmt 11 -out arch/tie2.asn
+tie1.asn	rpsblast -query q/tie1.faa -db Cdd -evalue 1e-13 -outfmt 11 -out arch/tie1.asn
+one.asn	rpsblast -query q/one.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/one.asn
+notitle.asn	rpsblast -query q/notitle.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/notitle.asn
+parsed.asn	rpsblast -query q/parsed.faa -parse_deflines -db Cdd -evalue 0.01 -outfmt 11 -out arch/parsed.asn
+bin.asn	env ARCHIVE_FORMAT=bin rpsblast -query q/one.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/bin.asn
+one.xml	rpsblast -query q/one.faa -db Cdd -evalue 0.01 -outfmt 5 -out arch/one.xml
+lcl.asn	rpsblast -query q/lcl.faa -db prof_rps -outfmt 11 -out arch/lcl.asn
+mstate.asn	env BATCH_SIZE=1 rpsblast -query q/mstate.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/mstate.asn
+mfirst.asn	rpsblast -query q/mfirst.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/mfirst.asn
+gen2.asn	rpsblast -query q/gen2.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/gen2.asn
+motdom.asn	rpsblast -query q/motdom.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/motdom.asn
+sdsite.asn	rpsblast -query q/sdsite.faa -db Cdd -evalue 0.01 -outfmt 11 -out arch/sdsite.asn

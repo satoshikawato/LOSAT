@@ -830,10 +830,11 @@ pub fn parse_comp_based_stats(
 }
 
 /// The query splitter that NCBI sets up for every query batch (`CBlastPrelimSearch`, in
-/// `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE` and then `OVERLAP_CHUNK_SIZE`
-/// but does not split an ungapped search. The outer `Err` is LOSAT's rejection of a value
-/// that NCBI cannot convert (its `CStringException` names its build's source files, exit
-/// 255); the inner one is NCBI's error for a chunk size that is not divisible by 3.
+/// `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE` and then (where it can split)
+/// `OVERLAP_CHUNK_SIZE` but does not split an ungapped search. The outer `Err` is LOSAT's
+/// rejection of a value that NCBI cannot convert (its `CStringException` names its build's
+/// source files, exit 255); the inner one is NCBI's error for a chunk size that is not
+/// divisible by 3.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-61
 /// ```c
@@ -854,15 +855,29 @@ pub fn parse_comp_based_stats(
 ///                    "Split query chunk size must be divisible by 3");
 ///     }
 /// ```
-/// `SplitQuery_ShouldSplit` is true for blastp, tblastn and tblastx
-/// (split_query_aux_priv.cpp:73-97), so `SplitQuery_CalculateNumChunks` always reads the
-/// overlap (`blastn/query_split.rs` `SplitSizes`; the `int` becomes a 64-bit `size_t`). The
-/// chunk size must be divisible by 3 only for a translated query (`translated_query`,
-/// tblastx). Whether a blastp or tblastn query batch is split is
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:78-110
+/// ```c
+///     // do not split RPS-BLAST
+///     if (Blast_SubjectIsPssm(program) || ... ) { retval = false; }
+/// ...
+///     if ( !SplitQuery_ShouldSplit(program, *chunk_size, concatenated_query_length, num_queries)) {
+///         return 1;
+///     }
+///     size_t overlap_size = SplitQuery_GetOverlapChunkSize(program);
+/// ```
+/// `SplitQuery_CalculateNumChunks` reads the overlap (`getenv("OVERLAP_CHUNK_SIZE")` in
+/// `SplitQuery_GetOverlapChunkSize`) only after `SplitQuery_ShouldSplit` is true, and that is
+/// false for RPS-BLAST (`Blast_SubjectIsPssm`, "do not split RPS-BLAST"), so `rpsblast` reads
+/// `CHUNK_SIZE` (the constructor above) but never `OVERLAP_CHUNK_SIZE`: `reads_overlap` is false
+/// for it and an overlap that is not an integer does not stop the run. It is true for blastp,
+/// psiblast, tblastn and tblastx (`blastn/query_split.rs` `SplitSizes`; the `int` becomes a
+/// 64-bit `size_t`). The chunk size must be divisible by 3 only for a translated query
+/// (`translated_query`, tblastx). Whether a blastp or tblastn query batch is split is
 /// `blastp/protein_query_split.rs`.
 pub fn check_query_split_environment(
     program: &str,
     translated_query: bool,
+    reads_overlap: bool,
 ) -> anyhow::Result<anyhow::Result<()>> {
     let read = |variable: &str| read_query_split_variable(program, variable);
     if let Some(chunk_size) = read("CHUNK_SIZE")? {
@@ -875,7 +890,9 @@ pub fn check_query_split_environment(
             .into()));
         }
     }
-    read("OVERLAP_CHUNK_SIZE")?;
+    if reads_overlap {
+        read("OVERLAP_CHUNK_SIZE")?;
+    }
     Ok(Ok(()))
 }
 
@@ -1020,8 +1037,8 @@ pub fn query_batch_size(program: &str, default: u32) -> anyhow::Result<u32> {
 
 /// Whether the environment variable `OLD_FSC` is set (to any value, the empty one too), with
 /// which NCBI's protein programs compute without the Gumbel block (finite-size correction).
-/// NCBI sets it itself for `-searchsp` (blast_args.cpp:303-307), so BLASTP, PSIBLAST, BLASTX and
-/// TBLASTN read it as they read `-searchsp`: their `old_fsc`.
+/// NCBI sets it itself for `-searchsp` (blast_args.cpp:303-307), so BLASTP, PSIBLAST, RPSBLAST, BLASTX
+/// and TBLASTN read it as they read `-searchsp`: their `old_fsc`.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:922-923
 /// ```c
@@ -1030,17 +1047,6 @@ pub fn query_batch_size(program: &str, default: u32) -> anyhow::Result<u32> {
 /// ```
 pub fn old_fsc_environment() -> bool {
     std::env::var_os("OLD_FSC").is_some()
-}
-
-/// LOSAT's refusal of `OLD_FSC` (`old_fsc_environment`) in RPSBLAST, whose search without the
-/// Gumbel block is not ported (its parser refuses `-searchsp`, item PS11c).
-pub fn check_old_fsc(program: &str) -> anyhow::Result<()> {
-    if old_fsc_environment() {
-        anyhow::bail!(
-            "the environment variable OLD_FSC, which makes NCBI BLAST+ compute without its finite-size correction (the Gumbel block), is not supported by LOSAT's {program}"
-        );
-    }
-    Ok(())
 }
 
 /// The window of the two-hit word finder where NCBI's diagonal table never gets a length.

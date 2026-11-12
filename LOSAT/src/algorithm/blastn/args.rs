@@ -472,6 +472,21 @@ pub struct BlastnArgs {
     // Read by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: true]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:354-356
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgWindowMaskerTaxId, "window_masker_taxid",
+    //                 "Enable WindowMasker filtering using a Taxonomic ID",
+    //                 CArgDescriptions::eInteger);
+    // ```
+    // Read by the filtering handler after `-dust` (`resolve_window_masker`); 0 is no
+    // WindowMasker, but it is one of the filtering databases given.
+    #[arg(
+        long = "window_masker_taxid",
+        value_name = "window_masker_taxid",
+        value_parser = ncbi_integer,
+        help = "Enable WindowMasker filtering using a Taxonomic ID"
+    )]
+    pub window_masker_taxid: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:358-363
     // ```c++
     //         arg_desc.AddOptionalKey(kArgWindowMaskerDatabase, "window_masker_db",
@@ -488,13 +503,22 @@ pub struct BlastnArgs {
         help = "Enable WindowMasker filtering using this repeats database."
     )]
     pub window_masker_db: Option<String>,
-    /// The masker of `-window_masker_db` (`resolve_window_masker`); `None` without the option.
+    /// The masker of `-window_masker_db` or of `-window_masker_taxid` (`resolve_window_masker`);
+    /// `None` without them (or with the taxid 0).
     #[arg(skip)]
     pub window_masker: Option<std::sync::Arc<super::window_masker::WindowMasker>>,
-    /// Where `-window_masker_db` is read from: the file system when `None`; LOSAT Web's adapter
-    /// gives the counts files it holds under their names.
+    /// Where `-window_masker_db` and the file of `-window_masker_taxid` are read from: the file
+    /// system when `None`; LOSAT Web's adapter gives the counts files it holds under their names.
     #[arg(skip)]
     pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
+    /// The registry of `-window_masker_taxid` as the caller read it (the directory of its files
+    /// and what each load writes, `ncbi_environment::ApplicationSettings::window_masker_registry`),
+    /// or LOSAT Web's registry of the counts files it holds (`window_masker_counts`: its directory,
+    /// no posts); `None` when the caller gives neither, which `-window_masker_taxid` other than 0
+    /// then refuses (`run_local_formats`).
+    #[arg(skip)]
+    pub window_masker_registry:
+        Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
     /// by the command line before the search where a tabular field list shows a name of the
     /// taxonomy database (`algorithm::blastn::tabular`); `None` elsewhere (`run_local`'s callers
@@ -906,27 +930,6 @@ impl BlastnArgs {
     /// ...
     ///         if ( !m_QueryIsProtein && args[kArgDustFiltering]) {
     /// ```
-    /// The filtering handler's `-window_masker_db`, after `-dust`: NCBI's check of the counts
-    /// file (`window_masker::open`), and the masker made from it.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-458
-    /// ```c++
-    ///     if (args.Exist(kArgWindowMaskerDatabase) &&
-    ///         args[kArgWindowMaskerDatabase]) {
-    ///         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
-    ///         const CSeqMaskerIstatFactory::EStatType type =
-    ///             CSeqMaskerIstatFactory::DiscoverStatType(stat_file);
-    /// ```
-    pub fn resolve_window_masker(&mut self) -> anyhow::Result<()> {
-        if let Some(name) = &self.window_masker_db {
-            let source = super::window_masker::source_of(self.window_masker_counts.as_ref());
-            self.window_masker = Some(std::sync::Arc::new(super::window_masker::open(
-                name, &*source,
-            )?));
-        }
-        Ok(())
-    }
-
     pub fn resolve_dust(&mut self) -> anyhow::Result<()> {
         if self.dust_filtering.is_none()
             && !crate::algorithm::blastn::coordination::task_dust_by_default(&self.task)
@@ -941,6 +944,89 @@ impl BlastnArgs {
                 ),
             })?;
         }
+        Ok(())
+    }
+
+    /// The filtering handler's `-window_masker_taxid` and `-window_masker_db`, after `-dust`:
+    /// NCBI's check of the counts file of `-window_masker_db` (`window_masker::open`), then
+    /// that only one of them is given, and the masker made from the file (that of the taxid:
+    /// `window_masker::open_taxid`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-458
+    /// ```c++
+    ///     if (args.Exist(kArgWindowMaskerDatabase) &&
+    ///         args[kArgWindowMaskerDatabase]) {
+    ///         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
+    ///         const CSeqMaskerIstatFactory::EStatType type =
+    ///             CSeqMaskerIstatFactory::DiscoverStatType(stat_file);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:430-466
+    /// ```c++
+    ///     int filter_dbs = 0;
+    ///
+    ///     if (args.Exist(kArgFilteringDb) && args[kArgFilteringDb]) {
+    ///         opt.SetRepeatFilteringDB(args[kArgFilteringDb].AsString().c_str());
+    ///         filter_dbs++;
+    ///     }
+    ///
+    ///     if (args.Exist(kArgWindowMaskerTaxId) &&
+    ///         args[kArgWindowMaskerTaxId]) {
+    ///
+    ///         opt.SetWindowMaskerTaxId
+    ///             (args[kArgWindowMaskerTaxId].AsInteger());
+    ///
+    ///         filter_dbs++;
+    ///     }
+    ///     ...
+    ///     if (filter_dbs > 1) {
+    ///         string msg =
+    ///             string("Please specify at most one of ") + kArgFilteringDb + ", " +
+    ///             kArgWindowMaskerTaxId + ", or " + kArgWindowMaskerDatabase + ".";
+    ///
+    ///         NCBI_THROW(CInputException, eInvalidInput, msg);
+    ///     }
+    /// ```
+    /// `-window_masker_taxid` counts also with the taxid 0, which uses no WindowMasker
+    /// (`Blast_FindWindowMaskerLoc_Fwd` reads a taxid only when it is not 0); its file is
+    /// looked for in the set-up of the query batches (`window_masker::open_taxid`). `-filtering_db`
+    /// is refused when the arguments are parsed (`cli::is_unported_blastn_arg`), so it is never
+    /// counted here.
+    pub fn resolve_window_masker(&mut self) -> anyhow::Result<()> {
+        if self.window_masker_db.is_none() && self.window_masker_taxid.is_none() {
+            return Ok(());
+        }
+        let source = super::window_masker::source_of(self.window_masker_counts.as_ref());
+        let database = match &self.window_masker_db {
+            Some(name) => Some(super::window_masker::open(name, &*source)?),
+            None => None,
+        };
+        if self.window_masker_taxid.is_some() && database.is_some() {
+            return Err(crate::cli::NativeError {
+                exit: 1,
+                message: "BLAST query/options error: Please specify at most one of filtering_db, window_masker_taxid, or window_masker_db.\nPlease refer to the BLAST+ user manual.\n".to_string(),
+            }
+            .into());
+        }
+        let masker = match self.window_masker_taxid.filter(|&taxid| taxid != 0) {
+            Some(taxid) => {
+                // The command line and the library give the registry, LOSAT Web the registry of
+                // its counts files; a caller that gives none is refused before
+                // (`run_local_formats`).
+                let registry = self
+                    .window_masker_registry
+                    .as_ref()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "-window_masker_taxid: the caller gave no directory of WindowMasker counts files"
+                        )
+                    })?
+                    .as_ref()
+                    .map_err(|reason| anyhow::anyhow!("{reason}"))?;
+                Some(super::window_masker::open_taxid(taxid, registry, &*source)?)
+            }
+            None => database,
+        };
+        self.window_masker = masker.map(std::sync::Arc::new);
         Ok(())
     }
 }

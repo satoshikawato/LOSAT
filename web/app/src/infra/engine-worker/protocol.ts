@@ -3,6 +3,7 @@
 // Every message of the Engine worker carries the runtime generation it belongs to; the main
 // thread drops messages of an older one.
 import type { RecordKey } from '../../domain/dataset';
+import type { CountsRecord } from '../../domain/run';
 import type { EnginePhase } from '../../ports/engine';
 import type { OutputStream } from '../../ports/run-output';
 import type { ReactorArtifact } from '../reactor/artifact';
@@ -28,6 +29,11 @@ export interface EngineInit {
   readonly faultChannel: string;
   /** BroadcastChannel on which the Gateway asks the keeper of the shared memory to grow it (memory-keeper.ts). */
   readonly keeperChannel: string;
+  /**
+   * Whether the threaded instance is in use (instance-use.ts), shared with the Gateway. Absent
+   * where the page cannot share memory with a worker: no threaded instance starts then.
+   */
+  readonly use?: SharedArrayBuffer;
 }
 
 export interface WorkerInput {
@@ -37,6 +43,19 @@ export interface WorkerInput {
    * Program, SHA-256 and dataset revisions of the input. A subject whose key equals the
    * one the worker holds is not registered again (plan §4.6 R1).
    */
+  readonly key: string;
+}
+
+/**
+ * The WindowMasker counts file of a run (`-window_masker_db` or `-window_masker_taxid`). A File posted to the worker is
+ * shared, not copied. A file whose `key` equals the one the instance holds is not given to the
+ * engine again (plan §5, DESIGN_ww1 §5).
+ */
+export interface WorkerCounts {
+  /** The value of `-window_masker_db` in the argv; for `-window_masker_taxid`, windowmasker/<taxid>/wmasker.obinary. */
+  readonly name: string;
+  readonly blob: Blob;
+  /** Name, size and last-modified time of the file (counts-key); the runtime adds the SHA-256 of its ends (`edgeDigest`). */
   readonly key: string;
 }
 
@@ -51,6 +70,7 @@ export interface WorkerRun {
   readonly threads: number;
   readonly query: WorkerInput;
   readonly subject: WorkerInput;
+  readonly windowMasker?: WorkerCounts;
   readonly output: MessagePort;
 }
 
@@ -66,6 +86,22 @@ export interface WorkerPrepare {
   /** The argv of the coming search (EnginePrepareHint.argv), for the warm-up. */
   readonly argv?: readonly string[];
 }
+
+/**
+ * Test builds only (`__LOSAT_TEST_HOOKS__`): the BroadcastChannel on which a page arms the
+ * Engine worker's next search to stop at its first output ({type: 'arm'}, answered by
+ * {type: 'armed'}).
+ */
+export const STOP_AT_OUTPUT_CHANNEL = 'losat-web:test:stop-at-output';
+
+/**
+ * Test builds only (`__LOSAT_TEST_HOOKS__`): the BroadcastChannel on which a page arms the
+ * Engine worker's next use of the threaded instance (a search or a warm-up) to hold at its
+ * start until the Gateway ends the runtime ({type: 'arm'}, answered by {type: 'armed'}; the
+ * worker posts {type: 'holding'} when it holds, and {type: 'not-held', reason} after a
+ * preparation with an argv that did not hold).
+ */
+export const HOLD_USE_CHANNEL = 'losat-web:test:hold-use';
 
 /** Test builds only (`__LOSAT_TEST_HOOKS__`): drives the run output writer of the worker. */
 export type WorkerTestCommand =
@@ -92,6 +128,10 @@ export interface WorkerRunResult {
   readonly memory: MemoryRecord;
   /** Whether the search used the subject that the instance held (plan §4.6 R1). */
   readonly subjectRetained: boolean;
+  /** What the run did with its WindowMasker counts file, when it had one. */
+  readonly windowMasker?: CountsRecord;
+  /** The bytes of the counts file that the instance holds after the run (the renewal's high-water mark allows for them); absent when it holds none. */
+  readonly countsBytes?: number;
 }
 
 export interface WorkerError {
@@ -108,11 +148,6 @@ export type EngineEvent =
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }
-  /**
-   * Before a search runs on the threaded instance: if the Gateway ends the worker during the
-   * search, it first has the keeper grow the shared memory to its maximum (memory-keeper.ts).
-   */
-  | { readonly type: 'threaded-search'; readonly generation: number }
   | { readonly type: 'test-reply'; readonly id: number; readonly ok: boolean; readonly value?: number; readonly error?: WorkerError };
 
 // --- thread workers -------------------------------------------------------------------
@@ -122,6 +157,8 @@ export const SLOT_PREPARING = 0;
 export const SLOT_READY = 1;
 export const SLOT_RUNNING = 2;
 export const SLOT_FAILED = -1;
+/** The ThreadHost ended the slot's worker while its thread ran (ThreadHost.terminate). */
+export const SLOT_ENDED = -2;
 
 export interface ThreadPrepare {
   readonly type: 'prepare';
@@ -130,6 +167,8 @@ export interface ThreadPrepare {
   /** Int32Array(1) on a SharedArrayBuffer: the slot state. */
   readonly slot: SharedArrayBuffer;
   readonly faultChannel: string;
+  /** The use count of the instance (instance-use.ts): a thread counts itself off when it returns. */
+  readonly use: SharedArrayBuffer;
 }
 
 /** Start states, in the start message's shared Int32Array (index 0). */

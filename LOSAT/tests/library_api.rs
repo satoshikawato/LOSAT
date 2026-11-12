@@ -11,9 +11,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use LOSAT::api::local_blast::{
-    run_local_blastn, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
-};
 use LOSAT::api::{
     describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
     run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs, Outcome,
@@ -975,61 +972,6 @@ fn the_messages_of_the_run_come_once_with_the_first_batch() {
     }
 }
 
-/// The extensions of each batch of a search, as the engine reports them.
-#[derive(Default)]
-struct Extensions(Vec<i32>);
-
-impl FormatObserver for Extensions {
-    fn hsp_begin(&mut self, _format: usize, _hsp: HspIndex) {}
-
-    fn hsp_end(&mut self, _format: usize, _hsp: HspIndex) {}
-
-    fn batch_extensions(&mut self, extensions: i32) {
-        self.0.push(extensions);
-    }
-}
-
-#[test]
-fn blastn_batches_are_those_of_the_search_of_all_queries() {
-    // `CBatchSizeMixer` sizes BLASTN's batches by the extensions of the batch before.
-    let once = std::fs::read(fixture("small_test.fasta")).expect("fixture");
-    let copied = once.repeat(30);
-    let queries = read_fasta(Program::Blastn, Role::Query, &copied).unwrap();
-    let subjects = read_fasta(Program::Blastn, Role::Subject, &once).unwrap();
-    for task in ["blastn", "megablast"] {
-        let cli = LOSAT::cli::try_parse_from::<LOSAT::cli::Cli, _, _>([
-            "losat", "blastn", "-query", "q", "-subject", "s", "-task", task,
-        ])
-        .unwrap();
-        let LOSAT::cli::Commands::Blastn(args) = cli.command else {
-            panic!("a BLASTN command")
-        };
-        let mut extensions = Extensions::default();
-        let mut report = Vec::new();
-        let mut diagnostics = Vec::new();
-        {
-            let mut on_hits = |_| {};
-            let mut outputs = ReportOutputs {
-                formats: vec![FormatOutput {
-                    outfmt: "6",
-                    sink: OutputSink::Writer(&mut report),
-                }],
-                diagnostics: &mut diagnostics,
-                hits: Some(&mut on_hits),
-                observer: Some(&mut extensions),
-            };
-            run_local_blastn(args, &queries, &subjects, &mut outputs).unwrap();
-        }
-        let search = validate(Program::Blastn, &["-task", task]).unwrap();
-        let batches = run_batches(&search, Inputs::new(&queries, &subjects))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(batches.len(), extensions.0.len(), "{task}");
-        assert!(batches.len() > 1, "{task}");
-    }
-}
-
 #[test]
 fn a_caller_stops_between_batches() {
     let case = &CASES[3];
@@ -1092,6 +1034,7 @@ fn parsed_ids_show_as_on_the_command_line() {
         Program::Blastx,
         Program::Tblastn,
         Program::Tblastx,
+        Program::Psiblast,
     ] {
         let query = format!(
             ">gb|AB000001.1| a query\n{0}\n>lcl|mine a second query\n{0}\n",

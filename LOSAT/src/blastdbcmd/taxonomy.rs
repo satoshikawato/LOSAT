@@ -5,7 +5,8 @@
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
-use crate::blastinput::db_filter::{string_to_int, NO_TAXONOMY_WARNING, TAXONOMY_FILE};
+use crate::blastinput::db_filter::{NO_TAXONOMY_WARNING, TAXONOMY_FILE};
+use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
 use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
@@ -131,7 +132,8 @@ pub(super) fn tax_id_list(
     };
     let mut tax_ids = BTreeSet::new();
     for id in &ids {
-        let Some(taxid) = string_to_int(id) else {
+        // `TTaxId` is an `int`: `StringToNumeric<TTaxId>` is `NStr::StringToInt`.
+        let Ok(taxid) = string_to_int(id, ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES) else {
             return Err(Ended(diag.refuse(&refusal(&format!(
                 "the taxid '{}' is not a number: NCBI ends with an exception that names its \
                  source files (exit status 255)",

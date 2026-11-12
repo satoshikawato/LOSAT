@@ -5,6 +5,8 @@
 
 use std::borrow::Cow;
 
+use crate::ncbi_str::parse_escapes;
+
 /// `NStr::PrintableString(str)` with its default mode (`fNewLine_Quote |
 /// fNonAscii_Passthru`, which are 0) and `eLanguage_C`.
 ///
@@ -220,181 +222,10 @@ fn replace(src: &[u8], search: &[u8], replacement: &[u8]) -> Vec<u8> {
     dst
 }
 
-/// `NStr::ParseEscapes(str)` with its default mode (`eEscSeqRange_Standard`). An error is
-/// the message of NCBI's `CStringException`; the text that `fasta_reader_title` gives it
-/// has no escape that fails (see there).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4789-4892
-/// ```c++
-/// string NStr::ParseEscapes(const CTempString str, EEscSeqRange mode, char user_char)
-/// {
-///     string out;
-///     out.reserve(str.size());  // result string can only be smaller
-///     SIZE_TYPE pos = 0;
-///     bool is_error = false;
-///
-///     while (pos < str.size()  ||  !is_error) {
-///         SIZE_TYPE pos2 = str.find('\\', pos);
-///         if (pos2 == NPOS) {
-///             //~ out += str.substr(pos);
-///             CTempString sub(str, pos);
-///             out += sub;
-///             break;
-///         }
-///         //~ out += str.substr(pos, pos2 - pos);
-///         CTempString sub(str, pos, pos2-pos);
-///         out += sub;
-///         if (++pos2 == str.size()) {
-///             NCBI_THROW2(CStringException, eFormat,
-///                         "Unterminated escape sequence", pos2);
-///         }
-///         switch (str[pos2]) {
-///         case 'a':  out += '\a';  break;
-///         case 'b':  out += '\b';  break;
-///         case 'f':  out += '\f';  break;
-///         case 'n':  out += '\n';  break;
-///         case 'r':  out += '\r';  break;
-///         case 't':  out += '\t';  break;
-///         case 'v':  out += '\v';  break;
-///         case 'x':
-///             {{
-///                 pos = ++pos2;
-///                 while (pos < str.size()
-///                        &&  isxdigit((unsigned char) str[pos])) {
-///                     pos++;
-///                 }
-///                 if (pos > pos2) {
-///                     SIZE_TYPE len = pos-pos2;
-///                     if ((mode == eEscSeqRange_FirstByte) && (len > 2)) {
-///                         // Take only 2 first hex-digits
-///                         len = 2;
-///                         pos = pos2 + 2;
-///                     }
-///                     unsigned int value =
-///                         StringToUInt(CTempString(str, pos2, len), 0, 16);
-///                     if ((mode != eEscSeqRange_Standard)  &&  (value > 255)) {
-///                         // eEscSeqRange_Standard -- by default
-///                         switch (mode) {
-///                         case eEscSeqRange_FirstByte:
-///                             // Already have right value
-///                             break;
-///                         case eEscSeqRange_Throw:
-///                             NCBI_THROW2(CStringException, eFormat,
-///                                 "Escape sequence '" + NStr::PrintableString(CTempString(str, pos2, len)) +
-///                                 "' is out of range [0-255]", pos2);
-///                             break;
-///                         case eEscSeqRange_Errno:
-///                             CNcbiError::SetErrno(errno = ERANGE, str);
-///                             is_error = true;
-///                             continue;
-///                         case eEscSeqRange_User:
-///                             value = (unsigned)user_char;
-///                             break;
-///                         default:
-///                             NCBI_THROW2(CStringException, eFormat, "Wrong set of flags", pos2);
-///                         }
-///                     }
-///                     out += static_cast<char>(value);
-///                 } else {
-///                     NCBI_THROW2(CStringException, eFormat,
-///                                 "\\x followed by no hexadecimal digits", pos);
-///                 }
-///             }}
-///             continue;
-///         case '0':  case '1':  case '2':  case '3':
-///         case '4':  case '5':  case '6':  case '7':
-///             {{
-///                 pos = pos2;
-///                 unsigned char c = (unsigned char)(str[pos++] - '0');
-///                 while (pos < pos2 + 3  &&  pos < str.size()
-///                        &&  str[pos] >= '0'  &&  str[pos] <= '7') {
-///                     c = (unsigned char)((c << 3) | (str[pos++] - '0'));
-///                 }
-///                 out += c;
-///             }}
-///             continue;
-///         case '\n':
-///             // quoted EOL means no EOL
-///             break;
-///         default:
-///             out += str[pos2];
-///             break;
-///         }
-///         pos = pos2 + 1;
-///     }
-///     if (mode == eEscSeqRange_Errno) {
-///         if (is_error) {
-///             return kEmptyStr;
-///         }
-///         errno = 0;
-///     }
-///     return out;
-/// }
-/// ```
-fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
-    let mut out = Vec::with_capacity(str.len());
-    let mut pos = 0;
-    loop {
-        let Some(found) = str[pos..].iter().position(|&byte| byte == b'\\') else {
-            out.extend_from_slice(&str[pos..]);
-            break;
-        };
-        let mut pos2 = pos + found;
-        out.extend_from_slice(&str[pos..pos2]);
-        pos2 += 1;
-        if pos2 == str.len() {
-            return Err("Unterminated escape sequence");
-        }
-        match str[pos2] {
-            b'a' => out.push(0x07),
-            b'b' => out.push(0x08),
-            b'f' => out.push(0x0c),
-            b'n' => out.push(b'\n'),
-            b'r' => out.push(b'\r'),
-            b't' => out.push(b'\t'),
-            b'v' => out.push(0x0b),
-            b'x' => {
-                pos2 += 1;
-                pos = pos2;
-                while pos < str.len() && str[pos].is_ascii_hexdigit() {
-                    pos += 1;
-                }
-                if pos == pos2 {
-                    return Err("\\x followed by no hexadecimal digits");
-                }
-                // `StringToUInt(..., 0, 16)` throws for a value above 4,294,967,295.
-                let mut value: u32 = 0;
-                for &digit in &str[pos2..pos] {
-                    let digit = (digit as char).to_digit(16).unwrap_or(0);
-                    value = value
-                        .checked_mul(16)
-                        .and_then(|value| value.checked_add(digit))
-                        .ok_or("Cannot convert string to unsigned int")?;
-                }
-                out.push(value as u8);
-                continue;
-            }
-            b'0'..=b'7' => {
-                pos = pos2;
-                let mut c = str[pos] - b'0';
-                pos += 1;
-                while pos < pos2 + 3 && pos < str.len() && (b'0'..=b'7').contains(&str[pos]) {
-                    c = (c << 3) | (str[pos] - b'0');
-                    pos += 1;
-                }
-                out.push(c);
-                continue;
-            }
-            b'\n' => {}
-            other => out.push(other),
-        }
-        pos = pos2 + 1;
-    }
-    Ok(out)
-}
-
 /// The `fasta` string of `x_GetFastaReaderDeflines`: the `DefLine` field with `\t` replaced
-/// by three spaces, then its escapes read (`fasta_reader_title` quotes the lines).
+/// by three spaces, then its escapes read (`fasta_reader_title` quotes the lines) by
+/// `NStr::ParseEscapes` (`ncbi_str::parse_escapes`). The field that `CFastaReader` writes
+/// (`printable_string`) has no escape that fails.
 pub(crate) fn fasta_reader_fasta(defline_field: &[u8]) -> Result<Vec<u8>, &'static str> {
     parse_escapes(&replace(defline_field, b"\\t", TAB_REPLACEMENT))
 }
@@ -497,14 +328,6 @@ mod tests {
     fn parse_escapes_reads_printable_string_back() {
         let all: Vec<u8> = (0..=255u8).chain([b'1', b'?', b'?', 0, b'7']).collect();
         assert_eq!(parse_escapes(&printable_string(&all)).unwrap(), all);
-        assert_eq!(parse_escapes(b"a\\x41\\x4a4bz").unwrap(), b"aA\x4bz");
-        assert_eq!(parse_escapes(b"\\101\\1012\\8\\q").unwrap(), b"AA28q");
-        assert_eq!(parse_escapes(b"a\\\nb").unwrap(), b"ab");
-        assert_eq!(parse_escapes(b"a\\"), Err("Unterminated escape sequence"));
-        assert_eq!(
-            parse_escapes(b"a\\xg"),
-            Err("\\x followed by no hexadecimal digits")
-        );
     }
 
     /// Titles as makeblastdb stores them (the header file of the databases of the probe

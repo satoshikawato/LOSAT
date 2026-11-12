@@ -21,6 +21,14 @@
 // with `-out results`: the side files `results_<n>.json|xml`, and the master file as
 // `results.json|xml`.
 //
+// A BLASTN search with `-window_masker_db` names a counts file: the host registers that file under
+// the argv's value (`file_begin`, `file_chunk`, `file_end`; abi_v2.md §4) before the run, and keeps
+// it for the next searches that name it, as the application keeps one (abi_v2.md §6); a value that
+// is not a regular file is not registered, which the run reports as the CLI reports a file it
+// cannot open. A search with `"window_masker_path"` (BLASTN `-window_masker_taxid`) runs the CLI
+// with that WINDOW_MASKER_PATH, and the host registers the directory's counts files under LOSAT
+// Web's directory (`registerTaxidCounts`).
+//
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
 //          [--out DIR]
@@ -205,6 +213,91 @@ class Reactor {
   }
 }
 
+// Registers the file at `file` under `name` in chunks of `chunkSize` bytes through one buffer of
+// the reactor (abi_v2.md §4 `file_begin`); returns the handle and the *file* JSON.
+function registerFile(reactor, name, file, chunkSize = 1 << 20) {
+  const e = reactor.exports, bytes = fs.readFileSync(file);
+  const begun = reactor.call("losat_web2_file_begin", 1, name, bytes.length);
+  assert.ok(begun.status > 0, `file_begin ${name}: ${begun.error}`);
+  const size = Math.max(1, Math.min(chunkSize, bytes.length));
+  const ptr = e.losat_web2_alloc(size) >>> 0;
+  try {
+    for (let at = 0; at < bytes.length; at += size) {
+      const part = bytes.subarray(at, at + size);
+      new Uint8Array(reactor.memory().buffer, ptr, part.length).set(part);
+      const status = e.losat_web2_file_chunk(begun.status, ptr, part.length);
+      assert.equal(status, 0, `file_chunk ${name}: ${status < 0 ? reactor.error() : ""}`);
+    }
+  } finally {
+    e.losat_web2_dealloc(ptr, size);
+  }
+  const ended = reactor.call("losat_web2_file_end", begun.status);
+  assert.equal(ended.status, 0, `file_end ${name}: ${ended.error}`);
+  const response = JSON.parse(ended.streams.get(2).toString());
+  assert.equal(response.handle, begun.status);
+  assert.equal(response.name, name);
+  assert.equal(response.kind, "windowmasker_counts");
+  assert.equal(response.size, bytes.length);
+  assert.equal(response.sha256, sha256(bytes), `${name}: the SHA-256 of the bytes given`);
+  return { handle: begun.status, response };
+}
+
+// The counts files of the searches: the argv's `-window_masker_db` value -> its handle and path.
+// A search that names a registered value with another file releases it first.
+function registerCounts(reactor, counts, search) {
+  const at = search.argv.indexOf("-window_masker_db");
+  if (at < 0) return null;
+  const name = search.argv[at + 1];
+  const file = path.resolve(search.cwd, name);
+  const known = counts.get(name);
+  if (known && known.file === file) return { name, held: "kept" };
+  if (known) {
+    assert.equal(reactor.call("losat_web2_file_release", known.handle).status, 0);
+    counts.delete(name);
+  }
+  if (name === "" || !fs.existsSync(file) || !fs.statSync(file).isFile()) return { name, held: "absent" };
+  const { handle } = registerFile(reactor, name, file);
+  counts.set(name, { handle, file });
+  return { name, held: "registered" };
+}
+
+// LOSAT Web's directory of -window_masker_taxid (web/adapter/src/files.rs WINDOW_MASKER_PATH).
+const WEB_WINDOW_MASKER_PATH = "windowmasker";
+
+// The counts files of a search's -window_masker_taxid directory (`"window_masker_path"`, the CLI's
+// WINDOW_MASKER_PATH): every readable regular file <path>/<n>/wmasker.obinary, registered as
+// windowmasker/<n>/wmasker.obinary and kept across runs (a file the CLI cannot read, or a directory
+// of that name, is not registered: LOSAT Web has neither). Returns null without the directory.
+function registerTaxidCounts(reactor, counts, search) {
+  if (search.window_masker_path === undefined) return null;
+  const root = path.resolve(search.cwd, search.window_masker_path);
+  let registered = 0, kept = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(root, entry.name, "wmasker.obinary");
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+      fs.accessSync(file, fs.constants.R_OK);
+    } catch {
+      continue;
+    }
+    const name = `${WEB_WINDOW_MASKER_PATH}/${entry.name}/wmasker.obinary`;
+    const known = counts.get(name);
+    if (known && known.file === file) {
+      kept++;
+      continue;
+    }
+    if (known) {
+      assert.equal(reactor.call("losat_web2_file_release", known.handle).status, 0);
+      counts.delete(name);
+    }
+    const { handle } = registerFile(reactor, name, file);
+    counts.set(name, { handle, file });
+    registered++;
+  }
+  return { name: WEB_WINDOW_MASKER_PATH, held: registered ? "registered" : "kept" };
+}
+
 async function openSerial(wasmPath) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {} });
   let reactor;
@@ -233,6 +326,15 @@ function inputPath(search, option) {
   return path.resolve(search.cwd, search.argv[search.argv.indexOf(option) + 1]);
 }
 
+// The CLI's environment of a search: the harness's, with the search's directory of
+// -window_masker_taxid as NCBI's WINDOW_MASKER_PATH (and without one inherited otherwise).
+function nativeEnv(search) {
+  const env = { ...process.env };
+  delete env.WINDOW_MASKER_PATH;
+  if (search.window_masker_path !== undefined) env.WINDOW_MASKER_PATH = search.window_masker_path;
+  return env;
+}
+
 // The CLI's outputs of a search, one run per format with -out. A search with
 // `"expect": "failure"` fails in the CLI (exit 3 or 1), whose files keep what was written
 // before the failure (the outfmt 0 prolog before a first query batch fails).
@@ -243,7 +345,7 @@ function nativeOutputs(native, search, scratch) {
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
-    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
+    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
     const failed = result.status !== 0;
     if (failed !== (search.expect === "failure")) {
       throw new Error(`native ${argv.join(" ")} ${failed ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
@@ -271,7 +373,7 @@ function nativeOutputs(native, search, scratch) {
     const directory = fs.mkdtempSync(path.join(scratch, "native.custom."));
     const out = path.join(directory, search.files ? "results" : "native.custom.out");
     const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
-    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
+    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
     if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed (exit ${result.status}): ${result.error ?? result.stderr}`);
     outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
     fs.rmSync(directory, { recursive: true, force: true });
@@ -286,15 +388,22 @@ function nativeOutputs(native, search, scratch) {
 
 // A run that fails as the CLI fails: the CLI's error is the last message of its standard
 // error (the warnings before it go to stream 3, which a failed run does not send), and
-// whatever the run sent of an output before it failed is the start of the CLI's file.
-function checkFailure(run, expected, program, label) {
+// whatever the run sent of an output before it failed is the start of the CLI's file. A search with
+// `"prolog": false` fails before any output (an error of the options or of their files), so the
+// CLI's files are empty; the others fail after the CLI wrote the outfmt 0 prolog.
+function checkFailure(run, expected, search, label) {
+  const program = search.program;
   assert.equal(run.status, -1, `${label}: the run fails as the CLI (exit ${expected.status})`);
   assert.ok(run.error.length > 0 && expected.stderr.toString().endsWith(run.error), `${label}: the CLI's error (${run.error})`);
   for (const format of FORMATS[program]) {
     const sent = run.streams.get(format) || Buffer.alloc(0);
     assert.ok(expected.outputs.get(format).subarray(0, sent.length).equals(sent), `${label}: outfmt ${format} before the failure`);
   }
-  assert.ok(expected.outputs.get(0).length > 0, `${label}: the CLI's outfmt 0 file has the prolog`);
+  if (search.prolog === false) {
+    assert.equal(expected.outputs.get(0).length, 0, `${label}: the CLI writes no outfmt 0 before the failure`);
+  } else {
+    assert.ok(expected.outputs.get(0).length > 0, `${label}: the CLI's outfmt 0 file has the prolog`);
+  }
 }
 
 function checkHits(streams, program, label, queryIds) {
@@ -350,6 +459,7 @@ function checkSurface(reactor, native) {
     if (program === "blastx") assert.ok(description.query_gencodes.includes(11) && !("subject_gencodes" in description), "blastx: the query's genetic codes");
     if (program === "blastn") {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
+      assert.ok(flags.includes("-window_masker_db"), "blastn: -window_masker_db");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
       assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
     }
@@ -476,6 +586,50 @@ function checkSurface(reactor, native) {
   const gap = reactor.call("losat_web2_register", "blastn", 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
   assert.equal(gap.status, -1);
   assert.match(gap.error, /^line 3 is a gap line .*not supported in the browser$/);
+  checkFiles(reactor);
+}
+
+// The named input files (abi_v2.md §4 `file_begin`): the same *file* JSON whatever the chunks, the
+// sizes kept, one registration per name, and the errors of the file's contents in the JSON.
+function checkFiles(reactor) {
+  const counts = path.join(ROOT, "LOSAT/tests/winmask/counts");
+  const whole = registerFile(reactor, "u9.obinary", path.join(counts, "mg1655_u9.obinary"));
+  assert.equal(whole.response.stat_type, "obinary");
+  assert.equal(whole.response.unit_size, 9);
+  assert.equal(whole.response.error, null);
+  const twice = reactor.call("losat_web2_file_begin", 1, "u9.obinary", 1);
+  assert.equal(twice.status, -1, "a registered name is not registered again");
+  assert.match(twice.error, /^an input file named u9\.obinary is registered/);
+  assert.equal(reactor.call("losat_web2_file_release", whole.handle).status, 0);
+  assert.equal(reactor.call("losat_web2_file_release", whole.handle).status, -1, "a released file is gone");
+  const small = registerFile(reactor, "u9.obinary", path.join(counts, "mg1655_u9.obinary"), 4093);
+  const { handle, ...same } = small.response;
+  const { handle: first, ...expected } = whole.response;
+  assert.deepEqual(same, expected, "chunks of 4093 bytes: the same file");
+  assert.equal(reactor.call("losat_web2_file_release", small.handle).status, 0);
+  const binary = registerFile(reactor, "u9.binary", path.join(counts, "dm2L_u9.binary"));
+  assert.equal(binary.response.stat_type, "binary");
+  assert.equal(reactor.call("losat_web2_file_release", binary.handle).status, 0);
+  for (const [kind, name, error] of [[2, "x", /^unknown input file kind 2$/], [1, "", /^an input file needs a name$/]]) {
+    const refused = reactor.call("losat_web2_file_begin", kind, name, 1);
+    assert.equal(refused.status, -1);
+    assert.match(refused.error, error);
+  }
+  const over = reactor.call("losat_web2_file_begin", 1, "over", 2);
+  assert.equal(reactor.call("losat_web2_file_chunk", over.status, Buffer.from("abc")).status, -1, "past the size");
+  assert.equal(reactor.call("losat_web2_file_end", over.status).status, -1, "a file past its size is dropped");
+  const short = reactor.call("losat_web2_file_begin", 1, "short", 2);
+  assert.equal(reactor.call("losat_web2_file_chunk", short.status, Buffer.from("a")).status, 0);
+  const ended = reactor.call("losat_web2_file_end", short.status);
+  assert.equal(ended.status, -1);
+  assert.equal(ended.error, "the input file short ended after 1 of its 2 bytes");
+  const cut = fs.readFileSync(path.join(counts, "mg1655_u9.obinary"));
+  const begun = reactor.call("losat_web2_file_begin", 1, "cut", cut.length >> 1);
+  assert.equal(reactor.call("losat_web2_file_chunk", begun.status, cut.subarray(0, cut.length >> 1)).status, 0);
+  const content = reactor.call("losat_web2_file_end", begun.status);
+  assert.equal(content.status, 0, "an error of the contents comes with the run");
+  assert.match(JSON.parse(content.streams.get(2).toString()).error, /^not enough data/);
+  assert.equal(reactor.call("losat_web2_file_release", begun.status).status, 0);
 }
 
 async function main() {
@@ -494,6 +648,8 @@ async function main() {
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs
+    const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
+    let countsRegistered = 0, countsKept = 0;
     for (const search of all) {
       const program = search.program;
       const query = inputPath(search, "-query"), subject = inputPath(search, "-subject");
@@ -507,14 +663,27 @@ async function main() {
       const q = reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
       assert.ok(q.status > 0, `register query: ${q.error}`);
       const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
+      const taxid = registerTaxidCounts(reactor, counts, search);
+      const named = registerCounts(reactor, counts, search) ?? taxid;
+      if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
         const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
+        // The application validates the argv on the instance that holds its counts file, then runs it
+        // (abi_v2.md §4): an error of validate is the CLI's first error.
+        if (named && named.held !== "absent") {
+          const validated = reactor.call("losat_web2_validate", argv);
+          if (search.expect === "failure" && validated.status !== 0) {
+            assert.ok(expected.stderr.toString().endsWith(validated.error), `${engine.name} n${threads} ${search.cases.join(",")}: validate gives the CLI's error (${validated.error})`);
+          } else {
+            assert.equal(validated.status, 0, `${engine.name} n${threads} ${search.cases.join(",")}: validate: ${validated.error}`);
+          }
+        }
         const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
         if (waitForWorkers) await waitForWorkers();
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;
         if (search.expect === "failure") {
-          checkFailure(run, expected, program, label);
+          checkFailure(run, expected, search, label);
           results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
                          failure: run.error });
           console.log(`ok ${label} (fails as the CLI)`);
@@ -568,6 +737,8 @@ async function main() {
       assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
     }
     for (const handle of subjects.values()) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+    for (const { handle } of counts.values()) assert.equal(reactor.call("losat_web2_file_release", handle).status, 0);
+    if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db and -window_masker_taxid: ${countsRegistered} searches that registered counts, ${countsKept} searches with counts kept or unregistered`);
     await close();
   }
   if (options.out) fs.writeFileSync(path.join(options.out, "v-abi-results.json"), JSON.stringify(results, null, 2) + "\n");

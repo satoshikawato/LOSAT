@@ -49,7 +49,6 @@ use options::OptionInputs;
 
 pub use writer::{
     write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
-    NoAlignments,
 };
 
 /// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
@@ -354,12 +353,22 @@ impl ArchiveHandle {
     /// saves one `SDiagMessage` (`diag_log`); the diagnostics stream (`DiagTee`) would save
     /// each line. Nothing is saved while the handle is muted.
     pub fn write_warning(&self, diagnostics: &mut dyn Write, text: &[u8]) -> std::io::Result<()> {
+        self.write_post(diagnostics, WARNING, text)
+    }
+
+    /// `write_warning` of a post of `severity` (`diag_log::Posts`).
+    pub fn write_post(
+        &self,
+        diagnostics: &mut dyn Write,
+        severity: i32,
+        text: &[u8],
+    ) -> std::io::Result<()> {
         let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
         let written = diagnostics.write_all(text);
         self.with_state(|state| {
             state.muted = muted;
             if !muted {
-                state.log.post(WARNING, text);
+                state.log.post(severity, text);
             }
         });
         written

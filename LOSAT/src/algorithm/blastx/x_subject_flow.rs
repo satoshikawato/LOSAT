@@ -273,7 +273,6 @@ fn search_task(
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    db_length: i64,
     x_containment: bool,
 ) -> Task {
     let mut kept = Vec::new();
@@ -295,14 +294,10 @@ fn search_task(
             diagonals,
             xdrop,
             false,
-            db_length,
             oid,
             x_containment,
         ) {
-            Ok(mut computed) => {
-                // Only the diagnostic stages read these (not with the flow).
-                computed.seeds = Vec::new();
-                computed.initial = Vec::new();
+            Ok(computed) => {
                 if !computed.is_empty() {
                     kept.push((oid, computed));
                 }
@@ -364,8 +359,7 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
 /// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
 /// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`); `capped` = the chunk's
-/// batch is one of the capped batch flow (`x_bx_mem::in_capped_batch`). Returns the number of
-/// subjects handed to the sink.
+/// batch is one of the capped batch flow (`x_bx_mem::in_capped_batch`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     k: usize,
@@ -377,11 +371,10 @@ pub(super) fn run(
     diagonals: &mut Diagonals,
     helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
-    db_length: i64,
     x_containment: bool,
     capped: bool,
     sink: &mut impl PreliminarySink,
-) -> Result<usize> {
+) -> Result<()> {
     let bounds = XTasks::new(k, subjects);
     let tasks = bounds.count();
     // A helper for each task but the first at most: the owner searches a task itself when no helper
@@ -413,7 +406,6 @@ pub(super) fn run(
             lookup,
             table,
             xdrop,
-            db_length,
             x_containment,
         )
     };
@@ -427,7 +419,6 @@ pub(super) fn run(
         crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1))
     };
     let x_t = super::super::x_timing::lap();
-    let mut call = 0usize;
     let mut own = super::x_bx_mem::XScratch::Borrowed(diagonals);
     let result = crate::utils::xahead::with_helpers(Some(&ahead), helper_tables, &compute, || {
         for task in 0..tasks {
@@ -462,7 +453,6 @@ pub(super) fn run(
                     sink.preliminary_purge(oid, &raw, &purged)?;
                 }
                 sink.subject(oid, &purged, batch, params)?;
-                call += 1;
             }
             if let Some((_, error)) = error {
                 return Err(error);
@@ -471,7 +461,7 @@ pub(super) fn run(
         Ok(())
     });
     super::super::x_timing::subject_flow(x_t, tasks as u64, ahead.counts());
-    result.map(|()| call)
+    result
 }
 
 /// No NCBI counterpart: tasks per thread that the flow across chunks searches ahead of the loop's
@@ -704,8 +694,7 @@ impl XCrossScratch {
 /// its order: per chunk `chunk_start`, the subjects as `run` hands them, `chunk_end`; a chunk
 /// without a valid context gets `chunk_start` only; a setup that failed returns its error after
 /// that chunk's `chunk_start`. A task's value depends on its chunk and subjects alone (module
-/// comment), so only which thread computes what, and when, changes. Returns the number of subjects
-/// handed to the sink.
+/// comment), so only which thread computes what, and when, changes.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_chunks(
     k: usize,
@@ -716,12 +705,11 @@ pub(super) fn run_chunks(
     options: &ResolvedOptions,
     helpers: usize,
     keep: bool,
-    db_length: i64,
     x_containment: bool,
     capped: bool,
     is_split: bool,
     sink: &mut impl PreliminarySink,
-) -> Result<usize> {
+) -> Result<()> {
     let bounds = XTasks::new(k, subjects);
     let tasks = bounds.count();
     let total = chunks.len() * tasks;
@@ -772,7 +760,6 @@ pub(super) fn run_chunks(
             &ready.lookup,
             table,
             ready.xdrop,
-            db_length,
             x_containment,
         )
     };
@@ -798,7 +785,6 @@ pub(super) fn run_chunks(
         })
         .collect();
     let x_t = super::super::x_timing::lap();
-    let mut call = 0usize;
     let mut own = XCrossScratch::Owned(0, None);
     let result = crate::utils::xahead::with_helpers(Some(&ahead), scratches, &compute, || {
         for (c, chunk) in chunks.iter().enumerate() {
@@ -852,7 +838,6 @@ pub(super) fn run_chunks(
                         sink.preliminary_purge(oid, &raw, &purged)?;
                     }
                     sink.subject(oid, &purged, batch, params)?;
-                    call += 1;
                 }
                 if let Some((_, error)) = error {
                     return Err(error);
@@ -865,7 +850,7 @@ pub(super) fn run_chunks(
         Ok(())
     });
     super::super::x_timing::subject_flow(x_t, total as u64, ahead.counts());
-    result.map(|()| call)
+    result
 }
 
 #[cfg(test)]

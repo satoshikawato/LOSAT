@@ -1,10 +1,13 @@
 //! NCBI's exception reports: the text of `CException::what()` that NCBI's applications print
 //! after `Error: ` (their last `catch (const CException&)` clause), and the warnings that quote
-//! an exception, with one `T0` line per exception of the chain. This module is the one owner of
-//! that text; each place NCBI throws from keeps its [`ThrowSite`] next to the port of the code
-//! that throws (`ncbi_str`, `writedb::data_size`, `writedb::build_db`, `utils::winmask`,
-//! `seqid::parse`, `blastinput::db_filter`, BLASTN's `-use_index` warning in
-//! `blastn::blast_engine::run`).
+//! an exception, with one `T0` line per exception of the chain; and the lines that
+//! `NCBI_REPORT_EXCEPTION_X` posts with NCBI's default diagnostic flags
+//! ([`NcbiException::report_default_ex`]: rpsbproc's application handler, `rpsbproc::report_exception`).
+//! This module is the one owner of that text; each place NCBI throws from keeps its
+//! [`ThrowSite`] next to the port of the code that throws (`ncbi_str`, `writedb::data_size`,
+//! `writedb::build_db`, `utils::winmask`, `seqid::parse`, `blastinput::db_filter`, BLASTN's
+//! `-use_index` warning in `blastn::blast_engine::run`, the serial objects' exceptions of
+//! rpsbproc in `rpsbproc::query`).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:370-384
 //! ```c
@@ -81,6 +84,33 @@ pub struct ThrowSite {
     pub function: Option<&'static str>,
 }
 
+impl ThrowSite {
+    // NCBI reference (598d8ae6): c++/src/serial/datatool/choicestr.cpp:887-893
+    // ```c++
+    //             "void "<<methodPrefix<<"ThrowInvalidSelection(" STATE_ENUM " index) const\n"
+    //             "{\n"
+    //             "    throw NCBI_NS_NCBI::CInvalidChoiceSelection(DIAG_COMPILE_INFO";
+    //         if ( 1 ) { // add extra argument for better error message
+    //             methods << ", this";
+    //         }
+    //         methods << ", m_choice, index, sm_SelectionNames, sizeof(sm_SelectionNames)/sizeof(sm_SelectionNames[0]));\n"
+    // ```
+    /// The place of a throw in the code that NCBI's `datatool` generates for a serial type
+    /// (`C<type>_Base::ThrowInvalidSelection` of a CHOICE): the generated files are not in NCBI's
+    /// source tree, so LOSAT has neither their names and lines nor the function, and leaves
+    /// them out (an empty file, line 0, no function). Only the reports that print no place are
+    /// made of such an exception ([`NcbiException::report_default_ex`]); its `what()` would not
+    /// name the place that NCBI's names.
+    pub const fn generated(kind: &'static str) -> ThrowSite {
+        ThrowSite {
+            file: "",
+            line: 0,
+            kind,
+            function: None,
+        }
+    }
+}
+
 /// An exception of NCBI's C++ Toolkit (`CException`): where it was thrown, its message, the
 /// extra text of its class, and the exception it was thrown for (`NCBI_RETHROW`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,7 +160,8 @@ impl NcbiException {
         }
     }
 
-    /// Where the exception was thrown.
+    /// Where the exception was thrown (for the tests; the report reads the field in `report_this`).
+    #[cfg(test)]
     pub fn site(&self) -> ThrowSite {
         self.site
     }
@@ -155,31 +186,238 @@ impl NcbiException {
             out.push_str(function);
             out.push_str("() - ");
         }
-        out.push_str(&self.message);
-        if let Some(extra) = &self.extra {
-            out.push_str(" (");
-            out.push_str(extra);
-            out.push(')');
-        }
+        out.push_str(&self.text());
     }
 
-    /// `CException::what()` (`ReportAll`): the report of the chain, oldest exception first,
-    /// ending with a line feed.
-    pub fn what(&self) -> String {
+    /// The exceptions of the chain, newest first (`this`, then each `GetPredecessor()`).
+    fn chain(&self) -> Vec<&NcbiException> {
         let mut pile = Vec::new();
         let mut pex = Some(self);
         while let Some(e) = pex {
             pile.push(e);
             pex = e.predecessor.as_deref();
         }
+        pile
+    }
+
+    /// `CException::what()` (`ReportAll`): the report of the chain, oldest exception first,
+    /// ending with a line feed.
+    pub fn what(&self) -> String {
         let mut os = String::from("NCBI C++ Exception:\n");
-        for e in pile.iter().rev() {
+        for e in self.chain().iter().rev() {
             os.push_str("    ");
             e.report_this(&mut os);
             os.push('\n');
         }
         os
     }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7844-7856
+    // ```c++
+    // static string
+    // s_GetExceptionText(const CException* pex)
+    // {
+    //     string text(pex->GetMsg());
+    //     stringstream os;
+    //     pex->ReportExtra(os);
+    //     string s = os.str();
+    //     if ( !s.empty() ) {
+    //         text += " (";
+    //         text += s;
+    //         text += ')';
+    //     }
+    //     return text;
+    // }
+    // ```
+    /// `s_GetExceptionText`: the message and the extra text of the class.
+    fn text(&self) -> String {
+        match &self.extra {
+            Some(extra) => format!("{} ({extra})", self.message),
+            None => self.message.clone(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:761-770
+    // ```c++
+    // #define NCBI_REPORT_EXCEPTION_X(err_subcode, title, ex)                 \
+    //     NCBI_REPORT_EXCEPTION_XX(NCBI_USE_ERRCODE_X, err_subcode, title, ex)
+    // ...
+    // #define NCBI_REPORT_EXCEPTION_XX(err_name, err_subcode, title, ex)   \
+    //     NCBI_CHECK_ERR_SUBCODE_X_NAME(err_name, err_subcode);            \
+    //     NCBI_NS_NCBI::CExceptionReporter::ReportDefaultEx                \
+    //     (NCBI_ERRCODE_X_NAME(err_name), err_subcode,                     \
+    //      DIAG_COMPILE_INFO, title, ex, NCBI_NS_NCBI::eDPF_Default)
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:676-700
+    // ```c++
+    // void CExceptionReporter::ReportDefaultEx(int err_code, int err_subcode,
+    //     const CDiagCompileInfo& info, const string& title,const exception& ex,
+    //     TDiagPostFlags flags)
+    // {
+    //     if ( !sm_DefEnabled )
+    //         return;
+    //     ...
+    //     if ( sm_DefHandler ) {
+    //         ...
+    //     } else {
+    //         CNcbiDiag d(info, cex->GetSeverity(), flags);
+    //         d.SetOmitStackTrace(true);
+    //         d << ErrCode(err_code, err_subcode) << title << " " <<  *cex;
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7873-7939
+    // ```c++
+    //     for (pex = &ex; pex; pex = pex->GetPredecessor()) {
+    //         pile.push(pex);
+    //         if (!main_pex  &&  pex->HasMainText())
+    //             main_pex = pex;
+    //     }
+    //     if (!main_pex)
+    //         main_pex = pile.top();
+    //     if ( !IsOssEmpty(*m_Buffer.m_Stream) ) {
+    //         *this << "(" << main_pex->GetType() << "::"
+    //                      << main_pex->GetErrCodeString() << ") "
+    //               << s_GetExceptionText(main_pex);
+    //     }
+    //     ...
+    //     for (; !pile.empty(); pile.pop()) {
+    //         pex = pile.top();
+    //         string text(s_GetExceptionText(pex));
+    //         ...
+    //         string err_type(pex->GetType());
+    //         err_type += "::";
+    //         err_type += pex->GetErrCodeString();
+    //         ...
+    //         SDiagMessage diagmsg
+    //             (pex_sev,
+    //             text.c_str(),
+    //             text.size(),
+    //             pex->GetFile().c_str(),
+    //             pex->GetLine(),
+    //             GetPostFlags(),
+    //             NULL,
+    //             pex->GetErrCode(),
+    //             0,
+    //             err_type.c_str(),
+    //             ...
+    //         m_Buffer.PrintMessage(diagmsg, *this);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:3984-3987
+    // ```c++
+    // static const TDiagPostFlags s_DefaultPostFlags =
+    //     eDPF_Prefix | eDPF_Severity | eDPF_ErrorID |
+    //     eDPF_ErrCodeMessage | eDPF_ErrCodeExplanation |
+    //     eDPF_ErrCodeUseSeverity;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:5672-5695
+    // ```c++
+    //     // <severity>:
+    //     if (IsSetDiagPostFlag(eDPF_Severity, m_Flags)  &&
+    //         (m_Severity != eDiag_Info || !IsSetDiagPostFlag(eDPF_OmitInfoSev))) {
+    //         string sev = CNcbiDiag::SeverityName(m_Severity);
+    //         ...
+    //             os << sev;
+    //         ...
+    //         os << ": ";
+    //     }
+    //
+    //     // (<err_code>.<err_subcode>) or (err_text)
+    //     if ((m_ErrCode  ||  m_ErrSubCode || m_ErrText)  &&
+    //         IsSetDiagPostFlag(eDPF_ErrorID, m_Flags)) {
+    //         os << '(';
+    //         if (m_ErrText) {
+    //             os << m_ErrText;
+    //         } else {
+    //             os << m_ErrCode << '.' << m_ErrSubCode;
+    //         }
+    //         os << ") ";
+    //     }
+    // ```
+    // `x_Put` posts a message for each exception of the chain, oldest first, as it runs; the
+    // title's message is posted when `d` goes out of scope, after them. With the default flags
+    // (an application that sets none, as rpsbproc) `SDiagMessage::x_OldWrite` writes neither the
+    // file and line (`eDPF_File`, `eDPF_Line`), the thread (`eDPF_TID`) nor the function
+    // (`eDPF_Location`), and no error code description (none without the registry's
+    // `[DEBUG] MessageFile`, ncbiapp.cpp:1654-1667); each message ends with a line feed. The
+    // severity is the exceptions' `Error` (`sm_DefEnabled` is true and `sm_DefHandler` null
+    // unless an application changes them, ncbiexpt.cpp:603-605). The main text is the newest
+    // exception's: `rethrow` makes an exception whose predecessor loses it (the constructor's
+    // `prev_exception->m_MainText = false`, ncbiexpt.cpp:188-189).
+    /// `NCBI_REPORT_EXCEPTION_X(err_subcode, title, e)` in a source file whose
+    /// `NCBI_USE_ERRCODE_X` is `err_code`, as an application with NCBI's default diagnostic
+    /// flags posts it: `Error: (<class>::<code>) <message>` for each exception of the chain,
+    /// oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
+    /// <message>` of the newest, each line ending with a line feed.
+    pub fn report_default_ex(&self, err_code: u32, err_subcode: u32, title: &str) -> String {
+        let mut out = String::new();
+        for e in self.chain().iter().rev() {
+            out.push_str(&post_error(e.site.kind, &e.text()));
+        }
+        out.push_str(&err_post_x(
+            err_code,
+            err_subcode,
+            &format!("{title} ({}) {}", self.site.kind, self.text()),
+        ));
+        out
+    }
+}
+
+/// A message of severity `Error` with the error id `id` (`m_ErrText`, or `<err_code>.<err_subcode>`)
+/// as an application with NCBI's default diagnostic flags writes it (`SDiagMessage::x_OldWrite`,
+/// quoted at [`NcbiException::report_default_ex`]): `Error: (<id>) <message>` and a line feed.
+fn post_error(id: &str, message: &str) -> String {
+    String::from_utf8(post_error_bytes(id, message.as_bytes()))
+        .expect("the text of UTF-8 parts is UTF-8")
+}
+
+/// `post_error` of a message that is bytes: NCBI's diagnostic stream writes them as they are.
+fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
+    let mut line = format!("Error: ({id}) ").into_bytes();
+    line.extend_from_slice(message);
+    line.push(b'\n');
+    line
+}
+
+// NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567
+// ```c++
+// #define ERR_POST_X(err_subcode, message)                  \
+//     ERR_POST_XX(NCBI_USE_ERRCODE_X, err_subcode, message)
+// ...
+// #define ERR_POST_XX(error_name, err_subcode, message)                   \
+//     ERR_POST_EX(NCBI_ERRCODE_X_NAME(error_name),                        \
+//                 NCBI_ERR_SUBCODE_X_NAME(error_name, err_subcode),       \
+//                 message)
+// ```
+// NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:252-256
+// ```c++
+// #define ERR_POST_EX(err_code, err_subcode, message)          \
+//     ( NCBI_NS_NCBI::CNcbiDiag(DIAG_COMPILE_INFO).GetRef()    \
+//       << NCBI_NS_NCBI::ErrCode( (err_code), (err_subcode) )  \
+//       << message                                             \
+//       << NCBI_NS_NCBI::Endm )
+// ```
+// NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:934-938
+// ```c++
+//     NCBI_XNCBI_EXPORT  CNcbiDiag
+//     (const CDiagCompileInfo& info,                      ///< File, line, module
+//      EDiagSev                sev        = eDiag_Error,  ///< Severity level
+//      TDiagPostFlags          post_flags = eDPF_Default  ///< What to post
+//      );
+// ```
+/// `ERR_POST_X(err_subcode, message)` in a source file whose `NCBI_USE_ERRCODE_X` is
+/// `err_code`, as an application with NCBI's default diagnostic flags writes it (a `CNcbiDiag`
+/// is of severity `Error`): `Error: (<err_code>.<err_subcode>) <message>` and a line feed. The
+/// application's report of an exception's title line, and of a `std::exception`
+/// (ncbiapp.cpp:675-679: rpsbproc's data loader).
+pub fn err_post_x(err_code: u32, err_subcode: u32, message: &str) -> String {
+    post_error(&format!("{err_code}.{err_subcode}"), message)
+}
+
+/// `err_post_x` of a message that is bytes (a `std::exception`'s `what()` that quotes data
+/// bytes, rpsbproc's motif parse error).
+pub fn err_post_x_bytes(err_code: u32, err_subcode: u32, message: &[u8]) -> Vec<u8> {
+    post_error_bytes(&format!("{err_code}.{err_subcode}"), message)
 }
 
 #[cfg(test)]
@@ -235,6 +473,62 @@ mod tests {
         assert_eq!(
             factory.what(),
             "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp\", line 63: Error: (Exception::format error) file too short\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n"
+        );
+    }
+
+    // blastn 2.17.0 (the official Linux x64 release) with a `blastn.ini` of the line `garbage`
+    // (env parity g_reg probe `x_ini`, 2026-11-11): `NCBI_REPORT_EXCEPTION_X(15, "Application's
+    // initialization failed", e)` of the application layer (error code 106), and of a chain.
+    #[test]
+    fn a_report_with_a_title_has_a_line_per_exception_then_the_title() {
+        let site = ThrowSite {
+            file: "src/corelib/ncbireg.cpp",
+            line: 722,
+            kind: "CRegistryException::eEntry",
+            function: Some("ncbi::IRWRegistry::x_Read"),
+        };
+        let e = NcbiException::with_pos(site, "Invalid registry entry format: 'garbage'", 1);
+        assert_eq!(
+            e.report_default_ex(106, 15, "Application's initialization failed"),
+            "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n"
+        );
+        let outer = NcbiException::new(site, "first").rethrow(
+            ThrowSite {
+                kind: "CAppException::eSetupDiag",
+                ..site
+            },
+            "second",
+        );
+        assert_eq!(
+            outer.report_default_ex(106, 15, "T"),
+            "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n"
+        );
+    }
+
+    // NCBI's rpsbproc 0.5.1 (tests/fixtures/rpsbproc/oracle/d_wsline.err and lcl.err): the
+    // application's report of an exception with the default diagnostic flags, without the place
+    // or the function, the position of a `CStringException` included; and that of an exception
+    // of generated code.
+    #[test]
+    fn the_default_report_names_the_class_and_the_message() {
+        let site = ThrowSite {
+            file: "src/corelib/ncbistr.cpp",
+            line: 895,
+            kind: "CStringException::eConvert",
+            function: Some("ncbi::NStr::StringToUInt8"),
+        };
+        let e = NcbiException::with_pos(site, "Cannot convert string '' to Uint8", 0);
+        assert_eq!(
+            e.report_default_ex(106, 15, "Application's initialization failed"),
+            "Error: (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\nError: (106.15) Application's initialization failed (CStringException::eConvert) Cannot convert string '' to Uint8 (m_Pos = 0)\n"
+        );
+        let e = NcbiException::new(
+            ThrowSite::generated("CInvalidChoiceSelection::eFail"),
+            "CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local",
+        );
+        assert_eq!(
+            e.report_default_ex(106, 16, "Application's execution failed"),
+            "Error: (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\nError: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) CSeq_id::GetGeneral(): Invalid choice selection: NCBI-Seqloc::Seq-id.local\n"
         );
     }
 

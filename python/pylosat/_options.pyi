@@ -76,6 +76,8 @@ class BlastnOptions(TypedDict, total=False):
     lcase_masking: Literal['true', 'false']
     soft_masking: bool
     """Apply filtering locations as soft masks [default: true]"""
+    window_masker_taxid: int
+    """Enable WindowMasker filtering using a Taxonomic ID"""
     window_masker_db: str
     """Enable WindowMasker filtering using this repeats database."""
     strand: Literal['both', 'plus', 'minus']
@@ -164,6 +166,12 @@ class BlastpOptions(TypedDict, total=False):
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
     ungapped: Literal['true', 'false']
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
     suggestion; 15 (PAM30's) for blastp-short]"""
@@ -236,10 +244,16 @@ class BlastxOptions(TypedDict, total=False):
     matrix: str
     """Scoring matrix name [default: BLOSUM62]"""
     threshold: float
-    """Minimum word score such that the word is added to the BLAST lookup table [default: 12; 20
-    for blastx-fast; 19.3 for -word_size 5]"""
+    """Minimum word score such that the word is added to the BLAST lookup table [default: 12;
+    19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]"""
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit [default: 0, no culling]"""
@@ -313,6 +327,8 @@ class TblastnOptions(TypedDict, total=False):
     """Minimum word score such that the word is added to the BLAST lookup table [default: 13, or
     the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for
     tblastn-fast]"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     xdrop_gap: float
     """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
     xdrop_gap_final: float
@@ -409,6 +425,8 @@ class TblastxOptions(TypedDict, total=False):
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
     lcase_masking: Literal['true', 'false']
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int
     """Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
     suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0
@@ -422,8 +440,30 @@ class TblastxOptions(TypedDict, total=False):
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
 
 class PsiblastOptions(TypedDict, total=False):
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: Literal['true', 'false']
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
+    show_gis: Literal['true', 'false']
+    """Show NCBI GIs in deflines?"""
+    parse_deflines: Literal['true', 'false']
+    """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
     evalue: float
@@ -461,6 +501,7 @@ class PsiblastOptions(TypedDict, total=False):
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
+    lcase_masking: Literal['true', 'false']
     use_sw_tback: Literal['true', 'false']
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""

@@ -153,10 +153,16 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    残す。自動の再試行はしない（1 回の操作に 1 要求）。
 4. **取得と展開**（`infra/browser/example-downloader.ts`）。ページ（main thread）が配備の CSP の下で取得する（`credentials: 'omit'`、
    referrer 無し。WF-1 と同じ）。NCBI の .gz は `application/x-gzip`、UniProt の `compressed=true` は Content-Encoding 無しで来るので
-   ブラウザは展開しない。本文が gzip の magic で始まるときだけ `DecompressionStream('gzip')` に通す（途中で展開済みの本文はそのまま）。
-   展開した部分は約 8 MiB ごとの Blob にまとめ、メモリの山は保存の大きさほどに留める。展開後 256 MiB を超える本文は止める。
+   ブラウザは展開しない。本文が gzip の magic で始まるときだけ展開する（途中で展開済みの本文はそのまま）。展開は 2026-11-11 から
+   エンジンの decoder で行う（swebok-improve SW8 D2、Owner-delegated）：取得した本文（約 8 MiB ごとの Blob）を `<fileName>.gz`
+   （サイト上のファイル名）の File として Data worker に渡し、source の `.gz` と同じ道（`infra/data/inflate.ts`、ABI v2 の
+   `inflate_*`）で展開する。Web の展開器はエンジンの 1 つだけになる。それまでの `DecompressionStream('gzip')` は連結した
+   member（bgzip、`cat a.gz b.gz`）を 3 ブラウザとも拒み、壊れたときの文もブラウザごとに違った。展開した部分は約 8 MiB ごとの
+   Blob にまとめる。取得した本文が 256 MiB を超えるか（gzip の本文が展開後より大きいのは高々 0.03 % ほど）、展開後が
+   256 MiB を超えれば止める。展開の間は圧縮した本文（最大の pdbaa で 36.8 MB）も Blob として持つ。エンジンの無い開発用の
+   build は gzip の本文を展開できない（「could not be decompressed (this build has no engine)」）。
    時間切れは 60 s（応答の見出しまで）。進捗は「Downloading 3.1 of 8.0 MB from ftp.ncbi.nlm.nih.gov…」（Content-Length の無い
-   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている、大きすぎる、
+   UniProt は全体を言わない）と「Cancel」。失敗は host と理由の一文（HTTP の状態、届かない、gzip が壊れている（括弧の中はコマンドラインと同じエンジンの文）、大きすぎる、
    FASTA でない：`>` で始まらない 200 の答え（空や HTML）は写しにしない）で、欄はそのまま。
 5. **保存**（`infra/data/example-store.ts`、Data worker）。OPFS の `examples/<id>/` に `data`、最後に `meta.json`（meta の無い
    ディレクトリは書きかけで、次の保存が消す）。書き込みは block store と同じ同期 access handle、保存と削除は Web Lock
@@ -252,3 +258,30 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    （P99999 で失敗、CNCB の組は残る）、EBI を選んで UniProt へ、最後に欄が欄の順で書かれること、競走の要求が出ないことを数える。
    別の欄の Fetch の競走で EBI が先になった後も、NCBI から届いた組は「Fetched P12345 from NCBI」のままで、新しい欄の組は EBI から
    始まる（`tests/e2e/fetch.spec.ts`）。
+
+## 12. WW2 の実装：WindowMasker の counts の取得（2026-11-12、Owner-delegated）
+
+線 NP の `WW/DESIGN_ww2.md` §4。BLASTN の `-window_masker_taxid <n>` は NCBI の `blast/windowmasker_files/<n>/wmasker.obinary` を読む。Web には
+その置き場が無いので、利用者が欄の下の「Download」を押したときだけ、そのファイルをこのブラウザに取る。常設の指示（2026-09-29、2026-10-07 再確認）。
+
+1. **要求**：`https://ftp.ncbi.nlm.nih.gov/blast/windowmasker_files/<taxid>/wmasker.obinary` の 1 つの GET（`mode: 'cors'`、`credentials: 'omit'`、
+   referrer なし。CSP の connect-src は §2 のまま）。再開は `Range: bytes=<保存済み>-`。応答が 206 でない、`Content-Range` の始まりが保存済みと違う、
+   `Last-Modified` が最初の応答と違う（サイトの file が変わった）ときは、保存済みを捨てて 0 から取り直す（同じ操作の中。200 が返れば
+   その応答をそのまま読む）。自動の再試行はしない。大きさは押す前に問い合わせない（人は 724 MB）。
+2. **共通部**：要求（時間切れ、CORS、referrer なし）、`Content-Length`、失敗の文は Example と 1 か所（`infra/browser/http.ts`、
+   `domain/download-sentences.ts`）。OPFS の書き込み（同期 access handle）と削除は `infra/data/opfs-files.ts`。
+3. **保存**（Data worker、`infra/data/counts-store.ts`）：OPFS `windowmasker/<taxid>/wmasker.obinary` と `meta.json`
+   （`{taxid, url, lastModified, size, savedBytes, complete, savedAt}`）。この相対 path は検索がファイルを読む名前
+   （`windowmasker/<taxid>/wmasker.obinary`、`abi_v2.md` §4）と同じ。ページは本文を約 8 MiB ごとに Data worker へ渡し、worker が末尾に書いて
+   `savedBytes` を進める（人の 724 MB は memory に持たない）。書いている間は Web Lock `losat-web:windowmasker:<taxid>`（2 つのタブが同じ
+   ファイルを書かない。タブが閉じれば lock も外れる）。Cancel、切断、タブを閉じても保存済みの分が残り、「Continue」の起点になる。完了で
+   `complete: true`。BroadcastChannel `losat-web:windowmasker`（中身は削除した taxid だけ）で、他のタブは持っているファイルを手放す。
+   OPFS か Web Locks の無いタブは本文をそのタブの Blob に持つ（そのタブだけで使う。再開はしない）。
+4. **検索**：draft が保存済みの全体のファイルを持ち（`SearchDraft.setCounts`）、argv に `-window_masker_taxid <n>` があれば WW1 の道に
+   `windowMasker = {name: 'windowmasker/<n>/wmasker.obinary', file, size, lastModified}` として渡す（runtime の保持・鍵・解放も同じ）。
+   保存が無ければ検索を始めない（「Download the counts for 9606.」）。warm-up は `-window_masker_taxid` も外す。
+5. **記録**：`CountsRecord.origin` に `taxid`、`url`、`lastModified`（取得時の Last-Modified）。SHA-256 は engine の file JSON（WW1 と同じ）。
+6. **e2e**（`tests/e2e/window-masker-taxid.spec.ts`）：Playwright の route で FTP を stub する（配備の CSP のまま。NCBI には繋がない）。
+   taxid 562 に `LOSAT/tests/winmask/counts/mg1655_u9.obinary` を返す。Download → 保存 → 検索 → 再読み込みで要求が増えない → Delete、
+   切れた応答 → Continue が Range で続きを取り同じ SHA-256、Last-Modified が変わると 0 から、404 / 500 の文、engine の build では native の CLI
+   （`WINDOW_MASKER_PATH=<dir>`、`<dir>/562/wmasker.obinary`）と outfmt 0 / 6 / 7 が同じ。

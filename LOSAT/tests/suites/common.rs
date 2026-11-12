@@ -4,6 +4,8 @@
 //! two lines in its suite (`common` for the command line, the output formats and shared parts;
 //! `tests/suite_layout.rs` checks that every file is in exactly one test binary).
 
+#[path = "../blastdbcmd_alias_keys.rs"]
+mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
 mod blastdbcmd_batch_line_ends;
 #[path = "../blastdbcmd_discovery.rs"]
@@ -16,12 +18,10 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastx_library_db_hold.rs"]
+mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
-#[path = "../cli_v2.rs"]
-mod cli_v2;
-#[path = "../compressed_lookup.rs"]
-mod compressed_lookup;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
@@ -42,6 +42,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_rename_lock;
 #[path = "../ncbi_lookup_paths.rs"]
 mod ncbi_lookup_paths;
+#[path = "../ncbi_toolkit_file_options.rs"]
+mod ncbi_toolkit_file_options;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]
@@ -90,6 +92,8 @@ mod parse_deflines_subject;
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
 mod report_counts_cli;
+#[path = "../rpsbproc_fixtures.rs"]
+mod rpsbproc_fixtures;
 #[path = "../search_environment.rs"]
 mod search_environment;
 #[path = "../seq_id_first_line.rs"]

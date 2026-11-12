@@ -1,6 +1,8 @@
 //! The command line's entry: what the `losat` binary runs (`main_entry`). The binary names nothing
 //! else of the library; the crate's root re-exports this function for it.
 
+use std::io::Write;
+
 use anyhow::Result;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
 // ```c++
@@ -32,6 +34,22 @@ use crate::cli::{Cli, Commands};
 /// calls `api` instead.
 #[doc(hidden)]
 pub fn main_entry() -> Result<()> {
+    let result = run_main_entry();
+    // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
+    // the standard error went to the `-logfile` target (tblastx and rpsblast,
+    // `ncbi_environment::run_messages_follow_log`): written as `main`'s `Result` writes them,
+    // exit status 1. NCBI's errors are written by the run itself (`exit_on_native_error`), where
+    // NCBI writes them. Line RG DECISIONS 32.
+    if let Err(error) = &result {
+        if let Some(mut terminal) = crate::blastinput::ncbi_environment::terminal_stderr() {
+            let _ = writeln!(terminal, "Error: {error:?}");
+            std::process::exit(1);
+        }
+    }
+    result
+}
+
+fn run_main_entry() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
     // counterpart; it reads the clock only with LOSAT_TIMING.
     crate::utils::xtiming::start();
@@ -75,6 +93,31 @@ pub fn main_entry() -> Result<()> {
     // (`blastdbcmd::args`), not clap's: the words after `blastdbcmd` go to it as they are.
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
+    // ```c++
+    // CBlastUsageReport::CBlastUsageReport()
+    // {
+    // 	x_CheckBlastUsageEnv();
+    // ```
+    // Every NCBI program's application has a usage report, made with the application before
+    // `AppMain` runs; it reads `.ncbirc` (`ncbi_environment::ApplicationStart`), and its messages
+    // go to stderr at once, before `-version` and before blastdbcmd's `-logfile` is read.
+    let program = argv
+        .get(1)
+        .and_then(|word| word.to_str())
+        .filter(|word| crate::cli::ENTRY_NAMES.contains(word));
+    let start = program
+        .map(|program| crate::blastinput::ncbi_environment::start_application(program, &argv[2..]));
+    if let Some(start) = start {
+        match start.usage_report() {
+            Ok(text) => {
+                let mut stderr = std::io::stderr();
+                let _ = stderr.write_all(text.as_bytes());
+                let _ = stderr.flush();
+            }
+            Err(reason) => return Err(anyhow::Error::msg(reason.to_string())),
+        }
+    }
     if argv.get(1).is_some_and(|word| word == "blastdbcmd") {
         std::process::exit(crate::blastdbcmd::run(&argv[2..]));
     }
@@ -105,25 +148,88 @@ pub fn main_entry() -> Result<()> {
             }
         }
     }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:868-871
+    // ```c++
+    //     // Setup logging as soon as possible.
+    //     // Setup for diagnostics
+    //     try {
+    //         CDiagContext::SetupDiag(diag, 0, eDCM_NoChange, m_LogFile);
+    // ```
+    // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
+    // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
+    // makes F, with the usage report's messages. rpsbproc refuses it as it reads its arguments
+    // (line RG item E1c), after the file is made, as NCBI makes it.
+    let mut target = match program {
+        Some(_) => {
+            use crate::blastinput::ncbi_environment::{diag_target, log_file};
+            diag_target(log_file(&argv[2..]))
+        }
+        None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+    };
+    if let Some(start) = start {
+        start.write_log_setup(&mut target);
+    }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` is read
     // before the program's arguments, `cli::ncbi_version_request`).
+    let argv_is_rpsbproc = argv.get(1).is_some_and(|word| word == "rpsbproc");
     if let Some(text) = crate::cli::ncbi_version_request(argv.iter().cloned()) {
-        print!("{text}");
+        if argv_is_rpsbproc {
+            crate::rpsbproc::write_stdout(&text);
+        } else {
+            print!("{text}");
+        }
         return Ok(());
     }
+    // NCBI reads the other words of that scan there too (`ncbi_environment::preparse`): a full
+    // version is printed, which LOSAT refuses (`cli::ncbi_toolkit_word_error`) before the
+    // configuration load. The file of `-conffile` is that load's (`start_application`); rpsbproc
+    // refuses it (line RG item E1c).
+    if let Some(program) = program {
+        use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+        let refused = match preparse(&argv[2..]) {
+            Preparsed::Refused(word) => Some(word),
+            Preparsed::Words {
+                conffile: Some(_), ..
+            } if program == "rpsbproc" => Some("-conffile"),
+            _ => None,
+        };
+        if let Some(word) = refused {
+            exit_on_parse_error(
+                &crate::cli::ncbi_toolkit_word_error(program, word),
+                argv_is_rpsbproc,
+            );
+        }
+    }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`: the
+    // configuration is loaded before the arguments are read; quoted at
+    // `ncbi_environment::ApplicationStart`). Its messages go where the diagnostics go, and a
+    // `<program>.ini` that NCBI reports as malformed ends the program with exit status 2, `-h`
+    // included.
+    if let Some(start) = start {
+        match start.write_config_load(&mut target, &mut std::io::stderr()) {
+            Ok(None) => {}
+            Ok(Some(status)) => std::process::exit(status),
+            Err(reason) => return Err(anyhow::Error::msg(reason)),
+        }
+    }
+    let program_name = program.map(str::to_string);
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match crate::cli::try_parse_from(argv) {
         Ok(cli) => cli,
-        Err(error) => {
-            let message = crate::cli::render_message(&error);
-            if error.use_stderr() {
-                eprint!("{message}");
-            } else {
-                print!("{message}");
-            }
-            std::process::exit(error.exit_code());
-        }
+        Err(error) => exit_on_parse_error(&error, argv_is_rpsbproc),
     };
+    // The messages of tblastx's and rpsblast's runs go where the diagnostics go
+    // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
+    // target from here, where NCBI's `Run` makes its handler. LOSAT's parser errors above stay on
+    // the standard error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1).
+    match program_name.as_deref() {
+        Some(name) if crate::blastinput::ncbi_environment::run_messages_follow_log(name) => {
+            if let Err(reason) = target.into_standard_error(name) {
+                return Err(anyhow::Error::msg(reason));
+            }
+        }
+        _ => drop(target),
+    }
     if startup_trace {
         eprintln!("[startup] after clap parse");
     }
@@ -338,6 +444,25 @@ pub fn main_entry() -> Result<()> {
                 return Err(error);
             }
         }
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1870
+        // ```c++
+        // 	return CRpsbProcApp().AppMain(argc, argv);
+        // ```
+        // rpsbproc ends with its own status (`Run`'s `m_app_status`, or the application layer's
+        // for an exception); LOSAT's refusals are errors (exit 1), written as `main` writes an
+        // error, through `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the
+        // message may quote data bytes).
+        Commands::Rpsbproc(args) => match crate::rpsbproc::run(args) {
+            crate::rpsbproc::Outcome::Exit(0) => {}
+            crate::rpsbproc::Outcome::Exit(code) => std::process::exit(code),
+            crate::rpsbproc::Outcome::Refused(message) => {
+                let mut line = b"Error: ".to_vec();
+                line.extend_from_slice(&message);
+                line.push(b'\n');
+                crate::rpsbproc::write_stderr_bytes(&line);
+                std::process::exit(1);
+            }
+        },
         Commands::Tblastn(args) => {
             // NCBI's application layer reads its environment and registry files before
             // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change
@@ -391,4 +516,29 @@ pub fn main_entry() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     crate::utils::xtiming::print();
     Ok(())
+}
+
+/// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
+/// refusals (`cli::ncbi_toolkit_word_error`), written as clap writes it, and its exit status.
+fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
+    // rpsbproc's arguments are not the single-dash words of the BLAST programs.
+    let message = if argv_is_rpsbproc {
+        crate::cli::render_rpsbproc_message(error)
+    } else {
+        crate::cli::render_message(error)
+    };
+    // rpsbproc's messages and help are written without a panic on a closed stream
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
+    if argv_is_rpsbproc {
+        if error.use_stderr() {
+            crate::rpsbproc::write_stderr(&message);
+        } else {
+            crate::rpsbproc::write_stdout(&message);
+        }
+    } else if error.use_stderr() {
+        eprint!("{message}");
+    } else {
+        print!("{message}");
+    }
+    std::process::exit(error.exit_code());
 }

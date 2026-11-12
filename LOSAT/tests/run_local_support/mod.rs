@@ -1,21 +1,24 @@
-//! The harness shared by the `run_local` tests of every program: one sink per requested
-//! format, the collected hit records, and the byte range that the observer reports for
-//! every HSP in every format.
+//! The harness shared by the `run_local` tests of every program that compare a search with the
+//! `losat` binary: the temporary FASTA files, and a search of files through `LOSAT::api` (the
+//! library's entry, which calls the same `run_local_*` functions as the command line), with the
+//! reports, the warnings and the error that the command line gives. The tests of the entry's own
+//! contract (its sinks, its observer, its refusals of hand-set arguments) are in the crate
+//! (`LOSAT/src/api/local_blast_tests/`).
 #![allow(
     dead_code,
     clippy::duplicate_mod,
     reason = "each test file that declares this module uses a different subset of it, and the blastp and tblastn suites load it through several #[path] files"
 )]
 
-use std::io::{self, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use LOSAT::api::local_blast::{FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs};
-use LOSAT::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
-use LOSAT::report::PairwiseHit;
+use LOSAT::api::{
+    read_fasta, read_input_file, read_inputs, run, run_collect, run_to_file, validate, Error,
+    FastaRecord, Inputs, Outcome, Program, Role,
+};
 
 /// The sequence of the first record of a FASTA file in `LOSAT/tests/fasta`.
 pub fn fixture_sequence(name: &str) -> Vec<u8> {
@@ -33,7 +36,6 @@ pub fn fixture_sequence(name: &str) -> Vec<u8> {
 /// The `-out` file of the CLI run of `outfmt` for the query `query`: the query path with the
 /// extension `cli<outfmt>.out`, where every character of `outfmt` that is not an ASCII letter
 /// or digit (a space, `|`, `=`) is written `_`, so the name is a valid file name on Windows too.
-#[allow(dead_code)]
 pub fn cli_out_path(query: &Path, outfmt: &str) -> PathBuf {
     let tag: String = outfmt
         .chars()
@@ -62,6 +64,42 @@ pub fn temp_path(name: &str) -> PathBuf {
     ))
 }
 
+/// The outcome of `losat <program> -query <query> -subject <subject> <args>` with the variables
+/// `env` set and the batch size and `OLD_FSC` removed otherwise: the exit status, stdout and
+/// stderr.
+pub fn subject_cli(
+    program: &str,
+    query: &Path,
+    subject: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> (Option<i32>, String, String) {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_losat"));
+    command
+        .arg(program)
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(subject)
+        .args(args)
+        .env_remove("LOSAT_TIMING")
+        .env_remove("BATCH_SIZE")
+        .env_remove("OLD_FSC")
+        // `cargo test --all-features` builds the probe of blastx's pool workers, which needs a log.
+        .env(
+            "LOSAT_BLASTX_WORKER_LOG",
+            std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+                .unwrap_or_else(|| temp_path("subject_cli_worker.log").into_os_string()),
+        )
+        .envs(env.iter().copied());
+    let output = command.output().expect("run LOSAT CLI");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
 /// A temporary FASTA file, removed when dropped.
 pub struct TempFasta(pub PathBuf);
 
@@ -88,159 +126,117 @@ impl Drop for TempFasta {
     }
 }
 
-/// The records of a fixture of either molecule (protein flags take every nucleotide letter).
+/// The records of a fixture of either molecule (the protein reader takes every nucleotide letter).
 pub fn read_records(path: &Path) -> Vec<FastaRecord> {
-    reader_records(path, ReaderConfig::query("BLASTP", true, false))
-}
-
-/// The records of a FASTA file as NCBI's reader reads them (`config`), the records of the
-/// programs that read with `fasta_reader`.
-#[allow(dead_code)]
-pub fn reader_records(path: &Path, config: ReaderConfig) -> Vec<FastaRecord> {
-    let file = std::fs::File::open(path).expect("FASTA");
-    read_all(&mut FastaInputSource::from_file(file, config), &mut |_| {
-        Ok(())
-    })
+    read_fasta(
+        Program::Blastp,
+        Role::Query,
+        &std::fs::read(path).expect("FASTA"),
+    )
     .expect("records")
 }
 
-/// A sink that publishes how many bytes it holds, so the observer can read positions.
-struct CountingSink {
-    bytes: Vec<u8>,
-    len: Arc<AtomicUsize>,
+/// The files of a search, shown in the reports by the names `query` and `subject` (the
+/// command line's `-query` and `-subject` arguments, which a report shows as they are given).
+#[derive(Clone, Copy)]
+pub struct Files<'a> {
+    pub program: Program,
+    pub query: &'a Path,
+    pub subject: &'a Path,
+    /// The names the reports show, where they are not the paths.
+    pub names: Option<(&'a str, &'a str)>,
 }
 
-impl Write for CountingSink {
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        self.bytes.extend_from_slice(data);
-        self.len.store(self.bytes.len(), Ordering::SeqCst);
-        Ok(data.len())
+impl<'a> Files<'a> {
+    pub fn new(program: Program, query: &'a Path, subject: &'a Path) -> Self {
+        Self {
+            program,
+            query,
+            subject,
+            names: None,
+        }
     }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+
+    /// The search of `options` (the command line's, without the inputs and the output) reading
+    /// the files as the command line reads them, and `with` its records.
+    fn with_records<T>(
+        &self,
+        options: &[&str],
+        with: impl FnOnce(&LOSAT::api::Search, Inputs<'_>) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let search = validate(self.program, options)?;
+        let (query, subject) = read_inputs(
+            &search,
+            &read_input_file(Role::Query, self.query)?,
+            &read_input_file(Role::Subject, self.subject)?,
+        )?;
+        let (query_name, subject_name) = match self.names {
+            Some(names) => names,
+            None => (
+                &*self.query.display().to_string(),
+                &*self.subject.display().to_string(),
+            ),
+        };
+        with(
+            &search,
+            Inputs::new(&query, &subject).named(query_name, subject_name),
+        )
+    }
+
+    /// `run_collect` of `formats`: the reports, the records and the warnings.
+    pub fn try_collect(&self, formats: &[&str], options: &[&str]) -> Result<Outcome, Error> {
+        self.with_records(options, |search, inputs| {
+            run_collect(search, inputs, formats)
+        })
+    }
+
+    /// `try_collect` of a search that must succeed.
+    pub fn collect(&self, formats: &[&str], options: &[&str]) -> Outcome {
+        self.try_collect(formats, options)
+            .unwrap_or_else(|error| panic!("{formats:?} {options:?}: {error}"))
+    }
+
+    /// `run_to_file`: the report of `outfmt` in the file `path` (outfmt 13 and 14 write their side
+    /// files next to it), and the warnings.
+    pub fn write_file(
+        &self,
+        outfmt: &str,
+        options: &[&str],
+        path: &Path,
+    ) -> (Result<(), Error>, Vec<u8>) {
+        let mut diagnostics = Vec::new();
+        let result = self.with_records(options, |search, inputs| {
+            run_to_file(search, inputs, outfmt, path, &mut diagnostics)
+        });
+        (result, diagnostics)
+    }
+
+    /// `run`: one writer per format, and what the writers hold when the search fails.
+    pub fn write(&self, formats: &[&str], options: &[&str]) -> Written {
+        let mut outputs = vec![Vec::new(); formats.len()];
+        let mut diagnostics = Vec::new();
+        let result = self.with_records(options, |search, inputs| {
+            let mut reports: Vec<(&str, &mut (dyn std::io::Write + Send))> = formats
+                .iter()
+                .copied()
+                .zip(outputs.iter_mut())
+                .map(|(outfmt, writer)| (outfmt, writer as &mut (dyn std::io::Write + Send)))
+                .collect();
+            run(search, inputs, &mut reports, &mut diagnostics)
+        });
+        Written {
+            result,
+            outputs,
+            diagnostics,
+        }
     }
 }
 
-struct RecordingObserver {
-    lengths: Vec<Arc<AtomicUsize>>,
-    open: Vec<Option<(HspIndex, usize)>>,
-    ranges: Vec<Vec<(HspIndex, usize, usize)>>,
-    open_subject: Vec<Option<(HspIndex, usize)>>,
-    subjects: Vec<Vec<(HspIndex, usize, usize)>>,
-}
-
-impl FormatObserver for RecordingObserver {
-    fn hsp_begin(&mut self, format: usize, hsp: HspIndex) {
-        assert!(self.open[format].is_none(), "nested HSP in format {format}");
-        self.open[format] = Some((hsp, self.lengths[format].load(Ordering::SeqCst)));
-    }
-    fn hsp_end(&mut self, format: usize, hsp: HspIndex) {
-        let (begun, start) = self.open[format].take().expect("end without begin");
-        assert_eq!(begun, hsp, "end for a different HSP in format {format}");
-        let end = self.lengths[format].load(Ordering::SeqCst);
-        self.ranges[format].push((hsp, start, end));
-    }
-    fn subject_begin(&mut self, format: usize, first_hsp: HspIndex) {
-        assert!(self.open[format].is_none(), "subject heading inside an HSP");
-        assert!(
-            self.open_subject[format].is_none(),
-            "nested subject heading"
-        );
-        self.open_subject[format] = Some((first_hsp, self.lengths[format].load(Ordering::SeqCst)));
-    }
-    fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
-        let (begun, start) = self.open_subject[format].take().expect("end without begin");
-        assert_eq!(
-            begun, first_hsp,
-            "end for a different subject in format {format}"
-        );
-        let end = self.lengths[format].load(Ordering::SeqCst);
-        self.subjects[format].push((first_hsp, start, end));
-    }
-}
-
-/// What one `run_local` call wrote.
-pub struct Run {
-    /// The bytes of each requested format, in request order.
+/// What `Files::write` gave: the result of the search and what the writers hold.
+pub struct Written {
+    pub result: Result<(), Error>,
     pub outputs: Vec<Vec<u8>>,
     pub diagnostics: Vec<u8>,
-    pub hits: Vec<PairwiseHit>,
-    /// Per format: (HSP index, start, end) of every row or section, in write order.
-    pub ranges: Vec<Vec<(HspIndex, usize, usize)>>,
-    /// Per format: (index of the subject's first HSP, start, end) of every subject
-    /// heading, in write order.
-    pub subjects: Vec<Vec<(HspIndex, usize, usize)>>,
-}
-
-/// Calls `search` with one sink per format. With `observe`, it also requests the hit
-/// records and the observer.
-pub fn run_formats(
-    formats: &[&str],
-    observe: bool,
-    search: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
-) -> Run {
-    run_formats_with(formats, observe, observe, search)
-}
-
-/// `run_formats`, with the observer (`observe`) and the hit records (`hits`) requested apart.
-pub fn run_formats_with(
-    formats: &[&str],
-    observe: bool,
-    hits: bool,
-    search: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
-) -> Run {
-    let mut sinks: Vec<CountingSink> = formats
-        .iter()
-        .map(|_| CountingSink {
-            bytes: Vec::new(),
-            len: Arc::new(AtomicUsize::new(0)),
-        })
-        .collect();
-    let mut observer = RecordingObserver {
-        lengths: sinks.iter().map(|sink| sink.len.clone()).collect(),
-        open: vec![None; formats.len()],
-        ranges: vec![Vec::new(); formats.len()],
-        open_subject: vec![None; formats.len()],
-        subjects: vec![Vec::new(); formats.len()],
-    };
-    let collected = Arc::new(Mutex::new(Vec::new()));
-    let collected_sink = collected.clone();
-    let mut on_hits =
-        move |hits: Arc<Vec<PairwiseHit>>| collected_sink.lock().unwrap().extend_from_slice(&hits);
-    let mut diagnostics = Vec::new();
-    {
-        let mut outputs = ReportOutputs {
-            formats: formats
-                .iter()
-                .zip(sinks.iter_mut())
-                .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
-                    sink: OutputSink::Writer(sink),
-                })
-                .collect(),
-            diagnostics: &mut diagnostics,
-            hits: hits.then_some(&mut on_hits as _),
-            observer: if observe { Some(&mut observer) } else { None },
-        };
-        search(&mut outputs).expect("run_local");
-    }
-    for (format, open) in observer.open.iter().enumerate() {
-        assert!(open.is_none(), "HSP left open in format {format}");
-    }
-    for (format, open) in observer.open_subject.iter().enumerate() {
-        assert!(
-            open.is_none(),
-            "subject heading left open in format {format}"
-        );
-    }
-    let hits = collected.lock().unwrap().clone();
-    Run {
-        outputs: sinks.into_iter().map(|sink| sink.bytes).collect(),
-        diagnostics,
-        hits,
-        ranges: observer.ranges,
-        subjects: observer.subjects,
-    }
 }
 
 /// The `index`-th tab-separated field of a tabular row.
@@ -263,19 +259,48 @@ pub fn field(row: &[u8], index: usize) -> String {
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
-/// Checks the observer ranges of the tabular formats: the outfmt 6 rows (at position
-/// `fmt6` of the request) are in HSP index order and tile the output, one line each;
-/// with `fmt7`, the outfmt 7 rows are its non-comment lines and equal the outfmt 6 rows.
-/// Returns the number of rows.
-pub fn assert_tabular_ranges(run: &Run, fmt6: usize, fmt7: Option<usize>, context: &str) -> usize {
-    let (out6, rows6) = (&run.outputs[fmt6], &run.ranges[fmt6]);
+/// The ranges of `Report::spans` of report `index`, one per HSP of `Outcome::hsps` in the order of
+/// the hit list; a range is missing only where the report does not show the HSP.
+fn spans_of(outcome: &Outcome, index: usize, context: &str) -> Vec<Range<usize>> {
+    let report = &outcome.reports[index];
+    assert_eq!(report.spans.len(), outcome.hsps.len(), "{context}");
+    report
+        .spans
+        .iter()
+        .enumerate()
+        .map(|(hsp, span)| {
+            span.clone()
+                .unwrap_or_else(|| panic!("{context}: HSP {hsp} has no range in report {index}"))
+        })
+        .collect()
+}
+
+/// Checks the ranges of the tabular reports of `outcome`: the outfmt 6 rows (at position `fmt6`
+/// of the request) are in HSP index order and tile the output, one line each; with `fmt7`, the
+/// outfmt 7 rows are its non-comment lines and equal the outfmt 6 rows. Returns the number of
+/// rows.
+pub fn assert_tabular_ranges(
+    outcome: &Outcome,
+    fmt6: usize,
+    fmt7: Option<usize>,
+    context: &str,
+) -> usize {
+    let (out6, rows6) = (
+        &outcome.reports[fmt6].bytes,
+        spans_of(outcome, fmt6, context),
+    );
     let mut position = 0;
-    for (expected_index, &(hsp, start, end)) in rows6.iter().enumerate() {
-        assert_eq!(hsp, expected_index, "{context}: outfmt 6 order");
-        assert_eq!(start, position, "{context}: outfmt 6 HSP {hsp} start");
-        let row = &out6[start..end];
-        assert_eq!(row.iter().filter(|&&byte| byte == b'\n').count(), 1);
-        position = end;
+    for (hsp, row) in rows6.iter().enumerate() {
+        assert_eq!(row.start, position, "{context}: outfmt 6 HSP {hsp} start");
+        assert_eq!(
+            out6[row.clone()]
+                .iter()
+                .filter(|&&byte| byte == b'\n')
+                .count(),
+            1,
+            "{context}: outfmt 6 HSP {hsp} is one line"
+        );
+        position = row.end;
     }
     assert_eq!(
         position,
@@ -284,14 +309,15 @@ pub fn assert_tabular_ranges(run: &Run, fmt6: usize, fmt7: Option<usize>, contex
     );
 
     if let Some(fmt7) = fmt7 {
-        let (out7, rows7) = (&run.outputs[fmt7], &run.ranges[fmt7]);
-        assert_eq!(rows7.len(), rows6.len(), "{context}: outfmt 7 rows");
-        for (&(hsp6, s6, e6), &(hsp7, s7, e7)) in rows6.iter().zip(rows7) {
-            assert_eq!(hsp6, hsp7, "{context}: outfmt 7 order");
+        let (out7, rows7) = (
+            &outcome.reports[fmt7].bytes,
+            spans_of(outcome, fmt7, context),
+        );
+        for (hsp, (row6, row7)) in rows6.iter().zip(&rows7).enumerate() {
             assert_eq!(
-                &out6[s6..e6],
-                &out7[s7..e7],
-                "{context}: outfmt 7 HSP {hsp7}"
+                &out6[row6.clone()],
+                &out7[row7.clone()],
+                "{context}: outfmt 7 HSP {hsp}"
             );
         }
         let data_lines = out7
@@ -303,28 +329,29 @@ pub fn assert_tabular_ranges(run: &Run, fmt6: usize, fmt7: Option<usize>, contex
     rows6.len()
 }
 
-/// Checks the observer ranges of outfmt 0, 6 and 7 (at the given positions of the
-/// request) against the hit records: `assert_tabular_ranges`; the same index has the
-/// same coordinates in the hit record and in its outfmt 6 row; and each outfmt 0
-/// section is one score block with the raw score and the query and subject
-/// coordinates of its HSP, inside the report block of its query.
-pub fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], context: &str) {
-    let hits = &run.hits;
+/// Checks the ranges of outfmt 0, 6 and 7 of `outcome` (at the given positions of the request)
+/// against its hit records: `assert_tabular_ranges`; the same index has the same coordinates in
+/// the hit record and in its outfmt 6 row; each outfmt 0 section is one score block with the raw
+/// score and the query and subject coordinates of its HSP, inside the report block of its query;
+/// and the subject headings: one per subject of each query, marked with its first HSP and ending
+/// where its section starts.
+pub fn assert_observer_ranges(outcome: &Outcome, [fmt0, fmt6, fmt7]: [usize; 3], context: &str) {
+    let hits = &outcome.hsps;
     assert!(!hits.is_empty(), "{context}: the fixture must produce hits");
-    let rows = assert_tabular_ranges(run, fmt6, Some(fmt7), context);
+    let rows = assert_tabular_ranges(outcome, fmt6, Some(fmt7), context);
     assert_eq!(rows, hits.len(), "{context}: outfmt 6 rows");
-    for &(hsp, start, end) in &run.ranges[fmt6] {
-        let hit = &hits[hsp].hit;
-        let row = &run.outputs[fmt6][start..end];
+    let rows6 = spans_of(outcome, fmt6, context);
+    for (hit, row) in hits.iter().zip(&rows6) {
         assert_eq!(
-            [6, 7, 8, 9].map(|index| field(row, index)),
+            [6, 7, 8, 9].map(|index| field(&outcome.reports[fmt6].bytes[row.clone()], index)),
             [hit.q_start, hit.q_end, hit.s_start, hit.s_end].map(|value| value.to_string()),
-            "{context}: outfmt 6 HSP {hsp} coordinates"
+            "{context}: outfmt 6 HSP {} coordinates",
+            hit.index
         );
     }
 
-    let (out0, sections) = (&run.outputs[fmt0], &run.ranges[fmt0]);
-    assert_eq!(sections.len(), hits.len(), "{context}: outfmt 0 sections");
+    let out0 = &outcome.reports[fmt0].bytes;
+    let sections = spans_of(outcome, fmt0, context);
     // Byte offsets of the "Query=" lines that open each query's report block.
     let query_blocks: Vec<usize> = out0
         .windows(7)
@@ -334,87 +361,98 @@ pub fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], context
         })
         .map(|(offset, _)| offset)
         .collect();
-    let mut seen = vec![false; hits.len()];
-    for &(hsp, start, end) in sections {
+    let mut blocks_of_queries = std::collections::BTreeMap::new();
+    for (hit, section) in hits.iter().zip(&sections) {
+        let hsp = hit.index;
+        let text = std::str::from_utf8(&out0[section.clone()]).expect("utf-8 section");
         assert!(
-            !std::mem::replace(&mut seen[hsp], true),
-            "{context}: HSP {hsp} twice"
-        );
-        let section = std::str::from_utf8(&out0[start..end]).expect("utf-8 section");
-        assert!(
-            section.starts_with(" Score ="),
-            "{context}: section {hsp}: {section:.20?}"
+            text.starts_with(" Score ="),
+            "{context}: section {hsp}: {text:.20?}"
         );
         assert_eq!(
-            section.matches(" Score =").count(),
+            text.matches(" Score =").count(),
             1,
             "{context}: section {hsp}"
         );
         assert!(
-            section.contains(&format!("bits ({}),", hits[hsp].hit.raw_score)),
+            text.contains(&format!("bits ({}),", hit.raw_score)),
             "{context}: raw score of HSP {hsp}"
         );
-        let hit = &hits[hsp].hit;
         assert_eq!(
-            alignment_span(section, "Query"),
+            alignment_span(text, "Query"),
             (hit.q_start, hit.q_end),
             "{context}: query coordinates of HSP {hsp}"
         );
         assert_eq!(
-            alignment_span(section, "Sbjct"),
+            alignment_span(text, "Sbjct"),
             (hit.s_start, hit.s_end),
             "{context}: subject coordinates of HSP {hsp}"
         );
-        // The section lies in the report block of its own query.
-        let q_idx = hit.q_idx as usize;
-        assert!(
-            query_blocks[q_idx] < start,
-            "{context}: HSP {hsp} before its query block"
-        );
-        if let Some(&next) = query_blocks.get(q_idx + 1) {
-            assert!(end <= next, "{context}: HSP {hsp} after its query block");
+        // The section lies in one report block, the block of its query: the block of a query
+        // is the same for all its HSPs and later for a later query (a query that the search
+        // skips has no block, so the index of the block is not always the index of the query),
+        // and where every query has a block, it is the query's own.
+        let block = query_blocks.partition_point(|&offset| offset < section.start);
+        assert!(block > 0, "{context}: HSP {hsp} before its query block");
+        let block = block - 1;
+        if let Some(&next) = query_blocks.get(block + 1) {
+            assert!(
+                section.end <= next,
+                "{context}: HSP {hsp} after its query block"
+            );
         }
+        if query_blocks.len() == outcome.query_stats.len() {
+            assert_eq!(
+                block, hit.q_idx,
+                "{context}: HSP {hsp} in the block of its query"
+            );
+        }
+        let (earlier, mut later) = (
+            blocks_of_queries.range(..hit.q_idx),
+            blocks_of_queries.range(hit.q_idx + 1..),
+        );
+        assert!(
+            earlier.last().is_none_or(|(_, &b)| b < block)
+                && later.next().is_none_or(|(_, &b)| b > block),
+            "{context}: HSP {hsp}: the blocks of the queries are in the order of the queries"
+        );
+        assert_eq!(
+            *blocks_of_queries.entry(hit.q_idx).or_insert(block),
+            block,
+            "{context}: HSP {hsp}: one block for all HSPs of a query"
+        );
     }
 
-    // One heading per subject of each query, just before the section of its first HSP.
-    let group_starts: Vec<HspIndex> = (0..hits.len())
-        .filter(|&index| {
-            index == 0
-                || (hits[index].hit.q_idx, hits[index].hit.s_idx)
-                    != (hits[index - 1].hit.q_idx, hits[index - 1].hit.s_idx)
-        })
-        .collect();
-    let headings = &run.subjects[fmt0];
-    assert_eq!(
-        headings
-            .iter()
-            .map(|&(first, _, _)| first)
-            .collect::<Vec<_>>(),
-        group_starts,
-        "{context}: one heading per subject, marked with its first HSP"
-    );
-    for &(first, start, end) in headings {
-        let heading = std::str::from_utf8(&out0[start..end]).expect("utf-8 heading");
-        assert!(
-            heading.starts_with("> "),
-            "{context}: heading of HSP {first}: {heading:.20?}"
-        );
-        let section_start = sections
-            .iter()
-            .find(|&&(hsp, _, _)| hsp == first)
-            .map(|&(_, start, _)| start)
-            .expect("section of the first HSP");
-        assert_eq!(
-            end, section_start,
-            "{context}: heading of HSP {first} ends at its section"
-        );
+    // One heading per subject of each query, just before the section of its first HSP; the
+    // other HSPs of the subject have the same heading.
+    let headings = &outcome.reports[fmt0].subject_headings;
+    assert_eq!(headings.len(), hits.len(), "{context}: headings");
+    for (index, hit) in hits.iter().enumerate() {
+        let heading = headings[index]
+            .clone()
+            .unwrap_or_else(|| panic!("{context}: HSP {index} has no heading"));
+        let first =
+            index == 0 || (hit.q_idx, hit.s_idx) != (hits[index - 1].q_idx, hits[index - 1].s_idx);
+        if first {
+            let text = std::str::from_utf8(&out0[heading.clone()]).expect("utf-8 heading");
+            assert!(
+                text.starts_with("> "),
+                "{context}: heading of HSP {index}: {text:.20?}"
+            );
+            assert_eq!(
+                heading.end, sections[index].start,
+                "{context}: heading of HSP {index} ends at its section"
+            );
+        } else {
+            assert_eq!(
+                headings[index],
+                headings[index - 1],
+                "{context}: HSP {index} has the heading of its subject"
+            );
+        }
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
 /// The first and last coordinates on the `label` ("Query" or "Sbjct") lines of one
 /// outfmt 0 alignment section.
 fn alignment_span(section: &str, label: &str) -> (usize, usize) {

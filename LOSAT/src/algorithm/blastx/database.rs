@@ -106,7 +106,7 @@ impl BlastxDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -118,6 +118,12 @@ impl BlastxDatabase {
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(crate) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()
+    }
+
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(crate) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -159,6 +165,25 @@ impl BlastxDatabase {
         self.taxdb.prefetch_refused(&self.db)
     }
 
+    /// Whether a later query batch of a run that writes BLAST XML or an XML2 or JSON document
+    /// could still be refused, which only the batch's hits show, so that the run holds what it
+    /// writes until its epilog (the command line's document, `native::run_inner`; every format of
+    /// a library call, `local::report_batches`) and the refusal follows no byte:
+    /// - with `taxdb.bti` on the search path, a taxonomy database name or record
+    ///   (`taxdb_may_refuse`; `names`: one of the formats is XML2 or JSON, which write the
+    ///   scientific names), or a fetch where NCBI's taxonomy cache would repeat the offset error
+    ///   (`prefetch_refused`: outfmt 5's prefetch, and the XML2 and JSON lookups of a batch with a
+    ///   subject that has a taxid, `read_reported_taxonomy`);
+    /// - with parsed Seq-ids, one of the batch's subjects (`ReportedSubjects::for_batch`).
+    ///
+    /// The taxids of every sequence are looked up here, once (DECISIONS 32; outfmt 5 asks no
+    /// scientific name); the usual run, in which none would be refused, writes batch by batch.
+    pub(crate) fn later_batch_may_refuse(&self, names: bool) -> bool {
+        let taxdb_may_refuse =
+            self.taxdb_found() && (self.taxdb_may_refuse(names) || self.prefetch_refused());
+        taxdb_may_refuse || self.parsed_seqids()
+    }
+
     /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
     pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db)
@@ -181,7 +206,7 @@ impl BlastxDatabase {
     /// query batch with a valid context, which the caller fails with it. The search checks each
     /// sequence where it first reads it (`XStreamDb::x_check`).
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
-        if self.db.printed_num_seqs() == 0 {
+        if self.db.num_oids() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let count = self.db.num_seqs();
@@ -221,7 +246,7 @@ impl BlastxDatabase {
 /// that fails during the search (`native::search_error`), whichever sequence the search's
 /// threads read first.
 pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
-    if db.printed_num_seqs() == 0 {
+    if db.num_oids() == 0 {
         return Err(PreliminaryReadError("Database memory map file error").into());
     }
     let mut longest = 0;

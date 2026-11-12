@@ -280,7 +280,7 @@ pub struct BlastxArgs {
     #[arg(
         long,
         value_parser = blastx_threshold,
-        help = "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 20 for blastx-fast; 19.3 for -word_size 5]"
+        help = "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]"
     )]
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:475-478
@@ -292,6 +292,16 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
+    // (quoted at `blastp::args::BlastpArgs::xdrop_ungap`): `-xdrop_ungap`, `-xdrop_gap` and
+    // `-xdrop_gap_final` in bits, given to the options when given. `None`: BLASTX's defaults
+    // (`ResolvedOptions`).
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = blastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = blastx_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = blastx_real, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
+    pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3299
     // ```c++
     //     arg_desc.AddOptionalKey(kArgCullingLimit, "int_value",
@@ -525,6 +535,7 @@ pub(crate) fn composition_mode(value: &str) -> u8 {
 // ```
 /// The fields that ABI v1 accepts (`web::v1_outfmt`, frozen, plan TD-1): the custom fields
 /// of BLASTX's report before it wrote them through the shared tabular writer.
+#[cfg(any(target_arch = "wasm32", test))]
 pub const FIELDS: &[&str] = &[
     "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
     "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",
@@ -658,7 +669,7 @@ pub struct ResolvedOptions {
     pub db_length: i64,
     pub effective_search_space: i64,
     /// Whether `-searchsp` was given, at any value, or the environment variable `OLD_FSC` is set
-    /// (`app::old_fsc_environment`): NCBI then has no Gumbel block (`gumbel_block`).
+    /// (`app::old_fsc_environment`): NCBI then has no Gumbel block (`has_gumbel_block`).
     pub old_fsc: bool,
 
     pub evalue: f64,
@@ -693,6 +704,54 @@ pub struct ResolvedOptions {
     /// `qcovs` by; read by `native::run` where NCBI's query options handler reads it (after the
     /// subjects), `None` otherwise.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:185-191
+// ```c++
+// typedef enum {
+//     eMBLookupTable,  /**< megablast lookup table (includes both
+//                                 contiguous and discontiguous megablast) */
+//     eSmallNaLookupTable,  /**< lookup table for blastn with small query*/
+//     eNaLookupTable,  /**< blastn lookup table */
+//     eAaLookupTable,  /**< standard protein (blastp) lookup table */
+//     eCompressedAaLookupTable,  /**< compressed alphabet (blastp) lookup table */
+// ```
+/// NCBI's `eAaLookupTable` (`ELookupTableType`): the standard lookup table, of word sizes 2 to 4.
+pub(crate) const AA_LOOKUP_TABLE: i32 = 3;
+/// NCBI's `eCompressedAaLookupTable`: the compressed lookup table, of word sizes 5 to 7.
+pub(crate) const COMPRESSED_AA_LOOKUP_TABLE: i32 = 4;
+
+impl ResolvedOptions {
+    /// Whether the search's lookup table is the compressed one (`-word_size` 5 to 7, blastx-fast).
+    pub(crate) fn compressed_lookup(&self) -> bool {
+        self.lookup_type == COMPRESSED_AA_LOOKUP_TABLE
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
+    // ```c
+    //     /* FSCOLD: to switch back to original FSC, comment out the following line */
+    //     use_old_fsc = getenv("OLD_FSC");
+    //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
+    // ```c
+    //        if (scoring_options->gapped_calculation) {
+    //        ...
+    //        } else {
+    //           ASSERT(sbp->kbp_gap == NULL);
+    //           /* for ungapped cases we do not have gbp filled */
+    //           if (sbp->gbp) {
+    //               sfree(sbp->gbp);
+    //               sbp->gbp=NULL;
+    // ```
+    /// Whether NCBI's score block has its Gumbel block (`sbp->gbp`): a gapped search without
+    /// `-searchsp` and `OLD_FSC` (`old_fsc`). Every choice between the Gumbel block's rules and
+    /// those without it (the block itself, `parameters::gumbel_block`; the length of the
+    /// hit-saving cutoff and its average-length error, `parameters::subject_parameters`; the
+    /// report's block) asks this.
+    pub(crate) fn has_gumbel_block(&self) -> bool {
+        self.gapped && !self.old_fsc
+    }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 // ```c++
@@ -926,7 +985,7 @@ impl BlastxArgs {
         //                                    "8 for a tblastn, blastp or blastx search");
         // ```
         // The command line's `-word_size` is at least 2 (`protein_word_size`); a caller of
-        // `run_local` sets the field itself. LOSAT's limit (3 or 5) comes after NCBI's checks.
+        // `run_local` sets the field itself.
         if let Some(word) = self.word_size {
             if word <= 0 {
                 return Err(
@@ -939,6 +998,23 @@ impl BlastxArgs {
                 )
                 .into());
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:608-618 (the initial
+        // word options' check, after the lookup table's and before the hit saving options')
+        // ```c
+        //    if (program_number != eBlastTypeBlastn  &&
+        //        program_number != eBlastTypeMapping &&
+        //        (!Blast_ProgramIsPhiBlast(program_number)) &&
+        //        options->x_dropoff <= 0.0)
+        //    {
+        //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                             "x_dropoff must be greater than zero");
+        //          return BLASTERR_OPTION_VALUE_INVALID;
+        //    }
+        // ```
+        // (`<= 0.0` is false for NaN, as in C.)
+        if self.xdrop_ungap.is_some_and(|x_dropoff| x_dropoff <= 0.0) {
+            return Err(SemanticOptionsError::from("x_dropoff must be greater than zero").into());
         }
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`). A `-max_target_seqs` below 1 (a caller of `run_local`
@@ -980,18 +1056,14 @@ impl BlastxArgs {
         if let Some(refusal) = seg_refusal {
             return Err(refusal);
         }
-        // LOSAT's limits, for values that NCBI's checks above accept: an e-value that is not
+        // LOSAT's limit, for values that NCBI's checks above accept: an e-value that is not
         // finite (`+inf`, `1e999`, `-nan`; NCBI's argument reads `inf` and `nan` without a sign as
-        // no number), and the word sizes 2 to 7 but 3 and 5, whose lookup tables the BLASTX engine
-        // does not have (series NP, SC9).
+        // no number). Every word size of NCBI's, 2 to 7, runs (item SC9 of line NP).
         if !self.evalue.is_finite() {
             bail!(
                 "an -evalue that is not finite ({}) is not supported by LOSAT's BLASTX",
                 self.evalue
             );
-        }
-        if let Some(word) = self.word_size.filter(|word| !matches!(word, 3 | 5)) {
-            bail!("-word_size {word} is not supported by LOSAT's BLASTX (word sizes 3 and 5 are)");
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433
         // ```c++
@@ -1003,9 +1075,26 @@ impl BlastxArgs {
         // ```
         let fast = self.task == "blastx-fast";
         let word_size = self.word_size.unwrap_or(if fast { 5 } else { 3 });
-        // The word size given on the command line sets its own threshold (19.3 for 5, the citation
-        // at `word_size` below) and word size 3 leaves the task's: `-task blastx-fast -word_size 3`
-        // is the standard table with threshold 20 (api/blast_options_local_priv.hpp:612-619).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:288-300
+        // ```c++
+        //     if ( args.Exist(kArgWordSize) && args[kArgWordSize]) {
+        //         if (m_QueryIsProtein && args[kArgWordSize].AsInteger() > 4){
+        //            opt.SetLookupTableType(eCompressedAaLookupTable);
+        //            opt.SetWordThreshold(19.3);
+        //            if (args[kArgWordSize].AsInteger() > 5) {
+        //                opt.SetWordThreshold(21.0);
+        //            }
+        //            if (args[kArgWordSize].AsInteger() > 6) {
+        //                opt.SetWordThreshold(20.25);
+        //            }
+        //         }
+        //         opt.SetWordSize(args[kArgWordSize].AsInteger());
+        // ```
+        // (BLASTX's query is protein for these arguments: blastx_args.cpp:74 passes
+        // `!kQueryIsProtein`.) A word size given on the command line above 4 is the compressed
+        // table with its own threshold (19.3, 21 or 20.25), and one of 4 or less leaves the task's:
+        // `-task blastx-fast -word_size 3` is the standard table with threshold 20
+        // (api/blast_options_local_priv.hpp:612-619).
         let task_threshold = if fast { 20.0 } else { 12.0 };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:604-622
         // ```c++
@@ -1019,11 +1108,13 @@ impl BlastxArgs {
         //                                     &threshold);
         // ```
         // The task's threshold 12 (`BLAST_WORD_THRESHOLD_BLASTX`) is the matrix's suggestion
-        // (BLOSUM62's 11 + 1 for a translated query); blastx-fast's 20 and `-word_size 5`'s 19.3
-        // are not the default, and stay.
+        // (BLOSUM62's 11 + 1 for a translated query); blastx-fast's 20 and the 19.3, 21 and 20.25
+        // of `-word_size` 5, 6 and 7 are not the default, and stay.
         let threshold = match self.threshold {
             Some(threshold) => threshold,
             None if self.word_size == Some(5) => 19.3,
+            None if self.word_size == Some(6) => 21.0,
+            None if self.word_size == Some(7) => 20.25,
             None if fast => task_threshold,
             None => suggested_threshold(SuggestionProgram::TranslatedQuery, &matrix_name),
         };
@@ -1042,8 +1133,8 @@ impl BlastxArgs {
             .unwrap_or_else(|| suggested_window_size(&matrix_name));
         // NCBI 2.17.0 crashes on a name that its matrix loader reads as IDENTITY without IDENTITY's
         // statistics table (`IDENTITYX`), and on IDENTITY with the compressed lookup table
-        // (`-word_size 5`, blastx-fast): LOSAT refuses both (ungapped searches only: a gapped one
-        // stops at NCBI's matrix error first).
+        // (`-word_size` 5 to 7, blastx-fast): LOSAT refuses both (ungapped searches only: a gapped
+        // one stops at NCBI's matrix error first).
         if scoring.is_none() && identity_prefix(&matrix_name) {
             bail!(
                 "-matrix {matrix_name} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTX"
@@ -1051,7 +1142,7 @@ impl BlastxArgs {
         }
         crate::blastinput::protein_options_check::check_identity_compressed_lookup(
             &matrix_name,
-            word_size == 5,
+            word_size > 4,
             word_size,
             "blastx",
             "BLASTX",
@@ -1101,10 +1192,14 @@ impl BlastxArgs {
             !self.ungapped,
             "BLASTX",
         )?;
-        Ok(ResolvedOptions {
+        let options = ResolvedOptions {
             word_size,
             threshold,
-            lookup_type: if word_size == 5 { 4 } else { 3 },
+            lookup_type: if word_size > 4 {
+                COMPRESSED_AA_LOOKUP_TABLE
+            } else {
+                AA_LOOKUP_TABLE
+            },
             matrix: matrix_name,
             scoring: scoring.unwrap_or(crate::config::ScoringMatrix::Blosum62),
             unknown_matrix: scoring.is_none(),
@@ -1163,9 +1258,11 @@ impl BlastxArgs {
             // #define BLAST_GAP_X_DROPOFF_FINAL_PROT 25 /**< default dropoff (all protein-
             //                                                based gapped extensions) */
             // ```
-            x_dropoff: 7.0,
-            gap_x_dropoff: 15.0,
-            gap_x_dropoff_final: 25.0,
+            // `-xdrop_ungap`, `-xdrop_gap` and `-xdrop_gap_final` replace them
+            // (blast_args.cpp:276-286).
+            x_dropoff: self.xdrop_ungap.unwrap_or(7.0),
+            gap_x_dropoff: self.xdrop_gap.unwrap_or(15.0),
+            gap_x_dropoff_final: self.xdrop_gap_final.unwrap_or(25.0),
             gap_trigger: 22.0,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:150-156
             // ```c++
@@ -1205,7 +1302,10 @@ impl BlastxArgs {
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,
-        })
+        };
+        // The gapped X-drops that NCBI's kernels cannot size are refused before the search.
+        super::parameters::check_gapped_x_drops(&options)?;
+        Ok(options)
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-220
     // ```c++
@@ -1306,6 +1406,85 @@ mod tests {
     // }
     //
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:288-300
+    // ```c++
+    //     if ( args.Exist(kArgWordSize) && args[kArgWordSize]) {
+    //         if (m_QueryIsProtein && args[kArgWordSize].AsInteger() > 4){
+    //            opt.SetLookupTableType(eCompressedAaLookupTable);
+    //            opt.SetWordThreshold(19.3);
+    //            if (args[kArgWordSize].AsInteger() > 5) {
+    //                opt.SetWordThreshold(21.0);
+    //            }
+    //            if (args[kArgWordSize].AsInteger() > 6) {
+    //                opt.SetWordThreshold(20.25);
+    //            }
+    //         }
+    //         opt.SetWordSize(args[kArgWordSize].AsInteger());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
+    // ```c++
+    // CBlastOptionsLocal::SetWordSize(int ws)
+    // {
+    //     m_LutOpts->word_size = ws;
+    //     if (m_LutOpts->lut_type == eCompressedAaLookupTable && ws <= 4)
+    // 	m_LutOpts->lut_type = eAaLookupTable;
+    //     else if (m_LutOpts->lut_type == eAaLookupTable && ws > 4)
+    // 	m_LutOpts->lut_type = eCompressedAaLookupTable;
+    // }
+    // ```
+    // Item SC9: every word size of NCBI's runs; one above 4 is the compressed table with its own
+    // threshold, one of 4 or less the lookup table with the task's (blastx-fast's 20 too), and a
+    // given -threshold stays. IDENTITY is refused with the compressed table, where NCBI crashes.
+    #[test]
+    fn every_word_size_takes_ncbi_s_table_and_threshold() {
+        for (word, threshold, compressed) in [
+            ("2", 12.0, false),
+            ("3", 12.0, false),
+            ("4", 12.0, false),
+            ("5", 19.3, true),
+            ("6", 21.0, true),
+            ("7", 20.25, true),
+        ] {
+            let resolved = parse(&["-word_size", word]).resolve().unwrap();
+            assert_eq!(resolved.word_size.to_string(), word);
+            assert_eq!(resolved.threshold, threshold, "{word}");
+            assert_eq!(resolved.compressed_lookup(), compressed, "{word}");
+            let fast = parse(&["-task", "blastx-fast", "-word_size", word])
+                .resolve()
+                .unwrap();
+            let fast_threshold = if compressed { threshold } else { 20.0 };
+            assert_eq!(fast.threshold, fast_threshold, "blastx-fast {word}");
+            assert_eq!(fast.compressed_lookup(), compressed, "blastx-fast {word}");
+            let given = parse(&["-word_size", word, "-threshold", "17"])
+                .resolve()
+                .unwrap();
+            assert_eq!(given.threshold, 17.0, "{word}");
+            let identity = parse(&[
+                "-word_size",
+                word,
+                "-matrix",
+                "IDENTITY",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+            ])
+            .resolve();
+            if compressed {
+                assert_eq!(
+                    identity.err().unwrap().to_string(),
+                    format!("-matrix IDENTITY with the compressed lookup table (-word_size {word}), with which NCBI BLAST+'s blastx crashes, is not supported by LOSAT's BLASTX")
+                );
+            } else {
+                assert!(identity.is_ok(), "{word}");
+            }
+        }
+        // The task's default word sizes: 3 is the lookup table, blastx-fast's 5 the compressed one.
+        assert!(!parse(&[]).resolve().unwrap().compressed_lookup());
+        assert!(parse(&["-task", "blastx-fast"])
+            .resolve()
+            .unwrap()
+            .compressed_lookup());
+    }
     fn parse(options: &[&str]) -> BlastxArgs {
         let mut argv = vec!["losat", "blastx", "-query", "q", "-subject", "s"];
         argv.extend_from_slice(options);
@@ -1314,6 +1493,77 @@ mod tests {
             crate::cli::Commands::Blastx(a) => a,
             _ => unreachable!(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:276-286 and
+    // core/blast_options.c:608-618 (quoted at `resolve_with_format`): the X-drops reach the
+    // options (7, 15 and 25 bits by default, blastx-fast too), an ungapped X-drop of 0 or below is
+    // NCBI's options error, and a gapped X-drop that NCBI's kernels cannot size is refused
+    // (`core::x_drop`).
+    #[test]
+    fn the_x_drops_reach_the_options_or_ncbis_errors() {
+        for task in [&[][..], &["-task", "blastx-fast"]] {
+            let options = parse(task).resolve().unwrap();
+            assert_eq!(
+                (
+                    options.x_dropoff,
+                    options.gap_x_dropoff,
+                    options.gap_x_dropoff_final
+                ),
+                (7.0, 15.0, 25.0)
+            );
+        }
+        let options = parse(&[
+            "-xdrop_ungap",
+            "3",
+            "-xdrop_gap",
+            "-1",
+            "-xdrop_gap_final",
+            "1e300",
+        ])
+        .resolve()
+        .unwrap();
+        assert_eq!(
+            (
+                options.x_dropoff,
+                options.gap_x_dropoff,
+                options.gap_x_dropoff_final
+            ),
+            (3.0, -1.0, 1e300)
+        );
+        for value in ["0", "-1", "-0.0", "-inf"] {
+            let error = parse(&["-xdrop_ungap", value]).resolve().unwrap_err();
+            assert!(
+                format!("{error:#}").contains("x_dropoff must be greater than zero"),
+                "{value}: {error:#}"
+            );
+        }
+        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
+        // preliminary X-drop at every mode, the final one only in mode 0 (the redo of modes 1 to 3
+        // converts its own at the scaled costs); an ungapped search has no gapped kernels.
+        for extra in [
+            &["-xdrop_gap", "4.2e8"][..],
+            &["-xdrop_gap", "4.2e8", "-comp_based_stats", "2"],
+            &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
+        ] {
+            let error = parse(extra).resolve().unwrap_err();
+            assert!(
+                format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
+                "{extra:?}: {error:#}"
+            );
+        }
+        for cbs in ["1", "2", "3"] {
+            assert!(
+                parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
+                    .resolve()
+                    .is_ok()
+            );
+        }
+        assert!(
+            parse(&["-ungapped", "-comp_based_stats", "0", "-xdrop_gap", "4.2e8"])
+                .resolve()
+                .is_ok()
+        );
     }
     #[test]
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1300-1306

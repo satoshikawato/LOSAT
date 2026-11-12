@@ -3,64 +3,43 @@
 // public/_headers), with no cookies and no referrer. NCBI sends its .gz files as
 // application/x-gzip and UniProt its compressed=true answers without Content-Encoding
 // (2026-11-03, losat-baselines/web-fetch-20261103/NOTES.md), so the browser leaves them
-// compressed: a body that starts with the gzip magic is decompressed with DecompressionStream,
-// and a body that something on the way already decoded is kept as it is.
+// compressed: a body that starts with the gzip magic is inflated by the engine's decoders in the
+// Data worker (WholeFileInflater, the path of a source named .gz: one decoder in the app, the
+// command line's; swebok-improve SW8 D2), and a body that something on the way already decoded is
+// kept as it is. Nothing is sent but the request for the file's URL.
 import type { DownloadProgress, DownloadRequest, DownloadResult, FileDownloader } from '../../ports/example';
+import { INFLATED_TOO_LARGE, type WholeFileInflater } from '../../ports/inflate';
+import { dateOf } from '../../domain/download-sentences';
+import { ask, contentLength, messageOf, PART_BYTES } from './http';
 
-/** Milliseconds to the answer's headers; the body may take longer. */
-const TIMEOUT_MS = 60_000;
-/** Decompressed bytes gathered into one Blob, so that the parts held in memory stay small. */
-const PART_BYTES = 8 * 1024 * 1024;
 const GZIP_MAGIC = [0x1f, 0x8b] as const;
 
 export interface DownloaderOptions {
+  /** The Data worker's inflation of a whole file (the engine's decoders). */
+  readonly inflater: WholeFileInflater;
   readonly fetch?: typeof fetch;
   readonly timeoutMs?: number;
 }
 
 export class BrowserFileDownloader implements FileDownloader {
-  constructor(private readonly options: DownloaderOptions = {}) {}
+  constructor(private readonly options: DownloaderOptions) {}
 
   async download(
     request: DownloadRequest,
     onProgress: (progress: DownloadProgress) => void,
     signal: AbortSignal,
   ): Promise<DownloadResult> {
-    signal.throwIfAborted();
-    const controller = new AbortController();
-    const onAbort = () => controller.abort(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort(new DOMException('no answer in time', 'TimeoutError'));
-    }, this.options.timeoutMs ?? TIMEOUT_MS);
-    try {
-      let response: Response;
-      try {
-        response = await (this.options.fetch ?? fetch)(request.url, {
-          signal: controller.signal,
-          credentials: 'omit',
-          referrerPolicy: 'no-referrer',
-        });
-      } catch (error) {
-        if (signal.aborted) throw error;
-        return { ok: false, reason: 'unreachable', detail: timedOut ? 'no answer in time' : messageOf(error) };
-      } finally {
-        clearTimeout(timer);
-      }
-      if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
-        return { ok: false, reason: 'refused', status: response.status };
-      }
-      const result = await readBody(response, request.maxBytes, onProgress, signal);
-      if (!result.ok) return result;
-      const version = versionOf(response);
-      return { ...result, ...(version === undefined ? {} : { version }) };
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
+    const answer = await ask(request.url, {}, signal, { fetch: this.options.fetch, timeoutMs: this.options.timeoutMs });
+    if (!answer.ok) return { ok: false, reason: 'unreachable', detail: answer.detail };
+    const { response } = answer;
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      return { ok: false, reason: 'refused', status: response.status };
     }
+    const result = await readBody(response, request, this.options.inflater, onProgress, signal);
+    if (!result.ok) return result;
+    const version = versionOf(response);
+    return { ...result, ...(version === undefined ? {} : { version }) };
   }
 }
 
@@ -69,73 +48,44 @@ type BodyResult = Exclude<DownloadResult, { readonly ok: true }> | { readonly ok
 
 async function readBody(
   response: Response,
-  maxBytes: number,
+  request: DownloadRequest,
+  inflater: WholeFileInflater,
   onProgress: (progress: DownloadProgress) => void,
   signal: AbortSignal,
 ): Promise<BodyResult> {
   const total = contentLength(response);
   const reader = (response.body ?? new Blob([]).stream()).getReader();
-  let downloaded = 0;
-  let networkError: unknown;
-  const next = async (): Promise<ReadableStreamReadResult<Bytes>> => {
-    let result: ReadableStreamReadResult<Bytes>;
-    try {
-      result = await reader.read();
-    } catch (error) {
-      networkError = error;
-      throw error;
-    }
-    if (!result.done) {
-      downloaded += result.value.byteLength;
-      onProgress(total === undefined ? { bytes: downloaded } : { bytes: downloaded, total });
-    }
-    return result;
-  };
   // The fetch's signal ends a browser's body too; cancelling the reader ends any body.
   const onAbort = () => void reader.cancel(signal.reason).catch(() => undefined);
   signal.addEventListener('abort', onAbort, { once: true });
   const parts: Blob[] = [];
   let chunks: Bytes[] = [];
   let chunkBytes = 0;
-  let kept = 0;
+  let downloaded = 0;
+  /** The first bytes, which say whether the body is gzip. */
+  const head: number[] = [];
   try {
-    // The first bytes say whether the body is gzip.
-    const head: Bytes[] = [];
-    let headBytes = 0;
-    let ended = false;
-    while (headBytes < GZIP_MAGIC.length) {
-      const { done, value } = await next();
-      if (done) {
-        ended = true;
-        break;
-      }
-      head.push(value);
-      headBytes += value.byteLength;
-    }
-    const gzip = startsWith(head, GZIP_MAGIC);
-    const raw = new ReadableStream<Bytes>({
-      start(stream) {
-        for (const chunk of head) stream.enqueue(chunk);
-        if (ended) stream.close();
-      },
-      async pull(stream) {
-        const { done, value } = await next();
-        if (done) stream.close();
-        else stream.enqueue(value);
-      },
-      cancel: (reason) => reader.cancel(reason),
-    });
-    const decoded = (gzip ? raw.pipeThrough(new DecompressionStream('gzip')) : raw).getReader();
     for (;;) {
-      const { done, value } = await decoded.read();
-      if (done) break;
-      kept += value.byteLength;
-      if (kept > maxBytes) {
-        await decoded.cancel().catch(() => undefined);
+      let result: ReadableStreamReadResult<Bytes>;
+      try {
+        result = await reader.read();
+      } catch (error) {
+        if (signal.aborted) throw signal.reason;
+        return { ok: false, reason: 'unreachable', detail: messageOf(error) };
+      }
+      if (result.done) break;
+      const chunk = result.value;
+      downloaded += chunk.byteLength;
+      onProgress(total === undefined ? { bytes: downloaded } : { bytes: downloaded, total });
+      // A gzip body is no larger than about what it inflates to (deflate adds at most 0.03 %), so
+      // a body over the limit is over it once inflated too.
+      if (downloaded > request.maxBytes) {
+        await reader.cancel().catch(() => undefined);
         return { ok: false, reason: 'too-large' };
       }
-      chunks.push(value);
-      chunkBytes += value.byteLength;
+      for (let i = 0; head.length < GZIP_MAGIC.length && i < chunk.byteLength; i++) head.push(chunk[i]!);
+      chunks.push(chunk);
+      chunkBytes += chunk.byteLength;
       if (chunkBytes >= PART_BYTES) {
         parts.push(new Blob(chunks));
         chunks = [];
@@ -143,41 +93,29 @@ async function readBody(
       }
     }
     signal.throwIfAborted();
-  } catch (error) {
-    if (signal.aborted) throw signal.reason;
-    if (networkError !== undefined) return { ok: false, reason: 'unreachable', detail: messageOf(networkError) };
-    return { ok: false, reason: 'corrupt', detail: messageOf(error) };
   } finally {
     signal.removeEventListener('abort', onAbort);
   }
   parts.push(new Blob(chunks));
-  return { ok: true, data: new Blob(parts, { type: 'text/plain' }), downloadedBytes: downloaded };
-}
-
-function startsWith(chunks: readonly Uint8Array[], magic: readonly number[]): boolean {
-  const bytes: number[] = [];
-  for (const chunk of chunks) {
-    for (const byte of chunk) {
-      if (bytes.length === magic.length) break;
-      bytes.push(byte);
-    }
+  const body = new Blob(parts, { type: 'text/plain' });
+  if (!GZIP_MAGIC.every((byte, i) => head[i] === byte)) return { ok: true, data: body, downloadedBytes: downloaded };
+  // The engine's decoders inflate the body in the Data worker, as they inflate the source
+  // `<fileName>.gz` (the set's file on its site), with the limit on the inflated bytes.
+  let inflated: File;
+  try {
+    inflated = await inflater.inflateFile(new File([body], `${request.fileName}.gz`), request.maxBytes);
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    if (error instanceof Error && error.name === INFLATED_TOO_LARGE) return { ok: false, reason: 'too-large' };
+    return { ok: false, reason: 'corrupt', detail: messageOf(error) };
   }
-  return bytes.length === magic.length && bytes.every((byte, i) => byte === magic[i]);
-}
-
-function contentLength(response: Response): number | undefined {
-  const value = Number(response.headers.get('Content-Length') ?? Number.NaN);
-  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  signal.throwIfAborted();
+  return { ok: true, data: new Blob([inflated], { type: 'text/plain' }), downloadedBytes: downloaded };
 }
 
 /** UniProt's release (an exposed header), else the date of Last-Modified (a CORS-safelisted header). */
 function versionOf(response: Response): string | undefined {
   const release = response.headers.get('X-UniProt-Release');
   if (release !== null && release.trim() !== '') return `UniProt release ${release.trim()}`;
-  const modified = Date.parse(response.headers.get('Last-Modified') ?? '');
-  return Number.isNaN(modified) ? undefined : new Date(modified).toISOString().slice(0, 10);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return dateOf(response.headers.get('Last-Modified'));
 }

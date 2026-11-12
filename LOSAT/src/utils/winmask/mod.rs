@@ -12,6 +12,7 @@
 mod istat;
 mod ncbi_report;
 mod score;
+mod taxid;
 mod window;
 
 #[cfg(test)]
@@ -24,6 +25,7 @@ use std::sync::Arc;
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
+pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
 use window::Window;
@@ -150,13 +152,17 @@ impl std::error::Error for WinMaskError {}
 
 /// Where the counts files that the callers name are read from: NCBI's checks of the format
 /// (`DiscoverStatType`) and its readers (`CSeqMaskerIstatFactory::create`) open the file by
-/// name; LOSAT opens it through a source, so that LOSAT Web can give counts it holds in memory
-/// under the name of the command line. [`FileCounts`] is the file system.
+/// name, and `-window_masker_taxid` asks whether its file is there (`WindowMaskerTaxidToDb`);
+/// LOSAT asks a source, so that LOSAT Web can give counts it holds in memory under the name of
+/// the command line. `FileCounts` is the file system.
 pub trait CountsSource: Send + Sync + fmt::Debug {
     /// `CSeqMaskerIstatFactory::DiscoverStatType( name )`.
     fn discover(&self, name: &str) -> Result<StatFile, WinMaskError>;
     /// `CSeqMaskerIstatFactory::create( name, ... )` with `params`.
     fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError>;
+    /// `CFile( path ).Exists()`: whether `path` is a file (or a link to one), which NCBI asks of
+    /// the counts file of `-window_masker_taxid` (`taxid_stat_file`).
+    fn is_file(&self, path: &Path) -> bool;
 }
 
 /// The counts files of the file system, by path.
@@ -170,6 +176,10 @@ impl CountsSource for FileCounts {
 
     fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
         UnitCounts::open(Path::new(name), params).map(Arc::new)
+    }
+
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
     }
 }
 
@@ -187,6 +197,7 @@ const UNIT_STEP: u8 = 1;
 
 impl SeqMasker {
     /// `s_BuildSeqMasker( lstat )` with `params` in place of its zeros.
+    #[cfg(test)]
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
         Self::new(Arc::new(UnitCounts::open(path, params)?), params)
     }
@@ -222,10 +233,12 @@ impl SeqMasker {
         Ok(Self { ustat, window_size })
     }
 
+    #[cfg(test)]
     pub fn unit_counts(&self) -> &UnitCounts {
         &self.ustat
     }
 
+    #[cfg(test)]
     pub fn window_size(&self) -> u8 {
         self.window_size
     }

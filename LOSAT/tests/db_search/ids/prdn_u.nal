@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, pssmread
+#
+TITLE prdn_u (two databases, parsed Seq-ids)
+DBLIST prdn_u0y prdn_ua

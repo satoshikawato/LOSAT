@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.12
+- Version: 1.15
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -19,7 +19,13 @@
   that are refused, line DBID);
   1.11 2026-11-04 (the makeblastdb exception: a `-in` file of several bzip2 streams or zstd
   frames, line GZ; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.12 2026-11-12 (exception 8, a TBLASTX cutoff quotient past the range of a double, line PS)
+  1.12 2026-11-12 (exception 8, a TBLASTX cutoff quotient past the range of a double, line PS);
+  1.13 2026-11-12 (exception 9, the `losat rpsbproc` exception: PSSM-IDs of 2^31 and more,
+  line PS item PS16a; decided 2026-11-11, numbered after 1.12);
+  1.14 2026-11-12 (exception 10, the `losat rpsbproc` exception: a motif check that reads past
+  the stored positions, line PS item PS16b; decided 2026-11-11, numbered after 1.13);
+  1.15 2026-11-12 (the explicit rejections of `losat rpsbproc`, rule 3, line PS items PS16a and
+  PS16b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -302,6 +308,51 @@ Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
    maintainer's rule of 2026-10-10 (no reproduction of NCBI's undefined behaviour or integer
    overflow) applies, also on these ordinary inputs.
 
+## Approved exception (`losat rpsbproc`, PSSM-IDs of 2^31 and more, version 1.13)
+
+Version 1.13, decided under the maintainer's standing delegation on 2026-11-11 (line PS
+`DECISIONS.md` 27, addendum of the PS16a review), under the rule of 2026-10-10 that LOSAT does
+not reproduce a signed `Int4` overflow (undefined behaviour in C++), as exception 4 widens the
+culling limit; its PR (PS16a) asks the maintainer to accept it, as version 1.5's did.
+
+9. **A PSSM-ID of 2^31 or more in rpsbproc's data.** rpsbproc 0.5.1 orders its maps of domains
+   and superfamilies by the `int` difference of two ids (`TSortByPssmId`, `(int)v1.m_uiPssmId -
+   (int)v2.m_uiPssmId`, `common/basedata.hpp:796-807`; `TSortByClusterId`, `:809-820`), used as
+   `m_comp(*p1, *p2) < 0` by its `std::sort` and by the sign of the difference in its binary
+   search (`common/ptrmap.hpp:63-70`, `:109-127`). Two ids whose `int` values are 2^31 or more
+   apart overflow it. NCBI's 2025-05-13 binary (GCC, no `-fwrapv`) sorts by the signed values
+   (the compiler folds `a - b < 0` to `a < b`) but searches with the wrapped difference: with
+   the fixture's `cddid.tbl` plus eight domain rows of PSSM-IDs between 2^31 - 2.5e6 and 2^31 +
+   1.3e6 (and in runs 2 and 3 a row of PSSM-ID 2^31), it prints the hit of PSSM-ID 488084 (run
+   1) and of 2148253328 (run 3) but not that of 2^31 (run 2; PS16a review oracle A2); with 1 to
+   30 rows of PSSM-IDs between 2^31 - 6e8 and 2^32 that no archive hits, it prints the output of
+   the data without them (oracle A4-1 cases `big3`, `big86` and `big88`). LOSAT compares the signed values
+   in the sort and in the search (`rpsbproc::data`, `int_order`), so it finds every row, the
+   one of 2^31 too; elsewhere its maps are NCBI's. The valid result is the one NCBI gives for the
+   row under a PSSM-ID that does not overflow the difference (only the PSSM-ID column, which
+   prints 0 from `INVALIDPSSMID` on, would differ). No CDD release has a PSSM-ID of 2^31 or
+   more (v3.22's largest is 533,962; the pseudo PSSM-IDs of accessions are about 1e8).
+   Unit test `pssm_ids_from_2_to_the_31_are_found` (`LOSAT/src/rpsbproc/data_tests.rs`).
+
+## Approved exception (`losat rpsbproc`, a motif check past the stored positions, version 1.14)
+
+Version 1.14, decided by the Owner on 2026-11-11 (line PS `DECISIONS.md` 25, Q2 = A, answer
+「すべて推奨通り」; numbered after 1.13); its PR (PS16b) asks the maintainer to accept it as the PR
+of exception 9 (PS16a) did.
+
+10. **`MotifCheck` reads `st_motif_pos` past its end.** rpsbproc 0.5.1 keeps the positions of
+    the first motif-bearing site that it checks in a function-static `vector<SeqPos_t>
+    st_motif_pos` (`common/basedata.cpp:671-676`) and compares the mapped positions of every
+    later motif-bearing site, of any domain and query of the process, with it: for each of the
+    `mtfLen` positions of the motif's minimal map, `rMappedRes[mapIdx].ori > st_motif_pos[mtfIdx]`
+    (`:704`). When the motif's minimal map is longer than the stored list (`mtfIdx >=
+    st_motif_pos.size()`) the read is outside the vector (C++ undefined behavior: heap bytes),
+    so NCBI's result depends on the heap. LOSAT treats the check as failed (returns 1, the site
+    is dropped), as the loop does when the mapped residues are exhausted (`:714-715`). The list
+    itself is NCBI's process-wide state, reproduced per run (rule 2). `MotifState::motif_check`
+    (`LOSAT/src/rpsbproc/sites.rs`); unit test `a_minimal_map_longer_than_the_stored_positions_fails_the_check`.
+    The PR gives the number of occurrences on E. coli K-12 MG1655 x CDD v3.22.
+
 ## Reproduced as NCBI (rule 2)
 
 - A text seqid list whose ids all go in NCBI's rewriting for a version 5 database (gi ids
@@ -389,6 +440,34 @@ Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
   cannot fetch, in the default tabular fields), pads the line without end (an outfmt 0
   description id of 65 bytes or more) or crashes (a protein title of punctuation): version 1.10,
   the table in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md).
+
+- `losat rpsbproc` (version 1.15, 2026-11-12, line PS items PS16a and PS16b, line PS
+  `DECISIONS.md` 37 and 40, Owner-delegated): where NCBI's rpsbproc 0.5.1 reads memory outside
+  its strings or its result depends on the host's memory, LOSAT refuses (exit 1) and names the
+  data line, site or position; the report keeps the lines before it, and no part of a line.
+  - A `cdtrack.txt` line on which NCBI's loader reads past the line's terminating 0 (a line that
+    ends without a root or after a field it skips; PS16a).
+  - A motif match that reads beyond the residues of a site, where NCBI's answer depends on the
+    bytes it reads there: LOSAT runs the match once with every such read failing and once with
+    every such read passing, and gives the answer where the two agree (NCBI's search tries every
+    count, so that answer holds for any bytes); where they differ, NCBI's answer depends on its
+    stack's bytes (`Hx(0,10)W` on `HKY`). Also refused where the two agree, if a read may leave
+    NCBI's buffer of the residues (the capacity of `minMap`; past it a read may fault, by the
+    memory layout; `DECISIONS.md` 40).
+  - A motif whose check makes NCBI hold 1 GiB or more at once in allocations below 2^47 bytes:
+    the minimal map's string with its old buffer while it grows, or the match records of
+    `curr.flex` with the copies of them on NCBI's stack and the string of the residues. NCBI's
+    allocations then succeed or throw `std::bad_alloc` by the host's memory and overcommit: the
+    oracle `H-{<}(0,67108863)-{<}(0,67108863)-K` (1.5 GiB of records in allocations of 512 MB)
+    and `Hx(536870910)K` (a map of 512 MB, then 1 GiB) exit 0 under a 4 GiB address space and
+    with `std::bad_alloc` under 1.5 GiB in both 0.5.1 builds. A repeat that does not advance
+    (`<*`) grows NCBI's records until the memory runs out. One allocation of 2^47 bytes or more
+    throws `std::bad_alloc` on every host, and a map longer than the string's `max_size()`
+    (2^63 - 1 in NCBI's C++20 builds) throws `basic_string::_M_replace_aux`: there LOSAT ends as
+    NCBI does (exit 3), and below 1 GiB it gives NCBI's result.
+  - A site or motif position outside the query's residues other than their end, also a query
+    without residues: NCBI reads memory outside the string (its two 0.5.1 builds print different
+    bytes for a query without `seq-data`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

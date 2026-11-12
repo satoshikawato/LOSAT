@@ -1,9 +1,10 @@
 // The keeper of the threaded instance's shared memory (thread-host.ts makes one for each
 // memory): a worker of the Engine worker that holds the memory and runs nothing else, so that
 // it can grow the memory while the Engine worker and the thread workers run a search. Before
-// the Gateway ends the Engine worker during a search (a cancel, a thread that reports a
-// fault), it asks the keeper on a BroadcastChannel to grow the memory to its maximum
-// (gateway.ts, retire; growToMaximum).
+// the Gateway ends the Engine worker while its threaded instance is in use (a cancel, a thread
+// that reports a fault; instance-use.ts), it asks the keeper on a BroadcastChannel to grow the
+// memory to its maximum (gateway.ts, retire; growToMaximum) and to end the waits of its threads,
+// which WebKit would otherwise keep alive with the memory (endWaits).
 //
 // The main thread does not hold the memory itself. A thread that is sent a shared memory keeps
 // it until that thread collects the message. In WebKit 26.5 (Playwright's build on Linux), a
@@ -16,7 +17,7 @@
 // be moved to them by the Engine worker, which then runs a search synchronously. In
 // Playwright's Firefox 151, a port that a worker moved carried no message while that worker
 // ran synchronously, also after a setTimeout of 0 ms before it; after one of 5 ms, it did.
-import { growToMaximum } from '../reactor/shared-memory';
+import { endWaits, growToMaximum } from '../reactor/shared-memory';
 import type { KeeperCommand, KeeperGrow, KeeperGrown, KeeperReady } from './protocol';
 
 export class MemoryKeeper {
@@ -30,7 +31,20 @@ export class MemoryKeeper {
     this.channel = channel;
     channel.onmessage = (event: MessageEvent<KeeperGrow>) => {
       if (event.data?.type !== 'grow') return;
-      growToMaximum(shared);
+      try {
+        growToMaximum(shared);
+      } catch {
+        // The Gateway ends a runtime whose threaded instance is in use only on the answer
+        // (gateway.ts, retire), so it comes also then; the memory stays as it is, as when the
+        // browser cannot give its maximum.
+      }
+      try {
+        // The threads that wait in the threaded module wait in slices from now on, so that the
+        // browser can end their workers (WebKit, endWaits).
+        endWaits(shared.memory);
+      } catch {
+        // As for the grow: the answer comes all the same.
+      }
       const grown: KeeperGrown = { type: 'grown' };
       channel.postMessage(grown);
     };

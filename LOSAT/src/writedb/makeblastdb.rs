@@ -16,7 +16,9 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
-use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
+use crate::blastinput::ncbi_environment::{
+    check_ncbi_application_settings, diag_target, DiagStream, DiagTarget,
+};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
@@ -804,11 +806,7 @@ impl Read for CompressedInput<'_> {
 /// format, or are cut short (line GZ, DECISIONS 5; for `.gz`: where makeblastdb's decompressor
 /// fails, `compressed::GzipMembers`): exit status 1, the files of the build removed.
 fn compressed_fault_error(name: &str, compression: Compression, fault: &str) -> MakedbError {
-    unsupported(format!(
-        "-in: '{name}' is named {suffix} but is not {format} data ({fault}); LOSAT reads a file named {suffix} through {format}",
-        suffix = compression.suffix(),
-        format = compression.format(),
-    ))
+    unsupported(format!("-in: {}", compression.not_data(name, fault)))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:792-836
@@ -1595,35 +1593,27 @@ pub(crate) fn run_with(
         }
         Some(name) => name,
     };
-    let silent = name.is_empty() || name == "/dev/null";
-    let opened = if name.is_empty() {
-        None
-    } else {
-        std::fs::OpenOptions::new()
+    // The diagnostics go to the target of `-logfile` (`ncbi_environment::diag_target`, which
+    // owns the special names), and the log to `AsOutputFile` of the same name (append): the
+    // target's file, or for `/dev/null`, whose diagnostics go nowhere, that file; an empty name
+    // or a file that cannot be opened has no log.
+    let mut target = diag_target(Some(std::ffi::OsStr::new(name)));
+    let log = match &target {
+        DiagTarget::File(file) => file.try_clone().ok(),
+        _ if name.is_empty() => None,
+        _ => std::fs::OpenOptions::new()
             .append(true)
             .create(true)
             .open(name)
-            .ok()
+            .ok(),
     };
-    let mut discard = std::io::sink();
-    let diag: &mut dyn Write = if silent { &mut discard } else { err };
-    match opened {
-        Some(file) if silent => {
-            let mut log = &file;
-            let result = build_database_with_log(
-                args,
-                now,
-                platform,
-                stdin,
-                &mut log,
-                diag,
-                None,
-                &mut end_message,
-            );
-            finish(result, end_message, diag)
-        }
+    let mut diag = DiagStream {
+        target: &mut target,
+        stderr: err,
+    };
+    match log {
         Some(file) => {
-            let (mut log, mut diag) = (&file, &file);
+            let mut log = &file;
             let result = build_database_with_log(
                 args,
                 now,
@@ -1646,11 +1636,11 @@ pub(crate) fn run_with(
                 platform,
                 stdin,
                 out,
-                diag,
+                &mut diag,
                 Some(error),
                 &mut end_message,
             );
-            finish(result, end_message, diag)
+            finish(result, end_message, &mut diag)
         }
     }
 }

@@ -516,7 +516,7 @@ fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
         Commands::Blastx(a) => (a.query_loc.as_deref(), "BLASTX"),
         Commands::Psiblast(a) => (a.query_loc.as_deref(), "BLASTP"),
         Commands::Rpsblast(a) => (a.query_loc.as_deref(), "RPSBLAST"),
-        Commands::Makedb(_) => (None, ""),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => (None, ""),
     }
 }
 
@@ -549,7 +549,7 @@ fn num_threads(command: &Commands) -> usize {
         Commands::Blastx(a) => a.num_threads as usize,
         Commands::Psiblast(a) => a.num_threads,
         Commands::Rpsblast(a) => usize::try_from(a.num_threads.max(1)).unwrap_or(1),
-        Commands::Makedb(_) => 1,
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => 1,
     }
 }
 
@@ -569,7 +569,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         ],
         Commands::Psiblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Rpsblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
-        Commands::Makedb(_) => [None; 3],
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => [None; 3],
     }
 }
 
@@ -644,7 +644,8 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // ```
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
-// change the output. A search of records reads neither.
+// change the output. A search of records reads neither, but for the directory of BLASTN's
+// `-window_masker_taxid`, which NCBI's library looks for itself.
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
     command: Commands,
@@ -676,7 +677,7 @@ pub(super) fn run_local(
                 let args = psiblast_args(args, outputs)?;
                 run_local_database_blastp(args, query, settings("psiblast")?, outputs)
             }
-            Commands::Rpsblast(_) | Commands::Makedb(_) => {
+            Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
                 unreachable!("Program::parse admits the search programs only")
             }
         };
@@ -696,6 +697,24 @@ pub(super) fn run_local(
             if args.window_masker_db.is_some() {
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:381-388
+            // ```c++
+            //     CRef<CNcbiRegistry> reg(new CNcbiRegistry(empty_stream,
+            //                                               IRegistry::fWithNcbirc));
+            //     ...
+            //     reg->Add(*env_reg, CNcbiRegistry::ePriority_MaxUser);
+            //     retval = reg->Get(kSection, kEnvVar);
+            // ```
+            // The directory of `-window_masker_taxid` is looked for by NCBI's library itself, in
+            // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
+            // a database search of the library does.
+            if args.window_masker_taxid.is_some_and(|taxid| taxid != 0) {
+                use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
+                let settings =
+                    check_ncbi_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                args.window_masker_registry = Some(settings.window_masker_registry);
+                args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
+            }
             run_local_blastn(args, query, subject, outputs)
         }
         Commands::Tblastx(args) => run_local_tblastx(args, query, subject, outputs),
@@ -704,7 +723,7 @@ pub(super) fn run_local(
             let args = psiblast_args(args, outputs)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
-        Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     }
@@ -910,7 +929,7 @@ fn set_output_file(command: &mut Commands, path: &Path) {
         Commands::Tblastx(args) => args.out = out,
         Commands::Blastx(args) => args.out = out,
         Commands::Psiblast(args) => args.out = out,
-        Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     }

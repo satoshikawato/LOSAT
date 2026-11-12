@@ -21,12 +21,11 @@
 use super::{
     blastn_trace, build_blastna_matrix, build_nucl_score_table, get_prelim_hitlist_size,
     x_few_subj, x_pair_seed, x_qgroup_par, BlastnArgs, ContextKarlin, SequenceData, SubjectSource,
-    NCBIMATH_LN2,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::coordination::TaskConfig;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
-use crate::algorithm::blastn::scoring::gap_x_dropoffs;
+use crate::algorithm::blastn::scoring::{check_gapped_x_dropoffs, gap_x_dropoffs};
 use crate::utils::threading::SearchPool;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -84,9 +83,7 @@ pub(super) struct SubjectSearchEnv {
     pub(super) x_strips: bool,
     pub(super) x_kind: x_few_subj::Kind,
     pub(super) use_parallel: bool,
-    // The database size, the e-value threshold, `-subject_besthit` and LOSAT_X_QGROUPPAR.
-    pub(super) db_len_total: usize,
-    pub(super) db_num_seqs: usize,
+    // The e-value threshold, `-subject_besthit` and LOSAT_X_QGROUPPAR.
     pub(super) evalue_threshold: f64,
     pub(super) subject_besthit: bool,
     pub(super) x_qgroup_batch: bool,
@@ -173,7 +170,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
             .map_err(|_| anyhow::anyhow!("the preliminary hit list size overflows"))?;
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
     // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
     let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:350-692
@@ -194,19 +191,21 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // ```
     let verbose = args.verbose;
     let debug_window: Option<(usize, usize, usize, usize)> =
-        std::env::var("BLEMIR_DEBUG_WINDOW").ok().and_then(|s| {
-            let parts: Vec<&str> = s.split(',').collect();
-            if parts.len() == 2 {
-                let q_parts: Vec<usize> =
-                    parts[0].split('-').filter_map(|x| x.parse().ok()).collect();
-                let s_parts: Vec<usize> =
-                    parts[1].split('-').filter_map(|x| x.parse().ok()).collect();
-                if q_parts.len() == 2 && s_parts.len() == 2 {
-                    return Some((q_parts[0], q_parts[1], s_parts[0], s_parts[1]));
+        crate::utils::xdiag::var("BLEMIR_DEBUG_WINDOW")
+            .ok()
+            .and_then(|s| {
+                let parts: Vec<&str> = s.split(',').collect();
+                if parts.len() == 2 {
+                    let q_parts: Vec<usize> =
+                        parts[0].split('-').filter_map(|x| x.parse().ok()).collect();
+                    let s_parts: Vec<usize> =
+                        parts[1].split('-').filter_map(|x| x.parse().ok()).collect();
+                    if q_parts.len() == 2 && s_parts.len() == 2 {
+                        return Some((q_parts[0], q_parts[1], s_parts[0], s_parts[1]));
+                    }
                 }
-            }
-            None
-        });
+                None
+            });
 
     // NCBI BLAST does NOT use mask_array/mask_hash for diagonal suppression
     // REMOVED: disable_mask variable (no longer needed)
@@ -257,6 +256,15 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // ```
     let (x_drop_gapped, x_drop_final) =
         gap_x_dropoffs(context_karlin, config.x_drop_gapped, config.x_drop_final);
+    if !UNGAPPED {
+        check_gapped_x_dropoffs(
+            config.use_dp,
+            (config.x_drop_gapped, config.x_drop_final),
+            (x_drop_gapped, x_drop_final),
+            (config.reward, config.penalty),
+            (config.gap_open, config.gap_extend),
+        )?;
+    }
     let scan_range = config.scan_range; // For off-diagonal hit detection
     let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
 
@@ -281,8 +289,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         blastn_trace_enabled,
         debug_window,
     });
-    let db_len_total = seq_data.db_len_total;
-    let db_num_seqs = seq_data.db_num_seqs;
     let evalue_threshold = crate::algorithm::blastn::coordination::determine_evalue(args);
     let subject_besthit = args.subject_besthit;
     // EXPERIMENT (LOSAT_X_QGROUPPAR): whether the gapped stages of a subject searched on this
@@ -345,15 +351,17 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
     // its raw X-drop is the subject's word cutoff in ParametersUpdate
     // (`batch_setup::batch_cutoffs`). `-xdrop_ungap` replaces the task's bits (`configure_task`).
+    // The conversion is the protein programs' (`core::x_drop::ungapped_x_dropoff`, scale factor
+    // 1): 0 bits and every value whose ceiling is 0 give 0, a value past `Int4` gives `INT_MIN`.
     let x_drop_ungapped_bits = config.x_drop_ungapped;
     let x_dropoff_init: Vec<i32> = search_karlin
         .iter()
         .map(|blocks| {
-            if x_drop_ungapped_bits == 0.0 {
-                0
-            } else {
-                ((x_drop_ungapped_bits * NCBIMATH_LN2) / blocks.ungapped.lambda).ceil() as i32
-            }
+            crate::core::x_drop::ungapped_x_dropoff(
+                x_drop_ungapped_bits,
+                blocks.ungapped.lambda,
+                1.0,
+            )
         })
         .collect();
     Ok(SubjectSearchEnv {
@@ -381,8 +389,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         x_strips,
         x_kind,
         use_parallel,
-        db_len_total,
-        db_num_seqs,
         evalue_threshold,
         subject_besthit,
         x_qgroup_batch,

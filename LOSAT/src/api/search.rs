@@ -95,7 +95,8 @@ impl Search {
             Commands::Blastn(args) => args.parse_deflines,
             Commands::Tblastx(args) => args.parse_deflines,
             Commands::Blastx(args) => args.parse_deflines,
-            Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => false,
+            Commands::Psiblast(args) => args.parse_deflines,
+            Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => false,
         }
     }
 
@@ -302,7 +303,7 @@ mod tests {
             );
             assert!(error.message().starts_with(key(word)), "{word}: {error}");
         }
-        for program in [Program::Blastp, Program::Blastx] {
+        for program in [Program::Blastp, Program::Blastx, Program::Psiblast] {
             assert!(validate(program, &["-parse_deflines"])
                 .unwrap()
                 .parse_deflines());

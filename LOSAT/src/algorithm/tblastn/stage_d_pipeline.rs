@@ -97,9 +97,10 @@ pub(super) struct LocalStageDProfile<'a> {
 pub(super) struct DatabaseNumbers {
     pub total_length: u64,
     pub num_seqs: u64,
-    /// The scanned shortest length in nucleotides with a list (`SeqDb::min_length`,
-    /// line DI-8), `None` for a whole database.
-    pub min_length: Option<u32>,
+    /// `CSeqDB::GetMinLength` in nucleotides (`SeqDb::min_length`): the alias files'
+    /// `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH` without a list, the scanned shortest length
+    /// with one (line DI-8).
+    pub min_length: i32,
 }
 
 /// The numbers of the subject set behind the statistics: a database's (`database`), or,
@@ -219,14 +220,12 @@ impl SubjectSetNumbers {
     }
 
     /// The shortest subject length of the hit-saving cutoff, in residues
-    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH` (with a
-    /// list, its scanned shortest length: line DI-8), a FASTA set its shortest record raised
-    /// to it.
+    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `CSeqDB::GetMinLength`
+    /// (`SeqDb::min_length`), a FASTA set its shortest record raised to
+    /// `BLAST_SEQSRC_MINLENGTH`.
     pub(super) fn min_subject_length(&self, subjects: &SubjectLetters<'_>) -> usize {
         let shortest = match self.database {
-            Some(database) => database
-                .min_length
-                .map_or(Self::MIN_LENGTH, |shortest| shortest as usize),
+            Some(database) => usize::try_from(database.min_length).unwrap_or(0),
             None => subjects
                 .lengths()
                 .min()
@@ -255,6 +254,8 @@ pub(super) struct LocalStageDScoring {
     pub window: i32,
     pub gap_xdrop_bits: f64,
     pub final_xdrop_bits: f64,
+    /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap` or 7.
+    pub word_xdrop_bits: f64,
 }
 
 impl Default for LocalStageDScoring {
@@ -268,6 +269,7 @@ impl Default for LocalStageDScoring {
             window: 40,
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
+            word_xdrop_bits: 7.0,
         }
     }
 }
@@ -1035,6 +1037,33 @@ fn run_local_search(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+// ```c
+//     case BLASTERR_SUBJECT_LENGTH_INVALID:
+//         new_msg->message = strdup("The average subject length is too short");
+//         new_msg->severity = eBlastSevFatal;
+// ```
+/// NCBI's `BLASTERR_SUBJECT_LENGTH_INVALID` of a query batch's setup
+/// (`run_local_search_with_pool`, blast_setup.c:969-980): NCBI 2.17.0 tblastn writes the start
+/// of the outfmt 0 report (and the reports of the batches before), then `BLAST engine error:
+/// The average subject length is too short`, exit status 3 (`-subject` of three empty records,
+/// or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`; env parity probe f_probe of 2026-11-12).
+#[derive(Debug)]
+pub(crate) struct SubjectLengthInvalid;
+
+impl SubjectLengthInvalid {
+    /// The text after `BLAST engine error: `.
+    pub(crate) const TEXT: &'static str = "The average subject length is too short";
+}
+
+impl std::fmt::Display for SubjectLengthInvalid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BLAST engine error: {}", Self::TEXT)
+    }
+}
+
+impl std::error::Error for SubjectLengthInvalid {}
+
 /// Diagnostic (LOSAT_TIMING): adds the time from `start` to its drop to the common line's `search`
 /// (utils/xtiming.rs). No NCBI counterpart; it reads the clock only with LOSAT_TIMING.
 struct XSearchTimer(Option<std::time::Instant>);
@@ -1091,6 +1120,28 @@ fn run_local_search_with_pool(
     let total_nt = usize::try_from(profile.subject_set.total_nt(&subjects))?;
     let stats_nt = usize::try_from(profile.subject_set.eff_length_nt(total_nt as u64))?;
     let num_subjects = profile.subject_set.num_seqs(&subjects);
+    let query_lengths: Vec<i32> = queries
+        .iter()
+        .map(|query| i32::try_from(query.len()))
+        .collect::<std::result::Result<_, _>>()?;
+    // NCBI c++/src/algo/blast/core/blast_options.c:908-936;
+    // core/blast_stat.c:2547-2605: reject scoring schemes absent from
+    // the pinned NCBI gapped table before any search.
+    let spec = ProteinScoringSpec {
+        matrix: scoring.matrix,
+        gap_open: scoring.gap_open,
+        gap_extend: scoring.gap_extend,
+    };
+    ensure!(
+        protein_scoring_supported(&spec),
+        "unsupported TBLASTN protein scoring scheme"
+    );
+    let gapped = lookup_protein_params(&spec);
+    let ungapped = lookup_protein_params_ungapped(scoring.matrix);
+    // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
+    // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
+    // BLAST_KarlinStoE_simple with the context's effective search space.
+    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
     // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // ```c
     //             if ( !m_Subjects.empty() ) {
@@ -1129,35 +1180,15 @@ fn run_local_search_with_pool(
     // ```
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
-    // answers 10 (`SubjectSetNumbers::min_subject_length`).
-    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
-    let min_subject_length = if profile.subject_set.old_fsc {
+    // answers `GetMinLength` (`SubjectSetNumbers::min_subject_length`); a quotient of 0 is
+    // NCBI's engine error of the first searched batch (`tblastn_app.rs`).
+    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975). The block
+    // itself decides, as `sbp->gbp` does in NCBI, here and in the average-length error below.
+    let min_subject_length = if gumbel.is_none() {
         total_nt / num_subjects.max(1)
     } else {
         profile.subject_set.min_subject_length(&subjects)
     };
-    let query_lengths: Vec<i32> = queries
-        .iter()
-        .map(|query| i32::try_from(query.len()))
-        .collect::<std::result::Result<_, _>>()?;
-    // NCBI c++/src/algo/blast/core/blast_options.c:908-936;
-    // core/blast_stat.c:2547-2605: reject scoring schemes absent from
-    // the pinned NCBI gapped table before any search.
-    let spec = ProteinScoringSpec {
-        matrix: scoring.matrix,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
-    };
-    ensure!(
-        protein_scoring_supported(&spec),
-        "unsupported TBLASTN protein scoring scheme"
-    );
-    let gapped = lookup_protein_params(&spec);
-    let ungapped = lookup_protein_params_ungapped(scoring.matrix);
-    // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
-    // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
-    // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
     let options_searchsp = profile.subject_set.searchsp;
     let QuerySetSetup {
         working_frames,
@@ -1195,12 +1226,14 @@ fn run_local_search_with_pool(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
-    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
-    // length is too short"; LOSAT refuses the search instead.
-    ensure!(
-        !profile.subject_set.old_fsc || !valid_contexts.iter().any(|&valid| valid) || min_subject_length > 0,
-        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's TBLASTN"
-    );
+    // Without the Gumbel block (`-searchsp` or `OLD_FSC`; LOSAT's tblastn has no ungapped
+    // search, which has none either, blast_setup.c:517-527) a set of subjects whose average is
+    // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
+    // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
+    // reports of the batches before (`SubjectLengthInvalid`).
+    if gumbel.is_none() && valid_contexts.iter().any(|&valid| valid) && min_subject_length == 0 {
+        return Err(SubjectLengthInvalid.into());
+    }
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
         // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
@@ -1439,7 +1472,6 @@ fn run_local_search_with_pool(
         *query_lengths.iter().max().unwrap(),
         compo_adjust_mode,
         false,
-        profile.expect_value,
         do_sum_stats,
         scoring.final_xdrop_bits,
         local_extension_final_xdrop(
@@ -1702,7 +1734,6 @@ fn run_local_search_with_pool(
                     *query_lengths.iter().max().unwrap(),
                     compo_adjust_mode,
                     false,
-                    profile.expect_value,
                     do_sum_stats,
                     scoring.final_xdrop_bits,
                     local_extension_final_xdrop(
@@ -2240,10 +2271,13 @@ fn preliminary_profile<'a>(
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         // NCBI blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
-        // converted as the x86-64 build does (INT_MIN beyond Int4).
-        gap_xdrop: crate::core::blast_util::ncbi_int4_from_double(
-            (scoring.gap_xdrop_bits * std::f64::consts::LN_2) / gapped.lambda,
-        ),
+        // converted as the x86-64 build does (INT_MIN beyond Int4; `core::x_drop`).
+        gap_xdrop: crate::core::x_drop::gapped_x_dropoffs(
+            scoring.gap_xdrop_bits,
+            scoring.final_xdrop_bits,
+            gapped.lambda,
+        )
+        .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
         hsp_num_max: i32::MAX as usize,
     }
@@ -2652,7 +2686,8 @@ fn query_set_setup(
             do_sum_stats: inputs.do_sum_stats,
             max_intron_length: 0,
             gap_trigger_bits: 22.0,
-            word_xdrop_bits: 7.0,
+            // `-xdrop_ungap` or 7 bits (`LocalStageDScoring::word_xdrop_bits`).
+            word_xdrop_bits: inputs.scoring.word_xdrop_bits,
             scale_factor: 1.0,
             gumbel: inputs.gumbel,
             eff_searchsp_override,
@@ -4994,6 +5029,7 @@ mod tests {
                 window: 60,
                 gap_xdrop_bits: 15.0,
                 final_xdrop_bits: 25.0,
+                word_xdrop_bits: 7.0,
             },
             Some(&mut boundary),
         )

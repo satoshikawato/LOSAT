@@ -8,10 +8,9 @@ use anyhow::{bail, Context, Result};
 //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
 // }
 // ```
-use std::{
-    io::{BufRead, BufReader, Read, Seek, SeekFrom},
-    path::Path,
-};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+#[cfg(test)]
+use std::path::Path;
 
 use crate::blastinput::fasta_reader::RecordSource;
 use crate::blastinput::seq_range::{
@@ -273,6 +272,7 @@ pub struct InputWarning {
 //     // Illegal characters can be things like = and we want to let those through.
 //     flags+= CFastaReader::fQuickIDCheck;
 // ```
+#[cfg(test)]
 pub fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<FastaRecord>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:291-301
     // ```c++
@@ -381,6 +381,7 @@ pub fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<Fas
 //         bioseq.SetDescr().Set().push_back(std::move(pDesc));
 //     }
 // ```
+#[cfg(test)]
 pub fn parse_fasta(data: &[u8], protein: bool, lowercase: bool) -> Result<Vec<FastaRecord>> {
     parse_fasta_batches(data, protein, lowercase, usize::MAX, &mut |_| Ok(()))
 }
@@ -456,6 +457,7 @@ pub fn parse_fasta(data: &[u8], protein: bool, lowercase: bool) -> Result<Vec<Fa
 //             }
 // 	    BLAST_PROF_STOP( APP.LOOP.FMT );
 // ```
+#[cfg(test)]
 pub(crate) fn parse_fasta_batches(
     data: &[u8],
     protein: bool,
@@ -477,6 +479,7 @@ pub(crate) fn parse_fasta_batches(
 // ```
 // Native caller posts each reader event immediately; retained warnings continue
 // to serve the independent B input-state probe. Batch delivery is unchanged.
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn parse_fasta_batches_with_warnings(
     data: &[u8],
     protein: bool,
@@ -1595,6 +1598,7 @@ impl ReaderBatch<'_> {
 //                                              user_input.size()));
 //     x_InitInputReader();
 // ```
+#[cfg(any(target_arch = "wasm32", test))]
 struct FastaMemoryLines<'a> {
     remaining: &'a [u8],
 }
@@ -1630,6 +1634,7 @@ struct FastaMemoryLines<'a> {
 //     return *this;
 // }
 // ```
+#[cfg(any(target_arch = "wasm32", test))]
 impl<'a> Iterator for FastaMemoryLines<'a> {
     type Item = &'a [u8];
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:353-381
@@ -2586,6 +2591,7 @@ impl<R: Read> Iterator for FastaStream<R> {
 //                 break;
 //             }
 // ```
+#[cfg(test)]
 pub(crate) fn parse_fasta_stream_with_warnings<R: Read>(
     stream: &mut FastaStream<R>,
     protein: bool,

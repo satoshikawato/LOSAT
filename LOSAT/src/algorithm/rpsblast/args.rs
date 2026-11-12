@@ -51,9 +51,8 @@ use crate::blastinput::value_parsers::*;
 // blastp's driver (`BlastpApp::Rpsblast`) and the RPS engine (`algorithm::rps_search`).
 // Composition-based statistics (modes 1 to 3, the default 1) run the redo of `rps_search::redo`
 // with the database's frequency ratios, or without them where the database has none (NCBI then
-// searches with mode 0); the arguments that LOSAT does not run yet (`-searchsp`, item PS11c-2;
-// `-use_sw_tback`, PS11c-3; `-html`, PS15a) are refused by the parser (`cli.rs`
-// `is_unported_rpsblast_arg`).
+// searches with mode 0); the arguments that LOSAT does not run yet (`-use_sw_tback`, PS11c-3;
+// `-html`, PS15a) are refused by the parser (`cli.rs` `is_unported_rpsblast_arg`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {
@@ -85,6 +84,27 @@ pub struct RpsblastArgs {
     /// the volumes' own sequence counts, `rps_hooks::rps_search`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    //     arg_desc.SetConstraint(kArgEffSearchSpace,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
+    // ```c++
+    //     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
+    //         CNcbiEnvironment env;
+    //         env.Set("OLD_FSC", "true");
+    //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
+    //     }
+    // ```
+    /// `-searchsp`: at any value (0 too) the search runs without the Gumbel block
+    /// (`ResolvedBlastpArgs::old_fsc`); above 0 it is every query's and volume's effective
+    /// search space (`rps_hooks::rps_search`).
+    #[arg(long, value_parser = nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // ```c++
     //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
@@ -361,7 +381,7 @@ impl RpsblastArgs {
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,
             id_scope: None,
-            searchsp: None,
+            searchsp: self.searchsp,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-66
             // ```c++
             // CBlastRPSOptionsHandle::SetLookupTableDefaults()
@@ -392,6 +412,10 @@ impl RpsblastArgs {
             qcov_hsp_perc: None,
             culling_limit: None,
             ungapped: false,
+            // rpsblast's X-drops are its RPS engine's (`rps`).
+            xdrop_ungap: None,
+            xdrop_gap: None,
+            xdrop_gap_final: None,
             window_size: self.window_size,
             matrix: None,
             gap_open: None,
@@ -553,7 +577,7 @@ mod tests {
                 "{extra:?}: {error}"
             );
         }
-        for name in ["searchsp", "use_sw_tback", "html"] {
+        for name in ["use_sw_tback", "html"] {
             let error = parse(&[&format!("-{name}"), "1"]).unwrap_err();
             assert!(
                 error.contains(&format!("-{name} is not supported by LOSAT's RPSBLAST")),
@@ -562,6 +586,32 @@ mod tests {
         }
         assert!(parse(&["-subject", "s.faa"]).is_err());
         assert!(parse(&["-mt_mode", "2"]).is_err());
+    }
+
+    // blast_args.cpp:234-238 and 303-307 (quoted at the field), ncbiargs.cpp:118-129: `-searchsp`
+    // takes NCBI's `Int8` forms at 0 or above and, at any value (0 too), the search runs without
+    // the Gumbel block; the same parser as psiblast's and blastp's.
+    #[test]
+    fn searchsp_takes_ncbis_int8_forms_and_drops_the_gumbel_block() {
+        for (value, space) in [
+            ("+1000000000", 1_000_000_000),
+            ("0x3B9ACA00", 1_000_000_000),
+            ("9223372036854775807", i64::MAX),
+            ("0", 0),
+        ] {
+            let args = parse(&["-searchsp", value]).unwrap();
+            assert_eq!(args.searchsp, Some(space), "{value}");
+            let resolved = args.into_blastp_args().unwrap().resolve().unwrap();
+            assert_eq!(resolved.searchsp, Some(space), "{value}");
+            assert!(resolved.old_fsc, "{value}");
+        }
+        assert_eq!(parse(&[]).unwrap().searchsp, None);
+        for value in [" 1", "1e6", "1.5", "", "-1", "-5", "9223372036854775808"] {
+            assert!(
+                parse(&["-searchsp", value]).is_err(),
+                "-searchsp {value:?} is refused"
+            );
+        }
     }
 
     // blast_args.cpp:209-244, 332-342, 1939-1942, 2683-2721 (quoted at the fields): the masks, the

@@ -1,6 +1,8 @@
 //! Warnings that NCBI writes to standard error for a search, whatever the output format.
 
 use crate::blastinput::fasta_reader::InputRecord;
+use crate::report::archive::ArchiveHandle;
+use crate::report::diag_log::Posts;
 use std::io::{self, Write};
 
 /// The warnings that NCBI posts between the reports of a search: the title warnings of a
@@ -27,22 +29,85 @@ use std::io::{self, Write};
 /// ```
 pub struct QueryWarnings<'a> {
     /// The warnings to write before the report of each query, by query index.
-    pub before: &'a [Vec<u8>],
+    before: Before<'a>,
     /// Standard error (the CLI) or the caller's diagnostics.
     pub sink: &'a mut (dyn Write + Send),
 }
 
-impl QueryWarnings<'_> {
+/// What `QueryWarnings` writes before the report of each query, by query index.
+enum Before<'a> {
+    /// Lines that are each a warning (`Posts::of_lines`): what the programs other than BLASTN
+    /// post there.
+    Lines(&'a [Vec<u8>]),
+    /// The posts of each query, written with the BLAST archive's handle (`Posts::write`).
+    Posts {
+        posts: &'a [Posts],
+        archive: Option<&'a ArchiveHandle>,
+    },
+}
+
+impl<'a> QueryWarnings<'a> {
+    /// The warnings `before` (lines, each a warning) of each query, written to `sink`.
+    pub fn new(before: &'a [Vec<u8>], sink: &'a mut (dyn Write + Send)) -> Self {
+        Self {
+            before: Before::Lines(before),
+            sink,
+        }
+    }
+
+    /// The posts `before` of each query, written to `sink`, whose whole posts the BLAST archive's
+    /// handle `archive` saves as one message each (`Posts::write`).
+    pub fn of_posts(
+        before: &'a [Posts],
+        archive: Option<&'a ArchiveHandle>,
+        sink: &'a mut (dyn Write + Send),
+    ) -> Self {
+        Self {
+            before: Before::Posts {
+                posts: before,
+                archive,
+            },
+            sink,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-308 and 562
+    // ```c++
+    //                         pssm =
+    //                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
+    //                                      results_1st_query.GetAncillaryData());
+    //     ...
+    //         formatter.PrintEpilog(opt);
+    // ```
+    /// Writes the warnings that come after the report of the last of `queries` queries and before
+    /// the epilog (psiblast's warnings of the last query's PSSM reads, which it makes after the
+    /// query's report): `before[queries]` where the caller sets it, as `before_query`. A report
+    /// writer calls it after its last query, before an epilog it writes (review 2 of line DBID
+    /// pssmread, H4).
+    pub fn after_last_query(&mut self, queries: usize, report: &mut dyn Write) -> io::Result<()> {
+        self.before_query(queries, report)
+    }
+
     /// Writes the warnings of query `index`, after the report written so far (`report`)
     /// is flushed; a failed flush returns before them.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
-        match self.before.get(index) {
-            Some(warnings) if !warnings.is_empty() => {
-                report.flush()?;
-                self.sink.write_all(warnings)?;
-                self.sink.flush()
-            }
-            _ => Ok(()),
+        match &self.before {
+            Before::Lines(before) => match before.get(index) {
+                Some(warnings) if !warnings.is_empty() => {
+                    report.flush()?;
+                    self.sink.write_all(warnings)?;
+                    self.sink.flush()
+                }
+                _ => Ok(()),
+            },
+            Before::Posts { posts, archive } => match posts.get(index) {
+                Some(posts) if !posts.is_empty() => {
+                    report.flush()?;
+                    posts.write(&mut *self.sink, *archive)?;
+                    self.sink.flush()
+                }
+                _ => Ok(()),
+            },
         }
     }
 }
@@ -95,6 +160,7 @@ impl QueryWarnings<'_> {
 ///
 /// `index` is the 0-based position of the query in the input; `program` is the lower-case
 /// program name that NCBI's diagnostics print (`[tblastn]`, `[blastn]`).
+#[cfg(test)]
 pub fn invalid_query_warning<R: InputRecord>(program: &str, index: usize, query: &R) -> Vec<u8> {
     query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
 }

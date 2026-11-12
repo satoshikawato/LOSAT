@@ -1436,7 +1436,7 @@ pub(super) fn render_queries_with(
                         writeln!(writer, "# {count} hits found")?;
                     }
                 }
-                for list in lists {
+                for list in lists.iter().take(options.shown_lists()) {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
                         ids: shown.subject_ids(subject, list.oid),

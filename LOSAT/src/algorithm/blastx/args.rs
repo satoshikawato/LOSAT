@@ -531,6 +531,18 @@ impl ResolvedOptions {
             .as_ref()
             .is_some_and(|search| search.merges_volumes())
     }
+
+    /// The number of a query's lists the tabular reports write: the merge of several volumes
+    /// keeps each volume's lists (`s_MergeAlignSet`), which NCBI's formatter cuts to the hit
+    /// list size after counting their hits (as rpsblast's `psiblast_hits_found`); all of them
+    /// otherwise.
+    pub(crate) fn shown_lists(&self) -> usize {
+        if self.merged_volumes() {
+            usize::try_from(self.hitlist_size).unwrap_or(0)
+        } else {
+            usize::MAX
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-871

@@ -53,6 +53,13 @@ impl<'a> RpsVolumeSet<'a> {
     }
 }
 
+/// Whether the volumes of an RPS search have their own effective search spaces: `-dbsize`
+/// (`dbsize` above 0) with several volumes and no `-searchsp` above 0 (`x_AdjustDbSize` returns
+/// early, so each volume's statistics read the given length and the volume's own sequence count).
+pub(crate) fn per_volume_search_spaces(dbsize: i64, searchsp: i64, volumes: usize) -> bool {
+    dbsize > 0 && searchsp == 0 && volumes >= 2
+}
+
 /// One volume set up for a search: its files and the consensus letters of its profiles at their
 /// offsets (the traceback's letters and the reports' identities).
 pub(crate) struct RpsVolume {

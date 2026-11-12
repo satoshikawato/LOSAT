@@ -46,8 +46,8 @@ use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::blastx::subjects::BLAST_SEQSRC_MINLENGTH;
 use crate::algorithm::rps_search::engine::{RpsFrame, RpsQuery, RpsRun, RpsSearch, NUM_FRAMES};
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, shift_ordinal_ids, RpsVolume, RpsVolumeError,
-    RpsVolumeSet, RpsVolumeSetup,
+    mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, RpsVolume,
+    RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::blastinput::report_counts::FormattingArgs;
 use crate::core::blast_util::frame_to_context;
@@ -66,6 +66,10 @@ pub(crate) struct TranslatedRpsSearch {
     /// `-ungapped` (with composition-based statistics 0: NCBI's options error at the others is
     /// BLASTX's `resolve`).
     pub(crate) ungapped: bool,
+    /// `-use_sw_tback` and `-comp_based_stats` as given: the composition-based statistics of
+    /// later items are refused per run (`check_options`).
+    pub(crate) use_sw_tback: bool,
+    pub(crate) comp_based_stats: String,
     /// Whether the database has several volumes, whose results NCBI merges
     /// (`RpsTblastnSearch::merges_volumes`); set by `for_database`.
     pub(crate) several_volumes: bool,
@@ -295,7 +299,17 @@ impl TranslatedRpsSearch {
             if !parameters.iter().any(|p| p.valid) {
                 continue;
             }
-            if !searched {
+            // `-dbsize` on several volumes: each volume's statistics read the volume's own
+            // number of sequences (`per_volume_search_spaces`, as rpsblast's).
+            if per_volume_search_spaces(
+                options.db_length,
+                options.effective_search_space,
+                volumes.order.len(),
+            ) {
+                let num_seqs = i64::from(volumes.volumes[index].num_oids());
+                effective_lengths(&prepared, parameters, options, db_length, num_seqs, None)
+                    .map_err(RpsBatchError::Setup)?;
+            } else if !searched {
                 effective_lengths(&prepared, parameters, options, db_length, db_count, None)
                     .map_err(RpsBatchError::Setup)?;
             }
@@ -339,6 +353,7 @@ impl TranslatedRpsSearch {
                     .unwrap_or(options.gap_x_dropoff_final),
                 gap_trigger_bits: options.gap_trigger,
                 options: &self.search,
+                program: PROGRAM,
             };
             let traced = run.search_volume(&files, &consensus, pool)?;
             drop(run);
@@ -380,7 +395,21 @@ impl TranslatedRpsSearch {
 
     /// LOSAT's refusals of the options before the first byte of the reports: what NCBI BLAST+
     /// 2.17.0's rpstblastn does in its search with them has no result that can be checked.
-    fn check_options(&self) -> Result<()> {
+    pub(crate) fn check_options(&self) -> Result<()> {
+        let requested_cbs = self.search.requested_cbs;
+        if self.use_sw_tback && requested_cbs > 0 {
+            bail!(
+                "-use_sw_tback with composition-based statistics is not supported by LOSAT's {PROGRAM} yet"
+            );
+        }
+        // NCBI's options error of an ungapped search with composition-based statistics comes
+        // from BLASTX's `resolve`; the refusal of the modes LOSAT does not run yet follows it.
+        if requested_cbs > 0 && !self.ungapped {
+            bail!(
+                "-comp_based_stats {} is not supported by LOSAT's {PROGRAM} yet",
+                self.comp_based_stats
+            );
+        }
         if self.search.sum_stats {
             bail!(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpstblastn links HSPs with the profiles' indexes as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's {PROGRAM}"
@@ -781,6 +810,8 @@ mod tests {
             search: RpsSearch::default(),
             formatting: FormattingArgs::default(),
             ungapped: false,
+            use_sw_tback: false,
+            comp_based_stats: "0".to_string(),
             several_volumes: false,
         };
         assert!(search.check_options().is_ok());

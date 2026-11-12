@@ -243,11 +243,14 @@ pub(super) fn dbsize_volume_num_seqs(
     Some(first.num_oids() as usize)
 }
 
-/// Whether the volumes of an RPS search have their own effective search spaces: `-dbsize` with
-/// several volumes and no `-searchsp` above 0 (`x_AdjustDbSize` returns early, so each volume's
-/// statistics read the given length and the volume's own sequence count).
+/// Whether the volumes of rpsblast's search have their own effective search spaces
+/// (`rps_search::volumes::per_volume_search_spaces`).
 pub(super) fn per_volume_search_spaces(args: &ResolvedBlastpArgs, volumes: usize) -> bool {
-    args.dbsize > 0 && args.searchsp.unwrap_or(0) == 0 && volumes >= 2
+    crate::algorithm::rps_search::volumes::per_volume_search_spaces(
+        args.dbsize,
+        args.searchsp.unwrap_or(0),
+        volumes,
+    )
 }
 
 /// One query's effective search space in a volume of `num_seqs` sequences with the database
@@ -569,6 +572,7 @@ pub(super) fn rps_search(
             x_drop_final_bits,
             gap_trigger_bits: GAP_TRIGGER_BIT_SCORE,
             options: rps,
+            program: "RPSBLAST",
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
         // ```c

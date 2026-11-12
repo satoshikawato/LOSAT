@@ -1,0 +1,1249 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini3v
+           3 sequences; 560 total letters
+
+
+
+Query= stopq
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  19.2    0.12 
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 19.2 bits (38),  Expect = 0.12
+ Identities = 5/22 (23%), Positives = 11/22 (50%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  362  DNNDSDNNNDSSSNNNNDDNSD  427
+            +N D++  N+ +   N   N +
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.9 bits (37),  Expect = 0.15
+ Identities = 4/22 (18%), Positives = 11/22 (50%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  47   DNNSSSNSDDSSSSNSNSNNNN  112
+            +N  +  +++ +   + S N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.5 bits (36),  Expect = 0.17
+ Identities = 6/44 (14%), Positives = 18/44 (41%), Gaps = 0/44 (0%)
+ Frame = +2
+
+Query  446  SSNNSDDSDNSDSNDNSNDNSNSNNSSSNSDDSNDNNNNSDNSS  577
+            +SN++  +  +   ++       N  +  +++     N S N +
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.5 bits (36),  Expect = 0.20
+ Identities = 9/44 (20%), Positives = 17/44 (39%), Gaps = 0/44 (0%)
+ Frame = +2
+
+Query  128  DSNSNSDDNSNDSDDSNSDDNSDNNSNDNDDNNSNNNNDDSDDN  259
+            +SNSN        ++S      +N   +  +N +   N   + N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.1 bits (35),  Expect = 0.25
+ Identities = 3/22 (14%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  44   DDNNSSSNSDDSSSSNSNSNNN  109
+            ++ ++   ++ +  +N++ N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 17.3 bits (33),  Expect = 0.48
+ Identities = 5/22 (23%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  428  DDNNNNSSNNSDDSDNSDSNDN  493
+            ++ +   +NN     N+  N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.9 bits (32),  Expect = 0.56
+ Identities = 10/49 (20%), Positives = 21/49 (43%), Gaps = 1/49 (2%)
+ Frame = +2
+
+Query  392  SSSNNNNDDNSDDDNNNNSSNNSDDSDNSDSNDNSNDNSNSNNSSSNSD  538
+            +S  N+N +          S      +N D+ + +N+ +   N+S N +
+Sbjct  49   ASWKNSNSNRQTPITRIEESLGLRFIENLDA-EKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.9 bits (32),  Expect = 0.69
+ Identities = 9/46 (20%), Positives = 17/46 (37%), Gaps = 0/46 (0%)
+ Frame = +2
+
+Query  77   SSSSNSNSNNNNNSNDDDSNSNSDDNSNDSDDSNSDDNSDNNSNDN  214
+            +S  NSNSN        + +       N   +  ++     N++ N
+Sbjct  49   ASWKNSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPN  94
+
+
+ Score = 16.9 bits (32),  Expect = 0.72
+ Identities = 9/47 (19%), Positives = 17/47 (36%), Gaps = 0/47 (0%)
+ Frame = +2
+
+Query  323  SSNDSNSNDSDNDDNNDSDNNNDSSSNNNNDDNSDDDNNNNSSNNSD  463
+            S  +SNSN        +         N + +  ++     N+S N +
+Sbjct  50   SWKNSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.5 bits (31),  Expect = 0.87
+ Identities = 6/32 (19%), Positives = 12/32 (38%), Gaps = 0/32 (0%)
+ Frame = +2
+
+Query  368  NDSDNNNDSSSNNNNDDNSDDDNNNNSSNNSD  463
+               +N +   +NN     +   N N ++   D
+Sbjct  72   RFIENLDAEKTNNKTWCTNTSPNMNVTAAGMD  103
+
+
+ Score = 16.5 bits (31),  Expect = 0.92
+ Identities = 8/44 (18%), Positives = 19/44 (43%), Gaps = 1/44 (2%)
+ Frame = +2
+
+Query  32   SSNNDDNNSSSNSDDSSSSNSNSNNN-NNSNDDDSNSNSDDNSN  160
+            +SN++     +  ++S       N +   +N+    +N+  N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.2 bits (30),  Expect = 1.0
+ Identities = 6/34 (18%), Positives = 13/34 (38%), Gaps = 3/34 (9%)
+ Frame = +2
+
+Query  497  NDNSNSNNSSSNSDDS---NDNNNNSDNSSDDDS  589
+            N NSN     +  ++S       N     +++ +
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKT  86
+
+
+ Score = 16.2 bits (30),  Expect = 1.1
+ Identities = 8/44 (18%), Positives = 20/44 (45%), Gaps = 3/44 (7%)
+ Frame = +2
+
+Query  437  NNNSSNNSDDSDNSDS---NDNSNDNSNSNNSSSNSDDSNDNNN  559
+            N+NS+  +  +   +S       N ++   N+ +   +++ N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.2 bits (30),  Expect = 1.2
+ Identities = 5/21 (24%), Positives = 7/21 (33%), Gaps = 0/21 (0%)
+ Frame = +2
+
+Query  266  NSDDNDDNDNNNSNNNDDNSS  328
+            N D    N+     N   N +
+Sbjct  76   NLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.8 bits (29),  Expect = 1.4
+ Identities = 9/40 (23%), Positives = 15/40 (38%), Gaps = 0/40 (0%)
+ Frame = +2
+
+Query  218  DNNSNNNNDDSDDNSSNSDDNDDNDNNNSNNNDDNSSNDS  337
+            ++NSN     +    S      +N +    NN    +N S
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTS  92
+
+
+ Score = 15.8 bits (29),  Expect = 1.4
+ Identities = 10/44 (23%), Positives = 15/44 (34%), Gaps = 1/44 (2%)
+ Frame = +2
+
+Query  146  DDNSNDSDDSNSDDNSDN-NSNDNDDNNSNNNNDDSDDNSSNSD  274
+            + NSN        + S      +N D    NN     + S N +
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.8 bits (29),  Expect = 1.4
+ Identities = 9/44 (20%), Positives = 15/44 (34%), Gaps = 3/44 (7%)
+ Frame = +2
+
+Query  287  NDNNNSNNNDDNSSNDSNSNDSDNDDNNDSDNN---NDSSSNNN  409
+            N N+N                 +N D   ++N     ++S N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.8 bits (29),  Expect = 1.6
+ Identities = 8/44 (18%), Positives = 13/44 (30%), Gaps = 12/44 (27%)
+ Frame = +2
+
+Query  200  NSNDNDD------------NNSNNNNDDSDDNSSNSDDNDDNDN  295
+            NSN N                  N + +  +N +   +   N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.4 bits (28),  Expect = 1.9
+ Identities = 11/47 (23%), Positives = 18/47 (38%), Gaps = 0/47 (0%)
+ Frame = +2
+
+Query  98   SNNNNNSNDDDSNSNSDDNSNDSDDSNSDDNSDNNSNDNDDNNSNNN  238
+            S  N+NSN     +  +++       N D    NN     + + N N
+Sbjct  50   SWKNSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.4 bits (28),  Expect = 2.0
+ Identities = 3/16 (19%), Positives = 8/16 (50%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  23  NSDSSNNDDNNSSSNS  70
+           N D+   ++    +N+
+Sbjct  76  NLDAEKTNNKTWCTNT  91
+
+
+ Score = 15.4 bits (28),  Expect = 2.3
+ Identities = 8/44 (18%), Positives = 17/44 (39%), Gaps = 2/44 (5%)
+ Frame = +2
+
+Query  83   SSNSNSNNNNNSNDDDSNSNSDDNSN--DSDDSNSDDNSDNNSN  208
+            +SNSN        ++       +N +   +++     N+  N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.0 bits (27),  Expect = 2.9
+ Identities = 6/32 (19%), Positives = 13/32 (41%), Gaps = 0/32 (0%)
+ Frame = +2
+
+Query  443  NSSNNSDDSDNSDSNDNSNDNSNSNNSSSNSD  538
+                N D    ++    +N + N N +++  D
+Sbjct  72   RFIENLDAEKTNNKTWCTNTSPNMNVTAAGMD  103
+
+
+ Score = 14.2 bits (25),  Expect = 4.4
+ Identities = 4/17 (24%), Positives = 7/17 (41%), Gaps = 0/17 (0%)
+ Frame = +2
+
+Query  11  DSSNNSDSSNNDDNNSS  61
+           + +NN     N   N +
+Sbjct  80  EKTNNKTWCTNTSPNMN  96
+
+
+ Score = 13.5 bits (23),  Expect = 7.7
+ Identities = 5/22 (23%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  281  DDNDNNNSNNNDDNSSNDSNSN  346
+            ++ D   +NN    ++   N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+
+Lambda      K        H        a         alpha
+   0.273    0.101    0.253    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82388
+
+
+Query= YP_009220476.1 bt strand=+ flank=0
+
+Length=637
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  19.2    0.14 
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 19.2 bits (38),  Expect = 0.14
+ Identities = 5/15 (33%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+ Frame = -3
+
+Query  53   KVNPAKMAA*TPHIC  9
+            ++N A++   TP++C
+Sbjct  115  QINSARIETGTPYVC  129
+
+
+ Score = 15.0 bits (27),  Expect = 2.5
+ Identities = 5/15 (33%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
+ Frame = -2
+
+Query  102  FVKFNISHNYANNNE  58
+            +V F  + N  +N E
+Sbjct  127  YVCFKDTINRKSNQE  141
+
+
+ Score = 14.6 bits (26),  Expect = 3.9
+ Identities = 6/19 (32%), Positives = 12/19 (63%), Gaps = 2/19 (11%)
+ Frame = +3
+
+Query  210  VTNTKLRESLRGWSGDKRQ  266
+            + N  +++  +G  GDKR+
+Sbjct  1    IFNVSVKKVSQG--GDKRR  17
+
+
+ Score = 13.9 bits (24),  Expect = 6.3
+ Identities = 6/16 (38%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  215  KHETTGKFTWLVRGQA  262
+            K+E  GK   +V+ +A
+Sbjct  96   KYEAEGKGKEVVKARA  111
+
+
+ Score = 13.5 bits (23),  Expect = 8.9
+ Identities = 6/19 (32%), Positives = 10/19 (53%), Gaps = 3/19 (16%)
+ Frame = -1
+
+Query  613  TNRCRD*TSYS---KDSVC  566
+            +N C +   YS   + +VC
+Sbjct  149  SNLCTEIVQYSDSEETAVC  167
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.136    0.383    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 87584
+
+
+Query= YP_009220478.1 bt strand=- flank=0
+
+Length=905
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.5    0.36 
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 18.5 bits (36),  Expect = 0.36
+ Identities = 7/27 (26%), Positives = 15/27 (56%), Gaps = 0/27 (0%)
+ Frame = +2
+
+Query  140  YSPNARYFLRLQDLAGCKPMRHRNLLP  220
+            +  + + F+  +  AG + +R R+L P
+Sbjct  27   WHLDVKDFIDCRKNAGNEDLRTRDLFP  53
+
+
+ Score = 18.5 bits (36),  Expect = 0.39
+ Identities = 6/14 (43%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = -3
+
+Query  285  GGRGRRGSGYAFIP  244
+            GG  RRG+   +I 
+Sbjct  12   GGDKRRGAAAIYIS  25
+
+
+ Score = 16.5 bits (31),  Expect = 1.5
+ Identities = 5/26 (19%), Positives = 12/26 (46%), Gaps = 0/26 (0%)
+ Frame = +3
+
+Query  84   PYITFASV*HFPGFHRI*GIVRTLDI  161
+            PY+ F    +        GI+++ ++
+Sbjct  126  PYVCFKDTINRKSNQENVGIIKSSNL  151
+
+
+ Score = 15.4 bits (28),  Expect = 3.1
+ Identities = 5/9 (56%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +2
+
+Query  542  RTRRLLPPL  568
+            RTR L P +
+Sbjct  47   RTRDLFPAI  55
+
+
+ Score = 15.4 bits (28),  Expect = 3.3
+ Identities = 7/23 (30%), Positives = 12/23 (52%), Gaps = 2/23 (9%)
+ Frame = -1
+
+Query  872  RGNSCLYKSFYFSGA--IIECKK  810
+            RG + +Y S +       I+C+K
+Sbjct  17   RGAAAIYISDWHLDVKDFIDCRK  39
+
+
+ Score = 14.6 bits (26),  Expect = 5.2
+ Identities = 9/25 (36%), Positives = 12/25 (48%), Gaps = 3/25 (12%)
+ Frame = +1
+
+Query  742  TTTPT---KHTNRINDNNKNIIIIR  807
+            T TP    K T     N +N+ II+
+Sbjct  123  TGTPYVCFKDTINRKSNQENVGIIK  147
+
+
+ Score = 14.6 bits (26),  Expect = 6.3
+ Identities = 8/30 (27%), Positives = 15/30 (50%), Gaps = 1/30 (3%)
+ Frame = -1
+
+Query  317  DEFLDSGEEMEEDEEEEDLDTLLS-RLETG  231
+            +++   G+  E  +     D + S R+ETG
+Sbjct  95   EKYEAEGKGKEVVKARALFDQINSARIETG  124
+
+
+ Score = 14.2 bits (25),  Expect = 8.4
+ Identities = 5/15 (33%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
+ Frame = -2
+
+Query  400  RLERQVPLVAWVKTM  356
+            R+E   P V +  T+
+Sbjct  120  RIETGTPYVCFKDTI  134
+
+
+ Score = 13.9 bits (24),  Expect = 9.4
+ Identities = 4/8 (50%), Positives = 7/8 (88%), Gaps = 0/8 (0%)
+ Frame = +3
+
+Query  534  WLLELEDF  557
+            W L+++DF
+Sbjct  27   WHLDVKDF  34
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 127370
+
+
+Query= YP_009220482.1 bt strand=+ flank=1
+
+Length=624
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  18.1    0.28 
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 18.1 bits (35),  Expect = 0.28
+ Identities = 10/40 (25%), Positives = 15/40 (38%), Gaps = 1/40 (3%)
+ Frame = +2
+
+Query  377  RYGRGEFGPEKHSLAETIQSTVQDMSEPYITHIFKKNTDV  496
+            RYG G      H+  E I+      S   +  +  +  DV
+Sbjct  54   RYGCGTGTIVTHA-GEVIEGCTTVSSIKELISVLPEVVDV  92
+
+
+ Score = 15.0 bits (27),  Expect = 2.5
+ Identities = 6/25 (24%), Positives = 10/25 (40%), Gaps = 3/25 (12%)
+ Frame = -1
+
+Query  408  FSGPNSPLPYLIRRYASAEASKQKC  334
+            F+G ++   YL   Y       + C
+Sbjct  23   FAGKST---YLKNIYQQENGGNKHC  44
+
+
+ Score = 14.2 bits (25),  Expect = 5.6
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 1/12 (8%)
+ Frame = +2
+
+Query  119  LYIRHASKQEKY  154
+            L+++H S + +Y
+Sbjct  45   LFVKH-SLETRY  55
+
+
+ Score = 13.5 bits (23),  Expect = 8.9
+ Identities = 4/12 (33%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  40   NNNQTDELAYGG  75
+            N+N  + +  GG
+Sbjct  169  NDNDNNVICVGG  180
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 85680
+
+
+Query= YP_009220483.1 bt strand=- flank=1
+
+Length=864
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.5    0.29 
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 18.5 bits (36),  Expect = 0.29
+ Identities = 10/22 (45%), Positives = 14/22 (64%), Gaps = 1/22 (5%)
+ Frame = +3
+
+Query  252  IKRV*AGIYRSWKCGPNQLPGL  317
+            ++RV AG   S  C P++ PGL
+Sbjct  62   MERVKAGKNWSLMC-PHECPGL  82
+
+
+ Score = 15.0 bits (27),  Expect = 4.5
+ Identities = 4/10 (40%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+ Frame = -1
+
+Query  105  KYIGEGTVRV  76
+            KY  EG  + 
+Sbjct  96   KYEAEGKGKE  105
+
+
+ Score = 14.6 bits (26),  Expect = 5.3
+ Identities = 6/26 (23%), Positives = 12/26 (46%), Gaps = 3/26 (12%)
+ Frame = -2
+
+Query  431  AVKLAKNTPVL---DTITKLDWMANI  363
+            + ++   TP +   DTI +     N+
+Sbjct  118  SARIETGTPYVCFKDTINRKSNQENV  143
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 121260
+
+
+Query= YP_009220649.1 bt strand=+ flank=2
+
+Length=712
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  20.8    0.048
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 20.8 bits (42),  Expect = 0.048
+ Identities = 7/35 (20%), Positives = 15/35 (43%), Gaps = 2/35 (6%)
+ Frame = +1
+
+Query  103  LFMILIASLSASRRISS*SGCCLVCRITWSRRFLP  207
+            +F  +   L  +  I   +  C++C+I    +  P
+Sbjct  130  MFSPIHKLLPYTNSIVKLASKCMICKID--TKEAP  162
+
+
+ Score = 16.9 bits (32),  Expect = 0.72
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  65  IDYSRT*RFGCG  30
+           + +S   R+GCG
+Sbjct  47  VKHSLETRYGCG  58
+
+
+ Score = 15.8 bits (29),  Expect = 1.9
+ Identities = 6/19 (32%), Positives = 7/19 (37%), Gaps = 0/19 (0%)
+ Frame = -2
+
+Query  444  MN*FCLVFGHLRNSTSLCG  388
+             N  CL   H   +   CG
+Sbjct  40   GNKHCLFVKHSLETRYGCG  58
+
+
+ Score = 15.0 bits (27),  Expect = 3.6
+ Identities = 4/7 (57%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+ Frame = -2
+
+Query  111  HK*LPLC  91
+            HK LP  
+Sbjct  135  HKLLPYT  141
+
+
+ Score = 14.2 bits (25),  Expect = 5.2
+ Identities = 5/22 (23%), Positives = 7/22 (32%), Gaps = 2/22 (9%)
+ Frame = +2
+
+Query  452  YSHYN--GGNATPPRKFC*GGT  511
+             + +    GN       C GG 
+Sbjct  160  EAPFTVRFGNDNDNNVICVGGA  181
+
+
+ Score = 13.9 bits (24),  Expect = 7.2
+ Identities = 4/5 (80%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+ Frame = -2
+
+Query  540  RRGCG  526
+            R GCG
+Sbjct  54   RYGCG  58
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 98384
+
+
+Query= YP_009220484.1 bt strand=- flank=2
+
+Length=718
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  19.2    0.14 
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 19.2 bits (38),  Expect = 0.14
+ Identities = 11/25 (44%), Positives = 15/25 (60%), Gaps = 1/25 (4%)
+ Frame = +3
+
+Query  219  SMALLPFIPICKQYILLIFYEPVDV  293
+            S+ LL  I  C Q I+L  Y P+D+
+Sbjct  23   SLLLLDVIDECNQ-IVLSEYRPIDI  46
+
+
+ Score = 16.9 bits (32),  Expect = 0.74
+ Identities = 8/40 (20%), Positives = 19/40 (48%), Gaps = 1/40 (3%)
+ Frame = -3
+
+Query  662  WSSTVTNTRHYQQQLNRALN-KIEEEDDVEEEHGQVTTTN  546
+            W ++ +N +    ++  +L  +  E  D E+ + +   TN
+Sbjct  51   WKNSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTN  90
+
+
+ Score = 15.4 bits (28),  Expect = 2.5
+ Identities = 5/17 (29%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+ Frame = -2
+
+Query  219  KSTTPNSQIEQQAIEKT  169
+            K++  N Q     IE++
+Sbjct  52   KNSNSNRQTPITRIEES  68
+
+
+ Score = 14.6 bits (26),  Expect = 3.8
+ Identities = 4/7 (57%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +3
+
+Query  81   KPRSGAH  101
+            +P  GAH
+Sbjct  145  RPYIGAH  151
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 99330
+
+
+Query= YP_009220489.1 bt strand=+ flank=0
+
+Length=612
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  17.3    0.55 
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 17.3 bits (33),  Expect = 0.55
+ Identities = 4/15 (27%), Positives = 7/15 (47%), Gaps = 0/15 (0%)
+ Frame = +3
+
+Query  531  FNKKSQKGKESTRTW  575
+            F +     K + +TW
+Sbjct  73   FIENLDAEKTNNKTW  87
+
+
+ Score = 16.2 bits (30),  Expect = 1.1
+ Identities = 13/36 (36%), Positives = 15/36 (42%), Gaps = 5/36 (14%)
+ Frame = -3
+
+Query  178  LPIHPWLLENARSVLP----SSPSPGQAQSPSGPCR  83
+            + I P  LE    VLP      P  G A   +G CR
+Sbjct  124  MHIAPASLEYMLQVLPIMLIDRPYIG-AHITAGKCR  158
+
+
+ Score = 15.8 bits (29),  Expect = 1.7
+ Identities = 4/15 (27%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+ Frame = -1
+
+Query  69   VVHIFDIMIINRRFV  25
+            ++ +  IM+I+R ++
+Sbjct  134  MLQVLPIMLIDRPYI  148
+
+
+ Score = 14.6 bits (26),  Expect = 3.3
+ Identities = 4/11 (36%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+ Frame = +2
+
+Query  8   SWTFPHTNRRL  40
+           SW   ++NR+ 
+Sbjct  50  SWKNSNSNRQT  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 84783
+
+
+Query= YP_009220491.1 bt strand=- flank=0
+
+Length=627
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  15.4    1.9  
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 15.4 bits (28),  Expect = 1.9
+ Identities = 4/8 (50%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = -1
+
+Query  606  QKFAPVIK  583
+            Q F+P+ K
+Sbjct  129  QMFSPIHK  136
+
+
+ Score = 15.4 bits (28),  Expect = 2.0
+ Identities = 6/24 (25%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -3
+
+Query  103  IFKLYFFQRRHGRGIRTQTSHVYQ  32
+            +F  +  + R+G G  T  +H  +
+Sbjct  45   LFVKHSLETRYGCGTGTIVTHAGE  68
+
+
+ Score = 14.2 bits (25),  Expect = 5.5
+ Identities = 5/7 (71%), Positives = 7/7 (100%), Gaps = 0/7 (0%)
+ Frame = -2
+
+Query  356  GRLELVS  336
+            GR+ELV+
+Sbjct  13   GRVELVT  19
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 86156
+
+
+Query= YP_009220493.1 bt strand=+ flank=1
+
+Length=884
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.9    0.98 
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 16.9 bits (32),  Expect = 0.98
+ Identities = 10/47 (21%), Positives = 20/47 (43%), Gaps = 0/47 (0%)
+ Frame = +2
+
+Query  89   GTGTLSIFGPQMRFSLRDDTIPVLTTKKIFWRGVVEELSWFIRGNTD  229
+            GT    +F P  +     ++I  L +K +  +   +E  + +R   D
+Sbjct  124  GTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGND  170
+
+
+ Score = 16.5 bits (31),  Expect = 1.3
+ Identities = 6/12 (50%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = -2
+
+Query  427  ISQLIYTLPSVI  392
+            I +LI  LP V+
+Sbjct  79   IKELISVLPEVV  90
+
+
+ Score = 14.2 bits (25),  Expect = 7.0
+ Identities = 3/10 (30%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  598  IGGSI*YCIV  627
+            +GG+  Y   
+Sbjct  178  VGGAEMYAAA  187
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 124080
+
+
+Query= YP_009220496.1 bt strand=- flank=1
+
+Length=845
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.9    0.91 
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 16.9 bits (32),  Expect = 0.91
+ Identities = 13/49 (27%), Positives = 24/49 (49%), Gaps = 2/49 (4%)
+ Frame = +2
+
+Query  161  LIIDEKYHTHDIVLLIRDSDDQVFCHIIRSLLNLRHKDELFGTGILLVP  307
+            ++IDE     D+VL+ R +D      I+ + L+     ++F     L+P
+Sbjct  93   ILIDEGQFFTDLVLVNRLADKGK--RIVIAALDGTSDQQMFSPIHKLLP  139
+
+
+ Score = 16.2 bits (30),  Expect = 1.6
+ Identities = 4/12 (33%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  159  QKRGSQRKKCLY  124
+            Q+     K CL+
+Sbjct  35   QQENGGNKHCLF  46
+
+
+ Score = 13.9 bits (24),  Expect = 8.6
+ Identities = 6/26 (23%), Positives = 8/26 (31%), Gaps = 0/26 (0%)
+ Frame = -2
+
+Query  580  MTDKELNDNREFMHDFGKISTGDGGT  503
+            +  KE      F +D        GG 
+Sbjct  156  IDTKEAPFTVRFGNDNDNNVICVGGA  181
+
+
+ Score = 13.9 bits (24),  Expect = 9.5
+ Identities = 10/28 (36%), Positives = 13/28 (46%), Gaps = 3/28 (11%)
+ Frame = +2
+
+Query  158  CLI--IDEKYHTHDIVLLIRDSDDQVFC  235
+            C+I  ID K      V    D+D+ V C
+Sbjct  151  CMICKIDTKEAPFT-VRFGNDNDNNVIC  177
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 117970
+
+
+Query= YP_009220497.1 bt strand=+ flank=2
+
+Length=909
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  18.9    0.27 
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 18.9 bits (37),  Expect = 0.27
+ Identities = 21/77 (27%), Positives = 34/77 (44%), Gaps = 5/77 (6%)
+ Frame = +3
+
+Query  18   MALQEKDITIGNVSAALRELMYSPTHMQHHDKLNTFLDRNVESSSEEKIRQIVDKIRSQT  197
+            +A + K I I  +     + M+SP H     KL  + +  V+ +S+  I +I  K    T
+Sbjct  110  LADKGKRIVIAALDGTSDQQMFSPIH-----KLLPYTNSIVKLASKCMICKIDTKEAPFT  164
+
+Query  198  TSDISETVNNVTTNGTA  248
+                ++  NNV   G A
+Sbjct  165  VRFGNDNDNNVICVGGA  181
+
+
+ Score = 15.0 bits (27),  Expect = 4.9
+ Identities = 5/9 (56%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  823  FFSSIYRLL  797
+             FS I++LL
+Sbjct  130  MFSPIHKLL  138
+
+
+ Score = 14.6 bits (26),  Expect = 5.2
+ Identities = 5/27 (19%), Positives = 10/27 (37%), Gaps = 1/27 (4%)
+ Frame = -2
+
+Query  821  LFVHIQTTHVGLYETIVTIQQQRCLHI  741
+            +F    T    +Y+      +  CL +
+Sbjct  22   MFAGKSTYLKNIYQQENGGNK-HCLFV  47
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 128310
+
+
+Query= YP_009220507.1 bt strand=- flank=2
+
+Length=706
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.2    1.3  
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 16.2 bits (30),  Expect = 1.3
+ Identities = 5/13 (38%), Positives = 8/13 (62%), Gaps = 0/13 (0%)
+ Frame = +2
+
+Query  383  PYRRRLVECSSTC  421
+            PY   +V+ +S C
+Sbjct  139  PYTNSIVKLASKC  151
+
+
+ Score = 15.8 bits (29),  Expect = 1.8
+ Identities = 6/8 (75%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = +3
+
+Query  42  ETICGCTT  65
+           E I GCTT
+Sbjct  68  EVIEGCTT  75
+
+
+ Score = 14.2 bits (25),  Expect = 5.2
+ Identities = 3/8 (38%), Positives = 3/8 (38%), Gaps = 0/8 (0%)
+ Frame = +3
+
+Query  78   TRCAGCGD  101
+               A C D
+Sbjct  183  MYAAACRD  190
+
+
+ Score = 13.9 bits (24),  Expect = 8.4
+ Identities = 3/14 (21%), Positives = 5/14 (36%), Gaps = 0/14 (0%)
+ Frame = +3
+
+Query  75   YTRCAGCGDRCCSA  116
+               C G  +   +A
+Sbjct  174  NVICVGGAEMYAAA  187
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 97438
+
+
+Query= YP_009220508.1 bt strand=+ flank=0
+
+Length=585
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  16.2    0.95 
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 16.2 bits (30),  Expect = 0.95
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  361  KNQNGNRSSD  390
+            KN N NR + 
+Sbjct  52   KNSNSNRQTP  61
+
+
+ Score = 15.4 bits (28),  Expect = 2.0
+ Identities = 6/13 (46%), Positives = 6/13 (46%), Gaps = 0/13 (0%)
+ Frame = +1
+
+Query  67   LPICTTTAPMIAA  105
+            LPI     P I A
+Sbjct  138  LPIMLIDRPYIGA  150
+
+
+ Score = 15.0 bits (27),  Expect = 2.5
+ Identities = 7/19 (37%), Positives = 9/19 (47%), Gaps = 0/19 (0%)
+ Frame = +1
+
+Query  34  STSAATTSSNTLPICTTTA  90
+            T+  T  +NT P    TA
+Sbjct  81  KTNNKTWCTNTSPNMNVTA  99
+
+
+ Score = 15.0 bits (27),  Expect = 2.6
+ Identities = 5/13 (38%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = +1
+
+Query  55  SSNTLPICTTTAP  93
+            +N    CT T+P
+Sbjct  81  KTNNKTWCTNTSP  93
+
+
+ Score = 13.5 bits (23),  Expect = 7.0
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 1/14 (7%)
+ Frame = -1
+
+Query  75   DRKSIAAR-RRGRC  37
+            DR  I A    G+C
+Sbjct  144  DRPYIGAHITAGKC  157
+
+
+ Score = 13.5 bits (23),  Expect = 7.6
+ Identities = 3/6 (50%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -1
+
+Query  39   CAVNMR  22
+            C +NM+
+Sbjct  110  CDINMQ  115
+
+
+
+Lambda      K        H        a         alpha
+   0.305    0.118    0.319    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 80472
+
+
+Query= YP_009220514.1 bt strand=- flank=0
+
+Length=472
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  16.9    0.44 
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 16.9 bits (32),  Expect = 0.44
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 2/19 (11%)
+ Frame = -2
+
+Query  270  RRNNTRSSSVLRRRPVLPA  214
+            R+N    +  LR R + PA
+Sbjct  38   RKNA--GNEDLRTRDLFPA  54
+
+
+ Score = 13.1 bits (22),  Expect = 8.2
+ Identities = 4/15 (27%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+ Frame = -1
+
+Query  73  GMSAMSKEQVLTMYQ  29
+           G+S +  E+   +Y+
+Sbjct  81  GLSDVHGEEFKALYE  95
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 64020
+
+
+Query= YP_009220601.1 bt strand=+ flank=1
+
+Length=1018
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  349     2e-124
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 349 bits (895),  Expect = 2e-124
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +2
+
+Query  20   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  199
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  200  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  379
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  380  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  559
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  560  AEMYAAACRD  589
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 17.3 bits (33),  Expect = 1.00
+ Identities = 12/51 (24%), Positives = 20/51 (39%), Gaps = 1/51 (2%)
+ Frame = -1
+
+Query  808  CMIVELYLLSEIVINQLTSVARPIRKAHILPAV*R*IFISK*EFRLSALAT  656
+            C    +   +  VI   T+V+       +LP V   I I + +F  + L  
+Sbjct  57   CGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQF-FTDLVL  106
+
+
+ Score = 16.9 bits (32),  Expect = 1.3
+ Identities = 11/38 (29%), Positives = 17/38 (45%), Gaps = 4/38 (11%)
+ Frame = +2
+
+Query  617  NKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMC  730
+              G++ ++ G    GKST  K +   +N    GG   C
+Sbjct  11   MAGRVELVTGPMFAGKSTYLKNIYQQEN----GGNKHC  44
+
+
+ Score = 16.2 bits (30),  Expect = 2.4
+ Identities = 4/11 (36%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+ Frame = +2
+
+Query  596  KKINKKKNKGK  628
+            K I +++N G 
+Sbjct  31   KNIYQQENGGN  41
+
+
+ Score = 15.4 bits (28),  Expect = 3.6
+ Identities = 4/16 (25%), Positives = 5/16 (31%), Gaps = 0/16 (0%)
+ Frame = -2
+
+Query  249  DTVVHPSMTSPACVTM  202
+              V H       C T+
+Sbjct  61   TIVTHAGEVIEGCTTV  76
+
+
+ Score = 15.4 bits (28),  Expect = 4.0
+ Identities = 9/27 (33%), Positives = 12/27 (44%), Gaps = 0/27 (0%)
+ Frame = +1
+
+Query  607  QKEK*GEVSCLGRRRSLWQEHSSETPT  687
+            Q+E  G   CL  + SL   +   T T
+Sbjct  35   QQENGGNKHCLFVKHSLETRYGCGTGT  61
+
+
+ Score = 15.4 bits (28),  Expect = 4.3
+ Identities = 5/16 (31%), Positives = 7/16 (44%), Gaps = 0/16 (0%)
+ Frame = -1
+
+Query  328  VGKELALIN*YNVDYL  281
+              KEL  +    VD +
+Sbjct  78   SIKELISVLPEVVDVI  93
+
+
+ Score = 14.6 bits (26),  Expect = 6.2
+ Identities = 4/27 (15%), Positives = 10/27 (37%), Gaps = 0/27 (0%)
+ Frame = +2
+
+Query  887  VMDRYYYSGIVFSLARGVDTVEWCSAS  967
+             ++  Y  G    +    + +E C+  
+Sbjct  50   SLETRYGCGTGTIVTHAGEVIEGCTTV  76
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 143836
+
+
+  Database: rps_mini3v
+    Posted date:  Nov 8, 2026  9:56 AM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

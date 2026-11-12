@@ -45,6 +45,8 @@ pub(crate) struct RpsPrelim<'a> {
     pub(crate) prelim_hitlist_size: usize,
     /// The query's index (the lists' `query_index`).
     pub(crate) query_index: u32,
+    /// The program of LOSAT's refusals.
+    pub(crate) program: &'static str,
 }
 
 /// The memory of one worker's preliminary stage, kept from query to query.
@@ -445,7 +447,8 @@ impl RpsPrelim<'_> {
                 || (ungapped.q_start + ungapped.length) as usize > profile_length
             {
                 bail!(
-                    "a profile database whose scores extend an ungapped alignment across two profiles (NCBI BLAST+ asserts against it) is not supported by LOSAT's RPSBLAST"
+                    "a profile database whose scores extend an ungapped alignment across two profiles (NCBI BLAST+ asserts against it) is not supported by LOSAT's {}",
+                    self.program
                 );
             }
             let candidate = TreeHsp {

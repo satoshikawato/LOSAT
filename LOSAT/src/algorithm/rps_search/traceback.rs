@@ -287,7 +287,12 @@ impl RpsTraceback<'_> {
         let first = &query.frames[0];
         // A translated query's contexts are its frames; a protein query has one, frame 0.
         let translated = first.frame != 0;
-        let letters = &first.aa_seq[1..first.aa_seq.len().max(2) - 1];
+        // A protein query's letters (a frame of a translated query may have none).
+        let letters: &[u8] = if first.aa_seq.len() >= 2 {
+            &first.aa_seq[1..first.aa_seq.len() - 1]
+        } else {
+            &[]
+        };
         if let Some(redo) = self.redo.as_ref() {
             let statistics = RpsQueryStats {
                 batch_kbp: &query.batch_kbp,
@@ -436,11 +441,31 @@ impl RpsTraceback<'_> {
         for hsp in &mut hsp_list.hsps {
             let context = query.context(hsp.query_frame);
             hsp.e_value = if translated {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:346-354
+                // ```c
+                //    if (Blast_ProgramIsRpsBlast(program_number)) {
+                //       /* Create a local BlastQueryInfo structure for this subject sequence
+                // 	 that has been switched with the query. */
+                //       BlastQueryInfo* qi = BlastMemDup(query_info_in, sizeof(BlastQueryInfo));
+                //       qi->first_context = qi->last_context = 0;
+                //       qi->num_queries = 1;
+                //       offsets[0] = 0;
+                //       offsets[1] = query_blk->length + 1;
+                //       OffsetArrayToContextOffsets(qi, offsets, program_number);
+                // ```
+                // The copy shares the user query's contexts (`BlastMemDup` copies the structure
+                // only), so context 0 holds the profile's length in the e-values of the list:
+                // an HSP of frame +1 reads the profile's length, the other frames their own.
+                let length = if crate::core::blast_util::frame_to_context(hsp.query_frame) == 0 {
+                    profile_length
+                } else {
+                    context.length()
+                };
                 context.stats(gumbel).e_value(
                     hsp.raw_score,
                     &scaled,
                     stat_length as i32,
-                    context.length() as i32,
+                    length as i32,
                 )
             } else {
                 context.stats(gumbel).e_value(

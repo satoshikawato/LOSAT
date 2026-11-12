@@ -455,7 +455,7 @@ pub(super) fn write_blastx_tabular(
                     local_id(query).as_bytes(),
                     query_length,
                 );
-                for list in lists {
+                for list in lists.iter().take(options.shown_lists()) {
                     let shown_hsps = || {
                         list.hsps
                             .iter()

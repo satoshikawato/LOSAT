@@ -194,13 +194,15 @@ pub(crate) struct RpsRun<'a> {
     pub(crate) x_drop_final_bits: f64,
     pub(crate) gap_trigger_bits: f64,
     pub(crate) options: &'a RpsSearch,
+    /// The program of LOSAT's refusals (`RPSBLAST`, `RPSTBLASTN`).
+    pub(crate) program: &'static str,
 }
 
 /// The refusal of a database whose scale makes a scaled score leave NCBI's `Int4` (gap costs,
 /// X-drops, cutoffs): NCBI's products overflow there.
-fn scale_overflow(scale: f64) -> anyhow::Error {
+fn scale_overflow(scale: f64, program: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "a profile database of the scale {scale} (its scaled gap costs, X-drops or score cutoffs leave 32-bit integers) is not supported by LOSAT's RPSBLAST"
+        "a profile database of the scale {scale} (its scaled gap costs, X-drops or score cutoffs leave 32-bit integers) is not supported by LOSAT's {program}"
     )
 }
 
@@ -210,12 +212,18 @@ fn scale_overflow(scale: f64) -> anyhow::Error {
 /// conversion of the double, or its arithmetic, is undefined there (DECISIONS 17 N1/N2, line PS).
 /// `given` is the option's value as the command line gives it; an X-drop of NCBI's defaults gets
 /// the database's refusal (`scale_overflow`), as only an extreme scale makes it leave 32 bits.
-fn x_drop_overflow(option: &str, given: Option<f64>, bits: f64, scale: f64) -> anyhow::Error {
+fn x_drop_overflow(
+    option: &str,
+    given: Option<f64>,
+    bits: f64,
+    scale: f64,
+    program: &str,
+) -> anyhow::Error {
     if given.is_none() {
-        return scale_overflow(scale);
+        return scale_overflow(scale, program);
     }
     anyhow::anyhow!(
-        "an {option} of {bits:?} bits, whose raw X-drop at the profile database's scale {scale} leaves NCBI BLAST+'s 32-bit integers (its conversion or the sizes of its alignment kernels overflow: undefined behaviour), is not supported by LOSAT's RPSBLAST"
+        "an {option} of {bits:?} bits, whose raw X-drop at the profile database's scale {scale} leaves NCBI BLAST+'s 32-bit integers (its conversion or the sizes of its alignment kernels overflow: undefined behaviour), is not supported by LOSAT's {program}"
     )
 }
 
@@ -299,6 +307,7 @@ impl RpsRun<'_> {
                     self.options.x_drop_ungapped_bits,
                     self.x_drop_ungapped_bits,
                     scale,
+                    self.program,
                 )
             })?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-931
@@ -319,14 +328,14 @@ impl RpsRun<'_> {
                 self.cutoff_subject_length,
             )
             .checked_mul(int_scale)
-            .ok_or_else(|| scale_overflow(scale))?;
+            .ok_or_else(|| scale_overflow(scale, self.program))?;
         let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
             / query.kbp_std.lambda) as i32;
         Ok(RpsCutoffs {
             x_dropoff,
             word_cutoff: gap_trigger
                 .checked_mul(int_scale)
-                .ok_or_else(|| scale_overflow(scale))?
+                .ok_or_else(|| scale_overflow(scale, self.program))?
                 .min(hit_cutoff),
             hit_cutoff,
         })
@@ -383,6 +392,7 @@ impl RpsRun<'_> {
                 self.options.x_drop_gapped_bits,
                 self.x_drop_gapped_bits,
                 scale,
+                self.program,
             )
         };
         let final_overflow = || {
@@ -391,6 +401,7 @@ impl RpsRun<'_> {
                 self.options.x_drop_final_bits,
                 self.x_drop_final_bits,
                 scale,
+                self.program,
             )
         };
         let raw_gapped = int4_of(self.x_drop_gapped_bits * std::f64::consts::LN_2 / lambda)
@@ -437,7 +448,7 @@ impl RpsRun<'_> {
         let scale = files.aux.scale;
         // (A whole number of 1 or more, `rps_hooks::rps_search`.)
         if scale > f64::from(i32::MAX) {
-            return Err(scale_overflow(scale));
+            return Err(scale_overflow(scale, self.program));
         }
         let int_scale = scale as i32;
         let table = RpsTable {
@@ -456,7 +467,7 @@ impl RpsRun<'_> {
             files.aux.gap_open.checked_mul(int_scale),
             files.aux.gap_extend.checked_mul(int_scale),
         ) else {
-            return Err(scale_overflow(scale));
+            return Err(scale_overflow(scale, self.program));
         };
         // The X-drops at the scale (`gapped_x_drops`, NCBI's `BlastExtensionParametersNew`).
         let (x_drop_gapped, x_drop_final) = self.gapped_x_drops(scale, gap_open, gap_extend)?;
@@ -495,7 +506,8 @@ impl RpsRun<'_> {
         let lambda = self.gapped.lambda;
         if lambda / scale * scale != lambda {
             anyhow::bail!(
-                "a profile database of the scale {scale} (NCBI BLAST+ divides Lambda by the scale for each e-value and multiplies it back, which changes Lambda at this scale) is not supported by LOSAT's RPSBLAST"
+                "a profile database of the scale {scale} (NCBI BLAST+ divides Lambda by the scale for each e-value and multiplies it back, which changes Lambda at this scale) is not supported by LOSAT's {}",
+                self.program
             );
         }
         let traceback = RpsTraceback {
@@ -572,6 +584,7 @@ impl RpsRun<'_> {
                     prelim_evalue: self.prelim_evalue,
                     prelim_hitlist_size: self.prelim_hitlist_size,
                     query_index: q_idx as u32,
+                    program: self.program,
                 };
                 prelim.search_frame(&mut scratch.0, &frame.aa_seq[1..], frame.frame)?;
                 searched = Some(prelim);
@@ -788,6 +801,7 @@ mod tests {
             x_drop_final_bits: final_bits,
             gap_trigger_bits: 22.0,
             options,
+            program: "RPSBLAST",
         }
     }
 

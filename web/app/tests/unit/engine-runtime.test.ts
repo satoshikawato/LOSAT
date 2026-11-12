@@ -643,6 +643,9 @@ describe.skipIf(reactors === undefined)("the serial reactor inflates sources wit
   const PZSTD =
     'UCpNGAQAAAA/AAAAKLUv/QRYlQEAhAI+YQpBQ0dUQUFBQ0NDR0dHVFRUCj5iClRUVFRHR0dHQ0NDQ0FBQUEKAgCYibw/ZwTZFtvJ';
   const AB_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
+  // `bzip2 -9c` of A, then of B: two bzip2 streams one after the other (as pbzip2 or `cat` writes them).
+  const TWO_BZIP2 =
+    'QlpoOTFBWSZTWa6jEEsAAAHfAAAQQAAAASiABAAiAaAAMQDTTQQBppoCaYaTyXi7kinChIV1GIJYQlpoOTFBWSZTWf/ayGYAAAJfgAAQQAAAAQiABAAQAISAIAAiDRppoQAwKKwKAaT5+LuSKcKEh/7WQzA=';
   const sentence = (name: string, suffix: string, format: string, fault: string) =>
     `'${name}' is named ${suffix} but is not ${format} data (${fault}); LOSAT reads a file named ${suffix} through ${format}`;
   const inflated = async (bytes: Uint8Array | string, name: string) => {
@@ -663,6 +666,7 @@ describe.skipIf(reactors === undefined)("the serial reactor inflates sources wit
     expect(await inflated(Buffer.concat([gzipSync(A), gzipSync(B)]), 'two.fa.GZ')).toEqual({ name: 'two.fa', text: A + B });
     expect(await inflated(Buffer.concat([zstdCompressSync(A), zstdCompressSync(B)]), 'two.fa.zst')).toEqual({ name: 'two.fa', text: A + B });
     expect(await inflated(Buffer.from(PZSTD, 'base64'), 'p.fa.zst')).toEqual({ name: 'p.fa', text: AB_TEXT });
+    expect(await inflated(Buffer.from(TWO_BZIP2, 'base64'), 'two.fa.Bz2')).toEqual({ name: 'two.fa', text: A + B });
     expect(await inflated(gzipSync(''), '.gz')).toEqual({ name: 'input', text: '' });
   });
 
@@ -725,8 +729,7 @@ describe.skipIf(reactors === undefined)("the serial reactor inflates sources wit
     expect(await failure(A, 'text.fa.gz')).toBe(sentence('text.fa.gz', '.gz', 'gzip', 'invalid gzip header'));
     expect(await failure('', 'e.fa.gz')).toBe(sentence('e.fa.gz', '.gz', 'gzip', 'the file is empty'));
     expect(await failure('', 'e.fa.zst')).toBe(sentence('e.fa.zst', '.zst', 'zstd', 'the file is empty'));
-    // The web app's own refusal of bzip2 (line GZ decision 11).
-    expect(await failure(A, 'a.fa.bz2')).toBe("'a.fa.bz2' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)");
+    expect(await failure(A, 'a.fa.bz2')).toBe(sentence('a.fa.bz2', '.bz2', 'bzip2', 'bzip2: bz2 header missing'));
     expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
   });
 

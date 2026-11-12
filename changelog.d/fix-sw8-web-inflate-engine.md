@@ -14,10 +14,10 @@
   read differently from makeblastdb. The app inflates through the engine's decoders over three new
   exports of ABI v2 (`losat_web2_inflate_begin`, `losat_web2_inflate_chunk`,
   `losat_web2_inflate_end`; the inflated bytes on stream 5; the version stays 2), and the engine's
-  name rule gives the compression and the name of the inflated file. A `.bz2` source is still
-  refused by the web app. A downloaded Example set takes the same path (the engine's decoders in the
-  Data worker instead of the browser's `DecompressionStream`): a set served as several gzip members,
-  which every browser refused, now loads, and a damaged one fails with the engine's sentence.
+  name rule gives the compression and the name of the inflated file. A downloaded Example set
+  takes the same path (the engine's decoders in the Data worker instead of the browser's
+  `DecompressionStream`): a set served as several gzip members, which every browser refused, now
+  loads, and a damaged one fails with the engine's sentence.
   Each compressed file inflates on a reactor instance of its own, let go when it ends. On a 96 MB
   FASTA, inflation is 1.3 to 4.8 times faster than before in Chromium, Firefox 157 and WebKit (zstd
   with a long window up to 24 times) and holds less memory, except Chromium with zstd (peak +22 %,

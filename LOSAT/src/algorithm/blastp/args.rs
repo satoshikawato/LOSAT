@@ -1200,7 +1200,10 @@ impl BlastpArgs {
             .and_then(|pssm| pssm.in_pssm.as_deref())
         {
             Some(path) => {
-                let (mut search, file) = crate::algorithm::psiblast::in_pssm::read_in_pssm(path)?;
+                let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
+                    path,
+                    crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+                )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
@@ -1261,6 +1264,7 @@ impl BlastpArgs {
             hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
+            psi_tblastn: false,
             // blastp's `-xdrop_ungap`, or rpsblast's (`RpsSearch`); psiblast's parser refuses it.
             x_dropoff: self
                 .xdrop_ungap

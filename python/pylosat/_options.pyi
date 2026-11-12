@@ -166,6 +166,12 @@ class BlastpOptions(TypedDict, total=False):
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
     ungapped: Literal['true', 'false']
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
     suggestion; 15 (PAM30's) for blastp-short]"""
@@ -242,6 +248,12 @@ class BlastxOptions(TypedDict, total=False):
     19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]"""
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit [default: 0, no culling]"""
@@ -315,6 +327,8 @@ class TblastnOptions(TypedDict, total=False):
     """Minimum word score such that the word is added to the BLAST lookup table [default: 13, or
     the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for
     tblastn-fast]"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     xdrop_gap: float
     """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
     xdrop_gap_final: float
@@ -411,6 +425,8 @@ class TblastxOptions(TypedDict, total=False):
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
     lcase_masking: Literal['true', 'false']
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int
     """Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
     suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0

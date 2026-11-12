@@ -153,7 +153,7 @@ impl std::error::Error for WinMaskError {}
 /// Where the counts files that the callers name are read from: NCBI's checks of the format
 /// (`DiscoverStatType`) and its readers (`CSeqMaskerIstatFactory::create`) open the file by
 /// name; LOSAT opens it through a source, so that LOSAT Web can give counts it holds in memory
-/// under the name of the command line. [`FileCounts`] is the file system.
+/// under the name of the command line. `FileCounts` is the file system.
 pub trait CountsSource: Send + Sync + fmt::Debug {
     /// `CSeqMaskerIstatFactory::DiscoverStatType( name )`.
     fn discover(&self, name: &str) -> Result<StatFile, WinMaskError>;

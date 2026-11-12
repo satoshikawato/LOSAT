@@ -1144,4 +1144,58 @@ mod tests {
         assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], true).is_ok());
         assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], false).is_err());
     }
+
+    // NCBI 2.17.0's greedy offsets (`greedy_xdrop_offset`, x86-64 `Int4`) and the refusals of
+    // the X-drops that NCBI cannot run (line RG X1b probe `b2.*`).
+    #[test]
+    fn gapped_x_drops_that_ncbis_kernels_cannot_run_are_refused() {
+        use super::super::alignment::greedy::greedy_xdrop_offset;
+        // megablast 1/-2, linear (0/0): the X-drop doubles, (2x + 1) / 6 + 1.
+        assert_eq!(greedy_xdrop_offset(13, 1, -2, 0, 0), 5);
+        assert_eq!(greedy_xdrop_offset(-1, 1, -2, 0, 0), 1);
+        assert_eq!(greedy_xdrop_offset(-3, 1, -2, 0, 0), 1);
+        // -8 bits = raw -4: the offset 0 reads `max_score` before NCBI writes it.
+        assert_eq!(greedy_xdrop_offset(-4, 1, -2, 0, 0), 0);
+        // INT_MIN (past Int4) doubles to 0; 2^30 doubles to INT_MIN; 2^31 - 1 doubles to -2.
+        assert_eq!(greedy_xdrop_offset(i32::MIN, 1, -2, 0, 0), 1);
+        assert!(greedy_xdrop_offset(1 << 30, 1, -2, 0, 0) <= 0);
+        assert_eq!(greedy_xdrop_offset(i32::MAX, 1, -2, 0, 0), 1);
+        // An even reward is not doubled: INT_MIN and INT_MAX (whose sum wraps) leave no offset.
+        assert_eq!(greedy_xdrop_offset(-1, 2, -3, 0, 0), 1);
+        assert!(greedy_xdrop_offset(i32::MIN, 2, -3, 0, 0) <= 0);
+        assert!(greedy_xdrop_offset(i32::MAX, 2, -3, 0, 0) <= 0);
+        // Affine 1/-2 2/2: doubled 2/4 4/4, common factor gdb3(6, 4, 5) = 1.
+        assert_eq!(greedy_xdrop_offset(13, 1, -2, 2, 2), 28);
+        assert_eq!(greedy_xdrop_offset(i32::MIN, 1, -2, 2, 2), 2);
+
+        let check = |use_dp, (gapped, finale), (reward, penalty), (gap_open, gap_extend)| {
+            check_gapped_x_dropoffs(
+                use_dp,
+                (25.0, 100.0),
+                (gapped, finale),
+                (reward, penalty),
+                (gap_open, gap_extend),
+            )
+        };
+        let refusal = |result: anyhow::Result<()>| result.expect_err("refused").to_string();
+        // Greedy: the defaults, INT_MIN at either stage, and the top of Int4 run.
+        assert!(check(false, (13, 54), (1, -2), (0, 0)).is_ok());
+        assert!(check(false, (i32::MIN, 54), (1, -2), (0, 0)).is_ok());
+        assert!(check(false, (13, i32::MIN), (1, -2), (0, 0)).is_ok());
+        assert!(refusal(check(false, (-4, 54), (1, -2), (0, 0))).starts_with("an -xdrop_gap of 25.0 bits"));
+        assert!(refusal(check(false, (13, 1 << 30), (1, -2), (0, 0)))
+            .starts_with("an -xdrop_gap_final of 100.0 bits"));
+        // The final X-drop that the preliminary one set is named -xdrop_gap.
+        assert!(refusal(check(false, (1 << 30, 1 << 30), (1, -2), (0, 0)))
+            .starts_with("an -xdrop_gap of 25.0 bits"));
+        assert!(check(false, (i32::MIN, 54), (2, -3), (0, 0)).is_err());
+        // Dynamic programming: only the final X-drop, against the Int4 sizes of `ALIGN_EX`; the
+        // preliminary one is never past the HSP's ungapped score, INT_MIN rises to the gap costs.
+        assert!(check(true, (i32::MIN, i32::MIN), (2, -3), (5, 2)).is_ok());
+        assert!(check(true, (-100, 2_147_483_441), (2, -3), (5, 2)).is_ok());
+        assert!(check(true, (-100, 2_147_483_442), (2, -3), (5, 2)).is_err());
+        assert!(check(true, (13, (1 << 30) - 104), (1, -2), (2, 1)).is_ok());
+        assert!(refusal(check(true, (13, (1 << 30) - 103), (1, -2), (2, 1)))
+            .contains("-xdrop_gap_final of 100.0 bits"));
+    }
 }

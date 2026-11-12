@@ -461,6 +461,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 - `-max_intron_length`: `tblastn` refuses a value other than 0 and `tblastx` the option itself. `blastx` accepts it.
 - `-window_size 0`: `tblastn`, `tblastx`.
 - A gapped X-drop whose raw score makes the sizes of NCBI's gapped alignment kernels leave 32-bit integers (about 4.14e8 bits and more with BLOSUM62 11/1; NCBI's arithmetic overflows): `-xdrop_gap` at every `-comp_based_stats`, and `-xdrop_gap_final` with `-comp_based_stats 0` (the redo of modes 1 to 3 runs with its own X-drop): `blastp`, `blastx`, `tblastn`.
+- A final gapped X-drop of dynamic programming (`-task blastn`, `blastn-short`, `dc-megablast`, `-no_greedy`) whose raw score over the gap extension reaches 1,073,741,721 (with a gap extension of 1; NCBI's arithmetic overflows), and a gapped X-drop of greedy extension (`-task megablast`) that leaves NCBI's greedy alignment no cell to start from (NCBI then writes outside its arrays and corrupts its heap, or stops with `BLAST engine error: Unknown error code -1`): with the default scores (reward 1, penalty -2), about -7.4 bits and less and about 1.98e9 to 3.97e9 bits (the doubled X-drop of an odd reward overflows); the negative limit depends on the scores, and with an even reward every value past 32-bit integers is refused too: `blastn`.
 - `-ungapped`: `blastp`, `tblastn`; with `-outfmt` 8, 9, 11, 12 and 17: `blastn`.
 - `-strand` and `-sum_stats`: `tblastx`.
 - `-best_hit_overhang` and `-best_hit_score_edge`: all five programs.

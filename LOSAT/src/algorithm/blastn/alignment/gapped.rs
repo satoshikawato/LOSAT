@@ -3137,6 +3137,41 @@ pub(crate) fn extend_gapped_heuristic_with_traceback_with_scratch(
 mod tests {
     use super::blast_get_start_for_gapped_alignment_nucl;
 
+    // A final X-drop far past the sequences (`-xdrop_gap_final 1e9`, raw 1.1e9 with 2/-3 5/2)
+    // gives the report of a saturated one (1e4 bits, NCBI 2.17.0 line RG X1b probe `b2.A.*`)
+    // and holds only the cells that NCBI touches: `N + 1` DP cells (or the first 1000) and rows of
+    // at most `N + 2` cells, not `x_dropoff / gap_extend` of each.
+    #[test]
+    fn a_large_final_x_drop_holds_only_the_sequences_cells() {
+        let mut state = 12345u32;
+        let mut base = || {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            ((state >> 16) & 3) as u8
+        };
+        let q: Vec<u8> = (0..300).map(|_| base()).collect();
+        let mut s = q.clone();
+        for i in (7..300).step_by(11) {
+            s[i] = (s[i] + 1) & 3;
+        }
+        s.drain(150..153);
+        let n = s.len();
+        let matrix = super::build_blastna_matrix(2, -3);
+        let run = |x_drop: i32| {
+            let mut scratch = super::GapAlignScratch::new();
+            let out = super::extend_gapped_one_direction_with_traceback_with_scratch(
+                &q, &s, 2, -3, &matrix, 5, 2, x_drop, &mut scratch,
+            );
+            (out, scratch)
+        };
+        let (saturated, _) = run(11_088);
+        let (large, scratch) = run(1_100_000_000);
+        assert_eq!(large, saturated);
+        assert_eq!(scratch.dp_mem.len(), 1000);
+        assert!(scratch.dp_mem_alloc > 500_000_000);
+        assert!(scratch.trace_rows.iter().all(|row| row.len() <= n + 2));
+        assert!(scratch.trace_rows.iter().all(|row| row.capacity() <= 3 * (n + 2)));
+    }
+
     fn blastna(bases: &str) -> Vec<u8> {
         bases
             .bytes()

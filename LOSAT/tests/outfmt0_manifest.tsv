@@ -2382,9 +2382,9 @@ xdp.tblastn.u3	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/ou
 xdp.tblastn.cbs0u3	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-comp_based_stats 0 -xdrop_ungap 3 -xdrop_gap 8 -xdrop_gap_final 12	0								
 xdp.tblastn.def	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 7	0								
 xdp.tblastn.u1e10	tblastn		tests/fasta/outfmt0/e2e_protein_query.faa	tests/fasta/outfmt0/e2e_tblastn_subject.fna	-xdrop_ungap 1e10	0								
-xdp.tblastx.u3	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 3	0								
+xdp.tblastx.u3.6	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 3	6								
 xdp.tblastx.u1	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 1	6								
-xdp.tblastx.def	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 7	0								
+xdp.tblastx.def.6	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 7	6								
 xdp.tblastx.u1e10	tblastx		tests/fasta/LC738874.fasta	tests/fasta/LC738875.fasta	-xdrop_ungap 1e10	0								
 xdp.blastp.u1e10q	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e10	0								
 xdp.blastp.u1e8q	blastp		tests/fasta/outfmt0/x1_q.faa	tests/fasta/outfmt0/x1_s.faa	-xdrop_ungap 1e8	0								

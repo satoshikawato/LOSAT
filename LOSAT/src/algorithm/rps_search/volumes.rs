@@ -116,18 +116,15 @@ impl RpsVolumeSetup {
         Ok(Ok(()))
     }
 
-    /// `volume`, which `check` has checked in this run, set up again for a search.
+    /// The files of `volume`, which `check` has checked in this run, opened again for a search;
+    /// the consensus letters come only for a batch that is searched (`consensus`: NCBI reads the
+    /// sequences only in the traceback, so a batch without a valid query reads no `.psq`).
     pub(crate) fn reopen(
         &self,
         volume: &Volume,
         cbs: bool,
-    ) -> Result<std::result::Result<RpsVolume, RpsVolumeError>> {
-        let files = match self.files(volume, cbs)? {
-            Ok(files) => files,
-            Err(error) => return Ok(Err(error)),
-        };
-        let consensus = self.consensus(volume, &files)?;
-        Ok(Ok(RpsVolume { files, consensus }))
+    ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
+        self.files(volume, cbs)
     }
 
     /// The volume's files (and frequency ratios when `cbs`).
@@ -236,7 +233,7 @@ impl RpsVolumeSetup {
     }
 
     /// The consensus letters of the volume's profiles at their offsets.
-    fn consensus(&self, volume: &Volume, files: &RpsVolumeFiles) -> Result<Vec<u8>> {
+    pub(crate) fn consensus(&self, volume: &Volume, files: &RpsVolumeFiles) -> Result<Vec<u8>> {
         let num_seqs = volume.num_oids();
         let concat = files.rows().len();
         let offsets = files.offsets();

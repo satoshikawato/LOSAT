@@ -5599,7 +5599,11 @@ fn write_blastx_alignment(
         }
         writeln!(writer)?;
         write!(writer, "Sbjct  ")?;
-        if sn > 0 {
+        // A first row of one residue at 1 shows no coordinates either (showalign.cpp:1598-1626,
+        // quoted at `write_sequence_row`: `j == 0 && start == 1 && end == 1`), as a
+        // `-line_length 1` report of a profile aligned from its first position.
+        let s_shown = sn > 0 && !(chunk == 0 && sp == 1 && se == 1);
+        if s_shown {
             write!(writer, "{sp}")?;
             write_spaces(writer, width + 2 - digit_count(sp))?;
         } else {
@@ -5607,7 +5611,7 @@ fn write_blastx_alignment(
         }
         writer.write_all(spart)?;
         write!(writer, "  ")?;
-        if sn > 0 {
+        if s_shown {
             write!(writer, "{se}")?;
         }
         writeln!(writer)?;

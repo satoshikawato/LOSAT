@@ -1254,6 +1254,22 @@ impl BlastxArgs {
         } else {
             Vec::new()
         };
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250
+        // ```c++
+        //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
+        // ```
+        // rpstblastn_app.cpp does not set it (as rpsblast's and psiblast's apps): its tabular
+        // formats keep their own delimiter, the tab or the comma (`delim=` is still checked).
+        let without_delimiter;
+        let choice = if self.rpstblastn.is_some() && !choice.delimiter.is_empty() {
+            without_delimiter = crate::blastinput::app::FormatChoice {
+                delimiter: String::new(),
+                ..choice.clone()
+            };
+            &without_delimiter
+        } else {
+            choice
+        };
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
             .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
             .map(crate::report::tabular::TabularSpec::intern);

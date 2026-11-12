@@ -45,7 +45,7 @@ use crate::algorithm::blastx::results::{Hsp, HspList};
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::rps_search::engine::{RpsFrame, RpsQuery, RpsRun, RpsSearch, NUM_FRAMES};
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, RpsVolume,
+    mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids,
     RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::blastinput::report_counts::FormattingArgs;
@@ -279,10 +279,9 @@ impl TranslatedRpsSearch {
         // `CLocalRPSBlast` searches each query batch.
         let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None; queries.len()];
         for (position, &index) in volumes.order.iter().enumerate() {
-            let RpsVolume { files, consensus } = match setup
-                .reopen(&volumes.volumes[index], false)?
-            {
-                Ok(volume) => volume,
+            let volume = &volumes.volumes[index];
+            let files = match setup.reopen(volume, false)? {
+                Ok(files) => files,
                 Err(RpsVolumeError::Files(text)) => return Err(RpsBatchError::Engine(text).into()),
                 // The empty matrix name fails every query's score block (blastx's unknown
                 // matrix: one "Unknown error code -1" per query).
@@ -294,6 +293,7 @@ impl TranslatedRpsSearch {
             if !parameters.iter().any(|p| p.valid) {
                 continue;
             }
+            let consensus = setup.consensus(volume, &files)?;
             // `-dbsize` on several volumes: each volume's statistics read the volume's own
             // number of sequences (`per_volume_search_spaces`, as rpsblast's).
             if per_volume_search_spaces(
@@ -301,7 +301,7 @@ impl TranslatedRpsSearch {
                 options.effective_search_space,
                 volumes.order.len(),
             ) {
-                let num_seqs = i64::from(volumes.volumes[index].num_oids());
+                let num_seqs = i64::from(volume.num_oids());
                 effective_lengths(&prepared, parameters, options, db_length, num_seqs, None)
                     .map_err(RpsBatchError::Setup)?;
             } else if !searched {

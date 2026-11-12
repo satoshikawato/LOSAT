@@ -3284,12 +3284,9 @@ fn psiblast_pssms(
         }
         let ordinal = ranges.query_input.ordinal(query);
         let record = &ranges.input_records[ordinal];
-        let id = crate::report::serial::pssm::ObjectId::Str(
-            format!(
-                "Query_{}",
-                args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
-            )
-            .into_bytes(),
+        let id = crate::algorithm::psiblast::pssm::fasta_query_id(
+            record,
+            args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1,
         );
         let ungapped = &contexts[query].karlin_params;
         let ungapped = KarlinBlk {
@@ -5482,7 +5479,26 @@ fn search_cli(
     // come when the options are processed and the subjects set up.
     if let Some(psi) = resolved.psi_search.clone() {
         crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, &psi)?;
-        let records = vec![psi.query().clone()];
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
+        // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
+        // ```c++
+        //         CBlastFormat formatter(opt, *db_adapter,
+        //                                fmt_args->GetFormattedOutputChoice(),
+        //                                query_opts->GetParseDeflines(),
+        // ```
+        // With `-parse_deflines` the reports believe the PSSM query's Seq-id as they believe a
+        // FASTA query's (NCBI BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`), and
+        // its id joins the search's scope as a FASTA query's does: NCBI shows a subject with that
+        // id as the PSSM's query (its title and letters), refused as for a FASTA query
+        // (`IdScope::add_record`; a database sequence with it, `database_id_scope`).
+        let mut query = psi.query().clone();
+        if resolved.parse_deflines {
+            query = query.believing_local_id();
+            if let (Some(scope), Some(believed)) = (args.id_scope.as_deref(), query.believed()) {
+                scope.add_record(&believed.ids, None, "query", args.app.name())?;
+            }
+        }
+        let records = vec![query];
         // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's below.
         if let Some(request) = resolved
             .psi_rounds
@@ -8005,9 +8021,8 @@ struct BlastpReports<'a> {
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
 /// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`), `OLD_FSC` in RPSBLAST (BLASTP and PSIBLAST read it) and query split
-/// values that NCBI cannot convert (not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never
-/// splits). Other
+/// archive (`archive`) and query split values that NCBI cannot convert (not
+/// `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never splits). Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
 /// `kappa_query_batches`) and the query split (`search_split_query_batches`).
@@ -8021,10 +8036,6 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
         fasta_subjects,
         archive && app == BlastpApp::Blastp,
     )?;
-    // BLASTP and PSIBLAST read OLD_FSC as `-searchsp 0` (`ResolvedBlastpArgs::old_fsc`).
-    if app == BlastpApp::Rpsblast {
-        app::check_old_fsc(app_name)?;
-    }
     // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
     // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
     app::check_query_split_environment(app_name, false, app != BlastpApp::Rpsblast)??;
@@ -10832,6 +10843,7 @@ fn run_resolved_in_pool(
             contexts: &contexts,
             gapped_params: &gapped_params,
             gumbel: gapped_gumbel.as_ref(),
+            search_spaces: &exact_search_spaces,
             cutoff_subject_length,
             prelim_hitlist_size,
             batches: query_batches

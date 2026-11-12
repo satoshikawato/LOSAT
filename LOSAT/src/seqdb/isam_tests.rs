@@ -961,25 +961,12 @@ fn version_check_drops_other_versions() {
     assert!(!found.version_check);
 }
 
+// The `NStr` conversions of this module are tested with `crate::ncbi_str`.
 #[test]
-fn string_to_int_with_trailing_symbols() {
-    assert_eq!(string_to_int_trailing(b"12"), 12);
-    assert_eq!(string_to_int_trailing(b"12|HBA_HUMAN"), 12);
-    assert_eq!(string_to_int_trailing(b"-5x"), -5);
-    assert_eq!(string_to_int_trailing(b"+7"), 7);
-    assert_eq!(string_to_int_trailing(b""), 0);
-    assert_eq!(string_to_int_trailing(b"x1"), 0);
-    assert_eq!(string_to_int_trailing(b"2147483647"), i32::MAX);
-    assert_eq!(string_to_int_trailing(b"2147483648"), 0);
-    assert_eq!(string_to_int_trailing(b"-2147483648"), i32::MIN);
-    assert_eq!(string_to_int_trailing(b"99999999999999999999"), 0);
+fn atoi_reads_as_the_c_library() {
     assert_eq!(crate::ncbi_str::c_atoi(b" 42xyz"), 42);
     assert_eq!(crate::ncbi_str::c_atoi(b"-3"), -3);
     assert_eq!(crate::ncbi_str::c_atoi(b""), 0);
-    assert_eq!(string_to_uint(b"+5"), Some(5));
-    assert_eq!(string_to_uint(b"-5"), None);
-    assert_eq!(string_to_uint(b"4294967296"), None);
-    assert_eq!(string_to_uint(b""), None);
 }
 
 // ---------------------------------------------------------------------------------------------

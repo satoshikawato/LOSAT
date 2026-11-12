@@ -661,25 +661,13 @@ const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "gap_trigger",
     "ignore_msa_master",
     "in_msa",
-    // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
-    "lcase_masking",
     "msa_master_idx",
-    // Line DI-7 ported it to BLASTP's queries, not to PSIBLAST's.
-    "parse_deflines",
     "phi_pattern",
     "sum_stats",
     // Line RG X1 ported them to BLASTP's search, not to PSIBLAST's rounds (series RG-Q).
     "xdrop_gap",
     "xdrop_gap_final",
     "xdrop_ungap",
-    // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
-    "negative_seqidlist",
-    "negative_taxidlist",
-    "negative_taxids",
-    "no_taxid_expansion",
-    "seqidlist",
-    "taxidlist",
-    "taxids",
 ];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
@@ -689,8 +677,7 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
 // `algorithm::rpsblast::args`)
-/// rpsblast's NCBI arguments that LOSAT does not run: `-searchsp` (it switches NCBI's RPS search
-/// to the old Karlin-Altschul statistics, item PS11c-2), `-use_sw_tback` (the Smith-Waterman
+/// rpsblast's NCBI arguments that LOSAT does not run: `-use_sw_tback` (the Smith-Waterman
 /// redo, PS11c-3), `-html` (PS15a) and the remote and search strategy options of every program.
 const UNPORTED_RPSBLAST_ARGS: &[&str] = &[
     "entrez_query",
@@ -698,7 +685,6 @@ const UNPORTED_RPSBLAST_ARGS: &[&str] = &[
     "html",
     "import_search_strategy",
     "remote",
-    "searchsp",
     "use_sw_tback",
 ];
 

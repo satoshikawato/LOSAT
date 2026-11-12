@@ -3,6 +3,7 @@
 
 use std::io::Write;
 
+use crate::ncbi_app::files::{ends_like_sigpipe, open_input_file, Cin, Ostream};
 use crate::ncbi_exception::{err_post_x, NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_ids;
 use crate::report::defline::bioseq_title_from_source;
@@ -48,11 +49,15 @@ pub(super) enum Failure {
     Refused(String),
     /// A `CArgException` of `AsInputFile` in `Run` (the reader's report of it).
     Arg(crate::ncbi_app::args::ArgException),
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
+    /// run ends at once, exit status 0, no message.
+    ClosedPipe,
 }
 
 impl From<WriteError> for Failure {
     fn from(error: WriteError) -> Self {
         match error {
+            WriteError::Io(error) if ends_like_sigpipe(&error) => Failure::ClosedPipe,
             WriteError::Io(error) => {
                 Failure::Refused(format!("writing the output failed: {error}"))
             }
@@ -107,6 +112,10 @@ pub(super) fn report(failure: Failure) -> Report {
         },
         Failure::Refused(reason) => Report::Refused(reason),
         Failure::Arg(error) => Report::Arg(error),
+        Failure::ClosedPipe => Report::Posts {
+            lines: String::new(),
+            status: 0,
+        },
     }
 }
 
@@ -190,8 +199,8 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
     })
 }
 
-/// `CDustMaskApplication::Run` after the arguments: `fasta_source` makes the FASTA reader of
-/// `-in` (`CMaskFastaReader`). The `maskinfo_*` writer writes its object even when the run
+/// `CDustMaskApplication::Run` after the arguments: `stdin` is the standard input, which the
+/// FASTA reader of `-in -` reads (`CMaskFastaReader`). The `maskinfo_*` writer writes its object even when the run
 /// fails after the writer was made (its destructor runs as the exception leaves `Run`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:281-317
@@ -225,31 +234,22 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
 /// ```
 pub(super) fn run(
     options: &Options<'_>,
-    fasta_source: &mut dyn FnMut() -> Result<Box<dyn SequenceSource>, Failure>,
+    stdin: &mut Cin<'_>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let mut writer = writer(options)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
-    let mut out = OstreamOf {
-        inner: out,
-        bad: false,
-    };
-    let result = masks_of_input(options, fasta_source, &mut writer, &mut out);
-    // A refusal of LOSAT's stops before NCBI's run would end: nothing more is written.
-    if !matches!(result, Err(Failure::Refused(_))) {
+    let mut out = Ostream::new(out);
+    let result = masks_of_input(options, stdin, &mut writer, &mut out);
+    // A refusal of LOSAT's stops before NCBI's run would end, and a closed pipe ends it where
+    // SIGPIPE ends NCBI's: nothing more is written.
+    if !matches!(result, Err(Failure::Refused(_) | Failure::ClosedPipe)) {
         writer.finish(&mut out)?;
     }
     result?;
     let _ = out.flush();
-    out.serial_write_failure(options.outfmt)
-}
-
-/// The output as NCBI's `ostream`: after a write fails (`badbit`), later writes do nothing and
-/// report nothing.
-struct OstreamOf<'a> {
-    inner: &'a mut dyn Write,
-    bad: bool,
+    serial_write_failure(&out, options.outfmt)
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:338-353
@@ -267,46 +267,31 @@ struct OstreamOf<'a> {
 //                 RethrowError(fWriteError, "cannot close output stream",exc);
 //         }
 // ```
-impl OstreamOf<'_> {
-    /// LOSAT's refusal when the output of a `seqloc_*` or `maskinfo_*` writer failed. Those
-    /// write through NCBI's serial stream (`CObjectOStream`), which checks its writes: NCBI posts
-    /// `cannot close output stream` for each object, then stops on `write fault` (exit status
-    /// 3) at the next one, or aborts (134) for a `maskinfo` object larger than its 8 KiB
-    /// buffer. The `interval`, `acclist` and `fasta` writers write to the `ostream` itself and
-    /// go on silently, as here.
-    fn serial_write_failure(&self, outfmt: &str) -> Result<(), Failure> {
-        if self.bad && !matches!(outfmt, "interval" | "acclist" | "fasta") {
-            return Err(Failure::Refused(unsupported(&format!(
-                "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
-            ))));
-        }
-        Ok(())
+/// LOSAT's refusal when the output `out` of a `seqloc_*` or `maskinfo_*` writer failed. Those
+/// write through NCBI's serial stream (`CObjectOStream`), which checks its writes: NCBI posts
+/// `cannot close output stream` for each object, then stops on `write fault` (exit status 3)
+/// at the next one, or aborts (134) for a `maskinfo` object larger than its 8 KiB buffer. The
+/// `interval`, `acclist` and `fasta` writers write to the `ostream` itself and go on silently,
+/// as here.
+fn serial_write_failure(out: &Ostream<'_>, outfmt: &str) -> Result<(), Failure> {
+    if out.closed() {
+        return Err(Failure::ClosedPipe);
     }
-}
-
-impl Write for OstreamOf<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if !self.bad && self.inner.write_all(buf).is_err() {
-            self.bad = true;
-        }
-        Ok(buf.len())
+    if out.bad() && !matches!(outfmt, "interval" | "acclist" | "fasta") {
+        return Err(Failure::Refused(unsupported(&format!(
+            "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
+        ))));
     }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        if !self.bad && self.inner.flush().is_err() {
-            self.bad = true;
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 fn masks_of_input(
     options: &Options<'_>,
-    fasta_source: &mut dyn FnMut() -> Result<Box<dyn SequenceSource>, Failure>,
+    stdin: &mut Cin<'_>,
     writer: &mut MaskWriter,
-    out: &mut OstreamOf<'_>,
+    out: &mut Ostream<'_>,
 ) -> Result<(), Failure> {
-    let mut source = reader(options, fasta_source)?;
+    let mut source = reader(options, stdin)?;
     let level = options.level as u32;
     let window = options.window as u32;
     let linker = options.linker as u32;
@@ -321,7 +306,7 @@ fn masks_of_input(
             iupac: &record.iupac,
         };
         writer.print(&seq, &mask, options.parse_seqids, out)?;
-        out.serial_write_failure(options.outfmt)?;
+        serial_write_failure(out, options.outfmt)?;
     }
     Ok(())
 }
@@ -343,12 +328,18 @@ fn masks_of_input(
 ///         throw runtime_error( "Unknown input format" );
 ///     }
 /// ```
-fn reader(
+///
+/// `-in` is opened here, as `x_GetReader` asks for it (`AsInputFile`, fasta input only), after
+/// the writer: an `-in` that does not open still lets a `maskinfo_*` writer write its object.
+fn reader<'a>(
     options: &Options<'_>,
-    fasta_source: &mut dyn FnMut() -> Result<Box<dyn SequenceSource>, Failure>,
-) -> Result<Box<dyn SequenceSource>, Failure> {
+    stdin: &'a mut Cin<'_>,
+) -> Result<Box<dyn SequenceSource + 'a>, Failure> {
     match options.infmt {
-        "fasta" => fasta_source(),
+        "fasta" => {
+            let input = open_input_file("in", options.input, stdin).map_err(Failure::Arg)?;
+            super::fasta::source(input, options.parse_seqids)
+        }
         "blastdb" => Ok(Box::new(DatabaseSource::open(
             options.input,
             options.blastdb_registry,
@@ -361,7 +352,7 @@ fn reader(
 /// `CMaskBDBReader`: the sequences of a nucleotide BLAST database in OID order, each as
 /// `CSeqDB::GetBioseq` makes it (the Seq-ids of the first definition line, the title joined
 /// from all of them). Every OID of the volumes, also those outside the alias files' OID
-/// ranges (`SeqDb::include_every_oid`).
+/// ranges (`SeqDb::open_every_oid_in`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/seqmasks_io/mask_bdb_reader.hpp:55-61
 /// ```c++
@@ -413,9 +404,9 @@ impl DatabaseSource {
             )
         })?;
         let path = SearchPath::from_environment(registry).map_err(database_failure)?;
-        let mut db = SeqDb::open_in(name, SeqType::Nucleotide, &path).map_err(database_failure)?;
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
-        db.include_every_oid();
+        let db =
+            SeqDb::open_every_oid_in(name, SeqType::Nucleotide, &path).map_err(database_failure)?;
         Ok(DatabaseSource {
             db,
             oid: 0,

@@ -36,6 +36,8 @@ mod dustmasker_fixtures;
 mod entry_names;
 #[path = "../library_api.rs"]
 mod library_api;
+#[path = "../library_examples.rs"]
+mod library_examples;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]

@@ -115,51 +115,51 @@ impl TextMode {
     }
 }
 
-/// Where an input stream reads from.
-enum Source {
-    Stdin(std::io::Stdin),
-    File(File),
-}
-
-impl Read for Source {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            Source::Stdin(stdin) => stdin.read(buf),
-            Source::File(file) => file.read(buf),
-        }
-    }
-}
-
-/// The stream of an `eInputFile` argument (`AsInputFile()`, without `fBinary`): the standard
-/// input or the file, read in the text mode of LOSAT's platform. It is not buffered (wrap it in a
-/// `std::io::BufReader` to read lines); a read error is the operating system's (NCBI's
-/// libstdc++ stream throws its own text for it, which the program that reads writes).
-pub(crate) struct InputFile {
-    source: Source,
+/// A stream of `source` read in the text mode of `platform` (`TextMode`), which reads nothing
+/// more once it has ended (the `eofbit` of NCBI's stream stays set: a later read gets nothing).
+struct TextReader<R> {
+    source: R,
     text: TextMode,
     /// Bytes of the text mode not handed out yet (Windows only), from `at`.
     pending: Vec<u8>,
     at: usize,
+    /// The source has ended.
+    ended: bool,
 }
 
-impl Read for InputFile {
+impl<R: Read> TextReader<R> {
+    fn new(source: R, platform: LineEnds) -> Self {
+        TextReader {
+            source,
+            text: TextMode::new(platform),
+            pending: Vec::new(),
+            at: 0,
+            ended: false,
+        }
+    }
+}
+
+impl<R: Read> Read for TextReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.text.platform != LineEnds::Windows {
-            return self.source.read(buf);
+            if self.ended || buf.is_empty() {
+                return Ok(0);
+            }
+            let read = self.source.read(buf)?;
+            self.ended = read == 0;
+            return Ok(read);
         }
         let mut raw = [0u8; 8192];
         while self.at == self.pending.len() {
             self.pending.clear();
             self.at = 0;
-            if self.text.ended {
+            if self.text.ended || self.ended {
                 return Ok(0);
             }
             let read = self.source.read(&mut raw)?;
             if read == 0 {
+                self.ended = true;
                 self.text.finish(&mut self.pending);
-                if self.pending.is_empty() {
-                    return Ok(0);
-                }
             } else {
                 self.text.push(&raw[..read], &mut self.pending);
             }
@@ -168,6 +168,51 @@ impl Read for InputFile {
         buf[..count].copy_from_slice(&self.pending[self.at..self.at + count]);
         self.at += count;
         Ok(count)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-720 (`-` is `cin`, set to the
+// text mode on Windows: `NcbiSys_setmode(NcbiSys_fileno(stdin), ... O_TEXT)`)
+/// The standard input of a run (`cin`): the process's on the command line, the caller's reader
+/// in the library API (`api::run_dustmasker`, `api::run_blastdbcmd`), read in the text mode of
+/// LOSAT's platform. It is one stream for the whole run, as `cin` is: a second argument `-`
+/// reads on where the first stopped, and nothing once the stream has ended (a terminal's next
+/// lines, the bytes after a Ctrl-Z on Windows).
+pub(crate) struct Cin<'a>(TextReader<&'a mut dyn Read>);
+
+impl<'a> Cin<'a> {
+    pub(crate) fn new(input: &'a mut dyn Read) -> Self {
+        Cin(TextReader::new(input, LineEnds::HOST))
+    }
+}
+
+impl Read for Cin<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+/// Where an input stream reads from.
+enum Source<'a> {
+    /// The standard input (`Cin`, in its text mode already).
+    Stdin(&'a mut dyn Read),
+    File(TextReader<File>),
+}
+
+/// The stream of an `eInputFile` argument (`AsInputFile()`, without `fBinary`): the standard
+/// input or the file, read in the text mode of LOSAT's platform. It is not buffered (wrap it in a
+/// `std::io::BufReader` to read lines); a read error is the operating system's (NCBI's
+/// libstdc++ stream throws its own text for it, which the program that reads writes).
+pub(crate) struct InputFile<'a> {
+    source: Source<'a>,
+}
+
+impl Read for InputFile<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match &mut self.source {
+            Source::Stdin(stdin) => stdin.read(buf),
+            Source::File(file) => file.read(buf),
+        }
     }
 }
 
@@ -195,34 +240,40 @@ impl Read for InputFile {
 //     }
 //     CArg_Ios::x_Open(flags);
 // ```
-/// `AsInputFile()` of the argument `name` whose value is `value`: `-` is the standard input
-/// (probes K30-K32 of line BDC), the empty name opens nothing (K39), and another name opens the
-/// file; on Linux a directory opens too (its reads fail). `Err` is NCBI's `eNoFile`.
-pub(crate) fn open_input_file(name: &str, value: &str) -> Result<InputFile, ArgException> {
+/// `AsInputFile()` of the argument `name` whose value is `value`: `-` is the standard input,
+/// `stdin` (probes K30-K32 of line BDC), the empty name opens nothing (K39), and another name
+/// opens the file; on Linux a directory opens too (its reads fail). `Err` is NCBI's `eNoFile`.
+pub(crate) fn open_input_file<'a>(
+    name: &str,
+    value: &str,
+    stdin: &'a mut Cin<'_>,
+) -> Result<InputFile<'a>, ArgException> {
     let source = if value == "-" {
-        Source::Stdin(std::io::stdin())
+        Source::Stdin(stdin)
     } else if value.is_empty() {
         return Err(not_accessible(name, value));
     } else {
-        Source::File(File::open(value).map_err(|_| not_accessible(name, value))?)
+        let file = File::open(value).map_err(|_| not_accessible(name, value))?;
+        Source::File(TextReader::new(file, LineEnds::HOST))
     };
-    Ok(InputFile {
-        source,
-        text: TextMode::new(LineEnds::HOST),
-        pending: Vec::new(),
-        at: 0,
-    })
+    Ok(InputFile { source })
 }
 
-/// The bytes of the input file `value` of the argument `name` (`AsInputFile`) as the loops of
-/// `NcbiGetlineEOL` over its stream read them (blastdbcmd's batch files, `input_lines`): `Err`
-/// with NCBI's message (`File is not accessible`) when it does not open or a read fails. On Linux
-/// the stream of a directory opens and reads nothing there (probes K33-K35 of line BDC).
-pub(crate) fn read_input_file(name: &str, value: &str) -> Result<Vec<u8>, String> {
+/// The bytes of the input file `value` of the argument `name` (`AsInputFile`, `-` is `stdin`)
+/// as the loops of `NcbiGetlineEOL` over its stream read them (blastdbcmd's batch files,
+/// `input_lines`): `Err` with NCBI's message (`File is not accessible`) when it does not open or
+/// a read fails. On Linux the stream of a directory opens and reads nothing there (probes
+/// K33-K35 of line BDC).
+pub(crate) fn read_input_file(
+    name: &str,
+    value: &str,
+    stdin: &mut Cin<'_>,
+) -> Result<Vec<u8>, String> {
     if cfg!(unix) && value != "-" && !value.is_empty() && std::path::Path::new(value).is_dir() {
         return Ok(Vec::new());
     }
-    let mut file = open_input_file(name, value).map_err(|error| error.message().to_string())?;
+    let mut file =
+        open_input_file(name, value, stdin).map_err(|error| error.message().to_string())?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .map_err(|_| not_accessible(name, value).message().to_string())?;
@@ -313,6 +364,93 @@ impl Write for OutputFile<'_> {
             OutputFile::Stdout(out) => out.flush(),
             OutputFile::File(file) => file.flush(),
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
+// `CNcbiOfstream`, or takes `cout`, without exceptions enabled on it: a failed write sets
+// `badbit` and later writes do nothing)
+/// An output as NCBI's `ostream` writes to it: after a write fails (`badbit`), the later writes
+/// do nothing and nothing reports the failure, so the run goes on to its end (NCBI 2.17.0 with
+/// `-out /dev/full`: dustmasker's `interval`, `acclist` and `fasta` writers, blastdbcmd's
+/// retrieval, which still posts the errors of later entries). [`Ostream::bad`] tells a writer
+/// that NCBI's serial stream would report the failure (`CObjectOStream`), which LOSAT refuses.
+///
+/// A write to a pipe whose reader has closed ends NCBI's process by SIGPIPE outside Windows
+/// (exit status 141, no message; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). LOSAT's
+/// runtime ignores the signal, so [`Ostream::closed`] is set there instead and every later write
+/// returns that error: the program ends at once, with exit status 0 and no message
+/// ([`ends_like_sigpipe`]). On Windows NCBI's write fails without a signal and is a failed
+/// write like the others.
+pub(crate) struct Ostream<'a> {
+    inner: &'a mut dyn Write,
+    bad: bool,
+    closed: bool,
+}
+
+/// Whether the failed write `error` is one that ends NCBI's process by SIGPIPE: a closed pipe,
+/// outside Windows.
+pub(crate) fn ends_like_sigpipe(error: &std::io::Error) -> bool {
+    cfg!(not(windows)) && error.kind() == std::io::ErrorKind::BrokenPipe
+}
+
+impl<'a> Ostream<'a> {
+    pub(crate) fn new(inner: &'a mut dyn Write) -> Self {
+        Ostream {
+            inner,
+            bad: false,
+            closed: false,
+        }
+    }
+
+    /// Whether a write or a flush has failed (`badbit`).
+    pub(crate) fn bad(&self) -> bool {
+        self.bad
+    }
+
+    /// Whether a write found the pipe closed where that ends NCBI's process (SIGPIPE).
+    pub(crate) fn closed(&self) -> bool {
+        self.closed
+    }
+
+    /// The outcome of a write or a flush of the inner stream.
+    fn result(&mut self, outcome: std::io::Result<()>) -> std::io::Result<()> {
+        if let Err(error) = outcome {
+            self.bad = true;
+            if ends_like_sigpipe(&error) {
+                self.closed = true;
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn closed_pipe() -> std::io::Error {
+        std::io::Error::from(std::io::ErrorKind::BrokenPipe)
+    }
+}
+
+impl Write for Ostream<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.closed {
+            return Err(Self::closed_pipe());
+        }
+        if !self.bad {
+            let outcome = self.inner.write_all(buf);
+            self.result(outcome)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.closed {
+            return Err(Self::closed_pipe());
+        }
+        if !self.bad {
+            let outcome = self.inner.flush();
+            self.result(outcome)?;
+        }
+        Ok(())
     }
 }
 
@@ -426,9 +564,117 @@ mod tests {
         }
     }
 
+    // `-` is the caller's standard input (the process's on the command line, a reader of the
+    // library API's caller), read in the text mode as a file is.
+    #[test]
+    fn the_standard_input_is_the_reader_given() {
+        let mut stdin: &[u8] = b"a\nb\n";
+        let mut cin = Cin::new(&mut stdin);
+        let mut bytes = Vec::new();
+        open_input_file("in", "-", &mut cin)
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, b"a\nb\n");
+        assert_eq!(
+            read_input_file("entry_batch", "-", &mut Cin::new(&mut &b"x\n"[..])).unwrap(),
+            b"x\n"
+        );
+    }
+
+    /// A terminal: a first batch, its end (Ctrl-D), then a second batch.
+    struct Terminal(Vec<&'static [u8]>);
+
+    impl Read for Terminal {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.0.is_empty() {
+                return Ok(0);
+            }
+            let piece = self.0.remove(0);
+            buf[..piece.len()].copy_from_slice(piece);
+            Ok(piece.len())
+        }
+    }
+
+    // `cin` is one stream: once it has ended, a second argument `-` reads nothing (NCBI 2.17.0
+    // blastdbcmd `-taxidlist - -ipg_batch -`, review of line RG item K1b, F5).
+    #[test]
+    fn the_standard_input_reads_nothing_after_its_end() {
+        let mut terminal = Terminal(vec![b"1\n", b"", b"2\n"]);
+        let mut cin = Cin::new(&mut terminal);
+        assert_eq!(read_input_file("taxidlist", "-", &mut cin).unwrap(), b"1\n");
+        assert_eq!(read_input_file("ipg_batch", "-", &mut cin).unwrap(), b"");
+    }
+
+    /// A writer that takes `room` bytes, then fails.
+    struct Room(usize, Vec<u8>);
+
+    impl Write for Room {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if buf.len() > self.0 {
+                return Err(std::io::Error::other("no space left"));
+            }
+            self.0 -= buf.len();
+            self.1.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // NCBI's `ostream` after a failed write: `badbit`, and later writes, even ones that would
+    // fit, do nothing; nothing reports it.
+    #[test]
+    fn an_ostream_drops_every_write_after_the_first_that_fails() {
+        let mut room = Room(4, Vec::new());
+        let mut out = Ostream::new(&mut room);
+        out.write_all(b"abc").unwrap();
+        assert!(!out.bad());
+        out.write_all(b"de").unwrap();
+        assert!(out.bad());
+        out.write_all(b"f").unwrap();
+        out.flush().unwrap();
+        assert!(out.bad() && !out.closed());
+        assert_eq!(room.1, b"abc");
+    }
+
+    /// A pipe whose reader has closed.
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // A closed pipe ends NCBI's process by SIGPIPE outside Windows: every write after it is an
+    // error, which ends the program. On Windows it is a failed write like the others.
+    #[test]
+    fn a_closed_pipe_ends_the_writes_where_sigpipe_ends_ncbi() {
+        let mut pipe = ClosedPipe;
+        let mut out = Ostream::new(&mut pipe);
+        let first = out.write_all(b"a");
+        let later = out.write_all(b"b");
+        assert!(out.bad());
+        if cfg!(windows) {
+            assert!(first.is_ok() && later.is_ok() && !out.closed());
+        } else {
+            assert!(out.closed() && ends_like_sigpipe(&first.unwrap_err()));
+            assert!(ends_like_sigpipe(&later.unwrap_err()));
+        }
+    }
+
     #[test]
     fn a_stream_that_does_not_open_is_ncbi_s_exception() {
-        let error = open_input_file("in", "").err().unwrap();
+        let mut empty = std::io::empty();
+        let mut cin = Cin::new(&mut empty);
+        let error = open_input_file("in", "", &mut cin).err().unwrap();
         assert_eq!(
             error,
             ArgException::new(
@@ -438,7 +684,10 @@ mod tests {
         );
         let missing = "no/such/dir/x.fa";
         assert_eq!(
-            open_input_file("in", missing).err().unwrap().message(),
+            open_input_file("in", missing, &mut cin)
+                .err()
+                .unwrap()
+                .message(),
             "Argument \"in\". File is not accessible:  `no/such/dir/x.fa'"
         );
         let mut stdout = Vec::new();

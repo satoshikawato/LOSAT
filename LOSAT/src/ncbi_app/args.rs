@@ -4,19 +4,19 @@
 //! has (the help flags, `-logfile`, `-conffile`), reads the words, and refuses every command line
 //! that NCBI's reader refuses with NCBI's text. The values are read as NCBI's `CArgs` gives them
 //! (`Args`): the text of a key, a flag, the integer of an `eInteger` key, and the streams of the
-//! file keys (`Args::input_file`, `Args::output_file`, module `files`).
+//! file keys (`files::open_input_file`, `Args::output_file`, module `files`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
-use super::files::{self, InputFile, OutputFile};
+use super::files::{self, OutputFile};
 use super::Tool;
 
 /// What an argument holds (`CArgDescriptions::EType` of a key, or a flag).
 ///
 /// The file types (`eInputFile`, `eOutputFile`) are read as text: LOSAT's programs describe
 /// them without `fPreOpen`, so the reader opens nothing (ncbiargs.cpp:686-693, 744-752); the
-/// program opens them where its `Run` asks for the stream (`Args::input_file`,
+/// program opens them where its `Run` asks for the stream (`files::open_input_file`,
 /// `Args::output_file`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -308,18 +308,11 @@ impl Args {
         self.integers.get(name).copied()
     }
 
-    /// `args[name].AsInputFile()`: the stream of the `eInputFile` key `name` (`files::InputFile`,
-    /// in text mode), or NCBI's exception when it does not open. A `CArgException` thrown in
-    /// `Run` is reported by the application as one of the reader's (`Diag::run_arg_exception`).
-    pub(crate) fn input_file(&self, name: &str) -> Result<InputFile, ArgException> {
-        match self.value(name) {
-            Some(value) => files::open_input_file(name, value),
-            None => Err(no_value(name)),
-        }
-    }
-
     /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, `stdout` for
-    /// `-`, or NCBI's exception when it does not open (as for `input_file`).
+    /// `-`, or NCBI's exception when it does not open. A `CArgException` thrown in `Run` is
+    /// reported by the application as one of the reader's (`Diag::run_arg_exception`). The
+    /// stream of an `eInputFile` key is `files::open_input_file` of its value, which the
+    /// programs open where NCBI's `Run` reads it.
     pub(crate) fn output_file<'a>(
         &self,
         name: &str,

@@ -418,6 +418,10 @@ pub(crate) struct RoundOutcome {
     pub(crate) has_alignments: bool,
     pub(crate) set: InclusionSet,
     pub(crate) next: Option<Result<super::pssm::QueryPssm>>,
+    /// NCBI's messages of the next PSSM's reads (`pssm::PssmReadMessages`: `Failed to retrieve
+    /// sequence` for each Seq-align whose read fails, the taxonomy texts of its loads), which
+    /// come after the round's report, before the PSSM's error.
+    pub(crate) next_warnings: super::pssm::PssmReadMessages,
     pub(crate) searched: Option<(crate::core::psi::KarlinBlk, crate::core::psi::KarlinBlk)>,
 }
 

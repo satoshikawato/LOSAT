@@ -245,9 +245,13 @@ pub(crate) struct QueryPssm {
 /// The PSSM of one query (`ComputePssmForNextIteration`) and its files: the ASN.1 text
 /// (`x_PSIMatrix2Asn1`, `PsiBlastAddAncillaryPssmData` and `MSerial_AsnText`) and the ASCII
 /// PSSM (`PrintAsciiPssm`), as requested. The inputs are the query, its Seq-aligns, the letters
-/// of their subjects (`subject(s_idx)`: the record's letters in NCBIstdaa) and the keys of their
-/// Seq-align ids (`key(s_idx)`, `rounds::SetKey`), the round's ancillary data, and the gapped
-/// block of the matrix and gap costs (`gapped`, the score block's `kbp_gap_std[0]`).
+/// that NCBI's scope gives by their Seq-align ids (`subject(s_idx)`: in NCBIstdaa, the record's
+/// own or another sequence's, `None` for no sequence; `Err` for LOSAT's internal error of a record
+/// without letters) and the keys of those ids (`key(s_idx)`,
+/// `rounds::SetKey`), the round's ancillary data, and the gapped block of the matrix and gap
+/// costs (`gapped`, the score block's `kbp_gap_std[0]`). `unread` receives the subject of each
+/// Seq-align whose letters cannot be read, in order (NCBI's warning `Failed to retrieve
+/// sequence`, `input_msa`), also where the PSSM then fails.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:110-150
 // ```c++
 //     CPSIBlastOptions opts;
@@ -402,15 +406,16 @@ pub(crate) fn query_pssm(
     inclusion_ethresh: f64,
     query: PssmQueryRecord<'_>,
     alignments: &[PssmAlignment<'_>],
-    subject: &dyn Fn(u32) -> Vec<u8>,
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
     key: &dyn Fn(u32) -> SetKey,
     ancillary: PssmAncillary,
+    unread: &mut Vec<u32>,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
     sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
     let encoded = crate::algorithm::blastp::encoding::encode_protein_sequence(query.letters);
     let letters = &encoded.aa_seq[1..=encoded.aa_len];
-    let msa = input_msa(letters, alignments, subject, key, inclusion_ethresh)?;
+    let msa = input_msa(letters, alignments, subject, key, inclusion_ethresh, unread)?;
     if request.pseudocount < 0 {
         return Err(blast_options_error(
             "IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0",
@@ -742,6 +747,38 @@ fn error_code_to_string(error: PsiError) -> &'static str {
 // after another subject (one handle, two rows; NCBI BLAST+ 2.17.0 crashes, review 2 P3). NCBI then
 // writes out of bounds (`_ASSERT` only), a failure without a checkable result: LOSAT refuses the
 // PSSM there.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:344-354 and 440-450
+// ```c++
+//     x_GetSubjectSequence(denseg, *m_Scope, seq);
+//
+//     // if this isn't available, set its corresponding row in the multiple
+//     // sequence alignment to the query sequence so that it can be purged in
+//     // PSIPurgeMatrix -> This is a hack, it should withdraw the sequence from
+//     // the multiple sequence alignment structure!
+//     if (seq.size() == 0) {
+//         for (unsigned int i = 0; i < GetQueryLength(); i++) {
+//             m_Msa->data[msa_index][i].letter = m_Query[i];
+//             m_Msa->data[msa_index][i].is_aligned = true;
+//         }
+//         return;
+//     }
+//     ...
+//     try {
+//         CSeqVector sv(seqloc, scope);
+//         sv.SetCoding(CSeq_data::e_Ncbistdaa);
+//         sv.GetSeqData(0, kInvalidSeqPos, sequence_data);
+//     } catch (const CException&) {
+//         sequence_data.erase();
+//         ERR_POST(Warning << "Failed to retrieve sequence " <<
+//                  seqloc.GetInt().GetId().AsFastaString());
+//     }
+// ```
+// Each Seq-align reads its subject's range by the Seq-align id: the letters of the Bioseq that
+// NCBI's scope gives for it (`subject`, the subject's own or another sequence's), and none where
+// it gives no Bioseq or the range ends beyond that one's letters (probe of line DBID pssmread:
+// one letter short fails, the same length and longer read that sequence's letters). Then the
+// row becomes the query's letters, also over the cells that earlier Seq-aligns of the row filled,
+// which the purge removes, and the subject goes to `unread` for the warning.
 // The hit lists are sorted by their best e-value (`s_EvalueCompareHSPLists`), which puts the
 // counted subjects first, but two e-values below 1.0e-180 compare as equal and those lists are
 // then ordered by score, so with an inclusion threshold below 1.0e-180 the counted subjects are
@@ -767,9 +804,10 @@ fn error_code_to_string(error: PsiError) -> &'static str {
 fn input_msa(
     query: &[u8],
     alignments: &[PssmAlignment<'_>],
-    subject: &dyn Fn(u32) -> Vec<u8>,
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
     key: &dyn Fn(u32) -> SetKey,
     inclusion_ethresh: f64,
+    unread: &mut Vec<u32>,
 ) -> Result<PsiMsa> {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
     // ```c
@@ -811,7 +849,20 @@ fn input_msa(
                     "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
                 );
             };
-            process_denseg(row, alignment, &subject(alignment.subject));
+            match subject(alignment.subject)?
+                .filter(|letters| letters.len() >= alignment.s_start + subject_span(alignment))
+            {
+                Some(letters) => process_denseg(row, alignment, &letters),
+                None => {
+                    for (cell, &letter) in row.iter_mut().zip(query) {
+                        *cell = PsiMsaCell {
+                            letter,
+                            is_aligned: true,
+                        };
+                    }
+                    unread.push(alignment.subject);
+                }
+            }
         }
         last_sid = Some(current_sid);
     }
@@ -919,6 +970,22 @@ fn process_denseg(row: &mut [PsiMsaCell], alignment: &PssmAlignment<'_>, subject
                 s += n as usize;
             }
         }
+    }
+}
+
+/// The subject letters that an HSP aligns, from its first: the length of the range that
+/// `x_GetSubjectSequence` reads (the segments without a gap in the subject, quoted at
+/// `process_denseg`).
+fn subject_span(alignment: &PssmAlignment<'_>) -> usize {
+    match alignment.ops {
+        Some(ops) if !ops.is_empty() => ops
+            .iter()
+            .map(|op| match *op {
+                GapEditOp::Sub(n) | GapEditOp::Del(n) => n as usize,
+                GapEditOp::Ins(_) => 0,
+            })
+            .sum(),
+        _ => alignment.q_length,
     }
 }
 
@@ -1566,6 +1633,65 @@ pub(crate) struct PssmFiles {
     /// as each of them would make or truncate it.
     last_replaced: Option<usize>,
     staging_count: u64,
+    /// NCBI's messages of each query's PSSM reads (`PssmReadMessages`), by searched query in the
+    /// order of the queries: NCBI writes them after that query's report.
+    read_warnings: Vec<(usize, PssmReadMessages)>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+// `input_msa`)
+/// What NCBI writes on standard error while one query's PSSM reads its subjects by their
+/// Seq-align ids (`x_GetSubjectSequence`, after the query's report), in the order of the reads,
+/// each line with the subject (by subject index) whose read writes it: the warning of each
+/// Seq-align whose letters the read cannot get (`Failed to retrieve sequence`, from `unread` of
+/// `query_pssm`), and the taxonomy database's texts where a read loads a sequence whose taxids
+/// the volume looks up then (`add_load_texts`). The scope loads a subject's sequence at the
+/// subject's first Seq-align (`CSeqVector`) before the letters are read, so the subject's texts
+/// come before its warnings and after those of the subjects read before it.
+#[derive(Debug, Default)]
+pub(crate) struct PssmReadMessages {
+    lines: Vec<(u32, Vec<u8>)>,
+}
+
+impl PssmReadMessages {
+    /// One line (or text) that the read of subject `subject` writes, after those before it.
+    pub(crate) fn push(&mut self, subject: u32, line: Vec<u8>) {
+        self.lines.push((subject, line));
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    /// The bytes of the messages, in their order.
+    pub(crate) fn bytes(&self) -> Vec<u8> {
+        self.lines
+            .iter()
+            .flat_map(|(_, line)| line.iter().copied())
+            .collect()
+    }
+
+    /// The taxonomy texts of the PSSM's loads merged in: `loads` holds every subject that the
+    /// PSSM includes, in the order of its reads (each once, at its first included Seq-align), with
+    /// the texts of that read's load (empty for none). A subject's texts come before the warnings
+    /// of its own Seq-aligns, which follow those of the subjects before it (`push` gives every
+    /// warning in the order of the Seq-aligns, which keep a subject's together).
+    pub(crate) fn add_load_texts(&mut self, loads: impl IntoIterator<Item = (u32, Vec<u8>)>) {
+        let mut warnings = std::mem::take(&mut self.lines).into_iter().peekable();
+        for (subject, text) in loads {
+            if !text.is_empty() {
+                self.lines.push((subject, text));
+            }
+            while let Some(line) = warnings.next_if(|(read, _)| *read == subject) {
+                self.lines.push(line);
+            }
+        }
+        debug_assert!(
+            warnings.peek().is_none(),
+            "every warning's subject is one of the PSSM's reads"
+        );
+        self.lines.extend(warnings);
+    }
 }
 
 /// One query's PSSM files, to be written after the reports.
@@ -1599,7 +1725,43 @@ impl PssmFiles {
             pending: Vec::new(),
             last_replaced: None,
             staging_count: 0,
+            read_warnings: Vec::new(),
         }
+    }
+
+    /// The warnings of the reads of the searched query `query`'s PSSM (`read_warnings`), made in
+    /// the order of the queries.
+    pub(crate) fn add_read_warnings(&mut self, query: usize, warnings: PssmReadMessages) {
+        if !warnings.is_empty() {
+            self.read_warnings.push((query, warnings));
+        }
+    }
+
+    /// The messages of the reads of the searched query `query`'s PSSM, to add the taxonomy
+    /// texts of its loads to (`PssmReadMessages::add_load_texts`); an empty entry is made in the
+    /// order of the queries where it has no warning.
+    pub(crate) fn read_messages(&mut self, query: usize) -> &mut PssmReadMessages {
+        let at = match self
+            .read_warnings
+            .binary_search_by_key(&query, |&(of, _)| of)
+        {
+            Ok(at) => at,
+            Err(at) => {
+                self.read_warnings
+                    .insert(at, (query, PssmReadMessages::default()));
+                at
+            }
+        };
+        &mut self.read_warnings[at].1
+    }
+
+    /// The messages of the PSSMs' reads, by searched query, in the order of the queries.
+    pub(crate) fn take_read_warnings(&mut self) -> Vec<(usize, Vec<u8>)> {
+        std::mem::take(&mut self.read_warnings)
+            .into_iter()
+            .filter(|(_, messages)| !messages.is_empty())
+            .map(|(query, messages)| (query, messages.bytes()))
+            .collect()
     }
 
     /// One query's PSSM: its ASN.1 file staged and its ASCII PSSM kept. `Err` is LOSAT's refusal

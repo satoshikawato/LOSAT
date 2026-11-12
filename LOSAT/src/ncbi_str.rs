@@ -4,7 +4,8 @@
 //! it is thrown from ([`ThrowSite`]); with them `NStr::PrintableString`, which their messages
 //! quote the string with, `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`)
 //! and `NStr::StringToDouble` with glibc's `strtod` (rpsbproc's bit score thresholds, module
-//! `double`).
+//! `double`). Also the string functions that more than one port calls: `NStr::ParseEscapes`
+//! (makeblastdb's titles and the registry reader) and `NStr::TruncateSpaces`.
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (no caller asks for
 //! them), the bases other than 10, and the flags no caller passes (`fMandatorySign`,
@@ -603,6 +604,225 @@ pub(crate) fn string_to_uint(s: &[u8]) -> Result<u32, NcbiException> {
         .map_err(|_| convert_error(s, "unsigned int", "overflow", STRING_TO_UINT_OVERFLOW, 0))
 }
 
+/// `NStr::ParseEscapes(str)` with its default mode (`eEscSeqRange_Standard`), as makeblastdb's
+/// title (`writedb::fasta_source::title`) and NCBI's registry reader
+/// (`blastinput::ncbi_registry`) call it. An error is the message of NCBI's `CStringException`
+/// (an escape that ends the string, `\x` without a hexadecimal digit, or one whose value
+/// `StringToUInt` cannot hold).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4789-4892
+/// ```c++
+/// string NStr::ParseEscapes(const CTempString str, EEscSeqRange mode, char user_char)
+/// {
+///     string out;
+///     out.reserve(str.size());  // result string can only be smaller
+///     SIZE_TYPE pos = 0;
+///     bool is_error = false;
+///
+///     while (pos < str.size()  ||  !is_error) {
+///         SIZE_TYPE pos2 = str.find('\\', pos);
+///         if (pos2 == NPOS) {
+///             //~ out += str.substr(pos);
+///             CTempString sub(str, pos);
+///             out += sub;
+///             break;
+///         }
+///         //~ out += str.substr(pos, pos2 - pos);
+///         CTempString sub(str, pos, pos2-pos);
+///         out += sub;
+///         if (++pos2 == str.size()) {
+///             NCBI_THROW2(CStringException, eFormat,
+///                         "Unterminated escape sequence", pos2);
+///         }
+///         switch (str[pos2]) {
+///         case 'a':  out += '\a';  break;
+///         case 'b':  out += '\b';  break;
+///         case 'f':  out += '\f';  break;
+///         case 'n':  out += '\n';  break;
+///         case 'r':  out += '\r';  break;
+///         case 't':  out += '\t';  break;
+///         case 'v':  out += '\v';  break;
+///         case 'x':
+///             {{
+///                 pos = ++pos2;
+///                 while (pos < str.size()
+///                        &&  isxdigit((unsigned char) str[pos])) {
+///                     pos++;
+///                 }
+///                 if (pos > pos2) {
+///                     SIZE_TYPE len = pos-pos2;
+///                     if ((mode == eEscSeqRange_FirstByte) && (len > 2)) {
+///                         // Take only 2 first hex-digits
+///                         len = 2;
+///                         pos = pos2 + 2;
+///                     }
+///                     unsigned int value =
+///                         StringToUInt(CTempString(str, pos2, len), 0, 16);
+///                     if ((mode != eEscSeqRange_Standard)  &&  (value > 255)) {
+///                         // eEscSeqRange_Standard -- by default
+///                         switch (mode) {
+///                         case eEscSeqRange_FirstByte:
+///                             // Already have right value
+///                             break;
+///                         case eEscSeqRange_Throw:
+///                             NCBI_THROW2(CStringException, eFormat,
+///                                 "Escape sequence '" + NStr::PrintableString(CTempString(str, pos2, len)) +
+///                                 "' is out of range [0-255]", pos2);
+///                             break;
+///                         case eEscSeqRange_Errno:
+///                             CNcbiError::SetErrno(errno = ERANGE, str);
+///                             is_error = true;
+///                             continue;
+///                         case eEscSeqRange_User:
+///                             value = (unsigned)user_char;
+///                             break;
+///                         default:
+///                             NCBI_THROW2(CStringException, eFormat, "Wrong set of flags", pos2);
+///                         }
+///                     }
+///                     out += static_cast<char>(value);
+///                 } else {
+///                     NCBI_THROW2(CStringException, eFormat,
+///                                 "\\x followed by no hexadecimal digits", pos);
+///                 }
+///             }}
+///             continue;
+///         case '0':  case '1':  case '2':  case '3':
+///         case '4':  case '5':  case '6':  case '7':
+///             {{
+///                 pos = pos2;
+///                 unsigned char c = (unsigned char)(str[pos++] - '0');
+///                 while (pos < pos2 + 3  &&  pos < str.size()
+///                        &&  str[pos] >= '0'  &&  str[pos] <= '7') {
+///                     c = (unsigned char)((c << 3) | (str[pos++] - '0'));
+///                 }
+///                 out += c;
+///             }}
+///             continue;
+///         case '\n':
+///             // quoted EOL means no EOL
+///             break;
+///         default:
+///             out += str[pos2];
+///             break;
+///         }
+///         pos = pos2 + 1;
+///     }
+///     if (mode == eEscSeqRange_Errno) {
+///         if (is_error) {
+///             return kEmptyStr;
+///         }
+///         errno = 0;
+///     }
+///     return out;
+/// }
+/// ```
+pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
+    let mut out = Vec::with_capacity(str.len());
+    let mut pos = 0;
+    loop {
+        let Some(found) = str[pos..].iter().position(|&byte| byte == b'\\') else {
+            out.extend_from_slice(&str[pos..]);
+            break;
+        };
+        let mut pos2 = pos + found;
+        out.extend_from_slice(&str[pos..pos2]);
+        pos2 += 1;
+        if pos2 == str.len() {
+            return Err("Unterminated escape sequence");
+        }
+        match str[pos2] {
+            b'a' => out.push(0x07),
+            b'b' => out.push(0x08),
+            b'f' => out.push(0x0c),
+            b'n' => out.push(b'\n'),
+            b'r' => out.push(b'\r'),
+            b't' => out.push(b'\t'),
+            b'v' => out.push(0x0b),
+            b'x' => {
+                pos2 += 1;
+                pos = pos2;
+                while pos < str.len() && str[pos].is_ascii_hexdigit() {
+                    pos += 1;
+                }
+                if pos == pos2 {
+                    return Err("\\x followed by no hexadecimal digits");
+                }
+                // `StringToUInt(..., 0, 16)` throws for a value above 4,294,967,295.
+                let mut value: u32 = 0;
+                for &digit in &str[pos2..pos] {
+                    let digit = (digit as char).to_digit(16).unwrap_or(0);
+                    value = value
+                        .checked_mul(16)
+                        .and_then(|value| value.checked_add(digit))
+                        .ok_or("Cannot convert string to unsigned int")?;
+                }
+                out.push(value as u8);
+                continue;
+            }
+            b'0'..=b'7' => {
+                pos = pos2;
+                let mut c = str[pos] - b'0';
+                pos += 1;
+                while pos < pos2 + 3 && pos < str.len() && (b'0'..=b'7').contains(&str[pos]) {
+                    c = (c << 3) | (str[pos] - b'0');
+                    pos += 1;
+                }
+                out.push(c);
+                continue;
+            }
+            b'\n' => {}
+            other => out.push(other),
+        }
+        pos = pos2 + 1;
+    }
+    Ok(out)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180
+// ```c++
+// template <class TStr>
+// TStr s_TruncateSpaces(const TStr& str, NStr::ETrunc where,
+//                       const TStr& empty_str)
+// {
+//     SIZE_TYPE length = str.length();
+//     if (length == 0) {
+//         return empty_str;
+//     }
+//     SIZE_TYPE beg = 0;
+//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
+//         _ASSERT(beg < length);
+//         while ( isspace((unsigned char) str[beg]) ) {
+//             if (++beg == length) {
+//                 return empty_str;
+//             }
+//         }
+//     }
+//     SIZE_TYPE end = length;
+//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
+//         _ASSERT(beg < end);
+//         while (isspace((unsigned char) str[--end])) {
+//             if (beg == end) {
+//                 return empty_str;
+//             }
+//         }
+//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
+//         ++end;
+//     }
+// ```
+/// `NStr::TruncateSpaces(str)` (`eTrunc_Both`, as `TruncateSpacesInPlace`): `str` without the C
+/// `isspace` spaces at its ends.
+pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {
+    let Some(beg) = str.iter().position(|&c| !is_space(c)) else {
+        return &[];
+    };
+    let end = str
+        .iter()
+        .rposition(|&c| !is_space(c))
+        .map_or(beg, |end| end + 1);
+    &str[beg..end]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,5 +980,45 @@ mod tests {
         for text in [&b"\0"[..], b" 9 ", b"\x85", b"\xa0"] {
             assert!(!is_blank(text), "{text:?}");
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4789-4892 (`NStr::ParseEscapes`,
+    // quoted at `parse_escapes`): the C escapes, `\x` with every hexadecimal digit after it (the
+    // value cut to a byte), up to three octal digits (cut to a byte), an escaped line feed that
+    // is no byte, any other byte for itself; and the three errors.
+    #[test]
+    fn parse_escapes_reads_ncbis_escapes() {
+        assert_eq!(parse_escapes(b"a\\tb\\n").unwrap(), b"a\tb\n");
+        assert_eq!(parse_escapes(b"a\\x41\\x4a4bz").unwrap(), b"aA\x4bz");
+        assert_eq!(parse_escapes(b"\\x000000041").unwrap(), b"A");
+        assert_eq!(parse_escapes(b"\\101\\1012\\8\\q").unwrap(), b"AA28q");
+        assert_eq!(parse_escapes(b"\\777\\0\\08").unwrap(), b"\xff\0\08");
+        assert_eq!(
+            parse_escapes(b"\\a\\b\\f\\r\\v\\\\\\\"").unwrap(),
+            b"\x07\x08\x0c\r\x0b\\\""
+        );
+        assert_eq!(parse_escapes(b"a\\\nb").unwrap(), b"ab");
+        assert_eq!(parse_escapes(b"").unwrap(), b"");
+        assert_eq!(parse_escapes(b"a\\"), Err("Unterminated escape sequence"));
+        for bad in [&b"a\\xg"[..], b"\\xZZ", b"\\x"] {
+            assert_eq!(
+                parse_escapes(bad),
+                Err("\\x followed by no hexadecimal digits"),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(parse_escapes(b"\\xffffffff").unwrap(), b"\xff");
+        assert!(parse_escapes(b"\\x100000000").is_err());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180 (quoted at
+    // `truncate_spaces`).
+    #[test]
+    fn truncate_spaces_cuts_the_c_spaces_at_both_ends() {
+        assert_eq!(truncate_spaces(b""), b"");
+        assert_eq!(truncate_spaces(b" \t\n\x0b\x0c\r"), b"");
+        assert_eq!(truncate_spaces(b"\x0b a b\r\n"), b"a b");
+        assert_eq!(truncate_spaces(b"a"), b"a");
+        assert_eq!(truncate_spaces(b"\0 \xa0"), b"\0 \xa0");
     }
 }

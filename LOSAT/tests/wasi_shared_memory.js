@@ -98,6 +98,10 @@ const WAITS_ENDING = 20;
 // WAIT_SLOTS i32 cells from WAIT_TABLE: the address of a wait in progress plus 1, 0 for none (the header).
 const WAIT_TABLE = 64;
 const WAIT_SLOTS = 128;
+// A wait takes the first free cell from the top bits of (address + 1) * FIBONACCI on (Fibonacci hashing):
+// the waits of a thread pool are at addresses a cache line or more apart (rayon's sleep states), which
+// the low bits would map to a few cells.
+const FIBONACCI = 0x9e3779b1;
 // Address of the largest memory size, in pages, that a thread of the guest grew the memory to
 // (0 = none yet). WAITS_ENDING and WAIT_TABLE lie below 1024 too. Addresses below 1024 are unused (wasm-ld's default global base) or, with
 // --stack-first as rustc links this target, the last bytes of the main thread's stack, reached
@@ -295,7 +299,7 @@ function i32Const(value) {
 //           result = wait(address, expected, slice); result != 2 (woken, not equal): done
 //           a finite timeout: timeout -= slice; timeout <= 0: done (result is 2)
 //           sched_yield(); again
-//         record address + 1 in a free cell (from cell (address >> 2) & (SLOTS - 1) on); none free:
+//         record address + 1 in a free cell (from cell hash(address + 1) on); none free:
 //           sliced = 1; again
 //         WAITS_ENDING now: clear the cell; again
 //         result = wait(address, expected, timeout); clear the cell; done
@@ -327,7 +331,8 @@ function waitBody({ sub, align, offset }, yieldIndex) {
     0x41, 0, 0x21, 7,
     0x02, 0x40, 0x03, 0x40,
     0x20, 7, ...i32Const(WAIT_SLOTS), 0x4f, 0x0d, 1,
-    0x20, 8, 0x41, 2, 0x76, 0x20, 7, 0x6a, ...i32Const(WAIT_SLOTS - 1), 0x71, 0x21, 6,
+    0x20, 8, ...i32Const(FIBONACCI), 0x6c, ...i32Const(32 - Math.log2(WAIT_SLOTS)), 0x76, 0x20, 7, 0x6a,
+    ...i32Const(WAIT_SLOTS - 1), 0x71, 0x21, 6,
     0x20, 6, 0x41, 2, 0x74, 0x41, 0, 0x20, 8, 0xfe, 0x48, 2, ...uleb(WAIT_TABLE),
     0x45, 0x0d, 1,
     0x20, 7, 0x41, 1, 0x6a, 0x21, 7, 0x0c, 0,

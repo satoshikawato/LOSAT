@@ -5293,7 +5293,7 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms.
 - `LOSAT_X_REDOCONTAINIDX=1` blastp, blastx and tblastn (speed; in the strict set from the pull request that added
   it, 2026-10-25; `=0` turns it off; `core/composition_adjustment/x_align_index.rs` `x_contains`, `x_add_distinct`,
-  `x_finish`, used by `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix_observed`): the
+  `x_finish`, used by `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix`): the
   composition-based redo of one match keeps, for each query, the alignments it has redone so far (NCBI's list
   `alignments[query_index]` of `Blast_RedoOneMatch`, newest first) and asks two questions of it for every HSP:
   whether the HSP is contained in an alignment that scores enough more (`s_IsContained`, `redo_alignment.c`
@@ -6190,7 +6190,7 @@ Scheduling (each value computed by one thread with the original function; order 
   at 8 threads (the default before both: 21 and 19 MiB).
 - TBXUNGAP (graduated 2026-10-26, in the set since 2026-10-18; no variable; always on, every target, the
   wasm32 builds (LOSAT Web) since 2026-10-19; the reference walks stay as the fallback below) the
-  two-hit ungapped extension (`extend_hit_two_hit`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
+  two-hit ungapped extension (`extend_hit_two_hit_with`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
   `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks) reads its scores from one 256 x 256 byte table
   (`q << 8 | s`, the scores of `get_score` for every two bytes, `BLAST_SCORE_MIN` stored as -128) and runs
   each walk in a function of its own (`tblastx/extension/x_two_hit_fast.rs`, exactness argument in its
@@ -6334,7 +6334,7 @@ Scheduling (each value computed by one thread with the original function; order 
   2 Ki letters or more):
   a hit that passes the two-hit test records its extension in a batch of 16, prefetches the query and
   subject lines the extension reads first and marks its cell (flag 1, the slot in `last_hit`); the
-  batch is resolved by `extend_hit_two_hit` when it is full and at the end of the unit, its init HSPs
+  batch is resolved by `extend_hit_two_hit_with` when it is full and at the end of the unit, its init HSPs
   saved in slot order, and a later hit on a marked cell resolves that one extension first. Each cell
   goes through the states of `scan_unit` in its order and the unit's list is the same element for
   element. The extension of a hit starts at a random position of the query group, so on a large query

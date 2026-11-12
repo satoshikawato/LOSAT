@@ -288,6 +288,7 @@ function runtimeWith(abi: ReactorAbi) {
       throw new Error('unused');
     },
     builds: { serial: 'serial', threads: 'threads' },
+    use: undefined,
     faultChannel: 'faults',
     keeperChannel: 'keeper',
   });

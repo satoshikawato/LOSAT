@@ -29,6 +29,11 @@ export interface EngineInit {
   readonly faultChannel: string;
   /** BroadcastChannel on which the Gateway asks the keeper of the shared memory to grow it (memory-keeper.ts). */
   readonly keeperChannel: string;
+  /**
+   * Whether the threaded instance is in use (instance-use.ts), shared with the Gateway. Absent
+   * where the page cannot share memory with a worker: no threaded instance starts then.
+   */
+  readonly use?: SharedArrayBuffer;
 }
 
 export interface WorkerInput {
@@ -82,6 +87,22 @@ export interface WorkerPrepare {
   readonly argv?: readonly string[];
 }
 
+/**
+ * Test builds only (`__LOSAT_TEST_HOOKS__`): the BroadcastChannel on which a page arms the
+ * Engine worker's next search to stop at its first output ({type: 'arm'}, answered by
+ * {type: 'armed'}).
+ */
+export const STOP_AT_OUTPUT_CHANNEL = 'losat-web:test:stop-at-output';
+
+/**
+ * Test builds only (`__LOSAT_TEST_HOOKS__`): the BroadcastChannel on which a page arms the
+ * Engine worker's next use of the threaded instance (a search or a warm-up) to hold at its
+ * start until the Gateway ends the runtime ({type: 'arm'}, answered by {type: 'armed'}; the
+ * worker posts {type: 'holding'} when it holds, and {type: 'not-held', reason} after a
+ * preparation with an argv that did not hold).
+ */
+export const HOLD_USE_CHANNEL = 'losat-web:test:hold-use';
+
 /** Test builds only (`__LOSAT_TEST_HOOKS__`): drives the run output writer of the worker. */
 export type WorkerTestCommand =
   | { readonly type: 'test-open'; readonly id: number; readonly port: MessagePort }
@@ -127,11 +148,6 @@ export type EngineEvent =
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }
-  /**
-   * Before a search runs on the threaded instance: if the Gateway ends the worker during the
-   * search, it first has the keeper grow the shared memory to its maximum (memory-keeper.ts).
-   */
-  | { readonly type: 'threaded-search'; readonly generation: number }
   | { readonly type: 'test-reply'; readonly id: number; readonly ok: boolean; readonly value?: number; readonly error?: WorkerError };
 
 // --- thread workers -------------------------------------------------------------------
@@ -141,6 +157,8 @@ export const SLOT_PREPARING = 0;
 export const SLOT_READY = 1;
 export const SLOT_RUNNING = 2;
 export const SLOT_FAILED = -1;
+/** The ThreadHost ended the slot's worker while its thread ran (ThreadHost.terminate). */
+export const SLOT_ENDED = -2;
 
 export interface ThreadPrepare {
   readonly type: 'prepare';
@@ -149,6 +167,8 @@ export interface ThreadPrepare {
   /** Int32Array(1) on a SharedArrayBuffer: the slot state. */
   readonly slot: SharedArrayBuffer;
   readonly faultChannel: string;
+  /** The use count of the instance (instance-use.ts): a thread counts itself off when it returns. */
+  readonly use: SharedArrayBuffer;
 }
 
 /** Start states, in the start message's shared Int32Array (index 0). */

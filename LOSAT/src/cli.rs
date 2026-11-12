@@ -575,27 +575,28 @@ fn render_rpsbproc_text(text: &str) -> String {
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
 // (DI-6) and `-min_raw_gapped_score` (DI-6b); the database masks are not.
+const UNPORTED_BLASTN_ARGS: &[&str] = &[
+    "best_hit_overhang",
+    "best_hit_score_edge",
+    "db_hard_mask",
+    "db_soft_mask",
+    "entrez_query",
+    "export_search_strategy",
+    "filtering_db",
+    "gilist",
+    "html",
+    "import_search_strategy",
+    "index_name",
+    "line_length",
+    "negative_gilist",
+    "remote",
+    "sorthits",
+    "sorthsps",
+    "version",
+];
+
 fn is_unported_blastn_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "best_hit_overhang"
-            | "best_hit_score_edge"
-            | "db_hard_mask"
-            | "db_soft_mask"
-            | "entrez_query"
-            | "export_search_strategy"
-            | "filtering_db"
-            | "gilist"
-            | "html"
-            | "import_search_strategy"
-            | "index_name"
-            | "line_length"
-            | "negative_gilist"
-            | "remote"
-            | "sorthits"
-            | "sorthsps"
-            | "version"
-    )
+    UNPORTED_BLASTN_ARGS.contains(&name)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
@@ -610,31 +611,32 @@ fn is_unported_blastn_arg(name: &str) -> bool {
 // ```
 // The options of NCBI blastp 2.17.0+ (-help) that LOSAT's BLASTP does not implement
 // (AGENTS.md rule 2: explicit unsupported errors).
+const UNPORTED_BLASTP_ARGS: &[&str] = &[
+    "best_hit_overhang",
+    "best_hit_score_edge",
+    "db_hard_mask",
+    "db_soft_mask",
+    "entrez_query",
+    "export_search_strategy",
+    "gilist",
+    "html",
+    "import_search_strategy",
+    "ipglist",
+    "line_length",
+    "negative_gilist",
+    "negative_ipglist",
+    "remote",
+    "sorthits",
+    "sorthsps",
+    "subject_besthit",
+    "version",
+    "xdrop_gap",
+    "xdrop_gap_final",
+    "xdrop_ungap",
+];
+
 fn is_unported_blastp_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "best_hit_overhang"
-            | "best_hit_score_edge"
-            | "db_hard_mask"
-            | "db_soft_mask"
-            | "entrez_query"
-            | "export_search_strategy"
-            | "gilist"
-            | "html"
-            | "import_search_strategy"
-            | "ipglist"
-            | "line_length"
-            | "negative_gilist"
-            | "negative_ipglist"
-            | "remote"
-            | "sorthits"
-            | "sorthsps"
-            | "subject_besthit"
-            | "version"
-            | "xdrop_gap"
-            | "xdrop_gap_final"
-            | "xdrop_ungap"
-    )
+    UNPORTED_BLASTP_ARGS.contains(&name)
 }
 
 // The rejection of an option that a program does not have: NCBI's options that LOSAT
@@ -657,29 +659,31 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// O3b; psiblast's first round is not compared with NCBI's under it yet), and the arguments that blastp's engine
 /// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
 /// `-mt_mode`).
+const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
+    "culling_limit",
+    "gap_trigger",
+    "ignore_msa_master",
+    "in_msa",
+    // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
+    "lcase_masking",
+    "msa_master_idx",
+    // Line DI-7 ported it to BLASTP's queries, not to PSIBLAST's.
+    "parse_deflines",
+    "phi_pattern",
+    "sum_stats",
+    // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
+    "negative_seqidlist",
+    "negative_taxidlist",
+    "negative_taxids",
+    "no_taxid_expansion",
+    "seqidlist",
+    "taxidlist",
+    "taxids",
+];
+
 fn is_unported_psiblast_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "culling_limit"
-            | "gap_trigger"
-            | "ignore_msa_master"
-            | "in_msa"
-            // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
-            | "lcase_masking"
-            | "msa_master_idx"
-            // Line DI-7 ported it to BLASTP's queries, not to PSIBLAST's.
-            | "parse_deflines"
-            | "phi_pattern"
-            | "sum_stats"
-            // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
-            | "negative_seqidlist"
-            | "negative_taxidlist"
-            | "negative_taxids"
-            | "no_taxid_expansion"
-            | "seqidlist"
-            | "taxidlist"
-            | "taxids"
-    ) || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
+    UNPORTED_PSIBLAST_OWN_ARGS.contains(&name)
+        || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
@@ -687,17 +691,18 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
 /// rpsblast's NCBI arguments that LOSAT does not run: `-searchsp` (it switches NCBI's RPS search
 /// to the old Karlin-Altschul statistics, item PS11c-2), `-use_sw_tback` (the Smith-Waterman
 /// redo, PS11c-3), `-html` (PS15a) and the remote and search strategy options of every program.
+const UNPORTED_RPSBLAST_ARGS: &[&str] = &[
+    "entrez_query",
+    "export_search_strategy",
+    "html",
+    "import_search_strategy",
+    "remote",
+    "searchsp",
+    "use_sw_tback",
+];
+
 fn is_unported_rpsblast_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "entrez_query"
-            | "export_search_strategy"
-            | "html"
-            | "import_search_strategy"
-            | "remote"
-            | "searchsp"
-            | "use_sw_tback"
-    )
+    UNPORTED_RPSBLAST_ARGS.contains(&name)
 }
 
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
@@ -941,18 +946,19 @@ fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
 // ```
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help.
+const NCBI_TOOLKIT_ARGS: &[&str] = &[
+    "help-full",
+    "xmlhelp",
+    "logfile",
+    "conffile",
+    "version-full",
+    "version-full-xml",
+    "version-full-json",
+    "dryrun",
+];
+
 fn is_ncbi_toolkit_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "help-full"
-            | "xmlhelp"
-            | "logfile"
-            | "conffile"
-            | "version-full"
-            | "version-full-xml"
-            | "version-full-json"
-            | "dryrun"
-    )
+    NCBI_TOOLKIT_ARGS.contains(&name)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
@@ -966,29 +972,30 @@ fn is_ncbi_toolkit_arg(name: &str) -> bool {
 // ```
 // The options of NCBI tblastn 2.17.0+ (-help) that LOSAT's TBLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors).
+const UNPORTED_TBLASTN_ARGS: &[&str] = &[
+    "best_hit_overhang",
+    "best_hit_score_edge",
+    "db_hard_mask",
+    "db_soft_mask",
+    "entrez_query",
+    "export_search_strategy",
+    "gilist",
+    "html",
+    "import_search_strategy",
+    "in_pssm",
+    "line_length",
+    "negative_gilist",
+    "remote",
+    "sorthits",
+    "sorthsps",
+    "subject_besthit",
+    "use_sw_tback",
+    "version",
+    "xdrop_ungap",
+];
+
 fn is_unported_tblastn_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "best_hit_overhang"
-            | "best_hit_score_edge"
-            | "db_hard_mask"
-            | "db_soft_mask"
-            | "entrez_query"
-            | "export_search_strategy"
-            | "gilist"
-            | "html"
-            | "import_search_strategy"
-            | "in_pssm"
-            | "line_length"
-            | "negative_gilist"
-            | "remote"
-            | "sorthits"
-            | "sorthsps"
-            | "subject_besthit"
-            | "use_sw_tback"
-            | "version"
-            | "xdrop_ungap"
-    )
+    UNPORTED_TBLASTN_ARGS.contains(&name)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
@@ -1003,30 +1010,31 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
 // ```
 // The options of NCBI tblastx 2.17.0+ (-help) that LOSAT's TBLASTX does not implement
 // (AGENTS.md rule 2: explicit unsupported errors).
+const UNPORTED_TBLASTX_ARGS: &[&str] = &[
+    "best_hit_overhang",
+    "best_hit_score_edge",
+    "db_hard_mask",
+    "db_soft_mask",
+    "entrez_query",
+    "export_search_strategy",
+    "gilist",
+    "html",
+    "import_search_strategy",
+    "line_length",
+    "max_intron_length",
+    "negative_gilist",
+    "remote",
+    "sorthits",
+    "sorthsps",
+    "strand",
+    "subject_besthit",
+    "sum_stats",
+    "version",
+    "xdrop_ungap",
+];
+
 fn is_unported_tblastx_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "best_hit_overhang"
-            | "best_hit_score_edge"
-            | "db_hard_mask"
-            | "db_soft_mask"
-            | "entrez_query"
-            | "export_search_strategy"
-            | "gilist"
-            | "html"
-            | "import_search_strategy"
-            | "line_length"
-            | "max_intron_length"
-            | "negative_gilist"
-            | "remote"
-            | "sorthits"
-            | "sorthsps"
-            | "strand"
-            | "subject_besthit"
-            | "sum_stats"
-            | "version"
-            | "xdrop_ungap"
-    )
+    UNPORTED_TBLASTX_ARGS.contains(&name)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
@@ -1038,30 +1046,31 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 //     m_Args.push_back(arg);
 // ```
 // Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
+const UNPORTED_BLASTX_ARGS: &[&str] = &[
+    "line_length",
+    "html",
+    "sorthits",
+    "sorthsps",
+    "gilist",
+    "negative_gilist",
+    "entrez_query",
+    "db_soft_mask",
+    "db_hard_mask",
+    "ipglist",
+    "negative_ipglist",
+    "best_hit_overhang",
+    "best_hit_score_edge",
+    "import_search_strategy",
+    "export_search_strategy",
+    "xdrop_ungap",
+    "xdrop_gap",
+    "xdrop_gap_final",
+    "remote",
+    "use_sw_tback",
+];
+
 fn is_unported_blastx_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "line_length"
-            | "html"
-            | "sorthits"
-            | "sorthsps"
-            | "gilist"
-            | "negative_gilist"
-            | "entrez_query"
-            | "db_soft_mask"
-            | "db_hard_mask"
-            | "ipglist"
-            | "negative_ipglist"
-            | "best_hit_overhang"
-            | "best_hit_score_edge"
-            | "import_search_strategy"
-            | "export_search_strategy"
-            | "xdrop_ungap"
-            | "xdrop_gap"
-            | "xdrop_gap_final"
-            | "remote"
-            | "use_sw_tback"
-    )
+    UNPORTED_BLASTX_ARGS.contains(&name)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
@@ -1307,6 +1316,9 @@ pub fn post_native_error(error: &anyhow::Error) {
     }
 }
 
+#[cfg(test)]
+mod readme_refusals_tests;
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -1514,3 +1526,7 @@ pub fn command_line_bytes() -> Vec<u8> {
     }
     line
 }
+
+#[cfg(test)]
+#[path = "cli_v2_tests.rs"]
+mod cli_v2_tests;

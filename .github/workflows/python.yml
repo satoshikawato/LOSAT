@@ -23,13 +23,16 @@ on:
       - 'LOSAT/Cargo.toml'
       - 'LOSAT/Cargo.lock'
       - '.github/workflows/python.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push cancels a pull request's run; runs on dev and main end, as in ci.yml, so that
+# each saves dev's (or main's) cache and gives its commit a verdict.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   pylosat:
@@ -53,6 +56,12 @@ jobs:
           workspaces: |
             python
             LOSAT
+          # Saved only on dev and main (see ci.yml's rust lint): 27 pull requests had saved their
+          # own 202 MiB copy (2026-11-12), and the job took 7.4 min with dev's older copy as with
+          # its own. Merges by Auto-merge start no push run, so dev's copy is saved by a hand merge
+          # or by `gh workflow run python.yml --ref dev`; after a toolchain change (part of the
+          # restore key) pull requests build the dependencies until then.
+          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'

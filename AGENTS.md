@@ -405,7 +405,9 @@ cd LOSAT && cargo fmt
   `cargo test --test <suite> <file>::`. A file that changes the process environment or process-wide
   state (`set_var`, `remove_var`, `set_current_dir`, `set_hook`, `take_hook`, rayon's
   `build_global`, the global allocator `#[global_allocator]`) gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite
-  share one process; `tests/suite_layout.rs` checks both.
+  share one process; `tests/suite_layout.rs` checks both. An integration test reaches the engine
+  through `LOSAT::api` and the `losat` binary only (every other module is `pub(crate)`); a test of
+  an engine item that `api` does not expose lives in the crate, as above.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates, on real short and long sequences.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing
@@ -433,7 +435,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 ├── Cargo.toml             # Test targets are listed by hand (`autotests = false`)
 ├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
-│   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]` or `pub(crate)`
+│   ├── lib.rs             # Module list; `api` is the public surface, the others are `pub(crate)` but the hidden `web_adapter` and `main_entry`
 │   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
 │   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd, rpsbproc
@@ -543,8 +545,8 @@ remains subject to all the requirements above.
 
 ## Conventions and Porting Notes
 
-- Match NCBI function names when porting (example: `s_BlastAaExtendTwoHit` ->
-  `extend_hit_two_hit`).
+- Match NCBI function names when porting (example: `s_BlastAaScanSubject` ->
+  `s_blast_aa_scan_subject`).
 - Keep NCBI terminology in comments: query_offset, subject_offset, context, frame.
 - Use `#[inline]` for hot-path functions; use `unsafe` only when necessary and
   always add safety comments.

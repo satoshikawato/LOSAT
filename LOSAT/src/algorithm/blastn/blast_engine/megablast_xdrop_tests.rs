@@ -32,7 +32,7 @@ fn megablast_automatic_xdrop_preserves_oracle_scripts() {
     ));
     std::fs::create_dir(&directory).unwrap();
     let output = directory.join("output.tsv");
-    let cli: LOSAT::cli::Cli = LOSAT::cli::try_parse_from([
+    let cli: crate::cli::Cli = crate::cli::try_parse_from([
         "losat",
         "blastn",
         "-query",
@@ -49,18 +49,18 @@ fn megablast_automatic_xdrop_preserves_oracle_scripts() {
         output.to_str().unwrap(),
     ])
     .unwrap();
-    let LOSAT::cli::Commands::Blastn(args) = cli.command else {
+    let crate::cli::Commands::Blastn(args) = cli.command else {
         panic!("expected blastn command");
     };
-    LOSAT::algorithm::blastn::run(
+    super::run(
         args,
-        LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+        crate::blastinput::ncbi_environment::ApplicationSettings::default(),
     )
     .unwrap();
     let actual = std::fs::read(&output).unwrap();
     std::fs::remove_dir_all(&directory).unwrap();
     assert_eq!(
         actual,
-        include_bytes!("fixtures/megablast_automatic_xdrop.outfmt6")
+        include_bytes!("../../../../tests/fixtures/megablast_automatic_xdrop.outfmt6")
     );
 }

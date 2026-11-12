@@ -17,6 +17,7 @@ import type { ReactorArtifact } from '../reactor/artifact';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance';
 import { createSharedMemory } from '../reactor/shared-memory';
 import { RunOutputWriter } from '../run-output/writer';
+import type { InstanceUse } from './instance-use';
 import type { RuntimePath, WorkerCounts, WorkerRun, WorkerRunResult } from './protocol';
 import { ThreadHost } from './thread-host';
 import { warmUp } from './warm-up';
@@ -29,11 +30,16 @@ export interface RuntimeOptions {
   /** The channel of the keeper of the threaded instance's shared memory (memory-keeper.ts). */
   readonly keeperChannel: string;
   /**
-   * Told before a search runs on the threaded instance: the Engine worker tells the Gateway,
-   * which then has the keeper grow the memory if it ends the worker during the search
-   * (gateway.ts, retire).
+   * Whether the threaded instance is in use, shared with the Gateway (instance-use.ts): the
+   * calls into it and the threads of its search pool count, and the Gateway ends this worker
+   * during a use only after the keeper's grow (gateway.ts, retire). Undefined where the page
+   * cannot share memory with a worker: the threaded module does not start then.
    */
-  readonly onThreadedSearch?: () => void;
+  readonly use: InstanceUse | undefined;
+  /** Test builds only: called before each output of a search, which it may stop by throwing. */
+  readonly beforeOutput?: () => void;
+  /** Test builds only: called at the start of each use of the threaded instance (a search, a warm-up). */
+  readonly onUse?: () => void;
 }
 
 interface Retained {
@@ -106,22 +112,44 @@ export class EngineRuntime {
       }
     }
     loaded ??= await this.load('serial');
-    if (loaded.path === 'threaded') this.options.onThreadedSearch?.();
+    // The calls into the threaded instance are a use from the first until the last has
+    // returned; its threads count themselves (ThreadHost.spawn). The search is synchronous.
+    const use = loaded.path === 'threaded' ? this.options.use : undefined;
+    // The counts file first: `validate` (in `search`) checks it where the command line does
+    // (after -dust, before the query range and the other options; ABI v2 §4), and the command
+    // line reads it before the queries. A counts file that is released or loaded here is not
+    // held together with the inputs of this run, and a replaced one is not held with its
+    // successor. Its calls into the instance are uses of their own, with the file's chunks read
+    // between them.
+    let windowMasker: CountsRecord | undefined;
+    try {
+      windowMasker = await this.counts(loaded, request, use);
+    } catch (error) {
+      // A trap while the file was given to the engine: the next search loads the module again
+      // (a stopped threaded instance is ended by the Gateway, as in `search`).
+      if (loaded.instance.abi.stoppedBy !== undefined && loaded.path === 'serial') this.dispose();
+      throw error;
+    }
+    if (use !== undefined && !use.enter()) throw new Error(ENDING);
+    try {
+      if (use !== undefined) this.options.onUse?.();
+      return this.search(loaded, request, fallbackReason, phase, windowMasker);
+    } finally {
+      use?.leave();
+    }
+  }
+
+  /** The search of `run` on the instance that `run` chose. */
+  private search(
+    loaded: Loaded,
+    request: WorkerRun,
+    fallbackReason: string | undefined,
+    phase: (phase: EnginePhase) => void,
+    windowMasker: CountsRecord | undefined,
+  ): WorkerRunResult {
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
     const abi = loaded.instance.abi;
-    // The counts file first: `validate` checks it where the command line does (after -dust, before
-    // the query range and the other options; ABI v2 §4), and the command line reads it before the
-    // queries. A counts file that is released or loaded here is not held together with the inputs
-    // of this run, and a replaced one is not held with its successor.
-    let windowMasker: CountsRecord | undefined;
-    try {
-      windowMasker = await this.counts(loaded, request);
-    } catch (error) {
-      // A trap while the file was given to the engine: the next search loads the module again.
-      if (abi.stoppedBy !== undefined) this.dispose();
-      throw error;
-    }
     const invalid = abi.validate(argv);
     if (invalid !== undefined) throw new EngineCallError(invalid);
 
@@ -146,6 +174,7 @@ export class EngineRuntime {
       loaded.instance.wasi.clear();
       phase('running');
       abi.run(argv, query.handle, subject.handle, (stream, bytes) => {
+        this.options.beforeOutput?.();
         if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
       });
       const linearBytesAfter = abi.memoryBytes();
@@ -169,7 +198,11 @@ export class EngineRuntime {
       };
     } finally {
       if (abi.stoppedBy === undefined) releaseQuery();
-      else this.dispose();
+      // A stopped threaded instance keeps its thread workers and the keeper: threads of the
+      // search may still run and grow the memory. They count as a use, so the Gateway, which
+      // ends the runtime on the stop, ends this worker once the keeper has grown the memory
+      // (gateway.ts, retire).
+      else if (loaded.path === 'serial') this.dispose();
     }
   }
 
@@ -213,17 +246,31 @@ export class EngineRuntime {
   private warmUp(loaded: Loaded, argv: readonly string[]): void {
     const key = argv.join('\0');
     if (loaded.ran.has(key)) return;
-    loaded.ran.add(key);
-    warmUp(loaded.instance.abi, argv);
-    loaded.instance.wasi.clear();
+    // Its calls into the threaded instance are a use, as a search's are (run).
+    const use = loaded.path === 'threaded' ? this.options.use : undefined;
+    if (use !== undefined && !use.enter()) return;
+    try {
+      if (use !== undefined) this.options.onUse?.();
+      loaded.ran.add(key);
+      warmUp(loaded.instance.abi, argv);
+      loaded.instance.wasi.clear();
+    } finally {
+      use?.leave();
+    }
     // The next search loads the module again.
     if (loaded.instance.abi.stoppedBy !== undefined) this.dispose();
   }
 
-  /** Ends the instance and its thread workers. */
-  dispose(): void {
-    this.loaded?.threads?.terminate();
+  /**
+   * Ends the instance and its thread workers, and returns true; false, ending nothing, once the
+   * Gateway ends this runtime: it may be waiting for the answer of the keeper, which ends with
+   * the thread workers (ThreadHost.terminate).
+   */
+  dispose(): boolean {
+    const threads = this.loaded?.threads;
+    if (threads !== undefined ? !threads.terminate() : this.options.use?.retiring() === true) return false;
     this.loaded = undefined;
+    return true;
   }
 
   /**
@@ -234,10 +281,10 @@ export class EngineRuntime {
    * it. A file is given to the engine in the 'preparing' phase only. Returns what the search did
    * with the file, if it has one.
    */
-  private async counts(loaded: Loaded, request: WorkerRun): Promise<CountsRecord | undefined> {
+  private async counts(loaded: Loaded, request: WorkerRun, use: InstanceUse | undefined): Promise<CountsRecord | undefined> {
     const wanted = request.windowMasker;
     if (request.program !== 'blastn') {
-      this.releaseCounts(loaded);
+      this.releaseCounts(loaded, use);
       return undefined;
     }
     if (wanted === undefined) return undefined;
@@ -246,47 +293,55 @@ export class EngineRuntime {
     if (held?.key === key) {
       return { name: wanted.name, size: held.info.size, sha256: held.info.sha256, retained: true, loadMs: 0 };
     }
-    this.releaseCounts(loaded);
+    this.releaseCounts(loaded, use);
     const started = performance.now();
-    const info = await this.loadCounts(loaded, wanted, key);
+    const info = await this.loadCounts(loaded, wanted, key, use);
     return { name: wanted.name, size: info.size, sha256: info.sha256, retained: false, loadMs: Math.round(performance.now() - started) };
   }
 
-  private releaseCounts(loaded: Loaded): void {
+  private releaseCounts(loaded: Loaded, use: InstanceUse | undefined): void {
     const held = loaded.counts;
     if (held === undefined) return;
     loaded.counts = undefined;
-    loaded.instance.abi.fileRelease(held.handle);
+    inUse(use, () => loaded.instance.abi.fileRelease(held.handle));
   }
 
   /** Gives the file to the engine in chunks, ends it, and holds it. */
-  private async loadCounts(loaded: Loaded, wanted: WorkerCounts, key: string): Promise<FileInfo> {
+  private async loadCounts(loaded: Loaded, wanted: WorkerCounts, key: string, use: InstanceUse | undefined): Promise<FileInfo> {
     const { abi } = loaded.instance;
     const size = wanted.blob.size;
-    const handle = abi.fileBegin(FILE_WINDOW_MASKER_COUNTS, wanted.name, size);
+    const handle = inUse(use, () => abi.fileBegin(FILE_WINDOW_MASKER_COUNTS, wanted.name, size));
     let buffer: ChunkBuffer | undefined;
     try {
-      buffer = abi.chunkBuffer(Math.max(1, Math.min(COUNTS_CHUNK_BYTES, size)));
+      buffer = inUse(use, () => abi.chunkBuffer(Math.max(1, Math.min(COUNTS_CHUNK_BYTES, size))));
       for (let offset = 0; offset < size; offset += COUNTS_CHUNK_BYTES) {
         const bytes = new Uint8Array(await wanted.blob.slice(offset, offset + COUNTS_CHUNK_BYTES).arrayBuffer());
-        abi.fileChunk(handle, bytes, buffer);
+        inUse(use, () => abi.fileChunk(handle, bytes, buffer!));
       }
-      const info = abi.fileEnd(handle);
+      const info = inUse(use, () => abi.fileEnd(handle));
       loaded.counts = { key, handle, info };
       return info;
     } catch (error) {
       // The engine drops a file whose chunk or end it refused; one that it still holds (the file
-      // could not be read) is released, so that the name is free for the next search.
+      // could not be read) is released, so that the name is free for the next search. Not when
+      // the runtime is ending: the instance goes with it.
       if (abi.stoppedBy === undefined) {
         try {
-          abi.fileRelease(handle);
+          inUse(use, () => abi.fileRelease(handle));
         } catch {
-          // Already dropped by the engine.
+          // Already dropped by the engine, or the runtime is ending.
         }
       }
       throw error;
     } finally {
-      if (buffer !== undefined) abi.freeChunkBuffer(buffer);
+      if (buffer !== undefined) {
+        const taken = buffer;
+        try {
+          inUse(use, () => abi.freeChunkBuffer(taken));
+        } catch {
+          // The runtime is ending: the instance goes with it.
+        }
+      }
     }
   }
 
@@ -306,7 +361,8 @@ export class EngineRuntime {
   private async load(path: RuntimePath): Promise<Loaded> {
     const current = this.loaded;
     if (current?.path === path && current.instance.abi.stoppedBy === undefined) return current;
-    this.dispose();
+    // A second keeper on the Gateway's channel could answer for the other memory.
+    if (!this.dispose()) throw new Error(ENDING);
     if (path === 'serial') {
       const instance = await instantiateSerial(await this.options.serial());
       this.loaded = { path, instance, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
@@ -314,12 +370,14 @@ export class EngineRuntime {
     }
     const unsupported = threadedSupport();
     if (unsupported !== undefined) throw new Error(unsupported);
+    const { use } = this.options;
+    if (use === undefined) throw new Error('this page cannot share memory with the engine worker');
     const { module, artifact } = await this.options.threads();
     // The maximum that the module declares, or a smaller one where the browser cannot
     // reserve it; never a larger one (plan TD-7).
     const { memory, maximumPages } = createSharedMemory(artifact.memory);
     const { faultChannel, keeperChannel } = this.options;
-    const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel });
+    const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel, use });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
       this.loaded = { path, instance, threads, runs: 0, retained: undefined, counts: undefined, ran: new Set() };
@@ -328,6 +386,22 @@ export class EngineRuntime {
       threads.terminate();
       throw error;
     }
+  }
+}
+
+/** A runtime that the Gateway ends starts nothing and makes no call into its threaded instance. */
+const ENDING = 'the runtime is ending';
+
+/**
+ * Calls into the instance without a wait between them, counted as a use of the threaded
+ * instance (instance-use.ts): `use` is undefined for the serial instance.
+ */
+function inUse<T>(use: InstanceUse | undefined, body: () => T): T {
+  if (use !== undefined && !use.enter()) throw new Error(ENDING);
+  try {
+    return body();
+  } finally {
+    use?.leave();
   }
 }
 

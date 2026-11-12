@@ -26,10 +26,6 @@ use std::rc::Rc;
 pub trait ReadAt {
     /// Total length in bytes.
     fn len(&self) -> u64;
-    /// True when the source has no bytes.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
     /// Fill `buf` from `offset`; `Err` when the range is not inside the source.
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String>;
 }
@@ -119,8 +115,6 @@ impl ReadAt for std::fs::File {
 pub const MDB_DUPSORT: u16 = 0x04;
 /// `MDB_INTEGERKEY` database flag.
 pub const MDB_INTEGERKEY: u16 = 0x08;
-/// `MDB_DUPFIXED` database flag.
-pub const MDB_DUPFIXED: u16 = 0x10;
 
 const MDB_MAGIC: u32 = 0xBEEF_C0DE;
 const MDB_DATA_VERSION: u32 = 1;
@@ -834,6 +828,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
     }
 
     /// Transaction id of the meta page in use.
+    #[cfg(test)]
     pub fn txnid(&self) -> u64 {
         self.txnid
     }

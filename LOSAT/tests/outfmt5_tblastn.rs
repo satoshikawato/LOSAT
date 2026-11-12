@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use LOSAT::api::{read_fasta, run_batches, validate, Inputs, Program, Role};
+
 fn temp_dir(stem: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -254,17 +256,26 @@ fn a_database_name_outside_us_ascii_is_refused() {
     fs::remove_dir_all(dir).ok();
 }
 
-/// TBLASTN's query batch size in letters (`args.rs` `query_batch_size("TBLASTN", 20000)`).
-const BATCH_LETTERS: usize = 20000;
-
 /// Queries in the file of `many_queries`: 150 of `PROTEIN.len()` (140) letters are 21,000
-/// letters, so the first batch (it takes queries until 20,000 letters are read) holds 143
-/// and the second the other 7.
+/// letters, so the first batch (TBLASTN's query batch takes queries until 20,000 letters are
+/// read) holds 143 and the second the other 7.
 const QUERIES: usize = 150;
 
-/// The query batches of `many_queries` as the search makes them (`query_batch::query_batches`).
+/// The query batches of `many_queries` as the search makes them: the ranges of query numbers that
+/// `LOSAT::api::run_batches` gives for the same queries against one subject.
 fn query_batches() -> Vec<std::ops::Range<usize>> {
-    LOSAT::blastinput::query_batch::query_batches(&[PROTEIN.len(); QUERIES], BATCH_LETTERS)
+    let mut text = Vec::new();
+    for n in 0..QUERIES {
+        text.extend(format!(">q{n} plain\n{PROTEIN}\n").bytes());
+    }
+    let queries = read_fasta(Program::Tblastn, Role::Query, &text).unwrap();
+    let subject = format!(">s1 subject\n{}\n", back_translate(PROTEIN));
+    let subjects = read_fasta(Program::Tblastn, Role::Subject, subject.as_bytes()).unwrap();
+    let search = validate(Program::Tblastn, &[]).unwrap();
+    run_batches(&search, Inputs::new(&queries, &subjects))
+        .unwrap()
+        .map(|batch| batch.unwrap().query_indices)
+        .collect()
 }
 
 /// 150 queries of `PROTEIN.len()` letters: more than a query batch holds, so two batches

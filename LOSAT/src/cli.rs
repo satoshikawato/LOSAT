@@ -419,10 +419,12 @@ where
             .unwrap_or("")
             .split_once('=')
             .map_or((key.unwrap_or(""), None), |(k, v)| (k, Some(v)));
-        // A hidden argument is the reader's own (`RpstblastnArgs::ncbi_help`), named by no word.
+        // rpstblastn's `RpstblastnArgs::ncbi_help` is the reader's own, named by no word; the
+        // other hidden arguments (the toolkit's `-logfile`, `-conffile`) are the user's.
         let Some(arg) = scope
             .get_arguments()
-            .find(|arg| arg.get_long() == Some(name) && !arg.is_hide_set())
+            .find(|arg| arg.get_long() == Some(name))
+            .filter(|_| name != rpstblastn::args::NCBI_HELP_ARG)
         else {
             return Err(unknown_option_error(scope, name, text));
         };

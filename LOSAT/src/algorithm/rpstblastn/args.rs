@@ -182,11 +182,15 @@ pub struct RpstblastnArgs {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834 (quoted at `USAGE`)
     /// `-help` (`full`) or `-h` (`short`): NCBI's reader stops at them, the words before them
     /// read first. The command line's reader sets this hidden argument there
-    /// (`cli::try_parse_from_command`; no word of the user names a hidden argument), and the run
-    /// writes NCBI's text (`ncbi_help_text`).
-    #[arg(long = "ncbi_help", hide = true, value_parser = ["full", "short"])]
+    /// (`cli::try_parse_from_command`; no word of the user names it, `NCBI_HELP_ARG`), and the
+    /// run writes NCBI's text (`ncbi_help_text`).
+    #[arg(long = NCBI_HELP_ARG, hide = true, value_parser = ["full", "short"])]
     pub(crate) ncbi_help: Option<String>,
 }
+
+/// The long name of the reader's own argument `RpstblastnArgs::ncbi_help`, which no word of the
+/// command line names (the toolkit's hidden `-logfile` and `-conffile` are named by theirs).
+pub(crate) const NCBI_HELP_ARG: &str = "ncbi_help";
 
 impl RpstblastnArgs {
     /// NCBI's text of `-help` or `-h` when the command line asks for it (`ncbi_help`).

@@ -183,6 +183,9 @@ pub(crate) struct DomQuery {
     pub(crate) title: Vec<u8>,
     /// `m_uiSeqLen`.
     pub(crate) length: u32,
+    /// `m_strSeqData`: the residues as one-letter codes (`Get1LetterSeqData`); empty when the
+    /// query has neither `seq-data` nor literals of `ext delta` with data.
+    pub(crate) residues: Vec<u8>,
     pub(crate) aligns: Vec<DomAlign>,
     pub(crate) index: AlignIndex,
 }
@@ -395,18 +398,30 @@ fn query_accession(query: &Query) -> Vec<u8> {
 // and a `CFastaReader` DefLine that is not a string is refused (`Query::unread_descriptor`).
 // `GetTaxId` (biodata_core.cpp:977) reads the `org` and `source` descriptors but never throws,
 // and the taxid is not printed, so those descriptors are only read past.
-fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32), ProcessError> {
+fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), ProcessError> {
     // `SeqDataTo1LtrSeq` (biodata_core.cpp:149-197) converts the protein encodings with
     // `CSeqportUtil::Convert`; LOSAT reads the one-letter ones and NCBIstdaa's 28 codes and
-    // refuses the others (before the length, as the conversion comes first).
+    // refuses the others (before the length, as the conversion comes first), for the
+    // `seq-data` and for each literal of `ext delta` (`Get1LetterSeqData` converts each).
+    let refuse = |what: &str, name: &str| {
+        Err(ProcessError::Unsupported(format!(
+            "a protein query whose {what} is {name} is not supported by LOSAT's rpsbproc"
+        )))
+    };
     match &query.seq_data {
-        None => {}
-        Some(("ncbieaa" | "iupacaa", _)) => {}
-        Some(("ncbistdaa", codes)) if codes.iter().all(|&code| code < 28) => {}
-        Some((name, _)) => {
-            return Err(ProcessError::Unsupported(format!(
-                "a protein query whose Seq-data is {name} is not supported by LOSAT's rpsbproc"
-            )));
+        Some(data) => {
+            if !one_letter_encoding(data) {
+                return refuse("Seq-data", data.0);
+            }
+        }
+        None => {
+            if let Some(data) = query
+                .delta_literals
+                .iter()
+                .find(|data| !one_letter_encoding(data))
+            {
+                return refuse("Seq-data of a delta literal", data.0);
+            }
         }
     }
     let Some(length) = query.length else {
@@ -433,7 +448,138 @@ fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32), ProcessError>
         }
         None => Vec::new(),
     };
-    Ok((query_accession(query), title, length))
+    Ok((
+        query_accession(query),
+        title,
+        length,
+        one_letter_residues(query, length),
+    ))
+}
+
+/// Whether `fill_sequence` reads a `Seq-data` of this variant and these codes.
+fn one_letter_encoding(data: &(&'static str, Vec<u8>)) -> bool {
+    match data {
+        ("ncbieaa" | "iupacaa", _) => true,
+        ("ncbistdaa", codes) => codes.iter().all(|&code| code < 28),
+        _ => false,
+    }
+}
+
+/// `Get1LetterSeqData` with `SeqDataTo1LtrSeq` for the protein encodings `fill_sequence`
+/// accepts: the `seq-data`, else the literals of `ext delta` one after another, cut to
+/// `inst.length`.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:199-246
+// ```c++
+// string Get1LetterSeqData(const CSeq_inst& rSeqInst)
+// {
+// 	string dst;
+// 	if (rSeqInst.IsSetSeq_data() && rSeqInst.CanGetSeq_data())
+// 	{
+// 		SeqDataTo1LtrSeq(rSeqInst.GetSeq_data(), dst);
+// 	}
+// 	else if (rSeqInst.IsSetExt() && rSeqInst.CanGetExt())
+// 	{
+// 		const CSeq_ext &rSeqExt = rSeqInst.GetExt();
+//
+// 		switch (rSeqExt.Which())
+// 		{
+// 		case CSeq_ext::e_not_set:
+// 		case CSeq_ext::e_Seg:
+// 		case CSeq_ext::e_Ref:
+// 		case CSeq_ext::e_Map:
+// 			break;
+// 		case CSeq_ext::e_Delta:
+// 			{
+// 				const CDelta_ext::Tdata &rDeltaExt_data = rSeqExt.GetDelta().Get();	//typedef list< CRef< CDelta_seq > > Tdata;
+// 				int litType = -1;
+// 				for (CDelta_ext::Tdata::const_iterator iter = rDeltaExt_data.begin(), iterEnd = rDeltaExt_data.end(); iterEnd != iter; ++iter)
+// 				{
+// 					switch ((*iter)->Which())
+// 					{
+// 					case CDelta_seq::e_Literal:
+// 						{
+// 							const CSeq_literal &rSeqLit = (*iter)->GetLiteral();
+// 							if (rSeqLit.IsSetSeq_data() && rSeqLit.CanGetSeq_data())
+// 							{
+// 								string tmp(k_strEmptyString);
+// 								int stype = SeqDataTo1LtrSeq(rSeqLit.GetSeq_data(), tmp);
+// 								if (stype >= 0)	//valid
+// 								{
+// 									if (litType < 0) litType = stype;
+//
+// 									if (litType == stype)	//same aa or na
+// 										dst.append(tmp);
+// 								}
+// 							}
+// 						}
+// 						break;
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+// ```
+// (Every encoding that LOSAT reads is a protein one, type 0: each literal is appended.)
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:149-197,248-253
+// ```c++
+// 	case CSeq_data::e_Ncbieaa:
+// 		dst = rSeqData.GetNcbieaa().Get();
+// 		iDataType = 0;
+// 		break;
+// 	case CSeq_data::e_Ncbi8aa:
+// 	case CSeq_data::e_Ncbipaa:
+// 	case CSeq_data::e_Iupacaa:
+// 	case CSeq_data::e_Ncbistdaa:	//all other aa format
+// 		{
+// 			CSeq_data objEaaData;
+// 			CSeqportUtil::Convert(rSeqData, &objEaaData, CSeq_data::e_Ncbieaa);
+// 			dst = objEaaData.GetNcbieaa().Get();
+// 		}
+// 	...
+// 	SeqLen_t ori_len = rSeqInst.GetLength(), end_len = dst.size();
+// 	if (ori_len < end_len)
+// 	{
+// 		dst.erase(ori_len);
+// 	}
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:886-893,950-958
+// ```c++
+// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacaaToEaa(...)
+// {
+//     return Subseq(src, CSeqUtil::e_Iupacaa, pos, length, dst);
+// }
+// ...
+//     return convert_1_to_1(src, pos, length, dst, CStdaaToEaa::GetTable());
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1826
+// ```c++
+// const Uint1 CStdaaToEaa::scm_Table[256] = {
+//     0x2d, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+//     0x48, 0x49, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
+//     0x52, 0x53, 0x54, 0x56, 0x57, 0x58, 0x59, 0x5a,
+//     0x55, 0x2a, 0x4f, 0x4a, 0xff, 0xff, 0xff, 0xff,
+// ```
+// (iupacaa to ncbieaa copies the letters; ncbistdaa codes 0 to 27 are the characters
+// `-ABCDEFGHIKLMNPQRSTVWXYZU*OJ`; the other codes, 0xff, are refused by `fill_sequence`.)
+fn one_letter_residues(query: &Query, length: u32) -> Vec<u8> {
+    const STDAA_TO_EAA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+    let mut residues = Vec::new();
+    let convert = |residues: &mut Vec<u8>, data: &(&'static str, Vec<u8>)| match data {
+        ("ncbistdaa", codes) => {
+            residues.extend(codes.iter().map(|&code| STDAA_TO_EAA[code as usize]))
+        }
+        (_, letters) => residues.extend_from_slice(letters),
+    };
+    match &query.seq_data {
+        Some(data) => convert(&mut residues, data),
+        None => {
+            for data in &query.delta_literals {
+                convert(&mut residues, data);
+            }
+        }
+    }
+    residues.truncate(length as usize);
+    residues
 }
 
 /// `x_GetPssmId`: the PSSM-ID of a subject id (`ProcessCDAlign` keeps the hits whose PSSM-ID
@@ -615,11 +761,12 @@ pub(crate) fn process_blast_results(
         let SeqEntry::Seq(query) = entry else {
             return Err(choice_selection("NCBI-Seqset", "Seq-entry", "seq", "set"));
         };
-        let (accession, title, length) = fill_sequence(query)?;
+        let (accession, title, length, residues) = fill_sequence(query)?;
         let mut dom_query = DomQuery {
             accession,
             title,
             length,
+            residues,
             aligns: Vec::new(),
             index: AlignIndex::default(),
         };
@@ -697,6 +844,46 @@ pub(crate) fn process_blast_results(
 mod tests {
     use super::*;
     use crate::seqid::model::{Dbtag, TextseqId};
+
+    // `Get1LetterSeqData` (biodata_core.cpp:199-253, quoted at `one_letter_residues`): the
+    // literals of `ext delta` one after another (NCBIstdaa converted), cut to `inst.length`;
+    // the `seq-data` first when both are set; a literal in an encoding LOSAT does not convert is
+    // refused as a `seq-data` in it is.
+    #[test]
+    fn residues_of_delta_literals() {
+        let query = |seq_data: Option<(&'static str, Vec<u8>)>,
+                     delta: Vec<(&'static str, Vec<u8>)>| Query {
+            ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()))],
+            mol: 3,
+            length: Some(5),
+            seq_data,
+            delta_literals: delta,
+            ..Query::default()
+        };
+        let residues = |query: Query| fill_sequence(&query).map(|(_, _, _, residues)| residues);
+        let delta = vec![
+            ("ncbieaa", b"MK".to_vec()),
+            ("ncbistdaa", vec![1, 25, 27, 0]),
+        ];
+        assert_eq!(
+            residues(query(None, delta.clone())).ok(),
+            Some(b"MKA*J".to_vec())
+        );
+        assert_eq!(
+            residues(query(Some(("iupacaa", b"WW".to_vec())), delta)).ok(),
+            Some(b"WW".to_vec())
+        );
+        let Err(ProcessError::Unsupported(message)) = residues(query(
+            None,
+            vec![("ncbieaa", b"MK".to_vec()), ("ncbi8aa", vec![1])],
+        )) else {
+            panic!("a literal of NCBI8aa is refused");
+        };
+        assert_eq!(
+            message,
+            "a protein query whose Seq-data of a delta literal is ncbi8aa is not supported by LOSAT's rpsbproc"
+        );
+    }
 
     // serial/exception.cpp:86-150 (quoted at `choice_selection`); NCBI's rpsbproc printed the first
     // one for a profile database with `lcl|` ids (PS16a probe 2).

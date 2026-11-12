@@ -5385,11 +5385,14 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .in_id_scope(args.id_scope.clone());
+            if resolved.rps_search.is_some() {
+                rps_hooks::check_alias_keys(&database, args.app.name())?;
+            }
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.filtered_empty(),
+                database.statistics_length_is_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
@@ -6196,7 +6199,7 @@ fn psiblast_stop_at_invalid_query(
         })
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.printed_num_sequences() == 0)
+    let empty_database = database.is_some_and(|database| database.num_oids() == 0)
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
@@ -8018,9 +8021,8 @@ struct BlastpReports<'a> {
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
 /// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`), `OLD_FSC` in RPSBLAST (BLASTP and PSIBLAST read it) and query split
-/// values that NCBI cannot convert (not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never
-/// splits). Other
+/// archive (`archive`) and query split values that NCBI cannot convert (not
+/// `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never splits). Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
 /// `kappa_query_batches`) and the query split (`search_split_query_batches`).
@@ -8034,10 +8036,6 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
         fasta_subjects,
         archive && app == BlastpApp::Blastp,
     )?;
-    // BLASTP and PSIBLAST read OLD_FSC as `-searchsp 0` (`ResolvedBlastpArgs::old_fsc`).
-    if app == BlastpApp::Rpsblast {
-        app::check_old_fsc(app_name)?;
-    }
     // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
     // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
     app::check_query_split_environment(app_name, false, app != BlastpApp::Rpsblast)??;
@@ -9115,7 +9113,7 @@ fn run_resolved_in_pool(
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
-        database.printed_num_sequences() == 0
+        database.num_oids() == 0
             && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(
@@ -9221,6 +9219,11 @@ fn run_resolved_in_pool(
         Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
             .unwrap_or(database.statistics_num_sequences() as usize),
     };
+    // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
+    // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
+    if let Some(database) = database.filter(|_| args.old_fsc) {
+        database.check_statistics_count(args.app.name())?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
     //    /* use overriding value from effective lengths options or the real value
@@ -10840,6 +10843,7 @@ fn run_resolved_in_pool(
             contexts: &contexts,
             gapped_params: &gapped_params,
             gumbel: gapped_gumbel.as_ref(),
+            search_spaces: &exact_search_spaces,
             cutoff_subject_length,
             prelim_hitlist_size,
             batches: query_batches
@@ -13437,9 +13441,11 @@ fn run_resolved_in_pool(
         // format, and the archive saves the warnings of its batches' queries.
         let mut warnings = (warning_lines.is_some()
             || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive))
-        .then(|| crate::report::query_warnings::QueryWarnings {
-            before: warning_lines.take().unwrap_or(&[]),
-            sink: &mut *outputs.diagnostics,
+        .then(|| {
+            crate::report::query_warnings::QueryWarnings::new(
+                warning_lines.take().unwrap_or(&[]),
+                &mut *outputs.diagnostics,
+            )
         });
         let format_result: Result<()> = match outfmt {
             BlastpReport::Seqalign(serial) => (|| -> Result<()> {

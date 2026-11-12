@@ -2408,6 +2408,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // item SC4b). psiblast's first round is BLASTP's search; its later rounds, whose PSSM scores
     // take the matrix and the gap costs too, are not ported, and it keeps BLOSUM62 11/1.
     if args.app == BlastpApp::Psiblast
+        && std::env::var_os("Q2_EXPERIMENT_OPEN").is_none()
         && (args.scoring.matrix != ScoringMatrix::Blosum62
             || args.scoring.gap_open != 11
             || args.scoring.gap_extend != 1)

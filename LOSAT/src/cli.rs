@@ -630,9 +630,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "sorthsps",
     "subject_besthit",
     "version",
-    "xdrop_gap",
-    "xdrop_gap_final",
-    "xdrop_ungap",
 ];
 
 fn is_unported_blastp_arg(name: &str) -> bool {
@@ -671,6 +668,10 @@ const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "parse_deflines",
     "phi_pattern",
     "sum_stats",
+    // Line RG X1 ported them to BLASTP's search, not to PSIBLAST's rounds (series RG-Q).
+    "xdrop_gap",
+    "xdrop_gap_final",
+    "xdrop_ungap",
     // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
     "negative_seqidlist",
     "negative_taxidlist",
@@ -1027,7 +1028,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "subject_besthit",
     "use_sw_tback",
     "version",
-    "xdrop_ungap",
 ];
 
 fn is_unported_tblastn_arg(name: &str) -> bool {
@@ -1066,7 +1066,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "subject_besthit",
     "sum_stats",
     "version",
-    "xdrop_ungap",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {
@@ -1098,9 +1097,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "best_hit_score_edge",
     "import_search_strategy",
     "export_search_strategy",
-    "xdrop_ungap",
-    "xdrop_gap",
-    "xdrop_gap_final",
     "remote",
     "use_sw_tback",
 ];

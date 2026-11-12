@@ -1,0 +1,153 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/outfmt0/x1_s.faa).
+           24 sequences; 22,488 total letters
+
+
+
+Query= BDT62082.1 baculoviral IAP repeat-containing protein [Litopenaeus
+vannamei majanivirus Nimav-1_LVa]
+
+Length=217
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.447    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3454296
+
+
+Query= BDT62084.1 innexin [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+
+Length=366
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.139    0.424    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6497568
+
+
+Query= BDT62085.1 hypothetical protein [Litopenaeus vannamei majanivirus
+Nimav-1_LVa]
+
+Length=199
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.138    0.414    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3097536
+
+
+Query= BDT62086.1 hypothetical protein [Litopenaeus vannamei majanivirus
+Nimav-1_LVa]
+
+Length=254
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.137    0.397    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4212432
+
+
+Query= BDT62087.1 hypothetical protein [Litopenaeus vannamei majanivirus
+Nimav-1_LVa]
+
+Length=407
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.142    0.447    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7333056
+
+
+Query= BDT62088.1 baculoviral IAP repeat-containing protein [Litopenaeus
+vannamei majanivirus Nimav-1_LVa]
+
+Length=707
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.134    0.413    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 13472136
+
+
+  Database: User specified sequence set (Input: tests/fasta/outfmt0/x1_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 22,488
+  Number of sequences in database:  24
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

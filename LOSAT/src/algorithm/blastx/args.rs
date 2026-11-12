@@ -292,6 +292,16 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
+    // (quoted at `blastp::args::BlastpArgs::xdrop_ungap`): `-xdrop_ungap`, `-xdrop_gap` and
+    // `-xdrop_gap_final` in bits, given to the options when given. `None`: BLASTX's defaults
+    // (`ResolvedOptions`).
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = blastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = blastx_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = blastx_real, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
+    pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3299
     // ```c++
     //     arg_desc.AddOptionalKey(kArgCullingLimit, "int_value",
@@ -941,6 +951,23 @@ impl BlastxArgs {
                 .into());
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:608-618 (the initial
+        // word options' check, after the lookup table's and before the hit saving options')
+        // ```c
+        //    if (program_number != eBlastTypeBlastn  &&
+        //        program_number != eBlastTypeMapping &&
+        //        (!Blast_ProgramIsPhiBlast(program_number)) &&
+        //        options->x_dropoff <= 0.0)
+        //    {
+        //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                             "x_dropoff must be greater than zero");
+        //          return BLASTERR_OPTION_VALUE_INVALID;
+        //    }
+        // ```
+        // (`<= 0.0` is false for NaN, as in C.)
+        if self.xdrop_ungap.is_some_and(|x_dropoff| x_dropoff <= 0.0) {
+            return Err(SemanticOptionsError::from("x_dropoff must be greater than zero").into());
+        }
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`). A `-max_target_seqs` below 1 (a caller of `run_local`
         // sets it; the command line's is at least 1) is NCBI's hit list size below 1.
@@ -1102,7 +1129,7 @@ impl BlastxArgs {
             !self.ungapped,
             "BLASTX",
         )?;
-        Ok(ResolvedOptions {
+        let options = ResolvedOptions {
             word_size,
             threshold,
             lookup_type: if word_size == 5 { 4 } else { 3 },
@@ -1164,9 +1191,11 @@ impl BlastxArgs {
             // #define BLAST_GAP_X_DROPOFF_FINAL_PROT 25 /**< default dropoff (all protein-
             //                                                based gapped extensions) */
             // ```
-            x_dropoff: 7.0,
-            gap_x_dropoff: 15.0,
-            gap_x_dropoff_final: 25.0,
+            // `-xdrop_ungap`, `-xdrop_gap` and `-xdrop_gap_final` replace them
+            // (blast_args.cpp:276-286).
+            x_dropoff: self.xdrop_ungap.unwrap_or(7.0),
+            gap_x_dropoff: self.xdrop_gap.unwrap_or(15.0),
+            gap_x_dropoff_final: self.xdrop_gap_final.unwrap_or(25.0),
             gap_trigger: 22.0,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:150-156
             // ```c++
@@ -1206,7 +1235,10 @@ impl BlastxArgs {
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,
-        })
+        };
+        // The gapped X-drops that NCBI's kernels cannot size are refused before the search.
+        super::parameters::check_gapped_x_drops(&options)?;
+        Ok(options)
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-220
     // ```c++
@@ -1315,6 +1347,77 @@ mod tests {
             crate::cli::Commands::Blastx(a) => a,
             _ => unreachable!(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:276-286 and
+    // core/blast_options.c:608-618 (quoted at `resolve_with_format`): the X-drops reach the
+    // options (7, 15 and 25 bits by default, blastx-fast too), an ungapped X-drop of 0 or below is
+    // NCBI's options error, and a gapped X-drop that NCBI's kernels cannot size is refused
+    // (`core::x_drop`).
+    #[test]
+    fn the_x_drops_reach_the_options_or_ncbis_errors() {
+        for task in [&[][..], &["-task", "blastx-fast"]] {
+            let options = parse(task).resolve().unwrap();
+            assert_eq!(
+                (
+                    options.x_dropoff,
+                    options.gap_x_dropoff,
+                    options.gap_x_dropoff_final
+                ),
+                (7.0, 15.0, 25.0)
+            );
+        }
+        let options = parse(&[
+            "-xdrop_ungap",
+            "3",
+            "-xdrop_gap",
+            "-1",
+            "-xdrop_gap_final",
+            "1e300",
+        ])
+        .resolve()
+        .unwrap();
+        assert_eq!(
+            (
+                options.x_dropoff,
+                options.gap_x_dropoff,
+                options.gap_x_dropoff_final
+            ),
+            (3.0, -1.0, 1e300)
+        );
+        for value in ["0", "-1", "-0.0", "-inf"] {
+            let error = parse(&["-xdrop_ungap", value]).resolve().unwrap_err();
+            assert!(
+                format!("{error:#}").contains("x_dropoff must be greater than zero"),
+                "{value}: {error:#}"
+            );
+        }
+        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
+        // preliminary X-drop at every mode, the final one only in mode 0 (the redo of modes 1 to 3
+        // converts its own at the scaled costs); an ungapped search has no gapped kernels.
+        for extra in [
+            &["-xdrop_gap", "4.2e8"][..],
+            &["-xdrop_gap", "4.2e8", "-comp_based_stats", "2"],
+            &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
+        ] {
+            let error = parse(extra).resolve().unwrap_err();
+            assert!(
+                format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
+                "{extra:?}: {error:#}"
+            );
+        }
+        for cbs in ["1", "2", "3"] {
+            assert!(
+                parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
+                    .resolve()
+                    .is_ok()
+            );
+        }
+        assert!(
+            parse(&["-ungapped", "-comp_based_stats", "0", "-xdrop_gap", "4.2e8"])
+                .resolve()
+                .is_ok()
+        );
     }
     #[test]
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1300-1306

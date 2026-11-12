@@ -950,7 +950,11 @@ outfmt 0 prolog (BLASTN reads `CHUNK_SIZE` first for its batch size mixer, after
 anything (BLASTN after the prolog; PSIBLAST does not read it); `PRE_FETCH_SEQS_LIMIT` before the first batch's report,
 except where every format is outfmt 11 (but in PSIBLAST). With outfmt 11 NCBI writes its error archive, 523 bytes for
 every input. The probe of every program, mode and value is `env-parity-20261108/h_probe/REPORT.md` (outside the tree).
-The `-subject` cases are `tests/search_environment.rs` and `tests/run_local_blastx.rs`.
+The `-subject` cases are `tests/search_environment.rs` and `tests/run_local_blastx.rs`. NCBI reads the titles of a
+batch's reported sequences in its traceback, before the prefetch: with `nophr`, `bnophr` or `nnophr` (no header file)
+and a query with hits it stops with the header file's error (exit 2) whatever `PRE_FETCH_SEQS_LIMIT` holds; the message
+names the file's absolute path, so these cases are `a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch` in
+`tests/search_environment.rs`, not rows.
 
 ## TBLASTN `-query_loc` and the chunk masks (line NP, series SM)
 

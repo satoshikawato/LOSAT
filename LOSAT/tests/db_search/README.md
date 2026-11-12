@@ -1138,6 +1138,10 @@ most 9 in BLOSUM62).
   letters and their reverse complements, a run of N, a lower-case run, ambiguity codes) and `odd.fna` (a 4-letter
   query, an empty one, one of N); `-query_loc 1-2` on `nedge.fna` gives a batch without a valid frame. The empty query
   file is `tests/db_search/empty.faa`.
+- PS12a review A rows: `tests/fasta/rps/bound1.fna` (11,101 bytes: `n9999`, 9,999 letters of N, and `t2` of 2 letters,
+  which fill rpstblastn's first query batch of 10,000 letters without a valid frame, then `v900`, 900 letters of a
+  valid record in the next batch; lines of 60 letters) and `tests/fasta/rps/allx.faa` (42 bytes: two records of X
+  only, 20 and 12 letters, a protein batch without a valid query), written by hand for the review's probes.
 
 ## outfmt 11 titles where NCBI's search fails (line NP, series SM, DECISIONS 25)
 

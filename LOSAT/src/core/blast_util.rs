@@ -43,27 +43,6 @@ pub fn ncbi_int4_from_double(value: f64) -> i32 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn int4_conversion_is_the_x86_64_one() {
-        assert_eq!(ncbi_int4_from_double(41.9), 41);
-        assert_eq!(ncbi_int4_from_double(-41.9), -41);
-        assert_eq!(ncbi_int4_from_double(f64::from(i32::MAX)), i32::MAX);
-        for value in [
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::NAN,
-            2_147_483_648.0,
-            -2_147_483_649.0,
-        ] {
-            assert_eq!(ncbi_int4_from_double(value), i32::MIN, "{value}");
-        }
-    }
-}
-
 /// `BLAST_FrameToContext`: the context of a frame of a translated sequence (+1, +2, +3 are 0, 1,
 /// 2; -1, -2, -3 are 3, 4, 5), and context 0 for frame 0 of a protein sequence.
 ///
@@ -95,5 +74,26 @@ pub(crate) fn frame_to_context(frame: i32) -> usize {
         0 => 0,
         f if f > 0 => (f - 1) as usize,
         f => (2 - f) as usize,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn int4_conversion_is_the_x86_64_one() {
+        assert_eq!(ncbi_int4_from_double(41.9), 41);
+        assert_eq!(ncbi_int4_from_double(-41.9), -41);
+        assert_eq!(ncbi_int4_from_double(f64::from(i32::MAX)), i32::MAX);
+        for value in [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            2_147_483_648.0,
+            -2_147_483_649.0,
+        ] {
+            assert_eq!(ncbi_int4_from_double(value), i32::MIN, "{value}");
+        }
     }
 }

@@ -14099,6 +14099,21 @@ fn run_resolved_in_pool(
                     args.app.ncbi_name().to_uppercase(),
                     crate::NCBI_BLAST_VERSION
                 );
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
+                // ```c++
+                // 		CRef<CSeq_align_set>  align_set(new CSeq_align_set);
+                //         ...
+                // 		CRef<CSearchResults> aggregate_search_results (new CSearchResults(thread_results[0]->GetSeqId(),
+                // 														   	   	   	   	  align_set,
+                // ```
+                // The merge of several volumes gives each query an alignment set, empty for a batch
+                // that was not searched, so outfmt 7 counts `# 0 hits found` there (review A of
+                // PS12a, S2's rpsblast half).
+                let tabular_unsearched: Vec<bool> = if rps_multi_volume {
+                    vec![false; query_batch_skipped.len()]
+                } else {
+                    query_batch_skipped.clone()
+                };
                 let tab = super::tabular::BlastpTabular {
                     spec,
                     app: args.app,
@@ -14122,7 +14137,7 @@ fn run_resolved_in_pool(
                         .or(context.subject_name.as_deref())
                         .unwrap_or_default(),
                     subjects: tabular_subjects,
-                    unsearched: &query_batch_skipped,
+                    unsearched: &tabular_unsearched,
                     hits_found: psiblast_hits_found.as_deref(),
                     prolog: reports.x_prolog,
                     epilog: reports

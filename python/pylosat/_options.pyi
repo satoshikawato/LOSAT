@@ -57,6 +57,16 @@ class BlastnOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     """Maximum number of HSPs per subject (unlimited when omitted) Reference:
     ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270"""
@@ -159,6 +169,16 @@ class BlastpOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     qcov_hsp_perc: float
     """Percent query coverage per hsp"""
@@ -259,6 +279,16 @@ class BlastxOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     num_threads: int
     """Number of threads (CPUs); serial WASI accepts only 1"""
     mt_mode: int
@@ -344,6 +374,16 @@ class TblastnOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     """Set maximum number of HSPs per subject sequence to save for each query"""
     qcov_hsp_perc: float
@@ -402,6 +442,16 @@ class TblastxOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     """Set maximum number of HSPs per subject sequence to save for each query"""
     qcov_hsp_perc: float
@@ -443,6 +493,16 @@ class PsiblastOptions(TypedDict, total=False):
     > 4 [default: 500]"""
     num_alignments: int
     """Number of database sequences to show alignments for [default: 250]"""
+    line_length: int
+    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
+    Not applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
+    for outfmt != 0"""
     max_hsps: int
     qcov_hsp_perc: float
     """Percent query coverage per hsp"""

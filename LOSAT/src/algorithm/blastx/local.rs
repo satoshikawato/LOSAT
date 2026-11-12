@@ -1097,12 +1097,13 @@ fn check_resolutions(
         app::formatting_handler_check(choice, Program::Blastx)?;
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
-    let (_, warnings) = crate::blastinput::report_counts::run_report_counts(
+    let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
         &outfmts,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
+        &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
     resolutions

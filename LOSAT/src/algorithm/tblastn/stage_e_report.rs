@@ -191,6 +191,7 @@ pub(super) fn render(
     scoring: LocalStageDScoring,
     matrix_name: &str,
     report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
@@ -430,6 +431,7 @@ pub(super) fn render(
                 scoring,
                 matrix_name,
                 report_counts,
+                formatting,
                 ranges,
                 probe.as_mut(),
                 warnings.as_mut(),
@@ -1062,6 +1064,7 @@ fn write_pairwise(
     scoring: LocalStageDScoring,
     matrix_name: &str,
     report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
     ranges: &ReportRanges<'_>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
@@ -1150,9 +1153,17 @@ fn write_pairwise(
         .iter()
         .map(|record| Arc::from(record.title()))
         .collect();
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
     let config = PairwiseConfig {
         program: "tblastn".into(),
         protein_matrix: scoring.matrix,
+        line_length: formatting.line_length(),
+        sort: formatting.report_sort(),
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(
@@ -1577,6 +1588,7 @@ mod tests {
                 &vec![false; queries.len()],
                 LocalStageDScoring::default(),
                 "BLOSUM62",
+                Default::default(),
                 Default::default(),
                 1,
                 Some(&seg),

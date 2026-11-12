@@ -2848,7 +2848,12 @@ pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
         args.num_descriptions,
         args.num_alignments,
     )
-    .warnings("blastx", outfmt, args.num_descriptions.is_some())
+    .warnings_with(
+        "blastx",
+        outfmt,
+        args.num_descriptions.is_some(),
+        &args.formatting,
+    )
 }
 
 #[cfg(test)]

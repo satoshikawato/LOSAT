@@ -164,6 +164,10 @@ pub struct PsiblastArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
     #[arg(long = "qcov_hsp_perc", value_parser = psiblast_query_coverage, help = "Percent query coverage per hsp")]
@@ -485,7 +489,13 @@ impl PsiblastArgs {
                 rounds,
                 in_pssm: self.in_pssm,
             }),
-            formatting: Default::default(),
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
+            // ```c++
+            //         formatter.SetLineLength(fmt_args->GetLineLength());
+            // ```
+            // The line length only: `-sorthits` and `-sorthsps` are read with their warnings
+            // (`BlastpArgs::check_options`) and sort nothing (`ResolvedBlastpArgs::sort`).
+            formatting: self.formatting,
             rps: None,
         })
     }

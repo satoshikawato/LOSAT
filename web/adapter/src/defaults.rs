@@ -72,6 +72,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-xdrop_gap", task.x_drop_gapped.to_string());
             put("-xdrop_gap_final", task.x_drop_final.to_string());
             put("-culling_limit", args.culling_limit_value().to_string());
+            put("-line_length", args.formatting.line_length().to_string());
             hit_list(
                 &mut put,
                 args.max_target_seqs,
@@ -91,6 +92,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-seg", resolved.seg.to_ncbi_cli_string());
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
+            put("-line_length", resolved.line_length.to_string());
             put("-max_target_seqs", resolved.max_target_seqs.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());
@@ -110,6 +112,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-seg", resolved.seg.to_ncbi_cli_string());
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
+            put("-line_length", resolved.formatting.line_length().to_string());
             put("-max_target_seqs", resolved.hitlist_size.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());
@@ -128,6 +131,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             );
             put("-soft_masking", bool_text(args.soft_masking()));
             put("-culling_limit", args.culling_limit().to_string());
+            put("-line_length", args.formatting.line_length().to_string());
             hit_list(
                 &mut put,
                 args.max_target_seqs,
@@ -147,6 +151,7 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-sum_stats", bool_text(resolved.sum_stats));
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
+            put("-line_length", resolved.formatting.line_length().to_string());
             put("-max_target_seqs", resolved.hitlist_size.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());

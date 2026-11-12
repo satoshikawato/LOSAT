@@ -232,6 +232,8 @@ impl RoundSections<'_> {
                 group.subject_order.len() <= report.num_descriptions,
                 &group.subject_hits,
                 false,
+                // psiblast does not hand `-sorthits` to the formatter (psiblast_app.cpp:502).
+                None,
                 |s_idx| self.label(group, s_idx),
             )?,
         }

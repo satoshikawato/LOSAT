@@ -4,7 +4,10 @@
 //!
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
-use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, truncate_spaces, ReportContext};
+use super::outfmt6::{
+    format_bitscore_ncbi, format_evalue_ncbi, format_total_bitscore_ncbi, truncate_spaces,
+    ReportContext,
+};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
@@ -60,6 +63,11 @@ pub struct PairwiseConfig {
     pub program: String,
     /// Protein scoring matrix for positives/midline rendering.
     pub protein_matrix: ScoringMatrix,
+    /// `-sorthits` and `-sorthsps` (NCBI's `m_HitsSortOption`, `m_HspsSortOption`): the order of
+    /// each query's hits and HSPs (`hit_sort::sort_query_hits`) and, with `-sorthits`, the
+    /// columns of the description table (`SortColumns`). None for psiblast and rpsblast, whose
+    /// applications do not hand them to the formatter.
+    pub sort: super::hit_sort::ReportSort,
 }
 
 impl Default for PairwiseConfig {
@@ -70,8 +78,41 @@ impl Default for PairwiseConfig {
             show_frame: true,
             program: "tblastx".to_string(),
             protein_matrix: ScoringMatrix::Blosum62,
+            sort: Default::default(),
         }
     }
+}
+
+impl PairwiseConfig {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1525-1528
+    // ```c++
+    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
+    //                                       *(const_cast<CSeq_align_set*>(aln_set.GetPointer())),
+    //                                       (m_Program == "tblastx") ? true : false,
+    // ```
+    /// Whether the report is TBLASTX's (`m_Program == "tblastx"`): the sorts and the description
+    /// table's identities read its alignment lengths in nucleotides (`HspScores::alignment_length`).
+    pub(crate) fn tblastx(&self) -> bool {
+        self.program == "tblastx"
+    }
+
+    /// The columns that `-sorthits` adds to the description table of a query of `query_length`
+    /// letters (`ReportSort::shows_columns`), or `None`.
+    pub(crate) fn sort_columns(&self, query_length: usize) -> Option<SortColumns> {
+        self.sort.shows_columns().then(|| SortColumns {
+            query_length,
+            tblastx: self.tblastx(),
+        })
+    }
+}
+
+/// The columns of a description table with `-sorthits` (NCBI's `eShowTotalScore`,
+/// `eShowQueryCoverage` and `eShowPercentIdent`): the length of the query (`m_QueryLength`, the
+/// query Bioseq's) and whether the report is TBLASTX's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SortColumns {
+    pub(crate) query_length: usize,
+    pub(crate) tblastx: bool,
 }
 
 /// Extended hit information for pairwise display
@@ -1263,6 +1304,7 @@ fn write_subject_summary_table<W: Write>(
         subject_hits,
         subject_ids,
         false,
+        None,
     )
 }
 
@@ -1273,6 +1315,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_ids: &[Arc<str>],
     show_sum_n: bool,
+    columns: Option<SortColumns>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -1280,6 +1323,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         last_row_counted,
         subject_hits,
         show_sum_n,
+        columns,
         |s_idx| {
             let subject_id = subject_ids
                 .get(s_idx as usize)
@@ -2361,6 +2405,10 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         self.report.num_alignments
     }
 
+    fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
+        (self.config.sort, self.config.tblastx())
+    }
+
     fn joins(&self, previous: u32, s_idx: u32) -> bool {
         // `-subject` records with one id are refused before any report.
         self.database.is_some()
@@ -2442,6 +2490,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             group.subject_order.len() <= report.num_descriptions,
             &group.subject_hits,
             false,
+            self.config.sort_columns(query.query_length),
             |s_idx| {
                 let title = group
                     .subject_titles
@@ -2661,12 +2710,96 @@ pub struct BlastnPairwiseReport {
 // With `show_sum_n` (NCBI's `eShowSumN`: ungapped sum statistics, blast_format.cpp:165-167,
 // 503-504) a last column shows the linked-set size of the subject's first HSP; the HSP
 // without a "sum_n" score (`num` of 1) shows 1.
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:771-791
+// ```c++
+//             out << kScore;
+//             CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kScore_size);
+//             CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//
+//
+//             if (m_Option & eShowTotalScore) {
+//                 out << kTotal;
+//                 CAlignFormatUtil::AddSpace(out, m_MaxTotalScoreLen - kTotal_size);
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//             }
+//             if (m_Option & eShowQueryCoverage) {
+//                 out << kQueryCov;
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//             }
+//
+//             CAlignFormatUtil::AddSpace(out, 2); //E align to l of value
+//             out << kE;
+//
+//             if (m_Option & eShowPercentIdent) {
+//                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//                 CAlignFormatUtil::AddSpace(out, kOneSpaceMargin_size);
+//                 out << kMax;//"Max" - "ident" -second line
+//             }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:809-840
+// ```c++
+//             CAlignFormatUtil::AddSpace(out, m_LineLen - kHeader_size);
+//             CAlignFormatUtil::AddSpace(out, kOneSpaceMargin_size);
+//             out << kBits;
+//             //in case m_MaxScoreLen > kBits.size()
+//             CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kBits_size);
+//             CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//
+//
+//             if (m_Option & eShowTotalScore) {
+//                 CAlignFormatUtil::AddSpace(out, kOneSpaceMargin_size);
+//                 out << kScoreLine2;//"score"
+//                 CAlignFormatUtil::AddSpace(out, m_MaxTotalScoreLen - kTotal_size);
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//             }
+//             if (m_Option & eShowQueryCoverage) {
+//                 out << kQueryCovLine2;//"cov"
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//                 CAlignFormatUtil::AddSpace(out, kOneSpaceMargin_size);
+//             }
+//
+//             out << kValue;
+//             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
+//                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//             }
+//             if(m_Option & eShowSumN){
+//                 out << kN;
+//             }
+//             if (m_Option & eShowPercentIdent) {
+//                 out << kIdentLine2;//"ident"
+//             }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:66-104,1051-1065
+// ```c++
+// static const char*  kTotal = "Total";
+// ...
+// static const char*  kIdentity = "Max ident";
+// static const size_t kIdentity_size = strlen(kIdentity);
+// ...
+// static const char*  kMax = "Max";
+// static const char*  kIdentLine2 = "Ident";
+// static const char*  kScoreLine2 = "Score";
+// static const char*  kQueryCov = "Query";
+// static const size_t kQueryCov_size = strlen(kQueryCov);
+// static const char*  kQueryCovLine2 = "cover";
+// ...
+//     m_MaxTotalScoreLen = kTotal_size;
+//     m_MaxPercentIdentityLen = kIdentity_size;
+// ```
+// With `-sorthits` (`columns`, NCBI's `eShowTotalScore`, `eShowQueryCoverage` and
+// `eShowPercentIdent`) the header and the rows add the total score, the query cover and the
+// identity of the subject's best HSP. `m_MaxPercentIdentityLen` starts at the 9 letters of
+// "Max ident" and grows only for a percentage of more digits, which none has.
 fn write_description_table<W: Write>(
     writer: &mut W,
     described: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     show_sum_n: bool,
+    columns: Option<SortColumns>,
     mut label_of: impl FnMut(u32) -> Vec<u8>,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:513-514
@@ -2680,7 +2813,7 @@ fn write_description_table<W: Write>(
     if described.is_empty() {
         return writeln!(writer);
     }
-    let rows: Vec<(u32, &PairwiseHit, f64, i32)> = described
+    let rows: Vec<(u32, &PairwiseHit, f64, i32, Option<SortColumnValues>)> = described
         .iter()
         .filter_map(|s_idx| {
             let hits = subject_hits.get(s_idx)?;
@@ -2695,8 +2828,10 @@ fn write_description_table<W: Write>(
             Some((
                 *s_idx,
                 best,
-                hits.iter().map(|hit| hit.hit.bit_score).sum(),
+                hits.iter()
+                    .fold(0.0, |total, hit| total + hit.hit.bit_score),
                 sum_n,
+                columns.map(|columns| SortColumnValues::of(hits, best, columns)),
             ))
         })
         .collect();
@@ -2708,21 +2843,58 @@ fn write_description_table<W: Write>(
     let mut max_evalue = "Value".len();
     let mut max_total = "Total".len();
     let mut max_sum_n = 1;
-    for (index, (_, best, total, sum_n)) in rows.iter().enumerate() {
+    for (index, (_, best, total, sum_n, _)) in rows.iter().enumerate() {
         max_score = max_score.max(format_bitscore_ncbi(best.hit.bit_score).len());
         max_evalue = max_evalue.max(format_evalue_ncbi(best.hit.e_value).len());
         max_sum_n = max_sum_n.max(sum_n.to_string().len());
-        let total_len = format_bitscore_ncbi(*total).len();
+        let total_len = format_total_bitscore_ncbi(*total).len();
         if index + 1 == rows.len() && last_row_counted {
             if max_total < total_len {
                 max_score = total_len;
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-944
+                // ```c++
+                //         if (m_Option & eShowTotalScore) {
+                //             out << kTwoSpaceMargin << kOneSpaceMargin << (*iter)->total_bit_string;
+                //             CAlignFormatUtil::AddSpace(out, m_MaxTotalScoreLen -
+                //                                    (*iter)->total_bit_string.size());
+                //         }
+                // ```
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:932-938
+                // ```c++
+                // void CAlignFormatUtil::AddSpace(CNcbiOstream& out, size_t number)
+                //
+                // {
+                //     for(auto i=0; i<number; i++){
+                //         out<<" ";
+                //     }
+                // }
+                // ```
+                // The last row's total, wider than the column (above 99999 bits, `%5.3le`),
+                // pads with `m_MaxTotalScoreLen - size` spaces as a `size_t` below 0: NCBI
+                // writes spaces without end. No valid report exists to match, so the run stops
+                // with an error (an NCBI failure is an explicit rejection, AGENTS.md rule 3).
+                if columns.is_some() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "-sorthits: the total score of the description table's last subject is wider than its column (more than 99999 bits), where NCBI BLAST+ 2.17.0 writes spaces without end (CAlignFormatUtil::AddSpace of a negative size); run without -sorthits",
+                    ));
+                }
             }
         } else {
             max_total = max_total.max(total_len);
         }
     }
     write_spaces(writer, 70)?;
-    writeln!(writer, "{:<max_score$}    E", "Score")?;
+    write!(writer, "{:<max_score$}  ", "Score")?;
+    if columns.is_some() {
+        write!(writer, "{:<max_total$}  Query  ", "Total")?;
+    }
+    write!(writer, "  E")?;
+    if columns.is_some() {
+        write_spaces(writer, max_evalue - "Value".len() + 5)?;
+        write!(writer, "Max")?;
+    }
+    writeln!(writer)?;
     write!(
         writer,
         "{:<69}",
@@ -2734,7 +2906,11 @@ fn write_description_table<W: Write>(
     // //in case m_MaxScoreLen > kBits.size()
     // CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kBits_size);
     // ```
-    write!(writer, "{:<max_score$}  Value", ncbi_k_bits())?;
+    write!(writer, "{:<max_score$}  ", ncbi_k_bits())?;
+    if columns.is_some() {
+        write!(writer, " {:<max_total$}  cover   ", "Score")?;
+    }
+    write!(writer, "Value")?;
     // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:829-836
     // ```c++
     //             out << kValue;
@@ -2746,13 +2922,18 @@ fn write_description_table<W: Write>(
     //                 out << kN;
     //             }
     // ```
-    if show_sum_n {
+    if show_sum_n || columns.is_some() {
         write_spaces(writer, max_evalue - "Value".len() + 2)?;
+    }
+    if show_sum_n {
         write!(writer, "N")?;
+    }
+    if columns.is_some() {
+        write!(writer, "Ident")?;
     }
     writeln!(writer)?;
     writeln!(writer)?;
-    for (s_idx, best, _, sum_n) in &rows {
+    for (s_idx, best, total, sum_n, values) in &rows {
         let label = label_of(*s_idx);
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
@@ -2773,8 +2954,39 @@ fn write_description_table<W: Write>(
         }
         write!(
             writer,
-            "  {:<max_score$}  {:<max_evalue$}",
-            format_bitscore_ncbi(best.hit.bit_score),
+            "  {:<max_score$}",
+            format_bitscore_ncbi(best.hit.bit_score)
+        )?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-956
+        // ```c++
+        //         if (m_Option & eShowTotalScore) {
+        //             out << kTwoSpaceMargin << kOneSpaceMargin << (*iter)->total_bit_string;
+        //             CAlignFormatUtil::AddSpace(out, m_MaxTotalScoreLen -
+        //                                    (*iter)->total_bit_string.size());
+        //         }
+        //
+        //         if (m_Option & eShowQueryCoverage) {
+        //             //int percent_coverage = 100*(*iter)->master_covered_length/m_QueryLength;
+        //             int percent_coverage = (*iter)->percent_coverage;
+        //
+        //             out << kTwoSpaceMargin << percent_coverage << "%";
+        //             //minus one due to % sign
+        //             CAlignFormatUtil::AddSpace(out, kQueryCov_size -
+        //                                        NStr::IntToString(percent_coverage).size() - 1);
+        //         }
+        // ```
+        if let Some(values) = values {
+            write!(
+                writer,
+                "   {:<max_total$}",
+                format_total_bitscore_ncbi(*total)
+            )?;
+            let coverage = format!("{}%", values.percent_coverage);
+            write!(writer, "  {coverage:<5}")?;
+        }
+        write!(
+            writer,
+            "  {:<max_evalue$}",
             format_evalue_ncbi(best.hit.e_value)
         )?;
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:961-965
@@ -2788,9 +3000,94 @@ fn write_description_table<W: Write>(
         if show_sum_n {
             write!(writer, "  {sum_n:<max_sum_n$}")?;
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:966-974
+        // ```c++
+        //         if(m_Option & eShowPercentIdent){
+        //             int percent_identity =(int) (0.5 + (*iter)->percent_identity);
+        //             if(percent_identity > 100) {
+        //                 percent_identity = min(99, percent_identity);
+        //             }
+        //             out << kTwoSpaceMargin << percent_identity <<"%";
+        //             CAlignFormatUtil::AddSpace(out, m_MaxPercentIdentityLen -
+        //                                            NStr::IntToString(percent_identity).size());
+        //         }
+        // ```
+        if let Some(values) = values {
+            let identity = values.percent_identity.to_string();
+            write!(writer, "  {identity}%")?;
+            write_spaces(writer, "Max ident".len().saturating_sub(identity.len()))?;
+        }
         writeln!(writer)?;
     }
     writeln!(writer)
+}
+
+/// The values of one row's columns of `-sorthits` (`SortColumns`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SortColumnValues {
+    /// `percent_coverage`.
+    percent_coverage: i64,
+    /// The shown identity: `(int)(0.5 + percent_identity)`, 99 above 100.
+    percent_identity: i64,
+}
+
+impl SortColumnValues {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4271-4306
+    // ```c++
+    //     seqSetInfo->subjRange = CAlignFormatUtil::GetSeqAlignCoverageParams(aln,&seqSetInfo->master_covered_length,&seqSetInfo->flip);
+    //     seqSetInfo->percent_coverage = (int)(0.5 + 100*seqSetInfo->master_covered_length/(double)queryLength);
+    //     if(seqSetInfo->percent_coverage > 100) {
+    //         seqSetInfo->percent_coverage = min(99, seqSetInfo->percent_coverage);
+    //     }
+    //
+    //     ITERATE(CSeq_align_set::Tdata, iter, aln.Get()) {
+    //         int align_length = CAlignFormatUtil::GetAlignmentLength(**iter, do_translation);
+    //         ...
+    //         if (bits > highest_bits) {  // this is the replacement condition (WB-1175)
+    //             highest_length = align_length;
+    //             highest_ident = num_ident;
+    // ///         highest_identity = 100*num_ident/align_length;
+    //         }
+    //     ...
+    //     seqSetInfo->match = highest_ident;
+    //     seqSetInfo->align_length = highest_length;
+    //     seqSetInfo->percent_identity = CAlignFormatUtil::GetPercentIdentity(seqSetInfo->match, seqSetInfo->align_length);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1525-1530
+    // ```c++
+    //     unique_ptr<CAlignFormatUtil::SSeqAlignSetCalcParams> seqSetInfo( CAlignFormatUtil::GetSeqAlignSetCalcParamsFromASN(aln));
+    //     if(seqSetInfo->hspNum == 0) {//calulated params are not in ASN - calculate now
+    //         seqSetInfo.reset( CAlignFormatUtil::GetSeqAlignSetCalcParams(aln,m_QueryLength,m_TranslatedNucAlignment));
+    //     }
+    // ```
+    /// The columns of the subject whose HSPs are `hits` and whose best HSP (the first of the
+    /// highest bit score, `write_description_table`) is `best`: `GetSeqAlignSetCalcParams` with
+    /// `m_TranslatedNucAlignment` false (TBLASTX's identities over its nucleotide lengths). The
+    /// cover is computed without NCBI's `int` product `100*master_covered_length`, which
+    /// overflows above about 21 million covered letters.
+    fn of(hits: &[&PairwiseHit], best: &PairwiseHit, columns: SortColumns) -> Self {
+        use super::hit_sort::{percent_identity, query_coverage, HspScores};
+        let scores: Vec<HspScores> = hits.iter().map(|hit| HspScores::of(hit)).collect();
+        let covered = query_coverage(&scores);
+        let mut percent_coverage =
+            (0.5 + (100 * covered) as f64 / columns.query_length as f64) as i64;
+        if percent_coverage > 100 {
+            percent_coverage = percent_coverage.min(99);
+        }
+        let best = HspScores::of(best);
+        let identity = percent_identity(
+            best.num_ident,
+            best.alignment_length(columns.tblastx, false),
+        );
+        let mut percent_identity = (0.5 + identity) as i64;
+        if percent_identity > 100 {
+            percent_identity = percent_identity.min(99);
+        }
+        Self {
+            percent_coverage,
+            percent_identity,
+        }
+    }
 }
 
 /// The subject of `s_idx` among `parsed` when it has parsed Seq-ids (not a `-subject` record shown
@@ -2836,6 +3133,7 @@ fn write_blastn_description_table<W: Write>(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     show_sum_n: bool,
     protein: bool,
+    columns: Option<SortColumns>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -2843,6 +3141,7 @@ fn write_blastn_description_table<W: Write>(
         last_row_counted,
         subject_hits,
         show_sum_n,
+        columns,
         |s_idx| {
             // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
             // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
@@ -3205,6 +3504,10 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         self.report.num_alignments
     }
 
+    fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
+        (self.config.sort, self.config.tblastx())
+    }
+
     fn joins(&self, previous: u32, s_idx: u32) -> bool {
         // `-subject` records with one id are refused before any report.
         self.report.database.is_some()
@@ -3261,6 +3564,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             &report.parsed_subjects,
             false,
             false,
+            self.config.sort_columns(query.query_length),
         )?;
         writeln!(writer)
     }
@@ -3872,6 +4176,10 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         self.report.num_alignments
     }
 
+    fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
+        (self.config.sort, self.config.tblastx())
+    }
+
     fn joins(&self, previous: u32, s_idx: u32) -> bool {
         // `-subject` records with one id are refused before any report.
         self.database.is_some()
@@ -3930,6 +4238,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             &report.parsed_subjects,
             true,
             false,
+            self.config.sort_columns(query.query_length),
         )?;
         writeln!(writer)
     }
@@ -4795,7 +5104,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // subject index), as BLASTN's and TBLASTX's.
         // The subjects' hits; a copy of one record that follows another is shown in its hit
         // (`QueryGroup::new`, `db_subject::joins_as_copy`).
-        let group = super::x_pairwise_par::QueryGroup::new(
+        let mut group = super::x_pairwise_par::QueryGroup::new(
             query_hits,
             subject_titles,
             |previous, s_idx| {
@@ -4809,6 +5118,13 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             },
         )
         .expect("a query with hits has a group");
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
+        // ```c++
+        //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
+        //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
+        // ```
+        // `-sorthits` and `-sorthsps` before the table and the alignments (`QueryGroup::sort`).
+        group.sort(config.sort, config.tblastx());
         let super::x_pairwise_par::QueryGroup {
             subject_order,
             subject_hits,
@@ -4825,6 +5141,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             parsed_subjects,
             false,
             false,
+            config.sort_columns(query.query_length),
         )?;
         writeln!(writer)?;
         // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
@@ -5288,7 +5605,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         } else {
             // The subjects' hits; a copy of one record of the database that follows another
             // is shown in its hit (`QueryGroup::new`, `db_subject::joins_as_copy`).
-            let group =
+            let mut group =
                 super::x_pairwise_par::QueryGroup::new(query_hits, &[], |previous, s_idx| {
                     database.is_some_and(|(_, _, parsed)| {
                         crate::report::db_subject::rank_joins_as_copy(
@@ -5299,6 +5616,14 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     })
                 })
                 .expect("a query with hits has a group");
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
+            // ```c++
+            //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
+            //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
+            // ```
+            // `-sorthits` and `-sorthsps` before the table and the alignments
+            // (`QueryGroup::sort`).
+            group.sort(config.sort, config.tblastx());
             let (grouped, indices, order) = (
                 &group.subject_hits,
                 &group.subject_hit_indices,
@@ -5322,6 +5647,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 grouped,
                 subject_ids,
                 !options.gapped && options.sum_stats,
+                config.sort_columns(query.query_length),
             )?;
             writeln!(writer)?;
             for oid in order.iter().take(options.num_alignments) {
@@ -6081,7 +6407,7 @@ mod tblastx_tests {
                 .into_iter()
                 .collect();
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, &[], true, false)
+        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, &[], true, false, None)
             .unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
@@ -6089,6 +6415,100 @@ mod tblastx_tests {
         assert!(lines[1].ends_with("(Bits)  Value  N"), "{text}");
         assert!(lines[3].ends_with("  120     2e-30  12"), "{text}");
         assert!(lines[4].ends_with("  30.2    0.50   1 "), "{text}");
+    }
+
+    // NCBI c++/src/objtools/align_format/showdefline.cpp:771-840,930-975 (`-sorthits`): the
+    // Total score, Query cover and Max ident columns, as NCBI BLAST+ 2.17.0 `blastp -sorthits 0`
+    // writes them (probe t1 `blastp.s.h0kx`): the total in the HSPs' order, the cover of the
+    // union of the query ranges, the identity of the best HSP, and the trailing spaces of the
+    // nine letters of "Max ident".
+    #[test]
+    fn sorthits_adds_the_total_cover_and_identity_columns() {
+        let mut a = tblastx_hit(1);
+        (a.hit.bit_score, a.hit.e_value, a.hit.num_ident, a.hit.length) = (28.1, 0.18, 27, 99);
+        (a.hit.q_start, a.hit.q_end) = (1, 99);
+        let mut b1 = a.clone();
+        b1.hit.s_idx = 1;
+        (b1.hit.bit_score, b1.hit.e_value, b1.hit.num_ident, b1.hit.length) = (24.6, 2.3, 16, 25);
+        (b1.hit.q_start, b1.hit.q_end) = (10, 34);
+        let mut b2 = b1.clone();
+        (b2.hit.bit_score, b2.hit.e_value, b2.hit.num_ident, b2.hit.length) = (24.6, 2.4, 10, 20);
+        (b2.hit.q_start, b2.hit.q_end) = (49, 30);
+        let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            [(0, vec![&a]), (1, vec![&b1, &b2])].into_iter().collect();
+        let titles: std::collections::HashMap<u32, Vec<u8>> =
+            [(0, b"s0".to_vec()), (1, b"s1".to_vec())].into_iter().collect();
+        let columns = Some(SortColumns {
+            query_length: 897,
+            tblastx: false,
+        });
+        let mut out = Vec::new();
+        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, &[], false, true, columns)
+            .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], format!("{}Score   Total  Query    E     Max", " ".repeat(70)));
+        assert_eq!(
+            lines[1],
+            "Sequences producing significant alignments:                          (Bits)   Score  cover   Value  Ident"
+        );
+        assert_eq!(lines[2], "");
+        let label = |name: &str| format!("{name:<68}");
+        // 99 of 897 letters (11 %), 27 of 99 identities (27 %).
+        assert_eq!(lines[3], format!("{}  28.1     28.1   11%    0.18   27%       ", label("s0")));
+        // 24.6 + 24.6; positions 10-49 (40 of 897: 4 %); the first of the equal best HSPs.
+        assert_eq!(lines[4], format!("{}  24.6     49.2   4%     2.3    64%       ", label("s1")));
+        // TBLASTX: the identity over three nucleotides per amino acid (60 of 183: 33 %), after
+        // the N column ("NIdent").
+        let t = tblastx_hit(2);
+        let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            [(0, vec![&t])].into_iter().collect();
+        let titles: std::collections::HashMap<u32, Vec<u8>> = [(0, b"t".to_vec())].into_iter().collect();
+        let columns = Some(SortColumns {
+            query_length: 300,
+            tblastx: true,
+        });
+        let mut out = Vec::new();
+        write_blastn_description_table(&mut out, &[0], true, &hits, &titles, &[], true, false, columns)
+            .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[1].ends_with("(Bits)   Score  cover   Value  NIdent"), "{text}");
+        // Positions 18-200: 183 of 300 (61 %).
+        assert!(lines[3].ends_with("  120      120    61%    2e-30  2  33%       "), "{text}");
+    }
+
+    // NCBI c++/src/objtools/align_format/showdefline.cpp:1133-1138,940-944 and
+    // align_format_util.cpp:932-938: a last row whose total is wider than every earlier total
+    // pads the total column with a negative `size_t`, where NCBI writes spaces without end; the
+    // table without `-sorthits` only widens the score column.
+    #[test]
+    fn sorthits_refuses_a_last_total_wider_than_its_column() {
+        let mut a = tblastx_hit(1);
+        a.hit.bit_score = 60000.0;
+        let mut b = a.clone();
+        b.hit.s_idx = 1;
+        let mut c = a.clone();
+        c.hit.s_idx = 1;
+        let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            [(0, vec![&a]), (1, vec![&b, &c])].into_iter().collect();
+        let titles: std::collections::HashMap<u32, Vec<u8>> =
+            [(0, b"s0".to_vec()), (1, b"s1".to_vec())].into_iter().collect();
+        let columns = Some(SortColumns {
+            query_length: 300,
+            tblastx: false,
+        });
+        let table = |order: &[u32], last_row_counted: bool, columns: Option<SortColumns>| {
+            let mut out = Vec::new();
+            write_blastn_description_table(&mut out, order, last_row_counted, &hits, &titles, &[], false, true, columns)
+                .map(|()| out)
+        };
+        let error = table(&[0, 1], true, columns).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(table(&[0, 1], true, None).is_ok());
+        // Not the last subject of the list, or an earlier total as wide: written.
+        assert!(table(&[0, 1], false, columns).is_ok());
+        assert!(table(&[1, 1], true, columns).is_ok());
     }
 
     // NCBI c++/src/objtools/align_format/align_format_util.cpp:4259,4299-4302: BLASTX's row
@@ -6115,7 +6535,7 @@ mod tblastx_tests {
         let ids = [Arc::<str>::from("YOL075C")];
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
-            write_subject_summary_table_with_sum_n(&mut out, &[0], true, &hits, &ids, show_sum_n)
+            write_subject_summary_table_with_sum_n(&mut out, &[0], true, &hits, &ids, show_sum_n, None)
                 .unwrap();
             let text = String::from_utf8(out).unwrap();
             let lines: Vec<&str> = text.lines().collect();
@@ -6252,7 +6672,7 @@ mod tblastx_tests {
         let titles: std::collections::HashMap<u32, Vec<u8>> =
             [(0, b"id \x81 x".to_vec())].into_iter().collect();
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0], true, &hits, &titles, &[], false, false)
+        write_blastn_description_table(&mut out, &[0], true, &hits, &titles, &[], false, false, None)
             .unwrap();
         let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
         assert!(row.starts_with(&[&b"Unknown"[..], &[b' '; 61], b"  120"].concat()));
@@ -6356,6 +6776,7 @@ mod tblastx_tests {
             show_frame: false,
             program: "rpsblast".to_string(),
             protein_matrix: ScoringMatrix::Blosum62,
+            sort: Default::default(),
         };
         let gapped_k = [0.041, 0.047, 0.041, 0.041];
         let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {

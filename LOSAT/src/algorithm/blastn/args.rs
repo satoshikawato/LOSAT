@@ -359,6 +359,10 @@ pub struct BlastnArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// The hit list size (NCBI BLAST hitlist_size) and the numbers of descriptions and
     /// alignments of the pairwise report, which `process_options` sets from
     /// `-max_target_seqs`, `-num_descriptions`, `-num_alignments` and the output format

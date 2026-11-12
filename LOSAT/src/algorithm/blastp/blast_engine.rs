@@ -7685,12 +7685,15 @@ fn write_reports_without_queries(
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
+                // (A report without queries writes no alignment and no table: the line length
+                // and the sorts are those of the run, `ResolvedBlastpArgs`.)
                 let config = PairwiseConfig {
-                    line_length: 60,
+                    line_length: args.line_length,
                     show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
+                    sort: args.sort,
                 };
                 write_blastp_pairwise_report(
                     &[],
@@ -13700,13 +13703,21 @@ fn run_resolved_in_pool(
                 // ```c++
                 //         formatter.SetLineLength(fmt_args->GetLineLength());
                 // ```
-                // (`args.line_length`: rpsblast's `-line_length`, else 60.)
+                // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:246-248
+                // ```c++
+                //         formatter.SetLineLength(fmt_args->GetLineLength());
+                //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+                //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+                // ```
+                // (`args.line_length`: `-line_length`, else 60; `args.sort`: blastp's
+                // `-sorthits` and `-sorthsps`, none for psiblast and rpsblast.)
                 let pairwise_config = PairwiseConfig {
                     line_length: args.line_length,
                     show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
+                    sort: args.sort,
                 };
                 // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
                 // (the file's values).

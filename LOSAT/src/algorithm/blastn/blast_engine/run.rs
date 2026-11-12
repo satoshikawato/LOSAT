@@ -5763,6 +5763,9 @@ struct BlastnReportInputs<'a> {
     /// (`BlastnArgs::report_counts`).
     num_descriptions: usize,
     num_alignments: usize,
+    /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report
+    /// (`BlastnArgs::formatting`).
+    formatting: crate::blastinput::report_counts::FormattingArgs,
     /// `-culling_limit` (0: no culling), read when the hit lists are finished.
     culling_limit: i32,
     db_num_seqs: usize,
@@ -6639,9 +6642,17 @@ fn post_process_hits_and_write(
             let (queries, pairwise_report) = pairwise_data
                 .as_ref()
                 .expect("the pairwise report data is built for outfmt 0");
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:251-253
+            // ```c++
+            //         formatter.SetLineLength(fmt_args->GetLineLength());
+            //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+            //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+            // ```
             let config = PairwiseConfig {
                 program: "blastn".to_string(),
                 show_frame: false,
+                line_length: report.formatting.line_length(),
+                sort: report.formatting.report_sort(),
                 ..PairwiseConfig::default()
             };
             let mut write = |hits: &[PairwiseHit], range: std::ops::Range<usize>| {
@@ -10948,6 +10959,7 @@ fn write_reports_untimed(
         context_karlin: results.context_karlin,
         num_descriptions: args.report_counts.num_descriptions,
         num_alignments: args.report_counts.num_alignments,
+        formatting: args.formatting,
         culling_limit: args.culling_limit_value(),
         db_num_seqs: subjects.shown.num_seqs,
         db_len_total: subjects.shown.total_letters,

@@ -172,6 +172,83 @@ impl<'h> QueryGroup<'h> {
         })
     }
 
+    /// The group of `query_hits` as `new` makes it, in the order of `sections`' `-sorthits` and
+    /// `-sorthsps` (`sort`).
+    pub(crate) fn for_sections<S: QuerySections>(
+        query_hits: &[(HspIndex, &'h PairwiseHit)],
+        subject_titles: &[Arc<[u8]>],
+        sections: &S,
+    ) -> Option<Self> {
+        let mut group = Self::new(query_hits, subject_titles, |previous, s_idx| {
+            sections.joins(previous, s_idx)
+        })?;
+        let (sort, tblastx) = sections.sort();
+        group.sort(sort, tblastx);
+        Some(group)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1743-1781
+    // ```c++
+    // void CAlignFormatUtil::HspListToHitList(list< CRef<CSeq_align_set> >& target,
+    //                                         const CSeq_align_set& source)
+    // {
+    //     ...
+    //         } else if (cur_id.Match(*previous_id)){
+    //             temp->Set().push_back(*iter);
+    //
+    //         } else {
+    //             temp =  new CSeq_align_set;
+    //             temp->Set().push_back(*iter);
+    //             target.push_back(temp);
+    //         }
+    //     ...
+    // CAlignFormatUtil::HitListToHspList(list< CRef<CSeq_align_set> >& source)
+    // {
+    //     ...
+    //     for (list<CRef<CSeq_align_set> >::iterator iter = source.begin(); iter != source.end(); iter ++) {
+    //         ITERATE(CSeq_align_set::Tdata, iter2, (*iter)->Get()) {
+    //             align_set->Set().push_back(*iter2);
+    //         }
+    //     }
+    // ```
+    /// Puts the subjects and each subject's HSPs (with their indices) in the order of NCBI's
+    /// `SortSeqalignForSortableFormat` (`hit_sort::sort_query_hits`): a hit of NCBI is one
+    /// subject of the group (the HSPs of the subjects shown in its hit too, whose Seq-ids
+    /// `Match`). The description table and the alignments then read the sorted group, as NCBI's
+    /// `x_DisplayDeflines` and `PruneSeqalign` read the sorted Seq-align set. Nothing is done
+    /// (or allocated) when `sort` sorts nothing.
+    pub(crate) fn sort(&mut self, sort: super::hit_sort::ReportSort, tblastx: bool) {
+        if !sort.sorts() {
+            return;
+        }
+        let scores: Vec<Vec<super::hit_sort::HspScores>> = self
+            .subject_order
+            .iter()
+            .map(|s_idx| {
+                self.subject_hits[s_idx]
+                    .iter()
+                    .map(|hit| super::hit_sort::HspScores::of(hit))
+                    .collect()
+            })
+            .collect();
+        let Some(sorted) = super::hit_sort::sort_query_hits(sort, tblastx, &scores) else {
+            return;
+        };
+        for (s_idx, hsp_order) in self.subject_order.iter().zip(&sorted.hsps) {
+            if let Some(hits) = self.subject_hits.get_mut(s_idx) {
+                *hits = hsp_order.iter().map(|&k| hits[k]).collect();
+            }
+            if let Some(indices) = self.subject_hit_indices.get_mut(s_idx) {
+                *indices = hsp_order.iter().map(|&k| indices[k]).collect();
+            }
+        }
+        self.subject_order = sorted
+            .hits
+            .iter()
+            .map(|&hit| self.subject_order[hit])
+            .collect();
+    }
+
     /// The number of the hits of subject `s_idx` that are its own, not those of the subjects
     /// shown in its hit.
     pub(crate) fn own_hsps(&self, s_idx: u32) -> usize {
@@ -204,6 +281,12 @@ pub(crate) trait QuerySections: Sync {
     /// `previous`'s hit (`report::db_subject::joins_as_copy`; `QueryGroup::new`).
     fn joins(&self, _previous: u32, _s_idx: u32) -> bool {
         false
+    }
+
+    /// `-sorthits` and `-sorthsps` of the report and whether it is TBLASTX's
+    /// (`QueryGroup::sort`); none by default.
+    fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
+        (super::hit_sort::ReportSort::default(), false)
     }
 
     /// `\n\n`, the query's header, then "No hits found" and the query's footer (`group` is
@@ -291,9 +374,7 @@ fn write_serial<S: QuerySections, W: Write>(
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
-        let group = QueryGroup::new(query_hits, subject_titles, |previous, s_idx| {
-            sections.joins(previous, s_idx)
-        });
+        let group = QueryGroup::for_sections(query_hits, subject_titles, sections);
         sections.head(writer, q_idx, group.as_ref())?;
         if let Some(group) = &group {
             for &s_idx in group.aligned(sections.num_alignments()) {
@@ -539,9 +620,7 @@ fn write_parallel_with<S: QuerySections, W: Write>(
         .collect();
     for window in query_windows(&estimates, budget) {
         let groups = map(pool, &hits_by_query[window.clone()], |query_hits| {
-            QueryGroup::new(query_hits, subject_titles, |previous, s_idx| {
-                sections.joins(previous, s_idx)
-            })
+            QueryGroup::for_sections(query_hits, subject_titles, sections)
         });
         let first = first_query + window.start;
         let planned = pieces(sections, first, &groups, piece_bytes);

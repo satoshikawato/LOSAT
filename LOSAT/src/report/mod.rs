@@ -3,6 +3,7 @@ pub mod blast_xml;
 pub mod blast_xml2;
 pub mod db_subject;
 pub mod defline;
+pub mod hit_sort;
 pub mod diag_log;
 pub mod outfmt6;
 pub mod pairwise;

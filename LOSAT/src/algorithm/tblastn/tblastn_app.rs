@@ -1997,6 +1997,7 @@ fn search(
                 num_descriptions: resolved.num_descriptions,
                 num_alignments: resolved.num_alignments,
             },
+            resolved.formatting,
             resolved.db_gencode,
             seg.as_ref(),
             resolved.lcase_masking,

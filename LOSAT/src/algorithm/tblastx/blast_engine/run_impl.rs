@@ -1269,12 +1269,13 @@ fn check_ncbi_options(
     formatting_handler_check(&parse_formatting_string(&args.outfmt)?, Program::Tblastx)?;
     // The hit list size and the counts of the pairwise report
     // (`blastinput::report_counts`), with the handler's warnings.
-    let (counts, warnings) = crate::blastinput::report_counts::run_report_counts(
+    let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "tblastx",
         outfmts,
         args.max_target_seqs,
         args.num_descriptions,
         args.num_alignments,
+        &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
     // (`threshold <= 0` is false for NaN, as in C.)
@@ -2384,9 +2385,17 @@ fn write_tblastx_outputs(
                         None => records_parsed.clone(),
                     },
                 };
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:166-168
+                // ```c++
+                //         formatter.SetLineLength(fmt_args->GetLineLength());
+                //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+                //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+                // ```
                 let config = crate::report::pairwise::PairwiseConfig {
                     program: "tblastx".to_string(),
                     protein_matrix: matrix,
+                    line_length: args.formatting.line_length(),
+                    sort: args.formatting.report_sort(),
                     ..crate::report::pairwise::PairwiseConfig::default()
                 };
                 let mut write = |rows: &[crate::report::pairwise::PairwiseHit],

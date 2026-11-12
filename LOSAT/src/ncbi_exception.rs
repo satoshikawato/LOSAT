@@ -461,6 +461,35 @@ mod tests {
         );
     }
 
+    // blastn 2.17.0 (the official Linux x64 release) with a `blastn.ini` of the line `garbage`
+    // (env parity g_reg probe `x_ini`, 2026-11-11): `NCBI_REPORT_EXCEPTION_X(15, "Application's
+    // initialization failed", e)` of the application layer (error code 106), and of a chain.
+    #[test]
+    fn a_report_with_a_title_has_a_line_per_exception_then_the_title() {
+        let site = ThrowSite {
+            file: "src/corelib/ncbireg.cpp",
+            line: 722,
+            kind: "CRegistryException::eEntry",
+            function: Some("ncbi::IRWRegistry::x_Read"),
+        };
+        let e = NcbiException::with_pos(site, "Invalid registry entry format: 'garbage'", 1);
+        assert_eq!(
+            e.report_default_ex(106, 15, "Application's initialization failed"),
+            "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n"
+        );
+        let outer = NcbiException::new(site, "first").rethrow(
+            ThrowSite {
+                kind: "CAppException::eSetupDiag",
+                ..site
+            },
+            "second",
+        );
+        assert_eq!(
+            outer.report_default_ex(106, 15, "T"),
+            "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n"
+        );
+    }
+
     // NCBI's rpsbproc 0.5.1 (tests/fixtures/rpsbproc/oracle/d_wsline.err and lcl.err): the
     // application's report of an exception with the default diagnostic flags, without the place
     // or the function, the position of a `CStringException` included; and that of an exception

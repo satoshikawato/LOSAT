@@ -66,7 +66,8 @@ impl FilterProgram {
 #[derive(Debug)]
 pub(crate) enum WriteError {
     Io(io::Error),
-    /// A case LOSAT does not reproduce (the text says which).
+    /// A case LOSAT does not reproduce: what it is, as a noun phrase that the tool completes
+    /// with "is not supported by LOSAT's <program>".
     Refused(String),
 }
 
@@ -293,7 +294,7 @@ fn write_document(
     match error {
         None => Ok(()),
         Some(error) => Err(WriteError::Refused(format!(
-            "{error}, which is not supported by LOSAT's mask writer"
+            "an object on which LOSAT's serial writer stops ({error})"
         ))),
     }
 }
@@ -371,17 +372,10 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
         false,
         &bioseq_ids(seq.ids),
     )
-    .map_err(|_| {
-        WriteError::Refused(
-            "a title whose encoding NCBI cannot tell is not supported by LOSAT's mask writer"
-                .to_string(),
-        )
-    })?;
+    .map_err(|_| WriteError::Refused("a title whose encoding NCBI cannot tell".to_string()))?;
     if defline.reads_past_end {
         return Err(WriteError::Refused(
-            "a title on which NCBI's defline generator reads past its end is not supported by \
-             LOSAT's mask writer"
-                .to_string(),
+            "a title on which NCBI's defline generator reads past its end".to_string(),
         ));
     }
     text.extend_from_slice(&defline.text);

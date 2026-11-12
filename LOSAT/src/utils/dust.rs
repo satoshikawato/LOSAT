@@ -27,6 +27,7 @@ use std::collections::VecDeque;
 // ```
 /// `CRandom` of `CIupac2Ncbi2na_converter` (the random numbers that resolve `N`): one per
 /// `CSymDustMasker`, so the calls of one masker draw from one sequence of numbers.
+#[derive(Clone)]
 pub(crate) struct NcbiLfgRandom {
     state: [u32; 33],
     rj: i32,
@@ -283,8 +284,13 @@ impl DustMasker {
         seq: &[u8],
         start: usize,
         stop: usize,
-        rng: &mut NcbiLfgRandom,
+        caller_rng: &mut NcbiLfgRandom,
     ) -> Vec<MaskedInterval> {
+        // The masker's numbers in a local copy for the loop (written back at the end): drawn
+        // through the caller's reference they cost a load and a store per `N` and per state
+        // update, which made blastn's DUST run ~1 % more instructions (ws A/B of e328aebb7).
+        let mut local_rng = caller_rng.clone();
+        let rng = &mut local_rng;
         let mut result = Vec::new();
         let mut current_start = start;
         // NCBI reference: ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
@@ -368,6 +374,7 @@ impl DustMasker {
             }
         }
 
+        *caller_rng = local_rng;
         result
     }
 

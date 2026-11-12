@@ -24,8 +24,9 @@ pub(super) struct Options<'a> {
     pub linker: i32,
     pub parse_seqids: bool,
     pub hard_masking: bool,
-    /// The `BLASTDB` of the configuration (`[BLAST] BLASTDB`), for `CSeqDB`'s search path.
-    pub blastdb_registry: Option<&'a str>,
+    /// The `BLASTDB` of the configuration (`[BLAST] BLASTDB`), for `CSeqDB`'s search path
+    /// (`ApplicationSettings::blastdb`: `Err` when LOSAT does not read the entry as NCBI does).
+    pub blastdb_registry: Result<Option<&'a str>, &'a str>,
 }
 
 /// One sequence of the input (`CBioseq`): its Seq-ids, its title descriptor, its IUPAC letters.
@@ -45,6 +46,8 @@ pub(super) enum Failure {
     Std(String),
     /// A case LOSAT does not reproduce.
     Refused(String),
+    /// A `CArgException` of `AsInputFile` in `Run` (the reader's report of it).
+    Arg(crate::ncbi_app::args::ArgException),
 }
 
 impl From<WriteError> for Failure {
@@ -53,9 +56,14 @@ impl From<WriteError> for Failure {
             WriteError::Io(error) => {
                 Failure::Refused(format!("writing the output failed: {error}"))
             }
-            WriteError::Refused(reason) => Failure::Refused(reason),
+            WriteError::Refused(what) => Failure::Refused(unsupported(&what)),
         }
     }
+}
+
+/// LOSAT's refusal of `what` (a noun phrase).
+pub(super) fn unsupported(what: &str) -> String {
+    format!("{what} is not supported by LOSAT's {}", super::PROGRAM)
 }
 
 /// `CMaskReader::GetNextSequence` of a source of sequences.
@@ -68,6 +76,7 @@ pub(super) trait SequenceSource {
 pub(super) enum Report {
     Posts { lines: String, status: i32 },
     Refused(String),
+    Arg(crate::ncbi_app::args::ArgException),
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:668-690 (AppMain's handlers of `Run`)
@@ -97,6 +106,7 @@ pub(super) fn report(failure: Failure) -> Report {
             status: 3,
         },
         Failure::Refused(reason) => Report::Refused(reason),
+        Failure::Arg(error) => Report::Arg(error),
     }
 }
 
@@ -318,7 +328,12 @@ struct DatabaseSource {
 }
 
 impl DatabaseSource {
-    fn open(name: &str, registry: Option<&str>) -> Result<Self, Failure> {
+    fn open(name: &str, registry: Result<Option<&str>, &str>) -> Result<Self, Failure> {
+        let registry = registry.map_err(|reason| {
+            Failure::Refused(
+                crate::algorithm::common::database::refusal(reason, super::PROGRAM).to_string(),
+            )
+        })?;
         let path = SearchPath::from_environment(registry).map_err(database_failure)?;
         let db = SeqDb::open_in(name, SeqType::Nucleotide, &path).map_err(database_failure)?;
         Ok(DatabaseSource { db, oid: 0 })
@@ -333,7 +348,10 @@ fn database_failure(error: crate::seqdb::SeqDbError) -> Failure {
             ThrowSite::generated("CSeqDBException::eInvalid"),
             text,
         )),
-        None => Failure::Refused(error.to_string()),
+        None => Failure::Refused(
+            crate::algorithm::common::database::refusal(&error.to_string(), super::PROGRAM)
+                .to_string(),
+        ),
     }
 }
 
@@ -350,11 +368,10 @@ impl SequenceSource for DatabaseSource {
             .iter()
             .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
         {
-            return Err(Failure::Refused(format!(
+            return Err(Failure::Refused(unsupported(&format!(
                 "sequence {oid} of the database: a definition line with bytes NCBI reads as '#' \
-                 (it writes an error each time it reads them), which is not supported by \
-                 LOSAT's dustmasker"
-            )));
+                 (it writes an error each time it reads them)"
+            ))));
         }
         let ids = set
             .deflines
@@ -369,10 +386,10 @@ impl SequenceSource for DatabaseSource {
             .iter()
             .any(|defline| defline.taxid.is_some_and(|taxid| taxid > 0));
         if has_source && bioseq_title_from_source(&title, &bioseq_ids(&ids)) {
-            return Err(Failure::Refused(format!(
-                "sequence {oid} of the database has no title and a taxid (NCBI makes its title \
-                 from the taxonomy), which is not supported by LOSAT's dustmasker"
-            )));
+            return Err(Failure::Refused(unsupported(&format!(
+                "sequence {oid} of the database, which has no title and a taxid (NCBI makes its \
+                 title from the taxonomy),"
+            ))));
         }
         let length = self.db.nucleotide_length(oid).map_err(database_failure)?;
         let iupac = self

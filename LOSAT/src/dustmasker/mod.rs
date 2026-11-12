@@ -4,6 +4,7 @@
 //! `main` hands it the words after `dustmasker`. The work of its `Run` is in `app`.
 
 mod app;
+mod fasta;
 mod masker;
 mod work;
 

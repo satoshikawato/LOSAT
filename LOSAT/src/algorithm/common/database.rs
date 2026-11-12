@@ -65,12 +65,9 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    let mut db = SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    // The errors of the alias files' counts depend on the list (`restrict_database`).
+    let db = SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
     db.check_accession_tables()
-        .map_err(DatabaseOpenError::Reader)?;
-    // What the reports show of each name of the list (NCBI's formatter opens them again
-    // before the search; `pairwise_database`).
-    db.read_name_records(name)
         .map_err(DatabaseOpenError::Reader)?;
     Ok(db)
 }
@@ -99,22 +96,40 @@ pub(crate) fn open_database(
     })
 }
 
-/// Restricts the search's database `db` to the taxid or seqid list of the command line
-/// (line DI-8, `DbFilterArgs::resolve`; none: the whole database), as NCBI's `CSeqDB` opened
-/// with the list (`SeqDb::restrict`): NCBI's errors are `BLAST Database error: <text>` with
-/// exit status 2 (`database_error`), and the warnings NCBI writes go to `diagnostics`
+/// Restricts the search's database `db` (opened as `name` by `open_database`) to the taxid or
+/// seqid list of the command line (line DI-8, `DbFilterArgs::resolve`; none: the whole
+/// database), as NCBI's `CSeqDB` opened with the list (`SeqDb::restrict`), then reads what its
+/// alias files' counts and the reports need: NCBI's errors are `BLAST Database error: <text>`
+/// with exit status 2 (`database_error`), and the warnings NCBI writes go to `diagnostics`
 /// (`LOG_POST(Warning << ...)`: the text alone; `ERR_POST`: `Warning: [<program>] <text>`,
 /// the program in lower case as `SetDiagPostPrefix` names it; an `ERR_POST` of an error
 /// before a throw: `Error: [<program>] <text>`), before an error too.
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
+    name: &str,
     list: Option<&crate::seqdb::DbList>,
     diagnostics: &mut dyn std::io::Write,
     program: &str,
 ) -> Result<()> {
-    let Some(list) = list else {
-        return Ok(());
-    };
+    if let Some(list) = list {
+        apply_list(db, list, diagnostics, program)?;
+    }
+    // NCBI's `CSeqDB` of the search meets the errors of the alias files' counts after the
+    // list (`SeqDb::check_alias_values`); its formatter then opens each name of the list again
+    // without it, before the search (`pairwise_database`), and meets the others there.
+    db.check_alias_values()
+        .map_err(|error| database_error(error, program))?;
+    db.read_name_records(name)
+        .map_err(|error| database_error(error, program))
+}
+
+/// `restrict_database` with a list.
+fn apply_list(
+    db: &mut SeqDb,
+    list: &crate::seqdb::DbList,
+    diagnostics: &mut dyn std::io::Write,
+    program: &str,
+) -> Result<()> {
     let mut warnings = Vec::new();
     let restricted = db.restrict(list, &mut warnings);
     let prefix = program.to_ascii_lowercase();
@@ -192,6 +207,20 @@ pub(crate) fn note_archive_database_filter(
 /// exit status 2; everything else is LOSAT's refusal, in LOSAT's wording (`program` is
 /// the program that refuses).
 pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    if let Some(exception) = error.ncbi_exception() {
+        return NativeError {
+            exit: 255,
+            message: format!("Error: {}\n", exception.what()),
+        }
+        .into();
+    }
     match error.ncbi_message() {
         Some(text) => NativeError {
             exit: 2,

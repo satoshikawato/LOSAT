@@ -1345,7 +1345,7 @@ fn search(
         let mut x_stream = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.printed_num_seqs() == 0 {
+                let read = if database.num_oids() == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
                 } else {
                     database.x_stream(resolved.num_threads).map(|stream| {

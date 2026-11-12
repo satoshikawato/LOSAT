@@ -96,7 +96,7 @@ impl TblastxDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -148,11 +148,12 @@ impl TblastxDatabase {
     }
 
     /// Whether the database has parsed Seq-ids and more than `max_sequences` sequences in its
-    /// volumes (`SeqDb::printed_num_seqs`, also under a taxid list: the range walks of
-    /// `reports_may_refuse` decode a list's excluded sequences of every range they read): the
-    /// check before the search does not read its headers (`shared::PARSED_CHECK_SEQUENCES_MAX`).
+    /// volumes (`SeqDb::num_oids`, also under a taxid list or an alias file's range: the range
+    /// walks of `reports_may_refuse` decode the excluded sequences of every range they read):
+    /// the check before the search does not read its headers
+    /// (`shared::PARSED_CHECK_SEQUENCES_MAX`).
     pub(crate) fn parsed_beyond(&self, max_sequences: u32) -> bool {
-        self.parsed && self.db.printed_num_seqs() > max_sequences
+        self.parsed && self.db.num_oids() > max_sequences
     }
 
     /// Whether a prefetch of the run is refused because of NCBI's taxonomy cache
@@ -217,10 +218,10 @@ impl TblastxDatabase {
         self.db.list_taxids()
     }
 
-    /// The number of sequences of the volumes (`SeqDb::printed_num_seqs`): none is the database
-    /// whose first query batch fails, also with a list.
-    pub(crate) fn printed_num_seqs(&self) -> u32 {
-        self.db.printed_num_seqs()
+    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
+    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    pub(crate) fn num_oids(&self) -> u32 {
+        self.db.num_oids()
     }
 
     /// The `Database:` lines of the pairwise report.

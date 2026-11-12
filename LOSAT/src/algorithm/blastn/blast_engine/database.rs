@@ -405,7 +405,7 @@ impl BlastnDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
         let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
             .ok()

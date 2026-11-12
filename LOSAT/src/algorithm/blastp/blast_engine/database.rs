@@ -148,7 +148,7 @@ impl BlastpDatabase {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids (line DBID): BLASTP (ID2a) and psiblast read it.
         shared::check_seqids(&db, settings, program)?;
-        shared::restrict_database(&mut db, list, diagnostics, program)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, program)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -223,10 +223,10 @@ impl BlastpDatabase {
         self.db.statistics_numbers().1
     }
 
-    /// The number of sequences the reports print: the whole database's, also with a taxid
-    /// list (`SeqDb::printed_num_seqs`).
-    pub(super) fn printed_num_sequences(&self) -> u32 {
-        self.db.printed_num_seqs()
+    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
+    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    pub(super) fn num_oids(&self) -> u32 {
+        self.db.num_oids()
     }
 
     /// The total length as the engine holds it.

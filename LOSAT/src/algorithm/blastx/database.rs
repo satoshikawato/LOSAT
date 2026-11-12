@@ -106,7 +106,7 @@ impl BlastxDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -181,7 +181,7 @@ impl BlastxDatabase {
     /// query batch with a valid context, which the caller fails with it. The search checks each
     /// sequence where it first reads it (`XStreamDb::x_check`).
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
-        if self.db.printed_num_seqs() == 0 {
+        if self.db.num_oids() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let count = self.db.num_seqs();
@@ -221,7 +221,7 @@ impl BlastxDatabase {
 /// that fails during the search (`native::search_error`), whichever sequence the search's
 /// threads read first.
 pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
-    if db.printed_num_seqs() == 0 {
+    if db.num_oids() == 0 {
         return Err(PreliminaryReadError("Database memory map file error").into());
     }
     let mut longest = 0;

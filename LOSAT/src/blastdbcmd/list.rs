@@ -667,11 +667,11 @@ fn write_line(format: &ListFormat, db: &FoundDb, path: &SearchPath) -> Result<Ve
             b'f' => db.file_name(),
             b't' => open(&mut opened, db, path)?.title().to_vec(),
             b'n' => open(&mut opened, db, path)?
-                .num_seqs()
+                .printed_num_seqs()
                 .to_string()
                 .into_bytes(),
             b'l' => open(&mut opened, db, path)?
-                .total_length()
+                .printed_total_length()
                 .to_string()
                 .into_bytes(),
             b'p' => match db.seqtype {

@@ -6164,7 +6164,7 @@ fn psiblast_stop_at_invalid_query(
         })
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.printed_num_sequences() == 0)
+    let empty_database = database.is_some_and(|database| database.num_oids() == 0)
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
@@ -9028,7 +9028,7 @@ fn run_resolved_in_pool(
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
-        database.printed_num_sequences() == 0
+        database.num_oids() == 0
             && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(

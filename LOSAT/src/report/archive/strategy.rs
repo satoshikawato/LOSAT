@@ -191,6 +191,21 @@ impl StrategyExport {
         })))
     }
 
+    /// `new` into the created strategy file (`create_strategy_file`), buffered.
+    pub fn for_file(
+        file: std::fs::File,
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        label: &str,
+    ) -> Result<Self> {
+        Self::new(
+            Box::new(std::io::BufWriter::new(file)),
+            inputs,
+            database,
+            label,
+        )
+    }
+
     fn with_state<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {
         let mut state = self
             .0

@@ -33,6 +33,7 @@ use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::strategy::StrategyExport;
 use crate::report::archive::{
     defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
     KaBlock,
@@ -127,29 +128,54 @@ pub(crate) fn handle_for(
     ArchiveHandle::for_program(&option_inputs(args), database, "BLASTP").map(Some)
 }
 
-/// `report::archive::check_titles` for BLASTP's records.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "BLASTP")
+/// The search strategy export of a run (`-export_search_strategy`), into `file`
+/// (`strategy::create_strategy_file`), with BLASTP's recorded options and `-db` name.
+pub(crate) fn strategy_for(
+    args: &BlastpArgs,
+    outfmt: i32,
+    file: std::fs::File,
+) -> Result<StrategyExport> {
+    let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
+    let mut inputs = option_inputs(args);
+    inputs.hitlist_size = strategy_hitlist_size(args, outfmt);
+    StrategyExport::for_file(file, &inputs, database, "BLASTP")
+}
+
+/// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's
+/// (`option_inputs`) is that of outfmt 11, while outfmt 0 to 4 take the larger of
+/// `-num_descriptions` and `-num_alignments` (blast_args.cpp:2910-2936, probe `nd` of RG-F1).
+fn strategy_hitlist_size(args: &BlastpArgs, outfmt: i32) -> i32 {
+    crate::blastinput::report_counts::report_counts(
+        outfmt,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    )
+    .hitlist_size as i32
+}
+
+/// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and
+/// the search strategy's (`strategy`).
+pub(crate) fn check_request_titles(
+    records: &[FastaRecord],
+    role: &str,
+    archive: bool,
+    strategy: bool,
+) -> Result<()> {
+    crate::report::archive::check_request_titles(records, role, "BLASTP", archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// What the archive of a call needs: the call's queries (the batches of one block, or of the
-/// whole search) and their data.
-pub(crate) struct ArchiveCall<'a> {
-    pub handle: &'a ArchiveHandle,
+/// The queries of a call's batches and what their requests read (the archive's and the search
+/// strategy's, `for_each_batch`).
+pub(crate) struct CallBatches<'a> {
     /// The searched queries of the call (their records keep the whole letters of a `-query_loc`
     /// cut).
     pub queries: &'a [FastaRecord],
-    pub query_lengths: &'a [usize],
     pub query_placements: &'a Placements,
     /// `-subject`: every subject record, whole (the Bioseqs of the request).
     pub subject_records: Option<&'a [FastaRecord]>,
-    /// The subject names of the Seq-aligns.
-    pub subjects: SubjectNames<'a>,
-    pub subject_placements: &'a Placements,
-    pub hit_lists: &'a [Option<BlastpHitList>],
-    pub engine_counts: &'a EngineCounts,
     /// The SEG masks and, with `-lcase_masking`, the lower-case runs of each query, in record
     /// coordinates (`query_record_masks`).
     pub masks: &'a [Vec<(i32, i32)>],
@@ -159,6 +185,19 @@ pub(crate) struct ArchiveCall<'a> {
     pub unsearched: &'a [bool],
     /// The queries of each NCBI batch of the call, in order.
     pub spans: &'a [Range<usize>],
+}
+
+/// What the archive of a call needs: the call's batches (the batches of one block, or of the
+/// whole search) and their results.
+pub(crate) struct ArchiveCall<'a> {
+    pub handle: &'a ArchiveHandle,
+    pub batches: CallBatches<'a>,
+    pub query_lengths: &'a [usize],
+    /// The subject names of the Seq-aligns.
+    pub subjects: SubjectNames<'a>,
+    pub subject_placements: &'a Placements,
+    pub hit_lists: &'a [Option<BlastpHitList>],
+    pub engine_counts: &'a EngineCounts,
 }
 
 /// The values of a batch's first query that `search-stats`, `ka-blocks` and the
@@ -228,28 +267,19 @@ impl<'a> AlignSource for BlastpAligns<'a> {
     }
 }
 
-/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
-/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
-/// before its archive. `first_context(first_query)` gives the values of a batch's first
-/// query.
-pub(crate) fn write_blastp_archives(
-    call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+/// Calls `each` with the queries and the request inputs of each batch of `call`, in order
+/// (`BatchArchive`; the archive and the search strategy file write their documents from it).
+/// `first_context(first_query)` gives the values of a batch's first query.
+pub(crate) fn for_each_batch(
+    call: &CallBatches<'_>,
     first_context: &dyn Fn(usize) -> FirstContext,
-    writer: &mut dyn Write,
+    mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
     let whole = [0..call.queries.len()];
     let spans: &[Range<usize>] = if call.spans.is_empty() {
         &whole
     } else {
         call.spans
-    };
-    let run = RunRecord {
-        program: Program::Blastp,
-        db_title: call.subjects.db_title(),
-        // The value cannot differ: `-ungapped` is refused before the search
-        // (`validate_requested_blastp_support`), so every BLASTP run is gapped, as in `seqalign.rs`.
-        gapped: true,
     };
     // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
     let subject_deflines: Vec<Cow<'_, [u8]>> = call
@@ -277,11 +307,6 @@ pub(crate) fn write_blastp_archives(
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;
-        }
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
         }
         let records = &call.queries[span.clone()];
         let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
@@ -366,22 +391,61 @@ pub(crate) fn write_blastp_archives(
             length_adjustment: context.length_adjustment,
             searched_space: searched.then_some(context.context0_space),
         };
+        each(span, &batch)?;
+    }
+    Ok(())
+}
+
+/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
+/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
+/// before its archive. `first_context(first_query)` gives the values of a batch's first
+/// query.
+pub(crate) fn write_blastp_archives(
+    call: &ArchiveCall<'_>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+    first_context: &dyn Fn(usize) -> FirstContext,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Blastp,
+        db_title: call.subjects.db_title(),
+        // The value cannot differ: `-ungapped` is refused before the search
+        // (`validate_requested_blastp_support`), so every BLASTP run is gapped, as in `seqalign.rs`.
+        gapped: true,
+    };
+    for_each_batch(&call.batches, first_context, |span, batch| {
+        if let Some(warnings) = warnings.as_deref_mut() {
+            for index in span.clone() {
+                warnings.before_query(index, &mut *writer)?;
+            }
+        }
         let mut aligns = BlastpAligns {
             run,
             queries: QueryNames {
-                records: call.queries,
+                records: call.batches.queries,
                 searched_lengths: call.query_lengths,
-                placements: call.query_placements,
+                placements: call.batches.query_placements,
             },
             subjects: call.subjects,
             subject_placements: call.subject_placements,
             hit_lists: &call.hit_lists[span.clone()],
             engine_counts: call.engine_counts,
-            first,
+            first: span.start,
         };
-        write_archive(call.handle, &batch, &mut aligns, writer)?;
-    }
-    Ok(())
+        write_archive(call.handle, batch, &mut aligns, &mut *writer)
+    })
+}
+
+/// Writes the search strategy's request of each batch of `call` (`StrategyExport::write_batch`;
+/// BLASTP's `LCaseMask` parameters are the lower-case runs, the same before and after the search).
+pub(crate) fn write_blastp_strategy(
+    strategy: &StrategyExport,
+    call: &CallBatches<'_>,
+    first_context: &dyn Fn(usize) -> FirstContext,
+) -> Result<()> {
+    for_each_batch(call, first_context, |_, batch| {
+        strategy.write_batch(batch, batch.lcase_masks)
+    })
 }
 
 #[cfg(test)]

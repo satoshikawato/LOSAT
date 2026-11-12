@@ -130,13 +130,15 @@ pub(crate) fn restrict_database(
     restricted.map_err(|error| database_error(error, program))
 }
 
-/// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
-/// makes of its request (`ArchiveHandle::set_database_filter`). `dbsize` is whether `-dbsize` is
-/// given: with a list that keeps no sequence the `EffectiveSearchSpace` option then counts the
-/// length adjustment with no sequence, which the searches do not compute (probes E14 and E17 of
-/// line DI-8): LOSAT refuses it.
+/// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
+/// export (`strategy`) what the database's list makes of their requests
+/// (`ArchiveHandle::set_database_filter`). `dbsize` is whether `-dbsize` is given: with a list
+/// that keeps no sequence the `EffectiveSearchSpace` option then counts the length adjustment
+/// with no sequence, which the searches do not compute (probes E14 and E17 of line DI-8): LOSAT
+/// refuses it (the strategy's requests after the first carry that option too).
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
     filtered_empty: bool,
@@ -144,18 +146,27 @@ pub(crate) fn note_archive_database_filter(
     dbsize: bool,
     program: &str,
 ) -> Result<()> {
-    let Some(handle) = archive else {
+    if archive.is_none() && strategy.is_none() {
         return Ok(());
-    };
+    }
     if filtered_empty && dbsize {
+        let option = if archive.is_some() {
+            "-outfmt 11"
+        } else {
+            "-export_search_strategy"
+        };
         anyhow::bail!(
-            "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
+            "-dbsize with {option} and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    handle.set_database_filter(
-        filter.archive_parameter(list_taxids),
-        filtered_empty && !searchsp,
-    );
+    let list = filter.archive_parameter(list_taxids);
+    let empty_database = filtered_empty && !searchsp;
+    if let Some(strategy) = strategy {
+        strategy.set_database_filter(list.clone(), empty_database);
+    }
+    if let Some(handle) = archive {
+        handle.set_database_filter(list, empty_database);
+    }
     Ok(())
 }
 

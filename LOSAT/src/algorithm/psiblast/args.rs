@@ -473,6 +473,8 @@ impl PsiblastArgs {
             subject_loc: self.subject_loc,
             outfmt: self.outfmt,
             archive: None,
+            export_search_strategy: None,
+            strategy: None,
             app: BlastpApp::Psiblast,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,

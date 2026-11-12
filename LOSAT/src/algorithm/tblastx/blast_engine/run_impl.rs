@@ -838,7 +838,24 @@ pub fn run(
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-    // there too.
+    // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
+    // file (`strategy::create_strategy_file`), which an error after it leaves empty.
+    let strategy_file = args
+        .export_search_strategy
+        .as_deref()
+        .map(|path| {
+            crate::blastinput::input_files::check_utf8_file_name(
+                path,
+                "export_search_strategy",
+                "TBLASTX",
+            )?;
+            crate::report::archive::strategy::create_strategy_file(
+                path,
+                args.out.as_deref(),
+                "TBLASTX",
+            )
+        })
+        .transpose()?;
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
     let format = crate::blastinput::app::report_format(
         &choice,
@@ -853,6 +870,10 @@ pub fn run(
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
     )?
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    // The search strategy's request, with the refusals of the archive's.
+    args.strategy = strategy_file
+        .map(|file| super::super::archive::strategy_for(&args, choice.number, file))
+        .transpose()?;
     let archive = args.archive.clone();
     crate::utils::threading::validate_threads(args.num_threads)?;
     use crate::blastinput::input_files;
@@ -1133,7 +1154,7 @@ fn read_subject_set(
         &subject_path,
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some())
+            .with_defline(args.archive.is_some() || args.strategy.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
     subject_source.set_id_scope(args.id_scope.clone());
@@ -1146,30 +1167,34 @@ fn read_subject_set(
     // ncbi4na code (the FASTA reader gives none: it reads `U` as `T`) or a record over `u32::MAX`
     // bases keeps every record's letters. The archive of `-subject` writes every subject's whole
     // letters (and its deflines) in every batch, which the packed stores do not keep (they hold
-    // the interval of a `-subject_loc` and no letters), so a run that writes it reads the records
-    // as the switch's `=0` side does (as TBLASTN's `x_tbn_store`). So does `-lcase_masking`: the
+    // the interval of a `-subject_loc` and no letters), so a run that writes it (or the search
+    // strategy's requests, which hold the same Bioseqs) reads the records as the switch's `=0`
+    // side does (as TBLASTN's `x_tbn_store`). So does `-lcase_masking`: the
     // scan reads the case of the letters (`x_soft_subject_calls`).
     let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
-    let (subjects, subject_placements, stores) =
-        if super::super::subjects::x_tbx_store() && args.archive.is_none() && !args.lcase_masking {
-            let (subjects, stores, placements) =
-                crate::blastinput::x_packed_subjects::x_read_packed_subjects(
-                    &mut subject_source,
-                    subject_range.as_ref(),
-                    &mut warn,
-                    args.num_threads,
-                    "TBLASTX",
-                )?;
-            crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
-            (subjects, placements, stores)
-        } else {
-            let read_subject_records =
-                read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
-            match cut_subjects(&read_subject_records, subject_range.as_ref())? {
-                Some((cut, placements)) => (cut, placements, None),
-                None => (read_subject_records, Placements::default(), None),
-            }
-        };
+    let (subjects, subject_placements, stores) = if super::super::subjects::x_tbx_store()
+        && args.archive.is_none()
+        && args.strategy.is_none()
+        && !args.lcase_masking
+    {
+        let (subjects, stores, placements) =
+            crate::blastinput::x_packed_subjects::x_read_packed_subjects(
+                &mut subject_source,
+                subject_range.as_ref(),
+                &mut warn,
+                args.num_threads,
+                "TBLASTX",
+            )?;
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
+        (subjects, placements, stores)
+    } else {
+        let read_subject_records =
+            read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?;
+        match cut_subjects(&read_subject_records, subject_range.as_ref())? {
+            Some((cut, placements)) => (cut, placements, None),
+            None => (read_subject_records, Placements::default(), None),
+        }
+    };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
     check_subjects_not_empty(&subjects)?;
@@ -1380,6 +1405,7 @@ fn open_search_database(
             .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
+                args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
                 database.filtered_empty(),
@@ -1504,7 +1530,7 @@ fn search_cli(
         &args.query,
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some())
+            .with_defline(args.archive.is_some() || args.strategy.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
     query_source.set_id_scope(args.id_scope.clone());
@@ -2126,6 +2152,49 @@ fn write_pairwise_prologs(
 // ```
 /// Writes the final hits (already filtered by e-value) to every requested format, and
 /// gives the caller the same final list (`ReportOutputs::hits`).
+/// The subjects of a call's Seq-aligns (the archive's).
+fn seqalign_subjects<'a>(
+    run: &'a TblastxReportRun<'_>,
+) -> crate::algorithm::tblastx::seqalign::SeqalignSubjects<'a> {
+    match &run.database {
+        Some(database) => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
+            ordinals: &database.reported.ordinals,
+            title: &database.pairwise.definition,
+            parsed: &database.reported.parsed,
+        },
+        None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
+            records: run.subjects,
+            placements: run.ranges.subject_placements,
+        },
+    }
+}
+
+/// What the archive and the search strategy's requests read of a call's report data.
+fn archive_data<'a>(
+    run: &'a TblastxReportRun<'_>,
+    hits: &'a [TblastxHsp],
+    engine_counts: &'a [(u32, u32)],
+    subjects: &'a crate::algorithm::tblastx::seqalign::SeqalignSubjects<'a>,
+) -> crate::algorithm::tblastx::archive::ArchiveData<'a> {
+    crate::algorithm::tblastx::archive::ArchiveData {
+        queries: run.queries,
+        query_stats: run.query_stats,
+        searched: run.searched,
+        subject_records: match &run.database {
+            Some(_) => &[],
+            None => run.subjects,
+        },
+        hits,
+        engine: engine_counts,
+        subjects,
+        subject_letters: run.subject_letters,
+        query_placements: &run.ranges.input.placements,
+        numbers: run.numbers,
+        spans: run.archive_spans,
+        lcase_masking: run.args.lcase_masking,
+    }
+}
+
 fn write_tblastx_outputs(
     mut hits: Vec<TblastxHsp>,
     outputs: &mut ReportOutputs<'_>,
@@ -2287,6 +2356,23 @@ fn write_tblastx_outputs(
                 super::super::blast_xml::query_stats(stats, run.numbers),
             );
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:178-181
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
+    // ```
+    // The search strategy's request of each batch (`-export_search_strategy`), which NCBI writes
+    // before the batch's search: the file is apart from the reports, and its documents are those
+    // of the batches the run reports.
+    if let Some(strategy) = args.strategy.as_ref() {
+        let subjects = seqalign_subjects(run);
+        crate::algorithm::tblastx::archive::write_tblastx_strategy(
+            strategy,
+            &archive_data(run, &hits, &engine_counts, &subjects),
+        )?;
     }
     // Every structured format of the call is XML2 or JSON: none writes the report that a
     // `-subject` document holds back (`blast_xml::write_tblastx_xml`).
@@ -2515,38 +2601,10 @@ fn write_tblastx_outputs(
                     .archive
                     .as_ref()
                     .expect("a BLAST archive request has its handle");
-                let subjects = match &run.database {
-                    Some(database) => {
-                        crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
-                            ordinals: &database.reported.ordinals,
-                            title: &database.pairwise.definition,
-                            parsed: &database.reported.parsed,
-                        }
-                    }
-                    None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
-                        records: run.subjects,
-                        placements: run.ranges.subject_placements,
-                    },
-                };
+                let subjects = seqalign_subjects(run);
                 crate::algorithm::tblastx::archive::write_tblastx_archives(
                     handle,
-                    &crate::algorithm::tblastx::archive::ArchiveData {
-                        queries: run.queries,
-                        query_stats: run.query_stats,
-                        searched: run.searched,
-                        subject_records: match &run.database {
-                            Some(_) => &[],
-                            None => run.subjects,
-                        },
-                        hits: &hits,
-                        engine: &engine_counts,
-                        subjects: &subjects,
-                        subject_letters: run.subject_letters,
-                        query_placements: &run.ranges.input.placements,
-                        numbers: run.numbers,
-                        spans: run.archive_spans,
-                        lcase_masking: args.lcase_masking,
-                    },
+                    &archive_data(run, &hits, &engine_counts, &subjects),
                     warnings.as_mut(),
                     &mut writer,
                 )?
@@ -3895,10 +3953,12 @@ impl BatchReports<'_> {
         // completes and, with `-subject`, of every subject in each archive: a title it cannot
         // write is refused before the first byte, exactly where NCBI would write that Bioseq.
         // NCBI writes none of them when no batch is completed (an error archive or nothing).
-        if self.args.archive.is_some() && !reported.is_empty() {
-            super::super::archive::check_titles(queries, "query")?;
+        // The search strategy's requests are refused with them (`check_request_titles`).
+        let (archive, strategy) = (self.args.archive.is_some(), self.args.strategy.is_some());
+        if (archive || strategy) && !reported.is_empty() {
+            super::super::archive::check_request_titles(queries, "query", archive, strategy)?;
             if let ShownSubjects::Fasta { records, .. } = self.subjects {
-                super::super::archive::check_titles(records, "subject")?;
+                super::super::archive::check_request_titles(records, "subject", archive, strategy)?;
             }
         }
         let mut hits = done.hits;

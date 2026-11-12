@@ -460,12 +460,47 @@ pub fn check_titles_for(
     role: &str,
     label: &str,
 ) -> anyhow::Result<()> {
+    check_titles_in(encoding, records, role, label, "-outfmt 11")
+}
+
+/// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
+/// encoding) and the search strategy's (`strategy`, always ASN.1 text,
+/// `strategy::StrategyExport`).
+pub fn check_request_titles(
+    records: &[FastaRecord],
+    role: &str,
+    label: &str,
+    archive: bool,
+    strategy: bool,
+) -> anyhow::Result<()> {
+    if archive {
+        check_titles(records, role, label)?;
+    }
+    if strategy {
+        check_titles_in(
+            ArchiveEncoding::Text,
+            records,
+            role,
+            label,
+            "-export_search_strategy",
+        )?;
+    }
+    Ok(())
+}
+
+fn check_titles_in(
+    encoding: ArchiveEncoding,
+    records: &[FastaRecord],
+    role: &str,
+    label: &str,
+    option: &str,
+) -> anyhow::Result<()> {
     if let Some(record) = records
         .iter()
         .find(|record| !encoding.writes_text(&record.title))
     {
         return Err(anyhow::Error::new(TitleRefusal(format!(
-            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with -outfmt 11",
+            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with {option}",
             record.local_id
         ))));
     }

@@ -105,7 +105,24 @@ impl TblastnArgs {
         // ```
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-        // there too.
+        // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
+        // file (`strategy::create_strategy_file`), which an error after it leaves empty.
+        let strategy_file = args
+            .export_search_strategy
+            .as_deref()
+            .map(|path| {
+                crate::blastinput::input_files::check_utf8_file_name(
+                    path,
+                    "export_search_strategy",
+                    "TBLASTN",
+                )?;
+                crate::report::archive::strategy::create_strategy_file(
+                    path,
+                    args.out.as_deref(),
+                    "TBLASTN",
+                )
+            })
+            .transpose()?;
         let choice = app::parse_formatting_string(&args.outfmt)?;
         let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
@@ -114,6 +131,10 @@ impl TblastnArgs {
         args.archive =
             super::archive::handle_for(&args, format == Some(app::ReportFormat::ArchiveFormat))?
                 .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        // The search strategy's request, with the refusals of the archive's.
+        args.strategy = strategy_file
+            .map(|file| super::archive::strategy_for(&args, choice.number, file))
+            .transpose()?;
         let archive = args.archive.clone();
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;
@@ -233,7 +254,7 @@ impl TblastnArgs {
             // read without a message and reported when the formatter sets up the subjects
             // (`before_prolog`).
             let config = ReaderConfig::subject("TBLASTN", false, settings.data_loaders)
-                .with_defline(archive.is_some())
+                .with_defline(archive.is_some() || args.strategy.is_some())
                 .with_parse_deflines(args.parse_deflines);
             // EXPERIMENT (LOSAT_X_TBNSTORE): each record's letters packed as it is read
             // (`x_read_subject_stores`), with a subject range after the record is cut to its
@@ -259,9 +280,12 @@ impl TblastnArgs {
                 // Both sides of the stores are recorded in x_subject_store.rs. The archive of
                 // `-subject` writes every subject's whole letters (and its deflines) in every
                 // batch, which the packed stores do not keep (they hold the interval of a
-                // `-subject_loc` and no letters), so a run that writes it reads the records
-                // as the switch's `=0` side does.
-                let x_packed = super::x_subject_store::x_tbn_store() && archive.is_none();
+                // `-subject_loc` and no letters), so a run that writes it (or the search
+                // strategy's requests, which hold the same Bioseqs) reads the records as the
+                // switch's `=0` side does.
+                let x_packed = super::x_subject_store::x_tbn_store()
+                    && archive.is_none()
+                    && args.strategy.is_none();
                 match subject_input {
                     Input::File(file) => read_subject_input(
                         FastaInputSource::from_argument(&subject_path, file, config),
@@ -605,6 +629,7 @@ fn open_search_database(
             .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
+                args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
                 database.filtered_empty(),
@@ -724,7 +749,7 @@ fn search_cli(
     // standard input too, `cin` has reached its end (a failed stream), so NCBI gets no
     // position for the query either, and its reader is at its end: no query batch is read.
     let config = ReaderConfig::query("TBLASTN", true, settings.data_loaders)
-        .with_defline(args.archive.is_some())
+        .with_defline(args.archive.is_some() || args.strategy.is_some())
         .with_parse_deflines(args.parse_deflines);
     let (mut query_source, query_empty) = match query_input {
         Input::File(query_file) => {
@@ -1649,9 +1674,11 @@ fn search(
         // read); the error archive holds no sequence. So a title the archive cannot write is
         // refused here, where the batches have been searched and their definition lines read, and
         // before the first byte of any report.
-        if args.archive.is_some() && !queries.is_empty() {
-            super::archive::check_titles(queries, "query")?;
-            super::archive::check_titles(subject_records, "subject")?;
+        // The search strategy's requests are refused with them (`check_request_titles`).
+        let (archive, strategy) = (args.archive.is_some(), args.strategy.is_some());
+        if (archive || strategy) && !queries.is_empty() {
+            super::archive::check_request_titles(queries, "query", archive, strategy)?;
+            super::archive::check_request_titles(subject_records, "subject", archive, strategy)?;
         }
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
         // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
@@ -1968,13 +1995,13 @@ fn search(
         };
         // The BLAST archive (outfmt 11): one document per query batch that was read and searched
         // (`batch_spans`).
-        let archive_render = args
-            .archive
-            .as_ref()
-            .map(|handle| super::archive::ArchiveRender {
-                handle,
+        let archive_render = (args.archive.is_some() || args.strategy.is_some()).then(|| {
+            super::archive::ArchiveRender {
+                handle: args.archive.as_ref(),
+                strategy: args.strategy.as_ref(),
                 spans: &batch_spans,
-            });
+            }
+        });
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.
         let t_output = crate::utils::xtiming::clock();

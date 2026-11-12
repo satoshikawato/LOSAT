@@ -657,6 +657,7 @@ fn run_inner(
                     .in_id_scope(id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
+                None,
                 &args.db_filter,
                 database.list_taxids(),
                 database.filtered_empty(),

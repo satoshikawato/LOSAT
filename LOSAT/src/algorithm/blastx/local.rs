@@ -839,6 +839,7 @@ fn search_database(
             )?);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
+        None,
         &args.db_filter,
         database.list_taxids(),
         database.filtered_empty(),

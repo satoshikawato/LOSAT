@@ -46,6 +46,7 @@ use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::strategy::StrategyExport;
 use crate::report::archive::{
     defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
     KaBlock,
@@ -129,9 +130,35 @@ pub(crate) fn handle_for(
     ArchiveHandle::for_program(&option_inputs(args), args.database_name(), "TBLASTX").map(Some)
 }
 
-/// `report::archive::check_titles` for TBLASTX's records.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "TBLASTX")
+/// The search strategy export of a run (`-export_search_strategy`), into `file`
+/// (`strategy::create_strategy_file`), with TBLASTX's recorded options and `-db` name, and the
+/// `HitlistSize` of the run's format `outfmt` (`report_counts`; the archive's is outfmt 11's,
+/// `blastp::archive::strategy_for`).
+pub(crate) fn strategy_for(
+    args: &TblastxArgs,
+    outfmt: i32,
+    file: std::fs::File,
+) -> Result<StrategyExport> {
+    let mut inputs = option_inputs(args);
+    inputs.hitlist_size = crate::blastinput::report_counts::report_counts(
+        outfmt,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    )
+    .hitlist_size as i32;
+    StrategyExport::for_file(file, &inputs, args.database_name(), "TBLASTX")
+}
+
+/// `report::archive::check_request_titles` for TBLASTX's records: the archive's (`archive`) and
+/// the search strategy's (`strategy`).
+pub(crate) fn check_request_titles(
+    records: &[FastaRecord],
+    role: &str,
+    archive: bool,
+    strategy: bool,
+) -> Result<()> {
+    crate::report::archive::check_request_titles(records, role, "TBLASTX", archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -266,23 +293,14 @@ impl<'a> AlignSource for TblastxAligns<'a> {
     }
 }
 
-/// Writes the archive of each batch of `data.spans` to `writer`; `warnings` writes the warnings
-/// of a batch's queries (to the diagnostics, which saves them as the batch's messages) before
-/// its archive.
-pub(super) fn write_tblastx_archives(
-    handle: &ArchiveHandle,
+/// Calls `each` with the queries and the request inputs of each batch of `data.spans`, in order
+/// (`BatchArchive`; the archive and the search strategy file write their documents from it). The
+/// results' masks are read only `with_masks`: the search strategy's requests do not hold them.
+fn for_each_batch(
     data: &ArchiveData<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
-    writer: &mut dyn Write,
+    with_masks: bool,
+    mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
-    let run = RunRecord {
-        program: Program::Tblastx,
-        db_title: match data.subjects {
-            SeqalignSubjects::Records { .. } => None,
-            SeqalignSubjects::Database { title, .. } => Some(title),
-        },
-        gapped: false,
-    };
     // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
     let subject_deflines: Vec<Cow<'_, [u8]>> =
         data.subject_records.iter().map(defline_of).collect();
@@ -303,11 +321,6 @@ pub(super) fn write_tblastx_archives(
     for span in data.spans.iter().cloned() {
         if span.is_empty() {
             continue;
-        }
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
         }
         let records = &data.queries[span.clone()];
         let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
@@ -341,7 +354,7 @@ pub(super) fn write_tblastx_archives(
 
         // The results' masks are those of the search, so only a searched batch has them.
         let mut results_masks: Vec<MaskEntry> = Vec::new();
-        if searched {
+        if searched && with_masks {
             for (index, record) in (span.start..).zip(records) {
                 results_masks.extend(query_results_masks(
                     record,
@@ -397,6 +410,34 @@ pub(super) fn write_tblastx_archives(
             length_adjustment,
             searched_space: searched.then_some(stats.context0_search_space),
         };
+        each(span, &batch)?;
+    }
+    Ok(())
+}
+
+/// Writes the archive of each batch of `data.spans` to `writer`; `warnings` writes the warnings
+/// of a batch's queries (to the diagnostics, which saves them as the batch's messages) before
+/// its archive.
+pub(super) fn write_tblastx_archives(
+    handle: &ArchiveHandle,
+    data: &ArchiveData<'_>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Tblastx,
+        db_title: match data.subjects {
+            SeqalignSubjects::Records { .. } => None,
+            SeqalignSubjects::Database { title, .. } => Some(title),
+        },
+        gapped: false,
+    };
+    for_each_batch(data, true, |span, batch| {
+        if let Some(warnings) = warnings.as_deref_mut() {
+            for index in span.clone() {
+                warnings.before_query(index, &mut *writer)?;
+            }
+        }
         let mut aligns = TblastxAligns {
             run: RunRecord {
                 program: run.program,
@@ -406,9 +447,20 @@ pub(super) fn write_tblastx_archives(
             data,
             span,
         };
-        write_archive(handle, &batch, &mut aligns, writer)?;
-    }
-    Ok(())
+        write_archive(handle, batch, &mut aligns, &mut *writer)
+    })
+}
+
+/// Writes the search strategy's request of each batch of `data.spans`
+/// (`StrategyExport::write_batch`; TBLASTX's `LCaseMask` parameters are the lower-case runs, the
+/// same before and after the search).
+pub(super) fn write_tblastx_strategy(
+    strategy: &StrategyExport,
+    data: &ArchiveData<'_>,
+) -> Result<()> {
+    for_each_batch(data, false, |_, batch| {
+        strategy.write_batch(batch, batch.lcase_masks)
+    })
 }
 
 #[cfg(test)]

@@ -7711,6 +7711,7 @@ fn open_search_database(
             .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
+                None,
                 &args.db_filter,
                 database.list_taxids(),
                 database.filtered_empty(),

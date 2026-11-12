@@ -617,7 +617,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -661,6 +660,8 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// `-mt_mode`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "culling_limit",
+    // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
+    "export_search_strategy",
     "gap_trigger",
     "ignore_msa_master",
     "in_msa",
@@ -978,7 +979,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",
@@ -1016,7 +1016,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "db_hard_mask",
     "db_soft_mask",
     "entrez_query",
-    "export_search_strategy",
     "gilist",
     "html",
     "import_search_strategy",

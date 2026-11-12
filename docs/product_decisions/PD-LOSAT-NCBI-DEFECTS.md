@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.12
+- Version: 1.13
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -20,7 +20,9 @@
   1.11 2026-11-04 (the makeblastdb exception: a `-in` file of several bzip2 streams or zstd
   frames, line GZ; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
   1.12 2026-11-11 (the `losat rpsbproc` exception: PSSM-IDs of 2^31 and more, line PS item
-  PS16a)
+  PS16a);
+  1.13 2026-11-12 (the `losat rpsbproc` exception: a motif check that reads past the stored
+  positions, line PS item PS16b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -300,6 +302,24 @@ culling limit; its PR (PS16a) asks the maintainer to accept it, as version 1.5's
    prints 0 from `INVALIDPSSMID` on, would differ). No CDD release has a PSSM-ID of 2^31 or
    more (v3.22's largest is 533,962; the pseudo PSSM-IDs of accessions are about 1e8).
    Unit test `pssm_ids_from_2_to_the_31_are_found` (`LOSAT/src/rpsbproc/data_tests.rs`).
+
+## Approved exception (`losat rpsbproc`, a motif check past the stored positions, version 1.13)
+
+Version 1.13, decided by the Owner on 2026-11-11 (line PS `DECISIONS.md` 25, Q2 = A, answer
+「すべて推奨通り」); its PR (PS16b) asks the maintainer to accept it as the PR of exception 8 does.
+
+9. **`MotifCheck` reads `st_motif_pos` past its end.** rpsbproc 0.5.1 keeps the positions of
+   the first motif-bearing site that it checks in a function-static `vector<SeqPos_t>
+   st_motif_pos` (`common/basedata.cpp:671-676`) and compares the mapped positions of every
+   later motif-bearing site, of any domain and query of the process, with it: for each of the
+   `mtfLen` positions of the motif's minimal map, `rMappedRes[mapIdx].ori > st_motif_pos[mtfIdx]`
+   (`:704`). When the motif's minimal map is longer than the stored list (`mtfIdx >=
+   st_motif_pos.size()`) the read is outside the vector (C++ undefined behavior: heap bytes),
+   so NCBI's result depends on the heap. LOSAT treats the check as failed (returns 1, the site
+   is dropped), as the loop does when the mapped residues are exhausted (`:714-715`). The list
+   itself is NCBI's process-wide state, reproduced per run (rule 2). `MotifState::motif_check`
+   (`LOSAT/src/rpsbproc/sites.rs`); unit test `a_minimal_map_longer_than_the_stored_positions_fails_the_check`.
+   The PR gives the number of occurrences on E. coli K-12 MG1655 x CDD v3.22.
 
 ## Reproduced as NCBI (rule 2)
 

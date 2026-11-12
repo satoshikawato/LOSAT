@@ -84,14 +84,14 @@ jobs:
         run: |
           mkdir -p ${{ runner.temp }}/ph
           sudo -b sh -c 'python3 -I ${{ github.workspace }}/.github/ph-diag/watch.py ${{ runner.temp }}/ph > ${{ runner.temp }}/ph/watcher.out 2>&1'
-      - name: WebKit E2E with the engine, five times
+      - name: WebKit page starts (zz-ph-start.spec.ts), 2,000 times
         continue-on-error: true
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
           LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/losat
           CI: '1'
           PH_DIAG_DIR: ${{ runner.temp }}/ph
-        run: npx playwright test --project=webkit --repeat-each=5 --reporter=list,github > ${{ runner.temp }}/ph/e2e.log 2>&1
+        run: npx playwright test --project=webkit --repeat-each=2000 --reporter=list,github tests/e2e/zz-ph-start.spec.ts > ${{ runner.temp }}/ph/e2e.log 2>&1
       - name: Summary
         if: always()
         run: |

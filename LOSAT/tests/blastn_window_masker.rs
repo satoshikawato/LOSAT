@@ -222,6 +222,11 @@ fn blastn() -> Command {
                     | "BLASTDB"
                     | "ARCHIVE_FORMAT"
                     | "WINDOW_MASKER_PATH"
+                    | "BL2SEQ_LEGACY"
+                    | "CTOOLKIT_COMPATIBLE"
+                    | "OLD_FSC"
+                    | "ADAPTIVE_CBS"
+                    | "PRE_FETCH_SEQS_LIMIT"
             )
         {
             command.env_remove(name);

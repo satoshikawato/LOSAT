@@ -1027,18 +1027,102 @@ fn check_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, Str
     // A value of `[WINDOW_MASKER] WINDOW_MASKER_PATH` that LOSAT does not read as NCBI stores it
     // stops every program here, as the entry did before LOSAT read it: NCBI's reader reports a
     // `"` in the middle and a badly placed `\` as a syntax error of the file and stores no line
-    // after it (`stored_registry_value`).
-    window_masker_entry(path, &entries)?;
+    // after it (`stored_registry_value`). Every such entry of the file is checked, not only the
+    // last one, which the value comes from.
+    for (section, name, value) in &entries {
+        if section.eq_ignore_ascii_case("WINDOW_MASKER")
+            && name.eq_ignore_ascii_case("WINDOW_MASKER_PATH")
+        {
+            window_masker_value(path, value)?;
+        }
+    }
     Ok(entries)
 }
 
+/// The value of an entry `[WINDOW_MASKER] WINDOW_MASKER_PATH` as NCBI stores it, or why LOSAT
+/// does not read it as NCBI does (`stored_registry_value`; a byte that is not UTF-8, which
+/// `read_registry_file` reads as U+FFFD, would make another path).
+fn window_masker_value(path: &Path, value: &str) -> Result<String, String> {
+    let stored = stored_registry_value(value).map_err(|reason| {
+        format!(
+            "the registry file {} sets [WINDOW_MASKER] WINDOW_MASKER_PATH to a value with {reason}; this is not supported by LOSAT",
+            path.display()
+        )
+    })?;
+    if stored.contains(char::REPLACEMENT_CHARACTER) {
+        return Err(format!(
+            "the registry file {} sets [WINDOW_MASKER] WINDOW_MASKER_PATH to a value that is not valid UTF-8; this is not supported by LOSAT",
+            path.display()
+        ));
+    }
+    Ok(stored.to_string())
+}
+
 /// The value of `[WINDOW_MASKER] WINDOW_MASKER_PATH` that the registry file at `path` stores
-/// (`file_entry`), or why LOSAT does not read it as NCBI does.
+/// (that of its last entry, as `file_entry`), or why LOSAT does not read it as NCBI does
+/// (`window_masker_value`).
 fn window_masker_entry(
     path: &Path,
     entries: &[(String, String, String)],
 ) -> Result<Option<String>, String> {
-    file_entry(path, entries, "WINDOW_MASKER", "WINDOW_MASKER_PATH")
+    entries
+        .iter()
+        .rev()
+        .find(|(section, name, _)| {
+            section.eq_ignore_ascii_case("WINDOW_MASKER")
+                && name.eq_ignore_ascii_case("WINDOW_MASKER_PATH")
+        })
+        .map(|(_, _, value)| window_masker_value(path, value))
+        .transpose()
+}
+
+/// Whether NCBI's reader would store every line of a registry file whose lines LOSAT read as
+/// `entries`: its section and entry names are of NCBI's letters, and every value is one LOSAT
+/// reads as NCBI stores it. Otherwise NCBI reports a syntax error and stores no line after it.
+/// An entry before the first section is not checked (NCBI drops it).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:59-65
+/// ```c++
+/// inline bool s_IsNameSectionSymbol(char ch, IRegistry::TFlags flags)
+/// {
+///     return (isalnum((unsigned char) ch)
+///             ||  ch == '_'  ||  ch == '-' ||  ch == '.'  ||  ch == '/'
+///             ||  ((flags & IRegistry::fInternalSpaces)  &&  ch == ' '));
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:707-711
+/// ```c++
+///                 } else if ( !IsNameSection(section, flags) ) {
+///                     NCBI_THROW2(CRegistryException, eSection,
+///                                 "Invalid registry section name" + in_path
+///                                 + ": `" + str + "'", line);
+///                 }
+/// ```
+fn registry_file_is_ncbis(path: &Path, entries: &[(String, String, String)]) -> Result<(), String> {
+    let is_name = |text: &str| {
+        !text.is_empty()
+            && text.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/')
+            })
+    };
+    for (section, name, value) in entries {
+        if section.is_empty() {
+            continue;
+        }
+        if !is_name(section) || !is_name(name) {
+            return Err(format!(
+                "the registry file {} has the section or entry name [{section}] {name}, which NCBI BLAST+ reports as a syntax error; this is not supported by LOSAT",
+                path.display()
+            ));
+        }
+        stored_registry_value(value).map_err(|reason| {
+            format!(
+                "the registry file {} sets [{section}] {name} to a value with {reason}; this is not supported by LOSAT",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// `.ncbirc` as the registry of `-window_masker_taxid` reads it when the program's `.ini`
@@ -1061,6 +1145,7 @@ fn window_masker_entry(
 /// ```
 fn window_masker_ncbirc(path: &Path) -> Result<Option<String>, String> {
     let entries = read_registry_file(path)?;
+    registry_file_is_ncbis(path, &entries)?;
     if entries.iter().any(|(section, name, _)| {
         section.eq_ignore_ascii_case("NCBI") && name.eq_ignore_ascii_case(".Inherits")
     }) {
@@ -2709,14 +2794,15 @@ mod tests {
     }
 
     /// The entry is accepted in every program's registry files. A value LOSAT cannot read as
-    /// NCBI stores it stops every program, as the entry did before LOSAT read it (NCBI reports a
-    /// syntax error of the file and stores no line after it). A `.ncbirc` that only
-    /// `-window_masker_taxid` reads (the program's `.ini` turned it off) and that LOSAT does
-    /// not read as NCBI does (a syntax error, a bad value, `[NCBI] .Inherits`) is kept for
-    /// `-window_masker_taxid`, also when a variable gives the directory: NCBI reads the file
-    /// before it asks for the entry.
+    /// NCBI stores it (in any of the file's entries of that name) stops every program, as the
+    /// entry did before LOSAT read it (NCBI reports a syntax error of the file and stores no line
+    /// after it). When the program's `.ini` turned `.ncbirc` off, a `.ncbirc` that LOSAT does
+    /// not read as NCBI does (a syntax error, a bad value or name in any entry, `[NCBI]
+    /// .Inherits`, a value that is not UTF-8) is the reason for `-window_masker_taxid` to
+    /// refuse, also when a variable gives the directory: NCBI reads the file before it asks for
+    /// the entry.
     #[test]
-    fn an_unreadable_window_masker_directory_is_kept_for_the_taxid() {
+    fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
         let dir = std::env::temp_dir().join(format!(
             "losat-ncbi-environment-window-masker-kept-{}",
             std::process::id()
@@ -2763,6 +2849,13 @@ mod tests {
                 "{program}: {reason}"
             );
         }
+        // NCBI stops at the first entry, which the later one does not hide.
+        std::fs::write(
+            &ncbirc,
+            "[WINDOW_MASKER]\nWINDOW_MASKER_PATH = a\"b\nWINDOW_MASKER_PATH = /w\n",
+        )
+        .unwrap();
+        assert!(settings("blastn").is_err());
         let ini = dir.join("blastn.ini");
         std::fs::write(&ini, "[NCBI]\nDONT_USE_NCBIRC = 1\n").unwrap();
         std::fs::write(
@@ -2780,15 +2873,32 @@ mod tests {
                 .window_masker_path,
             Ok(Some("/v".to_string()))
         );
+        // An entry before the first section is dropped by NCBI without an error.
+        std::fs::write(
+            &ncbirc,
+            "x y = 1\n[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\n",
+        )
+        .unwrap();
+        assert_eq!(
+            settings("blastn").unwrap().window_masker_path,
+            Ok(Some("/w".to_string()))
+        );
+        let wm = "[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\n";
         for (text, expected) in [
-            ("[WINDOW_MASKER\nWINDOW_MASKER_PATH = /w\n", "syntax error"),
             (
-                "[WINDOW_MASKER]\nWINDOW_MASKER_PATH = a\"b\n",
+                "[WINDOW_MASKER\nWINDOW_MASKER_PATH = /w\n".to_string(),
+                "syntax error",
+            ),
+            (
+                "[WINDOW_MASKER]\nWINDOW_MASKER_PATH = a\"b\n".to_string(),
                 "WINDOW_MASKER_PATH",
             ),
-            ("[NCBI]\n.Inherits = other\n", ".Inherits"),
+            ("[NCBI]\n.Inherits = other\n".to_string(), ".Inherits"),
+            (format!("[BLAST]\nLONG_SEQID = a\"b\n{wm}"), "LONG_SEQID"),
+            (format!("[my blast]\nx = 1\n{wm}"), "name"),
+            (format!("[BLAST]\nlong seqid = 1\n{wm}"), "name"),
         ] {
-            std::fs::write(&ncbirc, text).unwrap();
+            std::fs::write(&ncbirc, &text).unwrap();
             for variable in [None, Some("/v")] {
                 let reason = settings_with("blastn", variable)
                     .unwrap()
@@ -2797,6 +2907,10 @@ mod tests {
                 assert!(reason.contains(expected), "{text:?} {variable:?}: {reason}");
             }
         }
+        // A byte that is not UTF-8 in the value.
+        std::fs::write(&ncbirc, b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\xff\n").unwrap();
+        let reason = settings("blastn").unwrap().window_masker_path.unwrap_err();
+        assert!(reason.contains("UTF-8"), "{reason}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -41,7 +41,13 @@ run:
 | `WINDOW_MASKER_PATH` | The directory, after the variable above. |
 | `[WINDOW_MASKER] WINDOW_MASKER_PATH` in `.ncbirc` | The directory, after both variables: the first `.ncbirc` on the search path, also when `<program>.ini` sets `[NCBI] DONT_USE_NCBIRC`; `NCBI_DONT_USE_NCBIRC` and `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` skip it. `<program>.ini`'s entry is not read. |
 
-A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search at the first query batch with NCBI's error (exit status 3). LOSAT refuses, before any output, a counts file in the ascii or optimized ascii format there (NCBI BLAST+ reads them), a `.ncbirc` that only this search reads and that LOSAT does not read as NCBI BLAST+ does (a syntax error, a value with a backslash or a quote inside, `[NCBI] .Inherits`), a directory or path that is not UTF-8, and a current directory it cannot read. LOSAT Web refuses `-window_masker_taxid` other than 0.
+A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search with NCBI's error at the first query batch the file cannot mask (exit status 3). LOSAT refuses, before any output:
+
+- a counts file in the ascii or optimized ascii format there (NCBI BLAST+ reads them);
+- when `<program>.ini` turns `.ncbirc` off for the program, a `.ncbirc` that LOSAT does not read as NCBI BLAST+ does: a syntax error, a value with a backslash or a quote inside in any entry, a section or entry name NCBI BLAST+ does not accept, `[NCBI] .Inherits`;
+- a directory or path that is not UTF-8, and a current directory it cannot read.
+
+LOSAT Web refuses `-window_masker_taxid` other than 0.
 
 The home directory is `HOME` (an empty `HOME` means no home directory), or without `HOME` the
 account's home directory; on Windows it is `APPDATA`, else `USERPROFILE`. Without `HOME` and without an account

@@ -465,6 +465,10 @@ impl PsiblastArgs {
             // psiblast has no -culling_limit (rejected above).
             culling_limit: None,
             ungapped: false,
+            // psiblast's parser refuses the X-drops (`cli.rs` `is_unported_psiblast_arg`).
+            xdrop_ungap: None,
+            xdrop_gap: None,
+            xdrop_gap_final: None,
             window_size: self.window_size,
             matrix: self.matrix,
             gap_open: self.gap_open,

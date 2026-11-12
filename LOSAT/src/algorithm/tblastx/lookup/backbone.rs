@@ -4,9 +4,11 @@
 
 use super::super::diagnostics::diagnostics_enabled;
 use super::super::translation::QueryFrame;
+#[cfg(test)]
+use super::encode_kmer_3;
 use super::{
-    compute_backbone_size, compute_mask, compute_unmasked_intervals, encode_kmer_3, ilog2, pv_set,
-    QueryContext, LOOKUP_ALPHABET_SIZE, LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
+    compute_backbone_size, compute_mask, ilog2, pv_set, QueryContext, LOOKUP_ALPHABET_SIZE,
+    LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
 };
 use crate::config::ScoringMatrix;
 use crate::stats::karlin_calc::{
@@ -224,6 +226,10 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
     /// # Safety
     /// `dst` must point to a hit that nothing else reads or writes meanwhile, and a `u16` hit's `q`
     /// must be at most 65,535.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_write(dst: *mut Self, q: i32);
 
     /// `src` stored at `dst` without a check, as [`Self::x_write`] stores one offset (a `memcpy`
@@ -231,6 +237,10 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
     ///
     /// # Safety
     /// As [`Self::x_write`], for the `src.len()` hits from `dst`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_copy(dst: *mut Self, src: &[i32]);
 
     /// The hit at `p` read with one volatile load (not taken out of a vector register by the
@@ -238,6 +248,7 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
     ///
     /// # Safety
     /// `p` must point to a hit.
+    #[cfg(target_arch = "x86_64")]
     unsafe fn x_read_volatile(p: *const Self) -> i32;
 
     /// Eight hits from `p` as eight `i32` lanes: one `vmovdqu` for `i32`, one `vpmovzxwd ymm, m128`
@@ -275,18 +286,27 @@ impl XHit for i32 {
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_write(dst: *mut Self, q: i32) {
         // SAFETY: (caller) `dst` points to a hit nothing else touches.
         unsafe { dst.write(q) }
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_copy(dst: *mut Self, src: &[i32]) {
         // SAFETY: (caller) `dst..dst + src.len()` are hits nothing else touches.
         unsafe { std::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()) }
     }
 
     #[inline(always)]
+    #[cfg(target_arch = "x86_64")]
     unsafe fn x_read_volatile(p: *const Self) -> i32 {
         // SAFETY: (caller) `p` points to a hit.
         unsafe { std::ptr::read_volatile(p) }
@@ -325,6 +345,10 @@ impl XHit for u16 {
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_write(dst: *mut Self, q: i32) {
         debug_assert!(
             u16::try_from(q).is_ok(),
@@ -335,6 +359,10 @@ impl XHit for u16 {
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_copy(dst: *mut Self, src: &[i32]) {
         for (k, &q) in src.iter().enumerate() {
             // SAFETY: (caller) `dst..dst + src.len()` are hits nothing else touches.
@@ -343,6 +371,7 @@ impl XHit for u16 {
     }
 
     #[inline(always)]
+    #[cfg(target_arch = "x86_64")]
     unsafe fn x_read_volatile(p: *const Self) -> i32 {
         // SAFETY: (caller) `p` points to a hit.
         i32::from(unsafe { std::ptr::read_volatile(p) })
@@ -421,6 +450,13 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
     ///
     /// # Safety
     /// `cell` must point to a cell of a backbone that nothing writes meanwhile.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     unsafe fn x_cursor_at(cell: *const Self) -> usize;
 
     /// The cell's own entries (a cell with at most `AA_HITS_PER_CELL` hits is written here).
@@ -431,6 +467,10 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
     ///
     /// # Safety
     /// `cell` must point to a cell of a backbone.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_entries_ptr(cell: *mut Self) -> *mut Self::Hit;
 }
 
@@ -484,6 +524,13 @@ impl XCell for BackboneCell {
     }
 
     #[inline(always)]
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     unsafe fn x_cursor_at(cell: *const Self) -> usize {
         // SAFETY: (caller) `cell` points to a cell that nothing writes meanwhile.
         unsafe { BackboneCell::x_cursor_of(cell) }
@@ -495,6 +542,10 @@ impl XCell for BackboneCell {
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_entries_ptr(cell: *mut Self) -> *mut i32 {
         // SAFETY: (caller) `cell` points to a cell.
         unsafe { std::ptr::addr_of_mut!((*cell).entries) }.cast::<i32>()
@@ -549,6 +600,13 @@ impl XCell for BackboneCell16 {
     }
 
     #[inline(always)]
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     unsafe fn x_cursor_at(cell: *const Self) -> usize {
         // SAFETY: (caller) `cell` points to a cell that nothing writes meanwhile.
         let [low, high, _] = unsafe { std::ptr::addr_of!((*cell).entries).read() };
@@ -574,6 +632,10 @@ impl XCell for BackboneCell16 {
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     unsafe fn x_entries_ptr(cell: *mut Self) -> *mut u16 {
         // SAFETY: (caller) `cell` points to a cell.
         unsafe { std::ptr::addr_of_mut!((*cell).entries) }.cast::<u16>()
@@ -1560,7 +1622,7 @@ fn x_prepare_lookup_query(
     let mut query_offset = 0i32;
 
     for (q_idx, frames) in queries.iter().enumerate() {
-        for (f_idx, frame) in frames.iter().enumerate() {
+        for frame in frames.iter() {
             prepared.frame_bases.push(query_offset);
             prepared.concat_query.extend_from_slice(&frame.aa_seq[1..]);
 
@@ -1587,7 +1649,6 @@ fn x_prepare_lookup_query(
             if !x_with_karlin {
                 prepared.contexts.push(QueryContext {
                     q_idx: q_idx as u32,
-                    f_idx: f_idx as u8,
                     frame: frame.frame,
                     aa_seq: frame.aa_seq.clone(),
                     aa_seq_nomask: frame.aa_seq_nomask.clone(),
@@ -1609,7 +1670,6 @@ fn x_prepare_lookup_query(
 
             prepared.contexts.push(QueryContext {
                 q_idx: q_idx as u32,
-                f_idx: f_idx as u8,
                 frame: frame.frame,
                 aa_seq: frame.aa_seq.clone(),
                 aa_seq_nomask: frame.aa_seq_nomask.clone(),
@@ -2358,6 +2418,7 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
 ) -> XBxTable {
     build_ncbi_lookup_with(
         ScoringMatrix::Blosum62,
+        LOOKUP_WORD_LENGTH,
         concat_query,
         lookup_locations,
         contexts,
@@ -2369,14 +2430,18 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
 }
 
 /// [`build_ncbi_lookup_from_prepared`] with another matrix than BLOSUM62 (BLASTX's other matrices,
-/// items SC6 and SC6b of line NP): the same builds with the matrix's scores (the neighbour lists
-/// of the pooled build and of a thread's builds are kept per matrix, the key of `x_lut_direct.rs`'s
-/// memos). Not inlined, so that BLOSUM62's build keeps its code.
+/// items SC6 and SC6b of line NP) or another word length than 3 (BLASTX's `-word_size` 2 and 4,
+/// item SC9): the same builds with the matrix's scores and the words of `word_length` letters (the
+/// neighbour lists of the pooled build and of a thread's builds are kept per matrix and word
+/// length, the key of `x_lut_direct.rs`'s memos; a backbone index wider than 16 bits, word length
+/// 4, is built by the joint builder, `x_pair_lut_wide.rs`, whose table is the reference builder's).
+/// Not inlined, so that BLOSUM62's build keeps its code.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_ncbi_lookup_from_prepared_of(
     matrix: ScoringMatrix,
+    word_length: usize,
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
@@ -2385,9 +2450,10 @@ pub(crate) fn build_ncbi_lookup_from_prepared_of(
     parts: usize,
     narrow_cutoff: Option<u64>,
 ) -> XBxTable {
-    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+    debug_assert!(matrix != ScoringMatrix::Blosum62 || word_length != LOOKUP_WORD_LENGTH);
     build_ncbi_lookup_with(
         matrix,
+        word_length,
         concat_query,
         lookup_locations,
         contexts,
@@ -2398,11 +2464,13 @@ pub(crate) fn build_ncbi_lookup_from_prepared_of(
     )
 }
 
-/// The body of [`build_ncbi_lookup_from_prepared`] with the matrix `matrix`.
+/// The body of [`build_ncbi_lookup_from_prepared`] with the matrix `matrix` and words of
+/// `word_length` letters.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn build_ncbi_lookup_with(
     matrix: ScoringMatrix,
+    word_length: usize,
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
@@ -2430,21 +2498,68 @@ fn build_ncbi_lookup_with(
     //     }
     // ```
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
-    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
-    // mode, or a backbone index wider than 16 bits) the reference builder below runs. With `pooled`
+    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines, a backbone index
+    // wider than 16 bits takes the joint builder below and diagnostics mode the reference builder
+    // below. With `pooled`
     // (the pooled build, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
     // kept vectors; the caller gives them back (`x_give_back_pooled`, `x_give_back_pooled16`) when
     // it drops the table, or the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, matrix, 3, parts, narrow_cutoff)
+        x_lut_direct::x_build_direct_pooled(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            parts,
+            narrow_cutoff,
+        )
     } else {
-        x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, 3, narrow_cutoff)
+        x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, word_length, narrow_cutoff)
     };
     let prepared = match built {
         Ok(table) => return table,
         Err(prepared) => prepared,
     };
-    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, 3).0)
+    // A backbone index wider than the direct builder's 16 bits (`-word_size 4`, item SC9 of line
+    // NP; for BLOSUM62's 3 letters a constant false): the joint builder of 32-bit indices
+    // (`x_pair_lut_wide.rs`) with the batch's lookup locations as its one table, which is the
+    // reference builder's table, on `parts` tasks. Diagnostics mode keeps the reference builder.
+    if !x_pair_lut::x_direct_covers(word_length)
+        && x_pair_lut::x_pair_lut_wide::x_wide_covers(word_length)
+        && !diagnostics_enabled()
+    {
+        return XBxTable::Wide(
+            x_pair_lut::XPairLutQuery::x_from_prepared(prepared, threshold, matrix, word_length)
+                .x_build_full_wide(parts),
+        );
+    }
+    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+}
+
+/// The reference builder's table of a BLASTX lookup query (the inputs `build_ncbi_lookup_with`
+/// takes), for the tests of `blastx::seed` (item SC9 of line NP, a test of threaded builds).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_reference_table_from_prepared(
+    matrix: ScoringMatrix,
+    word_length: usize,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+) -> BlastAaLookupTable {
+    let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
+    let prepared = PreparedLookupQuery {
+        concat_query,
+        lookup_locations,
+        contexts,
+        frame_bases,
+        skipped_seg_mask: 0,
+    };
+    build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245
@@ -2884,74 +2999,6 @@ fn build_lookup_from_prepared(
     )
 }
 
-/// Build a simple direct (exact) 3-mer lookup table for tests and diagnostics.
-pub fn build_direct_lookup(queries: &[Vec<QueryFrame>]) -> Vec<Vec<(u32, u8, u32)>> {
-    let word_length = LOOKUP_WORD_LENGTH;
-    let alphabet_size = LOOKUP_ALPHABET_SIZE;
-    let charsize = ilog2(alphabet_size) + 1;
-    let mask = compute_mask(word_length, charsize);
-    let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
-
-    let mut table: Vec<Vec<(u32, u8, u32)>> = vec![Vec::new(); backbone_size];
-
-    for (q_idx, frames) in queries.iter().enumerate() {
-        for (f_idx, frame) in frames.iter().enumerate() {
-            if frame.aa_len < 3 || frame.aa_seq.len() < 5 {
-                continue;
-            }
-
-            let seq_ptr = &frame.aa_seq[1..frame.aa_seq.len() - 1];
-            // NCBI invalid_mask = 0xff << charsize (Uint1).
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:89-120
-            let invalid_mask: u8 = 0xffu8 << (charsize as u32);
-            let unmasked = compute_unmasked_intervals(&frame.seg_masks, frame.aa_len);
-            for (start, end) in unmasked {
-                let from = start as i32;
-                let to = end.saturating_sub(1) as i32;
-                // NCBI: if (word_length > to - from + 1) continue;
-                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:96-100
-                if word_length as i32 > to - from + 1 {
-                    continue;
-                }
-                let mut offset = from;
-                let mut word_target = from + word_length as i32;
-
-                while offset <= to {
-                    if offset >= word_target {
-                        let word_start = (offset - word_length as i32) as usize;
-                        let idx = encode_kmer_3(
-                            seq_ptr[word_start] as usize,
-                            seq_ptr[word_start + 1] as usize,
-                            seq_ptr[word_start + 2] as usize,
-                            charsize,
-                        ) & mask;
-                        table[idx].push((q_idx as u32, f_idx as u8, word_start as u32));
-                    }
-                    if (seq_ptr[offset as usize] & invalid_mask) != 0 {
-                        // NCBI: word_target = seq + lut_word_length + 1
-                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
-                        word_target = offset + word_length as i32 + 1;
-                    }
-                    offset += 1;
-                }
-
-                if offset >= word_target {
-                    let word_start = (offset - word_length as i32) as usize;
-                    let idx = encode_kmer_3(
-                        seq_ptr[word_start] as usize,
-                        seq_ptr[word_start + 1] as usize,
-                        seq_ptr[word_start + 2] as usize,
-                        charsize,
-                    ) & mask;
-                    table[idx].push((q_idx as u32, f_idx as u8, word_start as u32));
-                }
-            }
-        }
-    }
-
-    table
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3088,22 +3135,8 @@ mod tests {
             assert!(one.iter().any(|context| !context.is_valid));
             for (a, b) in one.iter().zip(&pooled) {
                 assert_eq!(
-                    (
-                        a.q_idx,
-                        a.f_idx,
-                        a.frame,
-                        a.aa_len,
-                        a.orig_len,
-                        a.frame_base
-                    ),
-                    (
-                        b.q_idx,
-                        b.f_idx,
-                        b.frame,
-                        b.aa_len,
-                        b.orig_len,
-                        b.frame_base
-                    )
+                    (a.q_idx, a.frame, a.aa_len, a.orig_len, a.frame_base),
+                    (b.q_idx, b.frame, b.aa_len, b.orig_len, b.frame_base)
                 );
                 assert_eq!((&a.aa_seq, &a.aa_seq_nomask), (&b.aa_seq, &b.aa_seq_nomask));
                 assert_eq!(a.is_valid, b.is_valid);

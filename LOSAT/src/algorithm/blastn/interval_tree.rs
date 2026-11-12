@@ -25,8 +25,9 @@ pub enum IndexMethod {
     QueryOnly,
     /// Index by query and then by subject offset
     QueryAndSubject,
-    /// Index by query offset only, strand indifferent
-    QueryOnlyStrandIndifferent,
+    /// Index by query offset only, strand indifferent (NCBI's `eQueryOnlyStrandIndifferent`;
+    /// renamed so that the variants do not all start with `Query`, clippy `enum_variant_names`)
+    StrandIndifferentQueryOnly,
 }
 
 // NCBI reference: blast_itree.c:41-45
@@ -1210,7 +1211,7 @@ impl BlastIntervalTree {
         // }
         let mut query_start = query_context_offset;
         let (region_start, region_end) =
-            if index_method == IndexMethod::QueryOnlyStrandIndifferent && hsp.query_frame < 0 {
+            if index_method == IndexMethod::StrandIndifferentQueryOnly && hsp.query_frame < 0 {
                 let region_end = query_start - hsp.query_offset;
                 let region_start = query_start - hsp.query_end;
                 query_start = query_start - hsp.query_length - 1;
@@ -1423,7 +1424,7 @@ impl BlastIntervalTree {
                 // The new interval crosses the center of the node
                 if index_subject_range
                     || index_method == IndexMethod::QueryOnly
-                    || index_method == IndexMethod::QueryOnlyStrandIndifferent
+                    || index_method == IndexMethod::StrandIndifferentQueryOnly
                 {
                     // NCBI reference: blast_itree.c:668-675
                     // If indexing subject offsets already, or only indexing query,
@@ -1502,7 +1503,7 @@ impl BlastIntervalTree {
         // }
         let (old_region_start, old_region_end) = if index_subject_range {
             (old_hsp.subject_offset, old_hsp.subject_end)
-        } else if index_method == IndexMethod::QueryOnlyStrandIndifferent && old_hsp.query_frame < 0
+        } else if index_method == IndexMethod::StrandIndifferentQueryOnly && old_hsp.query_frame < 0
         {
             let q_start = old_hsp.query_context_offset;
             let old_region_end = q_start - old_hsp.query_offset;
@@ -1533,7 +1534,7 @@ impl BlastIntervalTree {
             // Old leaf straddles both subtrees of new node
             if index_subject_range
                 || index_method == IndexMethod::QueryOnly
-                || index_method == IndexMethod::QueryOnlyStrandIndifferent
+                || index_method == IndexMethod::StrandIndifferentQueryOnly
             {
                 // NCBI reference: blast_itree.c:771
                 self.nodes[mid_index].midptr = old_leaf_index as i32;

@@ -104,6 +104,13 @@ fn make_counts() {
         // `-window_masker_taxid`: <dir>/<taxid>/wmasker.obinary, the directory named by the
         // registry files relative to LOSAT/.
         let rc = b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = target/winmask_blastn/taxid\n".to_vec();
+        // The system-wide registry file that NCBI reads (`ncbi.ini` on Windows, metareg.hpp:65-69):
+        // the case `taxid_ini_dont_use_ncbirc` gives the same bytes there.
+        let system_wide = if cfg!(windows) {
+            "cfg_inidont/ncbi.ini"
+        } else {
+            "cfg_inidont/.ncbirc"
+        };
         let taxid_files: [(&str, Vec<u8>); 7] = [
             ("taxid/562/wmasker.obinary", data.clone()),
             ("taxid/-1/wmasker.obinary", data.clone()),
@@ -120,7 +127,7 @@ fn make_counts() {
                 "cfg_inidont/blastn.ini",
                 b"[NCBI]\nDONT_USE_NCBIRC = 1\n".to_vec(),
             ),
-            ("cfg_inidont/.ncbirc", rc),
+            (system_wide, rc),
         ];
         for (name, content) in taxid_files {
             let path = work.join(name);

@@ -84,9 +84,7 @@ pub(super) struct SubjectSearchEnv {
     pub(super) x_strips: bool,
     pub(super) x_kind: x_few_subj::Kind,
     pub(super) use_parallel: bool,
-    // The database size, the e-value threshold, `-subject_besthit` and LOSAT_X_QGROUPPAR.
-    pub(super) db_len_total: usize,
-    pub(super) db_num_seqs: usize,
+    // The e-value threshold, `-subject_besthit` and LOSAT_X_QGROUPPAR.
     pub(super) evalue_threshold: f64,
     pub(super) subject_besthit: bool,
     pub(super) x_qgroup_batch: bool,
@@ -283,8 +281,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         blastn_trace_enabled,
         debug_window,
     });
-    let db_len_total = seq_data.db_len_total;
-    let db_num_seqs = seq_data.db_num_seqs;
     let evalue_threshold = crate::algorithm::blastn::coordination::determine_evalue(args);
     let subject_besthit = args.subject_besthit;
     // EXPERIMENT (LOSAT_X_QGROUPPAR): whether the gapped stages of a subject searched on this
@@ -383,8 +379,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         x_strips,
         x_kind,
         use_parallel,
-        db_len_total,
-        db_num_seqs,
         evalue_threshold,
         subject_besthit,
         x_qgroup_batch,

@@ -332,6 +332,7 @@ impl TaxError {
     }
 
     /// Detail of the failure for logs (no NCBI counterpart).
+    #[cfg(test)]
     pub fn detail(&self) -> &str {
         match self {
             TaxError::NoTaxInfo => "no taxid2offset table",
@@ -713,6 +714,7 @@ impl<'r, R: ReadAt + ?Sized> OidTaxIds<'r, R> {
     }
 
     /// Number of OIDs in the file.
+    #[cfg(test)]
     pub fn num_oids(&self) -> u64 {
         self.idx.n_oids
     }
@@ -879,6 +881,7 @@ impl<'r, R: ReadAt + ?Sized> OidSeqIds<'r, R> {
     }
 
     /// Number of OIDs in the file.
+    #[cfg(test)]
     pub fn num_oids(&self) -> u64 {
         self.idx.n_oids
     }

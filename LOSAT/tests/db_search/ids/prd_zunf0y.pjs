@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "prd_zunf0y",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_zunf0y (parsed Seq-ids)",
+  "number-of-letters": 250,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-11T14:21:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49753,
+  "bytes-to-cache": 372,
+  "files": [
+    "prd_zunf0y.pdb",
+    "prd_zunf0y.phr",
+    "prd_zunf0y.pin",
+    "prd_zunf0y.pnd",
+    "prd_zunf0y.pni",
+    "prd_zunf0y.pog",
+    "prd_zunf0y.pos",
+    "prd_zunf0y.pot",
+    "prd_zunf0y.psq",
+    "prd_zunf0y.ptf",
+    "prd_zunf0y.pto"
+  ]
+}

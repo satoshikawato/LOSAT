@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "prd_otag_4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "prd_otag_4 (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-11T14:21:00",
+  "number-of-volumes": 1,
+  "bytes-total": 884,
+  "bytes-to-cache": 607,
+  "files": [
+    "prd_otag_4.phr",
+    "prd_otag_4.pin",
+    "prd_otag_4.pog",
+    "prd_otag_4.psd",
+    "prd_otag_4.psi",
+    "prd_otag_4.psq"
+  ]
+}

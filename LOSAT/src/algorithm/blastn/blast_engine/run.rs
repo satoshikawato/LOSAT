@@ -11827,8 +11827,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         )]
         x_kind,
         use_parallel,
-        db_len_total,
-        db_num_seqs,
         evalue_threshold,
         subject_besthit,
         x_qgroup_batch,
@@ -15325,8 +15323,6 @@ fn search_query_batch<const UNGAPPED: bool>(
             query_eff_searchsp,
             search_karlin_ref,
             round_down_evalue_score,
-            db_len_total,
-            db_num_seqs,
             reward,
             penalty,
             gap_open,

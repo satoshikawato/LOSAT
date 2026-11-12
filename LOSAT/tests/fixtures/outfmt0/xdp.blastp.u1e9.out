@@ -1,0 +1,229 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/outfmt0/x1_s.faa).
+           24 sequences; 22,488 total letters
+
+
+
+Query= BDT62082.1 baculoviral IAP repeat-containing protein [Litopenaeus
+vannamei majanivirus Nimav-1_LVa]
+
+Length=217
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.447    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3454296
+
+
+Query= BDT62084.1 innexin [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+
+Length=366
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.139    0.424    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6497568
+
+
+Query= BDT62085.1 hypothetical protein [Litopenaeus vannamei majanivirus
+Nimav-1_LVa]
+
+Length=199
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.138    0.414    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3097536
+
+
+Query= BDT62086.1 hypothetical protein [Litopenaeus vannamei majanivirus
+Nimav-1_LVa]
+
+Length=254
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]        22.3    0.63 
+BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]                    21.2    1.2  
+BDT62530.1 wsv115-like protein [Metapenaeus ensis majanivirus]        20.8    2.7  
+BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]       19.6    5.5  
+BDT62545.1 wsv192-like protein [Metapenaeus ensis majanivirus]        18.9    9.0  
+
+
+> BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]
+Length=377
+
+ Score = 22.3 bits (46),  Expect = 0.63, Method: Compositional matrix adjust.
+ Identities = 10/30 (33%), Positives = 17/30 (57%), Gaps = 0/30 (0%)
+
+Query  215  IERRTIMKNKVSKKPRRKSFELKSLLFTQR  244
+            I  R +     ++  R KSF++KS +FT +
+Sbjct  156  ITNRDVCIKSFAQNKRYKSFDIKSTIFTGK  185
+
+
+> BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]
+Length=154
+
+ Score = 21.2 bits (43),  Expect = 1.2, Method: Compositional matrix adjust.
+ Identities = 8/13 (62%), Positives = 11/13 (85%), Gaps = 0/13 (0%)
+
+Query  201  EMINYPKIKKIEN  213
+            E I YPKI+K++N
+Sbjct  121  ESILYPKIQKVDN  133
+
+
+> BDT62530.1 wsv115-like protein [Metapenaeus ensis majanivirus]
+Length=1042
+
+ Score = 20.8 bits (42),  Expect = 2.7, Method: Compositional matrix adjust.
+ Identities = 9/21 (43%), Positives = 13/21 (62%), Gaps = 0/21 (0%)
+
+Query  190  DNTMIPKIIYNEMINYPKIKK  210
+            DN M P+ + + + NY KI K
+Sbjct  726  DNVMTPQTLASHVDNYVKIFK  746
+
+
+> BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]
+Length=370
+
+ Score = 19.6 bits (39),  Expect = 5.5, Method: Compositional matrix adjust.
+ Identities = 18/81 (22%), Positives = 37/81 (46%), Gaps = 13/81 (16%)
+
+Query  78   CINFESVDRVYFFKNIMDKE--FRLLLRMSYKSKPLYVEAIYSDHFTIRKSITIV-----  130
+             +  E +D+V    +++D +  F    +MS K +  Y+++I   + T  K  + V     
+Sbjct  178  SLEKEVLDKVSEKTSLVDNDTLFNKYKKMSQKERQQYIDSIMIKYQTDEKEDSSVMSLYK  237
+
+Query  131  ------TYDAQRFVESIVFSY  145
+                    + Q+++ESI+  Y
+Sbjct  238  KYQKMSQKERQQYIESILTKY  258
+
+
+ Score = 19.2 bits (38),  Expect = 6.1, Method: Compositional matrix adjust.
+ Identities = 8/23 (35%), Positives = 14/23 (61%), Gaps = 0/23 (0%)
+
+Query  170  IRLEDLSRIVSSNQINRFSNDNT  192
+            ++ +D+S+  S N+ N   ND T
+Sbjct  43   LKKDDVSKKTSGNEDNVMDNDMT  65
+
+
+> BDT62545.1 wsv192-like protein [Metapenaeus ensis majanivirus]
+Length=755
+
+ Score = 18.9 bits (37),  Expect = 9.0, Method: Compositional matrix adjust.
+ Identities = 18/66 (27%), Positives = 30/66 (45%), Gaps = 3/66 (5%)
+
+Query  10   FGYTTINIDGNTKKRVSEFTFMSIERQIQDNKNLIKWLNLLNEMQYS-NEKITFPDEIRH  68
+            + Y T+ ++ N KK++   T   I   I  N N I  L    ++ YS N KI  P  ++ 
+Sbjct  274  YSYCTLCLNNN-KKKIDNITSQIICDNISVNSNNISKL-FTEDIAYSQNIKIKVPQYLKA  331
+
+Query  69   WEEEEL  74
+               + +
+Sbjct  332  LHSQTI  337
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.137    0.397    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4212432
+
+
+Query= BDT62087.1 hypothetical protein [Litopenaeus vannamei majanivirus
+Nimav-1_LVa]
+
+Length=407
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.142    0.447    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7333056
+
+
+Query= BDT62088.1 baculoviral IAP repeat-containing protein [Litopenaeus
+vannamei majanivirus Nimav-1_LVa]
+
+Length=707
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.134    0.413    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 13472136
+
+
+  Database: User specified sequence set (Input: tests/fasta/outfmt0/x1_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 22,488
+  Number of sequences in database:  24
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

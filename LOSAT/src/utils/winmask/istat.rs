@@ -59,7 +59,8 @@ pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
     discover(&mut file)
 }
 
-/// [`discover_stat_type`] on an opened file or an in-memory copy of one.
+/// `discover_stat_type` on an opened file or an in-memory copy of one (LOSAT Web's counts files,
+/// `web_adapter`).
 pub fn discover_stat_type_in<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskError> {
     discover(r)
 }

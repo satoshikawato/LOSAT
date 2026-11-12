@@ -93,8 +93,10 @@
 //! `max_level` is below the bound, and is `retrieve` otherwise. The callers: the retrieves of the
 //! two reference scans, `extend_offset_pairs` (`pair_extend.rs`, two-stage tables) and the seed
 //! closure of the other tables (`run.rs`), not while the debug, trace or window diagnostics print
-//! what they read; the one-hit fold of PAIRPAR (`x_pair_seed.rs` `fold`) and the
-//! two-hit fold of `LOSAT_X_PAIRPARDISC` (`x_pair_seed_disc.rs` `fold_two_hit`). The
+//! what they read; the one-hit fold of PAIRPAR (`x_pair_seed.rs` `fold`), the
+//! two-hit fold of `LOSAT_X_PAIRPARDISC` (`x_pair_seed_disc.rs` `fold_two_hit`), the na fold
+//! of `LOSAT_X_PAIRPARNA` (`x_pair_seed_na.rs` `fold_na_t`) and the bucket-split folds of
+//! `LOSAT_X_PAIRPARFOLD` (`x_pair_seed_part.rs` `last_hit`). The
 //! off-diagonal retrieves (`scan_range > 0`, an unported option) stay plain walks.
 //!
 //! Why the output is the same:

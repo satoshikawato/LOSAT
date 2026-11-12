@@ -4416,8 +4416,9 @@ Scheduling (each value computed by one thread with the original function; order 
   test), which are the only readers of the retrieve; the insert still walks the chain itself, and the next
   seed reads only the table, so the bound needs no term for the insert, and the hit list and the table
   are the reference's (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in
-  the reference fold (`extend_offset_pairs`, not with debug, trace or window diagnostics, which print the
-  values read) and in the strips folds of PAIRPAR and `LOSAT_X_PAIRPARDISC`; the off-diagonal
+  the two reference scans (`extend_offset_pairs` for the two-stage tables, and the seed closure of the
+  other tables, which blastn-short's word 7 reaches; not with debug, trace or window diagnostics, which
+  print the values read) and in the strips folds of PAIRPAR and `LOSAT_X_PAIRPARDISC`; the off-diagonal
   retrieves (`scan_range`) stay walks. With the switch off the table has no bounds, an insert tests the
   length of an empty vector, and the retrieves walk as before (callgrind, release: +0.005 to +0.10 %
   instructions against the base).

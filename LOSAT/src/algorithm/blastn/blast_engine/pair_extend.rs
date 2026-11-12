@@ -27,8 +27,10 @@
 //!             hits_extended += s_BlastnDiagTableExtendInitialHit(query, subject,
 //! ```
 //!
-//! This module is a child of `run` for the types it keeps private (`DiagHashTable`, `OffsetPair`,
-//! `SubjectChunk`). Its functions are the statements of the scan's closures that were there, in
+//! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
+//! `OffsetPair`, `SubjectChunk`, `QueryContext`, `QueryContextIndex`, `UngappedHit` and
+//! `BlastnTiming`; `x_push_ungapped`, `mask_lookup_index`, `packed_kmer_at_seed_mask` and
+//! `X_HIT_AHEAD`). Its functions are the statements of the scan's closures that were there, in
 //! their order; the strips folds of `x_pair_seed.rs` and `x_pair_seed_disc.rs` copy those
 //! statements one by one, so their order is kept here. What the steps read that is the same for
 //! every pair of a chunk is `PairExtendInputs`, and what they write is `PairExtendState`, both

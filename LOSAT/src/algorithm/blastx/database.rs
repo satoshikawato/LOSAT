@@ -943,6 +943,7 @@ mod tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: false,
+            gapped_k: None,
         }]
     }
 

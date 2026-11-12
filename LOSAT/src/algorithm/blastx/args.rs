@@ -435,6 +435,35 @@ pub struct BlastxArgs {
         help = "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment"
     )]
     pub comp_based_stats: String,
+    /// The RPS search of an RPSTBLASTN run (`algorithm::rpstblastn`), which takes the place of
+    /// BLASTX's search of the query batches; `None` in every BLASTX run.
+    #[arg(skip)]
+    pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+}
+
+/// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
+/// DECISIONS 38 D1): the user's nucleotide queries, in BLASTX's query batches with BLASTX's frames,
+/// masks and statistics, against a profile database, whose results BLASTX's reports write. A run
+/// that has one (`ResolvedOptions::rpstblastn`) is RPSTBLASTN's: the command line's loop of the
+/// query batches (`native::run_query_batches`) is this search's, once per run; nothing of BLASTX's
+/// own search runs. It is a trait of BLASTX's so that BLASTX does not depend on the RPS engine.
+pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
+    /// `native::run_query_batches` of RPSTBLASTN: the query batches of `read`, searched against
+    /// the profile volumes of `database`, each handed to `render` in the reader's order. Returns
+    /// the number of queries reported.
+    #[allow(clippy::too_many_arguments)]
+    fn run_query_batches(
+        &self,
+        options: &ResolvedOptions,
+        database: Option<&super::database::BlastxDatabase>,
+        read: &mut super::native::QueryBatchReader<'_>,
+        diagnostics: &mut dyn std::io::Write,
+        search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
+        render: &mut super::native::BatchRender<'_>,
+    ) -> Result<usize>;
+    /// `-line_length`, `-sorthits` and `-sorthsps`, which BLASTX does not have: the formatting
+    /// handler's warnings (`native::warnings_of`) and the pairwise report's line length.
+    fn formatting(&self) -> crate::blastinput::report_counts::FormattingArgs;
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-871
@@ -693,6 +722,9 @@ pub struct ResolvedOptions {
     /// `qcovs` by; read by `native::run` where NCBI's query options handler reads it (after the
     /// subjects), `None` otherwise.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
+    /// RPSTBLASTN's search (`BlastxArgs::rpstblastn`): the run is RPSTBLASTN's, whose reports name
+    /// it; `None` in every BLASTX run.
+    pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 // ```c++
@@ -1103,7 +1135,22 @@ impl BlastxArgs {
         )?;
         Ok(ResolvedOptions {
             word_size,
-            threshold,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67
+            // ```c++
+            // CBlastRPSOptionsHandle::SetLookupTableDefaults()
+            // {
+            //     m_Opts->SetLookupTableType(eRPSLookupTable);
+            //     // N.B.: the word threshold is not set because for RPS-BLAST it CANNOT be
+            //     // done, i.e.: the RPS-BLAST databases already have this value encoded in
+            //     // them and therefore this value cannot be changed on an RPS-BLAST run
+            // }
+            // ```
+            // RPSTBLASTN's threshold is 0: its reports print none.
+            threshold: if self.rpstblastn.is_some() {
+                0.0
+            } else {
+                threshold
+            },
             lookup_type: if word_size == 5 { 4 } else { 3 },
             matrix: matrix_name,
             scoring: scoring.unwrap_or(crate::config::ScoringMatrix::Blosum62),
@@ -1205,6 +1252,7 @@ impl BlastxArgs {
             filtered_empty: false,
             num_threads: self.num_threads,
             query_range: None,
+            rpstblastn: self.rpstblastn.clone(),
         })
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-220

@@ -58,7 +58,7 @@ pub use crate::cli::{exit_on_native_error, NativeError};
 //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
 //             exit_code = BLAST_ENGINE_ERROR;                                 \
 // ```
-pub(super) fn engine(message: impl fmt::Display) -> anyhow::Error {
+pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
     NativeError {
         exit: 3,
         message: format!("BLAST engine error: {message}\n"),
@@ -302,7 +302,13 @@ fn run_inner(
     // arguments only). The registry's `BLASTDB` finds `-db`, and the data loaders decide whether
     // the reader tries the first line of the query or the `-subject` file as a Seq-id
     // (`FastaStream::seq_id_role`).
-    let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+    // An RPSTBLASTN run (`BlastxArgs::rpstblastn`) is the NCBI application rpstblastn: its
+    // settings, messages and query batches are that program's.
+    let (program, losat_program) = match &args.rpstblastn {
+        Some(_) => ("rpstblastn", "RPSTBLASTN"),
+        None => ("blastx", "BLASTX"),
+    };
+    let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings(program)
         .map_err(anyhow::Error::msg)?;
     let id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>> =
         args.parse_deflines.then(Default::default);
@@ -538,8 +544,9 @@ fn run_inner(
     if args.db.is_none() && subjects.is_empty() {
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
-    let query_file = crate::blastinput::input_files::open_input(&args.query, "query", "BLASTX")
-        .map_err(early_archive_error)?;
+    let query_file =
+        crate::blastinput::input_files::open_input(&args.query, "query", losat_program)
+            .map_err(early_archive_error)?;
     let destination: Box<dyn Write> =
         match (args.out.as_deref().filter(|p| *p != Path::new("-")), &hold) {
             (Some(path), Some(hold)) => Box::new(hold.writer(Box::new(
@@ -623,7 +630,7 @@ fn run_inner(
     let query_range = crate::blastinput::seq_range::parse_optional_range(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,
-        "BLASTX",
+        losat_program,
     )?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
@@ -720,8 +727,13 @@ fn run_inner(
     };
     // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
     // an empty query), which the reads before the search take too.
-    let batch_size = crate::blastinput::app::query_batch_size("BLASTX", BATCH_SIZE as u32)
-        .map(|size| size as usize);
+    let default_batch_size = match &args.rpstblastn {
+        Some(_) => super::query_setup::RPSTBLASTN_BATCH_SIZE,
+        None => BATCH_SIZE,
+    };
+    let batch_size =
+        crate::blastinput::app::query_batch_size(losat_program, default_batch_size as u32)
+            .map(|size| size as usize);
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
@@ -835,7 +847,7 @@ fn run_inner(
     };
     let mut query_stream = query_settings.stream(query_file);
     if stream_is_empty(&mut query_stream) {
-        stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
+        stderr.write_all(format!("Warning: [{program}] Query is Empty!\n").as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
         if let Some(handle) = &archive {
             handle.take_messages();
@@ -931,7 +943,7 @@ fn run_inner(
     // batch's report; LOSAT refuses both before the search, where an empty query has already
     // ended the run as NCBI ends it (`Query is Empty!`, exit status 0).
     app::check_search_environment(
-        "BLASTX",
+        losat_program,
         database.is_none(),
         format == Some(app::ReportFormat::ArchiveFormat),
     )?;
@@ -1161,33 +1173,53 @@ fn run_inner(
     if batch_size == 0 && !query_stream.at_eof() {
         return Err(engine("Empty CBlastQueryVector"));
     }
-    let processed = run_query_batches(
-        &options,
-        search_subjects,
-        args.parse_deflines,
-        &mut |deliver, warn| {
-            read_fasta_stream_batches(
-                &mut query_stream,
-                false,
-                args.lcase_masking,
-                batch_size,
-                archive.is_some(),
-                query_range.as_ref(),
-                deliver,
-                &mut |warning| {
-                    let mut bytes = Vec::new();
-                    reader_warning(warning, &mut bytes)?;
-                    warn(&bytes)
-                },
-            )
-        },
-        &mut *stderr,
-        &search_error,
-        &mut |diagnostics, queries, results, queries_before| {
-            render_batch(&mut *writer, diagnostics, queries, results, queries_before)?;
-            writer.flush().map_err(output_error)
-        },
-    )
+    let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
+                    warn: &mut dyn FnMut(&[u8]) -> Result<()>|
+     -> Result<()> {
+        read_fasta_stream_batches(
+            &mut query_stream,
+            false,
+            args.lcase_masking,
+            batch_size,
+            archive.is_some(),
+            query_range.as_ref(),
+            deliver,
+            &mut |warning| {
+                let mut bytes = Vec::new();
+                reader_warning(warning, &mut bytes)?;
+                warn(&bytes)
+            },
+        )
+    };
+    let mut render = |diagnostics: &mut dyn Write,
+                      queries: &[FastaRecord],
+                      results: &mut Vec<BatchResults>,
+                      queries_before: usize|
+     -> Result<()> {
+        render_batch(&mut *writer, diagnostics, queries, results, queries_before)?;
+        writer.flush().map_err(output_error)
+    };
+    // RPSTBLASTN's search of the query batches takes the place of BLASTX's, once per run
+    // (`args::RpsTblastnSearch`, DECISIONS 38 D1).
+    let processed = match &options.rpstblastn {
+        Some(search) => search.run_query_batches(
+            &options,
+            database.as_ref(),
+            &mut read,
+            &mut *stderr,
+            &search_error,
+            &mut render,
+        ),
+        None => run_query_batches(
+            &options,
+            search_subjects,
+            args.parse_deflines,
+            &mut read,
+            &mut *stderr,
+            &search_error,
+            &mut render,
+        ),
+    }
     .map_err(input_error)?;
     let x_t = super::x_timing::lap();
     report::write_epilog(
@@ -1565,11 +1597,16 @@ pub(super) fn write_empty_subject_warnings(
 /// writes the bytes of each reader warning, in the reader's order, and keeps no record (the search
 /// holds the batches it searches). The command line reads the query file
 /// (`read_fasta_stream_batches`); LOSAT Web's `run_local` delivers the records its host registered.
-pub(super) type QueryBatchReader<'r> = dyn FnMut(
+pub(crate) type QueryBatchReader<'r> = dyn FnMut(
         &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
         &mut dyn FnMut(&[u8]) -> Result<()>,
     ) -> Result<()>
     + 'r;
+
+/// The render of a query batch's reports (`run_query_batches`): the diagnostics, the batch's
+/// records, its results and the number of queries reported before it.
+pub(crate) type BatchRender<'r> =
+    dyn FnMut(&mut dyn Write, &[FastaRecord], &mut Vec<BatchResults>, usize) -> Result<()> + 'r;
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
 /// `search_subjects` (with 2+ threads, on one pool for the whole run) and handed to `render` with
@@ -2842,13 +2879,23 @@ fn x_flow(
 /// The formatting handler's warnings of a BLASTX run with output format `outfmt`
 /// (`ReportCounts::warnings`).
 pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
-    crate::blastinput::report_counts::report_counts(
+    let counts = crate::blastinput::report_counts::report_counts(
         outfmt,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
-    )
-    .warnings("blastx", outfmt, args.num_descriptions.is_some())
+    );
+    match &args.rpstblastn {
+        // RPSTBLASTN's formatting options (`-line_length`, `-sorthits`, `-sorthsps`) warn in
+        // NCBI's order as rpsblast's do.
+        Some(search) => counts.warnings_with(
+            "rpstblastn",
+            outfmt,
+            args.num_descriptions.is_some(),
+            &search.formatting(),
+        ),
+        None => counts.warnings("blastx", outfmt, args.num_descriptions.is_some()),
+    }
 }
 
 #[cfg(test)]
@@ -2937,6 +2984,7 @@ mod reader_batch_tests {
         let records: Vec<_> = (0..queries).map(|_| record(30)).collect();
         vec![BatchResults {
             query_ordinal: 0,
+            gapped_k: None,
             queries: vec![Vec::new(); queries],
             prepared: super::super::query_setup::prepare_queries(
                 &records,

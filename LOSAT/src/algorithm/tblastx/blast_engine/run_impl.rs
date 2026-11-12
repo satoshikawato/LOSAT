@@ -2467,7 +2467,9 @@ fn write_tblastx_outputs(
                             let end =
                                 hits.partition_point(|hsp| (hsp.hit.q_idx as usize) < range.end);
                             let window = &hits[first..end];
-                            let identities = &seqalign_identities[first..end];
+                            let identities = seqalign_identities
+                                .as_deref()
+                                .map(|identities| &identities[first..end]);
                             // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on
                             // the pool.
                             let mut rows = match run.x_pool {
@@ -2478,9 +2480,13 @@ fn write_tblastx_outputs(
                                     let mut buffer = Vec::new();
                                     window
                                         .iter()
-                                        .zip(identities)
-                                        .map(|(hsp, &seqalign_num_ident)| {
-                                            shown.hit(hsp, seqalign_num_ident, &mut buffer)
+                                        .enumerate()
+                                        .map(|(index, hsp)| {
+                                            shown.hit(
+                                                hsp,
+                                                identities.map(|identities| identities[index]),
+                                                &mut buffer,
+                                            )
                                         })
                                         .collect()
                                 }
@@ -2708,10 +2714,10 @@ fn rows_up_front(
                 || run.ranges.subject_placements.ranged()))
 }
 
-/// The Seq-aligns' engine counts (outfmt 8, 12), their identities for the outfmt 0 rows
-/// (`report::seqalign_identities`), the display counts of `hits` and the outfmt 0 rows made up
-/// front (`rows_up_front`), with the positives of the search's matrix `sc`
-/// (`write_tblastx_outputs`).
+/// The Seq-aligns' engine counts (outfmt 8, 12), their identities for the outfmt 0 rows when
+/// the report reads them (`report::seqalign_identities`), the display counts of `hits` and the
+/// outfmt 0 rows made up front (`rows_up_front`), with the positives of the search's matrix
+/// `sc` (`write_tblastx_outputs`).
 #[allow(clippy::too_many_arguments)]
 fn report_counts<S: TbxScore>(
     sc: S,
@@ -2723,7 +2729,7 @@ fn report_counts<S: TbxScore>(
     db_code: &GeneticCode,
 ) -> (
     Vec<(u32, u32)>,
-    Vec<u32>,
+    Option<Vec<u32>>,
     Option<Vec<crate::report::pairwise::PairwiseHit>>,
 ) {
     // The BLAST archive (outfmt 11) writes the same Seq-aligns.
@@ -2757,15 +2763,15 @@ fn report_counts<S: TbxScore>(
     } else {
         Vec::new()
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:518-522,1522-1530
+    // (quoted at `ReportSort::reads_hsp_scores`): only `-sorthits` and a `-sorthsps` above 0
+    // read the HSPs' Seq-align scores in the pairwise report.
     // The rows of outfmt 0 and of the caller's hit records keep the engine's identities, read
-    // before the display counts replace them.
-    let seqalign_identities = if outputs.hits.is_some()
-        || output_formats.contains(&report::TblastxOutputFormat::Pairwise)
-    {
-        report::seqalign_identities(hits)
-    } else {
-        Vec::new()
-    };
+    // before the display counts replace them, when the report reads them.
+    let seqalign_identities = (run.args.formatting.report_sort().reads_hsp_scores()
+        && (outputs.hits.is_some()
+            || output_formats.contains(&report::TblastxOutputFormat::Pairwise)))
+    .then(|| report::seqalign_identities(hits));
     // The display counts are read by the outfmt 0, 6 and 7 reports and the caller's hit
     // records only.
     if outputs.hits.is_some()
@@ -2807,7 +2813,7 @@ fn report_counts<S: TbxScore>(
             Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
                 pool,
                 hits,
-                &seqalign_identities,
+                seqalign_identities.as_deref(),
                 &report::PairwiseRows::new(
                     run.queries,
                     run.subjects,
@@ -2821,7 +2827,7 @@ fn report_counts<S: TbxScore>(
             ),
             None => report::pairwise_hits(
                 hits,
-                &seqalign_identities,
+                seqalign_identities.as_deref(),
                 run.queries,
                 run.subjects,
                 run.subject_letters,

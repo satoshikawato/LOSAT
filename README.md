@@ -445,12 +445,12 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 
 ### What LOSAT refuses
 
-LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
+LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them, except where an item says that NCBI BLAST+ fails there too. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 **Output**
 - `-outfmt 1`, `2`, `3`, `4` and `18`: all five programs.
 - `-html`: all five programs.
-- `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits (NCBI BLAST+ pads that row with spaces without end): all five programs.
+- `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.
 
 **Scoring and search settings**
 - `-matrix` and gap costs: `blastp`, `blastx` and `tblastn` accept every matrix with any gap costs of NCBI's table for the matrix, but IDENTITY not with the compressed lookup table (word sizes 5 to 7; 5 is the default of `-task blastp-fast`, `blastx-fast` and `tblastn-fast`), with which NCBI crashes, and `blastx` no other name that begins with IDENTITY (such as IDENTITYX), with which NCBI aborts; `tblastx` accepts every matrix.

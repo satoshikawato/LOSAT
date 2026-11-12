@@ -172,8 +172,20 @@ impl<'h> QueryGroup<'h> {
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1523-1530
+    // ```c++
+    //     //invoke sorting only for m_HitsSortOption > CAlignFormatUtil::eEvalue or m_HspsSortOption > CAlignFormatUtil::eHspEvalue
+    //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
+    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
+    //                                       *(const_cast<CSeq_align_set*>(aln_set.GetPointer())),
+    //                                       (m_Program == "tblastx") ? true : false,
+    //                                       m_HitsSortOption,
+    //                                       m_HspsSortOption);
+    //     }
+    // ```
     /// The group of `query_hits` as `new` makes it, in the order of `sections`' `-sorthits` and
-    /// `-sorthsps` (`sort`).
+    /// `-sorthsps` (`sort`): NCBI sorts one query's Seq-align set before its description table
+    /// and its alignments.
     pub(crate) fn for_sections<S: QuerySections>(
         query_hits: &[(HspIndex, &'h PairwiseHit)],
         subject_titles: &[Arc<[u8]>],

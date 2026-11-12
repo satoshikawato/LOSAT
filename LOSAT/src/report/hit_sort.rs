@@ -67,6 +67,22 @@ impl ReportSort {
     pub fn shows_columns(&self) -> bool {
         self.hits.is_some()
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:518-522,1522-1530
+    // ```c++
+    //     if(m_HitsSortOption >= 0) {
+    //         flags |= CShowBlastDefline::eShowPercentIdent;
+    //     ...
+    //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
+    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
+    // ```
+    /// Whether the report reads the HSPs' `HspScores` (the Seq-aligns' identities,
+    /// `PairwiseHit::seqalign_num_ident`): it sorts (`sorts`) or shows the columns
+    /// (`shows_columns`). Without either the report reads none of them, and TBLASTX does not
+    /// copy its HSPs' identities for it (`tblastx::report::seqalign_identities`).
+    pub(crate) fn reads_hsp_scores(&self) -> bool {
+        self.sorts() || self.shows_columns()
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:813-848
@@ -121,7 +137,18 @@ impl HspScores {
         let zero_based = |position: usize| (position as u64).saturating_sub(1);
         Self {
             bits: h.bit_score,
-            evalue: h.e_value,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1190
+            // ```c++
+            //     // Set the E-Value
+            //     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
+            //     if (evalue >= 0.0) {
+            //         string score_type = (hsp->num <= 1) ? "e_value" : "sum_e";
+            //         scores.push_back(s_MakeScore(score_type, evalue, 0, false));
+            //     }
+            // ```
+            // The comparators read the Seq-align's E-value (`GetAlnScores`), 0 below 1e-180:
+            // two HSPs below it tie.
+            evalue: crate::report::serial::seqalign::seqalign_evalue(h.e_value),
             num_ident: hit.seqalign_num_ident as i64,
             length: h.length as i64,
             query_from: zero_based(h.q_start.min(h.q_end)),
@@ -232,9 +259,11 @@ pub(crate) fn list_sort<T>(list: &mut Vec<T>, mut comp: impl FnMut(&T, &T) -> bo
             fill += 1;
         }
     }
+    // `__counter->merge(__counter[-1])`: bucket `counter` holds the older elements (`this`),
+    // bucket `counter - 1` the newer ones (`x`).
     for counter in 1..fill {
-        let (older, newer) = tmp.split_at_mut(counter);
-        merge(&mut newer[0], &mut older[counter - 1], &mut comp);
+        let (newer, older) = tmp.split_at_mut(counter);
+        merge(&mut older[0], &mut newer[counter - 1], &mut comp);
     }
     *list = std::mem::take(&mut tmp[fill - 1]);
 }

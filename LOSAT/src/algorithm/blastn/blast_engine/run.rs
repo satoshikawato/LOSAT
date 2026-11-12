@@ -5763,6 +5763,12 @@ struct BlastnReportInputs<'a> {
     /// (`BlastnArgs::report_counts`).
     num_descriptions: usize,
     num_alignments: usize,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:251-253
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
     /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report
     /// (`BlastnArgs::formatting`).
     formatting: crate::blastinput::report_counts::FormattingArgs,

@@ -258,16 +258,20 @@ pub(crate) fn engine_counts<S: TbxScore>(
 pub(crate) fn pairwise_hits(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
-    seqalign_identities: &[u32],
+    seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
 ) -> Vec<PairwiseHit> {
-    debug_assert_eq!(hits.len(), seqalign_identities.len());
+    debug_assert!(seqalign_identities.is_none_or(|identities| identities.len() == hits.len()));
     pool.install(|| {
         hits.par_iter()
-            .zip(seqalign_identities)
+            .enumerate()
             .with_min_len(CHUNK / 4)
-            .map_init(Vec::new, |window, (hsp, &seqalign_num_ident)| {
-                rows.hit(hsp, seqalign_num_ident, window)
+            .map_init(Vec::new, |window, (index, hsp)| {
+                rows.hit(
+                    hsp,
+                    seqalign_identities.map(|identities| identities[index]),
+                    window,
+                )
             })
             .collect()
     })
@@ -280,13 +284,19 @@ pub(crate) fn pairwise_hits(
 pub(crate) fn pairwise_hits(
     _pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
-    seqalign_identities: &[u32],
+    seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
 ) -> Vec<PairwiseHit> {
     let mut window = Vec::new();
     hits.iter()
-        .zip(seqalign_identities)
-        .map(|(hsp, &seqalign_num_ident)| rows.hit(hsp, seqalign_num_ident, &mut window))
+        .enumerate()
+        .map(|(index, hsp)| {
+            rows.hit(
+                hsp,
+                seqalign_identities.map(|identities| identities[index]),
+                &mut window,
+            )
+        })
         .collect()
 }
 

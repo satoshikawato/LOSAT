@@ -102,6 +102,21 @@ impl PairwiseConfig {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:518-522
+// ```c++
+//     if(m_HitsSortOption >= 0) {
+//         flags |= CShowBlastDefline::eShowPercentIdent;
+//         flags |= CShowBlastDefline::eShowTotalScore;
+//         flags |= CShowBlastDefline::eShowQueryCoverage;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1527-1530
+// ```c++
+//     unique_ptr<CAlignFormatUtil::SSeqAlignSetCalcParams> seqSetInfo( CAlignFormatUtil::GetSeqAlignSetCalcParamsFromASN(aln));
+//     if(seqSetInfo->hspNum == 0) {//calulated params are not in ASN - calculate now
+//         seqSetInfo.reset( CAlignFormatUtil::GetSeqAlignSetCalcParams(aln,m_QueryLength,m_TranslatedNucAlignment));
+//     }
+// ```
 /// The columns of a description table with `-sorthits` (NCBI's `eShowTotalScore`,
 /// `eShowQueryCoverage` and `eShowPercentIdent`): the length of the query (`m_QueryLength`, the
 /// query Bioseq's) and whether the report is TBLASTX's.
@@ -1049,13 +1064,12 @@ fn write_alignment_with_sequences<W: Write>(
     // on its plus strand, showalign.cpp:1852-1858).
     let subject_step: isize = if hit.s_start > hit.s_end { -1 } else { 1 };
 
-    let mut query_row = RowCursor::new(hit.q_start as isize, 1, 1);
-    let mut subject_row = RowCursor::new(hit.s_start as isize, subject_step, 1);
+    let mut query_row = RowCursor::new(hit.q_start as isize, 1, 1, line_len);
+    let mut subject_row = RowCursor::new(hit.s_start as isize, subject_step, 1, line_len);
     let mut offset = 0;
 
     while offset < q_chars.len() {
         let end = (offset + line_len).min(q_chars.len());
-        let first_chunk = offset == 0;
 
         // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2155
         // ```c++
@@ -1097,9 +1111,9 @@ fn write_alignment_with_sequences<W: Write>(
             writer,
             "Query",
             &mut query_row,
-            residue_count(&q_chars[offset..end], 0),
+            &q_chars[offset..end],
+            0,
             max_start_len,
-            first_chunk,
             |writer| write_chars(writer, &q_chars[offset..end]),
         )?;
         write_spaces(writer, max_id_len + 2 + max_start_len + 2)?;
@@ -1108,12 +1122,9 @@ fn write_alignment_with_sequences<W: Write>(
             writer,
             "Sbjct",
             &mut subject_row,
-            residue_count(
-                &s_chars[offset..end],
-                stored_gaps_between(subject_stored_gaps, offset, end),
-            ),
+            &s_chars[offset..end],
+            stored_gaps_between(subject_stored_gaps, offset, end),
             max_start_len,
-            first_chunk,
             |writer| write_chars(writer, &s_chars[offset..end]),
         )?;
         writeln!(writer)?;
@@ -1155,25 +1166,34 @@ fn write_alignment_with_sequences<W: Write>(
 /// ```
 /// A later chunk without residues ends where the previous chunk ended
 /// (`end == prev_stop`). `AddSpace` takes a `size_t`, so an omitted start gives
-/// `maxStartLen + 2` spaces. Every program's rows are written here (`write_letters` writes the
-/// chunk's letters): the rows of letters (BLASTN, BLASTP, RPSBLAST, PSIBLAST, and the protein
-/// rows of BLASTX and TBLASTN) and the rows translated from nucleotides (BLASTX's query,
-/// TBLASTN's subject, both rows of TBLASTX), whose chunk of `count` residues runs over
-/// `3 * count` nucleotides (`RowCursor`). A translated row's first chunk spans a codon, so its
-/// start and end differ and it always shows them; a first chunk of one residue at 1 of a row of
-/// letters shows none (the `-line_length 1` rows of an HSP from a sequence's first letter).
-fn write_sequence_row<W: Write>(
+/// `maxStartLen + 2` spaces. Every program's rows are written here: `columns` are the chunk's
+/// letters (`-` a gap, or of `stored_gaps` of them a stored gap character, a residue) and
+/// `write_letters` writes them. They are the rows of letters (BLASTN, BLASTP, RPSBLAST, PSIBLAST,
+/// and the protein rows of BLASTX and TBLASTN) and the rows translated from nucleotides
+/// (BLASTX's query, TBLASTN's subject, both rows of TBLASTX), whose chunk of residues runs over
+/// three nucleotides per residue (`RowCursor`). A translated row's first chunk spans a codon, so
+/// its start and end differ and it always shows them; a first chunk of one residue at 1 of a
+/// row of letters shows none (the `-line_length 1` rows of an HSP from a sequence's first
+/// letter). The end is that of NCBI's first screen (`RowCursor::first_screen`): the chunk's
+/// last letter, but for a translated row whose screen of `-line_length` 1431655766 or more
+/// wraps, where only the end moves (the letters are the whole row's).
+fn write_sequence_row<W: Write, T: Copy + PartialEq + From<u8>>(
     writer: &mut W,
     label: &str,
     row: &mut RowCursor,
-    count: usize,
+    columns: &[T],
+    stored_gaps: usize,
     width: usize,
-    first_chunk: bool,
     write_letters: impl FnOnce(&mut W) -> io::Result<()>,
 ) -> io::Result<()> {
-    let count = count as isize;
+    let count = residue_count(columns, stored_gaps) as isize;
+    let first_chunk = row.first;
     let start = row.next;
-    let end = start + row.step * (row.letters * count - 1);
+    let in_screen = match first_chunk.then(|| row.first_screen(columns)).flatten() {
+        Some(in_screen) => in_screen,
+        None => row.letters * count,
+    };
+    let end = start + row.step * (in_screen - 1);
     let shown = !(!first_chunk && count == 0 || first_chunk && start == 1 && end == 1);
     write!(writer, "{label}")?;
     write_spaces(writer, 2)?;
@@ -1190,11 +1210,27 @@ fn write_sequence_row<W: Write>(
     }
     writeln!(writer)?;
     row.next += row.step * row.letters * count;
+    row.first = false;
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:227-230,305,358
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1281-1283
 // ```c++
+//         m_AV->GetWholeAlnSeqString(row, sequence[row], &insertAlnStart[row],
+//                                    &insertStart[row], &insertLength[row],
+//                                    (int)m_LineLen, &seqStarts[row], &seqStops[row]);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:199-206,227-230,305,358
+// ```c++
+// string& CAlnVec::GetWholeAlnSeqString(TNumrow       row,
+//                                       string&       buffer,
+//                                       TSeqPosList * insert_aln_starts,
+//                                       TSeqPosList * insert_starts,
+//                                       TSeqPosList * insert_lens,
+//                                       unsigned int  scrn_width,
+//                                       TSeqPosList * scrn_lefts,
+//                                       TSeqPosList * scrn_rights) const
+//     ...
 //     bool plus     = IsPositiveStrand(row);
 //     int  width    = GetWidth(row);
 //
@@ -1205,22 +1241,100 @@ fn write_sequence_row<W: Write>(
 //                     scrn_rgt_seq_pos = plus ? stop : start;
 // ```
 /// Where one row of an alignment is (`write_sequence_row`): the coordinate of its next residue,
-/// the direction of its coordinates (1, or -1 on a minus strand or frame) and the letters of its
+/// the direction of its coordinates (1, or -1 on a minus strand or frame), the letters of its
 /// sequence per residue (`GetWidth`: 1, or 3 for a row translated from nucleotides, whose
-/// screen of `m_LineLen` residues spans three times as many nucleotides).
+/// screen of `m_LineLen` residues spans three times as many nucleotides), NCBI's screen in
+/// letters of its sequence (`scrn_width` after `*= width`) and whether its first chunk is still
+/// to be written (NCBI's `j == 0`).
 struct RowCursor {
     next: isize,
     step: isize,
     letters: isize,
+    screen: u32,
+    first: bool,
 }
 
 impl RowCursor {
-    fn new(next: isize, step: isize, letters: isize) -> Self {
+    /// The row from `next` in chunks of `line_length` columns. `(int)m_LineLen` comes in as an
+    /// `unsigned int` (`-line_length` is at most 2^31 - 1) and `*= width` wraps it modulo 2^32,
+    /// an unsigned product that C++ defines: a translated row's screen is `3 * line_length`
+    /// nucleotides up to 1431655765 (2^32 - 1), and `3 * line_length - 2^32` (2, 5, ... up to
+    /// 2147483645) from 1431655766 on. A row of letters' screen is `line_length`.
+    fn new(next: isize, step: isize, letters: isize, line_length: usize) -> Self {
         Self {
             next,
             step,
             letters,
+            screen: (line_length as u32).wrapping_mul(letters as u32),
+            first: true,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:310-343
+    // ```c++
+    //                     // previous scrns
+    //                     nscrns = (aln_pos - scrn_pos) / scrn_width;
+    //                     for (int i = 0; i < nscrns; i++) {
+    //                         scrn_lefts->push_back(scrn_lft_seq_pos);
+    //                         scrn_rights->push_back(scrn_rgt_seq_pos);
+    //     ...
+    //                     // current scrns
+    //                     nscrns = (aln_pos + len - scrn_pos) / scrn_width;
+    //                     curr_pos = aln_pos;
+    //                     for (int i = 0; i < nscrns; i++) {
+    //                         delta = (plus ?
+    //                                  scrn_width - (curr_pos - scrn_pos) :
+    //                                  curr_pos - scrn_pos - scrn_width);
+    //
+    //                         scrn_lefts->push_back(scrn_lft_seq_pos);
+    //                         if (plus ?
+    //                             scrn_lft_seq_pos < start :
+    //                             scrn_lft_seq_pos > stop) {
+    //                             scrn_lft_seq_pos = (plus ? start : stop) +
+    //                                 delta;
+    //                             scrn_rgt_seq_pos = scrn_lft_seq_pos +
+    //                                 (plus ? -1 : 1);
+    //                         } else {
+    //                             scrn_rgt_seq_pos = scrn_lft_seq_pos + (plus ? -1 : 1)
+    //                                 + delta;
+    //                             scrn_lft_seq_pos += delta;
+    //                         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1598-1599
+    // ```c++
+    //     int start = alnRoInfo->seqStarts[row].front() + 1;  //+1 for 1 based
+    //     int end = alnRoInfo->seqStops[row].front() + 1;
+    // ```
+    /// The letters of the row's sequence in NCBI's first screen when the screen is narrower
+    /// than the first chunk of `columns` (`None` otherwise: the chunk ends at its last letter).
+    /// A chunk prints the right end of its screen (`seqStops.front()`); a wrapped screen makes
+    /// the screens narrower than the chunks, of which the row then has one (a chunk of
+    /// 1431655766 or more residues would span more than 2^32 nucleotides). The screen covers
+    /// the alignment's first `scrn_width` letters of the row, a column counting `width` of them
+    /// (`aln_pos += len`, `len = seg_len * width`, residues and gaps alike), and its right end
+    /// is the row's last letter there: within a segment the end of `delta` letters from its
+    /// start, in a gap the previous segment's stop (`scrn_rgt_seq_pos = plus ? stop : start`).
+    /// A row's letters are contiguous across its gaps, so that end is the start moved by the
+    /// letters in the screen less one: whole residues of the first `scrn_width / width`
+    /// columns and `scrn_width % width` letters of the next when it is a residue. Without any
+    /// (a row that begins with gaps, which no HSP does), the screen's right is its left (lines
+    /// 304-308 and 312-314: one letter). Only translated rows' screens wrap, and their `-` is
+    /// a gap: a stored gap character comes only in protein sequences.
+    fn first_screen<T: Copy + PartialEq + From<u8>>(&self, columns: &[T]) -> Option<isize> {
+        let screen = u64::from(self.screen);
+        let width = self.letters as u64;
+        if screen >= width * columns.len() as u64 {
+            return None;
+        }
+        let whole = (screen / width) as usize;
+        let part = (screen % width) as usize;
+        let partial = if part > 0 && columns[whole] != T::from(b'-') {
+            part
+        } else {
+            0
+        };
+        let letters = self.letters as usize * residue_count(&columns[..whole], 0) + partial;
+        Some(letters.max(1) as isize)
     }
 }
 
@@ -2899,10 +3013,7 @@ fn write_description_table<W: Write>(
                 // writes spaces without end. No valid report exists to match, so the run stops
                 // with an error (an NCBI failure is an explicit rejection, AGENTS.md rule 3).
                 if columns.is_some() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        "-sorthits: the total score of the description table's last subject is wider than its column (more than 99999 bits), where NCBI BLAST+ 2.17.0 writes spaces without end (CAlignFormatUtil::AddSpace of a negative size); run without -sorthits",
-                    ));
+                    return Err(TotalScoreRefusal::error());
                 }
             }
         } else {
@@ -3045,6 +3156,49 @@ fn write_description_table<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-944
+// ```c++
+//         if (m_Option & eShowTotalScore) {
+//             out << kTwoSpaceMargin << kOneSpaceMargin << (*iter)->total_bit_string;
+//             CAlignFormatUtil::AddSpace(out, m_MaxTotalScoreLen -
+//                                    (*iter)->total_bit_string.size());
+//         }
+// ```
+/// LOSAT's refusal of a `-sorthits` description table whose last row's total score is wider than
+/// its column (`write_description_table`), where NCBI BLAST+ writes spaces without end: no
+/// error of NCBI's, so no program reports it as NCBI's "BLAST failed to write output". It
+/// travels as the `io::Error` of the report's writes (`TotalScoreRefusal::error`), and a
+/// program that turns its report's write errors into NCBI's passes it on unchanged
+/// (`is_total_score_refusal`, BLASTX's `report_error`), so every program stops with this text
+/// and exit status 1.
+#[derive(Debug)]
+pub(crate) struct TotalScoreRefusal;
+
+impl TotalScoreRefusal {
+    /// The refusal as the error of the report's writes.
+    pub(crate) fn error() -> io::Error {
+        io::Error::new(io::ErrorKind::Unsupported, TotalScoreRefusal)
+    }
+}
+
+impl std::fmt::Display for TotalScoreRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "-sorthits: the total score of the description table's last subject is wider than its column (more than 99999 bits), where NCBI BLAST+ 2.17.0 writes spaces without end (CAlignFormatUtil::AddSpace of a negative size); run without -sorthits",
+        )
+    }
+}
+
+impl std::error::Error for TotalScoreRefusal {}
+
+/// Whether `error` is the report's `TotalScoreRefusal` (an `io::Error` that holds it).
+pub(crate) fn is_total_score_refusal(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<io::Error>()
+        .and_then(io::Error::get_ref)
+        .is_some_and(|inner| inner.is::<TotalScoreRefusal>())
 }
 
 /// The values of one row's columns of `-sorthits` (`SortColumns`).
@@ -3903,22 +4057,23 @@ fn write_tblastx_alignment<W: Write>(
         }
     };
     // Both rows are translated: three nucleotides per residue; no row has a gap.
-    let mut query_row = RowCursor::new(hit.hit.q_start as isize, direction(hit.query_frame), 3);
-    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, direction(hit.subject_frame), 3);
-    for (chunk, (qpart, spart)) in q
-        .chunks(config.line_length)
-        .zip(s.chunks(config.line_length))
-        .enumerate()
-    {
-        write_sequence_row(
-            writer,
-            "Query",
-            &mut query_row,
-            qpart.len(),
-            width,
-            chunk == 0,
-            |writer| writer.write_all(qpart),
-        )?;
+    let line_length = config.line_length;
+    let mut query_row = RowCursor::new(
+        hit.hit.q_start as isize,
+        direction(hit.query_frame),
+        3,
+        line_length,
+    );
+    let mut subject_row = RowCursor::new(
+        hit.hit.s_start as isize,
+        direction(hit.subject_frame),
+        3,
+        line_length,
+    );
+    for (qpart, spart) in q.chunks(line_length).zip(s.chunks(line_length)) {
+        write_sequence_row(writer, "Query", &mut query_row, qpart, 0, width, |writer| {
+            writer.write_all(qpart)
+        })?;
         write_spaces(writer, 7 + width + 2)?;
         for (&qc, &sc) in qpart.iter().zip(spart) {
             let query_residue = qc.to_ascii_uppercase();
@@ -3936,9 +4091,9 @@ fn write_tblastx_alignment<W: Write>(
             writer,
             "Sbjct",
             &mut subject_row,
-            spart.len(),
+            spart,
+            0,
             width,
-            chunk == 0,
             |writer| writer.write_all(spart),
         )?;
         writeln!(writer)?;
@@ -4767,6 +4922,288 @@ mod tests {
         );
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:204,230
+    // ```c++
+    //                                       unsigned int  scrn_width,
+    //     ...
+    //     scrn_width *= width;
+    // ```
+    // The screen of a translated row wraps modulo 2^32 from `-line_length` 1431655766 on: 2
+    // nucleotides there, 5 at 1431655767, 2^32 - 1 at 1431655765; a row of letters keeps
+    // `-line_length`.
+    #[test]
+    fn a_translated_row_s_screen_wraps_at_2_to_the_32() {
+        let screen = |letters, line_length| RowCursor::new(1, 1, letters, line_length).screen;
+        assert_eq!(screen(3, 1431655765), u32::MAX);
+        assert_eq!(screen(3, 1431655766), 2);
+        assert_eq!(screen(3, 1431655767), 5);
+        assert_eq!(screen(3, 1431655800), 104);
+        assert_eq!(screen(3, 2147483647), 2147483645);
+        assert_eq!(screen(3, 60), 180);
+        assert_eq!(screen(1, 2147483647), 2147483647);
+        assert_eq!(screen(1, 1431655766), 1431655766);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1598-1599
+    // ```c++
+    //     int start = alnRoInfo->seqStarts[row].front() + 1;  //+1 for 1 based
+    //     int end = alnRoInfo->seqStops[row].front() + 1;
+    // ```
+    // NCBI BLAST+ 2.17.0 (line RG T1, cases d3.*): with a wrapped screen only the end of a
+    // translated row moves, to the end of its first screen; the letters are the whole row's
+    // and the rows of letters do not change. blastx (minus frame) `Query  2707 ... 2706` at
+    // 1431655766, `... 2703` at 1431655767, the row's `... 1325` at 1431655765; tblastn's
+    // subject (plus frame) 574..575, 574..578 and 574..1431; tblastx's query 2..3, 2..6 and
+    // 2..598 and minus-frame rows 598..597 and 598..594.
+    #[test]
+    fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
+        let config = |line_length| PairwiseConfig {
+            line_length,
+            ..PairwiseConfig::default()
+        };
+        let hit = |q: (usize, usize), s: (usize, usize), query_frame, subject_frame| {
+            let mut hit = PairwiseHit::from(Hit {
+                length: 5,
+                q_start: q.0,
+                q_end: q.1,
+                s_start: s.0,
+                s_end: s.1,
+                gap_info: None,
+                ..make_hit()
+            });
+            hit.query_seq = Some("MRKVL".to_string());
+            hit.subject_seq = Some("MRKVL".to_string());
+            hit.query_frame = query_frame;
+            hit.subject_frame = subject_frame;
+            hit
+        };
+        let text = |write: &dyn Fn(&mut Vec<u8>) -> io::Result<()>| {
+            let mut output = Vec::new();
+            write(&mut output).unwrap();
+            String::from_utf8(output).unwrap()
+        };
+        let blastx = hit((2707, 2693), (4, 8), Some(-1), None);
+        for (line_length, end) in [(1431655765, 2693), (1431655766, 2706), (1431655767, 2703)] {
+            assert_eq!(
+                text(&|out| write_blastx_alignment(out, &blastx, &config(line_length))),
+                format!("Query  2707  MRKVL  {end}\n             MRKVL\nSbjct  4     MRKVL  8\n\n"),
+                "-line_length {line_length}"
+            );
+        }
+        let tblastn = hit((1, 5), (574, 588), None, Some(1));
+        for (line_length, end) in [(1431655765, 588), (1431655766, 575), (1431655767, 578)] {
+            assert_eq!(
+                text(&|out| write_tblastn_alignment(out, &tblastn, &config(line_length))),
+                format!("Query  1    MRKVL  5\n            MRKVL\nSbjct  574  MRKVL  {end}\n\n"),
+                "-line_length {line_length}"
+            );
+        }
+        let tblastx = hit((2, 16), (598, 584), Some(1), Some(-1));
+        for (line_length, ends) in [
+            (1431655765, (16, 584)),
+            (1431655766, (3, 597)),
+            (1431655767, (6, 594)),
+            (2147483647, (16, 584)),
+        ] {
+            assert_eq!(
+                text(&|out| write_tblastx_alignment(out, &tblastx, &config(line_length))),
+                format!(
+                    "Query  2    MRKVL  {}\n            MRKVL\nSbjct  598  MRKVL  {}\n\n",
+                    ends.0, ends.1
+                ),
+                "-line_length {line_length}"
+            );
+        }
+        // Rows of letters keep their ends (BLASTP's rows).
+        let blastp = hit((1, 5), (11, 15), None, None);
+        let blastp_text = |line_length| {
+            text(&|out| {
+                write_alignment_with_sequences(
+                    out,
+                    &blastp.hit,
+                    "MRKVL",
+                    "MRKVL",
+                    &[],
+                    &PairwiseConfig {
+                        program: "blastp".into(),
+                        ..config(line_length)
+                    },
+                )
+            })
+        };
+        assert_eq!(blastp_text(1431655766), blastp_text(60));
+        assert!(blastp_text(1431655766).starts_with("Query  1   MRKVL  5\n"));
+    }
+
+    /// NCBI's `GetWholeAlnSeqString` (alnvec.cpp:199-397, quoted at `RowCursor`) for one row of
+    /// `segments` (a 0-based Dense-seg start, -1 for a gap, and a length in columns), as
+    /// written, unsigned arithmetic included: the first entry of `scrn_rights`.
+    fn ncbi_first_screen_right(
+        segments: &[(i64, u32)],
+        plus: bool,
+        width: u32,
+        scrn_width: u32,
+    ) -> i64 {
+        let (mut aln_pos, mut scrn_pos) = (0u32, 0u32);
+        let (mut lft, mut rgt) = (-1i64, -1i64);
+        let mut rights = Vec::new();
+        let left_seg = segments.iter().position(|seg| seg.0 >= 0).unwrap();
+        let toward = if plus { -1 } else { 1 };
+        for (seg, &(start, seg_len)) in segments.iter().enumerate() {
+            let len = seg_len.wrapping_mul(width);
+            if start >= 0 {
+                let stop = start + i64::from(len) - 1;
+                let first = if plus { start } else { stop };
+                if lft < 0 {
+                    lft = first;
+                    if rgt < 0 {
+                        rgt = lft;
+                    }
+                }
+                let nscrns = (aln_pos.wrapping_sub(scrn_pos) / scrn_width) as i32;
+                for _ in 0..nscrns {
+                    rights.push(rgt);
+                    scrn_pos = scrn_pos.wrapping_add(scrn_width);
+                }
+                if nscrns > 0 {
+                    lft = first;
+                }
+                let nscrns = (aln_pos.wrapping_add(len).wrapping_sub(scrn_pos) / scrn_width) as i32;
+                let mut curr_pos = aln_pos;
+                for _ in 0..nscrns {
+                    let delta = if plus {
+                        scrn_width.wrapping_sub(curr_pos.wrapping_sub(scrn_pos))
+                    } else {
+                        curr_pos.wrapping_sub(scrn_pos).wrapping_sub(scrn_width)
+                    } as i32 as i64;
+                    if if plus { lft < start } else { lft > stop } {
+                        lft = first + delta;
+                        rgt = lft + toward;
+                    } else {
+                        rgt = lft + toward + delta;
+                        lft += delta;
+                    }
+                    if seg == left_seg && lft == rgt {
+                        rgt += toward;
+                    }
+                    rights.push(rgt);
+                    scrn_pos = scrn_pos.wrapping_add(scrn_width);
+                    curr_pos = scrn_pos;
+                }
+                if aln_pos.wrapping_add(len) <= scrn_pos {
+                    lft = -1;
+                }
+                rgt = if plus { stop } else { start };
+            }
+            aln_pos = aln_pos.wrapping_add(len);
+        }
+        let pos_diff = aln_pos.wrapping_sub(scrn_pos);
+        if pos_diff > 0 {
+            let nscrns = pos_diff / scrn_width + u32::from(pos_diff % scrn_width != 0);
+            for _ in 0..nscrns {
+                rights.push(rgt);
+            }
+        }
+        rights[0]
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:310-358 (quoted at
+    // `RowCursor::first_screen`): rows of residues and gaps, on both strands, with screens
+    // narrower than the row (wrapped ones: 3 * L - 2^32 nucleotides, 2, 5, 8, ...) and wider,
+    // and residue runs split into segments at random (the other row's gaps split them): the
+    // end that `write_sequence_row` writes is the first screen's right of NCBI's computation.
+    #[test]
+    fn the_first_chunk_ends_at_ncbi_s_first_screen() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut random = |bound: u64| {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_f491_4f6c_dd1d) % bound
+        };
+        for case in 0..3000 {
+            let letters: u32 = if case % 5 == 0 { 1 } else { 3 };
+            let columns = 1 + random(60) as usize;
+            // Residues, with runs of gaps after the first one (an HSP's row begins with one).
+            let mut row: Vec<u8> = Vec::with_capacity(columns);
+            while row.len() < columns {
+                if row.is_empty() || random(4) != 0 {
+                    row.push(b'A');
+                } else {
+                    let gaps = 1 + random(4) as usize;
+                    row.resize(row.len() + gaps, b'-');
+                }
+            }
+            row.truncate(columns);
+            let plus = random(2) == 0;
+            let start = 1 + random(5000) as i64;
+            let start = if plus {
+                start
+            } else {
+                start + i64::from(letters) * columns as i64
+            };
+            let span = u64::from(letters) * columns as u64;
+            let line_length = match (letters, random(3)) {
+                // A wrapped screen narrower than the row: (W + 2^32) / 3 for a W of 2 mod 3.
+                (3, 0 | 1) if span > 2 => {
+                    let screen = 2 + 3 * random((span - 2).div_ceil(3));
+                    ((screen + (1u64 << 32)) / 3) as usize
+                }
+                (3, 2) => [1431655765, 2147483647][random(2) as usize],
+                _ => columns + random(100) as usize,
+            };
+            let mut cursor = RowCursor::new(
+                start as isize,
+                if plus { 1 } else { -1 },
+                letters as isize,
+                line_length,
+            );
+            let mut out = Vec::new();
+            write_sequence_row(&mut out, "Query", &mut cursor, &row, 0, 5, |out| {
+                out.write_all(&row)
+            })
+            .unwrap();
+            let line = String::from_utf8(out).unwrap();
+            let words: Vec<&str> = line.split_whitespace().collect();
+            // A first chunk of one letter at 1 shows no coordinates (its end is 1 too).
+            let end: i64 = match words[..] {
+                [_, _] => 1,
+                _ => words.last().unwrap().parse().unwrap(),
+            };
+            // The row's segments, runs of residues split at random.
+            let mut segments = Vec::new();
+            let mut next = start - 1;
+            let mut column = 0;
+            while column < row.len() {
+                let gap = row[column] == b'-';
+                let mut run = 1;
+                while column + run < row.len()
+                    && (row[column + run] == b'-') == gap
+                    && (gap || random(3) != 0)
+                {
+                    run += 1;
+                }
+                let nucleotides = i64::from(letters) * run as i64;
+                if gap {
+                    segments.push((-1, run as u32));
+                } else if plus {
+                    segments.push((next, run as u32));
+                    next += nucleotides;
+                } else {
+                    segments.push((next - nucleotides + 1, run as u32));
+                    next -= nucleotides;
+                }
+                column += run;
+            }
+            let scrn_width = (line_length as u32).wrapping_mul(letters);
+            assert_eq!(
+                end,
+                ncbi_first_screen_right(&segments, plus, letters, scrn_width) + 1,
+                "{line:?} plus={plus} letters={letters} L={line_length} segments={segments:?}"
+            );
+        }
+    }
+
     #[test]
     fn test_write_hsp_info() {
         let hit = PairwiseHit::from(make_hit());
@@ -5293,13 +5730,10 @@ fn write_tblastn_alignment<W: Write>(
     };
     // The query's row of letters, and the subject's translated row: three nucleotides per
     // residue, in the direction of its frame.
-    let mut query_row = RowCursor::new(hit.hit.q_start as isize, 1, 1);
-    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, direction, 3);
-    for (chunk, (qpart, spart)) in q
-        .chunks(config.line_length)
-        .zip(s.chunks(config.line_length))
-        .enumerate()
-    {
+    let line_length = config.line_length;
+    let mut query_row = RowCursor::new(hit.hit.q_start as isize, 1, 1, line_length);
+    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, direction, 3, line_length);
+    for (qpart, spart) in q.chunks(line_length).zip(s.chunks(line_length)) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1605-1627
         // ```c++
         //     //not to display start and stop number for empty row
@@ -5314,15 +5748,9 @@ fn write_tblastn_alignment<W: Write>(
         // ```
         // A row of gaps only shows no coordinates, nor a first row of one residue at 1
         // (`write_sequence_row`).
-        write_sequence_row(
-            writer,
-            "Query",
-            &mut query_row,
-            residue_count(qpart, 0),
-            width,
-            chunk == 0,
-            |writer| writer.write_all(qpart),
-        )?;
+        write_sequence_row(writer, "Query", &mut query_row, qpart, 0, width, |writer| {
+            writer.write_all(qpart)
+        })?;
         write_spaces(writer, 7 + width + 2)?;
         for (&qc, &sc) in qpart.iter().zip(spart) {
             // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
@@ -5343,9 +5771,9 @@ fn write_tblastn_alignment<W: Write>(
             writer,
             "Sbjct",
             &mut subject_row,
-            residue_count(spart, 0),
+            spart,
+            0,
             width,
-            chunk == 0,
             |writer| writer.write_all(spart),
         )?;
         writeln!(writer)?;
@@ -6021,23 +6449,14 @@ fn write_blastx_alignment(
     };
     // The query's translated row (three nucleotides per residue, in the direction of its frame)
     // and the subject's row of letters.
-    let mut query_row = RowCursor::new(hit.hit.q_start as isize, direction, 3);
-    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, 1, 1);
-    for (chunk, (qpart, spart)) in q
-        .chunks(config.line_length)
-        .zip(s.chunks(config.line_length))
-        .enumerate()
-    {
-        let first = chunk * config.line_length;
-        write_sequence_row(
-            writer,
-            "Query",
-            &mut query_row,
-            residue_count(qpart, 0),
-            width,
-            chunk == 0,
-            |writer| writer.write_all(qpart),
-        )?;
+    let line_length = config.line_length;
+    let mut query_row = RowCursor::new(hit.hit.q_start as isize, direction, 3, line_length);
+    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, 1, 1, line_length);
+    for (chunk, (qpart, spart)) in q.chunks(line_length).zip(s.chunks(line_length)).enumerate() {
+        let first = chunk * line_length;
+        write_sequence_row(writer, "Query", &mut query_row, qpart, 0, width, |writer| {
+            writer.write_all(qpart)
+        })?;
         write_spaces(writer, 7 + width + 2)?;
         // Both rows may carry lower case (the query's and, with `-lcase_masking`, a `-subject`'s,
         // `blastx/x_soft_subject.rs`), which NCBI applies only when it prints a row
@@ -6059,12 +6478,9 @@ fn write_blastx_alignment(
             writer,
             "Sbjct",
             &mut subject_row,
-            residue_count(
-                spart,
-                stored_gaps_between(&hit.subject_stored_gaps, first, first + spart.len()),
-            ),
+            spart,
+            stored_gaps_between(&hit.subject_stored_gaps, first, first + spart.len()),
             width,
-            chunk == 0,
             |writer| writer.write_all(spart),
         )?;
         writeln!(writer)?;
@@ -6559,6 +6975,12 @@ mod tblastx_tests {
         };
         let error = table(&[0, 1], true, columns).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(error.to_string(), TotalScoreRefusal.to_string());
+        assert!(is_total_score_refusal(&error.into()));
+        assert!(!is_total_score_refusal(
+            &io::Error::new(io::ErrorKind::Unsupported, "other").into()
+        ));
+        assert!(!is_total_score_refusal(&anyhow::anyhow!("other")));
         assert!(table(&[0, 1], true, None).is_ok());
         // Not the last subject of the list, or an earlier total as wide: written.
         assert!(table(&[0, 1], false, columns).is_ok());

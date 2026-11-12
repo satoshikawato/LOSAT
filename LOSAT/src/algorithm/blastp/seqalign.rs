@@ -78,6 +78,14 @@ impl EngineCounts {
             .map(|index| self.saved[index].1)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
+    // ```c++
+    //     // Set the identity score
+    //     if (hsp->num_ident >= 0) {
+    //         static const string kNumIdent("num_ident");
+    //         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
+    //     }
+    // ```
     /// The Seq-align's `num_ident` of the HSP at `key` whose identities are now `shown`: the
     /// engine's, if the recount replaced them (as `query_records` writes it).
     pub(crate) fn num_ident(&self, key: HspKey, shown: usize) -> usize {

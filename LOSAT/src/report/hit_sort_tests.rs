@@ -488,6 +488,68 @@ fn the_coverage_sort_breaks_ties_by_the_first_hsp_s_e_value() {
     assert_eq!(order.hits, vec![2, 1, 0]);
 }
 
+/// A BLASTP HSP of the query's letters 1-400 with E-value `e_value`.
+fn pairwise_hit(e_value: f64) -> PairwiseHit {
+    PairwiseHit::from(crate::common::Hit {
+        identity: 100.0,
+        length: 400,
+        mismatch: 0,
+        gapopen: 0,
+        q_start: 1,
+        q_end: 400,
+        s_start: 1,
+        s_end: 400,
+        e_value,
+        bit_score: 800.0,
+        num_ident: 400,
+        query_frame: 0,
+        query_length: 400,
+        q_idx: 0,
+        s_idx: 0,
+        raw_score: 2000,
+        sort_query_offset: 0,
+        sort_query_end: 400,
+        sort_subject_offset: 0,
+        sort_subject_end: 400,
+        has_sort_offsets: true,
+        gap_info: None,
+        num_positives: 400,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1186
+// ```c++
+//     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
+// ```
+// The sorts compare the Seq-align's E-values: below 1e-180 both are 0.0, so `0.0 < 0.0` is false
+// and the order stays (NCBI 2.17.0 `blastp -comp_based_stats 0 -sorthits 4` on a query and two
+// subjects, the query itself and the query between 800 letters on each side, keeps the second
+// subject, of the larger E-value, first: case d1.blastp.h4 of line RG T1).
+#[test]
+fn the_sorts_compare_the_seqalign_s_e_values() {
+    assert_eq!(HspScores::of(&pairwise_hit(1e-181)).evalue, 0.0);
+    assert_eq!(HspScores::of(&pairwise_hit(1e-180)).evalue, 1e-180);
+    assert_eq!(HspScores::of(&pairwise_hit(2e-3)).evalue, 2e-3);
+    // Equal coverage and scores, the larger E-value first (the search's order).
+    let worse = HspScores::of(&pairwise_hit(1e-200));
+    let better = HspScores::of(&pairwise_hit(1e-250));
+    let hits = vec![vec![worse], vec![better]];
+    assert_eq!(sorted(by(Some(4), None), false, &hits).hits, vec![0, 1]);
+    // An E-value at 1e-180 or above still decides.
+    let kept = HspScores::of(&pairwise_hit(1e-180));
+    let hits = vec![vec![kept], vec![better]];
+    assert_eq!(sorted(by(Some(4), None), false, &hits).hits, vec![1, 0]);
+    // The HSP sorts' ties on equal starts and identities alike.
+    let hsps = vec![vec![worse, better]];
+    for hsp_sort in [2, 3, 4] {
+        assert_eq!(
+            sorted(by(None, Some(hsp_sort)), false, &hsps).hsps,
+            vec![vec![0, 1]],
+            "-sorthsps {hsp_sort}"
+        );
+    }
+}
+
 #[test]
 fn hsp_sorts_apply_to_every_hit() {
     let hit = vec![

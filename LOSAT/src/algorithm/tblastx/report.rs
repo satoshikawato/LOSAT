@@ -1091,11 +1091,11 @@ fn lowercase_query_row(row: &mut [u8], frame: i8, low: i32, high: i32, masks: &[
 /// the hits move into the records (`shift_to_records`) with the records' frames and
 /// lengths. The subjects' titles come from `subjects`, their letters and lengths from
 /// `subject_letters`. `seqalign_identities` holds the Seq-align's `num_ident` of each HSP of
-/// `hits` (`seqalign_identities`).
+/// `hits` when the report reads them (`seqalign_identities`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
-    seqalign_identities: &[u32],
+    seqalign_identities: Option<&[u32]>,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
@@ -1115,11 +1115,17 @@ pub(crate) fn pairwise_hits(
         query_placements,
         subject_placements,
     );
-    debug_assert_eq!(hits.len(), seqalign_identities.len());
+    debug_assert!(seqalign_identities.is_none_or(|identities| identities.len() == hits.len()));
     let mut window = Vec::new();
     hits.iter()
-        .zip(seqalign_identities)
-        .map(|(hsp, &seqalign_num_ident)| rows.hit(hsp, seqalign_num_ident, &mut window))
+        .enumerate()
+        .map(|(index, hsp)| {
+            rows.hit(
+                hsp,
+                seqalign_identities.map(|identities| identities[index]),
+                &mut window,
+            )
+        })
         .collect()
 }
 
@@ -1135,7 +1141,8 @@ pub(crate) fn pairwise_hits(
 /// which the outfmt 0 report reads with `-sorthits` and `-sorthsps`): the engine's identities,
 /// which `hits` hold until `set_displayed_identities` replaces them by the display counts (the
 /// first value of `engine_counts`, without counting again). Made before that, when outfmt 0's
-/// rows or the hit records are made.
+/// rows or the hit records are made and the report reads them (`-sorthits`, or a `-sorthsps`
+/// above 0: `ReportSort::reads_hsp_scores`); a default report reads none and copies none.
 pub(crate) fn seqalign_identities(hits: &[TblastxHsp]) -> Vec<u32> {
     hits.iter().map(|hsp| hsp.hit.num_ident as u32).collect()
 }
@@ -1271,13 +1278,14 @@ impl<'a> PairwiseRows<'a> {
     // one); inlined into the map, the rows of a whole list (or of a pool task's part of it) were
     // one call in V8's baseline code. Other targets keep the compiler's choice.
     /// The outfmt 0 row of `hsp` (its displayed rows, frames, counts, linked-set size and
-    /// subject), whose Seq-align's `num_ident` is `seqalign_num_ident` (`seqalign_identities`);
-    /// `window` is the buffer of a stored subject's letters.
+    /// subject), whose Seq-align's `num_ident` is `seqalign_num_ident` (`seqalign_identities`)
+    /// when the report reads it; without it the row keeps the HSP's identities there, which
+    /// nothing reads. `window` is the buffer of a stored subject's letters.
     #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub(crate) fn hit(
         &self,
         hsp: &TblastxHsp,
-        seqalign_num_ident: u32,
+        seqalign_num_ident: Option<u32>,
         window: &mut Vec<u8>,
     ) -> PairwiseHit {
         let (queries, subjects, subject_letters) =
@@ -1346,7 +1354,7 @@ impl<'a> PairwiseRows<'a> {
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
             subject_stored_gaps: Vec::new(),
-            seqalign_num_ident: seqalign_num_ident as usize,
+            seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
         }
     }
 }
@@ -2088,7 +2096,7 @@ mod tests {
         let placements = Placements::default();
         let rows = pairwise_hits(
             &hits,
-            &identities,
+            Some(&identities),
             &queries,
             &subjects,
             SubjectLetters::Records(&subjects),

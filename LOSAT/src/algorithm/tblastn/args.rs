@@ -356,6 +356,12 @@ pub struct ResolvedTblastnArgs {
     /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
     pub num_descriptions: usize,
     pub num_alignments: usize,
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
     /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).

@@ -110,7 +110,7 @@ pub struct RpsbprocArgs {
         value_name = "DATA",
         default_value = "both",
         value_parser = ["doms", "feats", "both"],
-        help = "Target data: doms, feats or both (also --target-data); LOSAT's rpsbproc gives doms (feats and both, the default, come with item PS16b)"
+        help = "Target data: doms (domain hits), feats (sites and motifs) or both (also --target-data)"
     )]
     pub target_data: String,
     #[arg(

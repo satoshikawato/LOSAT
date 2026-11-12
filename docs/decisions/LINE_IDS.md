@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 104fb852f with line PS's PS7 (2026-11-12): 203 IDs cited in the tree, 122 of them in
-`CHANGELOG.md`, `changelog.d/` and `docs/`; 170 rows below. State: 149 done, 21 in progress, 0 stopped.
+As of dev cd665577f with line PS's PS7 (2026-11-13): 206 IDs cited in the tree, 123 of them in
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 171 rows below. State: 149 done, 22 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -165,6 +165,7 @@ As of dev 104fb852f with line PS's PS7 (2026-11-12): 203 IDs cited in the tree, 
 | `PS11c-1` | PS stage 11c part 1: `losat rpsblast` -seg, -soft_masking, -lcase_masking, -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -line_length, -sorthits, -sorthsps and -sum_stats false (true refused: NCBI reads past its arrays), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11c-1` |
 | `PS16` | PS stage 16 (series PR, the rpsbproc chain): `losat rpsbproc`, NCBI's post-RPSBLAST processing utility rpsbproc 0.5.1 (package of 2025-05-13); split into PS16a (domain hits), PS16b (sites and motifs), PS16c (nucleotide queries of rpstblastn), PS16d (XML input). | in progress | none | changelog entry `feature-ps-ps16a` |
 | `PS16a` | PS stage 16a: `losat rpsbproc` with `-t doms` for protein queries: the ASN.1 text Blast4-archive reader (streaming, one lexer with the PSSM reader), the six CDD data files, the domain classification (`-m rep`, `std`, `full`, `-f`) with libstdc++'s `std::sort`, NCBI's header, messages and exit codes, byte for byte as NCBI's rpsbproc 0.5.1. | in progress | none | changelog entry `feature-ps-ps16a` |
+| `PS16b` | PS stage 16b: `losat rpsbproc` with `-t feats` and `-t both` (the default) for protein queries: site storage from `cddannot.dat` and `cddannot_generic.dat`, the hierarchy roots, the feature records and the structural-domain clipping, the mapping of sites and motifs to the query (the 80 % rule), NCBI's PROSITE parser and matcher (`CProSite`) and `MotifCheck` with its process-wide motif positions (kept per run; a read past the list counts as failed, PD-LOSAT-NCBI-DEFECTS 1.14), the `SITES` and `MOTIFS` output and header lines, byte for byte as NCBI's rpsbproc 0.5.1. | in progress | none | changelog entry `feature-ps-ps16b` |
 
 ### RL: the v0.2.0 release
 

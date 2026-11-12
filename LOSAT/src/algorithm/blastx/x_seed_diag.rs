@@ -1035,9 +1035,7 @@ mod tests {
             &batch,
             &mut params,
             &options,
-            subject_length as i64,
-            1,
-            subject_length,
+            parameters::SubjectNumbers::one(subject_length),
             None,
         )
         .unwrap();

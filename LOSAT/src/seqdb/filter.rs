@@ -136,7 +136,7 @@ const SUPER_WORDS: usize = 8;
 impl OidFilter {
     /// The filter of the OIDs whose bits are set in `words` (bits at `num_oids` and above
     /// are cleared).
-    fn new(mut words: Vec<u64>, num_oids: u32) -> Self {
+    pub(super) fn new(mut words: Vec<u64>, num_oids: u32) -> Self {
         words.resize((num_oids as usize).div_ceil(64), 0);
         if !num_oids.is_multiple_of(64) {
             if let Some(last) = words.last_mut() {
@@ -965,6 +965,79 @@ impl LmdbEntry {
         })
     }
 
+    /// The end of the database's OIDs that the entry holds (`m_OIDEnd`, seqdblmdbset.cpp:
+    /// 55-73: the OIDs of the held volumes after `m_OIDStart`).
+    fn oid_end(&self) -> u32 {
+        let skipped: u32 = self.volumes.iter().map(|&(_, skipped)| skipped).sum();
+        self.oid_start + (self.num_oids - skipped)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:182-201
+    // ```c++
+    // void CSeqDBLMDBEntry::GetTaxIdsForOids(const vector<blastdb::TOid> & oids, set<TTaxId> & tax_ids) const
+    // {
+    // 	if(m_isPartial) {
+    // 		vector<TOid> tmp;
+    // 		TOid skipped_oids = 0;
+    // 		unsigned int j=0;
+    // 		for(unsigned int i=0; i < oids.size(); i++) {
+    // 			while(j < m_VolInfo.size() &&
+    // 				  (m_VolInfo[j].skipped_oids > 0 || oids[i] + skipped_oids >= m_VolInfo[j].max_oid)){
+    // 				skipped_oids += m_VolInfo[j].skipped_oids;
+    // 				j++;
+    // 			}
+    //
+    // 			tmp.push_back(oids[i] + skipped_oids) ;
+    // 		}
+    // 	   m_LMDB->GetTaxIdsForOids(tmp, tax_ids);
+    // 	}
+    // 	else {
+    // 		m_LMDB->GetTaxIdsForOids(oids, tax_ids);
+    // 	}
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:737-746
+    // ```c++
+    // void CSeqDBLMDB::GetTaxIdsForOids(const vector<blastdb::TOid> & oids, set<TTaxId> & tax_ids) const
+    // {
+    // 	CMemoryFile oid_file(m_Oid2TaxIdsFile);
+    // 	CLookupTaxIds lookup(oid_file);
+    // 	for(unsigned int i=0; i < oids.size(); i++) {
+    // 		vector<TTaxId>  taxid_list;
+    // 		lookup.GetTaxIdListForOid(oids[i], taxid_list);
+    // 		tax_ids.insert(taxid_list.begin(), taxid_list.end());
+    // 	}
+    // }
+    // ```
+    /// The taxids that the entry's `.pot`/`.not` file gives the OIDs `oids` (the entry's own
+    /// numbering, ascending), added to `tax_ids`. An OID past the file's is LOSAT's refusal
+    /// (NCBI reads past its index there).
+    fn oid_tax_ids(&self, oids: &[u32], tax_ids: &mut BTreeSet<i32>) -> Result<(), SeqDbError> {
+        let path = self.lookup_file("ot");
+        let file = DbFile::open(&path)?;
+        let format = |message: String| SeqDbError::Format {
+            path: path.clone(),
+            message,
+        };
+        let lookup = tax_files::OidTaxIds::open(&file).map_err(format)?;
+        let (mut skipped, mut next) = (0u32, 0usize);
+        for &oid in oids {
+            let file_oid = if self.partial {
+                while next < self.volumes.len()
+                    && (self.volumes[next].1 > 0 || oid + skipped >= self.volumes[next].0)
+                {
+                    skipped += self.volumes[next].1;
+                    next += 1;
+                }
+                oid + skipped
+            } else {
+                oid
+            };
+            tax_ids.extend(lookup.taxids(file_oid).map_err(format)?);
+        }
+        Ok(())
+    }
+
     /// The LMDB file opened for a lookup, handed to `f`.
     fn with_env<T>(
         &self,
@@ -1515,6 +1588,73 @@ fn entries_tax_oids(
     Ok((oids, found))
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:369-397
+// ```c++
+// void CSeqDBLMDBSet::GetTaxIdsForOids(const vector<blastdb::TOid> & oids, set<TTaxId> & tax_ids) const
+// {
+// 	if (m_LMDBEntrySet.size() > 1) {
+//     	vector<TOid> t;
+// 	    int j =0;
+//     	for(unsigned int i =0; i < oids.size(); i++){
+// 		   	if (oids[i] >= m_LMDBEntrySet[j]->GetOIDEnd()){
+// 		   		if (t.size() > 0){
+// 		   			set<TTaxId> t_set;
+// 		   			m_LMDBEntrySet[j]->GetTaxIdsForOids(t, t_set);
+// 		   			t.clear();
+// 		   			tax_ids.insert(t_set.begin(), t_set.end());
+// 		   		}
+// 		   		j++;
+// 		   	}
+// 		   	t.push_back(oids[i] - m_LMDBEntrySet[j]->GetOIDStart());
+// 		}
+//     	if (t.size() > 0){
+//     		set<TTaxId> t_set;
+//     		m_LMDBEntrySet[j]->GetTaxIdsForOids(t, t_set);
+//     		tax_ids.insert(t_set.begin(), t_set.end());
+//     	}
+// 	}
+// 	else {
+// 		m_LMDBEntrySet[0]->GetTaxIdsForOids(oids, tax_ids);
+// 	}
+// }
+// ```
+/// `CSeqDBLMDBSet::GetTaxIdsForOids`: the taxids of the database's OIDs `oids` (ascending),
+/// added to `tax_ids`. NCBI moves to the next entry once per OID, so an OID two entries on is
+/// read in the numbering of the next entry, as here; past the last entry NCBI reads past its
+/// vector, which LOSAT refuses.
+fn entries_oid_tax_ids(
+    entries: &[LmdbEntry],
+    oids: &[u32],
+    tax_ids: &mut BTreeSet<i32>,
+) -> Result<(), SeqDbError> {
+    let Some(first) = entries.first() else {
+        return Ok(());
+    };
+    if entries.len() == 1 {
+        return first.oid_tax_ids(oids, tax_ids);
+    }
+    let past_entries = || SeqDbError::Unsupported {
+        path: entries[entries.len() - 1].lmdb.clone(),
+        message: "NCBI BLAST+ reads the taxids of an OID past its LMDB entries".to_string(),
+    };
+    let (mut part, mut at) = (Vec::new(), 0usize);
+    for &oid in oids {
+        if oid >= entries[at].oid_end() {
+            if !part.is_empty() {
+                entries[at].oid_tax_ids(&part, tax_ids)?;
+                part.clear();
+            }
+            at += 1;
+        }
+        let entry = entries.get(at).ok_or_else(past_entries)?;
+        part.push(oid.checked_sub(entry.oid_start).ok_or_else(past_entries)?);
+    }
+    if !part.is_empty() {
+        entries[at].oid_tax_ids(&part, tax_ids)?;
+    }
+    Ok(())
+}
+
 /// NCBI's text when a taxid list selects no OID of `entries` (`CSeqDBLMDBSet::TaxIdsToOids`,
 /// quoted at `SeqDb::restrict_taxids`).
 fn tax_ids_not_found(entries: &[LmdbEntry]) -> String {
@@ -1580,10 +1720,16 @@ impl TaxIdLookup<'_> {
         if oids.is_empty() {
             return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
-        // `x_CheckOrFindOID` keeps the OIDs of the database (and of its list, which a
-        // database opened without one does not have).
+        // `x_CheckOrFindOID` keeps the OIDs of the database that its OID list includes (the
+        // alias files' ranges; a database opened without a list has no other).
         let num_oids = self.db.volume_starts[self.db.volumes.len()];
-        Ok(oids.into_iter().filter(|&oid| oid < num_oids).collect())
+        Ok(oids
+            .into_iter()
+            .filter(|&oid| match &self.db.filter {
+                Some(filter) => filter.contains(oid),
+                None => oid < num_oids,
+            })
+            .collect())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1307-1323
@@ -1615,12 +1761,29 @@ impl TaxIdLookup<'_> {
     // 	}
     // }
     // ```
-    // A database LOSAT opens has no OID list (the alias keys of lists are refused), so the
-    // taxids are every key of every entry's `.ntf`, also those of the volumes an alias of
-    // some volumes leaves out.
-    /// `GetDBTaxIds`: every taxid of the database's taxid lookup files, ascending.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1317-1322
+    // ```c++
+    //     	if(m_OIDList.NotEmpty()){
+    //     		vector<blastdb::TOid>  oids;
+    //     	    for(int oid = 0; CheckOrFindOID(oid); oid++) {
+    //     	    	oids.push_back(oid);
+    //     	    }
+    //     		m_LMDBSet.GetTaxIdsForOids(oids, tax_ids);
+    //     	}
+    // ```
+    // NCBI's OID list is that of the alias files' ranges here (`FIRST_OID`, `LAST_OID`: the
+    // database's filter; a `losat blastdbcmd` database has no other list): the taxids of the
+    // included OIDs. Without it they are every key of every entry's `.ntf`, also those of the
+    // volumes an alias of some volumes leaves out.
+    /// `GetDBTaxIds`: the taxids of the database's taxid lookup files (of its included OIDs
+    /// where a range leaves some out), ascending.
     pub fn db_tax_ids(&self) -> Result<BTreeSet<i32>, SeqDbError> {
         let mut tax_ids = BTreeSet::new();
+        if self.db.filter.is_some() {
+            let oids: Vec<u32> = (0..self.db.num_seqs()).map(|o| self.db.oid(o)).collect();
+            entries_oid_tax_ids(&self.entries, &oids, &mut tax_ids)?;
+            return Ok(tax_ids);
+        }
         for entry in &self.entries {
             tax_ids.extend(entry.db_tax_ids()?);
         }
@@ -1650,9 +1813,19 @@ impl SeqDb {
         }
     }
 
-    /// Whether the database is restricted by a list ([`SeqDb::restrict`]).
+    /// Whether the database includes the OID `oid` of its volumes (the alias files' ranges and
+    /// a list leave the others out).
+    pub fn includes_oid(&self, oid: u32) -> bool {
+        match &self.filter {
+            Some(filter) => filter.contains(oid),
+            None => oid < self.num_oids(),
+        }
+    }
+
+    /// Whether the database is restricted by a list ([`SeqDb::restrict`]); the alias files'
+    /// ranges alone do not make it so.
     pub fn is_restricted(&self) -> bool {
-        self.filter.is_some()
+        self.list_applied
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:275-286
@@ -2143,7 +2316,7 @@ impl SeqDb {
             ids
         } else {
             if list.file.info.db_vol_length > 0
-                && list.file.info.db_vol_length != self.whole_total_length
+                && list.file.info.db_vol_length != self.volume_set_length
             {
                 warnings.push(ListWarning::Posted(DB_INFO_WARNING.to_string()));
             }
@@ -2406,14 +2579,34 @@ impl SeqDb {
         Ok(())
     }
 
-    /// Makes `words` (bit `oid` set for an included OID) the database's OID set: the
-    /// ordinal ids, NCBI's scanned totals and the definition lines `rule` keeps.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:100-112
+    // ```c++
+    //     if (gi_list.NotEmpty()) {
+    //         x_ApplyUserGiList(*gi_list);
+    //     }
+    //     else if (neg_list.NotEmpty()) {
+    //         x_ApplyNegativeList(*neg_list, lmdb_set.IsBlastDBVersion5());
+    //     }
+    //     else if (lmdb_set.IsBlastDBVersion5()) {
+    //     ...
+    // ```
+    // The user list narrows the OID list of the alias files' ranges (`x_ApplyUserGiList`
+    // intersects `m_AllBits`; a negative list clears bits of it): an OID is included when both
+    // include it. NCBI's `CSeqDBImpl` then scans the totals of the included OIDs.
+    /// Makes `words` (bit `oid` set for an OID the list includes) and the alias files' ranges
+    /// the database's OID set: the ordinal ids, NCBI's scanned totals and the definition lines
+    /// `rule` keeps.
     fn apply_filter(
         &mut self,
-        words: Vec<u64>,
+        mut words: Vec<u64>,
         num_oids: u32,
         rule: Option<DeflineRule>,
     ) -> Result<(), SeqDbError> {
+        if let Some(mask) = &self.alias_mask {
+            for (word, range) in words.iter_mut().zip(mask) {
+                *word &= range;
+            }
+        }
         let filter = OidFilter::new(words, num_oids);
         let (total_length, max_length, min_length) = self.scan_totals(&filter)?;
         if let Some(rule) = rule.map(Arc::new) {
@@ -2421,21 +2614,18 @@ impl SeqDb {
                 volume.set_defline_rule(Arc::clone(&rule));
             }
         }
-        // OID 0 is the first OID of the first volume that has any.
-        let first_volume = self.volumes.iter().find(|volume| volume.num_oids() > 0);
-        self.empty_list_first_length = match first_volume {
-            Some(volume) if filter.count() == 0 => Some(match self.seqtype {
-                SeqType::Protein => u64::from(volume.protein_length(0)?),
-                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as u64,
-            }),
-            _ => None,
-        };
+        // `x_ScanTotals` counts the included OIDs in an `int` (the volume set holds fewer than
+        // 2^31 OIDs: `open_tree`) and keeps the shortest length without the `<= 0` fallback.
         self.num_seqs = filter.count();
-        self.total_length = total_length;
-        self.max_length = max_length;
-        self.min_length = min_length;
+        self.counts = super::Counts {
+            num_seqs: filter.count() as i32,
+            total_length,
+            max_length,
+            min_length: min_length as i32,
+        };
+        self.list_applied = true;
         self.filter = Some(Box::new(filter));
-        Ok(())
+        self.update_first_oid_length()
     }
 
     /// The database restricted to the OIDs that `keep` takes, as a list that names them does:
@@ -2983,7 +3173,7 @@ mod tests {
             assert!(db.is_restricted());
             assert_eq!(db.num_seqs(), whole);
             assert_eq!(kept_ids(&db).len(), whole as usize);
-            assert!(db.min_length().is_some_and(|min| min > 0));
+            assert!(db.min_length() > 0);
         }
     }
 

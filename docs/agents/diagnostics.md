@@ -3692,7 +3692,7 @@ Scheduling (each value computed by one thread with the original function; order 
   starts (two threads or more on unix with the `parallel` feature, a regular file of `LOSAT_X_QSCANPARMIN` bytes or more,
   4 MiB, no `\r` or `>?` in it, each part read to its end), and also not where a record of a part after the first has
   a reader message (its text may name a line, counted from the part's start), a record's local ID is not its reader's
-  counter's, `-parse_deflines` (its reader refuses an id read twice across the file) or the archive; elsewhere the
+  counter's, `-parse_deflines` (its records with ids take no number of the reader's counter, and its reader adds every record to the search's scope of ids) or the archive; elsewhere the
   search's reader reads the file into parts of at most 1 MiB (`read_parts`; a part is closed before a record that
   would pass the mark). A complete part gives back the room it did not take, so the commit charge follows what is
   held where memory is not overcommitted (Windows). Before, the reader kept every record (an

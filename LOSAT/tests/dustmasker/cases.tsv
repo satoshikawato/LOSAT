@@ -280,3 +280,7 @@ conf_malformed	-in in/basic.fa -conffile conf/malformed.ini
 conf_missing	-in in/basic.fa -conffile conf/missing.ini
 # An alias value that NCBI cannot convert (db/lenbad.nal: DBLIST basic, LENGTH abc): NCBI reports the CStringException, exit status 3. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-2 (review 2 F6).
 db_lenbad	-infmt blastdb -in db/lenbad -outfmt acclist
+# -dryrun (line RG item E1b on dev): the arguments are read, nothing runs. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-13, ad-RG-K-2.
+dryrun_basic	-in in/basic.fa -dryrun
+dryrun_missing_input	-in in/nonexist.fa -dryrun
+dryrun_bad_window	-dryrun -window abc

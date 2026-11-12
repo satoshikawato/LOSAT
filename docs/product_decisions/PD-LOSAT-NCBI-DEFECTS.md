@@ -487,8 +487,8 @@ would port:
   LOSAT shows in one hit as NCBI does): NCBI shows them as one hit, writes their tabular `qcovs`
   and `qcovus` as one subject's, and PSIBLAST's cut to `-max_target_seqs` counts them as one
   subject.
-- A reported sequence with the id of a query read with `-parse_deflines`: NCBI shows the query's
-  title and letters for it.
+- A reported sequence with the id of a query read with `-parse_deflines` in the query batch that
+  reports it (with outfmt 5, in any batch): NCBI shows the query's title and letters for it.
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
 - Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id

@@ -276,7 +276,8 @@ pub(crate) type Body =
 /// exception as diagnostics. LOSAT's refusals come where NCBI would start the work they stand
 /// for, before anything is written: `-conffile` without the command line's application start
 /// (which loads its file) and the full versions where NCBI reads them,
-/// `-xmlhelp` where the reader takes it, `-dryrun` after the arguments. Then `body` runs.
+/// `-xmlhelp` where the reader takes it, and `-dryrun` without that start; with it, `-dryrun`
+/// ends the run with exit status 0 after the arguments and the settings. Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
     words: &[OsString],
@@ -332,6 +333,13 @@ pub(crate) fn run_with(
                 "-conffile",
             ))
         }
+        // So is `-dryrun`, which the command line's entry ends after the arguments.
+        Preparsed::Words { dryrun: true, .. } if start.is_none() => {
+            return diag.refuse(&crate::cli::toolkit_file_word_refusal(
+                tool.program,
+                "-dryrun",
+            ))
+        }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
     if let Some(start) = start {
@@ -355,13 +363,18 @@ pub(crate) fn run_with(
         Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
     };
-    if dryrun {
-        return diag.refuse(&tool.unsupported_option("-dryrun"));
-    }
     let settings = match check_ncbi_application_settings(tool.program) {
         Ok(settings) => settings,
         Err(reason) => return diag.refuse(&reason),
     };
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
+    // `cli::main_entry`: blastdbcmd and dustmasker keep the default `DryRun`, which returns 0
+    // after the arguments have passed their definitions; LOSAT refuses the settings it refuses
+    // in a run first). NCBI BLAST+ 2.17.0 dustmasker: `-in missing.fa -dryrun` and
+    // `-infmt blastdb -in missing -dryrun` give exit status 0 and no output.
+    if dryrun {
+        return 0;
+    }
     body(&args, &settings, out, &mut diag)
 }
 

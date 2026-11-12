@@ -90,8 +90,11 @@ messages again to the standard error stream. The messages of the run go into the
 tblastx and rpsblast, and to the standard error stream in the other search programs, as in NCBI
 BLAST+. `-conffile FILE` loads FILE in place of `<program>.ini` (a name without a directory is
 looked for where `<program>.ini` is looked for, a name with one is that file); a FILE that is not
-a file ends the program with NCBI BLAST+'s message and exit status 255, before `-h`. rpsbproc
-refuses `-logfile` and `-conffile`. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+a file ends the program with NCBI BLAST+'s message and exit status 255, before `-h`. With
+`-dryrun` the configuration is loaded and the settings that LOSAT refuses are refused as without
+it (some of them, such as `DIAG_POST_LEVEL`, would make NCBI BLAST+ write a message); the program
+then stops after its options.
+rpsbproc refuses `-logfile`, `-conffile` and `-dryrun`. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
 a file that NCBI BLAST+ reports.
 

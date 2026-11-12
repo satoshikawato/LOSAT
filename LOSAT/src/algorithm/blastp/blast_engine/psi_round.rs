@@ -308,6 +308,10 @@ fn run_queries(
                     psi_round: Some(&io),
                     stopped_pssms: None,
                     titles_may_refuse,
+                    query_scopes: batches
+                        .query_scopes
+                        .as_ref()
+                        .map(|scopes| scopes.numbered_from(query)),
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
             );

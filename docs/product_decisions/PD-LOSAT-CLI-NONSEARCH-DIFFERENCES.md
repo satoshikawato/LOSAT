@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.12
+- Version: 1.13
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -18,7 +18,8 @@
   item PS16a, DECISIONS 27 of its task record; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07); 1.11 2026-11-12 (`-logfile` and `-conffile` run on the command
   line as in NCBI, line RG item E1, after the Owner's ask of 2026-11-12 to add the features NCBI
-  has and LOSAT lacked); 1.12 2026-11-13 (`losat blastdbcmd` and `losat dustmasker` in the
+  has and LOSAT lacked); 1.12 2026-11-13 (`-dryrun` runs on the command line as in NCBI, line RG
+  item E1b, the same ask); 1.13 2026-11-13 (`losat blastdbcmd` and `losat dustmasker` in the
   scope, exception 10, a closed pipe; line RG, item K1, RG DECISIONS K1-8; Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
@@ -31,7 +32,7 @@
 
 The command-line behaviour of every LOSAT program (BLASTN, BLASTP, TBLASTN, TBLASTX,
 BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report takes the
-place of a search result, and since version 1.12 `losat blastdbcmd` and `losat dustmasker`,
+place of a search result, and since version 1.13 `losat blastdbcmd` and `losat dustmasker`,
 whose outputs do) that is not part of a search result: argument parsing, help text, thread
 warnings, output-write failures and memory exhaustion. Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
@@ -165,7 +166,7 @@ BLAST+.
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
-10. **Closed pipe in blastdbcmd's and dustmasker's output** (version 1.12, 2026-11-13,
+10. **Closed pipe in blastdbcmd's and dustmasker's output** (version 1.13, 2026-11-13,
    Owner-delegated; line RG, item K1, RG DECISIONS K1-8). A write of NCBI's blastdbcmd 2.17.0
    or dustmasker 1.0.0 to a pipe whose reader has closed ends the program by SIGPIPE (exit
    status 141 from the shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE
@@ -208,7 +209,14 @@ BLAST+.
   BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX, PSIBLAST and RPSBLAST (and `-conffile` of
   makeblastdb and blastdbcmd): they run as in NCBI (`README.md`, NCBI C++ Toolkit options).
   rpsbproc, the library API and the Web engine still refuse them, and BLASTX refuses the other
-  words by name, as the other programs do.
+  words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
+  the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
+  and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
+  (`ncbiapp.cpp:705-707`, 292-296). An argument error is reported as without `-dryrun`
+  (exception 1), and the parser's refusals of an NCBI option that LOSAT does not run, or of a
+  value form it does not read, stay (LOSAT has no definition to check them as NCBI does; line RG
+  DECISIONS E1b-2), as do the refusals of registry and environment settings (some, such as
+  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). rpsbproc (its own `DryRun`), the library API and the Web engine refuse it.
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

@@ -249,7 +249,8 @@ pub(crate) fn engine_counts<S: TbxScore>(
     report::engine_counts(hits, queries, subjects, query_code, db_code, sc)
 }
 
-/// The outfmt 0 rows of `hits` (`report::pairwise_hits`) as an indexed map on `pool` (item 2).
+/// The outfmt 0 rows of `hits` (`report::pairwise_hits`, the Seq-aligns' identities
+/// `seqalign_identities` by HSP) as an indexed map on `pool` (item 2).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -257,12 +258,21 @@ pub(crate) fn engine_counts<S: TbxScore>(
 pub(crate) fn pairwise_hits(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
+    seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
 ) -> Vec<PairwiseHit> {
+    debug_assert!(seqalign_identities.is_none_or(|identities| identities.len() == hits.len()));
     pool.install(|| {
         hits.par_iter()
+            .enumerate()
             .with_min_len(CHUNK / 4)
-            .map_init(Vec::new, |window, hsp| rows.hit(hsp, window))
+            .map_init(Vec::new, |window, (index, hsp)| {
+                rows.hit(
+                    hsp,
+                    seqalign_identities.map(|identities| identities[index]),
+                    window,
+                )
+            })
             .collect()
     })
 }
@@ -274,10 +284,20 @@ pub(crate) fn pairwise_hits(
 pub(crate) fn pairwise_hits(
     _pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
+    seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
 ) -> Vec<PairwiseHit> {
     let mut window = Vec::new();
-    hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
+    hits.iter()
+        .enumerate()
+        .map(|(index, hsp)| {
+            rows.hit(
+                hsp,
+                seqalign_identities.map(|identities| identities[index]),
+                &mut window,
+            )
+        })
+        .collect()
 }
 
 /// The rows of `window`, one buffer per chunk of `CHUNK` rows, in order.

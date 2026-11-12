@@ -54,9 +54,10 @@ use crate::report::serial::{write_hit_list_seqaligns, SerialFormat};
 type HspKey = (u32, u32, u32);
 
 /// The engine's `(num_ident, num_positives)` of the HSPs whose counts the display recount
-/// replaced (`recount_shown_identities`), kept only when a Seq-annot format is
-/// requested (`ReportNeeds::seqalign`). The keys are added in the order of the hit lists, so
-/// they are sorted.
+/// replaced (`recount_shown_identities`), which the Seq-aligns show (outfmt 8, 11, 12) and the
+/// outfmt 0 report reads from them (`PairwiseHit::seqalign_num_ident`). The keys are added in
+/// the order of the hit lists, so they are sorted. Empty unless a query or subject has
+/// pyrrolysine or a subject a stored gap character.
 #[derive(Default)]
 pub(crate) struct EngineCounts {
     saved: Vec<(HspKey, (usize, usize))>,
@@ -75,6 +76,20 @@ impl EngineCounts {
             .binary_search_by(|(saved, _)| saved.cmp(&key))
             .ok()
             .map(|index| self.saved[index].1)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
+    // ```c++
+    //     // Set the identity score
+    //     if (hsp->num_ident >= 0) {
+    //         static const string kNumIdent("num_ident");
+    //         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
+    //     }
+    // ```
+    /// The Seq-align's `num_ident` of the HSP at `key` whose identities are now `shown`: the
+    /// engine's, if the recount replaced them (as `query_records` writes it).
+    pub(crate) fn num_ident(&self, key: HspKey, shown: usize) -> usize {
+        self.get(key).map_or(shown, |(num_ident, _)| num_ident)
     }
 }
 

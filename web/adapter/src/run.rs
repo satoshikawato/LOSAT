@@ -610,18 +610,20 @@ pub fn hit_list_size(command: &Commands, format: u32) -> usize {
 /// that search, as the CLI writes it alone: the CLI's search depends on the hit list size,
 /// which `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make
 /// differ between the pairwise format 0 and the tabular formats. Without those options the
-/// sizes are equal and the group is the program's formats in their order (the one search of
-/// before). The tabular group goes first because the formatting handler's warnings belong to
-/// the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`). The
+/// sizes are equal and the group is the program's formats with the tabular ones first (the one
+/// search of before). The tabular formats go first because the formatting handler's warnings
+/// belong to the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`;
+/// `-line_length`, `-sorthits` and `-sorthsps` warn for formats above 4 or other than 0 only,
+/// blast_args.cpp:2947-2989). The
 /// output of the argv's `-outfmt` (a format above 4) has the hit list size of the tabular
 /// formats, so it joins the tabular group, first (`outputs`): it adds no search.
 pub fn search_groups(formats: &[Output], command: &Commands) -> Vec<Vec<Output>> {
     let [_, descriptions, alignments] = count_options(command);
-    if descriptions.is_none() && alignments.is_none() {
-        return vec![formats.to_vec()];
-    }
     let mut ordered: Vec<Output> = formats.to_vec();
     ordered.sort_by_key(|format| format.number <= 4);
+    if descriptions.is_none() && alignments.is_none() {
+        return vec![ordered];
+    }
     let mut groups: Vec<(usize, Vec<Output>)> = Vec::new();
     for format in ordered {
         let size = hit_list_size(command, format.number);
@@ -1656,7 +1658,7 @@ mod tests {
 
     // The searches of a run: one per distinct hit list size of the formats 0, 6 and 7 (NCBI
     // `blast_args.cpp:2894-2973`), the tabular formats first; without -num_descriptions and
-    // -num_alignments the one search of the program's formats in their order.
+    // -num_alignments the one search of the program's formats, the tabular ones first.
     #[test]
     fn a_run_searches_once_for_each_hit_list_size() {
         let groups = |program: &str, options: &[&str]| {
@@ -1667,7 +1669,7 @@ mod tests {
                 .map(|group| group.iter().map(|output| output.stream).collect())
                 .collect::<Vec<Vec<u32>>>()
         };
-        let one = vec![vec![0, 6, 7]];
+        let one = vec![vec![6, 7, 0]];
         let one_tabular_first = vec![vec![6, 7, 0]];
         let two = vec![vec![6, 7], vec![0]];
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
@@ -1697,7 +1699,7 @@ mod tests {
             // The output of the argv's -outfmt (stream 4) has the hit list size of 6 and 7: it
             // joins the tabular search, first, and adds none.
             for (options, expected) in [
-                (&["-outfmt", "6 qseqid"][..], vec![vec![4, 0, 6, 7]]),
+                (&["-outfmt", "6 qseqid"][..], vec![vec![4, 6, 7, 0]]),
                 (
                     &["-outfmt", "7 std qcovs", "-num_alignments", "3"],
                     vec![vec![4, 6, 7], vec![0]],
@@ -1706,7 +1708,7 @@ mod tests {
                     &["-outfmt=6 sseqid", "-num_descriptions", "500"],
                     vec![vec![4, 6, 7, 0]],
                 ),
-                (&["-outfmt", "7"], vec![vec![0, 6, 7]]),
+                (&["-outfmt", "7"], vec![vec![6, 7, 0]]),
             ] {
                 assert_eq!(groups(program, options), expected, "{program} {options:?}");
             }

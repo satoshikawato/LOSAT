@@ -43,7 +43,6 @@ use crate::algorithm::blastx::query_setup::{
 };
 use crate::algorithm::blastx::results::{Hsp, HspList};
 use crate::algorithm::blastx::runtime::BatchResults;
-use crate::algorithm::blastx::subjects::BLAST_SEQSRC_MINLENGTH;
 use crate::algorithm::rps_search::engine::{RpsFrame, RpsQuery, RpsRun, RpsSearch, NUM_FRAMES};
 use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, RpsVolume,
@@ -273,13 +272,9 @@ impl TranslatedRpsSearch {
         let mut searched = false;
         let gapped = gapped_karlin(options);
         let gumbel = gumbel_block(options, db_length);
-        // `avg_subject_length` of the hit cutoff: the shortest profile (`BlastSeqSrcGetMinSeqLen`).
-        let cutoff_subject_length = database
-            .x_seqdb()
-            .min_length()
-            .map_or(BLAST_SEQSRC_MINLENGTH as i32, |shortest| {
-                i32::try_from(shortest).unwrap_or(i32::MAX)
-            });
+        // `avg_subject_length` of the hit cutoff: the shortest profile (`SeqDb::min_length`, as
+        // rpsblast's `cutoff_subject_length`).
+        let cutoff_subject_length = database.x_seqdb().min_length();
         // Volume after volume, each mapped for the batch's search alone, as NCBI's
         // `CLocalRPSBlast` searches each query batch.
         let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None; queries.len()];

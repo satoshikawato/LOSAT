@@ -1529,9 +1529,9 @@ fn reported_header(
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
-                .and_then(|subject| {
+                .map(|subject| {
                     let (found, weak, also_held) = headers.found_instead(&subject, ordinal);
-                    Ok(ReportedHeader::Parsed(std::sync::Arc::new(
+                    ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
                             .with_taxonomy_title(|taxids| headers.source_named(taxids))
                             .showing_gis(db.reports_show_gis())
@@ -1539,7 +1539,7 @@ fn reported_header(
                             .found_instead(found)
                             .weak_match(weak)
                             .also_held(also_held),
-                    )))
+                    ))
                 })
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {

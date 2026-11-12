@@ -542,26 +542,31 @@ fn write_run(
         ref xml_scan,
         ..
     } = run;
-    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), which the
-    // batches add as they come; with outfmt 5 against a database, every query's ids for the
-    // reported sequences (`QueryScopes::with_whole_run`), here from the records in memory.
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with `-subject`
+    // or outfmt 5 one scope of every record in memory, made before the search so that its refusal
+    // comes before any byte (`QueryScopes::read_ahead`); else the batches add theirs as they come.
     let xml = choices.iter().any(|choice| choice.number == 5);
     let query_scopes = std::cell::RefCell::new(
-        crate::blastinput::query_batch::QueryScopes::of_search(
+        match crate::blastinput::query_batch::QueryScopes::of_search(
             parse_deflines,
             database.is_none(),
             xml,
             "BLASTX",
-        )
-        .map(|scopes| {
-            if xml && database.is_some() {
-                let mut ids = crate::blastinput::query_batch::QueryScope::default();
-                ids.add_ids_of(query_records.iter().filter_map(|record| record.believed()));
-                scopes.with_whole_run(ids)
-            } else {
-                scopes
+        ) {
+            Some(scopes)
+                if scopes.span() == crate::blastinput::query_batch::QueryScopeSpan::Run =>
+            {
+                Some(
+                    crate::blastinput::query_batch::QueryScopes::of_records(
+                        crate::blastinput::query_batch::QueryScopeSpan::Run,
+                        "BLASTX",
+                        query_records,
+                    )?
+                    .read_ahead(),
+                )
             }
-        }),
+            scopes => scopes,
+        },
     );
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
@@ -649,7 +654,7 @@ fn write_run(
                 query_scopes
                     .borrow()
                     .as_ref()
-                    .map(|scopes| scopes.from_query(queries_before)),
+                    .map(|scopes| scopes.numbered_from(queries_before)),
                 &mut *diagnostics,
             )?),
             None => None,

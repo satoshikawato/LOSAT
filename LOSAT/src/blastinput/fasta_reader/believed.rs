@@ -13,9 +13,10 @@
 //!
 //! What NCBI's object manager does with these ids is not reproduced where it shows another
 //! sequence than the record's (`dropin-survey-20261029/DI7/DECISIONS.md` 7 and 8): LOSAT refuses
-//! such input. NCBI keeps every query in one scope and finds a sequence again by its id, so of
-//! two queries with one id it searches the first's letters twice, and it shows a database
-//! sequence with the id of a query as that query (probe of 2026-10-30).
+//! such input. NCBI keeps the queries of a batch in one scope (every batch's with `-subject` and in
+//! outfmt 5) and finds a sequence again by its id, so of two queries with one id there it searches
+//! the first's letters twice, and it shows a database sequence with the id of such a query as that
+//! query (probe of 2026-10-30; per batch: series Q of line RG, Q1c, `query_batch::QueryScopes`).
 
 use std::collections::HashSet;
 
@@ -261,9 +262,9 @@ pub(crate) fn refused_id(ids: &[ParsedSeqId], role: &str, program: &str) -> Opti
     None
 }
 
-/// LOSAT's refusal of the ids of a record, or `None`: an id that `refused_id` refuses, and an id
-/// that a record of the role read before has: the subjects of a reader, the queries of a scope
-/// (`query_batch::QueryScopes`). An accession with a version and the same accession without one
+/// LOSAT's refusal of the ids of a record, or `None`: an id that a record of the role read before
+/// has: the subjects of a reader, the queries of a scope (`query_batch::QueryScopes`). The readers
+/// refuse what `refused_id` refuses first. An accession with a version and the same accession without one
 /// count as one id for two subjects, and in BLASTN two queries (`dropin-survey-20261029/DI7/
 /// DECISIONS.md` 11, 12). Adds the keys of the ids. A record of the other role is
 /// `crate::seqid::id_scope::IdScope::add_record`'s.
@@ -278,9 +279,6 @@ pub(crate) fn duplicate_id(
         label::fasta(id, &mut out);
         String::from_utf8_lossy(&out).into_owned()
     };
-    if let Some(refusal) = refused_id(ids, role, program) {
-        return Some(refusal);
-    }
     // Where two queries are in one scope (`query_batch::QueryScopeSpan`): psiblast's batches
     // hold one query, after each of which NCBI's formatter empties the scope against a database
     // (`CBlastFormat::ResetScopeHistory`), so only `-subject` keeps two, where NCBI BLAST+ 2.17.0

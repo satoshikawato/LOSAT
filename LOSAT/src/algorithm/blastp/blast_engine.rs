@@ -6498,12 +6498,13 @@ fn search(
     let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
         database.is_none(),
-        crate::blastinput::query_batch::outfmts_have_xml(
-            outputs.formats.iter().map(|format| format.outfmt),
-        ),
+        args.parse_deflines
+            && crate::blastinput::query_batch::outfmts_have_xml(
+                outputs.formats.iter().map(|format| format.outfmt),
+            ),
         args.app.name(),
     );
-    let batches = match args.app {
+    let mut batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // ```c++
         //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
@@ -6532,6 +6533,10 @@ fn search(
             ),
         ),
     };
+    // LOSAT's refusal of two queries of one scope with one id comes before any report.
+    if let Some(refusal) = batches.query_refusal.take() {
+        return Err(refusal);
+    }
     // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
     // (`psiblast_stop_at_invalid_pssm`).
     let batches = psiblast_stop_at_invalid_pssm(&args, batches);
@@ -6637,7 +6642,7 @@ fn search(
             query_scopes: batches
                 .query_scopes
                 .as_ref()
-                .map(|scopes| scopes.from_query(0)),
+                .map(|scopes| scopes.numbered_from(0)),
         };
         run_resolved_in_pool(
             args,
@@ -7015,7 +7020,7 @@ fn search(
                                 query_scopes: batches
                                     .query_scopes
                                     .as_ref()
-                                    .map(|scopes| scopes.from_query(block.start)),
+                                    .map(|scopes| scopes.numbered_from(block.start)),
                             },
                             x_block,
                         )

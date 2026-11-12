@@ -1293,7 +1293,7 @@ fn search(
     // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
     // queries without letters), after the reports of the batches before (without the
     // epilog) and the messages of that batch's records (`read_query_batches`).
-    let batches = crate::blastinput::query_batch::read_query_batches(
+    let mut batches = crate::blastinput::query_batch::read_query_batches(
         input_records,
         &searched_queries,
         &query_input,
@@ -1302,12 +1302,17 @@ fn search(
         crate::blastinput::query_batch::QueryScopes::of_search(
             args.parse_deflines,
             database.is_none(),
-            crate::blastinput::query_batch::outfmts_have_xml(
-                outputs.formats.iter().map(|format| format.outfmt),
-            ),
+            args.parse_deflines
+                && crate::blastinput::query_batch::outfmts_have_xml(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
             "TBLASTN",
         ),
     );
+    // LOSAT's refusal of two queries of one scope with one id comes before any report.
+    if let Some(refusal) = batches.query_refusal.take() {
+        return Err(refusal);
+    }
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
     // that stops at its first batch gives NCBI's error.
     if batches.searched_done > 0 {

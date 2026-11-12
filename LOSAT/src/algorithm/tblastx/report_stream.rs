@@ -280,6 +280,12 @@ pub(super) fn check(
     }
 }
 
+/// The `-db` part of `check` for the report `format` (0, 6 or 7): a database with parsed Seq-ids
+/// of more than `max_parsed` sequences in its volumes is not read (`Off::LargeParsed`, NCBI's
+/// `nt` and `core_nt` with `common::database::PARSED_CHECK_SEQUENCES_MAX`: the reports after the
+/// loop, as blastn's), a run whose prefetch NCBI's taxonomy cache refuses is not streamed
+/// (`Off::TaxonomyCache`), else every header is read in `pool` (`TblastxDatabase::reports_may_refuse`,
+/// with `queries`: under `-parse_deflines` the scope of every query of the run).
 fn database_check(
     database: &crate::algorithm::tblastx::database::TblastxDatabase,
     format: report::TblastxOutputFormat,

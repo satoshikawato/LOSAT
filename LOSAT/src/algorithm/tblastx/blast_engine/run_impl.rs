@@ -3251,9 +3251,10 @@ fn run_batch_loop(
     // loop reads the batches. A streamed run has none that refuses (`report_stream::check`).
     // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`).
     let subject_records = matches!(subjects.shown, ShownSubjects::Fasta { .. });
-    let xml = crate::blastinput::query_batch::outfmts_have_xml(
-        outputs.formats.iter().map(|format| format.outfmt),
-    );
+    let xml = args.parse_deflines
+        && crate::blastinput::query_batch::outfmts_have_xml(
+            outputs.formats.iter().map(|format| format.outfmt),
+        );
     let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
         subject_records,
@@ -3407,11 +3408,6 @@ fn run_batch_loop(
                 outputs.diagnostics.write_all(&batch_warnings)?;
                 return Err(error);
             }
-        }
-        // LOSAT's refusal of two queries of the batch's scope with one id, as its refusal of a
-        // title (below).
-        if let Some(scopes) = query_scopes.as_mut() {
-            scopes.add_batch(&query_runs.input_records[input_start..input_end], start)?;
         }
         let batch_queries = &query_records[start..end];
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
@@ -3611,6 +3607,11 @@ fn run_batch_loop(
         // `-db`: the definition lines of the batch's reported sequences are read where NCBI
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
         // that NCBI cannot read fails this batch, after the reports of the batches before.
+        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
+        // the batch (its own errors come first), as its refusal of a title (below).
+        if let Some(scopes) = query_scopes.as_mut() {
+            scopes.add_batch(&query_runs.input_records[input_start..input_end], start)?;
+        }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();

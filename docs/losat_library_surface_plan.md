@@ -437,7 +437,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 | 共有 | データベースを開く塊を `open_search_database` に切り出し、`search_cli` と共有する。BLASTX は `reported_batch`、`database_search_error`、`ReportedAsks` を `native.rs` に切り出す | 重ねて書くと CLI との差が生まれる |
 | BLASTX の複数形式 | `report_batches`：`-subject` と `-db` が同じ batch loop を通る。1 回の検索で全形式を書き、`for_batch` の引数は全形式の和（`ReportedAsks::or`） | CLI の `run_inner` は 1 形式で、ライブラリは 1 回の検索で全形式を書く |
 | HSP の subject | `FormatObserver::database_subjects`（`ReportedSubject`：OID、`saccver`、長さ）。`HspRecord::s_idx` は database の順序 ID（`gnl\|BL_ORD_ID\|n` の n） | engine の `Hit::s_idx` は報告の rank で、バッチごとに意味が変わる。ID は表形式の報告が拒否するときも検索を失敗させない（`library_subject`） |
-| `-parse_deflines` | `read_inputs(&search, query, b"")`。query の id からスコープを作り直す（`database_id_scope`） | データベースはスコープに query の id を尋ねるだけで、読み手は要らない |
+| `-parse_deflines` | `read_inputs(&search, query, b"")`。query の id のスコープは各 program が batch を切る所で作る（`query_batch::QueryScopes`、線 RG の Q1c） | NCBI は batch ごとにスコープを空にする（outfmt 5 と `-subject` は空にしない）。データベースの配列は報告する batch のスコープに query の id を尋ねるだけ |
 | 読み手 | `read_fasta` と `read_inputs` は defline を保持する（`with_defline`）。範囲の拒否は outfmt 11 を求める検索で行う（`check_archive_inputs`） | 読むときに形式が分からない。archive は defline をそのまま書く |
 | BLASTN のバッチ | `QueryBatchSizes::of_database`：全体の文字数（リストがあっても全体）で `CBatchSizeMixer` を始める | `run_in_pool` と同じ値 |
 | archive | `ReportOutputs::finish_archive`：失敗と、どの archive にも載らなかったメッセージの error archive を CLI と同じく書く | `PrintErrorArchive` |

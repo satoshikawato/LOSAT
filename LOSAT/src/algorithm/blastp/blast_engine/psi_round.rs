@@ -311,7 +311,7 @@ fn run_queries(
                     query_scopes: batches
                         .query_scopes
                         .as_ref()
-                        .map(|scopes| scopes.from_query(query)),
+                        .map(|scopes| scopes.numbered_from(query)),
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
             );

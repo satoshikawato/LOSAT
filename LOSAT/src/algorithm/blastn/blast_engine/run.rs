@@ -9889,17 +9889,6 @@ fn run_in_pool(
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].append(&batch_title_warnings);
-        // LOSAT's refusal of two queries of the batch's scope with one id: the warnings of the
-        // batches read so far, as for its refusal of a title (below).
-        if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
-                let written = if stream.acting() { start } else { 0 };
-                for query_warnings in &warnings[written..=start] {
-                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
-                }
-                return Err(error);
-            }
-        }
         check_batch_window(&args, batch_records.batch_queries().records())?;
         // NCBI restricts the lower-case runs of each whole record to the chunks of a split
         // batch, and of the letters outside a `-query_loc` interval the one before it reaches
@@ -10065,6 +10054,18 @@ fn run_in_pool(
         // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
         // that NCBI cannot read fails this batch, after the reports of the batches before
         // and the messages of this batch's reading.
+        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
+        // the batch (its own errors come first): the warnings of the batches read so far, as for
+        // its refusal of a title (below).
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
+                let written = if stream.acting() { start } else { 0 };
+                for query_warnings in &warnings[written..=start] {
+                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
+                }
+                return Err(error);
+            }
+        }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();

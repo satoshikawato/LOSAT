@@ -496,8 +496,8 @@ impl Store {
         // the source starts from; where the parts are not taken, the source reads them (its
         // position is where it was: the parts read at offsets).
         // A part's reader numbers its records from the part's first (`-parse_deflines`, whose
-        // records with ids take no number and whose reader refuses an id read twice across the
-        // file, is never read batch by batch: `run.rs`).
+        // records with ids take no number and whose reader adds every record to the search's
+        // scope of ids, is never read batch by batch: `run.rs`).
         let parts = if !config.keep_defline && !config.parse_deflines {
             in_parts(&again, start)
         } else {

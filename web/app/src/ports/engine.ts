@@ -4,6 +4,7 @@ import type { RecordKey } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
 import type { ResolvedDefault } from '../domain/parameters';
 import type { ProgramId } from '../domain/programs';
+import type { CountsRecord, CountsSnapshot } from '../domain/run';
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -83,6 +84,8 @@ export interface RuntimeInfo {
   readonly memory?: EngineMemory;
   /** The engine searched the subject that it held from an earlier search (plan §4.6 R1). */
   readonly subjectRetained?: boolean;
+  /** The WindowMasker counts file of the run, when the argv has `-window_masker_db`. */
+  readonly windowMasker?: CountsRecord;
 }
 
 /** One input of a run: the exact FASTA bytes of the run snapshot and their record table. */
@@ -106,6 +109,8 @@ export interface EngineRunRequest {
   readonly query: EngineInput;
   readonly subject: EngineInput;
   readonly requestedThreads: number | 'auto';
+  /** The file of `-window_masker_db`, when the argv has it. */
+  readonly windowMasker?: CountsSnapshot;
 }
 
 /** Thrown (as a rejection) by `run` when `register` read other records than the record table. */

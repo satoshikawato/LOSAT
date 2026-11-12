@@ -9,7 +9,7 @@ import { commandWords } from '../domain/argv';
 import { CUSTOM_OUTPUT, customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
-import { formatBytes, formatCount, formatDateTime, formatDuration } from './format';
+import { formatBytes, formatCount, formatDateTime, formatDuration, formatMillis } from './format';
 import { vScrollFocus } from './scroll-focus';
 import VerificationBadge from './VerificationBadge.vue';
 
@@ -75,6 +75,14 @@ const inputs = computed(() => [
         <template v-if="record.subjectRetained !== undefined">
           <dt>Subject</dt>
           <dd>{{ record.subjectRetained ? 'kept from the previous search' : 'read for this search' }}</dd>
+        </template>
+        <template v-if="record.windowMasker">
+          <dt>WindowMasker counts</dt>
+          <dd data-testid="run-window-masker">
+            {{ record.windowMasker.name }}, {{ formatBytes(record.windowMasker.size) }},
+            {{ record.windowMasker.retained ? 'kept from the previous search' : `read for this search in ${formatMillis(record.windowMasker.loadMs)}` }}<br />
+            <span class="muted small">SHA-256 {{ record.windowMasker.sha256 }}</span>
+          </dd>
         </template>
         <template v-if="record.runtimeGeneration !== undefined">
           <dt>Runtime</dt>

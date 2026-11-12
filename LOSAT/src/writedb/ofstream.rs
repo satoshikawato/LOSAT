@@ -373,8 +373,29 @@ impl OfStream {
     //       return *this;
     //     }
     // ```
+    // The writers call this once for each record, offset or id (millions of times for a large
+    // database), so the case that only copies is decided here and inlined: a good stream whose
+    // put area is committed (`_M_writing`) and holds more room than `s` needs. There the sentry
+    // passes, `xsputn` takes `__streambuf_type::xsputn` (`__n < __bufavail`), which copies all
+    // of `s` without an `overflow`, and nothing else changes; every other case takes the whole
+    // path (`write_slow`).
     /// `ostream::write(s, n)`.
+    #[inline]
     pub(crate) fn write(&mut self, s: &[u8]) {
+        if self.state == IoState::GOOD && self.writing && self.pptr < self.epptr {
+            let end = self.pptr + s.len();
+            if end < self.epptr {
+                self.buf[self.pptr..end].copy_from_slice(s);
+                self.pptr = end;
+                return;
+            }
+        }
+        self.write_slow(s);
+    }
+
+    /// `ostream::write(s, n)` in full.
+    #[inline(never)]
+    fn write_slow(&mut self, s: &[u8]) {
         if self.sentry() && self.xsputn(s) != s.len() {
             self.setstate(IoState::BAD);
         }

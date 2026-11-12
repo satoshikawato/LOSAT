@@ -84,6 +84,8 @@ mod parse_deflines_subject;
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
 mod report_counts_cli;
+#[path = "../rpsbproc_fixtures.rs"]
+mod rpsbproc_fixtures;
 #[path = "../search_environment.rs"]
 mod search_environment;
 #[path = "../seq_id_first_line.rs"]

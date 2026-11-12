@@ -87,13 +87,17 @@ fn a_shim_prints_what_the_subcommand_prints() {
     let installed = install(&dir);
     assert!(installed.status.success(), "{installed:?}");
     for name in installed_names(&installed).iter().map(String::as_str) {
-        // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`).
+        // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`; rpsbproc,
+        // which is not part of BLAST+, has its own: `rpsbproc: 0.5.1`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
+        let first_line = if name == "rpsbproc" {
+            "rpsbproc: 0.5.1\n".to_string()
+        } else {
+            format!("{name}: 2.17.0+\n")
+        };
         assert!(
-            version
-                .stdout
-                .starts_with(format!("{name}: 2.17.0+\n").as_bytes()),
+            version.stdout.starts_with(first_line.as_bytes()),
             "{name}: {version:?}"
         );
         for words in [

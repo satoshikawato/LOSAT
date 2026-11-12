@@ -220,6 +220,14 @@ pub enum Commands {
     /// makeblastdb: create a BLAST database from a FASTA file, format version 4
     #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
+    // ```c++
+    // static const char *PROGRAM_USAGE =	//multiline
+    // "Process output from offline rpsblast to annotate sequence with conserved domain information";
+    // ```
+    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits)
+    #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
+    Rpsbproc(crate::rpsbproc::RpsbprocArgs),
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
@@ -260,7 +268,7 @@ where
         .filter(|program| {
             matches!(
                 program.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "rpsblast" | "rpsbproc"
             )
         })
     {
@@ -333,10 +341,21 @@ where
                     | "psiblast"
                     | "rpsblast"
                     | "makeblastdb"
+                    | "rpsbproc"
             )
         {
             continue;
         }
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/argwrapper.cpp:42-43
+        // ```c++
+        // 				if (TArgDefinition::EMPTYSTR != argdef.alias)
+        // 					pMyArgs->AddAlias(argdef.alias, argdef.name);
+        // ```
+        // rpsbproc's aliases (`-infile` of `i`, ...) are its `--infile`, ... (`rpsbproc::args`).
+        let alias = (scope.get_name() == "rpsbproc")
+            .then(|| crate::rpsbproc::alias_word(text))
+            .flatten();
+        let text: &str = alias.as_deref().unwrap_or(text);
         let key = text.strip_prefix('-').filter(|key| !key.starts_with('-'));
         let (name, inline) = key
             .unwrap_or("")
@@ -452,6 +471,26 @@ fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
 // const string kArgCompBasedStats("comp_based_stats");
 // ```
 // Render the same canonical names in help, usage and parser diagnostics.
+/// `text` with each `--{name}` that is a whole word (not followed by a letter, a digit, `-` or `_`)
+/// written `-{name}` (`render_rpsbproc_message`).
+fn replace_whole_option(text: &str, name: &str) -> String {
+    let pattern = format!("--{name}");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(&pattern) {
+        let after = &rest[at + pattern.len()..];
+        let whole = !after
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '-' || c == '_');
+        out.push_str(&rest[..at]);
+        out.push_str(if whole { &pattern[1..] } else { &pattern });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn render_message(error: &clap::Error) -> String {
     let mut message = error
         .to_string()
@@ -460,9 +499,11 @@ pub fn render_message(error: &clap::Error) -> String {
     let command = Cli::command();
     for scope in std::iter::once(&command).chain(command.get_subcommands()) {
         for arg in scope.get_arguments() {
+            // rpsbproc's one-letter arguments are left to `render_rpsbproc_message`: replacing
+            // `--i` here would change other words (`--infile`) in every program's messages.
             if let Some(name) = arg
                 .get_long()
-                .filter(|name| !matches!(*name, "help" | "version"))
+                .filter(|name| !matches!(*name, "help" | "version") && name.len() > 1)
             {
                 message = message.replace(&format!("--{name}"), &format!("-{name}"));
             }
@@ -472,6 +513,43 @@ pub fn render_message(error: &clap::Error) -> String {
         .replace("'-h'", "'-help'")
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version")
+}
+
+/// `render_message` for `losat rpsbproc`, whose arguments are NCBI's one-letter keys (`-i`)
+/// with long forms of two dashes (`--infile`, rpsbproc's `AddAlias`): only the one-letter
+/// arguments are written with one dash, and the long forms keep their two.
+pub fn render_rpsbproc_message(error: &clap::Error) -> String {
+    let text = error.to_string();
+    // The word that `unknown_option_error` quotes is the one on the command line (`--i` stays
+    // `--i`); the rest is rendered.
+    const UNKNOWN: &str = "unknown option or argument '";
+    if let Some(start) = text.find(UNKNOWN).map(|at| at + UNKNOWN.len()) {
+        if let Some(len) = text[start..].find('\'') {
+            return format!(
+                "{}{}{}",
+                render_rpsbproc_text(&text[..start]),
+                &text[start..start + len],
+                render_rpsbproc_text(&text[start + len..])
+            );
+        }
+    }
+    render_rpsbproc_text(&text)
+}
+
+/// `render_rpsbproc_message` of a part of a message.
+fn render_rpsbproc_text(text: &str) -> String {
+    let mut message = text
+        .replace("-h, --help", "-help")
+        .replace("-V, --version", "--version");
+    let command = Cli::command();
+    if let Some(scope) = command.find_subcommand("rpsbproc") {
+        for name in scope.get_arguments().filter_map(clap::Arg::get_long) {
+            if name.len() == 1 {
+                message = replace_whole_option(&message, name);
+            }
+        }
+    }
+    message.replace("'-h'", "'-help'")
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
@@ -683,18 +761,21 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
         );
     }
     if let Some(program) = [
-        "blastn", "blastp", "tblastn", "tblastx", "psiblast", "rpsblast",
+        "blastn", "blastp", "tblastn", "tblastx", "psiblast", "rpsblast", "rpsbproc",
     ]
     .into_iter()
     .find(|program| scope.get_name() == *program)
     .filter(|_| is_ncbi_toolkit_arg(name))
     {
+        // The BLAST programs are named in capitals, rpsbproc as in its other refusals.
+        let program = if program == "rpsbproc" {
+            program.to_string()
+        } else {
+            program.to_ascii_uppercase()
+        };
         return clap::Error::raw(
             ErrorKind::InvalidValue,
-            format!(
-                "the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {}",
-                program.to_ascii_uppercase()
-            ),
+            format!("the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {program}"),
         );
     }
     if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
@@ -754,15 +835,27 @@ where
         "psiblast" => "psiblast",
         "rpsblast" => "rpsblast",
         "makeblastdb" => "makeblastdb",
+        "rpsbproc" => "rpsbproc",
         _ => return None,
     };
     for token in &tokens[2..] {
         match token.to_str().unwrap_or("") {
             "--" => return None,
             "-version" => {
+                // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
+                // ```c++
+                // 	SetVersion(CVersionInfo(VER.major, VER.minor, VER.patch_level));
+                // ```
+                // rpsbproc's own version (0.5.1), not BLAST's; the second line names the BLAST+
+                // toolkit that bioconda builds it on (orchestrator's choice, Owner-delegated
+                // 2026-11-11).
+                let version = if name == "rpsbproc" {
+                    crate::rpsbproc::VERSION
+                } else {
+                    crate::NCBI_BLAST_VERSION
+                };
                 return Some(format!(
-                    "{name}: {}\n Package: LOSAT {}, output compatible with blast {}\n",
-                    crate::NCBI_BLAST_VERSION,
+                    "{name}: {version}\n Package: LOSAT {}, output compatible with blast {}\n",
                     env!("CARGO_PKG_VERSION"),
                     crate::NCBI_BLAST_RELEASE
                 ));

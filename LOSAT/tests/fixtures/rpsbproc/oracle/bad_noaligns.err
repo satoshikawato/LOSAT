@@ -1,0 +1,14 @@
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+RPSBlast session 0 start...
+Wrong type of results data: CBlast4_get_search_results_reply::e_alignments expected
+RPSBlast session 1 done...
+All done, 0 queries processed
+

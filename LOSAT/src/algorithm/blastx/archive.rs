@@ -216,8 +216,9 @@ pub(crate) fn batches_may_refuse(
     found
 }
 
-/// No NCBI counterpart: the output streams of a run whose archive may still refuse the title of a
-/// later batch (`batches_may_refuse`), held in the order in which they are written: each write keeps
+/// No NCBI counterpart: the output streams of a run in which a later batch may still be refused,
+/// by the archive for a title (`batches_may_refuse`) or, in a library call, by a BLAST XML, XML2 or
+/// JSON document (`local::report_batches`), held in the order in which they are written: each write keeps
 /// its bytes with the index of its stream (`writer`), so that `release` writes them in that order
 /// (the archives of the batches and the messages between them, as a stream that both go to reads
 /// them from NCBI) and `discard` drops them. Outside `hold` the bytes pass through. Shared, so that
@@ -304,7 +305,8 @@ impl<S: Write> ArchiveHold<S> {
     /// Writes what is held and passes the bytes on again: the side files first (in order), then
     /// the streams in the order of their writes. A side file that cannot be opened stops the run
     /// there, as NCBI's does (`Cannot open output file`, exit status 1): the side files before it
-    /// stay and the streams get nothing of what was held.
+    /// stay, and the streams and the side files of the later documents get nothing of what was
+    /// held.
     pub(crate) fn release(&self) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
@@ -312,8 +314,13 @@ impl<S: Write> ArchiveHold<S> {
         if state.discarded {
             return Ok(());
         }
-        for side in &state.sides {
+        for (index, side) in state.sides.iter().enumerate() {
             if let Err(error) = side.release() {
+                // Nothing more of what was held is written: neither the streams, nor the side
+                // files of the documents after this one.
+                for later in &state.sides[index + 1..] {
+                    later.discard();
+                }
                 state.discarded = true;
                 return Err(error);
             }
@@ -340,11 +347,13 @@ impl<S: Write> ArchiveHold<S> {
     }
 
     /// The end of a run that stopped with `error` and held its output for the archive's titles
-    /// (`batches_may_refuse`): one of NCBI's own errors, after which NCBI writes its error archive
-    /// (`error_lines`), follows the archives of the batches before it, which NCBI wrote
-    /// (released); LOSAT's refusal (the title of the batch, or another) follows no byte (dropped).
+    /// (`batches_may_refuse`): one of NCBI's own errors (`NativeError`: the errors after which NCBI
+    /// writes its error archive, `error_lines`, and, in a library call that writes other formats
+    /// too, a side file that cannot be opened or an output that cannot be written) follows the
+    /// bytes of the batches before it, which NCBI wrote (released); LOSAT's refusal (the title of
+    /// the batch, or another) follows no byte (dropped).
     pub(crate) fn end_with(&self, error: &anyhow::Error) {
-        if error_lines(error, false).is_some() {
+        if error.is::<crate::cli::NativeError>() {
             let _ = self.release();
         } else {
             self.discard();
@@ -840,7 +849,8 @@ mod hold_tests {
         .into()
     }
 
-    /// A refusal of the taxonomy database as the XML2 and JSON documents meet it (`XmlRefusal`).
+    /// A refusal of the taxonomy database as the XML2 and JSON documents meet it (`XmlRefusal`,
+    /// made of the reader's `TaxonomyRefusal`, which outfmt 5's prefetch returns as it is).
     fn document_refusal() -> anyhow::Error {
         super::super::blast_xml::XmlRefusal::of_taxonomy(
             crate::algorithm::common::database::taxdb_error_for_tests(SeqDbError::Unsupported {
@@ -857,11 +867,19 @@ mod hold_tests {
         assert_eq!(written(&streams), ALL);
     }
 
+    /// NCBI's error of a side file that it cannot open (`CArgException`, exit status 1): no
+    /// error archive follows it (`error_lines`), and NCBI wrote the bytes before it all the same.
+    fn side_file_error() -> anyhow::Error {
+        crate::report::blast_xml2::framing::side_file_open_error()
+    }
+
     #[test]
     fn the_archives_hold_writes_after_ncbis_error_and_drops_after_any_refusal() {
-        let (hold, streams) = held_run();
-        hold.end_with(&ncbis_error());
-        assert_eq!(written(&streams), ALL);
+        for ncbis in [ncbis_error(), side_file_error()] {
+            let (hold, streams) = held_run();
+            hold.end_with(&ncbis);
+            assert_eq!(written(&streams), ALL, "{ncbis}");
+        }
         for refusal in [
             document_refusal(),
             anyhow::anyhow!("this is not supported by LOSAT's BLASTX"),
@@ -888,12 +906,52 @@ mod hold_tests {
         assert_eq!(written(&streams), NOTHING);
         for other in [
             ncbis_error(),
+            side_file_error(),
             anyhow::anyhow!("taxdb.btd: Input/output error; this database is not supported"),
         ] {
             let (hold, streams) = held_run();
             hold.end_document_with(&other);
             assert_eq!(written(&streams), ALL, "{other}");
         }
+    }
+
+    /// Side files whose every file cannot be opened.
+    struct Blocked;
+
+    impl SideFiles for Blocked {
+        fn create(&mut self, _n: u32) -> std::io::Result<Box<dyn Write + '_>> {
+            Err(std::io::Error::other("blocked"))
+        }
+
+        fn listed(&self, _n: u32) -> Vec<u8> {
+            Vec::new()
+        }
+    }
+
+    /// The side files of one document cannot be opened at the release (they could when their
+    /// reports were made): NCBI's error ends the run, and neither the streams nor the side files
+    /// of the document after it get what was held, then or when the run's writers are dropped.
+    #[test]
+    fn a_side_file_error_at_the_release_writes_nothing_after_it() {
+        let (a, files) = (Shared::default(), Shared::default());
+        let hold = ArchiveHold::new();
+        let mut stream = hold.writer(a.clone());
+        hold.hold();
+        let mut first = hold.side_files(Box::new(Recorded(files.clone())));
+        let mut blocked = hold.side_files(Box::new(Blocked));
+        let mut last = hold.side_files(Box::new(Recorded(files.clone())));
+        stream.write_all(b"a1 ").unwrap();
+        first.write_file(1, b"one").unwrap();
+        blocked.write_file(1, b"x").unwrap();
+        last.write_file(1, b"late").unwrap();
+        let error = hold.release().unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(
+            native.message,
+            "Command line argument error: Cannot open output file\n"
+        );
+        drop((first, blocked, last, stream, hold));
+        assert_eq!([a.text(), files.text()], ["", "1:one;"].map(String::from));
     }
 
     #[test]

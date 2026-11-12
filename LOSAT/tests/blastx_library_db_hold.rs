@@ -345,6 +345,17 @@ fn a_held_library_run_that_nothing_refuses_writes_ncbis_bytes() {
             "outfmt {outfmt}"
         );
     }
+    // Outfmt 13 and 14: the held side files and the master file are the command line's.
+    let db = "tests/fixtures/outfmt16/db/sprot_mixtax";
+    let query = fixtures.join("qnx_late.fna");
+    for outfmt in ["13", "14"] {
+        let what = format!("outfmt {outfmt}");
+        let library = search(&dir, true, db, &query, outfmt, &env, &[]);
+        assert_eq!(library.status, Some(0), "{what}: {}", library.stderr);
+        assert_eq!(library.side_files().len(), 2, "{what}: a file per query");
+        let cli = search(&dir, false, db, &query, outfmt, &env, &[]);
+        same_as_command_line(&what, &library, &cli);
+    }
 }
 
 /// A database with parsed Seq-ids (`ids/refuse_v5`): the second query batch reports a sequence
@@ -423,6 +434,16 @@ fn a_held_library_run_that_ncbis_error_stops_writes_the_batches_before() {
 #[test]
 fn a_library_call_with_several_formats_holds_them_all() {
     use LOSAT::api::{read_inputs, run, validate, Inputs, Program};
+    // The call runs in this process: with one of the variables that the other tests clear for
+    // their runs, its batches or its database's taxonomy are not those of this test.
+    if let Some((name, _)) = std::env::vars_os().find(|(name, _)| {
+        let name = name.to_string_lossy();
+        name.starts_with("NCBI")
+            || matches!(&*name, "BATCH_SIZE" | "BLASTDB" | "PRE_FETCH_SEQS_LIMIT")
+    }) {
+        eprintln!("skipped: {} is set", name.to_string_lossy());
+        return;
+    }
     let mut filler = String::from(NO_HIT);
     while filler.len() < 10_003 {
         filler.push_str(NO_HIT);

@@ -1189,10 +1189,9 @@ mod held_side_files_tests {
         (HeldOutput::new(Box::new(master), Some(side.clone())), side)
     }
 
+    /// A report as a run writes it (`SideFiles::write_file`).
     fn report(side: &mut HeldSideFiles, n: u32, bytes: &[u8]) {
-        let mut file = side.create(n).unwrap();
-        file.write_all(bytes).unwrap();
-        file.flush().unwrap();
+        side.write_file(n, bytes).unwrap();
     }
 
     fn names(dir: &Path) -> Vec<String> {
@@ -1276,6 +1275,13 @@ mod held_side_files_tests {
         assert_eq!(names(&dir), ["o.out", "o.out_2.xml"]);
         let error = side.create(2).err().expect("a directory cannot be opened");
         assert!(error.raw_os_error().is_some(), "{error:?}");
+        // The run's route: NCBI's error of the file, and nothing of the report is kept.
+        let error = side.write_file(2, b"two").unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(
+            native.message,
+            "Command line argument error: Cannot open output file\n"
+        );
         let mut master = held.clone();
         master.write_all(b"master").unwrap();
         drop((held, side, master));

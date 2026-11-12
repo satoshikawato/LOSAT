@@ -481,10 +481,13 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
     // error: when the archive's titles are what it held for (`titles_may_refuse`), NCBI's bytes
-    // if the error is NCBI's own (the error archive follows, `ReportOutputs::finish_archive`) and
-    // nothing after LOSAT's refusal (`ArchiveHold::end_with`); when only the documents are,
-    // nothing after one of their refusals and the bytes of the batches before after any other
-    // error (`ArchiveHold::end_document_with`), as the command line.
+    // if the error is NCBI's own (its error archive follows where NCBI writes one,
+    // `ReportOutputs::finish_archive`) and nothing after LOSAT's refusal (`ArchiveHold::end_with`);
+    // when only the documents are, nothing after one of their refusals and the bytes of the
+    // batches before after any other error (`ArchiveHold::end_document_with`), as the command line.
+    // The observer's events of a held run come before its bytes reach their sinks, so a position
+    // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
+    // hold of this function, a `-subject` run's too.
     match (&hold, &written) {
         (Some(hold), Ok(_)) => hold.release()?,
         (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error),
@@ -618,9 +621,9 @@ fn write_run(
         };
         // The archive (outfmt 11) of this batch, which NCBI writes once its search and the read of
         // its definition lines have not failed: the titles it cannot write are refused before any
-        // format of the batch (`archive::check_batch_titles`; the outputs are the caller's, so the
-        // batches before are written); only a run whose read before the search found such a
-        // title can refuse (`titles_may_refuse`).
+        // format of the batch (`archive::check_batch_titles`; the run holds its formats, so the
+        // refusal follows no byte of the batches before); only a run whose read before the search
+        // found such a title can refuse (`titles_may_refuse`).
         if titles_may_refuse {
             archive::check_batch_titles(
                 queries,

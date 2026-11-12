@@ -8,8 +8,9 @@
 //! (makeblastdb's titles and the registry reader) and `NStr::TruncateSpaces`.
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (no caller asks for
-//! them), the bases other than 10, and the flags no caller passes (`fMandatorySign`,
-//! `fAllowCommas`, the leading and trailing symbols other than spaces). Other modules keep copies
+//! them), the bases other than 10 (but 16 of `StringToInt8`, which the argument reader tries,
+//! `ncbi_app::args`), and the flags no caller passes (`fMandatorySign`, `fAllowCommas`, the
+//! leading and trailing symbols other than spaces). Other modules keep copies
 //! of some of these conversions (`blastinput::query_batch`, `blastinput::value_parsers`,
 //! `seqdb::isam`, `seqdb::mask`, `blastdbcmd`), not yet folded here.
 
@@ -432,6 +433,64 @@ fn skip_spaces(s: &[u8], mut pos: usize) -> usize {
 /// `NStr::StringToInt8(str, flags)` in base 10, `flags` [`ALLOW_LEADING_SPACES`] and
 /// [`ALLOW_TRAILING_SPACES`] or 0.
 pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiException> {
+    string_to_int8_base(s, flags, 10)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:765-795
+// ```c++
+// static inline
+// bool s_CheckRadix(const CTempString str, SIZE_TYPE& pos, int& base)
+// {
+//     if ( base == 10  ||  base == 8 ) {
+//         // shortcut for most frequent case
+//         return true;
+//     }
+//     ...
+//     unsigned char ch   = str[pos];
+//     unsigned char next = str[pos+1];
+//     ...
+//     // Remove leading '0x' for hex numbers
+//     if ( base == 16 ) {
+//         if (ch == '0'  &&  (next == 'x' || next == 'X')) {
+//             pos += 2;
+//         }
+//     }
+//     return true;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:684-712
+// ```c++
+// bool s_IsGoodCharForRadix(char ch, int base, int* value = 0)
+// {
+//     if ( base <= 10 ) {
+//         // shortcut for most frequent case
+//         int delta = ch-'0';
+//         if ( unsigned(delta) < unsigned(base) ) {
+//             ...
+//             return true;
+//         }
+//         return false;
+//     }
+//     if (!isalnum((unsigned char) ch)) {
+//         return false;
+//     }
+//     // Corresponding numeric value of *endptr
+//     int delta;
+//     if (isdigit((unsigned char) ch)) {
+//         delta = ch - '0';
+//     } else {
+//         ch = (char) tolower((unsigned char) ch);
+//         delta = ch - 'a' + 10;
+//     }
+//     ...
+//     return delta < base;
+//  }
+// ```
+// `pos0` is set before the radix check: a `0x` with no digit after it is 0 (`pos != pos0`).
+/// `NStr::StringToInt8(str, flags, base)` in base 10 or 16 (`s_StringToInt8` of the argument
+/// reader tries 16 after 10, `ncbi_app::args`), `flags` as for [`string_to_int8`].
+pub(crate) fn string_to_int8_base(s: &[u8], flags: Flags, base: u8) -> Result<i64, NcbiException> {
+    debug_assert!(base == 10 || base == 16, "only bases 10 and 16 are ported");
     let at = |pos: usize| s.get(pos).copied().unwrap_or(0);
     let error = |site: ThrowSite, msg: &str, pos: usize| convert_error(s, "Int8", msg, site, pos);
     let mut pos = 0;
@@ -450,20 +509,30 @@ pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiExceptio
         _ => false,
     };
     let pos0 = pos;
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(sign);
+    if base == 16 && at(pos) == b'0' && matches!(at(pos + 1), b'x' | b'X') {
+        pos += 2;
+    }
+    let radix = i64::from(base);
+    let limdiv = i64::MAX / radix;
+    let limoff = i64::MAX % radix + i64::from(sign);
     let mut n: i64 = 0;
     loop {
         let ch = at(pos);
-        if ch == 0 || !ch.is_ascii_digit() {
+        let digit = match ch {
+            0 => None,
+            b'0'..=b'9' => Some(ch - b'0'),
+            _ if base > 10 && ch.is_ascii_alphabetic() => Some(ch.to_ascii_lowercase() - b'a' + 10),
+            _ => None,
+        };
+        let Some(delta) = digit.filter(|&delta| delta < base) else {
             break;
-        }
-        let delta = i64::from(ch - b'0');
+        };
+        let delta = i64::from(delta);
         if n >= limdiv && (n > limdiv || delta > limoff) {
             return Err(error(STRING_TO_INT8_OVERFLOW, "overflow", pos));
         }
         // `i64::MIN` passes the check as its magnitude, one past `i64::MAX`.
-        n = n.wrapping_mul(10).wrapping_add(delta);
+        n = n.wrapping_mul(radix).wrapping_add(delta);
         pos += 1;
     }
     if pos == pos0 {
@@ -930,6 +999,33 @@ mod tests {
         assert!(string_to_int(b"", 0).is_err());
         assert_eq!(string_to_int8(b"-9223372036854775808", 0), Ok(i64::MIN));
         assert_eq!(string_to_int8(b"12\x0034", 0), Ok(12));
+        // Base 16 (ncbistr.cpp:684-712, 765-795): `0x` or `0X` is skipped, a letter of either case
+        // is a digit, and a `0x` with no digit after it is 0.
+        assert_eq!(string_to_int8_base(b"0x10", 0, 16), Ok(16));
+        assert_eq!(string_to_int8_base(b"0XfF", 0, 16), Ok(255));
+        assert_eq!(string_to_int8_base(b"ff", 0, 16), Ok(255));
+        assert_eq!(string_to_int8_base(b"0x", 0, 16), Ok(0));
+        assert_eq!(string_to_int8_base(b"-0x10", 0, 16), Ok(-16));
+        assert_eq!(
+            string_to_int8_base(b"0x7fffffffffffffff", 0, 16),
+            Ok(i64::MAX)
+        );
+        assert_eq!(
+            failure(string_to_int8_base(b"0x8000000000000000", 0, 16).unwrap_err()),
+            (
+                "Cannot convert string '0x8000000000000000' to Int8, overflow".to_string(),
+                852,
+                "17".to_string()
+            )
+        );
+        assert_eq!(
+            failure(string_to_int8_base(b"0x1g", 0, 16).unwrap_err()),
+            (
+                "Cannot convert string '0x1g' to Int8".to_string(),
+                870,
+                "3".to_string()
+            )
+        );
         // fAllowLeadingSpaces | fAllowTrailingSpaces (a taxid list's entry); C `isspace`
         // includes the vertical tab.
         let both = ALLOW_LEADING_SPACES | ALLOW_TRAILING_SPACES;

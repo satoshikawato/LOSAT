@@ -107,6 +107,11 @@ pub(crate) mod seqid;
 pub(crate) mod writedb;
 // NCBI app/blastdb/blastdbcmd.cpp: the BLAST database client (its -info).
 pub(crate) mod blastdbcmd;
+// NCBI app/dustmasker/dust_mask_app.cpp: the masker of low-complexity nucleotide regions.
+pub(crate) mod dustmasker;
+// NCBI corelib/ncbiapp.cpp and corelib/ncbiargs.cpp: the application and argument reader of
+// blastdbcmd and dustmasker.
+pub(crate) mod ncbi_app;
 // NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;
 // NCBI corelib/ncbistr.cpp: the number conversions of `NStr`.

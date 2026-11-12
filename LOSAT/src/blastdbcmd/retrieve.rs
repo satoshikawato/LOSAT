@@ -9,6 +9,8 @@
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
+use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::{input_lines, read_input_file, LineEnds};
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
@@ -19,7 +21,7 @@ use crate::seqid::label::{content, fasta};
 use crate::seqid::parse::{seq_id_from_text, string_to_non_negative_int};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
-use super::args::{self, Args};
+use super::args;
 use super::fasta::FastaFormatter;
 use super::format::FormatSpec;
 use super::letters::{protein_fasta_letters, protein_string_letters};
@@ -950,11 +952,11 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
 /// fSplit_Truncate)`), lines without an id left out. A `\r` that the platform's reading leaves
 /// in a line stays (Linux: every `\r`), as in NCBI's reading.
 fn read_batch(argument: &str, file: &str) -> Result<Vec<(String, String)>, Stop> {
-    let bytes = args::read_input_file(argument, file).map_err(Stop::Ncbi)?;
+    let bytes = read_input_file(argument, file).map_err(Stop::Ncbi)?;
     let not_text = || Stop::refused(format!("{file}: a batch file that is not UTF-8 text"));
     let delimiter = |c: char| c == ' ' || c == '\t';
     let mut lines = Vec::new();
-    for line in args::input_lines(&bytes, args::LineEnds::HOST) {
+    for line in input_lines(&bytes, LineEnds::HOST) {
         let line = std::str::from_utf8(line).map_err(|_| not_text())?;
         let trimmed = line.trim_matches(delimiter);
         if trimmed.is_empty() {
@@ -1580,9 +1582,9 @@ mod tests {
         .unwrap();
         let lines = read_batch("entry_batch", file.to_str().unwrap()).unwrap();
         // The `\r` of `\r\n` stays on Linux and goes on Windows and macOS (`NcbiGetlineEOL`).
-        let crlf_rest = match args::LineEnds::HOST {
-            args::LineEnds::Unix => "1-5 21\r",
-            args::LineEnds::Windows | args::LineEnds::Darwin => "1-5 21",
+        let crlf_rest = match LineEnds::HOST {
+            LineEnds::Unix => "1-5 21\r",
+            LineEnds::Windows | LineEnds::Darwin => "1-5 21",
         };
         assert_eq!(
             lines,

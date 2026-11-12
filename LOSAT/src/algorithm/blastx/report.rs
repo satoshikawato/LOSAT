@@ -1355,6 +1355,7 @@ pub(super) fn render_queries_with(
             //     }
             // ```
             stderr.write_all(&query_warning(
+                ncbi_program(options),
                 query,
                 batch.search_skipped,
                 options.filtered_empty,
@@ -1428,7 +1429,12 @@ pub(super) fn render_queries_with(
                     })
                     .sum();
                 if comments {
-                    writeln!(writer, "# BLASTX {}", crate::NCBI_BLAST_VERSION)?;
+                    writeln!(
+                        writer,
+                        "# {} {}",
+                        program_name(options),
+                        crate::NCBI_BLAST_VERSION
+                    )?;
                     writeln!(
                         writer,
                         "# Query: {}",
@@ -1616,8 +1622,12 @@ fn write_pairwise(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            let mut query_warnings =
-                query_warning(query, batch.search_skipped, options.filtered_empty);
+            let mut query_warnings = query_warning(
+                ncbi_program(options),
+                query,
+                batch.search_skipped,
+                options.filtered_empty,
+            );
             query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
             warnings.push(query_warnings);
             valid.push(first.is_some());
@@ -1661,11 +1671,33 @@ fn write_pairwise(
         ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
         ShownSubjects::Database { .. } => &[],
     };
+    // An RPSTBLASTN run's `-line_length` (`RpsTblastnSearch::formatting`); BLASTX's rows are
+    // NCBI's default width.
     let config = PairwiseConfig {
         program: "blastx".into(),
         protein_matrix: options.scoring,
+        line_length: options
+            .rpstblastn
+            .as_ref()
+            .map_or(crate::report::pairwise::DEFAULT_LINE_LENGTH, |search| {
+                search.formatting().line_length()
+            }),
         ..PairwiseConfig::default()
     };
+    // The queries' gapped K where a batch gives its own (`BatchResults::gapped_k`), in the
+    // reports' order of the queries; the table's K elsewhere.
+    let query_gapped_k: Option<Vec<f64>> = batches
+        .iter()
+        .any(|batch| batch.gapped_k.is_some())
+        .then(|| {
+            batches
+                .iter()
+                .flat_map(|batch| match &batch.gapped_k {
+                    Some(gapped_k) => gapped_k.clone(),
+                    None => vec![report.gapped_karlin.k; batch.queries.len()],
+                })
+                .collect()
+        });
     write_blastx_pairwise_report(
         hits,
         writer,
@@ -1686,6 +1718,7 @@ fn write_pairwise(
         },
         database,
         records_parsed,
+        query_gapped_k.as_deref(),
         probe,
         first_hsp,
     )?;
@@ -1873,6 +1906,34 @@ fn pairwise_metadata(
 // ```c++
 //         formatter.PrintProlog();
 // ```
+/// The NCBI program of a run's messages: `rpstblastn` for an RPSTBLASTN run
+/// (`ResolvedOptions::rpstblastn`), `blastx` otherwise.
+pub(super) fn ncbi_program(options: &ResolvedOptions) -> &'static str {
+    match options.rpstblastn {
+        Some(_) => "rpstblastn",
+        None => "blastx",
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:66-73
+// ```c++
+// void CBlastFormatUtil::BlastPrintVersionInfo(const string program, bool html,
+//                                              CNcbiOstream& out)
+// {
+//     if (html)
+//         out << "<b>" << BlastGetVersion(program) << "</b>" << "\n";
+//     else
+//         out << BlastGetVersion(program) << "\n";
+// }
+// ```
+/// The program of a run's reports, as `BlastGetVersion` writes it (upper case): `RPSTBLASTN` for
+/// an RPSTBLASTN run, `BLASTX` otherwise.
+pub(super) fn program_name(options: &ResolvedOptions) -> &'static str {
+    match options.rpstblastn {
+        Some(_) => "RPSTBLASTN",
+        None => "BLASTX",
+    }
+}
 pub(crate) fn write_prolog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
@@ -1883,6 +1944,7 @@ pub(crate) fn write_prolog(
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_prolog(
             writer,
+            program_name(options),
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
         )?;
@@ -2107,6 +2169,7 @@ pub(crate) fn write_epilog(
 // ```
 // Global errorId0 "Could..." precedes per-query "Sequence..." after Combine.
 pub(super) fn query_warning(
+    program: &str,
     query: &FastaRecord,
     search_skipped: bool,
     filtered_empty: bool,
@@ -2124,7 +2187,7 @@ pub(super) fn query_warning(
         id.truncate(25);
         id.extend_from_slice(b".. ");
     }
-    let mut bytes = b"Warning: [blastx] ".to_vec();
+    let mut bytes = format!("Warning: [{program}] ").into_bytes();
     bytes.extend_from_slice(&id);
     bytes.extend_from_slice(b": ");
     if search_skipped {

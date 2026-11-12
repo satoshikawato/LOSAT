@@ -55,6 +55,9 @@ use crate::report::tabular::{
 /// outfmt 7's `# BLASTX 2.17.0+` line.
 const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::ncbi_blast_version!());
 
+/// outfmt 7's line of an RPSTBLASTN run (`ResolvedOptions::rpstblastn`).
+const RPSTBLASTN_VERSION: &str = concat!("RPSTBLASTN ", crate::ncbi_blast_version!());
+
 /// The program of NCBI's messages.
 const PROGRAM: &str = "blastx";
 
@@ -77,6 +80,7 @@ const PROGRAM: &str = "blastx";
 /// the report's lines before it are flushed; nothing when `taxdb.bti` is found or no plural name
 /// is among the fields.
 fn write_taxdb_warning(
+    program: &str,
     spec: &TabularSpec,
     taxdb_found: bool,
     writer: &mut dyn Write,
@@ -84,7 +88,7 @@ fn write_taxdb_warning(
 ) -> Result<()> {
     if spec.checks_taxdb() && !taxdb_found {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(PROGRAM).as_bytes())?;
+        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -121,7 +125,7 @@ pub(super) fn write_prolog(
     if spec.kind != TabularKind::CsvWithHeader {
         return Ok(());
     }
-    write_taxdb_warning(spec, taxdb_found, writer, diagnostics)?;
+    write_taxdb_warning(PROGRAM, spec, taxdb_found, writer, diagnostics)?;
     TabularWriter {
         spec,
         program_version: PROGRAM_VERSION,
@@ -148,7 +152,7 @@ pub(super) fn write_epilog_warning(
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     if spec.kind == TabularKind::Commented {
-        write_taxdb_warning(spec, taxdb_found, writer, diagnostics)?;
+        write_taxdb_warning(PROGRAM, spec, taxdb_found, writer, diagnostics)?;
     }
     Ok(())
 }
@@ -312,11 +316,34 @@ pub(super) fn write_blastx_tabular(
     // ```c++
     //     CAlignFormatUtil::GetAsciiProteinMatrix(m_MatrixName, m_ScoringMatrix);
     // ```
-    // The search's matrix (`-matrix`, item SC6 of line NP).
-    let table = TabularWriter {
-        spec,
-        program_version: PROGRAM_VERSION,
-        matrix: Some(options.scoring),
+    // The search's matrix (`-matrix`, item SC6 of line NP). RPSTBLASTN's options carry no matrix
+    // name (the `.aux` matrix goes to the search's options only), so NCBI's formatter has no
+    // matrix and counts the identities as the positives, as rpsblast's
+    // (`blastp::tabular::write_rpsblast_tabular`).
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:238
+    // ```c++
+    //           m_MatrixName(opts.GetMatrixName()),
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3552-3556
+    // ```c++
+    //     retval.Resize(0, 0, -1);
+    //     if (matrix_name == NULL ||
+    //         NStr::TruncateSpaces(string(matrix_name)).empty()) {
+    //         return;
+    //     }
+    // ```
+    let table = match options.rpstblastn {
+        Some(_) => TabularWriter {
+            spec,
+            program_version: RPSTBLASTN_VERSION,
+            matrix: None,
+        },
+        None => TabularWriter {
+            spec,
+            program_version: PROGRAM_VERSION,
+            matrix: Some(options.scoring),
+        },
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
@@ -355,6 +382,7 @@ pub(super) fn write_blastx_tabular(
             //     }
             // ```
             stderr.write_all(&query_warning(
+                super::report::ncbi_program(options),
                 query,
                 batch.search_skipped,
                 options.filtered_empty,
@@ -363,7 +391,13 @@ pub(super) fn write_blastx_tabular(
             // NCBI makes a formatter for each query's report, and it warns when the field list
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).
-            write_taxdb_warning(spec, options.taxdb_found, &mut *writer, &mut *stderr)?;
+            write_taxdb_warning(
+                super::report::ncbi_program(options),
+                spec,
+                options.taxdb_found,
+                &mut *writer,
+                &mut *stderr,
+            )?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
             // ```c++
             // CBlastTabularInfo::~CBlastTabularInfo()

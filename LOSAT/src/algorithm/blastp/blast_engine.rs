@@ -8004,22 +8004,15 @@ struct BlastpReports<'a> {
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
-/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`) and `OLD_FSC` in RPSBLAST
-/// (BLASTP and PSIBLAST read it). The values that NCBI converts in each query batch stop its first
-/// batch: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in its query splitter (`read_query_batches`; not
-/// `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never splits) and `PRE_FETCH_SEQS_LIMIT` in
-/// its prefetch (`run_resolved_in_pool`). Other batch sizes change a blastp report only through
-/// the query batches (`read_query_batches`; the redo of a query reads the heaps of its batch,
-/// `kappa_query_batches`) and the query split (`search_split_query_batches`).
+/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`). The values that NCBI
+/// converts in each query batch stop its first batch: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in its
+/// query splitter (`read_query_batches`; not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it
+/// never splits) and `PRE_FETCH_SEQS_LIMIT` in its prefetch (`run_resolved_in_pool`). Other batch
+/// sizes change a blastp report only through the query batches (`read_query_batches`; the redo of
+/// a query reads the heaps of its batch, `kappa_query_batches`) and the query split
+/// (`search_split_query_batches`).
 fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool) -> Result<()> {
-    use crate::blastinput::app;
-    let app_name = app.name();
-    app::check_search_environment(app_name, fasta_subjects)?;
-    // BLASTP and PSIBLAST read OLD_FSC as `-searchsp 0` (`ResolvedBlastpArgs::old_fsc`).
-    if app == BlastpApp::Rpsblast {
-        app::check_old_fsc(app_name)?;
-    }
-    Ok(())
+    crate::blastinput::app::check_search_environment(app.name(), fasta_subjects)
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -10823,6 +10816,7 @@ fn run_resolved_in_pool(
             contexts: &contexts,
             gapped_params: &gapped_params,
             gumbel: gapped_gumbel.as_ref(),
+            search_spaces: &exact_search_spaces,
             cutoff_subject_length,
             prelim_hitlist_size,
             batches: query_batches
@@ -13445,9 +13439,11 @@ fn run_resolved_in_pool(
         // format, and the archive saves the warnings of its batches' queries.
         let mut warnings = (warning_lines.is_some()
             || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive))
-        .then(|| crate::report::query_warnings::QueryWarnings {
-            before: warning_lines.take().unwrap_or(&[]),
-            sink: &mut *outputs.diagnostics,
+        .then(|| {
+            crate::report::query_warnings::QueryWarnings::new(
+                warning_lines.take().unwrap_or(&[]),
+                &mut *outputs.diagnostics,
+            )
         });
         let format_result: Result<()> = match outfmt {
             BlastpReport::Seqalign(serial) => (|| -> Result<()> {

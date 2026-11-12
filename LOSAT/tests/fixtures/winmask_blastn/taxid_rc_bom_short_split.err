@@ -1,0 +1,3 @@
+Warning: [blastn] Subject_2 s2: Subject sequence contains no data
+Error: (110.4) [blastn] Error reading the registry after line 1: 
+BLAST engine error: The average subject length is too short

@@ -704,8 +704,40 @@ pub fn subject_parameters(
         };
     }
     Ok(if options.gapped {
-        (options.gap_x_dropoff * std::f64::consts::LN_2 / gapped.lambda) as i32
+        gapped_x_drops(options, &gapped).0
     } else {
         0
     })
+}
+
+/// The preliminary and final gapped X-drops in raw scores (`gap_x_dropoff`,
+/// `gap_x_dropoff_final`) of the search's X-drops in bits (`-xdrop_gap`, `-xdrop_gap_final` or
+/// BLASTX's defaults) at the gapped Lambda `gapped` (`gapped_karlin`; the contexts share it, the
+/// smallest one), converted as the protein programs convert them (`core::x_drop`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:454-463 (quoted at
+/// `core::x_drop::gapped_x_dropoffs`)
+pub(crate) fn gapped_x_drops(options: &ResolvedOptions, gapped: &KarlinParams) -> (i32, i32) {
+    crate::core::x_drop::gapped_x_dropoffs(
+        options.gap_x_dropoff,
+        options.gap_x_dropoff_final,
+        gapped.lambda,
+    )
+}
+
+/// The refusal, before the search, of a gapped X-drop that NCBI's kernels cannot size
+/// (`core::x_drop::check_gapped_x_dropoffs`); an ungapped search has none.
+pub(crate) fn check_gapped_x_drops(options: &ResolvedOptions) -> Result<()> {
+    if !options.gapped {
+        return Ok(());
+    }
+    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback
+    // (composition 0, `runtime.rs`).
+    crate::core::x_drop::check_gapped_x_dropoffs(
+        "BLASTX",
+        (options.gap_x_dropoff, options.gap_x_dropoff_final),
+        gapped_x_drops(options, &gapped_karlin(options)),
+        (options.gap_open, options.gap_extend),
+        options.composition == 0,
+    )
 }

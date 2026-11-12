@@ -24,13 +24,14 @@ pub struct ProteinOptionsCheck<'a> {
     /// The program is psiblast (`eBlastTypePsiBlast`) rather than blastp or tblastn.
     pub psiblast: bool,
     /// The ungapped X-drop in bits (`word_options->x_dropoff`) where the command line gives it
-    /// (rpsblast's `-xdrop_ungap`); `None`: the program's default, which is above 0.
+    /// (`-xdrop_ungap` of blastp, tblastn and rpsblast); `None`: the program's default, which is
+    /// above 0.
     pub x_dropoff: Option<f64>,
 }
 
 /// NCBI's `BLAST_ValidateOptions` for blastp and tblastn, in its order, with NCBI's
 /// messages (`CInputException`): the scoring options, the lookup table options, the
-/// ungapped X-drop (rpsblast's `-xdrop_ungap`), the hit saving options and the word size of the
+/// ungapped X-drop (`-xdrop_ungap`), the hit saving options and the word size of the
 /// identity matrix. LOSAT has no greedy or Smith-Waterman extension option or cutoff score
 /// option for these programs, so NCBI's other checks cannot fail.
 ///

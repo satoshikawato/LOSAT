@@ -20,6 +20,8 @@
 // Utilities
 pub mod blast_encoding;
 pub mod blast_util;
+/// The X-drops in raw scores of the protein programs (`-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`).
+pub(crate) mod x_drop;
 
 // Filtering/Masking
 pub mod blast_seg;

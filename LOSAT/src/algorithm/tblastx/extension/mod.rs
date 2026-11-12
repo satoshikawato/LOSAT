@@ -1,26 +1,19 @@
 //! Extension algorithms for TBLASTX
 //!
-//! This module implements ungapped and gapped extension algorithms for protein sequences,
-//! following NCBI BLAST's approach with X-drop termination and affine gap penalties.
+//! This module implements the two-hit extension for protein sequences, following NCBI BLAST's
+//! approach with X-drop termination.
 //!
 //! Sequences are encoded in NCBISTDAA (0-27), and scoring uses BLOSUM62 via
 //! the ncbistdaa_to_blosum62 conversion table.
 //!
 //! # Module Structure
 //!
-//! - `ungapped` - Ungapped extension with SIMD optimization
 //! - `two_hit` - Two-hit extension algorithm (NCBI style)
-//! - `gapped` - Gapped extension with affine gap penalties
 
-mod gapped;
 mod two_hit;
-mod ungapped;
 // The table walks of the two-hit extension.
 mod x_two_hit_fast;
 
-// Re-export public functions
-pub use gapped::extend_gapped_protein;
-pub use two_hit::extend_hit_two_hit;
 pub(crate) use two_hit::extend_hit_two_hit_fitting;
 pub(crate) use two_hit::extend_hit_two_hit_with;
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the walks the sentinels stop, and the checks that choose them.
@@ -31,10 +24,7 @@ pub(crate) use x_two_hit_fast::{
 };
 // Diagnostic (LOSAT_X_STATS): the cells of one extension (tblastx/x_unit_probe.rs).
 pub(crate) use two_hit::x_two_hit_cells;
-pub use ungapped::extend_hit_ungapped;
 
-use crate::algorithm::common::evalue::calculate_evalue_alignment_length;
-use crate::stats::KarlinParams;
 use crate::utils::matrix::blosum62_score;
 
 /// Get the substitution matrix score for two amino acids in NCBISTDAA encoding.
@@ -107,14 +97,6 @@ pub fn convert_coords(aa_start: usize, aa_end: usize, frame: i8, dna_len: usize)
         let end_bp = dna_len - aa_end * 3 - shift + 1;
         (start_bp, end_bp)
     }
-}
-
-/// Calculate bit score and E-value for a protein alignment
-///
-/// This function uses alignment length as the effective search space,
-/// which is appropriate for protein alignments.
-pub fn calculate_statistics(score: i32, aln_len: usize, params: &KarlinParams) -> (f64, f64) {
-    calculate_evalue_alignment_length(score, aln_len, params)
 }
 
 #[cfg(test)]

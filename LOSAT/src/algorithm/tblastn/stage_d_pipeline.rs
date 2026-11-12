@@ -274,6 +274,8 @@ pub(super) struct LocalStageDScoring {
     pub window: i32,
     pub gap_xdrop_bits: f64,
     pub final_xdrop_bits: f64,
+    /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap` or 7.
+    pub word_xdrop_bits: f64,
 }
 
 impl Default for LocalStageDScoring {
@@ -287,6 +289,7 @@ impl Default for LocalStageDScoring {
             window: 40,
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
+            word_xdrop_bits: 7.0,
         }
     }
 }
@@ -1468,7 +1471,6 @@ fn run_local_search_with_pool(
         *query_lengths.iter().max().unwrap(),
         compo_adjust_mode,
         false,
-        profile.expect_value,
         do_sum_stats,
         scoring.final_xdrop_bits,
         local_extension_final_xdrop(
@@ -1731,7 +1733,6 @@ fn run_local_search_with_pool(
                     *query_lengths.iter().max().unwrap(),
                     compo_adjust_mode,
                     false,
-                    profile.expect_value,
                     do_sum_stats,
                     scoring.final_xdrop_bits,
                     local_extension_final_xdrop(
@@ -2269,10 +2270,13 @@ fn preliminary_profile<'a>(
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         // NCBI blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
-        // converted as the x86-64 build does (INT_MIN beyond Int4).
-        gap_xdrop: crate::core::blast_util::ncbi_int4_from_double(
-            (scoring.gap_xdrop_bits * std::f64::consts::LN_2) / gapped.lambda,
-        ),
+        // converted as the x86-64 build does (INT_MIN beyond Int4; `core::x_drop`).
+        gap_xdrop: crate::core::x_drop::gapped_x_dropoffs(
+            scoring.gap_xdrop_bits,
+            scoring.final_xdrop_bits,
+            gapped.lambda,
+        )
+        .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
         hsp_num_max: i32::MAX as usize,
     }
@@ -2676,7 +2680,8 @@ fn query_set_setup(
         do_sum_stats: inputs.do_sum_stats,
         max_intron_length: 0,
         gap_trigger_bits: 22.0,
-        word_xdrop_bits: 7.0,
+        // `-xdrop_ungap` or 7 bits (`LocalStageDScoring::word_xdrop_bits`).
+        word_xdrop_bits: inputs.scoring.word_xdrop_bits,
         scale_factor: 1.0,
         gumbel: inputs.gumbel,
         eff_searchsp_override,
@@ -5141,6 +5146,7 @@ mod tests {
                 window: 60,
                 gap_xdrop_bits: 15.0,
                 final_xdrop_bits: 25.0,
+                word_xdrop_bits: 7.0,
             },
             Some(&mut boundary),
         )

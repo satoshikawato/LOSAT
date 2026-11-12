@@ -208,7 +208,7 @@ export class ExampleLoader {
     let result: DownloadResult;
     try {
       result = await this.deps.downloader.download(
-        { url: set.url, maxBytes: EXAMPLE_BYTE_LIMIT },
+        { url: set.url, maxBytes: EXAMPLE_BYTE_LIMIT, fileName: set.fileName },
         ({ bytes, total }) => progress({ state: 'downloading', bytes, ...(total === undefined ? {} : { total }) }),
         signal,
       );

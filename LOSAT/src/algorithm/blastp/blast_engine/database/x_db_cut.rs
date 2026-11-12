@@ -286,3 +286,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "x_db_cut_fixture_tests.rs"]
+mod fixture_tests;

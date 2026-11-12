@@ -1286,7 +1286,7 @@ fn search(
         0
     };
     app::check_search_environment("TBLASTN", database.is_none(), outputs.only_archive())?;
-    app::check_query_split_environment("TBLASTN", false)??;
+    app::check_query_split_environment("TBLASTN", false, true)??;
     let subjects = subject_records;
     // The search reads the residues of the subject records in place (NCBI's subjects stay in the
     // reader's records, `CBlastQueryVector`); they are not copied for it. EXPERIMENT

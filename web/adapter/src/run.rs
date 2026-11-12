@@ -7,7 +7,8 @@ use std::sync::Arc;
 use LOSAT::api::FastaRecord;
 use LOSAT::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    Cli, Commands, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit, ReportOutputs,
+    Cli, Commands, CountsSource, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit,
+    ReportOutputs,
 };
 
 use crate::emit::{emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS};
@@ -108,7 +109,10 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Blastn(a) => &mut a.outfmt,
         Commands::Tblastx(a) => &mut a.outfmt,
         Commands::Blastx(a) => &mut a.outfmt,
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
         }
     }
@@ -263,6 +267,14 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
             .and_then(|()| args.resolve_dust())
             .and_then(|()| {
+                if names_registered_counts(&args) {
+                    args.window_masker_counts = Some(crate::files::source());
+                    args.resolve_window_masker()
+                } else {
+                    Ok(())
+                }
+            })
+            .and_then(|()| {
                 parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
                     .map(|_| ())
             })
@@ -359,14 +371,13 @@ fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), St
 /// `any_valid_context` in `blast_engine/run.rs`), which depends on the query's letters (a query
 /// of N only has none, and the same scores give rc 0 with a warning). `validate` has no query,
 /// so `run` makes these checks and stops with the CLI's message and exit code.
-/// `check_scoring_for_formats` makes them for a query of any letters, which rejects what the CLI
-/// accepts (WA-FM-01).
+/// Making them for a query of any letters would reject what the CLI accepts (WA-FM-01).
 fn blastn_group_check(
     args: &mut LOSAT::web_adapter::BlastnArgs,
     group: &[Output],
 ) -> Result<(), String> {
     use LOSAT::web_adapter::{check_losat_limits, check_scoring_options};
-    // The host has no database files (`check_scoring_for_formats`).
+    // The host has no database files.
     if args.db.is_some() {
         return Err("-db (a database search) is not supported in the browser yet".to_string());
     }
@@ -562,7 +573,10 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
             a.num_alignments,
         ],
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => [None; 3],
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => [None; 3],
     }
 }
 
@@ -576,7 +590,10 @@ fn num_threads(command: &Commands) -> usize {
         // A positive `i32` (the parser's `positive`).
         Commands::Blastx(a) => a.num_threads as usize,
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => 1,
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => 1,
     }
 }
 
@@ -782,7 +799,10 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), "BLASTX", query);
                 run_local_blastx(args, query, subject, &mut outputs)
             }
-            Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {
+            Commands::Psiblast(_)
+            | Commands::Rpsblast(_)
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")
             }
         };
@@ -938,6 +958,35 @@ fn link_format0(
     }
 }
 
+/// Whether `validate` checks the file of `-window_masker_db`, where the command line checks it:
+/// after `-dust`, before the query range and the other options (`resolve_window_masker`, with the
+/// CLI's message for a format other than the two binary ones). Only for a name that is registered:
+/// a host that validates an argv without its files (the application's control reactor) leaves the
+/// file to `run`, where a name that is not registered is the CLI's file that cannot be opened.
+fn names_registered_counts(args: &LOSAT::web_adapter::BlastnArgs) -> bool {
+    args.window_masker_db
+        .as_deref()
+        .is_some_and(crate::files::registered)
+}
+
+/// The counts source of BLASTN's `-window_masker_db`: the named input files registered when the
+/// run starts (`files::source`), which the engine opens by the option's value as the command line
+/// opens the file of that name. `None` without the option, so a run without it gives the engine
+/// what it gave before named input files.
+fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
+    match command {
+        Commands::Blastn(args) if args.window_masker_db.is_some() => Some(crate::files::source()),
+        _ => None,
+    }
+}
+
+/// Gives a search's command the run's counts source (`window_masker_counts`).
+fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
+    if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
+        args.window_masker_counts = Some(counts.clone());
+    }
+}
+
 /// Runs the searches of the run and emits its streams. On failure nothing more is emitted
 /// and the host discards what it received.
 ///
@@ -972,6 +1021,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     let custom_accepted = custom_handler_check(program, custom.as_deref()).is_ok();
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let threads = num_threads(&command);
+    let counts = window_masker_counts(&command);
     let mut command = Some(command);
     // Each search: what it wrote or why it failed, and (after the first) its diagnostics.
     let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
@@ -984,6 +1034,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
                 Some(command) => command,
                 None => parse(words)?.1,
             };
+            give_counts(&mut command, counts.as_ref());
             let mut scratch = Vec::new();
             // Whether the options' checks reject this search, found before `search` takes the
             // command.
@@ -2786,7 +2837,7 @@ mod tests {
         }
     }
 
-    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 54 rows of the manifest that a
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 57 rows of the manifest that a
     // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
     // store refuses: maintainer decision 3), stream 4 and stream 3.
     #[test]
@@ -2807,7 +2858,7 @@ mod tests {
                 !gap_line(file("-query")) && !gap_line(file("-subject"))
             })
             .collect();
-        assert_eq!(rows.len(), 54);
+        assert_eq!(rows.len(), 57);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];

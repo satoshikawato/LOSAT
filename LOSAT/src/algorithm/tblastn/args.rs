@@ -159,6 +159,11 @@ pub struct TblastnArgs {
     // arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value", ...);
     // opt.SetGapXDropoff(args[kArgGappedXDropoff].AsDouble());
     // opt.SetGapXDropoffFinal(args[kArgFinalGappedXDropoff].AsDouble());
+    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:209-214,276-278:
+    // arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value", ...);
+    // opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
     #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
     pub xdrop_gap: Option<f64>,
     #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
@@ -357,6 +362,9 @@ pub struct ResolvedTblastnArgs {
     pub gap_extend: i32,
     pub xdrop_gap: f64,
     pub xdrop_gap_final: f64,
+    /// `-xdrop_ungap` or 7 bits (`CBlastProteinOptionsHandle::SetInitialWordOptionsDefaults`,
+    /// blast_prot_options.cpp:100-104).
+    pub xdrop_ungap: f64,
     pub word_size: i32,
     /// Whether the compressed-alphabet lookup table is used (word sizes 5-7, tblastn-fast).
     pub compressed_lookup: bool,
@@ -766,8 +774,37 @@ impl TblastnArgs {
             evalue,
             psiblast: false,
             psi_tblastn: psi,
-            x_dropoff: None,
+            x_dropoff: self.xdrop_ungap,
         })?;
+        // The gapped X-drops that NCBI's kernels cannot size are refused before the search
+        // (`core::x_drop::check_gapped_x_dropoffs`), at the search's gapped Lambda: the matrix's,
+        // or a PSSM query's `kbp_gap_psi` (`PsiSearch::gapped_karlin`, whose Lambda NCBI's X-drops
+        // read, blast_parameters.c:455-458).
+        // (A name that LOSAT has no matrix for is refused when the search starts.)
+        let matrix = matrix_name.parse::<ScoringMatrix>();
+        if let (false, Ok(matrix)) = (self.ungapped, matrix) {
+            let gapped = crate::stats::lookup_protein_params(&crate::config::ProteinScoringSpec {
+                matrix,
+                gap_open,
+                gap_extend,
+            });
+            // The final X-drop reaches the unscaled `ALIGN_EX` only without the
+            // composition-based redo: mode 0, or IDENTITY's reset (`search_settings`).
+            crate::core::x_drop::check_gapped_x_dropoffs(
+                "TBLASTN",
+                (xdrop_gap, xdrop_gap_final),
+                crate::core::x_drop::gapped_x_dropoffs(
+                    xdrop_gap,
+                    xdrop_gap_final,
+                    pssm.as_deref()
+                        .map_or(gapped.lambda, |psi| psi.gapped_karlin(&gapped).lambda),
+                ),
+                (gap_open, gap_extend),
+                composition_mode
+                    == crate::blastinput::app::CompositionMode::NoCompositionBasedStats
+                    || matrix_name.eq_ignore_ascii_case("identity"),
+            )?;
+        }
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),
             evalue,
@@ -775,6 +812,7 @@ impl TblastnArgs {
             gap_extend,
             xdrop_gap,
             xdrop_gap_final,
+            xdrop_ungap: self.xdrop_ungap.unwrap_or(7.0),
             word_size,
             compressed_lookup,
             sum_stats,
@@ -950,6 +988,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             window,
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
+            word_xdrop_bits: args.xdrop_ungap,
         },
     })
 }
@@ -1345,7 +1384,6 @@ mod tests {
             &["-db_soft_mask", "1"][..],
             &["-remote"],
             &["-use_sw_tback"],
-            &["-xdrop_ungap", "7"],
         ] {
             let error = crate::cli::render_message(&parse(extra).unwrap_err());
             assert!(
@@ -1481,4 +1519,64 @@ mod tests {
                 .contains("-max_intron_length 100 (uneven gap linking) is not supported"));
         }
     }
+
+    // blast_args.cpp:276-278 and blast_options.c:608-618: `-xdrop_ungap` reaches the search's
+    // options (7 bits by default), one of 0 or below is NCBI's options error, and a gapped X-drop
+    // whose raw score NCBI's kernels cannot size is refused (`core::x_drop`).
+    #[test]
+    fn the_x_drops_reach_the_search_or_ncbis_errors() {
+        let resolved = parse(&[]).unwrap().resolve().unwrap();
+        assert_eq!(
+            (
+                resolved.xdrop_ungap,
+                resolved.xdrop_gap,
+                resolved.xdrop_gap_final
+            ),
+            (7.0, 15.0, 25.0)
+        );
+        let resolved = parse(&["-xdrop_ungap", "3.5", "-xdrop_gap", "1e300"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.xdrop_ungap, resolved.xdrop_gap), (3.5, 1e300));
+        assert_eq!(
+            search_settings(&resolved).unwrap().scoring.word_xdrop_bits,
+            3.5
+        );
+        for value in ["0", "-1", "-0.0", "-inf"] {
+            let error = parse(&["-xdrop_ungap", value])
+                .unwrap()
+                .resolve()
+                .unwrap_err();
+            assert!(
+                format!("{error:#}").contains("x_dropoff must be greater than zero"),
+                "{value}: {error:#}"
+            );
+        }
+        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
+        // preliminary X-drop at every mode, the final one only without the redo (mode 0, or
+        // IDENTITY's reset).
+        for extra in [
+            &["-xdrop_gap", "4.2e8"][..],
+            &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
+        ] {
+            let error = parse(extra).unwrap().resolve().unwrap_err();
+            assert!(
+                format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
+                "{extra:?}: {error:#}"
+            );
+        }
+        for cbs in ["1", "2", "3"] {
+            assert!(
+                parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
+                    .unwrap()
+                    .resolve()
+                    .is_ok()
+            );
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "tblastn_culling_tests.rs"]
+mod tblastn_culling_tests;

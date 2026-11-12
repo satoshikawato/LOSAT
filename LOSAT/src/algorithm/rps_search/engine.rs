@@ -143,51 +143,11 @@ fn x_drop_overflow(option: &str, given: Option<f64>, bits: f64, scale: f64) -> a
     )
 }
 
-/// The largest quotient of a raw X-drop by the scaled gap extension that NCBI's gapped kernels
-/// keep in `Int4`, plus one: `num_extra_cells = x_dropoff / gap_extend + 3`, the DP window
-/// `dp_mem_alloc = num_extra_cells + 100`, and its growth `2 * dp_mem_alloc`, which leaves `Int4`
-/// once `dp_mem_alloc` is 2^30 (at the first row that passes the window's first 97 cells).
-const KERNEL_X_DROP_QUOTIENT_LIMIT: i64 = (1 << 30) - 103;
-
-/// Whether NCBI's gapped kernels (`Blast_SemiGappedAlign`, the preliminary stage's, and
-/// `ALIGN_EX`, the CBS 0 traceback's) keep their sizes in `Int4` for the raw X-drop `x_dropoff`
-/// at the scale with the scaled gap costs: the X-drop raised to `gap_open + gap_extend`, over
-/// `gap_extend` (`Int4` division), below `KERNEL_X_DROP_QUOTIENT_LIMIT`. Reachable only where the
-/// scaled gap extension is 1 or 2 (scale 1 or 2 with BLOSUM62 11/1): the quotient is at most
-/// `INT4_MAX / scale` otherwise. LOSAT's kernels size their memory by the sequences, but NCBI's
-/// overflow is undefined behaviour, so such an X-drop is refused.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:426-429
-/// ```c
-///     x_dropoff = gap_align->gap_x_dropoff;
-///
-///     if (x_dropoff < gap_open_extend)
-///         x_dropoff = gap_open_extend;
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:457-464
-/// ```c
-///     if (gap_extend > 0)
-///         num_extra_cells = x_dropoff / gap_extend + 3;
-///     else
-///         num_extra_cells = N + 3;
-///
-///     if (num_extra_cells > gap_align->dp_mem_alloc) {
-///         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
-///                                       2 * gap_align->dp_mem_alloc);
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-644 (the same at
-/// 923-926 in `Blast_SemiGappedAlign`)
-/// ```c
-///         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
-///
-///             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
-///                                           2 * gap_align->dp_mem_alloc);
-/// ```
-fn kernel_x_drop_fits(x_dropoff: i32, gap_open: i32, gap_extend: i32) -> bool {
-    let gap_open_extend = i64::from(gap_open) + i64::from(gap_extend);
-    let x_dropoff = i64::from(x_dropoff).max(gap_open_extend);
-    gap_extend <= 0 || x_dropoff / i64::from(gap_extend) < KERNEL_X_DROP_QUOTIENT_LIMIT
-}
+// The limit of NCBI's gapped kernels' sizes (`kernel_x_drop_fits`, its `Int4` arithmetic on the X-drop
+// over the scaled gap extension) is the protein programs' (`core::x_drop`). Reachable here only
+// where the scaled gap extension is 1 or 2 (scale 1 or 2 with BLOSUM62 11/1): the quotient is at
+// most `INT4_MAX / scale` otherwise.
+use crate::core::x_drop::kernel_x_drop_fits;
 
 /// A query's ungapped X-drop (`x_dropoff_init`) from the X-drop in bits `bits` (above 0,
 /// `validate_protein_options`), the query's ungapped Lambda and the database's scale: the product
@@ -887,7 +847,10 @@ mod tests {
     // of 2^30 leaves `Int4`.
     #[test]
     fn the_kernels_window_of_an_x_drop_stays_in_32_bits() {
-        assert_eq!(KERNEL_X_DROP_QUOTIENT_LIMIT, 1_073_741_721);
+        assert_eq!(
+            crate::core::x_drop::KERNEL_X_DROP_QUOTIENT_LIMIT,
+            1_073_741_721
+        );
         assert!(kernel_x_drop_fits(1_073_741_720, 11, 1));
         assert!(!kernel_x_drop_fits(1_073_741_721, 11, 1));
         // Scale 2: the quotient truncates.

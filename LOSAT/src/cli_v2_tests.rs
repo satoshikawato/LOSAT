@@ -1563,7 +1563,10 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         // Line NP ported it to BLASTP, not to PSIBLAST.
         ("psiblast", &["-lcase_masking"]),
         ("blastp", &["-version"]),
-        ("blastp", &["-xdrop_gap_final", "30"]),
+        // Line RG X1 ported the X-drops to BLASTP, not to PSIBLAST.
+        ("psiblast", &["-xdrop_gap_final", "30"]),
+        ("psiblast", &["-xdrop_gap", "30"]),
+        ("psiblast", &["-xdrop_ungap", "3"]),
         ("blastn", &["-logfile", "log"]),
         ("blastp", &["-xmlhelp"]),
         ("tblastn", &["-version-full"]),
@@ -2112,6 +2115,10 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     assert!(version(&["losat", "blastp", "-evalue", "x", "-version", "-bogus"]).is_some());
     // Not a request: after `--`, a longer word, no program, the top level.
     assert!(version(&["losat", "blastn", "--", "-version"]).is_none());
+    // The value of `-logfile` or `-conffile` (NCBI logs to a file named `-version`).
+    assert!(version(&["losat", "blastn", "-logfile", "-version"]).is_none());
+    assert!(version(&["losat", "makeblastdb", "-conffile", "-version"]).is_none());
+    assert!(version(&["losat", "blastn", "-logfile=x", "-version"]).is_some());
     assert!(version(&["losat", "blastn", "-version-full"]).is_none());
     assert!(version(&["losat", "blastn", "-version=1"]).is_none());
     assert!(version(&["losat", "-version"]).is_none());

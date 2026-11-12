@@ -630,9 +630,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "sorthsps",
     "subject_besthit",
     "version",
-    "xdrop_gap",
-    "xdrop_gap_final",
-    "xdrop_ungap",
 ];
 
 fn is_unported_blastp_arg(name: &str) -> bool {
@@ -671,6 +668,10 @@ const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "parse_deflines",
     "phi_pattern",
     "sum_stats",
+    // Line RG X1 ported them to BLASTP's search, not to PSIBLAST's rounds (series RG-Q).
+    "xdrop_gap",
+    "xdrop_gap_final",
+    "xdrop_ungap",
     // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
     "negative_seqidlist",
     "negative_taxidlist",
@@ -703,6 +704,51 @@ const UNPORTED_RPSBLAST_ARGS: &[&str] = &[
 
 fn is_unported_rpsblast_arg(name: &str) -> bool {
     UNPORTED_RPSBLAST_ARGS.contains(&name)
+}
+
+/// LOSAT's refusal of the NCBI C++ Toolkit option `-name` in `program` (decision D9).
+fn toolkit_option_error(program: &str, name: &str) -> clap::Error {
+    // The BLAST programs are named in capitals; makeblastdb and rpsbproc as in their other
+    // refusals.
+    let shown = match program {
+        "makeblastdb" | "rpsbproc" => program.to_string(),
+        _ => program.to_ascii_uppercase(),
+    };
+    clap::Error::raw(
+        ErrorKind::InvalidValue,
+        format!("the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {shown}"),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-1022 (the full versions are printed,
+// and a `-conffile` file is checked and later loaded in place of `<program>.ini`, before the
+// configuration load)
+// ```c++
+//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
+//                 delete[] v;
+//                 // Print full VERSION
+//                 cout << GetFullVersion().Print( appname );
+//                 diag_context.DiscardMessages();
+//                 return 0;
+//     ...
+//         if (conf_arg) {
+//             if (CFile(conf_arg).Exists()) {
+//                 conf = conf_arg;
+//             }
+//             else {
+//                 ERR_POST_X(23, Critical << "Registry file \"" << conf_arg << "\" not found, aborting.");
+//                 Abort();
+//             }
+//         }
+// ```
+/// LOSAT's refusal of `word` (`-conffile`, or a full version word: `ncbi_environment::preparse`)
+/// in `program`, which the command line's entry gives before the configuration load, where NCBI
+/// reads another registry file or prints its build details (NCBI BLAST+ 2.17.0 `blastn -conffile
+/// other.ini` with a malformed `blastn.ini`: rc 0, the `.ini` never read; env parity review G F2).
+pub fn ncbi_toolkit_word_error(program: &str, word: &str) -> clap::Error {
+    let name = word.trim_start_matches('-');
+    let name = name.split_once('=').map_or(name, |(key, _)| key);
+    toolkit_option_error(program, name)
 }
 
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
@@ -772,16 +818,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     .find(|program| scope.get_name() == *program)
     .filter(|_| is_ncbi_toolkit_arg(name))
     {
-        // The BLAST programs are named in capitals, rpsbproc as in its other refusals.
-        let program = if program == "rpsbproc" {
-            program.to_string()
-        } else {
-            program.to_ascii_uppercase()
-        };
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {program}"),
-        );
+        return toolkit_option_error(program, name);
     }
     if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
         return clap::Error::raw(
@@ -804,9 +841,10 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
 /// The text `-version` prints for `argv` (`losat <program> ... -version ...`), or `None` when
 /// `argv` has no such request.
 ///
-/// NCBI's application reads `-version` before its arguments (`ncbi_preparsed_toolkit_word`,
+/// NCBI's application reads `-version` before its arguments (`ncbi_environment::preparse`,
 /// ncbiapp.cpp:926-1001): anywhere before `--`, in an option's value place too
-/// (`blastn -out -version` prints the version), and also when other arguments are invalid.
+/// (`blastn -out -version` prints the version) but not as the value of `-logfile` or
+/// `-conffile`, and also when other arguments are invalid.
 /// The text is the two lines of `fVersionInfo | fPackageShort`:
 /// the program name and version, then the package. NCBI's second line names its own
 /// package and build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
@@ -843,32 +881,31 @@ where
         "rpsbproc" => "rpsbproc",
         _ => return None,
     };
-    for token in &tokens[2..] {
-        match token.to_str().unwrap_or("") {
-            "--" => return None,
-            "-version" => {
-                // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
-                // ```c++
-                // 	SetVersion(CVersionInfo(VER.major, VER.minor, VER.patch_level));
-                // ```
-                // rpsbproc's own version (0.5.1), not BLAST's; the second line names the BLAST+
-                // toolkit that bioconda builds it on (orchestrator's choice, Owner-delegated
-                // 2026-11-11).
-                let version = if name == "rpsbproc" {
-                    crate::rpsbproc::VERSION
-                } else {
-                    crate::NCBI_BLAST_VERSION
-                };
-                return Some(format!(
-                    "{name}: {version}\n Package: LOSAT {}, output compatible with blast {}\n",
-                    env!("CARGO_PKG_VERSION"),
-                    crate::NCBI_BLAST_RELEASE
-                ));
-            }
-            _ => {}
+    // NCBI's reading of the words before the arguments (`ncbi_environment::preparse`): not
+    // after `--`, nor as the value of `-logfile` or `-conffile` (`blastn -logfile -version`
+    // logs to the file `-version`).
+    match crate::blastinput::ncbi_environment::preparse(&tokens[2..]) {
+        crate::blastinput::ncbi_environment::Preparsed::Version => {
+            // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
+            // ```c++
+            // 	SetVersion(CVersionInfo(VER.major, VER.minor, VER.patch_level));
+            // ```
+            // rpsbproc's own version (0.5.1), not BLAST's; the second line names the BLAST+
+            // toolkit that bioconda builds it on (orchestrator's choice, Owner-delegated
+            // 2026-11-11).
+            let version = if name == "rpsbproc" {
+                crate::rpsbproc::VERSION
+            } else {
+                crate::NCBI_BLAST_VERSION
+            };
+            Some(format!(
+                "{name}: {version}\n Package: LOSAT {}, output compatible with blast {}\n",
+                env!("CARGO_PKG_VERSION"),
+                crate::NCBI_BLAST_RELEASE
+            ))
         }
+        _ => None,
     }
-    None
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
@@ -991,7 +1028,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "subject_besthit",
     "use_sw_tback",
     "version",
-    "xdrop_ungap",
 ];
 
 fn is_unported_tblastn_arg(name: &str) -> bool {
@@ -1030,7 +1066,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "subject_besthit",
     "sum_stats",
     "version",
-    "xdrop_ungap",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {
@@ -1062,9 +1097,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "best_hit_score_edge",
     "import_search_strategy",
     "export_search_strategy",
-    "xdrop_ungap",
-    "xdrop_gap",
-    "xdrop_gap_final",
     "remote",
     "use_sw_tback",
 ];

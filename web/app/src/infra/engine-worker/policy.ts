@@ -70,6 +70,17 @@ export const DEFAULT_RENEWAL: RenewalLimits = Object.freeze({
   highWaterBytes: 512 * 1024 * 1024,
 });
 
+/**
+ * The limits for an instance that holds a WindowMasker counts file of `countsBytes` bytes: the
+ * high-water mark is higher by twice the file. The engine holds the bytes and the parsed counts
+ * while it reads the file, and the memory that the bytes took stays in the instance (DESIGN_ww1
+ * §4), so the human counts (691 MB) alone would be past the mark after every search, and the
+ * runtime would be renewed, and the counts read again, before the next one.
+ */
+export function limitsHolding(limits: RenewalLimits, countsBytes: number | undefined): RenewalLimits {
+  return countsBytes === undefined ? limits : { ...limits, highWaterBytes: limits.highWaterBytes + 2 * countsBytes };
+}
+
 /** Why the runtime must be renewed after a search, or undefined. */
 export function renewalReason(
   memory: { readonly linearBytesAfter: number; readonly instanceRuns: number },

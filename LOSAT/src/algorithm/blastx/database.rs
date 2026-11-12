@@ -165,6 +165,25 @@ impl BlastxDatabase {
         self.taxdb.prefetch_refused(&self.db)
     }
 
+    /// Whether a later query batch of a run that writes BLAST XML or an XML2 or JSON document
+    /// could still be refused, which only the batch's hits show, so that the run holds what it
+    /// writes until its epilog (the command line's document, `native::run_inner`; every format of
+    /// a library call, `local::report_batches`) and the refusal follows no byte:
+    /// - with `taxdb.bti` on the search path, a taxonomy database name or record
+    ///   (`taxdb_may_refuse`; `names`: one of the formats is XML2 or JSON, which write the
+    ///   scientific names), or a fetch where NCBI's taxonomy cache would repeat the offset error
+    ///   (`prefetch_refused`: outfmt 5's prefetch, and the XML2 and JSON lookups of a batch with a
+    ///   subject that has a taxid, `read_reported_taxonomy`);
+    /// - with parsed Seq-ids, one of the batch's subjects (`ReportedSubjects::for_batch`).
+    ///
+    /// The taxids of every sequence are looked up here, once (DECISIONS 32; outfmt 5 asks no
+    /// scientific name); the usual run, in which none would be refused, writes batch by batch.
+    pub(crate) fn later_batch_may_refuse(&self, names: bool) -> bool {
+        let taxdb_may_refuse =
+            self.taxdb_found() && (self.taxdb_may_refuse(names) || self.prefetch_refused());
+        taxdb_may_refuse || self.parsed_seqids()
+    }
+
     /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
     pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db)

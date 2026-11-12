@@ -23,8 +23,9 @@ ID 32 is invalid for this BLASTX CLI. Protein subjects have no `db_gencode`.
 The search profile supports NCBI's matrices (BLOSUM45, BLOSUM50, BLOSUM62,
 BLOSUM80, BLOSUM90, PAM30, PAM70, PAM250) with the gap costs of NCBI's table for
 each and their suggested threshold and window size, IDENTITY in an ungapped
-search with word size 3, word sizes 3/5, composition modes 0 to 3 (`2u` as 2,
-`5` as 0, as NCBI reads them), plus/minus/both query strands, SEG and lowercase masks,
+search with word sizes 2 to 4, word sizes 2 to 7 (5 to 7 with the compressed
+lookup table, as NCBI), composition modes 0 to 3 (`2u` as 2, `5` as 0, as NCBI
+reads them), plus/minus/both query strands, SEG and lowercase masks,
 soft/hard masking, gapped search or ungapped search with composition mode 0,
 sum statistics, intron length, target/HSP limits, culling, and subject-besthit.
 Omitted defaults retain their NCBI meanings, including description/alignment

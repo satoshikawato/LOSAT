@@ -84,6 +84,13 @@ pub use crate::blastinput::fasta_reader::{
 };
 pub use crate::blastinput::input_files::is_blank;
 
+// The WindowMasker unit counts of `-window_masker_db` that the adapter holds in memory under their
+// names (`file_begin`): NCBI's check of the format and the counts readers on the bytes, and the
+// source through which BLASTN opens them (`BlastnArgs::window_masker_counts`).
+pub use crate::utils::winmask::{
+    discover_stat_type_in, CountsSource, MaskerParams, StatFile, StatType, UnitCounts, WinMaskError,
+};
+
 // The decoders of compressed inputs (`blastinput/compressed.rs`): the name rule (`.gz`, `.bz2`,
 // `.zst`, in any case), the compression with its sentence for data that is not that format, and
 // the push form of the decoder that the command line's reader runs, which inflates a file the

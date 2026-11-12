@@ -30,7 +30,7 @@ use super::{
     subjects::{Subjects, UnreadableSubjects},
 };
 use crate::algorithm::common::database::{
-    prefetches_subjects, HeaderReadError, PreliminaryReadError, TaxonomyRefusal,
+    prefetches_subjects, HeaderReadError, PreliminaryReadError,
 };
 use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
 use anyhow::{bail, Result};
@@ -566,7 +566,7 @@ fn run_inner(
     let side_files = out_file.and_then(|out| {
         let kind = app::ReportFormat::from_number(choice.number).and_then(Xml2Kind::of)?;
         kind.is_files()
-            .then(|| super::blast_xml::HeldSideFiles::new(FsSideFiles::new(out, kind)))
+            .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
     let (destination, held) = if structured_xml {
         let held = super::blast_xml::HeldOutput::new(destination, side_files.clone());
@@ -770,29 +770,16 @@ fn run_inner(
         (&query_file)
             .seek(SeekFrom::Start(start))
             .map_err(|_| inaccessible("query", &args.query))?;
-        // The documents of a `-db` search with a taxonomy database on the search path: a later
-        // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
-        // database (`read_reported_taxonomy`, which needs the batch's hits; outfmt 5 looks the
-        // batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
-        // T). The taxids of every sequence are looked up here, once, and the output is held only
-        // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the
-        // usual run, in which none is, writes batch by batch. Where NCBI's taxonomy cache would
-        // repeat the offset error (`BlastxDatabase::prefetch_refused`) outfmt 5's prefetch, and the
-        // XML2 and JSON lookups of a batch with a subject that has a taxid
-        // (`read_reported_taxonomy`), are refused after the prolog: the run holds then too.
+        // A `-db` search in which a later batch can still refuse the taxonomy database or a
+        // subject with parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; outfmt 5 looks
+        // the batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
+        // T, and asks no scientific name) holds its document too.
         let prefetch = prefetches_subjects(Some(choice.number));
-        let taxdb_may_refuse = database.as_ref().is_some_and(|database| {
-            database.taxdb_found()
-                && (database.taxdb_may_refuse(!prefetch) || database.prefetch_refused())
-        });
-        // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
-        // (`ReportedSubjects::for_batch`), which only the batch's hits show.
-        let parsed_may_be_refused = database
+        let database_may_refuse = database
             .as_ref()
-            .is_some_and(|database| database.parsed_seqids());
+            .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
         if scan.messages_may_be_refused
-            || taxdb_may_refuse
-            || parsed_may_be_refused
+            || database_may_refuse
             || super::blast_xml::subjects_may_be_refused(&subjects)
         {
             held.hold();
@@ -1122,8 +1109,14 @@ fn run_inner(
                     ReportedAsks::of(&options),
                     results,
                     diagnostics,
-                    held.as_ref(),
-                )?;
+                )
+                .inspect_err(|error| {
+                    if let (true, Some(held)) =
+                        (super::blast_xml::drops_held_document(error), &held)
+                    {
+                        held.discard();
+                    }
+                })?;
                 report::render_queries(
                     writer,
                     diagnostics,
@@ -1207,7 +1200,7 @@ fn run_inner(
     }
     // What the archive's hold kept: the archives and messages of the run, in order.
     if let Some(hold) = &hold {
-        hold.release().map_err(output_error)?;
+        hold.release()?;
     }
     super::x_timing::run(XRun::Epilog, x_t);
     super::x_timing::run(XRun::Total, x_t_run);
@@ -1305,8 +1298,9 @@ impl ReportedAsks {
 /// The reported sequences of the query batch `results` of a `-db` search, with its hit lists
 /// renamed to ranks (`ReportedSubjects::for_batch`, `asks`), and what NCBI does before the reports
 /// of a batch, for the format of `options`: its prefetch and the values of a custom tabular field
-/// list. NCBI's reader error stops the run at this batch, with no epilog. `held`: what the run
-/// holds of its report, which a refusal drops.
+/// list. NCBI's reader error stops the run at this batch, with no epilog. A run that holds its
+/// document drops it on a refusal from here (`blast_xml::drops_held_document`: of the XML2
+/// document, of a subject with parsed Seq-ids, or of the taxonomy database).
 pub(super) fn reported_batch(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1314,7 +1308,6 @@ pub(super) fn reported_batch(
     asks: ReportedAsks,
     results: &mut [BatchResults],
     diagnostics: &mut dyn Write,
-    held: Option<&super::blast_xml::HeldOutput>,
 ) -> Result<ReportedSubjects> {
     use super::x_timing::Run as XRun;
     if matches!(search_subjects, Subjects::Unreadable) {
@@ -1357,26 +1350,14 @@ pub(super) fn reported_batch(
         prefetch_off,
     );
     super::x_timing::run(XRun::Titles, x_t);
-    let reported = reported
-        .map_err(|error| match error.downcast::<HeaderReadError>() {
-            Ok(header) => header.error,
-            // A failed read of a record's residues.
-            Err(error) => match error.downcast::<super::x_db_stream::XReadError>() {
-                Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
-                Err(error) => error,
-            },
-        })
-        .inspect_err(|error| {
-            // A refusal of the XML2 document, or of a subject with parsed
-            // Seq-ids, drops what the run holds.
-            if error.is::<super::blast_xml::XmlRefusal>()
-                || error.is::<crate::algorithm::common::database::ParsedRefusal>()
-            {
-                if let Some(held) = held {
-                    held.discard();
-                }
-            }
-        })?;
+    let reported = reported.map_err(|error| match error.downcast::<HeaderReadError>() {
+        Ok(header) => header.error,
+        // A failed read of a record's residues.
+        Err(error) => match error.downcast::<super::x_db_stream::XReadError>() {
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+            Err(error) => error,
+        },
+    })?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // ```c++
     //                 BlastFormatter_PreFetchSequenceData(*results, scope,
@@ -1398,8 +1379,8 @@ pub(super) fn reported_batch(
     // refusal comes after the reports of the batches before, as the refusals
     // of the batch's titles above (line DBID, DECISIONS 9 (9)); a refusal of
     // the taxonomy database (`TaxonomyRefusal`) drops what an outfmt 5 run
-    // holds, and the run holds where one could come (`taxdb_may_refuse`
-    // above), as XML2's does.
+    // holds, and the run holds where one could come
+    // (`BlastxDatabase::later_batch_may_refuse`), as XML2's does.
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
     // ```c++
     // s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
@@ -1423,13 +1404,6 @@ pub(super) fn reported_batch(
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
     let taxdb_found = database.taxdb_found();
     if prefetches_subjects(Some(prefetch_format)) && (taxdb_found || database.parsed_seqids()) {
-        let discard = |error: &anyhow::Error| {
-            if error.is::<TaxonomyRefusal>() {
-                if let Some(held) = held {
-                    held.discard();
-                }
-            }
-        };
         // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
         // (`prefetch_off`, above), each query's report fetches the
         // subjects it shows, after the query's own warnings
@@ -1442,16 +1416,12 @@ pub(super) fn reported_batch(
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
                     spec.subject_fetch(crate::blastinput::app::Program::Blastx)
                 });
-            reported
-                .fetch_by_query(database, results, options.gapped, rows)
-                .inspect_err(discard)?;
+            reported.fetch_by_query(database, results, options.gapped, rows)?;
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }
         } else if !prefetch_off {
-            let messages = reported
-                .batch_prefetch(database, results, options.gapped)
-                .inspect_err(discard)?;
+            let messages = reported.batch_prefetch(database, results, options.gapped)?;
             diagnostics.write_all(&messages)?;
         }
     }

@@ -18,6 +18,8 @@ mod blastdbcmd_masks;
 mod blastdbcmd_retrieve;
 #[path = "../blastdbcmd_several_names.rs"]
 mod blastdbcmd_several_names;
+#[path = "../blastx_library_db_hold.rs"]
+mod blastx_library_db_hold;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../db_empty_title.rs"]

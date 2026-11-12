@@ -13,7 +13,7 @@ import { sha256Hex } from '../../../src/infra/browser/platform';
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
 import { WasmEngine, type RuntimeEnd } from '../../../src/infra/engine-worker/gateway';
 import type { RenewalLimits } from '../../../src/infra/engine-worker/policy';
-import type { EngineEvent, WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
+import { STOP_AT_OUTPUT_CHANNEL, type EngineEvent, type WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
 import type { EngineGateway, EngineInput, RuntimeInfo } from '../../../src/ports/engine';
 import type { OutputStream } from '../../../src/ports/run-output';
 import { runCases, type CaseResult } from '../../contract/contract';
@@ -226,14 +226,21 @@ export interface CancelResult {
   readonly cancelMs: number;
   /** Milliseconds of the next search from its start to its search phase (worker, instance, inputs). */
   readonly nextPrepareMs: number;
-  /** How the runtimes ended until the next search completed, or until the first one ended (gateway.ts, RuntimeEnd). */
+  /** How the runtimes ended until the next search completed and the cancelled one ended (gateway.ts, RuntimeEnd). */
   readonly runtimeEnds: readonly RuntimeEnd[];
 }
 
 /** Cancels `long` once it runs, then runs `next` in the same application. */
 export async function cancelThenSearch(long: SearchCase, next: SearchCase, afterMs = 300): Promise<CancelResult> {
   const runtimeEnds: RuntimeEnd[] = [];
-  const session = new SearchSession({ onRuntimeEnd: (end) => runtimeEnds.push(end) });
+  let firstEnded: () => void = () => undefined;
+  const firstEnd = new Promise<void>((resolve) => (firstEnded = resolve));
+  const session = new SearchSession({
+    onRuntimeEnd: (end) => {
+      runtimeEnds.push(end);
+      firstEnded();
+    },
+  });
   const runId = await session.enqueue(long);
   await session.until(runId, ['running']);
   await new Promise((resolve) => setTimeout(resolve, afterMs));
@@ -243,12 +250,54 @@ export async function cancelThenSearch(long: SearchCase, next: SearchCase, after
   const cancelMs = performance.now() - cancelAt;
   const cancelled = await session.describe(long.id, cancelledView, 0);
   const result = await session.search(next);
-  // The cancelled runtime ends once its keeper grew the memory, which may come after the next search.
-  const deadline = performance.now() + 5_000;
-  while (runtimeEnds.length === 0 && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  // The cancelled runtime ends once its keeper grew the memory, which may come after the next
+  // search; the test's timeout bounds the wait.
+  await firstEnd;
   const phase = result.record.phaseTimes;
   const nextPrepareMs = (phase?.running ?? 0) - (result.record.startedAt ?? 0);
   return { cancelled, next: result, cancelMs, nextPrepareMs, runtimeEnds: [...runtimeEnds] };
+}
+
+export interface StopResult {
+  /** The search whose instance the armed Engine worker stopped at its first output. */
+  readonly stopped: SearchResult;
+  /** How the runtimes ended until the stopped one ended (gateway.ts, RuntimeEnd). */
+  readonly runtimeEnds: readonly RuntimeEnd[];
+}
+
+/**
+ * Runs `search`, then arms its Engine worker to stop the instance at the first output of the
+ * next search, as a trap in the engine would (engine-worker.ts, test builds), and runs
+ * `search` again in the same runtime.
+ */
+export async function stopDuringSearch(search: SearchCase): Promise<StopResult> {
+  const runtimeEnds: RuntimeEnd[] = [];
+  let firstEnded: () => void = () => undefined;
+  const firstEnd = new Promise<void>((resolve) => (firstEnded = resolve));
+  const session = new SearchSession({
+    onRuntimeEnd: (end) => {
+      runtimeEnds.push(end);
+      firstEnded();
+    },
+  });
+  const first = await session.search(search);
+  if (first.status !== 'completed') throw new Error(`the first search did not complete: ${first.record.error}`);
+  const arming = new BroadcastChannel(STOP_AT_OUTPUT_CHANNEL);
+  try {
+    const armed = new Promise<void>((resolve) => {
+      arming.onmessage = (event: MessageEvent<{ type?: string }>) => {
+        if (event.data?.type === 'armed') resolve();
+      };
+    });
+    arming.postMessage({ type: 'arm' });
+    await armed;
+  } finally {
+    arming.close();
+  }
+  const stopped = await session.search(search);
+  // The test's timeout bounds the wait.
+  await firstEnd;
+  return { stopped, runtimeEnds: [...runtimeEnds] };
 }
 
 export interface RetentionResult {

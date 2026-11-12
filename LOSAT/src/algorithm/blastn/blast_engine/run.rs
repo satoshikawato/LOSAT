@@ -10498,8 +10498,8 @@ fn x_query_batch_letters(task: &str) -> u64 {
 /// the reports written after the loop, where that output comes before them.
 fn x_debug_output(args: &BlastnArgs) -> bool {
     args.verbose
+        || crate::utils::xdiag::var_os("BLEMIR_DEBUG").is_some()
         || [
-            "BLEMIR_DEBUG",
             "LOSAT_DEBUG_BLASTN",
             "LOSAT_DEBUG_COORDS",
             "LOSAT_DEBUG_COORDS_START",

@@ -1806,19 +1806,28 @@ impl DiagTarget {
 //     int status = BLAST_EXIT_SUCCESS;
 //     CBlastAppDiagHandler bah;
 // ```
+// NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:111-114 (and :241-244 for
+// `x_RunMTBySplitQuery`; both are called from `Run`)
+// ```c++
+// int CRPSTBlastnApp::x_RunMTBySplitDB(void)
+// {
+//     int status = BLAST_EXIT_SUCCESS;
+//     CBlastAppDiagHandler bah;
+// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_aux.hpp:252
 // ```c++
 // 	CBlastAppDiagHandler():m_handler(GetDiagHandler(true)), m_save (true) {}
 // ```
 /// Whether the messages of `program`'s run go where its diagnostics go (the file of
-/// `-logfile`): tblastx and rpsblast, whose application makes its `CBlastAppDiagHandler` in
-/// `Run`, after `-logfile` set up the diagnostics. blastn, blastp, blastx, tblastn and psiblast
+/// `-logfile`): tblastx, rpsblast and rpstblastn, whose application makes its
+/// `CBlastAppDiagHandler` in `Run`, after `-logfile` set up the diagnostics. blastn, blastp, blastx, tblastn and psiblast
 /// hold theirs as a member, made with the application before `AppMain` from the handler of
 /// `cerr` (`replays_to_stderr`): their run's messages go to `cerr` whatever the `-logfile`.
 /// NCBI BLAST+ 2.17.0 (line RG `E/SURVEY_E1.md`): `-max_target_seqs 1`'s warning, a missing
-/// `-query` and `-evalue 0` go to `log.txt` in tblastx and rpsblast and to stderr in the others.
+/// `-query` and `-evalue 0` go to `log.txt` in tblastx and rpsblast and to stderr in the others;
+/// rpstblastn as tblastx (PS12a's probes of 2026-11-13, `PR/ws/ps12a/probe_e1_rpstbn.py`).
 pub fn run_messages_follow_log(program: &str) -> bool {
-    matches!(program, "tblastx" | "rpsblast")
+    matches!(program, "tblastx" | "rpsblast" | "rpstblastn")
 }
 
 impl DiagTarget {
@@ -2357,7 +2366,7 @@ impl ApplicationStart {
 /// those whose application holds a `CBlastAppDiagHandler` as a member (blastn, blastp, blastx,
 /// tblastn, psiblast). The handler takes the default handler (`cerr`) when the application is
 /// made, before `AppMain`, and puts it back when the application ends, before the collected
-/// messages are posted; tblastx and rpsblast make theirs in `Run`, and makeblastdb and
+/// messages are posted; tblastx, rpsblast and rpstblastn make theirs in `Run`, and makeblastdb and
 /// blastdbcmd have none, so their messages go to the `-logfile` target. NCBI BLAST+ 2.17.0, the
 /// official Linux x64 release (g_reg probes `probe_h`, 2026-11-12, a malformed `.ncbirc` and
 /// `<program>.ini`): blastn, blastp, blastx, tblastn and psiblast with `-logfile log.txt` write

@@ -36,7 +36,7 @@ use crate::cli::{Cli, Commands};
 pub fn main_entry() -> Result<()> {
     let result = run_main_entry();
     // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
-    // the standard error went to the `-logfile` target (tblastx and rpsblast,
+    // the standard error went to the `-logfile` target (tblastx, rpsblast and rpstblastn,
     // `ncbi_environment::run_messages_follow_log`): written as `main`'s `Result` writes them,
     // exit status 1. NCBI's errors are written by the run itself (`exit_on_native_error`), where
     // NCBI writes them. Line RG DECISIONS 32.
@@ -218,7 +218,7 @@ fn run_main_entry() -> Result<()> {
         Ok(cli) => cli,
         Err(error) => exit_on_parse_error(&error, argv_is_rpsbproc),
     };
-    // The messages of tblastx's and rpsblast's runs go where the diagnostics go
+    // The messages of tblastx's, rpsblast's and rpstblastn's runs go where the diagnostics go
     // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
     // target from here, where NCBI's `Run` makes its handler. LOSAT's parser errors above stay on
     // the standard error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1).

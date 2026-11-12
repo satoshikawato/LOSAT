@@ -1,18 +1,22 @@
-//! The functions of NCBI's `NStr` (`c++/src/corelib/ncbistr.cpp`) that makeblastdb uses to
-//! convert numbers, as LOSAT's ports call them: base 10, the flags each caller passes, and the
-//! `CStringException` each throws, with the place it is thrown from ([`ThrowSite`]); with them
-//! `NStr::PrintableString`, which their messages quote the string with, and
-//! `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`).
+//! The functions of NCBI's `NStr` (`c++/src/corelib/ncbistr.cpp`) that makeblastdb and
+//! rpsbproc's data loader (`rpsbproc::data`) use to convert numbers, as LOSAT's ports call them:
+//! base 10, the flags each caller passes, and the `CStringException` each throws, with the place
+//! it is thrown from ([`ThrowSite`]); with them `NStr::PrintableString`, which their messages
+//! quote the string with, `NStr::StringToUInt8_DataSize` (`-max_file_sz`, module `data_size`)
+//! and `NStr::StringToDouble` with glibc's `strtod` (rpsbproc's bit score thresholds, module
+//! `double`).
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (no caller asks for
 //! them), the bases other than 10, and the flags no caller passes (`fMandatorySign`,
 //! `fAllowCommas`, the leading and trailing symbols other than spaces). Other modules keep copies
-//! of some of these conversions (`blastinput::query_batch`, `seqdb::isam`, `seqdb::mask`,
-//! `blastdbcmd`), not yet folded here.
+//! of some of these conversions (`blastinput::query_batch`, `blastinput::value_parsers`,
+//! `seqdb::isam`, `seqdb::mask`, `blastdbcmd`), not yet folded here.
 
 mod data_size;
+mod double;
 
 pub use data_size::string_to_uint8_data_size;
+pub(crate) use double::string_to_double;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 
@@ -732,6 +736,19 @@ mod tests {
                 "19".to_string()
             )
         );
+    }
+
+    // ncbistr.cpp:3736-3844 (`s_PrintableString`, quoted at `printable_string`): C escapes,
+    // `?` escaped only next to another `?`, other bytes outside 0x20..0x7e in octal, as short as
+    // the next byte allows (rpsbproc's data loader quotes its lines with it).
+    #[test]
+    fn printable_string_escapes_as_ncbi() {
+        assert_eq!(printable_string(b"a\tb"), "a\\tb");
+        assert_eq!(printable_string(b"'\"\\"), "\\'\\\"\\\\");
+        assert_eq!(printable_string(b"??x?"), "\\?\\?x?");
+        assert_eq!(printable_string(b"\x01x"), "\\1x");
+        assert_eq!(printable_string(b"\x017"), "\\0017");
+        assert_eq!(printable_string(&[0xc3, 0xa9]), "\\303\\251");
     }
 
     /// `NStr::IsBlank` is C `isspace` over the whole string: the six spaces of the C locale

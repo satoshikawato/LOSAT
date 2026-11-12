@@ -1,0 +1,56 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/three.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Standard
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	176	NP_417964.1 putative DNA-binding transcriptional regulator DctR [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	197715	113	169	2.71276e-15	66.3966	smart00421	HTH_LUXR	-	481199
+1	Query_1	Specific	99777	116	172	6.40329e-15	65.6336	cd06170	LuxR_C_like	-	532797
+1	Query_1	Specific	442052	28	168	1.27742e-09	54.7618	COG2771	CsgD	N	-
+1	Query_1	Non-specific	441799	116	168	6.3722e-07	46.4238	COG2197	CitB	N	-
+1	Query_1	Non-specific	513237	115	169	6.45932e-07	44.5136	pfam00196	GerE	-	532797
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	113	169	2.71276e-15	66.3966	cl46859	HTH_CRP	-	-
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_2	Peptide	8	YP_009518762.2 protein YmdG [Escherichia coli str. K-12 substr. MG1655]
+ENDQUERY
+QUERY	Query_3	Peptide	250	NP_416077.4 putative antitermination protein Q [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_3	Specific	515680	155	242	8.4221e-35	119.758	pfam03589	Antiterm	-	-
+1	Query_3	Specific	515680	23	107	5.28709e-21	84.3197	pfam03589	Antiterm	-	-
+1	Query_3	Non-specific	274243	3	156	8.96473e-07	47.9456	TIGR02642	phage_xxxx	C	-
+1	Query_3	Non-specific	199908	148	192	3.23624e-05	41.0871	cd10719	DnaJ_zf	C	473904
+1	Query_3	Specific	513663	113	194	0.000890345	36.7914	pfam00684	DnaJ_CXXCXGXG	-	-
+1	Query_3	Non-specific	199908	113	194	0.00155634	36.0795	cd10719	DnaJ_zf	-	473904
+1	Query_3	Non-specific	510151	111	180	0.00288674	38.3736	NF010883	PRK14290	NC	-
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_3	Superfamily	0	148	192	3.23624e-05	41.0871	cl21539	DnaJ_zf	C	-
+1	Query_3	Superfamily	0	113	194	0.00155634	36.0795	cl21539	DnaJ_zf	-	-
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

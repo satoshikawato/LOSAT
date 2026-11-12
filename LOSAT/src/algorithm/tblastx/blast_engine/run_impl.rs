@@ -3352,7 +3352,7 @@ fn run_batch_loop(
         // error there.
         if input_start == 0 {
             if let Err(error) =
-                crate::blastinput::app::check_query_split_environment("TBLASTX", true)?
+                crate::blastinput::app::check_query_split_environment("TBLASTX", true, true)?
             {
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
                 outputs.diagnostics.write_all(&batch_warnings)?;

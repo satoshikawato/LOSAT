@@ -1,0 +1,32 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	stdin
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	79	NP_414783.1 protein YkfF [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	488084	5	74	5.04742e-43	133.904	pfam06006	DUF905	-	-
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

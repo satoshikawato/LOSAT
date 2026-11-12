@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.12
+- Version: 1.13
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -20,6 +20,8 @@
   1.11 2026-11-04 (the makeblastdb exception: a `-in` file of several bzip2 streams or zstd
   frames, line GZ; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
   1.12 2026-11-12 (exception 8, a TBLASTX cutoff quotient past the range of a double, line PS)
+  1.13 2026-11-12 (exception 9, the `losat rpsbproc` exception: PSSM-IDs of 2^31 and more,
+  line PS item PS16a; decided 2026-11-11, numbered after 1.12)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -301,6 +303,32 @@ Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
    genome pair above LOSAT writes 88,562 rows in 2 minutes, and on the small input 262 rows. The
    maintainer's rule of 2026-10-10 (no reproduction of NCBI's undefined behaviour or integer
    overflow) applies, also on these ordinary inputs.
+
+## Approved exception (`losat rpsbproc`, PSSM-IDs of 2^31 and more, version 1.13)
+
+Version 1.13, decided under the maintainer's standing delegation on 2026-11-11 (line PS
+`DECISIONS.md` 27, addendum of the PS16a review), under the rule of 2026-10-10 that LOSAT does
+not reproduce a signed `Int4` overflow (undefined behaviour in C++), as exception 4 widens the
+culling limit; its PR (PS16a) asks the maintainer to accept it, as version 1.5's did.
+
+9. **A PSSM-ID of 2^31 or more in rpsbproc's data.** rpsbproc 0.5.1 orders its maps of domains
+   and superfamilies by the `int` difference of two ids (`TSortByPssmId`, `(int)v1.m_uiPssmId -
+   (int)v2.m_uiPssmId`, `common/basedata.hpp:796-807`; `TSortByClusterId`, `:809-820`), used as
+   `m_comp(*p1, *p2) < 0` by its `std::sort` and by the sign of the difference in its binary
+   search (`common/ptrmap.hpp:63-70`, `:109-127`). Two ids whose `int` values are 2^31 or more
+   apart overflow it. NCBI's 2025-05-13 binary (GCC, no `-fwrapv`) sorts by the signed values
+   (the compiler folds `a - b < 0` to `a < b`) but searches with the wrapped difference: with
+   the fixture's `cddid.tbl` plus eight domain rows of PSSM-IDs between 2^31 - 2.5e6 and 2^31 +
+   1.3e6 (and in runs 2 and 3 a row of PSSM-ID 2^31), it prints the hit of PSSM-ID 488084 (run
+   1) and of 2148253328 (run 3) but not that of 2^31 (run 2; PS16a review oracle A2); with 1 to
+   30 rows of PSSM-IDs between 2^31 - 6e8 and 2^32 that no archive hits, it prints the output of
+   the data without them (oracle A4-1 cases `big3`, `big86` and `big88`). LOSAT compares the signed values
+   in the sort and in the search (`rpsbproc::data`, `int_order`), so it finds every row, the
+   one of 2^31 too; elsewhere its maps are NCBI's. The valid result is the one NCBI gives for the
+   row under a PSSM-ID that does not overflow the difference (only the PSSM-ID column, which
+   prints 0 from `INVALIDPSSMID` on, would differ). No CDD release has a PSSM-ID of 2^31 or
+   more (v3.22's largest is 533,962; the pseudo PSSM-IDs of accessions are about 1e8).
+   Unit test `pssm_ids_from_2_to_the_31_are_found` (`LOSAT/src/rpsbproc/data_tests.rs`).
 
 ## Reproduced as NCBI (rule 2)
 

@@ -1439,14 +1439,19 @@ mod tests {
         }
     }
 
-    /// The metadata file's text, its messages and the exception that ends makeblastdb.
+    /// The metadata file's text (when it is a regular file: `/dev/full` reads without end), its
+    /// messages and the exception that ends makeblastdb.
     fn written(
         path: &str,
         metadata: &DbMetadata,
     ) -> (Option<Vec<u8>>, String, Option<&'static str>) {
         let mut err = Vec::new();
         let escaped = write_metadata_file(path, true, metadata, &mut err);
-        let text = std::fs::read(format!("{path}.pjs")).ok();
+        let pjs = format!("{path}.pjs");
+        let text = std::fs::metadata(&pjs)
+            .is_ok_and(|meta| meta.is_file())
+            .then(|| std::fs::read(&pjs).ok())
+            .flatten();
         (text, String::from_utf8(err).unwrap(), escaped)
     }
 

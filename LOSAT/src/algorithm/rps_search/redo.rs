@@ -185,6 +185,8 @@ impl RpsTraceback<'_> {
                 expect_value: self.expect_value,
                 query_length: length as i32,
                 rps_roles: true,
+                // rpsblast's databases are BLOSUM62's (the others are refused).
+                matrix: crate::config::ScoringMatrix::Blosum62,
             }
             .redo_match(&mut run, list.oid, &hsps, query);
             let exceeded = run.bound_exceeded();

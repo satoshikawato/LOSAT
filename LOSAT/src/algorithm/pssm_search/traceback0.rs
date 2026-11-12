@@ -36,8 +36,9 @@ use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
+use crate::config::ScoringMatrix;
 use crate::stats::KarlinParams;
-use crate::utils::matrix::blosum62_score_ncbistdaa_direct;
+use crate::utils::matrix::standard_score;
 
 /// What the traceback of every list reads: the PSSM, the query's one context, the subjects, the
 /// scoring and the hit-saving options.
@@ -50,6 +51,8 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) subjects: XRedoSubjects<'a>,
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
+    /// The matrix of the search (`sbp->matrix`), whose positive scores are the positives.
+    pub(crate) matrix: ScoringMatrix,
     /// `ext_params->gap_x_dropoff_final` (`kbp_gap_psi`'s Lambda).
     pub(crate) x_drop_final: i32,
     /// `kbp_gap_psi[0]`.
@@ -213,6 +216,7 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
                     gap_extend: self.gap_extend,
                     x_drop_final: self.x_drop_final,
                     contained_before: true,
+                    matrix: self.matrix,
                 },
                 hsps,
                 scratch,
@@ -284,6 +288,8 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
     pub(crate) gap_extend: i32,
     pub(crate) x_drop_final: i32,
     pub(crate) contained_before: bool,
+    /// The matrix of the search (`sbp->matrix`), for the positives.
+    pub(crate) matrix: ScoringMatrix,
 }
 
 /// The loop of `Blast_TracebackFromHSPList` over one list's HSPs with a PSSM, then the purge of
@@ -444,7 +450,13 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             continue;
         }
         tree.add_hsp(node, 0, IndexMethod::QueryAndSubject);
-        final_hsps.push(final_hsp(&hsp, edit_script, query_nomask, subject));
+        final_hsps.push(final_hsp(
+            &hsp,
+            edit_script,
+            query_nomask,
+            subject,
+            inputs.matrix,
+        ));
     }
     final_hsps
 }
@@ -517,6 +529,7 @@ pub(super) fn final_hsp(
     edit_script: Vec<GapEditOp>,
     query_nomask: &[u8],
     subject: &[u8],
+    matrix: ScoringMatrix,
 ) -> BlastpHsp {
     let (mut q, mut s) = (hsp.query_start as usize, hsp.subject_start as usize);
     let (mut length, mut num_ident, mut num_positives, mut gap_opens, mut gap_letters) =
@@ -531,7 +544,7 @@ pub(super) fn final_hsp(
                     if ql == sl {
                         num_ident += 1;
                         num_positives += 1;
-                    } else if blosum62_score_ncbistdaa_direct(ql, sl) > 0 {
+                    } else if standard_score(matrix, ql, sl) > 0 {
                         num_positives += 1;
                     }
                 }

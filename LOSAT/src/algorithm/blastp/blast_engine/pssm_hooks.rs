@@ -41,27 +41,17 @@ use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
-use crate::algorithm::tblastx::lookup::{
-    prepare_blosum62_lookup_query_for_word_size, QueryContext,
-};
+use crate::algorithm::tblastx::lookup::{prepare_matrix_lookup_query_for_word_size, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
-/// The lookup table of the PSSM and the query's contexts (with `kbp_std`, the query's
-/// composition with BLOSUM62, and its validity).
+/// The lookup table of the PSSM and the query's contexts ([`psi_contexts`]).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-95 (quoted at
 /// `pssm_search::lookup`)
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2791
-/// ```c
-///       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-///       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-///       if (loop_status) {
-///           contexts[context].is_valid = FALSE;
-/// ```
 #[cold]
 #[inline(never)]
 pub(super) fn pssm_lookup(
@@ -72,14 +62,46 @@ pub(super) fn pssm_lookup(
         .psi_search
         .as_deref()
         .expect("the lookup table of a PSSM search");
-    let (_, _, contexts) =
-        prepare_blosum62_lookup_query_for_word_size(query_frames, args.word_size, false);
+    let contexts = psi_contexts(args, query_frames);
     let table = build_pssm_lookup(
         &psi.pssm,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
     );
     (BlastpRuntimeLookup::Aa(table), contexts)
+}
+
+/// The query's contexts of a PSSM search (and of psiblast's check of its queries before the
+/// search, `psiblast_stop_at_invalid_query`): `kbp_std`, the query's composition with the matrix
+/// of the search (`-matrix`: the score block's matrix, which the PSSM's scores replace only after
+/// its Karlin blocks), and its validity.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-515
+/// ```c
+///     status = Blast_ScoreBlkMatrixInit(program_number, scoring_options, sbp, get_path);
+///     ...
+///        status = Blast_ScoreBlkKbpUngappedCalc(program_number, sbp, query_blk->sequence,
+///                query_info, blast_message);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2791
+/// ```c
+///       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
+///       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+///       if (loop_status) {
+///           contexts[context].is_valid = FALSE;
+/// ```
+pub(super) fn psi_contexts(
+    args: &ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+) -> Vec<QueryContext> {
+    let (_, _, contexts) = prepare_matrix_lookup_query_for_word_size(
+        query_frames,
+        args.word_size,
+        false,
+        args.scoring.matrix,
+        None,
+    );
+    contexts
 }
 
 /// The Karlin blocks of a PSSM search: `kbp_psi[0]` and `kbp_gap_psi[0]`.
@@ -414,6 +436,7 @@ pub(super) fn pssm_traceback(
         subjects,
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
+        matrix: args.scoring.matrix,
         x_drop_final,
         karlin: &karlin.gapped,
         stats,
@@ -505,6 +528,7 @@ fn pssm_redo(
         subjects,
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
+        matrix: args.scoring.matrix,
         karlin: &karlin.gapped,
         x_drop_final,
         stats,

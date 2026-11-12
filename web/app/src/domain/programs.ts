@@ -393,13 +393,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'General Parameters',
         placement: 'algorithm',
-        // LOSAT's BLASTX reads word sizes 3 and 5 only.
-        fields: [
-          maxTargetSeqs,
-          evalue,
-          { ...wordSize, list: ['3', '5'] },
-          cullingLimit,
-        ],
+        fields: [maxTargetSeqs, evalue, wordSize, cullingLimit],
       },
       {
         title: 'Scoring Parameters',

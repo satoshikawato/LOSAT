@@ -342,10 +342,13 @@ export async function cancelDuringWarmUp(search: SearchCase): Promise<WarmUpCanc
   const gateway = engine as { run: EngineGateway['run'] };
   try {
     // The Engine worker and its threaded instance start; the worker listens once its script runs.
-    engine.prepare?.(hint);
+    // A hint whose modules did not load starts nothing (Chromium can fail the fetch of an engine
+    // module that the Data worker fetches at the same time, net::ERR_CACHE_WRITE_FAILURE;
+    // support/harness-server.ts): the next hint loads them again, as the form's next one would.
     let answered = false;
     void armed.then(() => (answered = true));
     while (!answered) {
+      engine.prepare?.(hint);
       channel.postMessage({ type: 'arm' });
       await new Promise((resolve) => setTimeout(resolve, 20));
     }

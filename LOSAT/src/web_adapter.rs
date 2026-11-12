@@ -83,3 +83,10 @@ pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 pub use crate::blastinput::input_files::is_blank;
+
+// The WindowMasker unit counts of `-window_masker_db` that the adapter holds in memory under their
+// names (`file_begin`): NCBI's check of the format and the counts readers on the bytes, and the
+// source through which BLASTN opens them (`BlastnArgs::window_masker_counts`).
+pub use crate::utils::winmask::{
+    discover_stat_type_in, CountsSource, MaskerParams, StatFile, StatType, UnitCounts, WinMaskError,
+};

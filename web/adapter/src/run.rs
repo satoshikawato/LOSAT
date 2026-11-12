@@ -7,7 +7,8 @@ use std::sync::Arc;
 use LOSAT::api::FastaRecord;
 use LOSAT::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    Cli, Commands, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit, ReportOutputs,
+    Cli, Commands, CountsSource, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit,
+    ReportOutputs,
 };
 
 use crate::emit::{emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS};
@@ -938,6 +939,24 @@ fn link_format0(
     }
 }
 
+/// The counts source of BLASTN's `-window_masker_db`: the named input files registered when the
+/// run starts (`files::source`), which the engine opens by the option's value as the command line
+/// opens the file of that name. `None` without the option, so a run without it gives the engine
+/// what it gave before named input files.
+fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
+    match command {
+        Commands::Blastn(args) if args.window_masker_db.is_some() => Some(crate::files::source()),
+        _ => None,
+    }
+}
+
+/// Gives a search's command the run's counts source (`window_masker_counts`).
+fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
+    if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
+        args.window_masker_counts = Some(counts.clone());
+    }
+}
+
 /// Runs the searches of the run and emits its streams. On failure nothing more is emitted
 /// and the host discards what it received.
 ///
@@ -972,6 +991,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     let custom_accepted = custom_handler_check(program, custom.as_deref()).is_ok();
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let threads = num_threads(&command);
+    let counts = window_masker_counts(&command);
     let mut command = Some(command);
     // Each search: what it wrote or why it failed, and (after the first) its diagnostics.
     let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
@@ -984,6 +1004,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
                 Some(command) => command,
                 None => parse(words)?.1,
             };
+            give_counts(&mut command, counts.as_ref());
             let mut scratch = Vec::new();
             // Whether the options' checks reject this search, found before `search` takes the
             // command.

@@ -9,6 +9,7 @@
 pub mod defaults;
 pub mod describe;
 pub mod emit;
+pub mod files;
 pub mod json;
 pub mod run;
 pub mod scan;
@@ -148,6 +149,46 @@ pub unsafe extern "C" fn losat_web2_register(
 #[no_mangle]
 pub extern "C" fn losat_web2_release(handle: u32) -> i32 {
     guarded(|| store::release(handle).map(|()| 0))
+}
+
+/// Starts a named input file of `kind` (`1`: a WindowMasker unit counts file, the value of
+/// BLASTN's `-window_masker_db`) of `size` bytes; returns its handle.
+///
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_file_begin(
+    kind: u32,
+    name_ptr: *const u8,
+    name_len: usize,
+    size: usize,
+) -> i32 {
+    guarded(|| {
+        let handle = files::begin(kind, text(name_ptr, name_len, "file name")?, size)?;
+        i32::try_from(handle).map_err(|_| "input file handle space exhausted".to_string())
+    })
+}
+
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_file_chunk(file: u32, ptr: *const u8, len: usize) -> i32 {
+    guarded(|| files::chunk(file, bytes(ptr, len)).map(|()| 0))
+}
+
+/// Ends a named input file: emits a *file* JSON on stream 2.
+#[no_mangle]
+pub extern "C" fn losat_web2_file_end(file: u32) -> i32 {
+    guarded(|| {
+        let response = files::end(file)?;
+        emit(STREAM_RESPONSE, response.as_bytes());
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn losat_web2_file_release(file: u32) -> i32 {
+    guarded(|| files::release(file).map(|()| 0))
 }
 
 fn scanners() -> &'static Mutex<(u32, HashMap<u32, scan::Scanner>)> {

@@ -1,10 +1,13 @@
 //! Alias files (`.pal` / `.nal`) and the list of volumes behind a database name.
 //!
 //! LOSAT reads the keys a multi-volume database of makeblastdb uses, `TITLE`
-//! and `DBLIST`, and the keys `NSEQ` and `LENGTH` of blastdb_aliastool when
-//! their values equal the sums over the databases they cover (`check_sums`).
-//! The keys that filter sequences or replace the statistics are explicit
-//! errors (not supported yet); unknown keys are ignored, as in NCBI.
+//! and `DBLIST`, the counts NCBI's reader takes from its walks of the alias
+//! tree (`NSEQ`, `LENGTH`, `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`:
+//! `walk_totals`) and the OID ranges `FIRST_OID` / `LAST_OID` (`compute_masks`,
+//! `range_mask`). The keys that select sequences by a list, an OID mask or a
+//! membership bit, and `MASKLIST`, are explicit errors (not supported yet);
+//! unknown keys, `VDBLIST` and `MAX_SEQ_LENGTH` among them, are ignored, as in
+//! NCBI.
 //!
 //! Two ways lead from a name to its volumes. `resolve_in` is NCBI's: the
 //! name of a search program's `-db` is looked for in the directories of a
@@ -21,17 +24,20 @@ use std::path::{Path, MAIN_SEPARATOR};
 use super::file::DbFile;
 use super::volume::with_extension;
 use super::{SeqDbError, SeqType};
+use crate::ncbi_exception::NcbiException;
+use crate::ncbi_str::{string_to_int8, string_to_uint, string_to_uint8};
 
 /// One node of the alias tree: the database name given by the caller (the
 /// top node) or one alias file.
 #[derive(Debug, Default)]
 pub(super) struct AliasNode {
-    /// `TITLE` of the alias file, when it has that key.
-    pub title: Option<Vec<u8>>,
-    /// Raw value of the `NSEQ` key of the alias file, when it has that key.
-    pub nseq: Option<Vec<u8>>,
-    /// Raw value of the `LENGTH` key of the alias file, when it has that key.
-    pub length: Option<Vec<u8>>,
+    /// The key / value lines of the alias file (`m_Values`, `read_values`), a
+    /// repeated key once with its last value; empty for the top node, whose
+    /// only value is the `DBLIST` of the names it was given.
+    pub values: Vec<(Vec<u8>, Vec<u8>)>,
+    /// `FIRST_OID` / `LAST_OID` of the alias file as `ComputeMasks` reads them
+    /// (`compute_masks`); `None` before it ran and for a node without them.
+    pub range: Option<OidRange>,
     /// Alias files named in `DBLIST`, in order.
     pub subnodes: Vec<AliasNode>,
     /// Volumes named in `DBLIST` (paths without extension), in order.
@@ -39,6 +45,83 @@ pub(super) struct AliasNode {
     /// Path of the alias file of this node (`m_ThisName`); `None` for the
     /// top node, which NCBI names "-".
     pub this_name: Option<String>,
+}
+
+impl AliasNode {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1578-1583
+    // ```c++
+    //     TVarList::const_iterator value =
+    //         m_Values.find(walker->GetFileKey());
+    //
+    //     if (value != m_Values.end()) {
+    // ```
+    /// The value of `key` in the alias file of this node (`m_Values.find(key)`).
+    pub fn value(&self, key: &str) -> Option<&[u8]> {
+        self.values
+            .iter()
+            .find(|(name, _)| name == key.as_bytes())
+            .map(|(_, value)| value.as_slice())
+    }
+}
+
+/// The OID range of one alias file: the values of `FIRST_OID` and `LAST_OID`
+/// as `NStr::StringToUInt` converts them (`compute_masks`), before NCBI keeps
+/// them in an `int`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct OidRange {
+    /// `FIRST_OID`, 1-based; `None` without the key.
+    pub first_oid: Option<u32>,
+    /// `LAST_OID`, 1-based and inclusive; `None` without the key.
+    pub last_oid: Option<u32>,
+}
+
+impl OidRange {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1975-1998
+    // ```c++
+    //             int first_oid = 0;
+    //             int last_oid  = INT_MAX;
+    //             bool has_range = false;
+    //
+    //             if (f_oid_iter != m_Values.end()) {
+    //                 first_oid = NStr::StringToUInt(f_oid_iter->second);
+    //
+    //                 // Starts at one, adjust to zero-indexed.
+    //                 if (first_oid)
+    //                     first_oid--;
+    //
+    //                 has_range = true;
+    //             }
+    //
+    //             if (l_oid_iter != m_Values.end()) {
+    //                 // Zero indexing and post notation adjustments cancel.
+    //                 last_oid = NStr::StringToUInt(l_oid_iter->second);
+    //                 has_range = true;
+    //             }
+    //
+    //             if (has_range) {
+    //                 CRef<TMask> mask(new TMask(first_oid, last_oid));
+    //                 m_NodeMasks.push_back(mask);
+    //             }
+    // ```
+    // A value of 2^31 or more becomes a negative `int`; such a range is refused
+    // before the mask is made (`SeqDb::open_tree`), so the values here fit.
+    /// The 0-based half-open range `[begin, end)` of the mask, in the OIDs of
+    /// the whole volume set: `(begin, end)` as NCBI's `CSeqDB_AliasMask` holds
+    /// them.
+    pub fn bounds(&self) -> (i64, i64) {
+        let begin = self.first_oid.map_or(0, |first| first.saturating_sub(1));
+        let end = self.last_oid.map_or(i64::from(i32::MAX), i64::from);
+        (i64::from(begin), end)
+    }
+
+    /// Whether `FIRST_OID` or `LAST_OID` does not fit NCBI's `int` (2^31 or
+    /// more), which it then reads as a negative number.
+    pub fn exceeds_int(&self) -> bool {
+        [self.first_oid, self.last_oid]
+            .into_iter()
+            .flatten()
+            .any(|value| value > i32::MAX as u32)
+    }
 }
 
 /// The resolved database: the alias tree and its volumes in NCBI's order.
@@ -50,16 +133,15 @@ pub(super) struct AliasTree {
 }
 
 /// Alias keys that LOSAT recognises and does not support: they select
-/// sequences (alias_files.txt "Type: filter"), replace the values used for
-/// statistics ("meta-data"), or name data LOSAT does not read. `NSEQ` and
-/// `LENGTH` are read (`check_sums`) and are not among them. They are the
-/// keys NCBI's reader looks up (seqdbalias.cpp), except `MAX_SEQ_LENGTH`,
-/// which it never applies (seqdbimpl.cpp:972-976 takes the maximum from the
-/// volumes) and which is ignored here too, plus `VDBLIST` of
-/// blastdb_aliastool.
-const UNSUPPORTED_KEYS: [&str; 14] = [
-    "FIRST_OID",
-    "LAST_OID",
+/// sequences by a list, an OID mask or a membership bit (alias_files.txt
+/// "Type: filter"), or name masks LOSAT does not read (`MASKLIST`). They are
+/// the keys NCBI's reader looks up (seqdbalias.cpp) but those LOSAT reads:
+/// `TITLE`, `DBLIST`, the counts of the walks (`walk_totals`) and the OID
+/// ranges (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
+/// (seqdbimpl.cpp:972-976 takes the maximum from the volumes), and `VDBLIST`,
+/// which only NCBI's VDB tools read (vdbalias.cpp; `CSeqDBAliasNode` looks it
+/// up nowhere), are ignored as unknown keys are.
+const UNSUPPORTED_KEYS: [&str; 8] = [
     "GILIST",
     "TILIST",
     "SEQIDLIST",
@@ -67,10 +149,6 @@ const UNSUPPORTED_KEYS: [&str; 14] = [
     "OIDLIST",
     "MEMB_BIT",
     "MASKLIST",
-    "VDBLIST",
-    "STATS_NSEQ",
-    "STATS_TOTLEN",
-    "MIN_SEQ_LENGTH",
     "OID_MASK_TYPE",
 ];
 
@@ -1172,21 +1250,15 @@ impl Resolver<'_> {
         // errors of `DbFile::open`.
         let bytes = DbFile::open(&path)?.read_all()?;
         let values = read_values(&bytes);
-        let mut title = None;
-        let mut nseq = None;
-        let mut length = None;
         let mut dblist: &[u8] = &[];
         for (key, value) in &values {
             match key.as_slice() {
-                b"TITLE" => title = Some(value.clone()),
-                b"NSEQ" => nseq = Some(value.clone()),
-                b"LENGTH" => length = Some(value.clone()),
                 b"DBLIST" => dblist = value,
                 other => {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
-                            "alias file key {key} is not supported; LOSAT reads TITLE, DBLIST, NSEQ and \
-                             LENGTH"
+                            "alias file key {key} is not supported; LOSAT reads TITLE, DBLIST, NSEQ, \
+                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID and LAST_OID"
                         )));
                     }
                 }
@@ -1202,9 +1274,7 @@ impl Resolver<'_> {
         self.recurse.push(path.to_string_lossy().into_owned());
         let mut node = AliasNode {
             this_name: Some(path.to_string_lossy().into_owned()),
-            title,
-            nseq,
-            length,
+            values,
             ..AliasNode::default()
         };
         let result = self.expand(&mut node, dir_name(base), base, &entries, false);
@@ -1447,38 +1517,26 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 // The volumes are opened, and ordinal ids are given, in the sorted order of
 // the volume names, not in `DBLIST` order.
 //
-// A volume reached more than once is rejected because LOSAT does not
-// reproduce what NCBI derives from it: NCBI's alias walk counts it once per
-// mention (seqdbalias.cpp:1588-1592) in the statistics of a search that reads
-// it once. Volumes of the same base name in different directories (two
-// databases of one name, `-db "d1/g d2/g"`) are opened in the order above,
-// each with the LMDB file of its own directory (`lmdb_entries`), as NCBI does.
+// A volume reached from several nodes (an alias file and a name of `-db`, or
+// two alias files) is one entry of the set, so it is opened once and its OIDs
+// are numbered once; NCBI's walks still count it once per node that names it
+// (`walk_totals`), and its OIDs are those of every path to it (`range_mask`).
+// A node lists a volume once however often its `DBLIST` names it
+// (`push_unique`, seqdbalias.cpp:789-798, 864-873, 905-914). Volumes of the
+// same base name in different directories (two databases of one name, `-db
+// "d1/g d2/g"`) are opened in the order above, each with the LMDB file of its
+// own directory (`lmdb_entries`), as NCBI does.
 /// The volumes of the alias tree `root` in NCBI's order.
-fn volumes_in_order(root: AliasNode) -> Result<AliasTree, SeqDbError> {
-    let mut mentions = Vec::new();
-    collect_volumes(&root, &mut mentions);
-    let mut volumes = mentions.clone();
+fn volumes_in_order(root: AliasNode) -> AliasTree {
+    let mut volumes = Vec::new();
+    collect_volumes(&root, &mut volumes);
     volumes.sort_by(|a, b| {
         path_base_name(a)
             .cmp(path_base_name(b))
             .then_with(|| a.cmp(b))
     });
     volumes.dedup();
-    let unsupported = |volume: &str, message: &str| SeqDbError::Unsupported {
-        path: Path::new(volume).to_path_buf(),
-        message: message.to_string(),
-    };
-    if volumes.len() != mentions.len() {
-        let repeated = volumes
-            .iter()
-            .find(|volume| mentions.iter().filter(|m| m == volume).count() > 1)
-            .map_or("", String::as_str);
-        return Err(unsupported(
-            repeated,
-            "the volume is listed more than once by the alias files",
-        ));
-    }
-    Ok(AliasTree { root, volumes })
+    AliasTree { root, volumes }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:155-165
@@ -1640,9 +1698,10 @@ fn volumes_in_order(root: AliasNode) -> Result<AliasTree, SeqDbError> {
 // separate databases and double quotes keep a name with spaces together.
 // Several names are the databases of one search, the entries of the top
 // alias node "-" as the names of a `DBLIST` are; a volume that two names give
-// is opened once (`push_unique`), one that a name and an alias file give is
-// refused (`volumes_in_order`). A name carries no extension: `db.pin` is looked for as `db.pin.pal`
-// and `db.pin.pin`. A name with a path separator is joined to every
+// is listed once by the top node (`push_unique`), one that a name and an
+// alias file give is opened once and counted by both (`volumes_in_order`). A
+// name carries no extension: `db.pin` is looked for as `db.pin.pal` and
+// `db.pin.pin`. A name with a path separator is joined to every
 // directory of the search path like any other (an absolute name stays as it
 // is, `combine_path`); it only turns off the look for a volume of the same
 // base name in the current directory (`m_SkipLocal`).
@@ -1736,7 +1795,7 @@ pub(super) fn resolve_in(
         };
         resolver.expand(&mut root, db_dir, "-", &[entry.to_string()], skip_local)?;
     }
-    volumes_in_order(root)
+    Ok(volumes_in_order(root))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:85-97
@@ -1795,7 +1854,7 @@ pub(super) fn resolve_one_name(
     let mut root = AliasNode::default();
     // The top node is named "-" (seqdbalias.cpp:106, 127).
     resolver.expand(&mut root, "", "-", std::slice::from_ref(&db_base), true)?;
-    volumes_in_order(root)
+    Ok(volumes_in_order(root))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:970-984
@@ -1919,7 +1978,7 @@ pub(super) fn walk_title(
     volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
     title: &mut Vec<u8>,
 ) {
-    if let Some(value) = &node.title {
+    if let Some(value) = node.value("TITLE") {
         join_delim(title, value);
         return;
     }
@@ -1957,113 +2016,478 @@ pub(super) fn walk_title(
 //     }
 // }
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1189-1192
+// Every volume a node names is in the volume set (`volumes_in_order` takes them all), so
+// `GetVol` finds it; a volume that several nodes name is accumulated once per node.
+/// NCBI's `WalkNodes` with a walker whose key is `key`: `add_string` takes the value of a node
+/// that has the key (the walk does not go below that node), `accumulate` the path of each
+/// volume of the nodes without it. The first exception of `add_string` ends the walk, as the
+/// exception of `AddString` leaves NCBI's.
+fn walk_nodes(
+    node: &AliasNode,
+    key: &str,
+    add_string: &mut dyn FnMut(&[u8]) -> Result<(), NcbiException>,
+    accumulate: &mut dyn FnMut(&str),
+) -> Result<(), NcbiException> {
+    if let Some(value) = node.value(key) {
+        return add_string(value);
+    }
+    for subnode in &node.subnodes {
+        walk_nodes(subnode, key, add_string, accumulate)?;
+    }
+    for volume in &node.vol_names {
+        accumulate(volume);
+    }
+    Ok(())
+}
+
+/// The keys of NCBI's count walks (`walk_totals`). A value that does not convert fails the
+/// walk of its key, where NCBI's reader runs that walk (`SeqDb::open_tree`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WalkKey {
+    Nseq,
+    Length,
+    MinSeqLength,
+    StatsNseq,
+    StatsTotlen,
+}
+
+/// What NCBI's walks of the alias tree give (`walk_totals`), each with the exception of the
+/// first value of its key that does not convert.
+#[derive(Debug)]
+pub(super) struct AliasTotals {
+    /// `CSeqDBAliasNode::GetNumSeqs`: `NSEQ`, else the volumes' OIDs (`int` of it is
+    /// `GetNumSeqs`).
+    pub nseq: Result<i64, NcbiException>,
+    /// `CSeqDBAliasNode::GetTotalLength`: `LENGTH`, else the volumes' lengths.
+    pub length: Result<u64, NcbiException>,
+    /// `CSeqDBAliasNode::GetMinLength`: the smallest `MIN_SEQ_LENGTH`, 0 for a branch of
+    /// volumes alone.
+    pub min_seq_length: Result<i32, NcbiException>,
+    /// `CSeqDBAliasNode::GetNumSeqsStats`: `STATS_NSEQ`, 0 for a branch of volumes alone.
+    pub stats_nseq: Result<i64, NcbiException>,
+    /// `CSeqDBAliasNode::GetTotalLengthStats`: `STATS_TOTLEN`, 0 for a branch of volumes
+    /// alone.
+    pub stats_totlen: Result<u64, NcbiException>,
+}
+
+impl AliasTotals {
+    /// The exception of the walk of `key`, if its walk failed.
+    pub fn error(&self, key: WalkKey) -> Option<&NcbiException> {
+        match key {
+            WalkKey::Nseq => self.nseq.as_ref().err(),
+            WalkKey::Length => self.length.as_ref().err(),
+            WalkKey::MinSeqLength => self.min_seq_length.as_ref().err(),
+            WalkKey::StatsNseq => self.stats_nseq.as_ref().err(),
+            WalkKey::StatsTotlen => self.stats_totlen.as_ref().err(),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1189-1204
 // ```c++
 //     virtual void Accumulate(const CSeqDBVol & vol)
 //     {
 //         m_Value += vol.GetNumOIDs();
 //     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1201-1204
-// ```c++
+//     ...
 //     virtual void AddString(const string & value)
 //     {
 //         m_Value += NStr::StringToInt8(value);
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1290-1293
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1257-1260
+// ```c++
+//     virtual void Accumulate(const CSeqDBVol & vol)
+//     {
+//         // only alias file data is included.
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1290-1305
 // ```c++
 //     virtual void Accumulate(const CSeqDBVol & vol)
 //     {
 //         m_Value += vol.GetVolumeLength();
 //     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1302-1305
-// ```c++
+//     ...
 //     virtual void AddString(const string & value)
 //     {
 //         m_Value += NStr::StringToUInt8(value);
 //     }
 // ```
-// The number of sequences (`NSEQ`) and the total length (`LENGTH`) of a
-// database are such walks: a node that has the key contributes its value and
-// is not descended into; any other node contributes the walks of its sub-nodes
-// and its own volumes. A value equal to the sum the walk gives below its node
-// therefore changes nothing, and LOSAT reads the key only in that case.
-/// The number of sequences and the total length of `node`, as the walks of
-/// `NSEQ` and `LENGTH` (quoted above) compute them over the volumes below it
-/// when no node has the keys. `volume_sums` gives both for a volume path.
-/// Every alias node below `node` that has `NSEQ` or `LENGTH` is checked on the
-/// way: the value must be plain decimal digits (1 to 19) and equal the sum of
-/// that node. NCBI's parse of other values is not reproduced.
-pub(super) fn check_sums(
-    node: &AliasNode,
-    volume_sums: &dyn Fn(&str) -> Option<(u64, u64)>,
-) -> Result<(u64, u64), SeqDbError> {
-    let mut nseq: u64 = 0;
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1107-1147
+// ```c++
+//     CSeqDB_MinLengthWalker()
+//     {
+//         m_Value = INT4_MAX;
+//     }
+//     ...
+//     virtual void Accumulate(const CSeqDBVol & vol)
+//     {
+//         int new_min = vol.GetMinLength();
+//
+//         if (new_min < m_Value) {
+//             m_Value = new_min;
+//         }
+//     }
+//     ...
+//     virtual void AddString(const string & value)
+//     {
+//         int new_min = NStr::StringToUInt(value);
+//
+//         if (new_min < m_Value) {
+//             m_Value = new_min;
+//         }
+//     }
+// ```
+// `CSeqDB_NSeqsStatsWalker` and `CSeqDB_TotalLengthStatsWalker` are the `NSEQ` and `LENGTH`
+// walkers with the keys `STATS_NSEQ` and `STATS_TOTLEN` and the empty `Accumulate` quoted
+// above (seqdbalias.cpp:1241-1262, 1342-1363). A volume's `GetMinLength` is its index file's
+// `m_MinLen`, which no index file sets (seqdbfile.cpp:142 starts it at 0; the formats store
+// none), so a branch of volumes alone makes the minimum 0. NCBI adds to an `Int8` with
+// signed overflow undefined; only the `int` of the sum is ever read (`x_GetNumSeqs`,
+// `GetNumSeqsStats`), whose 32 bits a wrapping sum gives as any wider sum would. The
+// unsigned sums of the lengths wrap as NCBI's `Uint8` does.
+/// NCBI's walks of the counts of the alias tree `root`; `volume` gives the number of OIDs and
+/// the total length of a volume path (`GetNumOIDs`, `GetVolumeLength`). The values parse
+/// with NCBI's `NStr` functions and flags (`NSEQ`, `STATS_NSEQ`: `StringToInt8`; `LENGTH`,
+/// `STATS_TOTLEN`: `StringToUInt8`; `MIN_SEQ_LENGTH`: `StringToUInt`, read as an `int`).
+pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&str) -> (u32, u64)) -> AliasTotals {
+    let mut nseq: i64 = 0;
+    let nseq = walk_nodes(
+        root,
+        "NSEQ",
+        &mut |value| {
+            nseq = nseq.wrapping_add(string_to_int8(value, 0)?);
+            Ok(())
+        },
+        &mut |path| nseq = nseq.wrapping_add(i64::from(volume(path).0)),
+    )
+    .map(|()| nseq);
     let mut length: u64 = 0;
-    let overflow = || SeqDbError::Unsupported {
-        path: node
-            .this_name
-            .as_deref()
-            .map_or_else(Default::default, |name| Path::new(name).to_path_buf()),
-        message: "the number of sequences or the total length of the databases of an alias \
-                  file overflows"
-            .to_string(),
-    };
-    for subnode in &node.subnodes {
-        let (sub_nseq, sub_length) = check_sums(subnode, volume_sums)?;
-        nseq = nseq.checked_add(sub_nseq).ok_or_else(overflow)?;
-        length = length.checked_add(sub_length).ok_or_else(overflow)?;
+    let length = walk_nodes(
+        root,
+        "LENGTH",
+        &mut |value| {
+            length = length.wrapping_add(string_to_uint8(value)?);
+            Ok(())
+        },
+        &mut |path| length = length.wrapping_add(volume(path).1),
+    )
+    .map(|()| length);
+    let mut min = i32::MAX;
+    let min_seq_length = walk_nodes(
+        root,
+        "MIN_SEQ_LENGTH",
+        &mut |value| {
+            min = min.min(string_to_uint(value)? as i32);
+            Ok(())
+        },
+        &mut |_| min = min.min(0),
+    )
+    .map(|()| min);
+    let mut stats_nseq: i64 = 0;
+    let stats_nseq = walk_nodes(
+        root,
+        "STATS_NSEQ",
+        &mut |value| {
+            stats_nseq = stats_nseq.wrapping_add(string_to_int8(value, 0)?);
+            Ok(())
+        },
+        &mut |_| {},
+    )
+    .map(|()| stats_nseq);
+    let mut stats_totlen: u64 = 0;
+    let stats_totlen = walk_nodes(
+        root,
+        "STATS_TOTLEN",
+        &mut |value| {
+            stats_totlen = stats_totlen.wrapping_add(string_to_uint8(value)?);
+            Ok(())
+        },
+        &mut |_| {},
+    )
+    .map(|()| stats_totlen);
+    AliasTotals {
+        nseq,
+        length,
+        min_seq_length,
+        stats_nseq,
+        stats_totlen,
     }
-    for volume in &node.vol_names {
-        if let Some((vol_nseq, vol_length)) = volume_sums(volume) {
-            nseq = nseq.checked_add(vol_nseq).ok_or_else(overflow)?;
-            length = length.checked_add(vol_length).ok_or_else(overflow)?;
-        }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-1980
+// ```c++
+//     if (! m_DBList.empty()) {
+//         if (oid_iter   != m_Values.end() ||
+//             gil_iter   != m_Values.end() ||
+//             til_iter   != m_Values.end() ||
+//             sil_iter   != m_Values.end() ||
+//             f_oid_iter != m_Values.end() ||
+//             l_oid_iter != m_Values.end() ||
+//             mbit_iter  != m_Values.end() ||
+//             taxid_iter != m_Values.end()) {
+//
+//             has_filters = true;
+//
+//             int first_oid = 0;
+//             int last_oid  = INT_MAX;
+//             bool has_range = false;
+//
+//             if (f_oid_iter != m_Values.end()) {
+//                 first_oid = NStr::StringToUInt(f_oid_iter->second);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:2094-2097
+// ```c++
+//     NON_CONST_ITERATE(TSubNodeList, sn, m_SubNodes) {
+//         (**sn).ComputeMasks(has_filters);
+//     }
+// }
+// ```
+// The rest of the range is quoted at `OidRange::bounds`. NCBI's constructor runs this first
+// (`m_Aliases.HasFilters()`, seqdbimpl.cpp:96), before any count walk. The other filter keys
+// are refused when the alias file is read, so a node's filters are its range alone.
+/// `ComputeMasks` of the top node: `FIRST_OID`, then `LAST_OID`, of every node from the top
+/// down, a node before its sub-nodes (`NStr::StringToUInt`); the first value that does not
+/// convert is the error.
+pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), NcbiException> {
+    let first_oid = node.value("FIRST_OID").map(string_to_uint).transpose()?;
+    let last_oid = node.value("LAST_OID").map(string_to_uint).transpose()?;
+    if first_oid.is_some() || last_oid.is_some() {
+        node.range = Some(OidRange {
+            first_oid,
+            last_oid,
+        });
     }
-    let path = node
-        .this_name
-        .as_deref()
-        .map_or_else(Default::default, |name| Path::new(name).to_path_buf());
-    for (key, value, sum, what) in [
-        ("NSEQ", &node.nseq, nseq, "the number of sequences"),
-        ("LENGTH", &node.length, length, "the total length"),
-    ] {
-        let Some(value) = value else { continue };
-        let digits = (1..=19).contains(&value.len()) && value.iter().all(u8::is_ascii_digit);
-        let parsed = if digits {
-            std::str::from_utf8(value)
-                .ok()
-                .and_then(|text| text.parse::<u64>().ok())
-        } else {
-            None
+    for subnode in &mut node.subnodes {
+        compute_masks(subnode)?;
+    }
+    Ok(())
+}
+
+/// Whether some node of the tree has an OID range (`CSeqDB_FilterTree::HasFilter`, the filters
+/// being ranges alone).
+pub(super) fn has_ranges(node: &AliasNode) -> bool {
+    node.range.is_some() || node.subnodes.iter().any(has_ranges)
+}
+
+/// The first range of the tree that does not fit NCBI's `int` (`OidRange::exceeds_int`), with
+/// the alias file that has it.
+pub(super) fn range_beyond_int(node: &AliasNode) -> Option<&str> {
+    if node.range.is_some_and(|range| range.exceeds_int()) {
+        return Some(node.this_name.as_deref().unwrap_or("-"));
+    }
+    node.subnodes.iter().find_map(range_beyond_int)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:91-99
+// ```c++
+//     for(int i = 0; i < volset.GetNumVols(); i++) {
+//         const CSeqDBVolEntry * v1 = volset.GetVolEntry(i);
+//
+//         CRef<CSeqDB_BitSet> vol_bits =
+//             x_ComputeFilters(filters, *v1, gi_list_set, locked, lmdb_set.IsBlastDBVersion5());
+//
+//         m_AllBits->UnionWith(*vol_bits, true);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-177
+// ```c++
+//     const string & vn = vol.Vol()->GetVolName();
+//     CRef<CSeqDB_FilterTree> ft = filters.Specialize(vn);
+//
+//     int vol_start = vol.OIDStart();
+//     int vol_end   = vol.OIDEnd();
+//     ...
+//     if (vols > 0) {
+//         ...
+//         volume_map.Reset(new CSeqDB_BitSet(vol_start,
+//                                      vol_end,
+//                                      CSeqDB_BitSet::eAllSet));
+//     } else {
+//         ...
+//         ITERATE(vector< CRef< CSeqDB_FilterTree > >, sub, ft->GetNodes()) {
+//             CRef<CSeqDB_BitSet> sub_bits =
+//                 x_ComputeFilters(**sub, vol, gis, locked, isBlastDBv5);
+//
+//             volume_map->UnionWith(*sub_bits, true);
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:193-206
+// ```c++
+//     CRef<CSeqDB_BitSet> filter(new CSeqDB_BitSet(vol_start,
+//                                                  vol_end,
+//                                                  CSeqDB_BitSet::eAllSet));
+//
+//     // First, apply any 'range' filters, because they can be combined
+//     // very efficiently.
+//
+//     typedef CSeqDB_FilterTree::TFilters TFilters;
+//
+//     ITERATE(TFilters, range, ft->GetFilters()) {
+//         const CSeqDB_AliasMask & mask = **range;
+//
+//         if (mask.GetType() == CSeqDB_AliasMask::eOidRange) {
+//             CSeqDB_BitSet r2(mask.GetBegin(),
+//                                 mask.GetEnd(),
+//                                 CSeqDB_BitSet::eAllSet);
+//             filter->IntersectWith(r2, true);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:38-55
+// ```c++
+// CRef<CSeqDB_FilterTree> CSeqDB_FilterTree::Specialize(string volname) const
+// {
+//     CRef<CSeqDB_FilterTree> clone(new CSeqDB_FilterTree);
+//     clone->SetName(m_Name);
+//     clone->AddFilters(m_Filters);
+//
+//     ITERATE(vector< CRef<CSeqDB_FilterTree> >, iter, m_SubNodes) {
+//         CRef<CSeqDB_FilterTree> sub = (**iter).Specialize(volname);
+//
+//         if (sub.NotEmpty()) {
+//             if (! sub->GetFilters().empty()) {
+//                 clone->AddNode(sub);
+//             } else {
+//                 clone->AddNodes(sub->GetNodes());
+//                 clone->AddVolumes(sub->GetVolumes());
+//             }
+//         }
+//     }
+// ```
+// The tree of one volume keeps the branches that reach it and lifts a node without a filter
+// into its parent. A node's OIDs of the volume are its range (the whole volume without one)
+// intersected with the volume when the node names the volume, else with the union of its
+// sub-nodes' OIDs; a sub-node's OIDs below a node that names the volume are inside the whole
+// volume, so ignoring them changes nothing. By distribution the OIDs of a volume are therefore
+// the union, over the paths from the top node to each node that names the volume, of the
+// intersection of the ranges on the path with the volume, which is what is computed here.
+// The ranges count the OIDs of the whole volume set (`vol_start`, `vol_end` are global).
+/// The OIDs that the OID ranges of the tree include, one bit per OID of the volume set (bit
+/// `oid % 64` of word `oid / 64`); `volume` gives the global OIDs `[start, end)` of a volume
+/// path. `None` when no node has a range: NCBI builds no OID list then, and every OID is
+/// included.
+pub(super) fn range_mask(
+    root: &AliasNode,
+    volume: &dyn Fn(&str) -> (u32, u32),
+    num_oids: u32,
+) -> Option<Vec<u64>> {
+    if !has_ranges(root) {
+        return None;
+    }
+    fn mark(
+        node: &AliasNode,
+        lo: i64,
+        hi: i64,
+        volume: &dyn Fn(&str) -> (u32, u32),
+        words: &mut [u64],
+    ) {
+        let (lo, hi) = match node.range {
+            Some(range) => {
+                let (begin, end) = range.bounds();
+                (lo.max(begin), hi.min(end))
+            }
+            None => (lo, hi),
         };
-        let shown = String::from_utf8_lossy(value);
-        match parsed {
-            Some(parsed) if parsed == sum => {}
-            Some(_) => {
-                return Err(SeqDbError::Unsupported {
-                    path,
-                    message: format!(
-                        "alias file key {key} ({shown}) differs from {what} of its databases \
-                         ({sum}); LOSAT reads NSEQ and LENGTH only when they equal those sums"
-                    ),
-                })
-            }
-            None => {
-                return Err(SeqDbError::Unsupported {
-                    path,
-                    message: format!(
-                        "alias file key {key} ({shown}) is not a plain decimal number of 1 to \
-                         19 digits; LOSAT reads NSEQ and LENGTH only when they equal {what} of \
-                         their databases ({sum})"
-                    ),
-                })
-            }
+        for path in &node.vol_names {
+            let (start, end) = volume(path);
+            set_bits(
+                words,
+                lo.max(i64::from(start)),
+                hi.min(i64::from(end)),
+            );
+        }
+        for subnode in &node.subnodes {
+            mark(subnode, lo, hi, volume, words);
         }
     }
-    Ok((nseq, length))
+    let mut words = vec![0u64; (num_oids as usize).div_ceil(64)];
+    mark(root, 0, i64::MAX, volume, &mut words);
+    Some(words)
+}
+
+/// Sets the bits `[from, to)` of `words` (nothing when `to <= from`).
+fn set_bits(words: &mut [u64], from: i64, to: i64) {
+    if to <= from {
+        return;
+    }
+    let (from, to) = (from as u64, to as u64);
+    let mut at = from;
+    while at < to {
+        let word = (at / 64) as usize;
+        let bit = at % 64;
+        let span = (64 - bit).min(to - at);
+        let ones = if span == 64 {
+            u64::MAX
+        } else {
+            ((1u64 << span) - 1) << bit
+        };
+        words[word] |= ones;
+        at += span;
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:247-258
+// ```c++
+//         // Handle the case where FIRST_OID and LAST_OID is set on a top level
+//         // alias file and that's the only alias file present
+//         if (ft->HasFilter()) {
+//             const vector< CRef<CSeqDB_FilterTree> >& nodes = ft->GetNodes();
+//             if (nodes.size() == 1) {
+//                 const CSeqDB_FilterTree::TFilters& filters = nodes.front()->GetFilters();
+//                 if (filters.size() == 1 && filters.front()->GetType() == CSeqDB_AliasMask::eOidRange) {
+//                     const CSeqDB_AliasMask& alias_mask = *filters.front();
+//                     SetIterationRange(alias_mask.GetBegin(), alias_mask.GetEnd());
+//                 }
+//             }
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:183-201
+// ```c++
+// void CSeqDBImpl::SetIterationRange(int oid_begin, int oid_end)
+// {
+//     ...
+//     m_RestrictBegin = (oid_begin < 0) ? 0 : oid_begin;
+//     m_RestrictEnd   = (oid_end   < 0) ? 0 : oid_end;
+//
+//     if ((oid_begin == 0) && (oid_end == 0)) {
+//         m_RestrictEnd = m_VolSet.GetNumOIDs();
+//     } else {
+//         if ((oid_end == 0) || (m_RestrictEnd > m_VolSet.GetNumOIDs())) {
+//             m_RestrictEnd = m_VolSet.GetNumOIDs();
+//         }
+//         if (m_RestrictBegin > m_RestrictEnd) {
+//             m_RestrictBegin = m_RestrictEnd;
+//         }
+//     }
+// }
+// ```
+// The filter tree's top node has one sub-node per alias file of the top node
+// (`BuildFilterTree`, seqdbalias.cpp:1880-1894), and a node's only filter is its range (the
+// other filter keys are refused). The ranges here fit an `int` (`range_beyond_int` refuses
+// the others).
+/// The iteration range NCBI sets on its first OID-list build when the top node has exactly one
+/// alias file and that file has an OID range: `[begin, end)` as `SetIterationRange` clamps it
+/// to the `num_oids` OIDs of the volume set. `None` in every other case.
+pub(super) fn top_iteration_range(root: &AliasNode, num_oids: u32) -> Option<(u32, u32)> {
+    let [only] = root.subnodes.as_slice() else {
+        return None;
+    };
+    let (begin, end) = only.range?.bounds();
+    let num_oids = i64::from(num_oids);
+    let mut restrict_begin = begin.max(0);
+    let mut restrict_end = end.max(0);
+    if begin == 0 && end == 0 {
+        restrict_end = num_oids;
+    } else {
+        if end == 0 || restrict_end > num_oids {
+            restrict_end = num_oids;
+        }
+        if restrict_begin > restrict_end {
+            restrict_begin = restrict_end;
+        }
+    }
+    Some((restrict_begin as u32, restrict_end as u32))
 }
 
 fn join_delim(a: &mut Vec<u8>, b: &[u8]) {

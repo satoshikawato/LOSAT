@@ -198,6 +198,11 @@ pub enum SeqDbError {
     Unsupported { path: PathBuf, message: String },
     /// A request outside the database (ordinal id, block range).
     Range(String),
+    /// An exception of NCBI's C++ Toolkit that is not a `CSeqDBException`: the
+    /// `CStringException` of an alias file value that does not convert (`alias::walk_totals`,
+    /// `alias::compute_masks`). NCBI's programs report it as `Error: <what()>` with exit
+    /// status 255 ([`SeqDbError::ncbi_exception`]).
+    Ncbi(crate::ncbi_exception::NcbiException),
 }
 
 impl std::fmt::Display for SeqDbError {
@@ -211,6 +216,7 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Unsupported { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
             }
+            SeqDbError::Ncbi(exception) => f.write_str(exception.what().trim_end()),
         }
     }
 }
@@ -221,6 +227,25 @@ impl SeqDbError {
     /// with `-parse_seqids`; `SeqDb::read_header`).
     pub fn is_parsed_seqids(&self) -> bool {
         matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    // `BLAST_UNKNOWN_ERROR` is 255 (blast_app_util.hpp:161); blastdbcmd catches the exception the
+    // same way (`CATCH_ALL`). NCBI's guess of a database type moves on to the nucleotide
+    // database only after a `CSeqDBException` (seqdb.cpp:121-123), so not after this one.
+    /// The NCBI exception of this error when it is not a database error of NCBI's: a search
+    /// program or blastdbcmd writes `Error: <what()>` and ends with exit status 255.
+    pub fn ncbi_exception(&self) -> Option<&crate::ncbi_exception::NcbiException> {
+        match self {
+            SeqDbError::Ncbi(exception) => Some(exception),
+            _ => None,
+        }
     }
 }
 
@@ -337,7 +362,10 @@ impl SeqDbError {
                     None
                 }
             }
-            SeqDbError::Io { .. } | SeqDbError::Unsupported { .. } | SeqDbError::Range(_) => None,
+            SeqDbError::Io { .. }
+            | SeqDbError::Unsupported { .. }
+            | SeqDbError::Range(_)
+            | SeqDbError::Ncbi(_) => None,
         }
     }
 

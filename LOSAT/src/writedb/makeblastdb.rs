@@ -1342,16 +1342,17 @@ fn open_new_database(
     // cut alias file names fewer than the writer made), or the one volume. Each volume's
     // count and length are the ones its index file holds in its header, which are the writer's
     // (`volume_totals`); no volume is opened. A volume the resolution finds that the writer did
-    // not make (one of the same name in the current directory, found first) adds nothing.
-    let written: std::collections::HashMap<String, (u32, u64)> = output_db
+    // not make (one of the same name in the current directory, found first) adds nothing. The
+    // names are compared as paths (by their components: the separators of Windows).
+    let written: std::collections::HashMap<std::path::PathBuf, (u32, u64)> = output_db
         .volume_totals()
         .into_iter()
-        .map(|(name, oids, letters)| (name, (oids, letters)))
+        .map(|(name, oids, letters)| (std::path::PathBuf::from(name), (oids, letters)))
         .collect();
     let totals: Vec<(u32, u64)> = located
         .volumes
         .iter()
-        .filter_map(|path| written.get(path).copied())
+        .filter_map(|path| written.get(std::path::Path::new(path)).copied())
         .collect();
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1705-1747
     // ```c++

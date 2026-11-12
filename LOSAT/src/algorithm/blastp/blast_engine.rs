@@ -12413,12 +12413,18 @@ fn run_resolved_in_pool(
         listed_titles.as_ref(),
         database,
     ) {
+        // The length of each query's hit list after the formatter's cut (`prune_by_size`, below).
         (true, Some(titles), Some(database)) => titles.pssm_reads(
             database,
             &hit_lists,
             &batch_prefetch,
             args.inclusion_ethresh,
             prefetch_taxids,
+            &|query| match psiblast_kept.as_ref() {
+                _ if !args.app.prunes_after_traceback() => usize::MAX,
+                Some(kept) => kept[query],
+                None => args.max_target_seqs,
+            },
         )?,
         _ => database::PssmReads::default(),
     };
@@ -12887,7 +12893,13 @@ fn run_resolved_in_pool(
                         // the blobs it loads first look their taxids up then, and NCBI writes
                         // their texts among the PSSM's warnings (`ListedTitles::pssm_load_texts`).
                         if pssm_made {
-                            let texts = titles.pssm_load_texts(database, &pssm_reads, query)?;
+                            let texts = titles.pssm_load_texts(
+                                database,
+                                &pssm_reads,
+                                query,
+                                hit_lists[query].as_ref(),
+                                args.inclusion_ethresh,
+                            )?;
                             if texts.iter().any(|(_, text)| !text.is_empty()) {
                                 if let Some(files) = psiblast_pssms.as_mut() {
                                     files.read_messages(query).add_load_texts(texts);

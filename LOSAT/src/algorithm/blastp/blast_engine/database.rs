@@ -1311,8 +1311,11 @@ impl ListedTitles<'_> {
     /// (the round's), which reads them all by their own ids before the PSSM; one whose prefetch is
     /// off reads them one by one (`ParsedSubject::pssm_read`'s `one_by_one`). `taxids`: whether
     /// the batches look the subjects' taxids up (`taxdb.bti` on the search path); only then, and
-    /// only for the queries whose batch reads one by one, are the PSSM's reads kept by query with
-    /// the blob each one loads (parsed Seq-ids or not), for `pssm_load_texts`.
+    /// only for the queries whose batch reads one by one, does `pssm_load_texts` make the PSSM's
+    /// loads of a query, from its hit list after the formatter's cut (`cut`: the length of each
+    /// query's list after it, `prune_by_size`; `usize::MAX` for none), with what that cut drops
+    /// and the blobs of the reads that do not load the subject's own, kept here (`QueryLoads`,
+    /// `PssmReads::other_blobs`).
     pub(super) fn pssm_reads(
         &self,
         database: &BlastpDatabase,
@@ -1320,22 +1323,19 @@ impl ListedTitles<'_> {
         prefetch: &shared::BatchPrefetch,
         inclusion_ethresh: f64,
         taxids: bool,
+        cut: &dyn Fn(usize) -> usize,
     ) -> Result<PssmReads> {
         let mut reads = PssmReads::default();
         // The queries whose PSSM's reads can load a sequence that the batch did not read before
         // (`pssm_load_texts`).
         let keeps_loads = |query: usize| taxids && prefetch.reads_one_by_one(query);
-        if self.parsed.is_empty() && !(0..hit_lists.len()).any(keeps_loads) {
+        let any_loads = (0..hit_lists.len()).any(keeps_loads);
+        if self.parsed.is_empty() && !any_loads {
             return Ok(reads);
         }
-        let included = |hsp_list: &crate::algorithm::blastp::hsp::BlastpHspList| {
-            hsp_list
-                .hsps
-                .iter()
-                .any(|hsp| super::psi_round::included(hsp.e_value, inclusion_ethresh))
-        };
-        // The included subjects with parsed Seq-ids, and the reads of each query whose loads are
-        // kept, in the order of its hit list (each subject once: its HSPs follow each other).
+        // The included subjects with parsed Seq-ids, and of each query whose loads are made the
+        // included subjects that the formatter's cut drops from its hit list, in its order (each
+        // subject once: its HSPs follow each other).
         let mut read: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
@@ -1343,27 +1343,29 @@ impl ListedTitles<'_> {
             };
             let keep = keeps_loads(query);
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-            for hsp_list in hit_list.hsplist_array[..count]
+            let kept = cut(query).min(count);
+            let mut beyond = Vec::new();
+            for (index, hsp_list) in hit_list.hsplist_array[..count]
                 .iter()
-                .filter(|hsp_list| included(hsp_list))
+                .enumerate()
+                .filter(|(_, hsp_list)| pssm_includes(hsp_list, inclusion_ethresh))
             {
                 if self.parsed_subject(hsp_list.oid as usize).is_some() {
                     read.insert(hsp_list.oid as usize);
                 }
-                if keep {
-                    if reads.loads.len() <= query {
-                        reads.loads.resize_with(query + 1, Vec::new);
-                    }
-                    reads.loads[query].push(PssmLoad {
-                        rank: hsp_list.oid,
-                        blob: None,
-                    });
+                if keep && index >= kept {
+                    beyond.push(hsp_list.oid);
                 }
+            }
+            if keep {
+                if reads.loads.len() <= query {
+                    reads.loads.resize_with(query + 1, || None);
+                }
+                reads.loads[query] = Some(QueryLoads { kept, beyond });
             }
         }
         // The blob that each read of a subject with parsed Seq-ids loads, whose taxids NCBI looks
-        // up there (`pssm_load_texts`).
-        let mut blobs: std::collections::BTreeMap<usize, u32> = std::collections::BTreeMap::new();
+        // up there (`pssm_load_texts`), kept where it is not the subject's own.
         if !read.is_empty() {
             let batch_reads = Self::batch_reads(hit_lists, prefetch);
             for rank in read {
@@ -1375,11 +1377,14 @@ impl ListedTitles<'_> {
                 // before (`shared::ScopeBioseq::instead`).
                 if let Err(reason) = subject.pssm_read(batch_reads.one_by_one(rank as u32)) {
                     reads.refused.get_or_insert((ordinal, reason, self.program));
+                    if any_loads {
+                        reads.other_blobs.insert(rank, None);
+                    }
                     continue;
                 }
                 let scope = shared::scope_bioseq(&database.db, ordinal, subject, self.program)?;
-                if let Some(blob) = scope.taxonomy() {
-                    blobs.insert(rank, blob);
+                if any_loads && scope.taxonomy() != Some(ordinal) {
+                    reads.other_blobs.insert(rank, scope.taxonomy());
                 }
                 match scope.letters() {
                     Some(blob) if blob == ordinal => {}
@@ -1397,14 +1402,6 @@ impl ListedTitles<'_> {
                     }
                 }
             }
-        }
-        // A subject without parsed Seq-ids loads its own blob.
-        for load in reads.loads.iter_mut().flatten() {
-            let rank = load.rank as usize;
-            load.blob = match self.parsed_subject(rank) {
-                Some(_) => blobs.get(&rank).copied(),
-                None => Some(self.listed.ordinals[rank]),
-            };
         }
         Ok(reads)
     }
@@ -1427,29 +1424,60 @@ impl ListedTitles<'_> {
     // load a sequence read before again (`shared::pssm_load_texts`).
     /// NCBI's taxonomy texts of the PSSM's reads of query `query` (of the call) whose batch reads
     /// one by one, after that query's report read its subjects (`shared::prefetch_messages`):
-    /// every read that `pssm_reads` keeps for the query, in the order of the reads, with the texts
-    /// of the lookups of its load (`shared::blob_taxids`, `shared::pssm_load_texts`, with the run's
-    /// `TaxdbRun`; empty for none, and for a read that loads no blob), for
-    /// `psiblast::pssm::PssmReadMessages::add_load_texts`. The lookups are the run's from then on.
+    /// every read of the query's PSSM, in the order of the reads (the included subjects of its hit
+    /// list `hit_list`, after the formatter's cut, then those that the cut dropped,
+    /// `QueryLoads::beyond`), with the texts of the lookups of its load (`shared::blob_taxids`,
+    /// `shared::pssm_load_texts`, with the run's `TaxdbRun`; empty for none, and for a read that
+    /// loads no blob), for `psiblast::pssm::PssmReadMessages::add_load_texts`; empty for a query
+    /// whose loads `pssm_reads` does not make. Only this query's reads are made, here: none are
+    /// kept for the batch. The lookups are the run's from then on.
     pub(super) fn pssm_load_texts(
         &self,
         database: &BlastpDatabase,
         reads: &PssmReads,
         query: usize,
+        hit_list: Option<&BlastpHitList>,
+        inclusion_ethresh: f64,
     ) -> Result<Vec<(u32, Vec<u8>)>> {
-        let Some(loads) = reads.loads.get(query) else {
+        let Some(Some(loads)) = reads.loads.get(query) else {
             return Ok(Vec::new());
         };
-        let mut texts = Vec::with_capacity(loads.len());
-        for load in loads {
-            let rank = load.rank as usize;
-            let text = match load.blob {
+        let shown: &[crate::algorithm::blastp::hsp::BlastpHspList] = match hit_list {
+            Some(hit_list) => {
+                &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
+            }
+            None => &[],
+        };
+        if shown.len() != loads.kept {
+            anyhow::bail!(
+                "internal error: query {query}'s hit list holds {} subjects after the cut, {} when psiblast's PSSM reads were made",
+                shown.len(),
+                loads.kept
+            );
+        }
+        let ranks = shown
+            .iter()
+            .filter(|hsp_list| pssm_includes(hsp_list, inclusion_ethresh))
+            .map(|hsp_list| hsp_list.oid)
+            .chain(loads.beyond.iter().copied());
+        let mut texts = Vec::new();
+        for rank in ranks {
+            let ordinal = self.listed.ordinals[rank as usize];
+            // A subject without parsed Seq-ids loads its own blob.
+            let blob = match self.parsed_subject(rank as usize) {
+                Some(_) => reads
+                    .other_blobs
+                    .get(&(rank as usize))
+                    .copied()
+                    .unwrap_or(Some(ordinal)),
+                None => Some(ordinal),
+            };
+            let text = match blob {
                 Some(blob) => {
-                    let ordinal = self.listed.ordinals[rank];
                     let lookups = shared::blob_taxids(
                         &database.db,
                         ordinal,
-                        self.parsed_subject(rank),
+                        self.parsed_subject(rank as usize),
                         blob,
                         self.program,
                     )?;
@@ -1463,7 +1491,7 @@ impl ListedTitles<'_> {
                 }
                 None => Vec::new(),
             };
-            texts.push((load.rank, text));
+            texts.push((rank, text));
         }
         Ok(texts)
     }
@@ -4039,25 +4067,40 @@ mod tests {
 /// where that is not the subject's own letters (`ListedTitles::pssm_reads`): another sequence's
 /// letters in NCBIstdaa, or `None` for no sequence (NCBI's warning `Failed to retrieve sequence`,
 /// and the row becomes the query's). `refused`: LOSAT's refusal of the first subject whose read
-/// it does not make as NCBI, which stops a run where a PSSM is made (`check`). `loads`: the reads
-/// of each query (of the call) whose batch reads one by one with `taxdb.bti` on the search path,
-/// in the order of the reads, with the blob each loads (`ListedTitles::pssm_load_texts`); empty
-/// elsewhere.
+/// it does not make as NCBI, which stops a run where a PSSM is made (`check`). `loads`: by query
+/// (of the call), what `ListedTitles::pssm_load_texts` needs to make the reads of a query whose
+/// batch reads one by one with `taxdb.bti` on the search path (`QueryLoads`), `None` elsewhere;
+/// `other_blobs`: then, the subjects with parsed Seq-ids whose read loads the blob of another
+/// sequence (`shared::ScopeBioseq::taxonomy`), or none (`None`, also for a refused read), by rank.
+/// The reads themselves are made one query at a time, so the batch keeps no list of them.
 #[derive(Default)]
 pub(super) struct PssmReads {
     read: std::collections::BTreeMap<usize, Option<Vec<u8>>>,
     /// The ordinal id, the reason and the program of the refusal.
     refused: Option<(u32, String, &'static str)>,
-    loads: Vec<Vec<PssmLoad>>,
+    loads: Vec<Option<QueryLoads>>,
+    other_blobs: std::collections::BTreeMap<usize, Option<u32>>,
 }
 
-/// One read of psiblast's PSSM of a query by a subject's Seq-align id (`PssmReads::loads`).
-struct PssmLoad {
-    /// The subject's rank.
-    rank: u32,
-    /// The sequence, by ordinal id, whose blob the read loads (`shared::ScopeBioseq::taxonomy`;
-    /// the subject's own without parsed Seq-ids), `None` where it loads none.
-    blob: Option<u32>,
+/// What the PSSM's reads of a query need beyond its hit list after the formatter's cut
+/// (`PssmReads::loads`): `kept`, that list's length, which `pssm_load_texts` checks; `beyond`, the
+/// ranks of the included subjects that the cut drops, in their order (NCBI's PSSM reads them too;
+/// empty unless the traceback list is longer than `-max_target_seqs`).
+struct QueryLoads {
+    kept: usize,
+    beyond: Vec<u32>,
+}
+
+/// Whether psiblast's PSSM includes the subject of `hsp_list`, so reads its letters: one of its
+/// HSPs has an e-value below `inclusion_ethresh` (`psi_round::included`).
+fn pssm_includes(
+    hsp_list: &crate::algorithm::blastp::hsp::BlastpHspList,
+    inclusion_ethresh: f64,
+) -> bool {
+    hsp_list
+        .hsps
+        .iter()
+        .any(|hsp| super::psi_round::included(hsp.e_value, inclusion_ethresh))
 }
 
 impl PssmReads {

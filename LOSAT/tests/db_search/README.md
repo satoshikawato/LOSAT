@@ -1142,7 +1142,10 @@ most 9 in BLOSUM62).
   which fill rpstblastn's first query batch of 10,000 letters without a valid frame, then `v900`, 900 letters of a
   valid record in the next batch; lines of 60 letters) and `tests/fasta/rps/allx.faa` (42 bytes: two records of X
   only, 20 and 12 letters, a protein batch without a valid query), written by hand for the review's probes, and
-  `tests/fasta/rps/tkcut570.fna` (the record `tkcut570` of `nedge.fna` alone, 589 bytes: row `db.rpstbn.ll1.0`).
+  `tests/fasta/rps/tkcut570.fna` (the record `tkcut570` of `nedge.fna` alone, 589 bytes: rows `db.rpstbn.ll1.0`, `ll.0`,
+  `sort.0`, `3v.0`, `mix2v.*`), and `tests/fasta/rps/nq4.fna` (the first four records of `nq.fna`, 2,922 bytes: rows
+  `segsoft.0`, `pdsg.0`; review B S1 kept PS12's outfmt 0 rows small). Rows `db.rpstbn.mix2v.*` and `db.rps.mix2v.ds.0`
+  search `rps_mini` (3 profiles) and `rps_tie.00` (1 profile) as two volumes (`rps-gz:rps_mini+rps_tie.00`).
 
 ## outfmt 11 titles where NCBI's search fails (line NP, series SM, DECISIONS 25)
 

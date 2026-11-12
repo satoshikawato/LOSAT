@@ -20,7 +20,6 @@ Length=600
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  19.2    0.12 
-CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.2    1.1  
 
 
 >CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
@@ -242,100 +241,6 @@ Query  281  DDNDNNNSNNNDDNSSNDSNSN  346
 Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
 
 
->CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
-spot syndrome virus] residues 1-190
-Length=190
-
- Score = 16.2 bits (30),  Expect = 1.1
- Identities = 4/7 (57%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
- Frame = +2
-
-Query  425  DDDNNNN  445
-             +DN+NN
-Sbjct  168  GNDNDNN  174
-
-
- Score = 16.2 bits (30),  Expect = 1.1
- Identities = 5/11 (45%), Positives = 6/11 (55%), Gaps = 0/11 (0%)
- Frame = +2
-
-Query  266  NSDDNDDNDNN  298
-                 +DNDNN
-Sbjct  164  TVRFGNDNDNN  174
-
-
- Score = 14.6 bits (26),  Expect = 3.8
- Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
- Frame = +2
-
-Query  284  DNDNNN  301
-             NDN+N
-Sbjct  168  GNDNDN  173
-
-
- Score = 14.6 bits (26),  Expect = 3.9
- Identities = 5/11 (45%), Positives = 6/11 (55%), Gaps = 0/11 (0%)
- Frame = +2
-
-Query  353  DNDDNNDSDNN  385
-                 ND+DNN
-Sbjct  164  TVRFGNDNDNN  174
-
-
- Score = 14.6 bits (26),  Expect = 3.9
- Identities = 5/6 (83%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
- Frame = +2
-
-Query  545  NDNNNN  562
-            NDN+NN
-Sbjct  169  NDNDNN  174
-
-
- Score = 14.2 bits (25),  Expect = 4.3
- Identities = 5/22 (23%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
- Frame = -3
-
-Query  346  ITITIITTIIIIIITIIIIIII  281
-             T++ I  +I ++  ++ +I+I
-Sbjct  74   TTVSSIKELISVLPEVVDVILI  95
-
-
- Score = 14.2 bits (25),  Expect = 4.5
- Identities = 6/34 (18%), Positives = 15/34 (44%), Gaps = 0/34 (0%)
- Frame = -3
-
-Query  535  TITTTIITITIIITIIITITIITIITIITTIIII  434
-             +T     I    T+     +I+++  +  +I+I
-Sbjct  62   IVTHAGEVIEGCTTVSSIKELISVLPEVVDVILI  95
-
-
- Score = 13.9 bits (24),  Expect = 6.4
- Identities = 3/7 (43%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
- Frame = +2
-
-Query  182  DDNSDNN  202
-             +++DNN
-Sbjct  168  GNDNDNN  174
-
-
- Score = 13.5 bits (23),  Expect = 7.2
- Identities = 2/10 (20%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
- Frame = +2
-
-Query  416  DNSDDDNNNN  445
-                 ++N+N
-Sbjct  164  TVRFGNDNDN  173
-
-
- Score = 13.5 bits (23),  Expect = 8.6
- Identities = 5/34 (15%), Positives = 14/34 (41%), Gaps = 0/34 (0%)
- Frame = -3
-
-Query  103  ITITITTTTIITITTTIIIIIITTITIITTIITI  2
-             T++     I  +   + +I+I      T ++ +
-Sbjct  74   TTVSSIKELISVLPEVVDVILIDEGQFFTDLVLV  107
-
-
 
 Lambda      K        H        a         alpha
    0.273    0.101    0.253    0.792     4.96 
@@ -354,7 +259,6 @@ Length=637
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  19.2    0.14 
-CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  15.4    2.2  
 
 
 >CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
@@ -406,46 +310,6 @@ Query  613  TNRCRD*TSYS---KDSVC  566
 Sbjct  149  SNLCTEIVQYSDSEETAVC  167
 
 
->CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
-spot syndrome virus] residues 1-190
-Length=190
-
- Score = 15.4 bits (28),  Expect = 2.2
- Identities = 5/17 (29%), Positives = 10/17 (59%), Gaps = 0/17 (0%)
- Frame = -2
-
-Query  591  PHTQKIVSVSVIYILIK  541
-            P+T  IV ++   ++ K
-Sbjct  139  PYTNSIVKLASKCMICK  155
-
-
- Score = 15.4 bits (28),  Expect = 2.3
- Identities = 9/30 (30%), Positives = 14/30 (47%), Gaps = 1/30 (3%)
- Frame = +1
-
-Query  142  SEIINLTINGVARGNHFNFVNGTLQTRNYG  231
-            + + N+         H  FV  +L+TR YG
-Sbjct  28   TYLKNIYQQENGGNKHCLFVKHSLETR-YG  56
-
-
- Score = 14.6 bits (26),  Expect = 4.3
- Identities = 2/9 (22%), Positives = 4/9 (44%), Gaps = 0/9 (0%)
- Frame = -1
-
-Query  133  DKHPYLFCL  107
-            D    + C+
-Sbjct  170  DNDNNVICV  178
-
-
- Score = 14.2 bits (25),  Expect = 4.8
- Identities = 4/19 (21%), Positives = 9/19 (47%), Gaps = 0/19 (0%)
- Frame = -2
-
-Query  561  VIYILIKGRSENQSVDPVL  505
-            ++   + G S+ Q   P+ 
-Sbjct  117  IVIAALDGTSDQQMFSPIH  135
-
-
 
 Lambda      K        H        a         alpha
    0.317    0.136    0.383    0.792     4.96 
@@ -464,7 +328,6 @@ Length=905
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.5    0.36 
-CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.2    1.8  
 
 
 >CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
@@ -552,82 +415,6 @@ Query  534  WLLELEDF  557
 Sbjct  27   WHLDVKDF  34
 
 
->CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
-spot syndrome virus] residues 1-190
-Length=190
-
- Score = 16.2 bits (30),  Expect = 1.8
- Identities = 6/20 (30%), Positives = 9/20 (45%), Gaps = 0/20 (0%)
- Frame = +1
-
-Query  742  TTTPTKHTNRINDNNKNIII  801
-             T     T R  ++N N +I
-Sbjct  157  DTKEAPFTVRFGNDNDNNVI  176
-
-
- Score = 15.4 bits (28),  Expect = 2.9
- Identities = 9/26 (35%), Positives = 14/26 (54%), Gaps = 0/26 (0%)
- Frame = +3
-
-Query  789  EHHYYTNFFALNYRARKIKAFVEAAI  866
-            E  ++T+   +N  A K K  V AA+
-Sbjct  97   EGQFFTDLVLVNRLADKGKRIVIAAL  122
-
-
- Score = 15.0 bits (27),  Expect = 4.1
- Identities = 3/11 (27%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
- Frame = +2
-
-Query  548  RRLLPPLCRLL  580
-            +++  P+ +LL
-Sbjct  128  QQMFSPIHKLL  138
-
-
- Score = 15.0 bits (27),  Expect = 4.8
- Identities = 6/15 (40%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
- Frame = -1
-
-Query  332  DDNDIDEFLDSGEEM  288
-            +DND +     G EM
-Sbjct  169  NDNDNNVICVGGAEM  183
-
-
- Score = 14.6 bits (26),  Expect = 5.5
- Identities = 9/24 (38%), Positives = 13/24 (54%), Gaps = 2/24 (8%)
- Frame = +2
-
-Query  431  AGELELAWA--VAGEANPLQERYQ  496
-            AG +EL      AG++  L+  YQ
-Sbjct  12   AGRVELVTGPMFAGKSTYLKNIYQ  35
-
-
- Score = 14.2 bits (25),  Expect = 8.1
- Identities = 3/9 (33%), Positives = 4/9 (44%), Gaps = 0/9 (0%)
- Frame = +2
-
-Query  656  PPFLSLYPF  682
-             P   L P+
-Sbjct  132  SPIHKLLPY  140
-
-
- Score = 14.2 bits (25),  Expect = 8.2
- Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
- Frame = +3
-
-Query  609  PILRLTPAED  638
-            PI +L P  +
-Sbjct  133  PIHKLLPYTN  142
-
-
- Score = 13.9 bits (24),  Expect = 8.9
- Identities = 3/10 (30%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
- Frame = +3
-
-Query  288  HLFPTI*KFV  317
-             +F  I K +
-Sbjct  129  QMFSPIHKLL  138
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -646,7 +433,6 @@ Length=624
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  18.1    0.28 
-CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  17.7    0.39 
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -689,63 +475,6 @@ Query  40   NNNQTDELAYGG  75
 Sbjct  169  NDNDNNVICVGG  180
 
 
->CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
-Length=190
-
- Score = 17.7 bits (34),  Expect = 0.39
- Identities = 6/18 (33%), Positives = 10/18 (56%), Gaps = 0/18 (0%)
- Frame = -3
-
-Query  544  NFVPVLLQYRLHSVPIYV  491
-            +  P  L+Y L  +PI +
-Sbjct  125  HIAPASLEYMLQVLPIML  142
-
-
- Score = 15.4 bits (28),  Expect = 2.1
- Identities = 3/11 (27%), Positives = 6/11 (55%), Gaps = 0/11 (0%)
- Frame = -3
-
-Query  91  NEEHSYHHRPV  59
-           N+     +RP+
-Sbjct  34  NQIVLSEYRPI  44
-
-
- Score = 15.0 bits (27),  Expect = 2.7
- Identities = 4/9 (44%), Positives = 4/9 (44%), Gaps = 0/9 (0%)
- Frame = -1
-
-Query  537  FRFFSNTDC  511
-             RF  N D 
-Sbjct  71   LRFIENLDA  79
-
-
- Score = 15.0 bits (27),  Expect = 2.8
- Identities = 3/5 (60%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
- Frame = +1
-
-Query  433  VDRPR  447
-            +DRP 
-Sbjct  143  IDRPY  147
-
-
- Score = 14.6 bits (26),  Expect = 3.3
- Identities = 5/15 (33%), Positives = 7/15 (47%), Gaps = 0/15 (0%)
- Frame = -3
-
-Query  586  QIIGLRTRFTVPHTN  542
-            QI+ LR R  +    
-Sbjct  3    QIMQLRDRLVLEKMK  17
-
-
- Score = 13.9 bits (24),  Expect = 7.3
- Identities = 8/33 (24%), Positives = 11/33 (33%), Gaps = 11/33 (33%)
- Frame = -3
-
-Query  559  TVPHTNFVPVLLQYRLHSVPIYVRILLENMCDI  461
-            T P+ N     + Y             E +CDI
-Sbjct  91   TSPNMNVTAAGMDY-----------FPEIVCDI  112
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -764,7 +493,6 @@ Length=864
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.5    0.29 
-CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  18.5    0.29 
 
 
 >CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
@@ -798,82 +526,6 @@ Query  431  AVKLAKNTPVL---DTITKLDWMANI  363
 Sbjct  118  SARIETGTPYVCFKDTINRKSNQENV  143
 
 
->CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
-spot syndrome virus] residues 1-190
-Length=190
-
- Score = 18.5 bits (36),  Expect = 0.29
- Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
- Frame = -2
-
-Query  416  KNTPVLDTITKLDWMANICQSNK  348
-            K  P  ++I KL     IC+ + 
-Sbjct  136  KLLPYTNSIVKLASKCMICKIDT  158
-
-
- Score = 15.4 bits (28),  Expect = 2.8
- Identities = 8/37 (22%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
- Frame = -2
-
-Query  788  QDFDVLELDYSKIIHDITAMLSVAAPPPNSILDASDG  678
-            +  DV+ +D  +   D+  +  +A      ++ A DG
-Sbjct  88   EVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDG  124
-
-
- Score = 15.0 bits (27),  Expect = 4.2
- Identities = 4/8 (50%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
- Frame = -1
-
-Query  288  SSCGICQL  265
-            S C IC++
-Sbjct  149  SKCMICKI  156
-
-
- Score = 14.6 bits (26),  Expect = 4.6
- Identities = 4/17 (24%), Positives = 10/17 (59%), Gaps = 0/17 (0%)
- Frame = +1
-
-Query  157  MSSRGRRLSLLPFDSAS  207
-            ++ +G+R+ +   D  S
-Sbjct  110  LADKGKRIVIAALDGTS  126
-
-
- Score = 14.6 bits (26),  Expect = 5.1
- Identities = 3/23 (13%), Positives = 9/23 (39%), Gaps = 0/23 (0%)
- Frame = +3
-
-Query  630  ISSFSGRCCRACSRYQAVGSIKY  698
-            I + +G     C+   ++  +  
-Sbjct  62   IVTHAGEVIEGCTTVSSIKELIS  84
-
-
- Score = 14.6 bits (26),  Expect = 5.3
- Identities = 7/36 (19%), Positives = 18/36 (50%), Gaps = 0/36 (0%)
- Frame = +1
-
-Query  469  FSVLLVLIFFSDADSPK*SSCLMIESTSIVSLFTNS  576
-            FS +  L+ ++++     S C++ +  +  + FT  
-Sbjct  131  FSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVR  166
-
-
- Score = 14.6 bits (26),  Expect = 6.1
- Identities = 7/25 (28%), Positives = 13/25 (52%), Gaps = 2/25 (8%)
- Frame = -2
-
-Query  524  LYFGESASEKNI--KTNSTEKEPVY  456
-            ++ G+S   KNI  + N   K  ++
-Sbjct  22   MFAGKSTYLKNIYQQENGGNKHCLF  46
-
-
- Score = 13.9 bits (24),  Expect = 9.5
- Identities = 5/22 (23%), Positives = 11/22 (50%), Gaps = 2/22 (9%)
- Frame = +3
-
-Query  615  PHTV*ISSFSGRC--CRACSRY  674
-            P+T  I   + +C  C+  ++ 
-Sbjct  139  PYTNSIVKLASKCMICKIDTKE  160
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -892,7 +544,6 @@ Length=712
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  20.8    0.048
-CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  18.9    0.21 
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -953,40 +604,6 @@ Query  540  RRGCG  526
 Sbjct  54   RYGCG  58
 
 
->CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
-Length=190
-
- Score = 18.9 bits (37),  Expect = 0.21
- Identities = 16/88 (18%), Positives = 34/88 (39%), Gaps = 8/88 (9%)
- Frame = +3
-
-Query  237  KYNWSKSGHERFSDMSNNCLD---NITRPSEVIESVIKKTSSDFKMKYTRSLMDHTEKYY  407
-            K     +      D+ + C     +  RP ++  +  K ++S+ +   TR       ++ 
-Sbjct  15   KMKNKTTDSLLLLDVIDECNQIVLSEYRPIDIAVASWKNSNSNRQTPITRIEESLGLRFI  74
-
-Query  408  FSGDQKLSKISSWCT-----TPITTVGM  476
-             + D + +   +WCT       +T  GM
-Sbjct  75   ENLDAEKTNNKTWCTNTSPNMNVTAAGM  102
-
-
- Score = 17.7 bits (34),  Expect = 0.49
- Identities = 8/18 (44%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
- Frame = -3
-
-Query  269  PFMTTFRPVIFYHISTHK  216
-            P M   RP I  HI+  K
-Sbjct  139  PIMLIDRPYIGAHITAGK  156
-
-
- Score = 15.0 bits (27),  Expect = 3.2
- Identities = 5/17 (29%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
- Frame = +1
-
-Query  310  DRPRSSSLSLRKQAQTL  360
-            DRP   +     + +TL
-Sbjct  144  DRPYIGAHITAGKCRTL  160
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1005,7 +622,6 @@ Length=718
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  19.2    0.14 
-CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  13.9    7.0  
 
 
 >CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
@@ -1047,37 +663,6 @@ Query  81   KPRSGAH  101
 Sbjct  145  RPYIGAH  151
 
 
->CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
-spot syndrome virus] residues 1-190
-Length=190
-
- Score = 13.9 bits (24),  Expect = 7.0
- Identities = 5/7 (71%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
- Frame = -3
-
-Query  254  LADRNKR  234
-            LAD+ KR
-Sbjct  110  LADKGKR  116
-
-
- Score = 13.9 bits (24),  Expect = 8.3
- Identities = 3/8 (38%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
- Frame = +2
-
-Query  182  ACCSICEF  205
-            + C IC+ 
-Sbjct  149  SKCMICKI  156
-
-
- Score = 13.5 bits (23),  Expect = 9.4
- Identities = 7/19 (37%), Positives = 9/19 (47%), Gaps = 3/19 (16%)
- Frame = +2
-
-Query  218  FDGASSFYSYLQAIYPSHI  274
-            F G S+   YL+ IY    
-Sbjct  23   FAGKST---YLKNIYQQEN  38
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1096,7 +681,6 @@ Length=612
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  17.3    0.55 
-CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  16.5    0.80 
 
 
 >CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
@@ -1138,28 +722,6 @@ Query  8   SWTFPHTNRRL  40
 Sbjct  50  SWKNSNSNRQT  60
 
 
->CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
-virus] residues 301-480
-Length=180
-
- Score = 16.5 bits (31),  Expect = 0.80
- Identities = 13/50 (26%), Positives = 23/50 (46%), Gaps = 4/50 (8%)
- Frame = +1
-
-Query  100  ETELVLEMAKKEGR---YVRSLATMDELEVPE-EPATCYTCGYTFIRRRA  237
-            E + + E  + EG+    V++ A  D++     E  T Y C    I R++
-Sbjct  89   EFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFKDTINRKS  138
-
-
- Score = 14.2 bits (25),  Expect = 4.5
- Identities = 6/9 (67%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
- Frame = -1
-
-Query  477  VANLASLWV  451
-            V NLAS+ V
-Sbjct  166  VCNLASIAV  174
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1178,7 +740,6 @@ Length=627
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  15.4    1.9  
-CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  14.2    4.5  
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -1212,54 +773,6 @@ Query  356  GRLELVS  336
 Sbjct  13   GRVELVT  19
 
 
->CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
-Length=190
-
- Score = 14.2 bits (25),  Expect = 4.5
- Identities = 4/6 (67%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
- Frame = -1
-
-Query  210  KCKTIE  193
-            KC+T+E
-Sbjct  156  KCRTLE  161
-
-
- Score = 14.2 bits (25),  Expect = 5.0
- Identities = 8/27 (30%), Positives = 13/27 (48%), Gaps = 0/27 (0%)
- Frame = -1
-
-Query  315  TEENPIDKCGVAFLYSNYNEGDGMTHL  235
-            +E  PID    ++  SN N    +T +
-Sbjct  39   SEYRPIDIAVASWKNSNSNRQTPITRI  65
-
-
- Score = 13.9 bits (24),  Expect = 6.0
- Identities = 3/9 (33%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
- Frame = -2
-
-Query  389  PIEVWRSAW  363
-            PI++  ++W
-Sbjct  43   PIDIAVASW  51
-
-
- Score = 13.9 bits (24),  Expect = 6.4
- Identities = 6/24 (25%), Positives = 10/24 (42%), Gaps = 1/24 (4%)
- Frame = +1
-
-Query  148  KVLLPILFHPCTSTTLNGLTLFDI  219
-             +LL ++   C    L+     DI
-Sbjct  24   LLLLDVI-DECNQIVLSEYRPIDI  46
-
-
- Score = 13.5 bits (23),  Expect = 8.1
- Identities = 4/9 (44%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
- Frame = +1
-
-Query  511  FPVTKIDLP  537
-             P+  ID P
-Sbjct  138  LPIMLIDRP  146
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1278,7 +791,6 @@ Length=884
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.9    0.98 
-CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  15.0    4.8  
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -1312,18 +824,6 @@ Query  598  IGGSI*YCIV  627
 Sbjct  178  VGGAEMYAAA  187
 
 
->CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
-Length=190
-
- Score = 15.0 bits (27),  Expect = 4.8
- Identities = 4/17 (24%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
- Frame = -2
-
-Query  727  LYMSIVDMCIAES*NEF  677
-            L + ++D C     +E+
-Sbjct  25   LLLDVIDECNQIVLSEY  41
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1342,7 +842,6 @@ Length=845
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.9    0.91 
-CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  16.5    1.3  
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -1385,46 +884,6 @@ Query  158  CLI--IDEKYHTHDIVLLIRDSDDQVFC  235
 Sbjct  151  CMICKIDTKEAPFT-VRFGNDNDNNVIC  177
 
 
->CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
-virus] residues 301-480
-Length=180
-
- Score = 16.5 bits (31),  Expect = 1.3
- Identities = 5/32 (16%), Positives = 11/32 (34%), Gaps = 0/32 (0%)
- Frame = -2
-
-Query  535  FGKISTGDGGTFHLFEDTPGFESALKAEYKNV  440
-              ++  G   +     + PG       E+K +
-Sbjct  62   MERVKAGKNWSLMCPHECPGLSDVHGEEFKAL  93
-
-
- Score = 14.6 bits (26),  Expect = 4.6
- Identities = 6/12 (50%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
- Frame = -1
-
-Query  125  TIQRPENQSSKG  90
-            TI R  NQ + G
-Sbjct  133  TINRKSNQENVG  144
-
-
- Score = 14.2 bits (25),  Expect = 6.7
- Identities = 7/28 (25%), Positives = 9/28 (32%), Gaps = 2/28 (7%)
- Frame = +2
-
-Query  47   LIRNLADKRKVGATPL*SFGFLDVVWYK  130
-            L   +   R    TP     F D +  K
-Sbjct  112  LFDQINSARIETGTPY--VCFKDTINRK  137
-
-
- Score = 14.2 bits (25),  Expect = 6.8
- Identities = 8/22 (36%), Positives = 12/22 (55%), Gaps = 2/22 (9%)
- Frame = -3
-
-Query  549  NLCT--ISVKSALETVVLFISS  490
-            NLCT  +    + ET V  ++S
-Sbjct  150  NLCTEIVQYSDSEETAVCNLAS  171
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1443,7 +902,6 @@ Length=909
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  18.9    0.27 
-CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  18.5    0.35 
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -1481,63 +939,6 @@ Query  821  LFVHIQTTHVGLYETIVTIQQQRCLHI  741
 Sbjct  22   MFAGKSTYLKNIYQQENGGNK-HCLFV  47
 
 
->CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
-Length=190
-
- Score = 18.5 bits (36),  Expect = 0.35
- Identities = 10/33 (30%), Positives = 17/33 (52%), Gaps = 0/33 (0%)
- Frame = -2
-
-Query  311  LEVISNILLDHPFKGIFEKAKRSAIRRDIVDSL  213
-            L+V+  +L+D P+ G    A +     DI+  L
-Sbjct  135  LQVLPIMLIDRPYIGAHITAGKCRTLEDILSEL  167
-
-
- Score = 15.4 bits (28),  Expect = 2.9
- Identities = 4/11 (36%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
- Frame = -3
-
-Query  382  LKIAPVARDFM  350
-            + IAP + ++M
-Sbjct  124  MHIAPASLEYM  134
-
-
- Score = 14.6 bits (26),  Expect = 6.3
- Identities = 6/11 (55%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
- Frame = -1
-
-Query  432  ASLLYLLWTPP  400
-            ASL Y+L   P
-Sbjct  129  ASLEYMLQVLP  139
-
-
- Score = 14.6 bits (26),  Expect = 6.5
- Identities = 7/13 (54%), Positives = 8/13 (62%), Gaps = 0/13 (0%)
- Frame = -3
-
-Query  763  NNKGACTSASSEM  725
-            NNK  CT+ S  M
-Sbjct  83   NNKTWCTNTSPNM  95
-
-
- Score = 14.2 bits (25),  Expect = 7.3
- Identities = 3/8 (38%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
- Frame = +1
-
-Query  505  IMMMTKPR  528
-            IM++ +P 
-Sbjct  140  IMLIDRPY  147
-
-
- Score = 13.9 bits (24),  Expect = 9.8
- Identities = 5/18 (28%), Positives = 8/18 (44%), Gaps = 0/18 (0%)
- Frame = -1
-
-Query  756  KVPAHLRPRKCSPDSQLL  703
-             + AH+   KC     +L
-Sbjct  147  YIGAHITAGKCRTLEDIL  164
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1556,7 +957,6 @@ Length=706
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.2    1.3  
-CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  16.2    1.3  
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -1599,54 +999,6 @@ Query  75   YTRCAGCGDRCCSA  116
 Sbjct  174  NVICVGGAEMYAAA  187
 
 
->CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
-Length=190
-
- Score = 16.2 bits (30),  Expect = 1.3
- Identities = 3/21 (14%), Positives = 8/21 (38%), Gaps = 0/21 (0%)
- Frame = +1
-
-Query  223  WTTLFLYSPISLSRFSKNLAI  285
-            W          ++R  ++L +
-Sbjct  51   WKNSNSNRQTPITRIEESLGL  71
-
-
- Score = 16.2 bits (30),  Expect = 1.4
- Identities = 10/27 (37%), Positives = 11/27 (41%), Gaps = 0/27 (0%)
- Frame = -1
-
-Query  307  PHDNAAAKWLSSLRNAIKI*VNIETKL  227
-            P D A A W +S  N       IE  L
-Sbjct  43   PIDIAVASWKNSNSNRQTPITRIEESL  69
-
-
- Score = 13.9 bits (24),  Expect = 6.9
- Identities = 6/38 (16%), Positives = 15/38 (39%), Gaps = 0/38 (0%)
- Frame = -3
-
-Query  422  SKYSNIQRAASCMAYAVDLLNNHNITSDQFDFMAMTAW  309
-             K  N    +  +   +D  N   ++  +   +A+ +W
-Sbjct  14   EKMKNKTTDSLLLLDVIDECNQIVLSEYRPIDIAVASW  51
-
-
- Score = 13.9 bits (24),  Expect = 7.4
- Identities = 5/18 (28%), Positives = 7/18 (39%), Gaps = 0/18 (0%)
- Frame = +2
-
-Query  362  LIDLPRTPYRRRLVECSS  415
-            LID P         +C +
-Sbjct  142  LIDRPYIGAHITAGKCRT  159
-
-
- Score = 13.5 bits (23),  Expect = 9.9
- Identities = 8/43 (19%), Positives = 15/43 (35%), Gaps = 0/43 (0%)
- Frame = -3
-
-Query  203  TRTTEMNKRAKIILEQQQRREAAAAAAATGATAPIPTTSAAGV  75
-            T  T + +   +   +    E          T+P    +AAG+
-Sbjct  60   TPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMNVTAAGM  102
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1665,7 +1017,6 @@ Length=585
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  16.2    0.95 
-CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  15.0    2.3  
 
 
 >CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
@@ -1725,55 +1076,6 @@ Query  39   CAVNMR  22
 Sbjct  110  CDINMQ  115
 
 
->CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
-spot syndrome virus] residues 1-190
-Length=190
-
- Score = 15.0 bits (27),  Expect = 2.3
- Identities = 5/18 (28%), Positives = 7/18 (39%), Gaps = 0/18 (0%)
- Frame = +3
-
-Query  138  CVRRNVHKFQLYVLVRNV  191
-            C   +  K  + VL   V
-Sbjct  73   CTTVSSIKELISVLPEVV  90
-
-
- Score = 14.6 bits (26),  Expect = 3.0
- Identities = 4/13 (31%), Positives = 6/13 (46%), Gaps = 0/13 (0%)
- Frame = +3
-
-Query  255  RIYRHEDELYSKC  293
-             IY+ E+     C
-Sbjct  32   NIYQQENGGNKHC  44
-
-
- Score = 13.9 bits (24),  Expect = 6.7
- Identities = 7/12 (58%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
- Frame = +1
-
-Query  73   ICTTTAPMIAAA  108
-            IC   A M AAA
-Sbjct  176  ICVGGAEMYAAA  187
-
-
- Score = 13.5 bits (23),  Expect = 7.6
- Identities = 5/7 (71%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
- Frame = +2
-
-Query  23  LILTAHL  43
-           LIL+ HL
-Sbjct  3   LILSHHL  9
-
-
- Score = 13.5 bits (23),  Expect = 7.8
- Identities = 7/25 (28%), Positives = 11/25 (44%), Gaps = 0/25 (0%)
- Frame = +1
-
-Query  307  VPGPKNKSKSKKKDSKRKKNQNGNR  381
-            V GP    KS    +  ++   GN+
-Sbjct  18   VTGPMFAGKSTYLKNIYQQENGGNK  42
-
-
 
 Lambda      K        H        a         alpha
    0.305    0.118    0.319    0.792     4.96 
@@ -1792,7 +1094,6 @@ Length=472
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  16.9    0.44 
-CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  16.5    0.57 
 
 
 >CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
@@ -1826,41 +1127,6 @@ Query  73  GMSAMSKEQVLTMYQ  29
 Sbjct  81  GLSDVHGEEFKALYE  95
 
 
->CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
-spot syndrome virus] residues 1-190
-Length=190
-
- Score = 16.5 bits (31),  Expect = 0.57
- Identities = 13/37 (35%), Positives = 18/37 (49%), Gaps = 8/37 (22%)
- Frame = +2
-
-Query  146  DLISV---NIDFIFI----FFLRVTVARRGAGSTGRR  235
-            +LISV    +D I I    FF  + +  R A   G+R
-Sbjct  81   ELISVLPEVVDVILIDEGQFFTDLVLVNRLA-DKGKR  116
-
-
- Score = 15.4 bits (28),  Expect = 1.6
- Identities = 3/10 (30%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
- Frame = +1
-
-Query  424  CLICPLRAEF  453
-            C+IC +  + 
-Sbjct  151  CMICKIDTKE  160
-
-
- Score = 14.6 bits (26),  Expect = 2.4
- Identities = 17/92 (18%), Positives = 30/92 (33%), Gaps = 13/92 (14%)
- Frame = -1
-
-Query  406  PLFSTSTTKII-LAQSSIGDCGEG--VKEKIRERFGLEEYVEEDNVNQEEEQHQEQLCTA  236
-            P+F+  +T +  + Q   G       VK  +  R+G         V    E  +     +
-Sbjct  21   PMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGT---GTIVTHAGEVIEGCTTVS  77
-
-Query  235  STTSTTSTSPSNSNTQEKDKNKINIDANKIYS  140
-            S     S  P   +        I ID  + ++
-Sbjct  78   SIKELISVLPEVVDV-------ILIDEGQFFT  102
-
-
 
 Lambda      K        H        a         alpha
    0.318    0.134    0.401    0.792     4.96 
@@ -1879,7 +1145,6 @@ Length=1018
 Sequences producing significant alignments:                          (Bits)  Value
 
 CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  349     2e-124
-CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  24.3    0.005 
 
 
 >CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
@@ -1968,77 +1233,6 @@ Sbjct  78   SIKELISVLPEVVDVI  93
 Query  887  VMDRYYYSGIVFSLARGVDTVEWCSAS  967
              ++  Y  G    +    + +E C+  
 Sbjct  50   SLETRYGCGTGTIVTHAGEVIEGCTTV  76
-
-
->CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
-virus] residues 301-480
-Length=180
-
- Score = 24.3 bits (51),  Expect = 0.005
- Identities = 19/74 (26%), Positives = 32/74 (43%), Gaps = 18/74 (24%)
- Frame = +2
-
-Query  548  CVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLY--GGE  721
-            C G ++++    +  Y+K  + + KGK VV           +A+ L    NS     G  
-Sbjct  79   CPGLSDVHGEEFKALYEKY-EAEGKGKEVV-----------KARALFDQINSARIETGTP  126
-
-Query  722  YMCFPD----RSSH  751
-            Y+CF D    +S+ 
-Sbjct  127  YVCFKDTINRKSNQ  140
-
-
- Score = 15.4 bits (28),  Expect = 3.1
- Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
- Frame = +1
-
-Query  487  RHKRGALYRPFW  522
-            R    A+Y   W
-Sbjct  16   RRGAAAIYISDW  27
-
-
- Score = 15.0 bits (27),  Expect = 5.1
- Identities = 4/4 (100%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
- Frame = +1
-
-Query  79   PYVC  90
-            PYVC
-Sbjct  126  PYVC  129
-
-
- Score = 15.0 bits (27),  Expect = 5.7
- Identities = 5/20 (25%), Positives = 10/20 (50%), Gaps = 0/20 (0%)
- Frame = +2
-
-Query  701  SPLYGGEYMCFPDRSSHTGK  760
-            S ++G E+    ++    GK
-Sbjct  83   SDVHGEEFKALYEKYEAEGK  102
-
-
- Score = 14.6 bits (26),  Expect = 7.0
- Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
- Frame = +1
-
-Query  991   PGSTDVASQ  1017
-             PG +DV  +
-Sbjct  80    PGLSDVHGE  88
-
-
- Score = 14.2 bits (25),  Expect = 7.6
- Identities = 3/7 (43%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
- Frame = +2
-
-Query  278  PEVVDVI  298
-             +V D I
-Sbjct  29   LDVKDFI  35
-
-
- Score = 14.2 bits (25),  Expect = 8.9
- Identities = 7/25 (28%), Positives = 11/25 (44%), Gaps = 2/25 (8%)
- Frame = -2
-
-Query  462  ANLTIELVYGKSLWMGLNIC*SEVP  388
-            ++L +E V     W  +  C  E P
-Sbjct  58   SDLFMERVKAGKNWSLM--CPHECP  80
 
 
 

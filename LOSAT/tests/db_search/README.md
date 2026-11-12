@@ -305,7 +305,10 @@ search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it 
 `db.gap.*`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:
-`python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`.
+`python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`. A freeze runs NCBI BLAST+ with its usage
+report off (`BLAST_USAGE_REPORT=false` in each NCBI run's environment, `db_search_fixtures.ncbi_env`): without it NCBI
+BLAST+ 2.17.0 sends each run's parameters to NCBI when it ends (`blast_usage_report.cpp:195-220`). LOSAT's runs
+(`check`) do not get the variable.
 
 OF5a (XML2 and JSON, outfmt 15 and 16): `x16_taxid.faa` (the two `-subject` records of the XML2 probe sprot_tax, `st1` and
 `st2`) and `x16_taxid_q.faa` (its query), and `x16_taxid`, built from them with a taxid in each definition line (only `.pin

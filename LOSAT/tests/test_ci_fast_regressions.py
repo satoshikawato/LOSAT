@@ -2,13 +2,16 @@
 """Tests for ci_fast_regressions.py and frozen_allowlist.py (no LOSAT binary is run)."""
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -164,6 +167,47 @@ class DbSearchFixtureTests(unittest.TestCase):
                                  "LANG": "C"})
         # nothing of the caller's environment is changed
         self.assertEqual(dirty["HOME"], "/home/someone")
+
+    def test_ncbi_runs_have_the_usage_report_off(self):
+        # NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+        # (blast_usage_report.cpp:195-220): every NCBI run of the harness has it, LOSAT's runs do not.
+        clean = db_fixtures.clean_env({"PATH": "/bin", "BLAST_USAGE_REPORT": "true"}, "/empty/home")
+        self.assertNotIn("BLAST_USAGE_REPORT", clean)
+        self.assertEqual(db_fixtures.ncbi_env(clean)["BLAST_USAGE_REPORT"], "false")
+        self.assertEqual(db_fixtures.ncbi_env(clean), {**clean, "BLAST_USAGE_REPORT": "false"})
+        # a row's tokens cannot turn it back on
+        self.assertFalse(db_fixtures.is_env_token("BLAST_USAGE_REPORT=true"))
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI programs are shell scripts")
+    def test_freeze_runs_ncbi_with_the_usage_report_off(self):
+        # `freeze` with stand-in NCBI programs that print the variable: a plain row, an RPS row
+        # (`freeze_rps`) and a rejection row whose NCBI stdout is frozen; the manifest is not written.
+        rows = db_fixtures.read_manifest()[1]
+        def first(test):
+            return dict(next(r for r in rows if test(r)))
+        plain = first(lambda r: r["kind"] == "ncbi" and not xinclude.wants_files(r) and not xinclude.wants_pssm(r)
+                      and db_fixtures.rps_cell(r["db"]) is None)
+        rps = first(lambda r: r["kind"] == "ncbi" and db_fixtures.rps_cell(r["db"]) is not None)
+        rejection = first(lambda r: r["kind"] == "losat-rejection" and r["stdout_bytes"]
+                          and not xinclude.wants_pssm(r))
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
+            bin_dir.mkdir()
+            for program in db_fixtures.PROGRAMS:
+                script = bin_dir / program
+                script.write_text('#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n')
+                script.chmod(0o755)
+            written = []
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [plain, rps, rejection])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    unittest.mock.patch.dict(os.environ, {"BLAST_USAGE_REPORT": "true"}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                args = argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="")
+                self.assertEqual(db_fixtures.freeze(args), 0)
+            for row in (plain, rps, rejection):
+                self.assertEqual((frozen / f"{row['row_id']}.out").read_bytes(), b"false", row["row_id"])
+            self.assertEqual(len(written), 1)
 
 
 def fake_search(directory: Path, master: bytes, sides: list[bytes], stdout: bytes = b"", extra: str = "") -> list[str]:

@@ -38,7 +38,9 @@ rewrites the rc, hash and size columns of the manifest (rows outside --program a
 the default is every program). It runs NCBI in a cleaned environment (see `check`), because each
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
 ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, and `~/.ncbirc`
-(HOME is an empty directory).
+(HOME is an empty directory); every NCBI run then gets BLAST_USAGE_REPORT=false (`ncbi_env`: NCBI BLAST+
+sends no usage report with the run's parameters to NCBI). LOSAT's runs (`check`) keep the cleaned
+environment as it is.
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
 (default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC,
@@ -242,6 +244,19 @@ def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
     return env
 
 
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_usage_report.cpp:195-220 (the
+# report's parameters, sent to NCBI's server when the application ends unless BLAST_USAGE_REPORT, in the
+# environment or the registry, is a false value)
+NCBI_RUN_ENV = {"BLAST_USAGE_REPORT": "false"}
+
+
+def ncbi_env(base: dict[str, str]) -> dict[str, str]:
+    """The environment of every NCBI run of the harness (`freeze`): `base`, the cleaned environment, with
+    BLAST_USAGE_REPORT=false, so that NCBI BLAST+ 2.17.0 does not send the run's parameters to NCBI at exit.
+    A row cannot set it (it is not one of `ENV_NAMES`). LOSAT's runs keep `base`."""
+    return {**base, **NCBI_RUN_ENV}
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -293,7 +308,8 @@ def freeze(args: argparse.Namespace) -> int:
     comments, rows = read_manifest()
     FROZEN.mkdir(parents=True, exist_ok=True)
     home = tempfile.TemporaryDirectory(prefix="db_search_home_")
-    env = clean_env(dict(os.environ), home.name)
+    # Every NCBI run below (and `freeze_rps`'s) takes this environment, with the usage report off.
+    env = ncbi_env(clean_env(dict(os.environ), home.name))
     for row in rows:
         if not selected(row, args):
             continue

@@ -354,6 +354,8 @@ impl RpsTraceback<'_> {
                         gap_extend: self.gap_extend,
                         x_drop_final: self.x_drop_final,
                         contained_before: true,
+                        // rpsblast's and rpstblastn's databases are BLOSUM62's (the others are refused).
+                        matrix: crate::config::ScoringMatrix::Blosum62,
                     },
                     hsps,
                     &mut scratch.gap,
@@ -382,6 +384,8 @@ impl RpsTraceback<'_> {
                         gap_extend: self.gap_extend,
                         x_drop_final: self.x_drop_final,
                         contained_before: false,
+                        // rpsblast's and rpstblastn's databases are BLOSUM62's (the others are refused).
+                        matrix: crate::config::ScoringMatrix::Blosum62,
                     },
                     hsps,
                     &mut scratch.gap,

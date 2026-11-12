@@ -1,0 +1,23 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+YP_009220601.1	BDT63550.1	42.246	187	95	4	13	191	7	188	2.16e-36	137
+YP_009220601.1	BDT63503.1	23.656	93	61	3	63	154	1868	1951	2.4	23.2
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+YP_009220601.1	BDT63550.1	42.246	187	95	4	13	191	7	188	8.26e-117	369
+YP_009220601.1	BDT63501.1	30.303	33	17	3	135	164	375	404	0.29	26.1
+YP_009220601.1	BDT63504.1	35.714	14	7	1	183	194	922	935	7.1	21.9
+YP_009220601.1	BDT63506.1	35.714	14	7	1	183	194	928	941	7.2	21.9
+YP_009220601.1	BDT63505.1	35.714	14	7	1	183	194	917	930	7.7	21.5
+YP_009220601.1	BDT63531.1	31.915	47	16	3	358	394	310	350	9.8	21.1
+
+Search has CONVERGED!
+# BLAST processed 2 queries

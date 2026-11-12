@@ -9,7 +9,7 @@ use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix;
 use crate::utils::matrix::{
-    blosum62_ncbistdaa_score_row, blosum62_score_ncbistdaa_direct, protein_score,
+    blosum62_ncbistdaa_score_row, blosum62_score_ncbistdaa_direct, protein_score, standard_score,
 };
 
 #[cfg(test)]
@@ -105,19 +105,6 @@ enum BlastpScoreMatrix<'a> {
 }
 
 #[inline(always)]
-fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:737-957
-    // ```c
-    // next_score = score_array[b_index].best + matrix_row[*b_ptr];
-    // ```
-    if matrix == ScoringMatrix::Blosum62 {
-        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
-    } else {
-        protein_score(matrix, query_residue, subject_residue)
-    }
-}
-
-#[inline(always)]
 fn blastp_standard_score_impl<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query_residue: u8,
@@ -176,7 +163,7 @@ impl BlastpScoreMatrix<'_> {
         // ```
         match self {
             Self::Blosum62 => blosum62_score_ncbistdaa_direct(query_residue, subject_residue),
-            Self::Standard(matrix) => blastp_standard_score(matrix, query_residue, subject_residue),
+            Self::Standard(matrix) => standard_score(matrix, query_residue, subject_residue),
             Self::Adjusted(matrix) => matrix.score(query_residue, subject_residue),
         }
     }
@@ -1269,7 +1256,7 @@ fn x_blosum62_tables() -> &'static crate::utils::xdrop_simd::StaticTables {
 //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
 // ```
 // The tables hold the scores that matrix[A[a]][B[b]] reads for a matrix other than BLOSUM62
-// (`blastp_standard_score`, built as `x_blosum62_tables` is); they only change how the row is
+// (`standard_score`, built as `x_blosum62_tables` is); they only change how the row is
 // looked up, and give the kernel the matrix's largest score (its 8-bit lanes need it).
 /// The lookup tables of the SIMD kernel for `matrix`, built at the first call for the matrix;
 /// `None` if a score is outside the 16-bit tables (the kernel then builds each row as before).
@@ -1281,7 +1268,7 @@ fn x_standard_tables(
         ScoringMatrix::ALL.len()] = [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
     T[matrix as usize]
         .get_or_init(|| {
-            let f = move |q: u8, s: u8| blastp_standard_score(matrix, q, s);
+            let f = move |q: u8, s: u8| standard_score(matrix, q, s);
             crate::utils::xdrop_simd::build_tables(&f, 28)
         })
         .as_deref()
@@ -1311,7 +1298,7 @@ fn with_x_scores<R>(
         }),
         BlastpScoreMatrix::Adjusted(m) => run(&Scores::Rows28(&m.scores)),
         BlastpScoreMatrix::Standard(matrix) => {
-            let f = move |q: u8, s: u8| blastp_standard_score(matrix, q, s);
+            let f = move |q: u8, s: u8| standard_score(matrix, q, s);
             run(&match x_standard_tables(matrix) {
                 Some(t) => Scores::Tables { t, n: 28 },
                 None => Scores::Func { f: &f, n: 28 },
@@ -4611,7 +4598,7 @@ mod tests {
         for matrix in ScoringMatrix::ALL {
             assert!(x_standard_tables(matrix).is_some(), "{matrix:?}");
             let top = (1..28u8)
-                .flat_map(|q| (1..28u8).map(move |s| blastp_standard_score(matrix, q, s)))
+                .flat_map(|q| (1..28u8).map(move |s| standard_score(matrix, q, s)))
                 .max()
                 .unwrap();
             let score_matrix = BlastpScoreMatrix::Standard(matrix);

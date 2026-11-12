@@ -724,6 +724,23 @@ pub fn protein_defscore(matrix: ScoringMatrix) -> i32 {
     standard_protein_matrix(matrix).defscore
 }
 
+/// The score of two NCBIstdaa letters in a standard matrix (`sbp->matrix->data[q][s]`), BLOSUM62's
+/// from its direct table: BLASTP's extensions and counts, and the positives of a PSSM search's
+/// alignments (`pssm_search::traceback0::final_hsp`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3409-3438
+/// ```c
+/// score += sbp->matrix->data[*query_var][*subject_var];
+/// ```
+#[inline(always)]
+pub fn standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
+}
+
 #[inline(always)]
 pub fn protein_score(matrix: ScoringMatrix, aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1559-1579

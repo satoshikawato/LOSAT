@@ -121,7 +121,7 @@ pub(crate) struct PosMatrixInfo {
 impl PosMatrixInfo {
     /// `s_MatrixInfoInit` for a position-based search: the query `query` (NCBIstdaa, as the
     /// search holds it: O as X), the PSSM's frequency ratios `freq_ratios` (28 per position, 0.0
-    /// where the PSSM has none), the score block `sbp` (BLOSUM62's), the scaling factor
+    /// where the PSSM has none), the score block `sbp` (the search matrix's), the scaling factor
     /// `scale_factor` (`SCALING_FACTOR`, 32) and the search's `kbp_psi[0]` (`kbp_psi`: the PSSM
     /// file's ungapped values, or `kbp_std`'s), which stays where the factor-1 PSSM has no score
     /// frequencies (`Blast_ScoreFreqNew` NULL, review S1 of PS4b). `None` when the factor-1 PSSM
@@ -165,7 +165,7 @@ impl PosMatrixInfo {
     }
 }
 
-/// `s_GetPosBasedStartFreqRatios`: each row starts as BLOSUM62's frequency ratios of the query
+/// `s_GetPosBasedStartFreqRatios`: each row starts as the matrix's frequency ratios of the query
 /// letter; a cell takes the PSSM's ratio over the letter's standard probability where both
 /// letters are standard, the column is neither `*` nor X, and the PSSM's ratio is above 1e-4.
 ///

@@ -87,7 +87,7 @@ pub struct PsiSearch {
 
 impl PsiSearch {
     /// `kbp_psi[0]`: the file's ungapped values, or those of `kbp_std` (the query's composition
-    /// with BLOSUM62, which NCBI also computes for `kbp_psi` before it overwrites them).
+    /// with the search's matrix, which NCBI also computes for `kbp_psi` before it overwrites them).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-107
     /// ```c++
@@ -143,7 +143,7 @@ impl PsiSearch {
     }
 
     /// `kbp_gap_psi[0]`: the file's gapped values, or those of `kbp_gap_std` (the table's values
-    /// of BLOSUM62 with the search's gap costs, which `kbp_gap_psi` is a copy of).
+    /// of the search's matrix and gap costs, which `kbp_gap_psi` is a copy of).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:109-127
     /// ```c++

@@ -613,19 +613,31 @@ fn write_run(
                       results: &mut Vec<BatchResults>,
                       queries_before: usize|
      -> Result<()> {
-        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (quoted at
-        // `native::run_inner`'s batches)
-        // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT` (not with the
-        // archive alone): a value that NCBI cannot convert stops the first batch here, after its
-        // search (`app::check_prefetch_environment`).
-        app::check_prefetch_environment(only_archive)?;
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (quoted at
+        // `native::run_inner`'s batches)
+        // A database: the titles of the batch's reported sequences, read in NCBI's traceback
+        // (`native::batch_titles`). Then the prefetch before the batch's reports reads
+        // `PRE_FETCH_SEQS_LIMIT` (not with the archive alone): a value that NCBI cannot convert
+        // stops the first batch here (`app::check_prefetch_environment`).
+        let titles = match database {
+            Some(run) => super::native::batch_titles(
+                run.database,
+                search_subjects,
+                results,
+                search_options.gapped,
+                asks,
+            )?,
+            None => None,
+        };
+        app::check_prefetch_environment(only_archive)?;
         // A database: the batch's reported sequences, and its hit lists named by their ranks.
         let mut reported = match database {
             Some(run) => Some(reported_batch(
                 run.database,
                 search_subjects,
+                titles,
                 search_options,
                 asks,
                 results,

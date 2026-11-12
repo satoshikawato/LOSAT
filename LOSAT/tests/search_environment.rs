@@ -55,12 +55,29 @@ fn run_files(
     variable: Option<(&str, &str)>,
     extra: &[&str],
 ) -> Output {
+    run_search(
+        program,
+        &["-query", query, "-subject", subject],
+        outfmt,
+        variable,
+        extra,
+    )
+}
+
+/// One run of `losat <program> <inputs> -outfmt <outfmt> -num_threads 1 <extra>` from `LOSAT/`
+/// without the variables that change a search, plus `variable`.
+fn run_search(
+    program: &str,
+    inputs: &[&str],
+    outfmt: &str,
+    variable: Option<(&str, &str)>,
+    extra: &[&str],
+) -> Output {
     let mut command = Command::new(BIN);
     command
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .arg(program)
-        .args(["-query", query])
-        .args(["-subject", subject])
+        .args(inputs)
         .args(["-outfmt", outfmt, "-num_threads", "1"])
         .args(extra);
     for (name, _) in std::env::vars() {
@@ -227,6 +244,64 @@ fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
                     output.stdout == expected,
                     "{what}: {}",
                     String::from_utf8_lossy(&output.stdout)
+                );
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
+// ```c++
+//     TSeqAlignVector aligns =
+//         LocalBlastResults2SeqAlign(hsp_results,
+//                                    *qdata,
+//                                    *m_SeqInfoSrc,
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-264
+// ```c++
+//                    results = psiblast->Run();
+//                    BlastFormatter_PreFetchSequenceData(*results, scope,
+//                 		   m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice());
+// ```
+// NCBI reads the titles of a batch's reported sequences in its traceback (the Seq-ids of the
+// Seq-aligns; psiblast's in `Run`), before the batch's prefetch converts `PRE_FETCH_SEQS_LIMIT`:
+// with a database whose header file is missing and a query that has hits, NCBI 2.17.0 stops with
+// the header file's error (exit 2, after the outfmt 0 prolog) with `PRE_FETCH_SEQS_LIMIT=abc` as
+// without it (env parity H, probe h_probe/hdr of 2026-11-12: every program, outfmt 0, 6 and 7, an empty value too).
+#[test]
+fn a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch() {
+    for (program, db, header, query) in [
+        ("blastp", "nophr", "phr", "tests/fasta/psiblast/tk.faa"),
+        ("psiblast", "nophr", "phr", "tests/fasta/psiblast/tk.faa"),
+        ("blastx", "bnophr", "phr", "tests/db_search/bslice_q.fna"),
+        ("blastn", "nnophr", "nhr", "tests/seqdb/nucl.fna"),
+        ("tblastx", "nnophr", "nhr", "tests/seqdb/nucl.fna"),
+    ] {
+        let run = |outfmt: &str, variable: Option<(&str, &str)>| {
+            run_search(
+                program,
+                &["-db", &format!("tests/db_search/{db}"), "-query", query],
+                outfmt,
+                variable,
+                &[],
+            )
+        };
+        let error = format!(
+            "BLAST Database error: Error: File ({}/tests/db_search/{db}.{header}) not found.\n",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        for outfmt in ["0", "6", "7"] {
+            let what = format!("{program} -db {db} -outfmt {outfmt}");
+            let plain = run(outfmt, None);
+            assert_eq!(plain.status.code(), Some(2), "{what}: {plain:?}");
+            assert_eq!(String::from_utf8_lossy(&plain.stderr), error, "{what}");
+            for value in ["abc", ""] {
+                let output = run(outfmt, Some(("PRE_FETCH_SEQS_LIMIT", value)));
+                assert!(
+                    output.status.code() == Some(2)
+                        && output.stdout == plain.stdout
+                        && output.stderr == plain.stderr,
+                    "{what} PRE_FETCH_SEQS_LIMIT={value:?}: {output:?}"
                 );
             }
         }

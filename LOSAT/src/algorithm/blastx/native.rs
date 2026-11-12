@@ -1025,12 +1025,19 @@ fn run_inner(
             let (subject_records, subject_names, call_subjects): (_, _, &[FastaRecord]) =
                 match (&database, &pairwise_database) {
                     (Some(database), Some(pairwise)) => {
-                        reported = match search_subjects {
-                            Subjects::Unreadable => ReportedSubjects::default(),
-                            search_subjects => ReportedSubjects::for_batch(
+                        reported = match batch_titles(
+                            database,
+                            search_subjects,
+                            results,
+                            options.gapped,
+                            ReportedAsks::default(),
+                        )? {
+                            None => ReportedSubjects::default(),
+                            Some(titles) => ReportedSubjects::for_batch(
                                 database,
                                 search_subjects,
                                 results,
+                                titles,
                                 options.gapped,
                                 false,
                                 false,
@@ -1043,17 +1050,7 @@ fn run_inner(
                                 false,
                                 false,
                             )
-                            .map_err(|error| match error.downcast::<HeaderReadError>() {
-                                Ok(header) => header.error,
-                                Err(error) => {
-                                    match error.downcast::<super::x_db_stream::XReadError>() {
-                                        Ok(super::x_db_stream::XReadError(kept)) => {
-                                            database_error(kept)
-                                        }
-                                        Err(error) => error,
-                                    }
-                                }
-                            })?,
+                            .map_err(reported_error)?,
                         };
                         (
                             None,
@@ -1101,9 +1098,23 @@ fn run_inner(
         //                 		                            fmt_args->GetFormattedOutputChoice());
         // ```
         // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's
-        // search: a value that NCBI cannot convert stops the first batch here, after the outfmt 0
-        // prolog and the messages of its records, before its query warnings
+        // search and, with `-db`, the read of its reported sequences' titles (NCBI's traceback,
+        // `batch_titles`): a value that NCBI cannot convert stops the first batch here, after the
+        // outfmt 0 prolog and the messages of its records, before its query warnings
         // (`app::check_prefetch_environment`).
+        let drop_held = |error: &anyhow::Error| {
+            if let (true, Some(held)) = (super::blast_xml::drops_held_document(error), &held) {
+                held.discard();
+            }
+        };
+        let asks = ReportedAsks::of(&options);
+        let titles = match &database {
+            Some(database) => {
+                batch_titles(database, search_subjects, results, options.gapped, asks)
+                    .inspect_err(drop_held)?
+            }
+            None => None,
+        };
         app::check_prefetch_environment(false)?;
         // The run stops after this batch (`stops_after`).
         let stops = stops_after == Some(queries_before + queries.len());
@@ -1112,18 +1123,13 @@ fn run_inner(
                 let reported = reported_batch(
                     database,
                     search_subjects,
+                    titles,
                     &options,
-                    ReportedAsks::of(&options),
+                    asks,
                     results,
                     diagnostics,
                 )
-                .inspect_err(|error| {
-                    if let (true, Some(held)) =
-                        (super::blast_xml::drops_held_document(error), &held)
-                    {
-                        held.discard();
-                    }
-                })?;
+                .inspect_err(drop_held)?;
                 report::render_queries(
                     writer,
                     diagnostics,
@@ -1302,24 +1308,62 @@ impl ReportedAsks {
     }
 }
 
+/// The read error of a query batch's reported sequences as the run reports it: NCBI's reader
+/// error of a header file (`HeaderReadError`) or of a record's residues (`XReadError`,
+/// `database_error`), or LOSAT's refusal as it is.
+fn reported_error(error: anyhow::Error) -> anyhow::Error {
+    match error.downcast::<HeaderReadError>() {
+        Ok(header) => header.error,
+        // A failed read of a record's residues.
+        Err(error) => match error.downcast::<super::x_db_stream::XReadError>() {
+            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
+            Err(error) => error,
+        },
+    }
+}
+
+/// The titles of the reported sequences of the query batch `results` of a `-db` search
+/// (`ReportedSubjects::read_titles`, for the reports that `asks` names), read where
+/// NCBI's traceback makes the batch's Seq-aligns, before the batch's prefetch: NCBI's reader error
+/// stops the run at this batch, with no epilog. `None` where the database's sequences could not be
+/// read (the batch's search failed with that error).
+pub(super) fn batch_titles(
+    database: &BlastxDatabase,
+    search_subjects: Subjects<'_>,
+    results: &[BatchResults],
+    gapped: bool,
+    asks: ReportedAsks,
+) -> Result<Option<super::database::BatchTitles>> {
+    use super::x_timing::Run as XRun;
+    if matches!(search_subjects, Subjects::Unreadable) {
+        return Ok(None);
+    }
+    let x_t = super::x_timing::lap();
+    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise);
+    super::x_timing::run(XRun::Titles, x_t);
+    titles.map(Some).map_err(reported_error)
+}
+
 /// The reported sequences of the query batch `results` of a `-db` search, with its hit lists
-/// renamed to ranks (`ReportedSubjects::for_batch`, `asks`), and what NCBI does before the reports
-/// of a batch, for the format of `options`: its prefetch and the values of a custom tabular field
+/// renamed to ranks (`ReportedSubjects::for_batch`, `asks`), from their titles (`titles`,
+/// `batch_titles`; `None`: no sequence could be read), and what NCBI does before the reports of a
+/// batch, for the format of `options`: its prefetch and the values of a custom tabular field
 /// list. NCBI's reader error stops the run at this batch, with no epilog. A run that holds its
 /// document drops it on a refusal from here (`blast_xml::drops_held_document`: of the XML2
 /// document, of a subject with parsed Seq-ids, or of the taxonomy database).
 pub(super) fn reported_batch(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
+    titles: Option<super::database::BatchTitles>,
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
     diagnostics: &mut dyn Write,
 ) -> Result<ReportedSubjects> {
     use super::x_timing::Run as XRun;
-    if matches!(search_subjects, Subjects::Unreadable) {
+    let Some(titles) = titles else {
         return Ok(ReportedSubjects::default());
-    }
+    };
     // The batch's Seq-aligns: one for each HSP that the reports show
     // (`has_seqalign`), one for each subject of an ungapped search. Where
     // `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
@@ -1344,6 +1388,7 @@ pub(super) fn reported_batch(
         database,
         search_subjects,
         results,
+        titles,
         options.gapped,
         asks.tabular,
         asks.tabular_reads,
@@ -1357,14 +1402,7 @@ pub(super) fn reported_batch(
         prefetch_off,
     );
     super::x_timing::run(XRun::Titles, x_t);
-    let reported = reported.map_err(|error| match error.downcast::<HeaderReadError>() {
-        Ok(header) => header.error,
-        // A failed read of a record's residues.
-        Err(error) => match error.downcast::<super::x_db_stream::XReadError>() {
-            Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
-            Err(error) => error,
-        },
-    })?;
+    let reported = reported.map_err(reported_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // ```c++
     //                 BlastFormatter_PreFetchSequenceData(*results, scope,

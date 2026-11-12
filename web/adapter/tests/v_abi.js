@@ -357,8 +357,9 @@ function nativeOutputs(native, search, scratch) {
   }
   // The diagnostics are the CLI's standard error for the tabular formats (abi_v2.md §5):
   // outfmt 6 and 7 write the same lines, and outfmt 0 the same without the formatting
-  // handler's lines, which -num_descriptions and -num_alignments can make differ.
-  const handler = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches)/;
+  // handler's lines, which -num_descriptions and -num_alignments can make differ, and which
+  // -line_length, -sorthits and -sorthsps give for formats above 4 (other than 0) only.
+  const handler = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches|The parameter -line_length is not applicable|The parameter -sorthits is ignored|The parameter -sorthsps is ignored)/;
   const lines = (format) => stderrs.get(format).toString().split("\n");
   const withoutHandler = (format) => lines(format).filter((line) => !handler.test(line));
   if (stderrs.has(6)) {

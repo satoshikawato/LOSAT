@@ -397,6 +397,10 @@ pub struct BlastxArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3158-3161
     // ```c++
     //     arg_desc.AddDefaultKey(kArgNumThreads, "int_value",
@@ -683,6 +687,14 @@ pub struct ResolvedOptions {
     pub hitlist_size: i32,
     pub num_descriptions: i32,
     pub num_alignments: i32,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:247-249
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
+    /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     pub outfmt: u8,
     /// The fields of the default tabular report (outfmt 6 and 7 without `tabular`: the `std`
     /// fields), by name; empty for outfmt 0.
@@ -1295,6 +1307,7 @@ impl BlastxArgs {
             hitlist_size,
             num_descriptions: counts.num_descriptions as i32,
             num_alignments: counts.num_alignments as i32,
+            formatting: self.formatting,
             outfmt,
             fields,
             tabular,

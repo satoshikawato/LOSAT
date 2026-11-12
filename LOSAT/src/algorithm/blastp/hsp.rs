@@ -1909,10 +1909,15 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
 }
 
 /// `collect_hits_from_hit_lists` with each HSP's `comp_adjustment_method`, which the
-/// outfmt 0 report prints (showalign.cpp:3600-3603).
+/// outfmt 0 report prints (showalign.cpp:3600-3603), and its Seq-align's `num_ident`
+/// (`PairwiseHit::seqalign_num_ident`): the engine's identities that `engine_counts` keeps
+/// where the display recount replaced them, else the HSP's. `first_query` is the index of the
+/// query of `hit_lists[0]` (the keys of `engine_counts` count the queries from the run's first).
 pub(crate) fn collect_hits_and_methods_from_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
-) -> Vec<(Hit, u8)> {
+    first_query: usize,
+    engine_counts: &super::seqalign::EngineCounts,
+) -> Vec<(Hit, u8, usize)> {
     let reported = |hit_list: &BlastpHitList| {
         hit_list
             .hsplist_array
@@ -1922,13 +1927,25 @@ pub(crate) fn collect_hits_and_methods_from_hit_lists(
             .sum::<usize>()
     };
     let mut hits = Vec::with_capacity(hit_lists.iter().flatten().map(reported).sum());
-    for hit_list_opt in hit_lists {
+    for (q_offset, hit_list_opt) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list_opt else {
             continue;
         };
-        for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
-            for hsp in &hsp_list.hsps {
-                hits.push((hsp.clone().into_hit(), hsp.comp_adjustment_method));
+        let q_idx = (first_query + q_offset) as u32;
+        for (list_index, hsp_list) in hit_list
+            .hsplist_array
+            .iter()
+            .take(hit_list.hsplist_count)
+            .enumerate()
+        {
+            for (hsp_index, hsp) in hsp_list.hsps.iter().enumerate() {
+                let seqalign_num_ident = engine_counts
+                    .num_ident((q_idx, list_index as u32, hsp_index as u32), hsp.num_ident);
+                hits.push((
+                    hsp.clone().into_hit(),
+                    hsp.comp_adjustment_method,
+                    seqalign_num_ident,
+                ));
             }
         }
     }
@@ -2088,6 +2105,39 @@ mod tests {
                 .collect(),
             best_evalue: 0.0,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203 (quoted at
+    // `PairwiseHit::seqalign_num_ident`): each collected HSP carries its Seq-align's `num_ident`,
+    // the engine's identities, which `EngineCounts` keeps where the display recount replaced
+    // them; its keys count the queries from the run's first, also for a window of queries.
+    #[test]
+    fn collected_hits_carry_the_seqalign_identities() {
+        let hit_lists: Vec<Option<BlastpHitList>> = (0..2)
+            .map(|_| {
+                let mut list = hsp_list_of(
+                    0,
+                    &[(100, 1, 50, 1, 50, 1e-20), (90, 60, 99, 60, 99, 1e-10)],
+                );
+                for (hsp, identities) in list.hsps.iter_mut().zip([40, 30]) {
+                    hsp.num_ident = identities;
+                }
+                let mut hit_list = BlastpHitList::new(10);
+                hit_list.update(list);
+                Some(hit_list)
+            })
+            .collect();
+        let mut engine_counts = super::super::seqalign::EngineCounts::default();
+        engine_counts.save((1, 0, 1), (28, 35));
+        let counts = |first: usize, end: usize| -> Vec<(usize, usize)> {
+            collect_hits_and_methods_from_hit_lists(&hit_lists[first..end], first, &engine_counts)
+                .iter()
+                .map(|(hit, _, seqalign_num_ident)| (hit.num_ident, *seqalign_num_ident))
+                .collect()
+        };
+        assert_eq!(counts(0, 1), [(40, 40), (30, 30)]);
+        assert_eq!(counts(1, 2), [(40, 40), (30, 28)]);
+        assert_eq!(counts(0, 2), [(40, 40), (30, 30), (40, 40), (30, 28)]);
     }
 
     fn hsp_order(list: &BlastpHspList) -> Vec<(i32, usize, usize)> {

@@ -310,6 +310,9 @@ losat dustmasker -in genome.fna -outfmt maskinfo_asn1_bin -out genome.dust.asnb
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
 | `-num_descriptions <int>` | Integer (0 or more) | `500` | Number of database sequences to show one-line descriptions for (outfmt 0; ignored with a warning for outfmt above 4). Without `-max_target_seqs`, either `-num_descriptions` or `-num_alignments` sets the hit list size to the larger of the two (outfmt 0), and `-num_alignments` sets it for the tabular formats; 0 for both, or `-num_alignments 0` with a tabular format, is NCBI's error `No hits are being saved`. Excludes `-max_target_seqs` |
 | `-num_alignments <int>` | Integer (0 or more) | `250` | Number of database sequences to show alignments for (outfmt 0), or the number of subjects of the tabular formats. Excludes `-max_target_seqs` |
+| `-line_length <int>` | Integer (1 or more) | `60` | Letters per row of the outfmt 0 alignments (ignored with a warning for outfmt above 4) |
+| `-sorthits <int>` | Integer (0 to 4) | — | Order of the subjects of outfmt 0: `0` by E-value (the search's order), `1` bit score, `2` total score, `3` percent identity, `4` query coverage, as NCBI BLAST+ orders them (ties included); any value adds NCBI's Total score, Query cover and Max ident columns to the description table (all five programs; `psiblast` and `rpsblast` read it and sort nothing, as NCBI does) |
+| `-sorthsps <int>` | Integer (0 to 4) | — | Order of each subject's HSPs in outfmt 0: `0` by E-value, `1` score, `2` query start, `3` percent identity, `4` subject start (ignored with a warning for other formats; `psiblast` and `rpsblast` as for `-sorthits`) |
 | `-qcov_hsp_perc <real>` | Float | `0` (no filter) | Percent query coverage per HSP: HSPs that cover less of the query (of the query frame in BLASTX/TBLASTX) are removed |
 | `-dust <args>` | String | `20 64 1` | DUST low-complexity filter for BLASTN (`yes`, `no`, or `"level window linker"`) |
 | `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (blastx/tblastx/tblastn) | SEG low-complexity filter for BLASTX/BLASTP/TBLASTX/TBLASTN (`yes`, `no`, or `"window locut hicut"`) |
@@ -450,11 +453,12 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 
 ### What LOSAT refuses
 
-LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
+LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them, except where an item says that NCBI BLAST+ fails there too. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 **Output**
 - `-outfmt 1`, `2`, `3`, `4` and `18`: all five programs.
-- `-html`, `-line_length`, `-sorthits`, `-sorthsps`: all five programs.
+- `-html`: all five programs.
+- `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.
 
 **Scoring and search settings**
 - `-matrix` and gap costs: `blastp`, `blastx` and `tblastn` accept every matrix with any gap costs of NCBI's table for the matrix, but IDENTITY not with the compressed lookup table (word sizes 5 to 7; 5 is the default of `-task blastp-fast`, `blastx-fast` and `tblastn-fast`), with which NCBI crashes, and `blastx` no other name that begins with IDENTITY (such as IDENTITYX), with which NCBI aborts; `tblastx` accepts every matrix.

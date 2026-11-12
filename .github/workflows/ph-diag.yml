@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1]
     defaults:
       run:
         working-directory: web/app
@@ -86,7 +86,7 @@ jobs:
         run: |
           mkdir -p ${{ runner.temp }}/ph ${{ runner.temp }}/ph/crash
           sudo -b sh -c 'python3 -I ${{ github.workspace }}/.github/ph-diag/watch.py ${{ runner.temp }}/ph > ${{ runner.temp }}/ph/watcher.out 2>&1'
-      - name: WebKit page starts (zz-ph-start.spec.ts), 2,500 times
+      - name: The WebKit project, twice (with the no-core launcher of fix/web-webkit-no-core)
         continue-on-error: true
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
@@ -96,7 +96,7 @@ jobs:
           DEBUG: pw:browser
           LD_PRELOAD: ${{ runner.temp }}/crashbt.so
           CRASHBT_DIR: ${{ runner.temp }}/ph/crash
-        run: npx playwright test --project=webkit --repeat-each=2500 --reporter=list,github tests/e2e/zz-ph-start.spec.ts > ${{ runner.temp }}/ph/e2e.log 2>&1
+        run: npx playwright test --project=webkit --repeat-each=2 --reporter=list,github > ${{ runner.temp }}/ph/e2e.log 2>&1
       - name: Summary
         if: always()
         run: |
@@ -105,7 +105,7 @@ jobs:
           sudo coredumpctl list --no-pager > ${{ runner.temp }}/ph/coredumps.txt 2>&1 || true
           ls ${{ runner.temp }}/ph/crash | head -20 || true
           sudo chmod -R a+r ${{ runner.temp }}/ph || true
-          grep -iE 'segfault|WPE|MiniBrowser|oom|killed' ${{ runner.temp }}/ph/dmesg.txt | tail -20 || true
+          grep -iE 'segfault|traps|RLIMIT_CORE|aborting|WPE|MiniBrowser|oom|killed' ${{ runner.temp }}/ph/dmesg.txt | tail -30 || true
           grep -E '^\s+[0-9]+ (passed|failed|flaky|skipped|did not run)' ${{ runner.temp }}/ph/e2e.log || true
           grep -E '✘' ${{ runner.temp }}/ph/e2e.log | head -20 || true
           cat ${{ runner.temp }}/ph/watch.log 2>/dev/null || echo 'no watch.log'

@@ -1733,10 +1733,6 @@ pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
 /// bounds and its ideal block, as `build_ncbi_lookup_for_profile(.., matrix, word_length)`
 /// prepares them; with a `pool` of more than one thread they are computed on its threads (each
 /// reads only its own context: the same blocks, as `x_prepare_blosum62_lookup_query_in_pool`).
-/// Inlined into each caller, as into BLASTP's `XLookupFlat::lookup_query` when it was the only
-/// one (psiblast's later rounds call it too, `pssm_hooks::psi_contexts`): BLASTP's machine code
-/// stays as it was.
-#[inline(always)]
 pub(crate) fn prepare_matrix_lookup_query_for_word_size(
     queries: &[Vec<QueryFrame>],
     word_length: usize,

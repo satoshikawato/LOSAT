@@ -182,6 +182,31 @@ impl SideFiles for FsSideFiles {
     fn listed(&self, n: u32) -> Vec<u8> {
         self.name(&self.listed_base, n)
     }
+
+    /// Opens the side file of the n-th report as NCBI does when it writes the report, without
+    /// leaving a mark: a path that exists is opened for writing and not truncated (a directory or a
+    /// file without write permission fails), a path that does not exist is created and removed. The
+    /// run that holds its side files makes this check when the report is made, so that an
+    /// unopenable file stops it where NCBI's run stops, not at the epilog after every later batch
+    /// was searched (DECISIONS 35 S1). The bytes are written when the hold ends, which creates the
+    /// file again.
+    fn check_openable(&self, n: u32) -> io::Result<()> {
+        let path = self.path(n);
+        match std::fs::OpenOptions::new().write(true).open(&path) {
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // A dangling link is created through (`File::create` follows it); only a path that
+                // did not exist at all is removed again.
+                let existed = path.symlink_metadata().is_ok();
+                std::fs::File::create(&path)?;
+                if !existed {
+                    std::fs::remove_file(&path)?;
+                }
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
 }
 
 /// The receiver of the side files of an outfmt 13 or 14 run that a caller without files takes

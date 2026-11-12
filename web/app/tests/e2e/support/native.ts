@@ -27,9 +27,9 @@ function sha256(bytes: Uint8Array | string): string {
 
 const cache = new Map<string, NativeExpectation>();
 
-/** Runs the native CLI for every format with `argv` (program first) from `cwd` (relative to the repository, or absolute). */
-export function nativeExpectation(argv: readonly string[], cwd: string): NativeExpectation {
-  const key = JSON.stringify([argv, cwd]);
+/** Runs the native CLI for every format with `argv` (program first) from `cwd` (relative to the repository, or absolute), with `env` added to the environment. */
+export function nativeExpectation(argv: readonly string[], cwd: string, env: Readonly<Record<string, string>> = {}): NativeExpectation {
+  const key = JSON.stringify([argv, cwd, env]);
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
   if (NATIVE === undefined) throw new Error(NO_NATIVE_REASON);
@@ -37,7 +37,7 @@ export function nativeExpectation(argv: readonly string[], cwd: string): NativeE
   let stderr: string | undefined;
   for (const format of FORMATS) {
     const args = [...argv, '-outfmt', String(format), '-num_threads', '1'];
-    const result = spawnSync(NATIVE, args, { cwd: resolve(REPOSITORY, cwd), maxBuffer: 1 << 30 });
+    const result = spawnSync(NATIVE, args, { cwd: resolve(REPOSITORY, cwd), maxBuffer: 1 << 30, env: { ...process.env, ...env } });
     if (result.status !== 0) throw new Error(`native ${args.join(' ')} failed (${result.status}): ${result.stderr}`);
     formats[format] = sha256(result.stdout);
     const warnings = sha256(result.stderr);

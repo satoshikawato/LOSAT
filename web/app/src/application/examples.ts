@@ -17,6 +17,7 @@ import {
   type ExampleId,
   type ExampleSet,
 } from '../domain/examples';
+import { refusedSentence, unreachableSentence } from '../domain/download-sentences';
 import type {
   DownloadResult,
   ExampleCopy,
@@ -288,9 +289,9 @@ function downloadProblem(result: Exclude<DownloadResult, { ok: true }>, set: Exa
   const host = exampleHost(set);
   switch (result.reason) {
     case 'unreachable':
-      return `${host} could not be reached (${result.detail}).`;
+      return unreachableSentence(host, result.detail);
     case 'refused':
-      return result.status >= 500 ? `${host} answered HTTP ${result.status}: try again in a moment.` : `${host} answered HTTP ${result.status}.`;
+      return refusedSentence(host, result.status);
     case 'corrupt':
       return `The file from ${host} could not be decompressed (${result.detail}).`;
     case 'too-large':

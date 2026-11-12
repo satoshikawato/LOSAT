@@ -515,14 +515,15 @@ pub struct BlastnArgs {
     /// `None` without them (or with the taxid 0).
     #[arg(skip)]
     pub window_masker: Option<std::sync::Arc<super::window_masker::WindowMasker>>,
-    /// Where `-window_masker_db` is read from: the file system when `None`; LOSAT Web's adapter
-    /// gives the counts files it holds under their names.
+    /// Where `-window_masker_db` and the file of `-window_masker_taxid` are read from: the file
+    /// system when `None`; LOSAT Web's adapter gives the counts files it holds under their names.
     #[arg(skip)]
     pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
     /// The registry of `-window_masker_taxid` as the caller read it (the directory of its files
-    /// and what each load writes, `ncbi_environment::ApplicationSettings::window_masker_registry`);
-    /// `None` when the caller has no such registry (LOSAT Web), which `-window_masker_taxid`
-    /// other than 0 then refuses.
+    /// and what each load writes, `ncbi_environment::ApplicationSettings::window_masker_registry`),
+    /// or LOSAT Web's registry of the counts files it holds (`window_masker_counts`: its directory,
+    /// no posts); `None` when the caller gives neither, which `-window_masker_taxid` other than 0
+    /// then refuses (`run_local_formats`).
     #[arg(skip)]
     pub window_masker_registry:
         Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
@@ -1016,8 +1017,9 @@ impl BlastnArgs {
         }
         let masker = match self.window_masker_taxid.filter(|&taxid| taxid != 0) {
             Some(taxid) => {
-                // The command line and the library give the registry; LOSAT Web has none and
-                // refuses the option before (`run_local_formats`).
+                // The command line and the library give the registry, LOSAT Web the registry of
+                // its counts files; a caller that gives none is refused before
+                // (`run_local_formats`).
                 let registry = self
                     .window_masker_registry
                     .as_ref()

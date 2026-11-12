@@ -99,10 +99,10 @@ fn run_main_entry() -> Result<()> {
     // {
     // 	x_CheckBlastUsageEnv();
     // ```
-    // Every NCBI BLAST+ program's application but dustmasker's has a usage report, made with the
+    // Every NCBI BLAST+ program's application but dustmasker's and segmasker's has a usage report, made with the
     // application before `AppMain` runs; it reads `.ncbirc` (`ncbi_environment::ApplicationStart`),
     // and its messages go to stderr at once, before `-version` and before blastdbcmd's `-logfile`
-    // is read. The start of the others (dustmasker, rpsbproc) writes nothing here.
+    // is read. The start of the others (dustmasker, segmasker, rpsbproc) writes nothing here.
     let program = argv
         .get(1)
         .and_then(|word| word.to_str())
@@ -133,6 +133,18 @@ fn run_main_entry() -> Result<()> {
     // blastdbcmd does.
     if argv.get(1).is_some_and(|word| word == "dustmasker") {
         std::process::exit(crate::dustmasker::run(&argv[2..]));
+    }
+    // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272
+    // ```c++
+    // int main(int argc, const char* argv[])
+    // {
+    //     // Execute main application function
+    //     return SegMaskerApplication().AppMain(argc, argv);
+    // }
+    // ```
+    // `losat segmasker` too.
+    if argv.get(1).is_some_and(|word| word == "segmasker") {
+        std::process::exit(crate::segmasker::run(&argv[2..]));
     }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.

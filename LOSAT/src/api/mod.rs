@@ -92,8 +92,9 @@
 //!   it writes. The API writes no PSSM file, so it refuses `-out_pssm`, `-out_ascii_pssm`,
 //!   `-save_pssm_after_last_round` and `-save_each_pssm` ([`validate`]).
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
-//!   [`run_dustmasker`] the masker of low-complexity regions: the command line's words, with the
-//!   caller's reader and writers for its standard streams.
+//!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
+//!   protein): the command line's words, with the caller's reader and writers for its standard
+//!   streams.
 //!
 //! # Items
 //!
@@ -105,7 +106,7 @@
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
 //!   [`Strand`], [`QueryHits`], [`SubjectHits`]
-//! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`]
+//! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -131,7 +132,7 @@ pub use program::Program;
 pub use run::{run, run_collect, run_to_file, HspRecord, Outcome, QueryStats, Report, Strand};
 pub(crate) use search::pssm_file_options;
 pub use search::{validate, Search, API_OWNED};
-pub use tools::{run_blastdbcmd, run_dustmasker, run_makeblastdb};
+pub use tools::{run_blastdbcmd, run_dustmasker, run_makeblastdb, run_segmasker};
 pub use view::{QueryHits, SubjectHits};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:49-57

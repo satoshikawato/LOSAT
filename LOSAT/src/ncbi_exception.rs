@@ -166,6 +166,12 @@ impl NcbiException {
         self.site
     }
 
+    /// Whether LOSAT knows the place of every throw of the chain, which `what()` names (a
+    /// [`ThrowSite::generated`] names none).
+    pub fn places_known(&self) -> bool {
+        self.chain().iter().all(|e| !e.site.file.is_empty())
+    }
+
     /// `GetMsg()`: the message, without the place or the extra text.
     pub fn get_msg(&self) -> &str {
         &self.message

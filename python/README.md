@@ -80,9 +80,10 @@ line writes to its standard error.
 pylosat.makeblastdb("-dbtype", "prot", "-out", "proteins", input=fasta_text)
 print(pylosat.blastdbcmd("-db", "proteins", "-info").text)
 print(pylosat.dustmasker("-outfmt", "fasta", input=nucleotide_fasta).text)
+print(pylosat.segmasker("-outfmt", "fasta", input=protein_fasta).text)
 ```
 
-`makeblastdb`, `blastdbcmd` and `dustmasker` take the command line's words and return a
+`makeblastdb`, `blastdbcmd`, `dustmasker` and `segmasker` take the command line's words and return a
 `ToolOutput`, what it writes to standard output (`bytes`, `text`) and to standard error
 (`diagnostics`). `input` is what the command line reads as standard input, so a database can be
 built from FASTA in memory, ids given to `blastdbcmd -entry_batch -`, and sequences in memory

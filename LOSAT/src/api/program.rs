@@ -13,9 +13,9 @@ use std::fmt;
 
 use super::error::Error;
 
-/// A search program of the library API. `makeblastdb`, `blastdbcmd` and `dustmasker` are not
-/// searches: they have functions of their own (`run_makeblastdb`, `run_blastdbcmd`,
-/// `run_dustmasker`).
+/// A search program of the library API. `makeblastdb`, `blastdbcmd`, `dustmasker` and
+/// `segmasker` are not searches: they have functions of their own (`run_makeblastdb`,
+/// `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Program {
@@ -60,8 +60,8 @@ impl Program {
     }
 
     /// The program of a command-line name. A program that the command line runs and the API
-    /// does not search with (`makeblastdb`, `makedb`, `blastdbcmd`, `dustmasker`) is named in
-    /// the error.
+    /// does not search with (`makeblastdb`, `makedb`, `blastdbcmd`, `dustmasker`, `segmasker`)
+    /// is named in the error.
     pub fn parse(name: &str) -> Result<Self, Error> {
         match name {
             "blastn" => Ok(Program::Blastn),
@@ -78,6 +78,9 @@ impl Program {
             )),
             "dustmasker" => Err(Error::Argv(
                 "dustmasker is not a search program: run_dustmasker runs it".to_string(),
+            )),
+            "segmasker" => Err(Error::Argv(
+                "segmasker is not a search program: run_segmasker runs it".to_string(),
             )),
             // rpsblast (series PR, item PS11a) runs on the command line; the API has no program
             // for it yet (its results and options are those of a later item).

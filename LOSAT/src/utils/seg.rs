@@ -611,9 +611,10 @@ impl SegParams {
         // if (sparamsp->locut > sparamsp->hicut)
         //     sparamsp->hicut = sparamsp->locut;
         // ```
+        // (`< 0.0`, so a NaN stays: segmasker's `-locut -nan`.)
         let window = if window > 0 { window } else { 12 };
-        let locut = if locut >= 0.0 { locut } else { 0.0 };
-        let mut hicut = if hicut >= 0.0 { hicut } else { 0.0 };
+        let locut = if locut < 0.0 { 0.0 } else { locut };
+        let mut hicut = if hicut < 0.0 { 0.0 } else { hicut };
         if locut > hicut {
             hicut = locut;
         }
@@ -891,9 +892,32 @@ impl SegMasker {
         (leftend + best_lend, leftend + best_rend)
     }
 
-    /// Mask a sequence and return the list of masked intervals
+    /// Mask a sequence and return the list of masked intervals, the overlapping segments merged:
+    /// `SeqBufferSeg` as BLAST's filters call it (`sparamsp->overlaps = TRUE`, blast_filter.c
+    /// and the composition adjustment's `s_DoSegSequenceData`).
     /// Reference: blast_seg.c:2030-2116 (s_SegSeq)
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+        self.seq_buffer_seg::<true>(seq)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2224-2238, 2311-2316
+    // ```c
+    // SegParameters* SegParametersNewAa (void)
+    // {
+    //    ...
+    //    sparamsp->overlaps = FALSE;
+    // ...
+    //    /* merge the segment if desired. */
+    //    if (sparamsp->overlaps)
+    //       s_MergeSegs(seqwin, segs);
+    // ```
+    /// `SeqBufferSeg` with `sparamsp->overlaps` = `OVERLAPS`: the intervals of the segments in
+    /// NCBI's order (`s_SegsToBlastSeqLoc`), merged where they overlap when `OVERLAPS`. The
+    /// masker of `losat segmasker` (`CSegMasker`) keeps `SegParametersNewAa`'s `FALSE`; BLAST's
+    /// filters set `TRUE` (`mask_sequence`). Each value is its own copy of the code, so the
+    /// filters' copy is the same machine code as before the masker of segmasker came.
+    #[inline(always)]
+    pub(crate) fn seq_buffer_seg<const OVERLAPS: bool>(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         if seq.len() < self.window {
             return Vec::new();
         }
@@ -912,9 +936,9 @@ impl SegMasker {
         // other settings run `mask_sequence_reference`, the port of `s_SegSeq`. The fast path keeps the
         // control flow of this loop and replaces only the entropy and trim computations.
         if self.x_fast_applies() {
-            return self.x_mask_sequence(seq);
+            return self.x_mask_sequence::<OVERLAPS>(seq);
         }
-        self.mask_sequence_reference(seq)
+        self.mask_sequence_reference::<OVERLAPS>(seq)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2032,2053-2060
@@ -932,7 +956,7 @@ impl SegMasker {
     // ```
     // The original body of `mask_sequence`, moved here unchanged; it is the port of this function. It runs
     // where the fast path does not apply (`x_fast_applies`).
-    fn mask_sequence_reference(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+    fn mask_sequence_reference<const OVERLAPS: bool>(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
         fn seg_seq(masker: &SegMasker, seq: &[u8], offset: usize, segs: &mut Vec<(usize, usize)>) {
@@ -1030,7 +1054,9 @@ impl SegMasker {
         // if (sparamsp->overlaps)
         //    s_MergeSegs(seqwin, segs);
         // ```
-        merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        if OVERLAPS {
+            merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2300-2319
         // ```c
@@ -1601,7 +1627,7 @@ impl SegMasker {
     // The recursion, the left-trim handling and the order of the segments are the same as in
     // `mask_sequence_reference`; only the entropy array and the trim use the histogram.
     /// `mask_sequence` through `x_entropy_array` and `x_trim_segment`.
-    fn x_mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+    fn x_mask_sequence<const OVERLAPS: bool>(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         let index = self.x_letter_index();
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
@@ -1689,7 +1715,9 @@ impl SegMasker {
         }
 
         seg_seq(self, &index, seq, 0, &mut segs_inclusive);
-        merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        if OVERLAPS {
+            merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        }
         segs_inclusive.reverse();
         segs_inclusive
             .into_iter()
@@ -1838,12 +1866,12 @@ mod tests {
             let reference = if seq.len() < masker.window {
                 Vec::new()
             } else {
-                masker.mask_sequence_reference(&seq)
+                masker.mask_sequence_reference::<true>(&seq)
             };
             let fast = if seq.len() < masker.window {
                 Vec::new()
             } else {
-                masker.x_mask_sequence(&seq)
+                masker.x_mask_sequence::<true>(&seq)
             };
             assert_eq!(fast, reference, "case {case}, length {len}");
             masked += reference.len();
@@ -1900,9 +1928,9 @@ mod tests {
             let begin = (next() % 5000) as usize;
             let end = (begin + 50 + (next() % 900) as usize).min(seq.len());
             let window = &seq[begin..end];
-            let reference = masker.mask_sequence_reference(window);
+            let reference = masker.mask_sequence_reference::<true>(window);
             assert_eq!(
-                masker.x_mask_sequence(window),
+                masker.x_mask_sequence::<true>(window),
                 reference,
                 "window {begin}..{end}"
             );

@@ -7,9 +7,9 @@
 //! Reads the query and subject files into memory, searches with `LOSAT::api::run`, or
 //! `run_to_file` with `-out`, and writes the search's warnings and a failure's message to
 //! standard error, so that a run compares with `losat <program>` with the same arguments
-//! (`tests/db_search_fixtures.py check --library`). `makeblastdb`, `blastdbcmd` and
-//! `dustmasker` go to their functions, with the standard streams of this process
-//! (`tests/dustmasker_fixtures.rs`). A failure ends with status 1, whatever the command line's
+//! (`tests/db_search_fixtures.py check --library`). `makeblastdb`, `blastdbcmd`, `dustmasker`
+//! and `segmasker` go to their functions, with the standard streams of this process
+//! (`tests/masker_fixtures.rs`). A failure ends with status 1, whatever the command line's
 //! status for it.
 
 use std::io::Write;
@@ -18,7 +18,7 @@ use std::process::ExitCode;
 
 use LOSAT::api::{
     read_input_file, read_inputs, run, run_blastdbcmd, run_dustmasker, run_makeblastdb,
-    run_to_file, validate, Error, Inputs, Program, Role,
+    run_segmasker, run_to_file, validate, Error, Inputs, Program, Role,
 };
 
 fn main() -> ExitCode {
@@ -57,6 +57,7 @@ fn search() -> Result<(), Error> {
         "blastdbcmd" => run_blastdbcmd,
         "makeblastdb" => run_makeblastdb,
         "dustmasker" => run_dustmasker,
+        "segmasker" => run_segmasker,
         _ => return search_program(program, words),
     };
     let (mut stdin, mut stdout, mut stderr) =

@@ -262,6 +262,25 @@ pub fn dustmasker<'py>(
     Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
 }
 
+/// `segmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn segmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    let (output, diagnostics) = py
+        .detach(|| {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            api::run_segmasker(&words, &mut &*input, &mut output, &mut diagnostics)?;
+            Ok((output, diagnostics))
+        })
+        .map_err(exception)?;
+    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+}
+
 /// `run` without reports.
 fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTuple>> {
     let mut batches = api::run_batches(&loaded.search, loaded.inputs()).map_err(exception)?;

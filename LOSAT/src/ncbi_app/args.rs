@@ -3,8 +3,8 @@
 //! (`Tool::descs`, `Tool::dependencies`), this module adds those that every `CArgDescriptions`
 //! has (the help flags, `-logfile`, `-conffile`), reads the words, and refuses every command line
 //! that NCBI's reader refuses with NCBI's text. The values are read as NCBI's `CArgs` gives them
-//! (`Args`): the text of a key, a flag, the integer of an `eInteger` key, and the streams of the
-//! file keys (`files::open_input_file`, `Args::output_file`, module `files`).
+//! (`Args`): the text of a key, a flag, the integer of an `eInteger` key, the number of an
+//! `eDouble` key, and the streams of the file keys (`files::open_input_file`, `Args::output_file`, module `files`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -23,8 +23,17 @@ pub(crate) enum Kind {
     Flag,
     Text,
     Integer,
+    /// `eDouble`: `CArg_Double` (`NStr::StringToDouble` with `fDecimalPosixOrLocal`).
+    Double,
     InputFile,
     OutputFile,
+}
+
+/// The number of an `eInteger` or `eDouble` key.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Number {
+    Integer(i32),
+    Double(f64),
 }
 
 /// A constraint on a key's value (`CArgAllow`).
@@ -270,8 +279,9 @@ pub(crate) struct Args {
     /// The value of each argument that has one: the value given (`None` for a flag), else the
     /// default of a key that no given argument excludes.
     values: BTreeMap<&'static str, Option<String>>,
-    /// The number of each `eInteger` key that has a value (`CArg_Integer`).
-    integers: BTreeMap<&'static str, i32>,
+    /// The number of each `eInteger` and `eDouble` key that has a value (`CArg_Integer`,
+    /// `CArg_Double`).
+    numbers: BTreeMap<&'static str, Number>,
     /// The names given on the command line, in their order.
     given: Vec<&'static str>,
 }
@@ -305,7 +315,18 @@ impl Args {
 
     /// `AsInteger()` of the `eInteger` key `name`: given, or its default.
     pub(crate) fn integer(&self, name: &str) -> Option<i32> {
-        self.integers.get(name).copied()
+        match self.numbers.get(name) {
+            Some(&Number::Integer(number)) => Some(number),
+            _ => None,
+        }
+    }
+
+    /// `AsDouble()` of the `eDouble` key `name`: given, or its default.
+    pub(crate) fn double(&self, name: &str) -> Option<f64> {
+        match self.numbers.get(name) {
+            Some(&Number::Double(number)) => Some(number),
+            _ => None,
+        }
     }
 
     /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, `stdout` for
@@ -379,7 +400,7 @@ impl Args {
 /// is not an option, and every word after `--`, is one too many.
 pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
     let mut values: BTreeMap<&'static str, Option<String>> = BTreeMap::new();
-    let mut integers: BTreeMap<&'static str, i32> = BTreeMap::new();
+    let mut numbers: BTreeMap<&'static str, Number> = BTreeMap::new();
     let mut given: Vec<&'static str> = Vec::new();
     // `n_plain`: `None` until the positional arguments start (NCBI's `kMax_UInt`).
     let mut n_plain: Option<u32> = None;
@@ -433,15 +454,15 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
         }
         values.insert(desc.name, value);
         if let Some(number) = number {
-            integers.insert(desc.name, number);
+            numbers.insert(desc.name, number);
         }
         given.push(desc.name);
         at += if used { 2 } else { 1 };
     }
-    post_check(tool, &mut values, &mut integers, &given)?;
+    post_check(tool, &mut values, &mut numbers, &given)?;
     Ok(Args {
         values,
-        integers,
+        numbers,
         given,
     })
 }
@@ -630,8 +651,8 @@ struct Created {
     desc: &'static Desc,
     /// Its value (`None` for a flag).
     value: Option<String>,
-    /// The number of an `eInteger` key.
-    number: Option<i32>,
+    /// The number of an `eInteger` or `eDouble` key.
+    number: Option<Number>,
     /// Whether the next word was its value.
     used: bool,
 }
@@ -702,10 +723,11 @@ fn is_argument_name(name: &str) -> bool {
 //                            err_msg + m_Constraint->GetUsage(),value));
 // ```
 /// `CArgDesc::ProcessArgument` (and `ProcessDefault`): the conversion of `value` to the key's
-/// type, then its constraint; the number of an `eInteger` key.
-fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<i32>, ArgsError> {
+/// type, then its constraint; the number of an `eInteger` or `eDouble` key.
+fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>, ArgsError> {
     let number = match desc.kind {
-        Kind::Integer => Some(integer_value(tool, desc, value)?),
+        Kind::Integer => Some(Number::Integer(integer_value(tool, desc, value)?)),
+        Kind::Double => Some(Number::Double(double_value(tool, desc, value)?)),
         Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
     };
     let allowed = match desc.constraint {
@@ -713,7 +735,11 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<i32>, A
         Some(Constraint::Strings(values)) => values.contains(&value),
         // `NStr::StringToDouble(value) >= m_MinValue`: the decimal integer `integer_value`
         // accepted is the same number as a double.
-        Some(Constraint::AtLeast(min)) => number.is_some_and(|number| i64::from(number) >= min),
+        Some(Constraint::AtLeast(min)) => match number {
+            Some(Number::Integer(number)) => i64::from(number) >= min,
+            Some(Number::Double(number)) => number >= min as f64,
+            None => false,
+        },
     };
     match desc.constraint {
         Some(constraint) if !allowed => Err(invalid(
@@ -809,6 +835,42 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
+// ```c++
+// inline CArg_Double::CArg_Double(const string& name, const string& value)
+//     : CArg_String(name, value)
+// {
+//     try {
+//         m_Double = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
+//     } catch (const CException& e) {
+//         NCBI_RETHROW(e,CArgException,eConvert,
+//             s_ArgExptMsg(GetName(),"Argument cannot be converted",value));
+//     }
+// }
+// ```
+// As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
+// message: `Cannot convert string 'abc' to double (m_Pos = 0)`).
+/// The value of an `eDouble` key (`CArg_Double`). A value that NCBI computes in extended
+/// precision (`ncbi_str::PosixOrLocalError::ExtendedPrecision`: more than 18 digits or 15
+/// places before a final `e`) is LOSAT's refusal.
+fn double_value(tool: &Tool, desc: &Desc, value: &str) -> Result<f64, ArgsError> {
+    use crate::ncbi_str::{string_to_double_posix_or_local, PosixOrLocalError};
+    string_to_double_posix_or_local(value.as_bytes()).map_err(|error| match error {
+        PosixOrLocalError::Ncbi(error) => ArgsError::Invalid(ArgException {
+            code: "eConvert",
+            messages: vec![
+                error.text(),
+                arg_message(desc.name, "Argument cannot be converted", value),
+            ],
+        }),
+        PosixOrLocalError::ExtendedPrecision => ArgsError::Refused(format!(
+            "the value '{value}' of -{}, which NCBI computes in extended precision, is not \
+             supported by LOSAT's {}",
+            desc.name, tool.refusal_name
+        )),
+    })
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3162-3296
 // ```c++
 //     ITERATE(TDependencies, dep, m_Dependencies) {
@@ -864,7 +926,7 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
 fn post_check(
     tool: &Tool,
     values: &mut BTreeMap<&'static str, Option<String>>,
-    integers: &mut BTreeMap<&'static str, i32>,
+    numbers: &mut BTreeMap<&'static str, Number>,
     given: &[&'static str],
 ) -> Result<(), ArgsError> {
     let mut require: BTreeMap<&str, &str> = BTreeMap::new();
@@ -907,7 +969,7 @@ fn post_check(
         }
         if let Some(default) = desc.default {
             if let Some(number) = process_value(tool, desc, default)? {
-                integers.insert(desc.name, number);
+                numbers.insert(desc.name, number);
             }
             values.insert(desc.name, Some(default.to_string()));
         }

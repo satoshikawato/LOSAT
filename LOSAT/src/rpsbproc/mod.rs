@@ -115,9 +115,6 @@ impl Outcome {
 
 /// glibc's `%g` (an `ostream`'s default output of a double), `-0` for negative zero.
 fn format_g(value: f64) -> String {
-    if value == 0.0 && value.is_sign_negative() {
-        return "-0".to_string();
-    }
     crate::report::pairwise::cpp_default_double(value)
 }
 

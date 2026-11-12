@@ -104,9 +104,18 @@ impl Diag<'_> {
         self.target.write_text(text, self.stderr);
     }
 
-    /// LOSAT's refusal: a diagnostic line, exit status 1.
+    /// Writes `text` to the standard error stream itself (`cerr << ...`), not to the target of
+    /// `-logfile`: segmasker's report of an exception its `Run` catches.
+    pub(crate) fn cerr(&mut self, text: &[u8]) {
+        let _ = self.stderr.write_all(text);
+        let _ = self.stderr.flush();
+    }
+
+    /// LOSAT's refusal: a line on the standard error stream itself, not on the target of
+    /// `-logfile` (NCBI has no text for it, and `-logfile /dev/null` must not hide it: as the
+    /// searches' refusals, line RG DECISIONS 32), exit status 1.
     pub(crate) fn refuse(&mut self, reason: &str) -> i32 {
-        self.post(&format!("Error: {reason}"));
+        self.cerr(format!("Error: {reason}\n").as_bytes());
         1
     }
 

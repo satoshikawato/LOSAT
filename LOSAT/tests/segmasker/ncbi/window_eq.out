@@ -1,0 +1,15 @@
+>seq1 low complexity test
+2 - 14
+15 - 50
+>seq2 no lcr
+>seq3 several regions
+2 - 19
+24 - 57
+64 - 86
+86 - 98
+98 - 106
+106 - 120
+124 - 128
+149 - 169
+183 - 196
+200 - 255

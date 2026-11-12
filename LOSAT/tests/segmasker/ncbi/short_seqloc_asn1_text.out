@@ -1,0 +1,10 @@
+Seq-loc ::= int {
+  from 0,
+  to 12,
+  id local id 6
+}
+Seq-loc ::= int {
+  from 0,
+  to 24,
+  id local id 8
+}

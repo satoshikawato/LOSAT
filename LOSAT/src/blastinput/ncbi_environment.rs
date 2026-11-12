@@ -2324,6 +2324,9 @@ impl ApplicationStart {
             }
             Ok(ConfigLoad::Failed(report)) => {
                 target.write_text(report.as_bytes(), stderr);
+                if !replays_collected(&self.program) {
+                    return Ok(Some(2));
+                }
                 let replay = format!("{}{report}", self.usage_report.as_deref().unwrap_or(""));
                 if replays_to_stderr(&self.program) {
                     DiagTarget::Stderr.write_text(replay.as_bytes(), stderr);
@@ -2389,6 +2392,31 @@ impl ApplicationStart {
 /// ```c++
 ///     CBlastAppDiagHandler bah;
 /// ```
+// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:258-261
+// ```c++
+// void SegMaskerApplication::Exit(void)
+// {
+//     SetDiagStream(0);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:750-753 (`x_TryMain`, after a failed
+// `x_TryInit` too)
+// ```c++
+//     // Close application
+//     if ( s_HandleExceptions() ) {
+//         try {
+//             Exit();
+// ```
+/// Whether `program`'s application posts again, when it ends after a failed configuration load,
+/// the messages it collected before its diagnostics were set up (the replay of
+/// `write_config_load`): not segmasker, whose `Exit` takes the diagnostic stream away before
+/// (NCBI BLAST+ 2.17.0 segmasker, the official release and the conda build, `-conffile` of a
+/// malformed file: the report once, exit status 2; dustmasker writes it twice; fixtures
+/// `conf_malformed`).
+fn replays_collected(program: &str) -> bool {
+    program != "segmasker"
+}
+
 fn replays_to_stderr(program: &str) -> bool {
     matches!(
         program,
@@ -2446,7 +2474,7 @@ fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsStrin
 ///     }
 /// ```
 fn has_usage_report(program: &str) -> bool {
-    !matches!(program, "rpsbproc" | "dustmasker")
+    !matches!(program, "rpsbproc" | "dustmasker" | "segmasker")
 }
 
 /// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the reports of

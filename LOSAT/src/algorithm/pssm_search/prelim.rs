@@ -43,6 +43,7 @@
 //! reference code. The chaining of `BLAST_GetGappedScore` is blastp-fast's only (psiblast's task
 //! is blastp's), and `hit_params->low_score` is set by no psiblast option.
 
+use super::evalue::EvalueStats;
 use super::gapalign::{
     pssm_get_start_for_gapped_alignment, pssm_score_only_gapped_alignment, PssmGapScratch,
 };
@@ -58,7 +59,7 @@ use crate::algorithm::tblastx::blast_aascan::{
 };
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::KarlinParams;
 
 /// NCBI's `BlastInitHSP` with its `BlastUngappedData`.
 #[derive(Clone, Copy, Debug)]
@@ -88,8 +89,8 @@ pub(crate) struct PssmPrelim<'a, R: PssmRows> {
     pub(crate) x_drop_gapped: i32,
     /// `kbp_gap_psi[0]`, for the preliminary e-values.
     pub(crate) karlin: &'a KarlinParams,
-    /// `sbp->gbp` (a PSSM search always has one: LOSAT's psiblast takes no `-searchsp`).
-    pub(crate) gumbel: &'a BlastGumbelBlk,
+    /// `sbp->gbp` and the context's effective search space, for the preliminary e-values.
+    pub(crate) stats: EvalueStats<'a>,
     /// `hit_params->prelim_evalue`.
     pub(crate) prelim_evalue: f64,
 }
@@ -375,7 +376,19 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
         //             status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
         // ```
         // `sbp->kbp_gap` is `kbp_gap_psi` (`Blast_QueryIsPssm`); Spouge's finite-size correction
-        // reads the query's and the subject's lengths (blast_hits.c:1825-1846).
+        // reads the query's and the subject's lengths, the e-value without the Gumbel block the
+        // context's search space (`EvalueStats::e_value`, blast_hits.c:1872-1890). psiblast
+        // computes them without the block too (only RPS-BLAST skips them then).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:874-880
+        // ```c
+        //     } else if (!Blast_ProgramIsPhiBlast(program_number)
+        //            && !(isRPS && !sbp->gbp)
+        //            /* do not calculate E-values for mapping */
+        //            && program_number != eBlastTypeMapping ) {
+        //         /* Calculate e-values for all HSPs. Skip this step
+        //            for PHI or RPS with old FSC, since calculating the E values
+        //            requires precomputation that has not been done yet */
+        // ```
         let query_length = self.rows.len() as i32;
         let mut list = BlastpHspList {
             oid: s_idx,
@@ -384,10 +397,9 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
                 .iter()
                 .map(|hsp| XPrelimHsp {
                     hsp: *hsp,
-                    e_value: blast_spouge_stoe(
+                    e_value: self.stats.e_value(
                         hsp.raw_score,
                         self.karlin,
-                        self.gumbel,
                         query_length,
                         aa_len as i32,
                     ),

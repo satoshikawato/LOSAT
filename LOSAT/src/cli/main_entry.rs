@@ -262,7 +262,12 @@ fn run_main_entry() -> Result<()> {
     // `[Diag]`, `[LOG]`), let it through: LOSAT refuses the settings it refuses in a run, which
     // include those, with the same check (line RG DECISIONS E1b-6). rpsbproc refuses `-dryrun`
     // (item E1c).
-    if dryrun {
+    // rpstblastn's `-help` and `-h` reach here as a parsed flag (`RpstblastnArgs::ncbi_help`);
+    // NCBI's reader writes their text before the application runs, `-dryrun` or not (NCBI BLAST+
+    // 2.17.0, PS12a probes `dry_h`, `dry_help`), as the parser's help of the other programs.
+    let help_flag =
+        matches!(&cli.command, Commands::Rpstblastn(args) if args.ncbi_help_text().is_some());
+    if dryrun && !help_flag {
         if let Some(name) = program_name.as_deref() {
             crate::blastinput::ncbi_environment::check_ncbi_application_settings(name)
                 .map_err(anyhow::Error::msg)?;

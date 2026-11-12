@@ -7712,8 +7712,7 @@ fn open_search_database(
                 list,
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis)
-            .in_id_scope(args.id_scope.clone());
+            .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -8317,11 +8316,6 @@ pub fn run_local_database(
     )?
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    args.id_scope = crate::algorithm::common::database::database_id_scope(
-        args.parse_deflines,
-        query_records,
-        "BLASTN",
-    )?;
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -9404,6 +9398,25 @@ fn run_in_pool(
     // sequences that the final hit lists of the batches name (`database::read_titles`).
     let shown = ShownSubjects::new(&args, source);
     let mut titles = database::DatabaseTitles::new();
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
+    // loop cuts the batches.
+    // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`):
+    // outfmt 5 reads the queries' letters, which keeps the records read before the search
+    // (`x_query_drop::Rule`), and `-parse_deflines` reads no query as a stream.
+    let subject_records = matches!(source, SubjectSource::Prepared(_));
+    let xml = output_formats.contains(&BlastnOutputFormat::Xml);
+    let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        subject_records,
+        xml,
+        "BLASTN",
+    )
+    .map(|scopes| match &queries {
+        x_query_stream::Queries::Records { input, .. } if xml && !subject_records => {
+            scopes.with_whole_run_of(input)
+        }
+        _ => scopes,
+    });
     let megablast = args.task == "megablast";
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
     // ```c
@@ -10041,6 +10054,18 @@ fn run_in_pool(
         // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
         // that NCBI cannot read fails this batch, after the reports of the batches before
         // and the messages of this batch's reading.
+        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
+        // the batch (its own errors come first): the warnings of the batches read so far, as for
+        // its refusal of a title (below).
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
+                let written = if stream.acting() { start } else { 0 };
+                for query_warnings in &warnings[written..=start] {
+                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
+                }
+                return Err(error);
+            }
+        }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
@@ -10060,7 +10085,30 @@ fn run_in_pool(
                     );
                 }
             }
-            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+            let read =
+                database::read_titles(database, &batch_hit_lists, &mut titles).and_then(|()| {
+                    let Some(scopes) = query_scopes.as_ref() else {
+                        return Ok(());
+                    };
+                    crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                        &titles,
+                        batch_hit_lists
+                            .iter()
+                            .enumerate()
+                            .flat_map(|(query, hit_list)| {
+                                hit_list.iter().flat_map(move |hit_list| {
+                                    let count =
+                                        hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                                    hit_list.hsplist_array[..count]
+                                        .iter()
+                                        .map(move |hsp_list| (start + query, hsp_list.oid))
+                                })
+                            }),
+                        scopes,
+                        "BLASTN",
+                    )
+                });
+            if let Err(error) = read {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the

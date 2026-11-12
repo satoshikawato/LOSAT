@@ -18,7 +18,7 @@ use super::{
     runtime::BatchResults,
     subjects::Subjects,
 };
-use crate::algorithm::common::database::{database_id_scope, library_subject};
+use crate::algorithm::common::database::library_subject;
 use crate::api::local_blast::{FormatProbe, ReportOutputs, ReportedSubject};
 use crate::blastinput::app::{self, Program};
 use crate::blastinput::fasta_reader;
@@ -212,6 +212,7 @@ fn search_records(
             shown,
             search_subjects: Subjects::Fasta(&subjects),
             serial_batches: args.parse_deflines,
+            parse_deflines: args.parse_deflines,
             database: None,
             archive,
             out: args.out.as_deref(),
@@ -245,6 +246,8 @@ struct RunReports<'a> {
     search_subjects: Subjects<'a>,
     /// `run_query_batches`.
     serial_batches: bool,
+    /// `-parse_deflines` (`query_batch::QueryScopes`).
+    parse_deflines: bool,
     database: Option<DatabaseReports<'a>>,
     /// The BLAST archive (outfmt 11), when it is requested.
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
@@ -532,12 +535,39 @@ fn write_run(
         shown,
         search_subjects,
         serial_batches,
+        parse_deflines,
         ref database,
         archive,
         search_error,
         ref xml_scan,
         ..
     } = run;
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with `-subject`
+    // or outfmt 5 one scope of every record in memory, made before the search so that its refusal
+    // comes before any byte (`QueryScopes::read_ahead`); else the batches add theirs as they come.
+    let xml = choices.iter().any(|choice| choice.number == 5);
+    let query_scopes = std::cell::RefCell::new(
+        match crate::blastinput::query_batch::QueryScopes::of_search(
+            parse_deflines,
+            database.is_none(),
+            xml,
+            "BLASTX",
+        ) {
+            Some(scopes)
+                if scopes.span() == crate::blastinput::query_batch::QueryScopeSpan::Run =>
+            {
+                Some(
+                    crate::blastinput::query_batch::QueryScopes::of_records(
+                        crate::blastinput::query_batch::QueryScopeSpan::Run,
+                        "BLASTX",
+                        query_records,
+                    )?
+                    .read_ahead(),
+                )
+            }
+            scopes => scopes,
+        },
+    );
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
@@ -605,6 +635,12 @@ fn write_run(
                       results: &mut Vec<BatchResults>,
                       queries_before: usize|
      -> Result<()> {
+        if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
+            scopes.add_batch_ids(
+                queries.iter().filter_map(|record| record.believed()),
+                queries_before,
+            )?;
+        }
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
         // A database: the batch's reported sequences, and its hit lists named by their ranks.
@@ -615,6 +651,10 @@ fn write_run(
                 search_options,
                 asks,
                 results,
+                query_scopes
+                    .borrow()
+                    .as_ref()
+                    .map(|scopes| scopes.numbered_from(queries_before)),
                 &mut *diagnostics,
             )?),
             None => None,
@@ -894,12 +934,7 @@ fn search_database(
     // `InitializeSubject`.
     let database =
         BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut *outputs.diagnostics)?
-            .showing_gis(args.show_gis)
-            .in_id_scope(database_id_scope(
-                args.parse_deflines,
-                query_records,
-                "BLASTX",
-            )?);
+            .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         &args.db_filter,
@@ -989,6 +1024,7 @@ fn search_database(
             shown,
             search_subjects,
             serial_batches: args.parse_deflines,
+            parse_deflines: args.parse_deflines,
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,

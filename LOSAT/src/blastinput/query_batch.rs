@@ -586,7 +586,7 @@ mod tests {
             ("+", None),
             ("1,000", None),
             ("0x10", None),
-            // NCBI reads up to a NUL (`while (char ch = str[pos])`, ncbistr.cpp:851).
+            // NCBI reads up to a NUL (`while (char ch = str[pos])`, ncbistr.cpp:841).
             ("12\u{0}x", Some(12)),
             ("\u{0}12", None),
         ] {

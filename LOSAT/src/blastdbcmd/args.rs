@@ -593,6 +593,14 @@ impl Args {
     pub(super) fn value(&self, name: &str) -> Option<&str> {
         self.values.get(name).and_then(|value| value.as_deref())
     }
+
+    /// `CArgValue::AsInteger` of an `eInteger` key: its value converted as the reader converted
+    /// it (`NStr::StringToInt8`, `integer_value`), so that a value the reader accepted is read
+    /// as the same number (`40\0x` is 40, as in NCBI).
+    pub(super) fn integer(&self, name: &str) -> Option<i64> {
+        self.value(name)
+            .and_then(|value| string_to_int8(value).ok())
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2856-2932
@@ -1356,6 +1364,27 @@ mod tests {
             messages(&["-info", "-info-file"]).1,
             ["Argument with this name is defined already: info"]
         );
+    }
+
+    /// `CArgValue::AsInteger`: an integer key is read as the number the reader accepted, so a
+    /// value whose digits end at a NUL (a value the library can pass) is that number for its
+    /// consumer too, as in NCBI (`-line_length 40\0x` wraps at 40).
+    #[test]
+    fn an_integer_key_is_the_number_the_reader_accepted() {
+        let args = parse(&words(&[
+            "-db",
+            "db/p5",
+            "-entry",
+            "all",
+            "-line_length",
+            "40\u{0}x",
+        ]))
+        .unwrap();
+        assert_eq!(args.integer("line_length"), Some(40));
+        let args = parse(&words(&["-db", "db/p5", "-ipg", "1001\u{0}x"])).unwrap();
+        assert_eq!(args.integer("ipg"), Some(1001));
+        let args = parse(&words(&["-db", "db/p5", "-entry", "all"])).unwrap();
+        assert_eq!(args.integer("line_length"), Some(80));
     }
 
     #[test]

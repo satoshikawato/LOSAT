@@ -1,11 +1,14 @@
 //! The Bioseq of a query or subject record in a BLAST archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:597-601
+//! NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:597-603
 //! ```c++
-//!     // (CFastaReader::ParseDefLine ... the raw defline is kept in a user object)
-//!     CRef<CUser_object> uo(new CUser_object);
-//!     uo->SetType().SetStr("CFastaReader");
-//!     uo->AddField("DefLine", NStr::PrintableString(defline));
+//!     if ( !TestFlag(fNoUserObjs) ) {
+//!         // store the raw defline in a User-object for reference
+//!         CRef<CSeqdesc> desc(new CSeqdesc);
+//!         desc->SetUser().SetType().SetStr("CFastaReader");
+//!         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
+//!         m_CurrentSeq->SetDescr().Set().push_back(desc);
+//!     }
 //! ```
 //! A record is `id { local str "Query_N" }` (`Subject_N` for `-subject`), `descr` with the
 //! `CFastaReader` user object (the raw defline line) and the `title` (absent when it is
@@ -268,19 +271,26 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
 mod tests {
     use super::*;
 
+    /// The `DefLine` field is `NStr::PrintableString(s)` of the raw line (fasta.cpp:601) in the
+    /// default `fNewLine_Quote` mode: a line feed, which only a record the library builds can
+    /// hold, is written as `\n`.
     #[test]
-    fn printable_string_follows_ncbi() {
-        let printable = |text: &[u8]| crate::ncbi_str::printable_string(text).into_bytes();
-        assert_eq!(printable(b">plain text"), b">plain text");
-        assert_eq!(printable(b"a\tb\\c'd\"e"), b"a\\tb\\\\c\\'d\\\"e");
-        assert_eq!(printable(b"what??"), b"what\\?\\?");
-        assert_eq!(printable(b"one?two"), b"one?two");
-        assert_eq!(printable(b"caf\xc3\xa9"), b"caf\\303\\251");
-        assert_eq!(printable(b"\x01x"), b"\\1x");
-        assert_eq!(printable(b"\x011"), b"\\0011");
-        assert_eq!(printable(b"\x07\x08\x0c\r\x0b"), b"\\a\\b\\f\\r\\v");
-        // `fNewLine_Quote`: a line feed is `\n`, not the `\n\` and line feed of `fNewLine_Passthru`.
-        assert_eq!(printable(b"a\nb"), b"a\\nb");
+    fn the_defline_field_quotes_a_line_feed() {
+        let mut buf = Vec::new();
+        let mut enc = crate::report::serial::asn_text::AsnTextEncoder::new(&mut buf);
+        let bioseq = BioseqInput {
+            id: "Query_1",
+            ids: None,
+            seq_loc: None,
+            defline: b">a\nb",
+            title: b"a",
+            letters: b"MKV",
+            protein: true,
+        };
+        write_bioseq(&mut enc, &bioseq);
+        assert_eq!(enc.error(), None);
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains(r#"str ">a\nb""#), "{text}");
     }
 
     #[test]

@@ -32,18 +32,27 @@ test.afterAll(async () => {
 });
 
 for (const backend of ['opfs', 'memory'] as const) {
-  test(`BlockStore contract: ${backend} store in a dedicated worker (without storage full)`, async ({ context }) => {
-    const page = await openHarness(context, server);
-    if (backend === 'opfs') {
-      // Playwright's WebKit has no OPFS in its contexts; the application then keeps results
-      // in memory (the last test checks that it says so).
-      const opfs = await page.evaluate(() => typeof navigator.storage?.getDirectory === 'function');
-      test.skip(!opfs, 'this browser has no Origin Private File System');
+  test(`BlockStore contract: ${backend} store in a dedicated worker (without storage full)`, async ({ context, playwright, browserName }, testInfo) => {
+    // The OPFS store runs in a profile on disk, as users have it. Playwright's default contexts
+    // are incognito: WebKit 27 refuses OPFS there ("UnknownError" from getDirectory), while the
+    // application then keeps results in memory and says so (the last test).
+    const profile =
+      backend === 'opfs'
+        ? await playwright[browserName].launchPersistentContext(testInfo.outputPath('profile'), { ...testInfo.project.use.launchOptions })
+        : undefined;
+    try {
+      const page = await openHarness(profile ?? context, server);
+      if (backend === 'opfs') {
+        const opfs = await page.evaluate(() => typeof navigator.storage?.getDirectory === 'function');
+        test.skip(!opfs, 'this browser has no Origin Private File System');
+      }
+      await page.exposeFunction('setStorageQuota', async () => undefined);
+      const results = withoutStorageFull(await page.evaluate((kind) => window.losatHarness!.blockStore(kind), backend));
+      expect(results.filter((result) => !result.ok)).toEqual([]);
+      expect(results.map((result) => result.name)).toEqual(withoutStorageFull(BLOCK_STORE_CASES).map((c) => c.name));
+    } finally {
+      await profile?.close();
     }
-    await page.exposeFunction('setStorageQuota', async () => undefined);
-    const results = withoutStorageFull(await page.evaluate((kind) => window.losatHarness!.blockStore(kind), backend));
-    expect(results.filter((result) => !result.ok)).toEqual([]);
-    expect(results.map((result) => result.name)).toEqual(withoutStorageFull(BLOCK_STORE_CASES).map((c) => c.name));
   });
 }
 

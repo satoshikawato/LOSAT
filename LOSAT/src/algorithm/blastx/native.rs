@@ -753,7 +753,7 @@ fn run_inner(
             args.parse_deflines,
             database.is_none(),
             choice.number == 5,
-            "BLASTX",
+            program.upper,
         )
     };
     let mut read_ahead_scopes = None;

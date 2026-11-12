@@ -72,7 +72,9 @@ fn outcome(status: i32, diagnostics: Vec<u8>) -> Result<(), Error> {
 /// what the command line reads as standard input (`-entry_batch -`, `-ipg_batch -`,
 /// `-taxidlist -`), so a batch of ids can be given from memory. What the command line writes to
 /// standard output goes to `output` (`-out` is a file, as there), what it writes to standard
-/// error to `diagnostics`. A failure is an error whose message is that text.
+/// error to `diagnostics`. A failure is an error whose message is that text (an argv that NCBI's
+/// argument reader refuses too). `-conffile` and `-dryrun`, which the command line's NCBI
+/// application start reads, are refused.
 pub fn run_blastdbcmd(
     argv: &[&str],
     input: &mut dyn Read,
@@ -93,7 +95,8 @@ pub fn run_blastdbcmd(
 /// memory can be masked. What the command line writes to standard output goes to `output`
 /// (`-out` is a file, as there), what it writes to standard error to `diagnostics`. A failure
 /// is an error whose message is that text (an argv that NCBI's argument reader refuses too: its
-/// usage and report, as the command line prints them).
+/// usage and report, as the command line prints them). `-conffile` and `-dryrun`, which the
+/// command line's NCBI application start reads, are refused.
 pub fn run_dustmasker(
     argv: &[&str],
     input: &mut dyn Read,

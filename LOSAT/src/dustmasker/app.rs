@@ -1,10 +1,11 @@
 //! dustmasker's `Run` (`CDustMaskApplication::Run`) on the arguments that NCBI's reader read
 //! (`ncbi_app::args::Args`): the streams of `-out` and `-in`, then `work::run`.
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::Cin;
 use crate::ncbi_app::Diag;
 
 use super::work::{self, report, Options, Report};
@@ -31,7 +32,7 @@ use super::work::{self, report, Options, Report};
 pub(super) fn run(
     args: &Args,
     settings: &ApplicationSettings,
-    stdin: &mut dyn Read,
+    stdin: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {

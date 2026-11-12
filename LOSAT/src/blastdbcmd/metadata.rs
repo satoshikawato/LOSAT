@@ -91,7 +91,7 @@ pub(super) fn metadata(
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
-    out: &mut dyn Write,
+    out: &mut Ostream<'_>,
 ) -> i32 {
     let mut prefix = args
         .value("metadata_output_prefix")
@@ -158,11 +158,11 @@ pub(super) fn metadata(
     // JSON's length>`, three more lines of the stream's close, `BLAST failed to write output:
     // COStreamBuffer::Flush: failed`) and ends with exit status 6, or with other lines where a
     // JSON longer than the stream's buffer first fails (review 2 of line RG item K1, F2). LOSAT
-    // refuses it, as dustmasker's serial writers do (RG DECISIONS K1-9).
-    let mut out = Ostream::new(out);
+    // refuses it, as dustmasker's serial writers do (RG DECISIONS K1-9). A closed pipe ends the
+    // program silently, where SIGPIPE ends NCBI's (`Ostream::closed`).
     let _ = out.write_all(&metadata.to_json());
     let _ = out.flush();
-    if out.bad() {
+    if out.bad() && !out.closed() {
         return diag.refuse(&format!(
             "a failed write of the -metadata output (NCBI's serial stream reports it) is not \
              supported by LOSAT's {}",

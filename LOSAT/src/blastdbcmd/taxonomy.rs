@@ -3,11 +3,11 @@
 //! `-tax_info`, the taxids of the database (`x_PrintBlastDatabaseTaxInformation`).
 
 use std::collections::BTreeSet;
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Write};
 
 use crate::blastinput::db_filter::{NO_TAXONOMY_WARNING, TAXONOMY_FILE};
 use crate::ncbi_app::args::{arg_message, Args};
-use crate::ncbi_app::files::{input_lines, read_input_file, LineEnds};
+use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds};
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
@@ -81,7 +81,7 @@ pub(super) fn tax_id_list(
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
-    stdin: &mut dyn Read,
+    stdin: &mut Cin<'_>,
 ) -> Result<BTreeSet<i32>, Ended> {
     let ids: Vec<Vec<u8>> = match (args.value("taxids"), args.value("taxidlist")) {
         (Some(""), _) => Vec::new(),
@@ -463,8 +463,12 @@ pub(super) fn tax_info(
         };
         line.clear();
         fields.line(taxid, names.as_ref(), num_seqs, &mut line);
-        // NCBI's stream ignores a failed write (no exception is enabled on it).
-        let _ = sink.write_all(&line);
+        // `out` is the run's `ncbi_app::files::Ostream`: a failed write does nothing, as in
+        // NCBI's stream (no exception is enabled on it); a closed pipe ends the program, where
+        // SIGPIPE ends NCBI's.
+        if sink.write_all(&line).is_err() {
+            return 0;
+        }
     }
     let _ = sink.flush();
     0

@@ -170,27 +170,27 @@ BLAST+.
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
 10. **Closed pipe in blastdbcmd's and dustmasker's output** (version 1.13, 2026-11-13,
    Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14 the same day, item K1b,
-   K1b-3). A write of NCBI's blastdbcmd 2.17.0 or dustmasker 1.0.0 to a pipe whose reader has
-   closed ends the program by SIGPIPE (exit status 141 from the shell, no message; exception
-   5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT sees a failed write and handles
-   it as it handles a failed write to a file, which is NCBI's run with `-out /dev/full` where
-   NCBI writes to the `ostream` itself: dustmasker's `interval`, `acclist` and `fasta` writers
-   and blastdbcmd's retrieval (`-entry`, `-entry_batch`, `-ipg`, `-ipg_batch`, the taxid
-   lists), `-info`, `-list` and `-tax_info` drop the later writes and the run goes on to its
-   end with its exit status (0, or the error of a later input or entry, such as blastdbcmd's
-   `Skipped` of an id that is not found, exit status 1). Where NCBI writes through its serial
-   stream, which reports a failed write (dustmasker's `seqloc_*` and `maskinfo_*` writers:
-   exit status 3, 0 or 134 by the case; blastdbcmd's `-metadata`: exit status 6), LOSAT stops
-   with its refusal (exit status 1), for a file and for a closed pipe. A run whose writes all
-   succeed is identical to NCBI's; so is a closed pipe that NCBI's writes never reach (a short
-   output read by `head -c 100`). Functions: `ncbi_app::files::Ostream` (the writer that drops
-   the writes after a failed one), used by `dustmasker::work::run` and
-   `blastdbcmd::retrieve::process`, `blastdbcmd/metadata.rs` (the refusal), and blastdbcmd's
-   other writers (`mod.rs`, `list.rs`, `taxonomy.rs`), which ignore a failed write.
-   Release-notes sentence: When the reader of `losat blastdbcmd`'s or `losat dustmasker`'s
-   output closes the pipe early, LOSAT goes on as for a full disk and ends with the exit status
-   of the rest of the run (1 with an error for dustmasker's `seqloc_*` and `maskinfo_*` formats
-   and blastdbcmd's `-metadata`), where NCBI's programs are ended by SIGPIPE (141).
+   K1b-3 and K1b-5). A write of NCBI's blastdbcmd 2.17.0 or dustmasker 1.0.0 to a pipe whose
+   reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
+   shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
+   sees the failed write and ends the program at once, with exit status 0 and no message, in
+   every mode and format: nothing more is read, written or reported, as in NCBI's ended process.
+   On Windows, where NCBI's write fails without a signal, a closed pipe is a failed write like
+   a full disk. A failed write that is not a closed pipe (`-out /dev/full`) is NCBI's: where
+   NCBI writes to the `ostream` itself (dustmasker's `interval`, `acclist` and `fasta`,
+   blastdbcmd's retrieval, `-info`, `-list`, `-tax_info`) the later writes are dropped and the
+   run goes on to its end with its exit status (0, or the error of a later input or entry, such
+   as blastdbcmd's `Skipped` of an id that is not found, exit status 1); where NCBI writes
+   through its serial stream, which reports a failed write (dustmasker's `seqloc_*` and
+   `maskinfo_*`: exit status 3, 0 or 134 by the case; blastdbcmd's `-metadata`: exit status 6),
+   LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
+   is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
+   Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
+   `ends_like_sigpipe`), `dustmasker::work::run` (`Failure::ClosedPipe`),
+   `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`), `blastdbcmd/metadata.rs`,
+   `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
+   blastdbcmd`'s or `losat dustmasker`'s output closes the pipe early, LOSAT stops at once with
+   exit status 0, where NCBI's programs are ended by SIGPIPE (141).
 
 ## Decided handling that is not an exception
 

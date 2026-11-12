@@ -1,9 +1,9 @@
 //! `CDustMaskApplication::Run`: the writer of `-outfmt`, the reader of `-infmt`, and the masks of
 //! each nucleotide sequence.
 
-use std::io::{Read, Write};
+use std::io::Write;
 
-use crate::ncbi_app::files::{open_input_file, Ostream};
+use crate::ncbi_app::files::{ends_like_sigpipe, open_input_file, Cin, Ostream};
 use crate::ncbi_exception::{err_post_x, NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_ids;
 use crate::report::defline::bioseq_title_from_source;
@@ -49,11 +49,15 @@ pub(super) enum Failure {
     Refused(String),
     /// A `CArgException` of `AsInputFile` in `Run` (the reader's report of it).
     Arg(crate::ncbi_app::args::ArgException),
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
+    /// run ends at once, exit status 0, no message.
+    ClosedPipe,
 }
 
 impl From<WriteError> for Failure {
     fn from(error: WriteError) -> Self {
         match error {
+            WriteError::Io(error) if ends_like_sigpipe(&error) => Failure::ClosedPipe,
             WriteError::Io(error) => {
                 Failure::Refused(format!("writing the output failed: {error}"))
             }
@@ -108,6 +112,10 @@ pub(super) fn report(failure: Failure) -> Report {
         },
         Failure::Refused(reason) => Report::Refused(reason),
         Failure::Arg(error) => Report::Arg(error),
+        Failure::ClosedPipe => Report::Posts {
+            lines: String::new(),
+            status: 0,
+        },
     }
 }
 
@@ -226,7 +234,7 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
 /// ```
 pub(super) fn run(
     options: &Options<'_>,
-    stdin: &mut dyn Read,
+    stdin: &mut Cin<'_>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let mut writer = writer(options)?;
@@ -234,8 +242,9 @@ pub(super) fn run(
     // `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(out);
     let result = masks_of_input(options, stdin, &mut writer, &mut out);
-    // A refusal of LOSAT's stops before NCBI's run would end: nothing more is written.
-    if !matches!(result, Err(Failure::Refused(_))) {
+    // A refusal of LOSAT's stops before NCBI's run would end, and a closed pipe ends it where
+    // SIGPIPE ends NCBI's: nothing more is written.
+    if !matches!(result, Err(Failure::Refused(_) | Failure::ClosedPipe)) {
         writer.finish(&mut out)?;
     }
     result?;
@@ -265,6 +274,9 @@ pub(super) fn run(
 /// `interval`, `acclist` and `fasta` writers write to the `ostream` itself and go on silently,
 /// as here.
 fn serial_write_failure(out: &Ostream<'_>, outfmt: &str) -> Result<(), Failure> {
+    if out.closed() {
+        return Err(Failure::ClosedPipe);
+    }
     if out.bad() && !matches!(outfmt, "interval" | "acclist" | "fasta") {
         return Err(Failure::Refused(unsupported(&format!(
             "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
@@ -275,7 +287,7 @@ fn serial_write_failure(out: &Ostream<'_>, outfmt: &str) -> Result<(), Failure> 
 
 fn masks_of_input(
     options: &Options<'_>,
-    stdin: &mut dyn Read,
+    stdin: &mut Cin<'_>,
     writer: &mut MaskWriter,
     out: &mut Ostream<'_>,
 ) -> Result<(), Failure> {
@@ -321,7 +333,7 @@ fn masks_of_input(
 /// the writer: an `-in` that does not open still lets a `maskinfo_*` writer write its object.
 fn reader<'a>(
     options: &Options<'_>,
-    stdin: &'a mut dyn Read,
+    stdin: &'a mut Cin<'_>,
 ) -> Result<Box<dyn SequenceSource + 'a>, Failure> {
     match options.infmt {
         "fasta" => {
@@ -340,7 +352,7 @@ fn reader<'a>(
 /// `CMaskBDBReader`: the sequences of a nucleotide BLAST database in OID order, each as
 /// `CSeqDB::GetBioseq` makes it (the Seq-ids of the first definition line, the title joined
 /// from all of them). Every OID of the volumes, also those outside the alias files' OID
-/// ranges (`SeqDb::include_every_oid`).
+/// ranges (`SeqDb::open_every_oid_in`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/seqmasks_io/mask_bdb_reader.hpp:55-61
 /// ```c++

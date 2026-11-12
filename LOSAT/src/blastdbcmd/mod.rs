@@ -26,6 +26,7 @@ use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::{Cin, Ostream};
 use crate::ncbi_app::{Diag, Tool};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
@@ -85,7 +86,7 @@ pub(crate) fn run_with(
 fn run_body(
     args: &Args,
     settings: &ApplicationSettings,
-    stdin: &mut dyn Read,
+    stdin: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
@@ -112,7 +113,9 @@ fn run_body(
             return 1;
         }
     };
-    let out: &mut dyn Write = &mut out;
+    // NCBI's `ostream` of `-out` for every mode: a failed write drops the later ones, and a
+    // closed pipe ends the program where SIGPIPE ends NCBI's (`files::Ostream`).
+    let mut out = Ostream::new(&mut out);
     let path = match SearchPath::from_environment(registry) {
         Ok(path) => path,
         Err(error) => return database_error(diag, error),
@@ -129,7 +132,7 @@ fn run_body(
         return 0;
     }
     if args.given("list") {
-        return list::list(args, &path, diag, out);
+        return list::list(args, &path, diag, &mut out);
     }
     let name = args.value("db").unwrap_or("nr");
     let dbtype = args.value("dbtype").unwrap_or("guess");
@@ -178,7 +181,7 @@ fn run_body(
             &path,
             diag,
             stdin,
-            out,
+            &mut out,
             Some(&tax_ids),
             dbtype_protein,
         );
@@ -189,13 +192,13 @@ fn run_body(
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, args, &path, diag, out);
+            return metadata::metadata(&db, name, args, &path, diag, &mut out);
         }
         if args.given("tax_info") {
-            return taxonomy::tax_info(&db, args, &path, diag, out);
+            return taxonomy::tax_info(&db, args, &path, diag, &mut out);
         }
         let protein = db.seqtype() == SeqType::Protein;
-        return retrieve::process(&db, args, &path, diag, stdin, out, None, protein);
+        return retrieve::process(&db, args, &path, diag, stdin, &mut out, None, protein);
     }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
@@ -474,6 +477,19 @@ mod tests {
         }
     }
 
+    /// A pipe whose reader has closed.
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     /// The exit status and the diagnostics of `words` run with `input` as the standard input
     /// and `out` as the standard output.
     fn run_on(words: &[&str], input: &str, out: &mut dyn Write) -> (i32, String) {
@@ -503,6 +519,17 @@ mod tests {
         );
         assert!(written.starts_with(b">"));
         assert_eq!(run_on(&words, batch, &mut FullDisk), expected);
+        // A closed pipe ends NCBI's process by SIGPIPE (exit status 141, no message) outside
+        // Windows: the retrieval ends with exit status 0 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+        // exception 10). This short output meets it at its last flush, after the entries'
+        // messages, as NCBI's buffered output does. On Windows it is a failed write like the
+        // others.
+        let closed = if cfg!(windows) {
+            expected.clone()
+        } else {
+            (0, expected.1.clone())
+        };
+        assert_eq!(run_on(&words, batch, &mut ClosedPipe), closed);
     }
 
     // NCBI 2.17.0 with `-out /dev/full` (F2): the serial stream of `-metadata` reports the
@@ -523,5 +550,9 @@ mod tests {
                     .to_string()
             )
         );
+        // A closed pipe ends the program silently outside Windows, where SIGPIPE ends NCBI's.
+        if !cfg!(windows) {
+            assert_eq!(run_on(&words, "", &mut ClosedPipe), (0, String::new()));
+        }
     }
 }

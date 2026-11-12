@@ -1442,7 +1442,7 @@ impl SeqDb {
     /// loops `GetNumOIDs` and reads each OID with `GetBioseq(oid)`, which reads an OID outside
     /// the ranges too (dustmasker's `CMaskBDBReader`). Only before a list
     /// ([`SeqDb::restrict`]): the alias keys of lists are refused when the database opens.
-    pub fn include_every_oid(&mut self) {
+    fn include_every_oid(&mut self) {
         debug_assert!(!self.list_applied, "include_every_oid after a list");
         self.filter = None;
         self.num_seqs = self.num_oids();
@@ -1472,7 +1472,7 @@ impl SeqDb {
     /// `GetBioseq(oid)` (dustmasker's `CMaskBDBReader`, which makes `CSeqDB(name, type)`):
     /// [`SeqDb::open_search_in`], the errors of the walks of the alias files' counts that NCBI's
     /// constructor makes (those of [`SeqDb::check_alias_values`] without a list), and
-    /// [`SeqDb::include_every_oid`]. LOSAT's refusals of the values that only a search reads
+    /// `include_every_oid`. LOSAT's refusals of the values that only a search reads
     /// differently are not made, as such a reader reads none of them: an OID range with another
     /// name of the same `-db`, a `FIRST_OID` or `LAST_OID` of 2^31 or more, a negative `NSEQ`,
     /// a `LENGTH` of 0 (NCBI 2.17.0 dustmasker reads them as it reads the database without the

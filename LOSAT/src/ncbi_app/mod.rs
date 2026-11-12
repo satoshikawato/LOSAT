@@ -252,12 +252,12 @@ pub(crate) fn run(tool: &'static Tool, words: &[OsString], body: Body) -> i32 {
 }
 
 /// A program's `Run`: it gets the arguments, the application's settings, the standard input
-/// (what an `eInputFile` argument `-` reads: `files::open_input_file`), the standard output
-/// and the diagnostics, and returns the exit status.
+/// (`files::Cin`, what an `eInputFile` argument `-` reads: `files::open_input_file`), the
+/// standard output and the diagnostics, and returns the exit status.
 pub(crate) type Body = fn(
     args: &Args,
     settings: &ApplicationSettings,
-    input: &mut dyn Read,
+    input: &mut files::Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32;
@@ -383,7 +383,13 @@ pub(crate) fn run_with(
     if dryrun {
         return 0;
     }
-    body(&args, &settings, input, out, &mut diag)
+    body(
+        &args,
+        &settings,
+        &mut files::Cin::new(input),
+        out,
+        &mut diag,
+    )
 }
 
 #[cfg(test)]

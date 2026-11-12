@@ -216,6 +216,13 @@ pub(crate) fn open_taxid(
         None => String::new(),
     };
     let masker = build(&name, source);
+    // The counts that only LOSAT refuses (NCBI's result is undefined there) are refused when
+    // the options are read, before any output.
+    if let Err(error @ (WinMaskError::UnitSize { .. } | WinMaskError::UnsetHashParameter { .. })) =
+        &masker
+    {
+        return Err(rejection(&name, error));
+    }
     let first_load = load_posts(&registry.load_posts, &masker);
     let later_loads = if registry.posts_once {
         load_posts(&Posts::new(), &masker)
@@ -435,8 +442,8 @@ pub(crate) fn batch_error(
 }
 
 /// LOSAT's rejection of the errors that NCBI does not report as `batch_error` does: an ascii
-/// file's unit size above 16 (`WinMaskError::UnitSize`, where NCBI's masker is undefined), a
-/// cache bit array of 0 words that NCBI reads past (`WinMaskError::EmptyCacheBitArray`), a
+/// file's unit size above 16 and an optimized ascii file's unset hash parameter (both where
+/// NCBI's result is undefined; `open_taxid` refuses them before any output), a cache bit array of 0 words that NCBI reads past (`WinMaskError::EmptyCacheBitArray`), a
 /// query of 2^32 letters or more, an error of a counts source of LOSAT Web, and an error of the
 /// masks of a chunk of a split batch whose whole queries were masked (NCBI masks each chunk
 /// when it searches it, after the batch's set-up).

@@ -850,11 +850,13 @@ impl UnitCounts {
     /// The numbers are glibc's `atoi` ([`ncbi_str::c_atoi`]) truncated to the field, and those of
     /// the hash table parameters are read as libstdc++'s `>>` reads an `unsigned int`
     /// ([`extract_uints`]). A value that `>>` does not reach (the line ends, or an earlier value
-    /// failed) is left uninitialized by NCBI; LOSAT reads it as 0, which gives NCBI 2.17.0's
-    /// errors on every such line tried (line NP M3d: `3694 17 0` and `3694 17` the shift's,
-    /// `3694`, `x 17 0 2` and an empty line the hash key size's). The tables grow with the lines
-    /// read, so a file that names a larger table than it holds fails without NCBI's allocation
-    /// of the named size. The optimized ascii format has no cache bit array.
+    /// failed) is left uninitialized by NCBI: a check that reads one is refused
+    /// ([`WinMaskError::UnsetHashParameter`]). NCBI 2.17.0's errors for such lines change from
+    /// one load of the masker to the next (line NP M3d, review 2: `3694` gives the hash key
+    /// size's error for the first query, then the offset's). A value that `>>` failed to read is
+    /// set (0, or `UINT_MAX` past it), so `3694 x` and `3694 17 0 x` are NCBI's errors. The tables
+    /// grow with the lines read, so a file that names a larger table than it holds fails without
+    /// NCBI's allocation of the named size. The optimized ascii format has no cache bit array.
     fn read_oascii<R: Read + Seek>(
         &mut self,
         r: &mut R,
@@ -883,12 +885,24 @@ impl UnitCounts {
                     }
                 }
                 3 => {
-                    [m, k, roff, bc] = extract_uints(line);
+                    // The checks read k, roff and bc in this order (M is set whenever k is).
+                    let set;
+                    ([m, k, roff, bc], set) = extract_uints(line);
+                    let unset = |field: &'static str| WinMaskError::UnsetHashParameter { field };
+                    if set < 2 {
+                        return Err(unset("k"));
+                    }
                     if k == 0 || k > 2 * u32::from(unit_size) - 1 {
                         return Err(self.format_error(FormatSite::OAsciiHashKeySize));
                     }
+                    if set < 3 {
+                        return Err(unset("roff"));
+                    }
                     if roff > 32 - k {
                         return Err(self.format_error(FormatSite::OAsciiHashOffset));
+                    }
+                    if set < 4 {
+                        return Err(unset("bc"));
                     }
                     if bc == 0 || bc > 32 - k {
                         return Err(self.format_error(FormatSite::OAsciiHashShift));
@@ -1910,10 +1924,12 @@ impl<R: Read> TextLines<R> {
 /// (`num_get::_M_extract_int` with the stream's default flags): white space, then a sign and the
 /// decimal digits up to the first other byte; no digit is 0 and a failure, a value beyond
 /// `UINT_MAX` is `UINT_MAX` and a failure, and a `-` gives the value's negation modulo 2^32.
-/// After a failure, and once the line has ended, the stream reads nothing more: those values
-/// are 0 here (NCBI leaves them uninitialized; see [`UnitCounts::read_oascii`]).
-pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> [u32; N] {
+/// After a failure, and once the line has ended, the stream reads nothing more: the values and
+/// how many of them `>>` set (the first ones; a failed one is set), the others 0 here (NCBI
+/// leaves them uninitialized; see [`UnitCounts::read_oascii`]).
+pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
     let mut values = [0u32; N];
+    let mut set = 0;
     let mut pos = 0;
     for value in values.iter_mut() {
         // The sentry: skip white space; at the end of the line it fails.
@@ -1923,6 +1939,7 @@ pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> [u32; N] {
         if pos == line.len() {
             break;
         }
+        set += 1;
         let negative = line[pos] == b'-';
         if negative || line[pos] == b'+' {
             pos += 1;
@@ -1957,5 +1974,5 @@ pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> [u32; N] {
             break;
         }
     }
-    values
+    (values, set)
 }

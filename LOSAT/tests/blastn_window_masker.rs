@@ -379,33 +379,37 @@ fn the_cases_give_ncbis_bytes_at_one_and_four_threads() {
     check("4");
 }
 
-// An ascii counts file whose unit size is 17 to 251 (its reader does not check it; NCBI BLAST+
-// 2.17.0 then reverse-complements 32-bit units by 32 bits or more, which C++ leaves undefined,
-// and writes its report): LOSAT refuses it when the first batch is set up, before any report.
+// Counts whose NCBI result is undefined, which LOSAT refuses when it reads the options, before
+// any output (the outfmt 0 header too): an ascii file whose unit size is 17 to 251 (its reader
+// does not check it; NCBI's masker then reverse-complements 32-bit units by 32 bits or more), and
+// an optimized ascii file whose hash parameters line ends before the shift (NCBI checks it
+// uninitialized; its errors change from one query's load to the next, line NP M3d review 2).
 #[test]
-fn ascii_counts_with_units_above_16_letters_are_refused() {
+fn counts_that_ncbi_reads_undefined_are_refused_before_any_output() {
     make_counts();
-    let output = blastn()
-        .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")
-        .args([
-            "-query",
-            "tests/fixtures/blastn_regression/inputs/wm_query.fa",
-            "-subject",
-            "tests/fixtures/blastn_regression/inputs/s60k.fa",
-            "-window_masker_taxid",
-            "48",
-            "-outfmt",
-            "6",
-        ])
-        .output()
-        .expect("run losat");
-    assert_ne!(output.status.code(), Some(0));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("units of 17 letters") && stderr.contains("not supported by LOSAT"),
-        "{stderr}"
-    );
+    for (taxid, text) in [("48", "units of 17 letters"), ("60", "does not set bc")] {
+        let output = blastn()
+            .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")
+            .args([
+                "-query",
+                "tests/fixtures/blastn_regression/inputs/wm_query.fa",
+                "-subject",
+                "tests/fixtures/blastn_regression/inputs/s60k.fa",
+                "-window_masker_taxid",
+                taxid,
+                "-outfmt",
+                "0",
+            ])
+            .output()
+            .expect("run losat");
+        assert_eq!(output.status.code(), Some(1), "{taxid}");
+        assert!(output.stdout.is_empty(), "{taxid}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(text) && stderr.contains("not supported by LOSAT"),
+            "{stderr}"
+        );
+    }
 }
 
 #[test]

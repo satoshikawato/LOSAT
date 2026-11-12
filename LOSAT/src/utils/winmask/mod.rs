@@ -104,6 +104,10 @@ pub enum WinMaskError {
     /// a unit (`CSeqMaskerUtil::reverse_complement`) then shifts it by 32 bits or more, which
     /// C++ leaves undefined.
     UnitSize { unit: u8 },
+    /// An optimized ascii file whose hash parameters line ends, or fails, before `field` (`k`,
+    /// `roff` or `bc`) while NCBI's checks read it: NCBI leaves it uninitialized
+    /// (`seq_masker_istat_oascii.cpp:82-87, 111`).
+    UnsetHashParameter { field: &'static str },
     /// A cache bit array of 0 words (units of 1 or 2 letters) that the cache boost would read:
     /// NCBI reads past its `new Uint4[0]` (`seq_masker_cache_boost.cpp:40-48`).
     EmptyCacheBitArray { unit: u8 },
@@ -138,6 +142,10 @@ impl fmt::Display for WinMaskError {
             Self::WindowSize { window, unit, .. } => write!(
                 f,
                 "window size ({window}) must be greater or equal to unit size ({unit})"
+            ),
+            Self::UnsetHashParameter { field } => write!(
+                f,
+                "the hash parameters line of the optimized ascii counts does not set {field}, which NCBI BLAST+ then checks uninitialized (undefined behaviour in C++)"
             ),
             Self::UnitSize { unit } => write!(
                 f,

@@ -119,6 +119,7 @@ impl WinMaskError {
             // `s_BuildSeqMasker` gives its `what()` to blastn's error (`winmask_filter.cpp:147-151`).
             Self::WindowSize { .. } => NcbiException::new(WINDOW_SIZE, self.to_string()),
             Self::UnitSize { .. }
+            | Self::UnsetHashParameter { .. }
             | Self::EmptyCacheBitArray { .. }
             | Self::SequenceTooLong { .. }
             | Self::BadIndex { .. } => return None,

@@ -46,14 +46,16 @@
 48	mg1655_u9.ascii	505=17
 49	mg1655_u9.ascii	2=##windowmasker-statistics-algorithm-version:99999999999.0.0
 50	mg1655_u9.ascii	2=##windowmasker-statistics-algorithm-version:.0.0
-# Errors of the optimized ascii reader: the unit size, the hash key size, the offset, the shift (a value >> does not reach),
-# a file that ends in the header, in the hash table and in the values table, a ##pct: line, a hash table past the values.
+# Errors of the optimized ascii reader: the unit size, the hash key size, the offset, the shift (a value >> fails to read, which
+# it sets to 0), a file that ends in the header, in the hash table and in the values table, a ##pct: line, a hash table past
+# the values; and a shift that >> does not reach (NCBI checks it uninitialized: refused by LOSAT).
 51	mg1655_u9.oascii	506=0
 52	mg1655_u9.oascii	507=3694 0 0 2
 53	mg1655_u9.oascii	507=3694 17 16 2
-54	mg1655_u9.oascii	507=3694 17 0
+54	mg1655_u9.oascii	507=3694 17 0 x
 55	mg1655_u9.oascii	cut=508
 56	mg1655_u9.oascii	cut=600
 57	mg1655_u9.oascii	cut=131600
 58	mg1655_u9.oascii	4=##pct:
 59	mg1655_u9.oascii	507=100 17 0 2
+60	mg1655_u9.oascii	507=3694 17 0

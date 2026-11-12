@@ -878,11 +878,11 @@ fn the_optimized_ascii_reader_reads_as_ncbis() {
         (header("2", "2 3 0 0"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
         (header("2", "2 3 0 30"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
         (header("2", "2 3 0 4294967296"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
-        // Values that `>>` does not reach (NCBI's are uninitialized): read as 0.
-        (header("2", "2 3 0"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
-        (header("2", "2 3 x 1"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
-        (header("2", "x 3 0 1"), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
-        (header("2", ""), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
+        // A value that `>>` fails to read is set (0, or UINT_MAX past it): NCBI's checks.
+        (header("2", "2 x 0 1"), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
+        (header("2", "2 3 99 x"), format!("{oascii} 119: Error: (Exception::bad hash parameter) {new} - offset must by in [0,32 - hash_key_size]")),
+        (header("2", "2 3 0 x"), format!("{oascii} 124: Error: (Exception::bad hash parameter) {new} - shift must be in [1, 32 - hash_key_size]")),
+        (header("2", "2 99"), format!("{oascii} 114: Error: (Exception::bad hash parameter) {new} - hash key size must be in [1,2*unit_size - 1]")),
         (format!("{md}AAAA\n2\n2 3 0 1\n4\n5\n6\n"), format!("{oascii} 145: Error: (Exception::format error) {new} - file too short")),
         (format!("{md}AAAA\n2\n2 3 0 1\n4\n5\n6\n7\n0\n0\n"), format!("{oascii} 176: Error: (Exception::format error) {new} - not enough lines to fill the hash table")),
         (format!("{md}AAAA\n2\n2 3 0 1\n4\n5\n6\n7\n0\n0\n0\n0\n0\n0\n0\n0\n5\n"), format!("{oascii} 192: Error: (Exception::format error) {new} - not enough lines to fill the values table")),
@@ -896,27 +896,43 @@ fn the_optimized_ascii_reader_reads_as_ncbis() {
             .unwrap_or_else(|| panic!("{text:?} was read"));
         assert_eq!(reader_report(&error), rethrown_report(&thrown), "{text:?}");
     }
+    // A value that `>>` does not reach and the checks read: NCBI's is uninitialized (its errors
+    // change from one load to the next), refused.
+    for (hash, field) in [
+        ("2 3 0", "bc"),
+        ("2 3 x 1", "bc"),
+        ("2 3", "roff"),
+        ("x 3 0 1", "k"),
+        ("2", "k"),
+        ("", "k"),
+        (" ", "k"),
+    ] {
+        let error = read(header("2", hash)).err().unwrap();
+        assert_eq!(
+            error,
+            WinMaskError::UnsetHashParameter { field },
+            "{hash:?}"
+        );
+        assert!(error.create_report().is_none());
+    }
 }
 
 #[test]
 fn hash_parameters_are_read_as_libstdcxx_reads_unsigned_ints() {
     use super::istat::extract_uints;
-    assert_eq!(extract_uints::<4>(b"3694 17 0 2"), [3694, 17, 0, 2]);
-    assert_eq!(
-        extract_uints::<4>(b"\t3694\x0b17 0 2 99 x"),
-        [3694, 17, 0, 2]
-    );
-    assert_eq!(
-        extract_uints::<4>(b"+1 -1 -4294967295 2x"),
-        [1, u32::MAX, 1, 2]
-    );
-    // A failure stores 0 (no digit) or UINT_MAX (overflow); nothing is read after it.
-    assert_eq!(extract_uints::<4>(b"1 x 3 4"), [1, 0, 0, 0]);
-    assert_eq!(extract_uints::<4>(b"1 4294967296 3 4"), [1, u32::MAX, 0, 0]);
-    assert_eq!(extract_uints::<4>(b"1 - 3 4"), [1, 0, 0, 0]);
-    assert_eq!(extract_uints::<4>(b"1 2"), [1, 2, 0, 0]);
-    assert_eq!(extract_uints::<4>(b"1 2\r"), [1, 2, 0, 0]);
-    assert_eq!(extract_uints::<4>(b""), [0; 4]);
+    let read = |line: &[u8]| extract_uints::<4>(line);
+    assert_eq!(read(b"3694 17 0 2"), ([3694, 17, 0, 2], 4));
+    assert_eq!(read(b"\t3694\x0b17 0 2 99 x"), ([3694, 17, 0, 2], 4));
+    assert_eq!(read(b"+1 -1 -4294967295 2x"), ([1, u32::MAX, 1, 2], 4));
+    // A failure sets 0 (no digit) or UINT_MAX (overflow); nothing is read after it.
+    assert_eq!(read(b"1 x 3 4"), ([1, 0, 0, 0], 2));
+    assert_eq!(read(b"1 4294967296 3 4"), ([1, u32::MAX, 0, 0], 2));
+    assert_eq!(read(b"1 - 3 4"), ([1, 0, 0, 0], 2));
+    // Nothing is read after the end of the line.
+    assert_eq!(read(b"1 2"), ([1, 2, 0, 0], 2));
+    assert_eq!(read(b"1 2\r"), ([1, 2, 0, 0], 2));
+    assert_eq!(read(b""), ([0; 4], 0));
+    assert_eq!(read(b" "), ([0; 4], 0));
 }
 
 #[test]

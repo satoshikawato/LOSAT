@@ -116,7 +116,10 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-seg", resolved.seg.to_ncbi_cli_string());
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
-            put("-line_length", resolved.formatting.line_length().to_string());
+            put(
+                "-line_length",
+                resolved.formatting.line_length().to_string(),
+            );
             put("-max_target_seqs", resolved.hitlist_size.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());
@@ -159,7 +162,10 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-sum_stats", bool_text(resolved.sum_stats));
             put("-soft_masking", bool_text(resolved.soft_masking));
             put("-culling_limit", resolved.culling_limit.to_string());
-            put("-line_length", resolved.formatting.line_length().to_string());
+            put(
+                "-line_length",
+                resolved.formatting.line_length().to_string(),
+            );
             put("-max_target_seqs", resolved.hitlist_size.to_string());
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());

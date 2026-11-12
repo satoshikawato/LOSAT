@@ -13429,9 +13429,11 @@ fn run_resolved_in_pool(
         // format, and the archive saves the warnings of its batches' queries.
         let mut warnings = (warning_lines.is_some()
             || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive))
-        .then(|| crate::report::query_warnings::QueryWarnings {
-            before: warning_lines.take().unwrap_or(&[]),
-            sink: &mut *outputs.diagnostics,
+        .then(|| {
+            crate::report::query_warnings::QueryWarnings::new(
+                warning_lines.take().unwrap_or(&[]),
+                &mut *outputs.diagnostics,
+            )
         });
         let format_result: Result<()> = match outfmt {
             BlastpReport::Seqalign(serial) => (|| -> Result<()> {

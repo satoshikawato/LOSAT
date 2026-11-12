@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "prd_m",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_m (parsed Seq-ids)",
+  "number-of-letters": 250,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-12T01:35:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 49833,
+  "bytes-to-cache": 364,
+  "files": [
+    "prd_m.pdb",
+    "prd_m.phr",
+    "prd_m.pin",
+    "prd_m.pog",
+    "prd_m.pos",
+    "prd_m.pot",
+    "prd_m.psq",
+    "prd_m.ptf",
+    "prd_m.pto"
+  ]
+}

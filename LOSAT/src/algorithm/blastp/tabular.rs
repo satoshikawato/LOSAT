@@ -715,6 +715,10 @@ fn write_tabular_rows<const RPS: bool>(
     //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
     //         return;
     // ```
+    // The warnings after the last query's report (`QueryWarnings::after_last_query`).
+    if let Some(warnings) = warnings.as_deref_mut() {
+        warnings.after_last_query(hit_lists.len(), &mut *writer)?;
+    }
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;

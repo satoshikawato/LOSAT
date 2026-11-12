@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "prd_xg0y",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_xg0y (parsed Seq-ids)",
+  "number-of-letters": 250,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-11T20:06:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49740,
+  "bytes-to-cache": 372,
+  "files": [
+    "prd_xg0y.pdb",
+    "prd_xg0y.phr",
+    "prd_xg0y.pin",
+    "prd_xg0y.pog",
+    "prd_xg0y.pos",
+    "prd_xg0y.pot",
+    "prd_xg0y.psq",
+    "prd_xg0y.ptf",
+    "prd_xg0y.pto"
+  ]
+}

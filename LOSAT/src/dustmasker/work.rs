@@ -229,8 +229,8 @@ pub(super) fn run(
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let mut writer = writer(options)?;
-    // A failed write leaves NCBI's stream bad, and it goes on silently (exit 0): `out` drops
-    // the bytes after the first failed write.
+    // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
+    // `out` drops the bytes after the first failed write.
     let mut out = OstreamOf {
         inner: out,
         bad: false,
@@ -242,7 +242,7 @@ pub(super) fn run(
     }
     result?;
     let _ = out.flush();
-    Ok(())
+    out.serial_write_failure(options.outfmt)
 }
 
 /// The output as NCBI's `ostream`: after a write fails (`badbit`), later writes do nothing and
@@ -250,6 +250,38 @@ pub(super) fn run(
 struct OstreamOf<'a> {
     inner: &'a mut dyn Write,
     bad: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:338-353
+// ```c++
+// void CObjectOStream::Close(void)
+// {
+//     if (m_Fail != fNotOpen) {
+//         try {
+//             DefaultFlush();
+//             ...
+//             m_Output.Close();
+//         }
+//         catch (CException& exc) {
+//             if ( InGoodState() )
+//                 RethrowError(fWriteError, "cannot close output stream",exc);
+//         }
+// ```
+impl OstreamOf<'_> {
+    /// LOSAT's refusal when the output of a `seqloc_*` or `maskinfo_*` writer failed. Those
+    /// write through NCBI's serial stream (`CObjectOStream`), which checks its writes: NCBI posts
+    /// `cannot close output stream` for each object, then stops on `write fault` (exit status
+    /// 3) at the next one, or aborts (134) for a `maskinfo` object larger than its 8 KiB
+    /// buffer. The `interval`, `acclist` and `fasta` writers write to the `ostream` itself and
+    /// go on silently, as here.
+    fn serial_write_failure(&self, outfmt: &str) -> Result<(), Failure> {
+        if self.bad && !matches!(outfmt, "interval" | "acclist" | "fasta") {
+            return Err(Failure::Refused(unsupported(&format!(
+                "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
+            ))));
+        }
+        Ok(())
+    }
 }
 
 impl Write for OstreamOf<'_> {
@@ -272,7 +304,7 @@ fn masks_of_input(
     options: &Options<'_>,
     fasta_source: &mut dyn FnMut() -> Result<Box<dyn SequenceSource>, Failure>,
     writer: &mut MaskWriter,
-    out: &mut dyn Write,
+    out: &mut OstreamOf<'_>,
 ) -> Result<(), Failure> {
     let mut source = reader(options, fasta_source)?;
     let level = options.level as u32;
@@ -289,6 +321,7 @@ fn masks_of_input(
             iupac: &record.iupac,
         };
         writer.print(&seq, &mask, options.parse_seqids, out)?;
+        out.serial_write_failure(options.outfmt)?;
     }
     Ok(())
 }
@@ -404,9 +437,14 @@ impl DatabaseSource {
 // (`CSeqDBException`, seqdbcommon.hpp:73-100, does not name its codes, so every one is reported
 // as `eInvalid`: `(CSeqDBException::eInvalid) No alias or index file found ...` for the
 // `eFileErr` of seqdbalias.cpp:311-321, fixture db_missing.)
-/// An error of the database reader: NCBI's `CSeqDBException` (`SeqDbError::ncbi_message`), or
-/// LOSAT's refusal.
+/// An error of the database reader: NCBI's exception (`SeqDbError::ncbi_exception`), its
+/// `CSeqDBException` (`SeqDbError::ncbi_message`), or LOSAT's refusal.
 fn database_failure(error: crate::seqdb::SeqDbError) -> Failure {
+    // An NCBI exception of the reader itself (an alias value that does not convert), reported
+    // as the application reports it (blastdbcmd's `database_error`).
+    if let Some(exception) = error.ncbi_exception() {
+        return Failure::Ncbi(exception.clone());
+    }
     match error.ncbi_message() {
         Some(text) => Failure::Ncbi(NcbiException::new(
             ThrowSite::generated("CSeqDBException::eInvalid"),

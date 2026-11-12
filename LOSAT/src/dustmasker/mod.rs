@@ -226,6 +226,62 @@ mod tests {
         }
     }
 
+    /// An output whose every write fails (a full disk).
+    struct FullDisk;
+
+    impl Write for FullDisk {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("no space left"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("no space left"))
+        }
+    }
+
+    // NCBI 2.17.0 with `-out /dev/full` (review 2 of K1, F1): `interval`, `acclist` and `fasta`
+    // write nothing more, silently, exit status 0; the serial writers' `CObjectOStream` reports
+    // the failure (exit status 3, 0 or 134 by the case), which LOSAT refuses.
+    #[test]
+    fn a_failed_write_is_silent_for_the_text_writers_and_refused_for_the_serial_ones() {
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("dustmasker")
+            .join("in")
+            .join("basic.fa");
+        for (outfmt, status) in [
+            ("interval", 0),
+            ("acclist", 0),
+            ("fasta", 0),
+            ("seqloc_asn1_text", 1),
+            ("seqloc_xml", 1),
+            ("maskinfo_asn1_bin", 1),
+            ("maskinfo_xml", 1),
+        ] {
+            let words = [
+                OsString::from("-in"),
+                input.clone().into_os_string(),
+                OsString::from("-outfmt"),
+                OsString::from(outfmt),
+            ];
+            let mut err = Vec::new();
+            assert_eq!(
+                run_with(&words, &mut FullDisk, &mut err),
+                status,
+                "{outfmt}"
+            );
+            let err = String::from_utf8(err).unwrap();
+            let expected = match status {
+                0 => String::new(),
+                _ => format!(
+                    "Error: a failed write of the -outfmt {outfmt} output (NCBI's serial stream \
+                     reports it) is not supported by LOSAT's DUSTMASKER\n"
+                ),
+            };
+            assert_eq!(err, expected, "{outfmt}");
+        }
+    }
+
     // The file of `-conffile` is read by the command line's application start; the library API,
     // which these runs are (no start), refuses it as blastdbcmd's does.
     #[test]

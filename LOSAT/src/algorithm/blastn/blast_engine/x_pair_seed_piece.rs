@@ -63,6 +63,7 @@ use super::{
     OwnLines, PartScratch, PartState, PartStats, Run, HELPER_STALL, IN_STAGE,
 };
 use std::cell::Cell;
+use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError, RwLock};
 
@@ -88,13 +89,6 @@ const NONE: u16 = u16::MAX;
 /// `StripState::published`: the strip's scan is done (the count below it is final).
 const DONE: u32 = 1 << 31;
 
-const ZERO: Seed = Seed {
-    context: 0,
-    q: 0,
-    s: 0,
-    s_range: 0,
-};
-
 /// One partition's seeds of a piece: the first and the last block of its chain and the seeds in
 /// the last one (`BLOCK` before its first seed, so that the first push takes a block).
 #[derive(Clone, Copy)]
@@ -116,8 +110,11 @@ const EMPTY: Chain = Chain {
 /// (`reset`) and does not change with the seeds.
 #[derive(Default)]
 pub(super) struct Arena {
-    seeds: Vec<Seed>,
-    pos: Vec<u32>,
+    // (not initialized when allocated, so that only the pages of the blocks a piece takes become
+    // resident: a stage of few seeds holds few pages whatever the arena's size; a slot is read
+    // only after a push of the same piece wrote it, `for_each_run`)
+    seeds: Vec<MaybeUninit<Seed>>,
+    pos: Vec<MaybeUninit<u32>>,
     next: Vec<u16>,
     chains: Vec<Chain>,
     used: u16,
@@ -135,8 +132,8 @@ impl Arena {
     fn reset(&mut self, parts: usize, piece_seeds: usize) {
         let blocks = Self::blocks(parts, piece_seeds);
         if self.next.len() != blocks {
-            self.seeds = vec![ZERO; blocks * BLOCK];
-            self.pos = vec![0; blocks * BLOCK];
+            self.seeds = uninit(blocks * BLOCK);
+            self.pos = uninit(blocks * BLOCK);
             self.next = vec![NONE; blocks];
         }
         self.chains.clear();
@@ -168,18 +165,42 @@ impl Arena {
         loop {
             if b == tail {
                 let (a, z) = (first * BLOCK, b * BLOCK + chain.fill as usize);
-                f(&self.seeds[a..z], &self.pos[a..z]);
+                // SAFETY: blocks `first..=b` are p's, taken in this piece and filled in order
+                // (all of each but the last, `fill` of it), so every slot of `a..z` was written.
+                let (seeds, pos) =
+                    unsafe { (written(&self.seeds[a..z]), written(&self.pos[a..z])) };
+                f(seeds, pos);
                 return;
             }
             let next = self.next[b] as usize;
             if next != b + 1 {
                 let (a, z) = (first * BLOCK, (b + 1) * BLOCK);
-                f(&self.seeds[a..z], &self.pos[a..z]);
+                // SAFETY: as above; blocks `first..=b` are full.
+                let (seeds, pos) =
+                    unsafe { (written(&self.seeds[a..z]), written(&self.pos[a..z])) };
+                f(seeds, pos);
                 first = next;
             }
             b = next;
         }
     }
+}
+
+/// `n` slots, not initialized (allocated, not written: the pages stay untouched until used).
+fn uninit<T>(n: usize) -> Vec<MaybeUninit<T>> {
+    let mut v = Vec::with_capacity(n);
+    // SAFETY: `MaybeUninit<T>` needs no initialization, and the capacity is `n`.
+    unsafe { v.set_len(n) };
+    v
+}
+
+/// The slots `s` as values.
+///
+/// # Safety
+/// Every slot of `s` was written.
+unsafe fn written<T>(s: &[MaybeUninit<T>]) -> &[T] {
+    // SAFETY: `MaybeUninit<T>` has the layout of `T`, and the caller says every slot holds a value.
+    unsafe { std::slice::from_raw_parts(s.as_ptr().cast::<T>(), s.len()) }
 }
 
 /// No NCBI counterpart (scheduling only): the receiver of a piece's seeds: each seed to the
@@ -224,8 +245,8 @@ impl SeedOut for PieceSink<'_> {
         // SAFETY: `chain.tail` is a block below `next.len()` (the test above when it was taken)
         // and `fill < BLOCK`, so `at` is below `blocks * BLOCK`, the length of both.
         unsafe {
-            *a.seeds.get_unchecked_mut(at) = seed;
-            *a.pos.get_unchecked_mut(at) = self.k;
+            a.seeds.get_unchecked_mut(at).write(seed);
+            a.pos.get_unchecked_mut(at).write(self.k);
         }
         chain.fill += 1;
         self.k += 1;

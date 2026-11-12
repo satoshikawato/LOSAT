@@ -11,8 +11,8 @@
 //! `COStreamBuffer`, `super::metadata`), which makes the points where a write fails part of
 //! makeblastdb's output: they follow the put area of 8191 bytes and the rule of `xsputn` below.
 //!
-//! The model (source: libstdc++-v3 of the gcc-13.2.0 release; `include/bits/fstream.tcc` is the
-//! same in 13.3.0):
+//! The model (source: libstdc++-v3 of the gcc-13.2.0 release, whose line numbers are cited; the
+//! quoted functions are the same in 13.3.0):
 //! - the open is `fopen(name, "wb")`: the file is created or truncated; a failure sets `failbit`;
 //! - the buffer has `BUFSIZ` = 8192 bytes, of which the put area holds `BUFSIZ - 1`; it starts
 //!   "uncommitted" (no put area) until the first output;

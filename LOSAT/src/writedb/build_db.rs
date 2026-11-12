@@ -1172,8 +1172,8 @@ impl<'a> BuildDatabase<'a> {
             Some(WriteDbError::Exception(e)) => {
                 Err(WriteDbError::Creation(e.get_msg().to_string()))
             }
-            // LOSAT's own errors (a file that could not be written or
-            // renamed) and a failed allocation keep their kind.
+            // A creation error whose text is not UTF-8, an error of a write of LMDB's
+            // data file (`Io`) and a failed allocation keep their kind.
             Some(error) => Err(error),
             None => Ok(success),
         }

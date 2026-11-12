@@ -1269,8 +1269,8 @@ fn add_input_and_close(
 // sequence). So the error `CSeqDB` gives for more volumes than the process may
 // hold open files ("Too many open files, please raise the open file limit",
 // exit status 2 after a complete build) is not reproduced. The totals of the
-// metadata are those of the volumes written (what the reader would read from
-// their index files), and their date is the build's.
+// metadata are those of the volumes written that the database resolves to (what
+// the reader would read from their index files), and their date is the build's.
 //
 // The path is one database name (`SeqDb::locate_one_name_metadata`), which
 // departs from NCBI on purpose: `CSeqDB` splits the name at spaces and double
@@ -1309,7 +1309,50 @@ fn open_new_database(
     .map_err(MakedbError::Database)?;
     let output_db = db.output_db();
     let version = output_db.version();
-    let totals = output_db.volume_totals();
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1649-1656
+    // ```c++
+    //     case CSeqDB::eFilteredAll:
+    //         if (oid_count) {
+    //             *oid_count = GetNumSeqs();
+    //         }
+    //         if (total_length) {
+    //             *total_length = GetTotalLength();
+    //         }
+    //         break;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1638-1644,1662-1668
+    // ```c++
+    // Int8 CSeqDBAliasNode::GetNumSeqs(const CSeqDBVolSet & vols) const
+    // {
+    //     CSeqDB_NSeqsWalker walk;
+    //     WalkNodes(& walk, vols);
+    //
+    //     return walk.GetNum();
+    // }
+    // ...
+    // Uint8 CSeqDBAliasNode::GetTotalLength(const CSeqDBVolSet & volset) const
+    // {
+    //     CSeqDB_TotalLengthWalker walk;
+    //     WalkNodes(& walk, volset);
+    //
+    //     return walk.GetLength();
+    // }
+    // ```
+    // The totals are those of the volumes `CSeqDB` opened: the ones the alias file names (a
+    // cut alias file names fewer than the writer made), or the one volume. Each volume's
+    // count and length are the ones its index file holds in its header, which are the writer's
+    // (`volume_totals`); no volume is opened. A volume the resolution finds that the writer did
+    // not make (one of the same name in the current directory, found first) adds nothing.
+    let written: std::collections::HashMap<String, (u32, u64)> = output_db
+        .volume_totals()
+        .into_iter()
+        .map(|(name, oids, letters)| (name, (oids, letters)))
+        .collect();
+    let totals: Vec<(u32, u64)> = located
+        .volumes
+        .iter()
+        .filter_map(|path| written.get(path).copied())
+        .collect();
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1705-1747
     // ```c++
     // 	GetTotals(CSeqDB::eFilteredAll, &num_seqs, &total_length, true);
@@ -1369,7 +1412,7 @@ fn open_new_database(
         dbtype: if is_protein { "Protein" } else { "Nucleotide" },
         db_version: version.number(),
         description: located.title,
-        number_of_letters: totals.iter().map(|(_, _, letters)| letters).sum(),
+        number_of_letters: totals.iter().map(|(_, letters)| letters).sum(),
         // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.def:11-12
         // ```
         // number-of-letters._type = Uint8
@@ -1377,7 +1420,7 @@ fn open_new_database(
         // ```
         // NCBI's `GetDBMetaData` counts in an `int num_seqs` (seqdb.cpp:1707), which a
         // database of more than 2^31 - 1 sequences would overflow; LOSAT sums in `Int8`.
-        number_of_sequences: totals.iter().map(|(_, oids, _)| i64::from(*oids)).sum(),
+        number_of_sequences: totals.iter().map(|(oids, _)| i64::from(*oids)).sum(),
         last_updated: last_updated(now),
         number_of_volumes: located.volumes.len() as i32,
         number_of_taxids: (version == DbVersion::V5)

@@ -25,7 +25,10 @@
 //! (`Create`, `Write`), c++/src/app/blastdb/makeblastdb.cpp:1296-1318 (the metadata file),
 //! c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108 (`~CWriteDB_Impl`).
 
-#![cfg(unix)]
+// The frozen files and messages are those of the Linux x64 release: the LMDB files follow the
+// host's page size (`Platform`), and the search path of a message is the run directory as the
+// child process sees it.
+#![cfg(target_os = "linux")]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -238,8 +241,10 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(name: &str) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("losat-mkdb-streams-{name}-{}", std::process::id()));
+        // The run directory as `getcwd` names it in the messages (`<C>`).
+        let dir = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("losat-mkdb-streams-{name}-{}", std::process::id()));
         if dir.exists() {
             writable(&dir);
             std::fs::remove_dir_all(&dir).unwrap();
@@ -422,14 +427,14 @@ fn delta(entries: &BTreeMap<String, Entry>, clean: &BTreeMap<String, Entry>) -> 
     out.join(" ")
 }
 
-/// Root reads any directory: the cases that need an unreadable one say nothing then.
+/// Whether this process reads a directory that cannot be read (root does).
 fn running_as_root() -> bool {
     let tmp = TempDir::new("root-check");
     blocked(&tmp.0.join("b"));
     std::fs::read_dir(tmp.0.join("b").join("u")).is_ok()
 }
 
-fn check(cases: &[Case]) {
+fn check<'a>(cases: impl IntoIterator<Item = &'a Case>) {
     let mut failures = Vec::new();
     for case in cases {
         let outcome = run(case.name, case.kind, case.setup);
@@ -455,14 +460,18 @@ fn check(cases: &[Case]) {
 
 #[test]
 fn makeblastdb_output_files_that_cannot_be_created_end_as_makeblastdb_ends() {
-    if running_as_root() {
-        eprintln!("skipped (running as root)");
-        return;
+    // Root reads any directory: the cases that need an unreadable one are skipped then.
+    let root = running_as_root();
+    if root {
+        eprintln!("cases with an unreadable directory skipped (running as root)");
     }
-    check(CASES);
+    check(
+        CASES
+            .iter()
+            .filter(|case| !(root && matches!(case.setup, Setup::Blocked(_)))),
+    );
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn makeblastdb_output_files_on_a_full_device_end_as_makeblastdb_ends() {
     check(FULL_CASES);

@@ -1,8 +1,10 @@
 """DIAGNOSTIC ONLY (branch diag/ph-webkit-hang, line WFL item PH; not for merge).
 
-Dumps WPEWebProcess processes of the runner in three cases, at most once per process:
-- a failed WebKit test asks for it (tests/e2e/support/test.ts writes <out>/fail-<ms>-<worker pid>.txt and waits
-  for <out>/done-<same id>): every web process under that Playwright worker, while its pages are still open;
+Dumps WebKit's processes of the runner (WPEWebProcess, WPENetworkProcess, MiniBrowser = the UI process) in three
+cases, at most once per process:
+- a WebKit test asks for it (tests/e2e/support/test.ts writes <out>/fail-<ms>-<worker pid>.txt when a page has not
+  answered for 6 s, or when the test failed, and waits for <out>/done-<same id>): every WebKit process under that
+  Playwright worker, while its pages are still open;
 - the MAIN thread (tid == pid) sleeps anywhere but the GLib poll of its run loop, with no CPU time added, for
   BLOCK_S seconds (default 20);
 - the main thread runs (state R) and adds CPU time without a pause for BUSY_S seconds (default 30).
@@ -26,9 +28,14 @@ def read(path):
         return f'({e})'
 
 
+KINDS = ('WPEWebProcess', 'WPENetworkProce', 'MiniBrowser')
+
+
 def procs():
+    # Web processes, the network process and the UI process (MiniBrowser): Playwright's protocol and the
+    # screencast go through the UI process, so a stalled UI process also looks like a page that stopped.
     for p in os.listdir('/proc'):
-        if p.isdigit() and read(f'/proc/{p}/comm').startswith('WPEWebProcess'):
+        if p.isdigit() and read(f'/proc/{p}/comm').strip() in KINDS:
             yield p
 
 

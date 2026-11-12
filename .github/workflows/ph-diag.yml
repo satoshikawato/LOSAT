@@ -84,18 +84,21 @@ jobs:
         run: |
           mkdir -p ${{ runner.temp }}/ph
           sudo -b sh -c 'python3 -I ${{ github.workspace }}/.github/ph-diag/watch.py ${{ runner.temp }}/ph > ${{ runner.temp }}/ph/watcher.out 2>&1'
-      - name: WebKit page starts (zz-ph-start.spec.ts), 2,000 times
+      - name: WebKit page starts (zz-ph-start.spec.ts), 2,500 times
         continue-on-error: true
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
           LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/losat
           CI: '1'
           PH_DIAG_DIR: ${{ runner.temp }}/ph
-        run: npx playwright test --project=webkit --repeat-each=2000 --reporter=list,github tests/e2e/zz-ph-start.spec.ts > ${{ runner.temp }}/ph/e2e.log 2>&1
+          DEBUG: pw:browser
+        run: npx playwright test --project=webkit --repeat-each=2500 --reporter=list,github tests/e2e/zz-ph-start.spec.ts > ${{ runner.temp }}/ph/e2e.log 2>&1
       - name: Summary
         if: always()
         run: |
+          sudo dmesg -T > ${{ runner.temp }}/ph/dmesg.txt 2>&1 || true
           sudo chmod -R a+r ${{ runner.temp }}/ph || true
+          grep -iE 'segfault|WPE|MiniBrowser|oom|killed' ${{ runner.temp }}/ph/dmesg.txt | tail -20 || true
           grep -E '^\s+[0-9]+ (passed|failed|flaky|skipped|did not run)' ${{ runner.temp }}/ph/e2e.log || true
           grep -E '✘' ${{ runner.temp }}/ph/e2e.log | head -20 || true
           cat ${{ runner.temp }}/ph/watch.log 2>/dev/null || echo 'no watch.log'

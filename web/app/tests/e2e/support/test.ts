@@ -14,13 +14,40 @@ import { test as base } from '@playwright/test';
 export const test = base.extend({
   context: async ({ context, browserName }, use, testInfo) => {
     if (browserName === 'webkit') await context.addInitScript(standInWakeLock);
-    await use(context);
-    // DIAGNOSTIC ONLY (branch diag/ph-webkit-hang, not for merge): when a WebKit test fails, ask the
-    // root watcher (.github/ph-diag/watch.py) to dump every web process while its pages are still open.
+    // DIAGNOSTIC ONLY (branch diag/ph-webkit-hang, not for merge): ask the root watcher
+    // (.github/ph-diag/watch.py) to dump every WebKit process of this worker (a) as soon as a page has not
+    // answered for 6 s (CI's stalled process was gone ~20 s after it stopped), (b) when a WebKit test failed.
     const dir = process.env['PH_DIAG_DIR'];
+    const ask = (why: string): string => {
+      const id = `${Date.now()}-${process.pid}`;
+      writeFileSync(join(dir!, `fail-${id}.txt`), `${why} ${testInfo.titlePath.join(' > ')}\n`);
+      return id;
+    };
+    let probe: ReturnType<typeof setInterval> | undefined;
+    if (dir !== undefined && browserName === 'webkit') {
+      const answered = new Map<object, number>();
+      const asked = new Set<object>();
+      probe = setInterval(() => {
+        for (const page of context.pages()) {
+          if (page.isClosed() || asked.has(page)) continue;
+          const now = Date.now();
+          if (!answered.has(page)) answered.set(page, now);
+          if (now - answered.get(page)! > 6000) {
+            asked.add(page);
+            ask(`stall: ${page.url()} has not answered for ${now - answered.get(page)!} ms;`);
+            continue;
+          }
+          page.evaluate(() => 1).then(
+            () => answered.set(page, Date.now()),
+            () => undefined,
+          );
+        }
+      }, 1000);
+    }
+    await use(context);
+    clearInterval(probe);
     if (dir === undefined || browserName !== 'webkit' || testInfo.status === testInfo.expectedStatus) return;
-    const id = `${Date.now()}-${process.pid}`;
-    writeFileSync(join(dir, `fail-${id}.txt`), `${testInfo.titlePath.join(' > ')}\n${testInfo.error?.message ?? ''}\n`);
+    const id = ask(`failed (${testInfo.error?.message?.split('\n')[0] ?? ''}):`);
     for (let i = 0; i < 240 && !existsSync(join(dir, `done-${id}`)); i++) await new Promise((r) => setTimeout(r, 1000));
   },
 });

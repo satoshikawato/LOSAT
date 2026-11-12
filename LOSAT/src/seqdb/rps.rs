@@ -843,6 +843,8 @@ mod tests {
         assert_eq!(ratios.len(), 2);
         assert_eq!(ratios[0][0], 4000.0 / 1e9);
         assert_eq!(ratios[1][27], 5027.0 / 1e9);
+        // The next volume is written over these files. (Windows does not write a mapped file.)
+        drop(files);
         // A 26-column `.rps` with a 28-column `.freq` reads rows two integers early: row r
         // starts at integer 26 r of the rows (NCBI's drift), and columns 26 and 27 are 0.0.
         let base = write_volume(&dir, 26, AUX);

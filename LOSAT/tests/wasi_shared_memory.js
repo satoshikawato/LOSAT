@@ -57,13 +57,16 @@
 // that 0 means a free cell), in WAIT_TABLE (one of WAIT_SLOTS cells, chosen from the address) and
 // clears it when the wait returns.
 // When the host ends the memory's workers (the memory keeper, ThreadHost.terminate: endWaits in
-// web/app/src/infra/reactor/shared-memory.ts) it sets WAITS_ENDING and notifies every recorded address
-// until the table is empty. From then on, and while the table is full, the helper waits in slices of
+// web/app/src/infra/reactor/shared-memory.ts) it sets WAITS_ENDING and notifies every recorded address,
+// again each millisecond, until the table is empty (or nothing changed in it and no notify woke a
+// thread for a second: a cell that stays set without a waiter, after an overflow of the main thread's
+// stack into these cells). From then on, and while the table is full, the helper waits in slices of
 // at most WAIT_SLICE_NS and calls the module's import wasi_snapshot_preview1.sched_yield between them;
 // the browser ends the worker in that call. The helper re-reads WAITS_ENDING after it recorded its
 // address, so a notify that comes before its wait is repeated by the host (it notifies until the table
 // is empty). Before it records the address it loads from it, which traps as the wait would (bounds,
-// alignment), so no address stays recorded after a trap. The helper returns what the instruction
+// alignment), so no address stays recorded after a trap. A cell taken after a trap cannot happen; the
+// cells, like GROWN_PAGES, are reached by the main thread's stack only at the end of an overflow. The helper returns what the instruction
 // returns (0 woken, 1 not equal, 2 timed out; the host's notify is a wake that the guest's futexes
 // treat as spurious), and waits at least a finite timeout in full. A module that does not import
 // sched_yield (the hosts' test fixtures) has no host function to call, and its wait helpers are the
@@ -94,7 +97,7 @@ const WAIT_SLICE_NS = 100_000_000;
 const WAITS_ENDING = 20;
 // WAIT_SLOTS i32 cells from WAIT_TABLE: the address of a wait in progress plus 1, 0 for none (the header).
 const WAIT_TABLE = 64;
-const WAIT_SLOTS = 64;
+const WAIT_SLOTS = 128;
 // Address of the largest memory size, in pages, that a thread of the guest grew the memory to
 // (0 = none yet). WAITS_ENDING and WAIT_TABLE lie below 1024 too. Addresses below 1024 are unused (wasm-ld's default global base) or, with
 // --stack-first as rustc links this target, the last bytes of the main thread's stack, reached
@@ -600,8 +603,8 @@ function verifyGuarded(bytes) {
   for (let i = fill + 3; i < n; i += 1) {
     const found = [];
     walk(m.bodies[i], (guarded) => { if (guarded && typeof guarded !== "string") found.push(guarded); });
-    // The helper's operation: its first atomic instruction, or the wait of a wait helper (which loads
-    // WAITS_ENDING first).
+    // The helper's operation: its first atomic instruction, or the wait of a wait helper (whose first
+    // atomic instructions are the load at the wait's address and the load of WAITS_ENDING).
     const op = found.find((g) => isWait(g.sub)) ?? found[0];
     const yieldIndex = op !== undefined && isWait(op.sub) ? schedYield(m) : undefined;
     if (op === undefined || !Buffer.from(m.bodies[i]).equals(atomicBody(op, yieldIndex))) {

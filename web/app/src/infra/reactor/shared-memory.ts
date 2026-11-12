@@ -69,20 +69,25 @@ function formatGib(value: number): string {
  */
 export const WAITS_ENDING_ADDRESS = 20;
 export const WAIT_TABLE_ADDRESS = 64;
-export const WAIT_TABLE_SLOTS = 64;
-/** How long endWaits wakes the waits of the table at most. */
+export const WAIT_TABLE_SLOTS = 128;
+/** How long endWaits goes on without any change in the table or any thread woken. */
 const END_WAITS_MS = 1_000;
 
 /**
- * Lets the workers of a shared memory end: the memory keeper (and ThreadHost.terminate) call it
- * before the workers whose threads may be in the threaded module end. It sets WAITS_ENDING, then
- * wakes every wait recorded in the table, again each millisecond, until the table is empty or
- * `deadlineMs` passed: a woken thread waits again, now in slices, and its worker ends in the
- * host call between two of them. A memory whose buffer is not shared or too small to hold the
- * cells (a module without the guard's waits) is left as it is.
+ * Lets the workers of the threaded module's shared memory end: the memory keeper (and
+ * ThreadHost.terminate) call it before the workers whose threads may be in the module end. It sets
+ * WAITS_ENDING, then wakes every wait recorded in the table, again each millisecond, until the
+ * table is empty: a woken thread waits again, now in slices, and its worker ends in the host call
+ * between two of them. A thread that took its cell but has not begun its wait is woken by a later
+ * round. It stops early only when nothing changed in the table and no thread was woken for
+ * `deadlineMs` (a cell that stays set without a waiter, after an overflow of the main thread's
+ * stack into the cells). The web build serves the threaded module only with the guard's waits
+ * (build/reactors.ts); a memory whose buffer is not shared or too small for the cells is left as
+ * it is.
  */
 export function endWaits(memory: WebAssembly.Memory, deadlineMs = END_WAITS_MS): void {
-  const until = performance.now() + deadlineMs;
+  let until = performance.now() + deadlineMs;
+  let last = '';
   const pause = new Int32Array(new SharedArrayBuffer(4));
   for (;;) {
     const buffer = memory.buffer as ArrayBufferLike;
@@ -90,16 +95,22 @@ export function endWaits(memory: WebAssembly.Memory, deadlineMs = END_WAITS_MS):
     // A view of the current size: the memory may have grown since the last round.
     const view = new Int32Array(buffer);
     Atomics.store(view, WAITS_ENDING_ADDRESS / 4, 1);
-    let recorded = 0;
+    const cells: number[] = [];
+    let woken = 0;
     for (let slot = 0; slot < WAIT_TABLE_SLOTS; slot++) {
       // The address of the wait, plus 1 (0 is a free cell).
       const cell = Atomics.load(view, WAIT_TABLE_ADDRESS / 4 + slot);
       if (cell === 0) continue;
-      recorded++;
+      cells.push(slot, cell);
       const index = ((cell >>> 0) - 1) >>> 2;
-      if (index < view.length) Atomics.notify(view, index);
+      if (index < view.length) woken += Atomics.notify(view, index);
     }
-    if (recorded === 0 || performance.now() >= until) return;
+    if (cells.length === 0) return;
+    const now = performance.now();
+    const table = cells.join(',');
+    if (woken > 0 || table !== last) until = now + deadlineMs;
+    else if (now >= until) return;
+    last = table;
     Atomics.wait(pause, 0, 0, 1);
   }
 }

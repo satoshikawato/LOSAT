@@ -212,13 +212,35 @@ pub(crate) struct PssmAncillary {
     pub(crate) psi_gapped: KarlinBlk,
 }
 
-/// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id (the
-/// local id `Query_<n>` of a FASTA query, or that of the PSSM query of `-in_pssm`, a string or an
-/// integer) and its title.
+/// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id
+/// (`fasta_query_id` of a FASTA query, or the local id of the PSSM query of `-in_pssm`, a string
+/// or an integer) and its title.
 pub(crate) struct PssmQueryRecord<'a> {
     pub(crate) letters: &'a [u8],
-    pub(crate) id: &'a ObjectId,
+    pub(crate) id: &'a PssmSeqId,
     pub(crate) title: &'a [u8],
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:150-155
+// ```c++
+//     m_QueryBioseq.Reset(new CBioseq);
+//     // set the sequence id
+//     CRef<CSeq_align> aln =
+//         const_cast<CSeq_align_set*>(&*m_SeqAlignSet)->Set().front();
+//     CRef<CSeq_id> query_id(const_cast<CSeq_id*>(&aln->GetSeq_id(0)));
+//     m_QueryBioseq->SetId().push_back(query_id);
+// ```
+/// The Seq-id of the PSSM of FASTA query `record`, the `ordinal`-th of the run (1-based): its
+/// Seq-align id, the local id `Query_<ordinal>`, or with `-parse_deflines` the id NCBI's Seq-aligns
+/// take of those it read (`BelievedIds::best`: of `gi|4504347|ref|NP_000549.1|` the gi alone).
+pub(crate) fn fasta_query_id(
+    record: &crate::blastinput::fasta_reader::FastaRecord,
+    ordinal: usize,
+) -> PssmSeqId {
+    match record.believed() {
+        Some(ids) => PssmSeqId::Parsed(ids.best.clone()),
+        None => PssmSeqId::Local(ObjectId::Str(format!("Query_{ordinal}").into_bytes())),
+    }
 }
 
 /// The scoring of the search that the PSSM records: the matrix as named (`-matrix`, any case)
@@ -582,7 +604,7 @@ fn pssm_with_parameters(
             row_labels: None,
             by_row: Some(false),
             query: Some(PssmQuery {
-                ids: vec![PssmSeqId::Local(query.id.clone())],
+                ids: vec![query.id.clone()],
                 titles: Some(vec![query.title.to_vec()]),
                 inst: SeqInst {
                     repr: ("raw", 2),

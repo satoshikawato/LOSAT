@@ -661,25 +661,13 @@ const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     "gap_trigger",
     "ignore_msa_master",
     "in_msa",
-    // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
-    "lcase_masking",
     "msa_master_idx",
-    // Line DI-7 ported it to BLASTP's queries, not to PSIBLAST's.
-    "parse_deflines",
     "phi_pattern",
     "sum_stats",
     // Line RG X1 ported them to BLASTP's search, not to PSIBLAST's rounds (series RG-Q).
     "xdrop_gap",
     "xdrop_gap_final",
     "xdrop_ungap",
-    // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
-    "negative_seqidlist",
-    "negative_taxidlist",
-    "negative_taxids",
-    "no_taxid_expansion",
-    "seqidlist",
-    "taxidlist",
-    "taxids",
 ];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {

@@ -1,0 +1,281 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           23 sequences; 3,263 total letters
+
+Results from round 1
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp|P69905.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  207     5e-74
+sp|P01923.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  204     2e-72
+sp|Q9TS35.2| RecName: Full=Hemoglobin subunit alpha-1; AltName: F...  203     4e-72
+sp|P63107.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  200     4e-71
+sp|P67818.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  196     1e-69
+sp|P01935.1| RecName: Full=Hemoglobin subunit alpha-3; AltName: F...  188     3e-66
+sp|P07405.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  179     6e-63
+sp|P01942.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  178     2e-62
+sp|P60529.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  178     3e-62
+sp|P01966.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  173     2e-60
+sp|P01946.3| RecName: Full=Hemoglobin subunit alpha-1/2; AltName:...  149     1e-50
+sp|P01999.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  141     1e-47
+sp|P01994.2| RecName: Full=Hemoglobin subunit alpha-A; AltName: F...  135     3e-45
+sp|P83135.2| RecName: Full=Hemoglobin subunit alpha-A; AltName: F...  130     1e-43
+sp|P06638.2| RecName: Full=Hemoglobin subunit alpha-5; AltName: F...  122     3e-40
+sp|P09105.2| RecName: Full=Hemoglobin subunit theta-1; AltName: F...  122     4e-40
+sp|Q9PRL9.1| RecName: Full=Hemoglobin subunit alpha-1; AltName: F...  114     7e-37
+sp|P02008.2| RecName: Full=Hemoglobin subunit zeta; AltName: Full...  111     5e-36
+sp|P06467.2| RecName: Full=Hemoglobin subunit zeta; AltName: Full...  107     4e-34
+sp|P11748.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  105     2e-33
+sp|P02018.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  102     2e-32
+sp|Q90487.3| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  100     9e-32
+sp|P11251.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  99.0    5e-31
+
+
+> sp|P69905.2| RecName: Full=Hemoglobin subunit alpha; AltName: 
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: 
+RecName: Full=Hemopressin [Homo sapiens] >sp|P69906.2| 
+RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Pan paniscus] >sp|P69907.2| RecName: 
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+Length=142
+
+ Score = 207 bits (528),  Expect = 5e-74, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+> sp|P01923.1| RecName: Full=Hemoglobin subunit alpha; AltName: 
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: 
+RecName: Full=Hemopressin [Gorilla gorilla gorilla]
+Length=141
+
+ Score = 204 bits (518),  Expect = 2e-72, Method: Compositional matrix adjust.
+ Identities = 140/141 (99%), Positives = 141/141 (100%), Gaps = 0/141 (0%)
+
+Query  2    VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  61
+            VLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK
+Sbjct  1    VLSPADKTNVKAAWGKVGAhagdygaealermflsfpttktyfphfdlshgsaqvkghgk  60
+
+Query  62   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  121
+            KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA
+Sbjct  61   kvadaltnavAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  120
+
+Query  122  VHASLDKFLASVSTVLTSKYR  142
+            VHASLDKFLASVSTVLTSKYR
+Sbjct  121  VHASLDKFLASVSTVLTSKYR  141
+
+
+> sp|Q9TS35.2| RecName: Full=Hemoglobin subunit alpha-1; AltName: 
+Full=Alpha-1-globin; AltName: Full=Hemoglobin alpha-1 chain; 
+Contains: RecName: Full=Hemopressin [Hylobates lar]
+Length=142
+
+ Score = 203 bits (516),  Expect = 4e-72, Method: Compositional matrix adjust.
+ Identities = 140/142 (99%), Positives = 141/142 (99%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.128    0.369    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 263006
+Results from round 2
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp|P69905.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  221     2e-79
+sp|P01923.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  218     5e-78
+sp|Q9TS35.2| RecName: Full=Hemoglobin subunit alpha-1; AltName: F...  217     8e-78
+sp|P63107.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  213     3e-76
+sp|P67818.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  211     3e-75
+sp|P01935.1| RecName: Full=Hemoglobin subunit alpha-3; AltName: F...  200     4e-71
+sp|P01942.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  190     6e-67
+sp|P07405.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  189     1e-66
+sp|P60529.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  189     1e-66
+sp|P01966.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  185     3e-65
+sp|P01946.3| RecName: Full=Hemoglobin subunit alpha-1/2; AltName:...  158     2e-54
+sp|P01999.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  149     1e-50
+sp|P01994.2| RecName: Full=Hemoglobin subunit alpha-A; AltName: F...  143     1e-48
+sp|P83135.2| RecName: Full=Hemoglobin subunit alpha-A; AltName: F...  138     1e-46
+sp|P06638.2| RecName: Full=Hemoglobin subunit alpha-5; AltName: F...  131     1e-43
+sp|P09105.2| RecName: Full=Hemoglobin subunit theta-1; AltName: F...  129     5e-43
+sp|Q9PRL9.1| RecName: Full=Hemoglobin subunit alpha-1; AltName: F...  121     1e-39
+sp|P02008.2| RecName: Full=Hemoglobin subunit zeta; AltName: Full...  119     8e-39
+sp|P11748.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  112     4e-36
+sp|P06467.2| RecName: Full=Hemoglobin subunit zeta; AltName: Full...  111     8e-36
+sp|P02018.1| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  107     2e-34
+sp|Q90487.3| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  107     3e-34
+sp|P11251.2| RecName: Full=Hemoglobin subunit alpha; AltName: Ful...  103     1e-32
+
+
+> sp|P69905.2| RecName: Full=Hemoglobin subunit alpha; AltName: 
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: 
+RecName: Full=Hemopressin [Homo sapiens] >sp|P69906.2| 
+RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Pan paniscus] >sp|P69907.2| RecName: 
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+Length=142
+
+ Score = 221 bits (564),  Expect = 2e-79, Method: Composition-based stats.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+> sp|P01923.1| RecName: Full=Hemoglobin subunit alpha; AltName: 
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: 
+RecName: Full=Hemopressin [Gorilla gorilla gorilla]
+Length=141
+
+ Score = 218 bits (555),  Expect = 5e-78, Method: Composition-based stats.
+ Identities = 140/141 (99%), Positives = 141/141 (100%), Gaps = 0/141 (0%)
+
+Query  2    VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  61
+            VLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK
+Sbjct  1    VLSPADKTNVKAAWGKVGAhagdygaealermflsfpttktyfphfdlshgsaqvkghgk  60
+
+Query  62   KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  121
+            KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA
+Sbjct  61   kvadaltnavAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  120
+
+Query  122  VHASLDKFLASVSTVLTSKYR  142
+            VHASLDKFLASVSTVLTSKYR
+Sbjct  121  VHASLDKFLASVSTVLTSKYR  141
+
+
+> sp|Q9TS35.2| RecName: Full=Hemoglobin subunit alpha-1; AltName: 
+Full=Alpha-1-globin; AltName: Full=Hemoglobin alpha-1 chain; 
+Contains: RecName: Full=Hemopressin [Hylobates lar]
+Length=142
+
+ Score = 217 bits (553),  Expect = 8e-78, Method: Composition-based stats.
+ Identities = 140/142 (99%), Positives = 141/142 (99%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.313    0.139    0.446    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0425    0.140     1.90     42.6     43.6 
+
+Effective search space used: 263006
+
+Search has CONVERGED!
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 3,263
+  Number of sequences in database:  23
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

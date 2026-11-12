@@ -284,6 +284,27 @@ where
             tokens.truncate(2);
             tokens.extend(words);
         }
+    } else if tokens.get(1).is_some_and(|token| token == "makeblastdb") {
+        // makeblastdb's application reads the same words (its own refusals of the others come
+        // with its arguments): a last `-logfile` or `-conffile` without a value is dropped, and
+        // the library API refuses `-conffile` (NCBI BLAST+ 2.17.0, probes
+        // `makeblastdb.log_noval`, `makeblastdb.conf_noval`: rc 0).
+        use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+        if let Preparsed::Words {
+            words,
+            conffile,
+            dryrun: false,
+        } = preparse(&tokens[2..])
+        {
+            let no_start =
+                crate::blastinput::ncbi_environment::application_start_of_process().is_none();
+            if no_start && conffile.is_some() {
+                let word = toolkit_file_word(&tokens[2..]).unwrap_or("-conffile");
+                return Err(toolkit_file_word_error("makeblastdb", word));
+            }
+            tokens.truncate(2);
+            tokens.extend(words);
+        }
     }
     let mut input = tokens.into_iter();
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
@@ -503,7 +524,7 @@ pub fn render_message(error: &clap::Error) -> String {
         .to_string()
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version");
-    let command = Cli::command();
+    let command = with_toolkit_file_args(Cli::command());
     for scope in std::iter::once(&command).chain(command.get_subcommands()) {
         for arg in scope.get_arguments() {
             // rpsbproc's one-letter arguments are left to `render_rpsbproc_message`: replacing
@@ -984,14 +1005,22 @@ fn toolkit_file_word(tokens: &[OsString]) -> Option<&str> {
 /// LOSAT's refusal of the toolkit file option `word` (`-logfile` or `-conffile`) in `program`
 /// when the parser's caller ran no application start: the library API and the Web engine.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
-    let name = word.trim_start_matches('-');
-    let name = name.split_once('=').map_or(name, |(key, _)| key);
     clap::Error::raw(
         ErrorKind::InvalidValue,
-        format!(
-            "the NCBI C++ Toolkit option -{name} runs on the command line of LOSAT's {} only: the library API and the Web engine run no NCBI application start, which reads it",
-            program.to_ascii_uppercase()
-        ),
+        toolkit_file_word_refusal(program, word),
+    )
+}
+
+/// The text of `toolkit_file_word_error`, which blastdbcmd's library run writes too.
+pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
+    let name = word.trim_start_matches('-');
+    let name = name.split_once('=').map_or(name, |(key, _)| key);
+    let shown = match program {
+        "makeblastdb" => program.to_string(),
+        _ => program.to_ascii_uppercase(),
+    };
+    format!(
+        "the NCBI C++ Toolkit option -{name} runs on the command line of LOSAT's {shown} only: the library API and the Web engine run no NCBI application start, which reads it"
     )
 }
 
@@ -1062,8 +1091,6 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // const char* s_ArgFullVersionJson = "-version-full-json";
 // const char* s_ArgDryRun          = "-dryrun";
 // ```
-// The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
-// accept without listing them in -help.
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
 // makeblastdb (line RG item E1); rpsbproc refuses them (`RPSBPROC_TOOLKIT_FILE_ARGS`, item E1c).

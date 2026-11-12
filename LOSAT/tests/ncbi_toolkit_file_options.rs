@@ -45,6 +45,10 @@ fn run_in(dir: &Path, words: &[&str], envs: &[(&str, &str)]) -> Output {
         .current_dir(dir)
         .args(words)
         .stdin(std::process::Stdio::null());
+    // The `--all-features` build's BLASTX diagnostic probe needs its log (as in CI).
+    if let Some(log) = std::env::var_os("LOSAT_BLASTX_WORKER_LOG") {
+        command.env("LOSAT_BLASTX_WORKER_LOG", log);
+    }
     command.output().unwrap()
 }
 
@@ -133,7 +137,12 @@ fn run_messages_go_where_ncbi_sends_them() {
         let other = if program == "rpsblast" {
             ["-db", "nodb"]
         } else {
-            ["-subject", "arch_bp_s.faa"]
+            let subject = match program {
+                "blastn" | "tblastx" => "arch_tbx_s.fna",
+                "tblastn" => "arch_tbn_s.fna",
+                _ => "arch_bp_s.faa",
+            };
+            ["-subject", subject]
         };
         let mut words = vec![program, "-query", "missing.fa"];
         words.extend(other);
@@ -297,5 +306,84 @@ fn a_conffile_that_is_not_a_file_aborts_as_ncbi_aborts() {
         (Some(255), critical("missing.ini"))
     );
     assert!(!dir.join("mdb.pin").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// NCBI BLAST+ 2.17.0 (probes `conf_unread_dot`, `conf_unread_bare`, `makeblastdb.log_noval`,
+/// `makeblastdb.conf_noval`): a `-conffile` with a directory whose file cannot be opened ends the
+/// program as a malformed registry file does (exit status 2), one without a directory loads no
+/// file; makeblastdb drops a last `-logfile` or `-conffile` without a value.
+#[test]
+fn an_unreadable_conffile_and_a_last_word_without_value() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("unread");
+    fs::write(dir.join("c.ini"), "[BLAST]\n").unwrap();
+    fs::set_permissions(dir.join("c.ini"), fs::Permissions::from_mode(0o000)).unwrap();
+    // A process that can open the file anyway (root) reads it as NCBI's would.
+    let unreadable = fs::File::open(dir.join("c.ini")).is_err();
+    let message = "Registry file \"./c.ini\" cannot be opened";
+    let report = format!("Error: (CAppException::eNoRegistry) {message}\nError: (106.15) Application's initialization failed (CAppException::eNoRegistry) {message}\n");
+    for (program, search) in SEARCHES {
+        let mut words = vec![program];
+        words.extend(search);
+        words.extend(["-outfmt", "6"]);
+        let mut dotted = words.clone();
+        dotted.extend(["-conffile", "./c.ini"]);
+        let run = run_in(&dir, &dotted, &[]);
+        if unreadable {
+            assert_eq!(
+                (run.status.code(), text(&run.stderr)),
+                (Some(2), report.repeat(2)),
+                "{program}"
+            );
+        }
+        let mut bare = words.clone();
+        bare.extend(["-conffile", "c.ini"]);
+        let run = run_in(&dir, &bare, &[]);
+        assert_eq!(run.status.code(), Some(0), "{program}: {run:?}");
+    }
+    fs::set_permissions(dir.join("c.ini"), fs::Permissions::from_mode(0o644)).unwrap();
+    for last in ["-logfile", "-conffile"] {
+        let run = run_in(
+            &dir,
+            &[
+                "makeblastdb",
+                "-in",
+                "arch_bp_s.faa",
+                "-dbtype",
+                "prot",
+                "-out",
+                "mdb",
+                last,
+            ],
+            &[],
+        );
+        assert_eq!(run.status.code(), Some(0), "{last}: {run:?}");
+        assert!(dir.join("mdb.pin").exists(), "{last}");
+        fs::remove_file(dir.join("mdb.pin")).unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// No NCBI counterpart: LOSAT's own refusal (here of `BL2SEQ_LEGACY`, which NCBI reads and LOSAT
+/// does not) stays on the terminal when tblastx sends the messages of its run to the `-logfile`
+/// file (line RG DECISIONS 32).
+#[test]
+fn losats_refusals_stay_on_the_terminal() {
+    let dir = scratch("refusal");
+    let (_, search) = SEARCHES[3];
+    let mut words = vec!["tblastx"];
+    words.extend(search);
+    words.extend(["-outfmt", "6", "-logfile", "log.txt"]);
+    let refused = run_in(&dir, &words, &[("BL2SEQ_LEGACY", "1")]);
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+    let stderr = text(&refused.stderr);
+    assert!(
+        stderr.starts_with("Error: ") && stderr.contains("not supported by LOSAT"),
+        "{stderr}"
+    );
+    assert!(!fs::read_to_string(dir.join("log.txt"))
+        .unwrap()
+        .contains("not supported by LOSAT"));
     let _ = fs::remove_dir_all(&dir);
 }

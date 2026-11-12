@@ -85,9 +85,12 @@ messages, before the options are read: its report, then every message so far aga
 go to the standard error stream, and with `-logfile` as in NCBI BLAST+: those of the start to the
 standard error stream and into the file, the others into the file (`-logfile /dev/null` and
 `-logfile ""` discard them), except that blastn, blastp, blastx, tblastn and psiblast write the
-messages again to the standard error stream. (The search programs then refuse `-logfile` as they
-read their options.) `-conffile`, which would load another file in place of `<program>.ini`, is
-refused before the configuration is loaded. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+messages again to the standard error stream. The messages of the run go into the file in
+tblastx and rpsblast, and to the standard error stream in the other search programs, as in NCBI
+BLAST+. `-conffile FILE` loads FILE in place of `<program>.ini` (a name without a directory is
+looked for where `<program>.ini` is looked for, a name with one is that file); a FILE that is not
+a file ends the program with NCBI BLAST+'s message and exit status 255, before `-h`. rpsbproc
+refuses `-logfile` and `-conffile`. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
 a file that NCBI BLAST+ reports.
 

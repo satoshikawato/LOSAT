@@ -192,6 +192,13 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
             return 0;
         }
         Preparsed::Refused(word) => return diag.refuse(&unsupported_option(word)),
+        // The file of `-conffile` is the configuration of the command line's application start
+        // (`start_application`); the library API runs none (`cli::toolkit_file_word_refusal`).
+        Preparsed::Words {
+            conffile: Some(_), ..
+        } if start.is_none() => {
+            return diag.refuse(&crate::cli::toolkit_file_word_refusal(PROGRAM, "-conffile"))
+        }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit` loads the

@@ -1975,6 +1975,19 @@ fn toolkit_file_options_need_the_command_lines_application_start() {
         // `-out` then has no value: the parser's error.
         assert!(parse(program, &["-out", "-logfile"]).is_err(), "{program}");
     }
+    // makeblastdb's library run refuses `-conffile` too; a last word without value is dropped.
+    let makedb = |words: &[&str]| {
+        let mut argv = vec!["losat", "makeblastdb", "-in", "x.faa", "-dbtype", "prot"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv)
+    };
+    let error = makedb(&["-conffile", "c.ini"]).unwrap_err().to_string();
+    assert!(
+        error.contains("runs on the command line of LOSAT's makeblastdb only"),
+        "{error}"
+    );
+    assert!(makedb(&["-conffile"]).is_ok());
+    assert!(makedb(&["-logfile"]).is_ok());
 }
 
 #[test]

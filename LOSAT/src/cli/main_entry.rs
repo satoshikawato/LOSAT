@@ -34,6 +34,22 @@ use crate::cli::{Cli, Commands};
 /// calls `api` instead.
 #[doc(hidden)]
 pub fn main_entry() -> Result<()> {
+    let result = run_main_entry();
+    // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
+    // the standard error went to the `-logfile` target (tblastx and rpsblast,
+    // `ncbi_environment::run_messages_follow_log`): written as `main`'s `Result` writes them,
+    // exit status 1. NCBI's errors are written by the run itself (`exit_on_native_error`), where
+    // NCBI writes them. Line RG DECISIONS 32.
+    if let Err(error) = &result {
+        if let Some(mut terminal) = crate::blastinput::ncbi_environment::terminal_stderr() {
+            let _ = writeln!(terminal, "Error: {error:?}");
+            std::process::exit(1);
+        }
+    }
+    result
+}
+
+fn run_main_entry() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
     // counterpart; it reads the clock only with LOSAT_TIMING.
     crate::utils::xtiming::start();

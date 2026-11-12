@@ -1,0 +1,2 @@
+Error: (CObjReaderParseException::eInvalidID) 'a]b' is not a valid local ID (m_Pos = 1)
+Error: (106.16) Application's execution failed (CObjReaderParseException::eInvalidID) 'a]b' is not a valid local ID (m_Pos = 1)

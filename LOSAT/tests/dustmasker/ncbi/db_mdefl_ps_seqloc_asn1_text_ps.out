@@ -1,0 +1,100 @@
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id tpg {
+    accession "DAA00001",
+    version 1
+  }
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id genbank {
+    accession "AAAA01000001",
+    version 1
+  }
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id pdb {
+    mol "1ABC",
+    chain 66,
+    chain-id "B"
+  }
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id other {
+    accession "NC_000002",
+    version 1
+  }
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id other {
+    accession "NM_000001",
+    version 1
+  }
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id local str "amp"
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id local str "lowfirst"
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id local str "tildes"
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id local str "range:5-20"
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id gi 77
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id genbank {
+    accession "AY000001",
+    version 1
+  }
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id local str "ctrla"
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id local str "xm"
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id other {
+    accession "XM_000001",
+    version 1
+  }
+}
+Seq-loc ::= int {
+  from 16,
+  to 59,
+  id general {
+    db "SRA",
+    tag str "SRR1.1"
+  }
+}

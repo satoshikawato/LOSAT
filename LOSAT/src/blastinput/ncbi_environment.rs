@@ -2439,9 +2439,29 @@ fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsStrin
 /// rpsbproc's has none (no `CBlastUsageReport` in RpsbProc 0.5.1's source): NCBI's rpsbproc
 /// (the 2025-05-13 package and bioconda's 0.5.1) with a `.ncbirc` of a malformed line posts
 /// nothing for `-version` and its `Critical` once for `-h` and for a run (env parity probe of
-/// 2026-11-12 on ws), the configuration load's only.
+/// 2026-11-12 on ws), the configuration load's only. dustmasker's has none either: its
+/// application is a `CNcbiApplication` with no member of BLAST's.
+///
+/// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.hpp:47-55
+/// ```c++
+/// class CDustMaskApplication : public CNcbiApplication
+/// {
+/// public:
+///     /// Application constructor
+///     CDustMaskApplication() {
+///         CRef<CVersion> version(new CVersion());
+///         version->SetVersionInfo(1, 0, 0);
+///         SetFullVersion(version);
+///     }
+/// ```
 fn has_usage_report(program: &str) -> bool {
-    program != "rpsbproc"
+    !matches!(program, "rpsbproc" | "dustmasker")
+}
+
+/// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the reports of
+/// its registry files name its own toolkit build (`rpsbproc_registry_refusal`).
+fn has_own_build(program: &str) -> bool {
+    program == "rpsbproc"
 }
 
 /// LOSAT's refusal of a registry file that NCBI's rpsbproc reports when it loads its
@@ -2795,7 +2815,7 @@ fn application_start(
     let mut posts = String::new();
     if let Some((path, read)) = &ini {
         start.library_note = start.library_note.take().or(library_note(path, read));
-        if (read.error.is_some() || read.stream_failed) && !has_usage_report(program) {
+        if (read.error.is_some() || read.stream_failed) && has_own_build(program) {
             start.config = Err(rpsbproc_registry_refusal(path));
             return ended(start);
         }
@@ -2827,7 +2847,7 @@ fn application_start(
                 if !kept {
                     posts.push_str(&system_wide_posts(read));
                 }
-                if !has_usage_report(program) && !system_wide_posts(read).is_empty() {
+                if has_own_build(program) && !system_wide_posts(read).is_empty() {
                     start.config = Err(rpsbproc_registry_refusal(path));
                     return ended(start);
                 }
@@ -4233,6 +4253,47 @@ mod tests {
         std::fs::remove_file(&ncbirc).unwrap();
         std::fs::write(dir.join("rpsbproc.ini"), "garbage\n").unwrap();
         assert!(start(&[]).config.unwrap_err().contains("LOSAT's rpsbproc"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // dustmasker has no usage report (dust_mask_app.hpp:47-55, quoted at `has_usage_report`):
+    // `BLAST_USAGE_REPORT` is not read, and `.ncbirc` is read once, by the configuration load,
+    // whose posts go to the diagnostics as blastdbcmd's do.
+    #[test]
+    fn dustmasker_starts_without_the_usage_report() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-dustmasker-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
+        let start = |pairs: &[(&str, &str)]| {
+            let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+            all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+            let env = |name: &str| {
+                all.iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| OsString::from(value))
+            };
+            application_start(
+                "dustmasker",
+                None,
+                all.iter()
+                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+                &env,
+                &NO_PROCESS,
+            )
+        };
+        std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\n").unwrap();
+        let read = start(&[("BLAST_USAGE_REPORT", "abc")]);
+        assert_eq!(read.usage_report, Ok(String::new()));
+        assert_eq!(read.config, Ok(ConfigLoad::Loaded(String::new())));
+        assert_eq!(read.settings.unwrap().blastdb, Ok(Some("/db".to_string())));
+        std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\ngarbage\n").unwrap();
+        let malformed = start(&[]);
+        assert_eq!(malformed.usage_report, Ok(String::new()));
+        assert_eq!(malformed.config, Ok(ConfigLoad::Loaded(critical(3))));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

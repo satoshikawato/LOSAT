@@ -4,11 +4,11 @@
 
 use std::io::Write;
 
+use crate::ncbi_app::args::Args;
 use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::writedb::metadata::{db_files_metadata, DbMetadata};
 
-use super::args::Args;
 use super::{database_error, refusal, Diag};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1206-1222

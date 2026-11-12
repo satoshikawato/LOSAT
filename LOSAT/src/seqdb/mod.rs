@@ -1419,6 +1419,25 @@ impl SeqDb {
         self.volume_starts[self.volumes.len()]
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:44-49
+    // ```c++
+    // CRef< CSeq_entry > CMaskBDBReader::GetNextSequence()
+    // {
+    //     CRef< CSeq_entry > entry( null );
+    //     if( oid_ < seqdb_->GetNumOIDs() ) {
+    //         CRef< CBioseq > seq = seqdb_->GetBioseq( oid_++ );
+    // ```
+    /// Every OID of the volumes as an ordinal id ([`SeqDb::num_oids`] of them): the alias
+    /// files' OID ranges (`FIRST_OID`, `LAST_OID`) no longer leave any out. For a reader that
+    /// loops `GetNumOIDs` and reads each OID with `GetBioseq(oid)`, which reads an OID outside
+    /// the ranges too (dustmasker's `CMaskBDBReader`). Only before a list
+    /// ([`SeqDb::restrict`]): the alias keys of lists are refused when the database opens.
+    pub fn include_every_oid(&mut self) {
+        debug_assert!(!self.list_applied, "include_every_oid after a list");
+        self.filter = None;
+        self.num_seqs = self.num_oids();
+    }
+
     /// `CSeqDB::GetNumSeqs` of the search: the walk of `NSEQ` (the volumes' OIDs below the
     /// alias files without the key) without a list, the included OIDs with one. It is not the
     /// number of included OIDs ([`SeqDb::num_seqs`]) when an alias file has `NSEQ` or a range.

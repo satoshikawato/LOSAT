@@ -604,6 +604,10 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.enumerated(name, value);
         self.flush();
     }
+    fn named_int(&mut self, name: &str, value: i32) {
+        self.inner.named_int(name, value);
+        self.flush();
+    }
     fn boolean(&mut self, value: bool) {
         self.inner.boolean(value);
         self.flush();

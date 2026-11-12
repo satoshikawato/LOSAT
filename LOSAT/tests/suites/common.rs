@@ -30,6 +30,8 @@ mod db_seqidlist;
 mod db_taxid_root;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
+#[path = "../dustmasker_fixtures.rs"]
+mod dustmasker_fixtures;
 #[path = "../entry_names.rs"]
 mod entry_names;
 #[path = "../library_api.rs"]

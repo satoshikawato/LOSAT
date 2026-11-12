@@ -257,6 +257,23 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.number(value);
     }
 
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1006-1017
+    /// ```c++
+    /// void CObjectOStreamAsnBinary::WriteEnum(const CEnumeratedTypeValues& values,
+    ///                                         TEnumValueType value)
+    /// {
+    ///     if ( values.IsInteger() ) {
+    ///         WriteSysTag(eInteger);
+    ///     }
+    ///     ...
+    ///     WriteNumberValue(value);
+    /// }
+    /// ```
+    fn named_int(&mut self, _name: &str, value: i32) {
+        self.out.push(TAG_INTEGER);
+        self.number(value);
+    }
+
     /// `WriteBool`: `01 01 01` or `01 01 00`.
     fn boolean(&mut self, value: bool) {
         self.out

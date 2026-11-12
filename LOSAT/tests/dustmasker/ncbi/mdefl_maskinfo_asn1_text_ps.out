@@ -1,0 +1,110 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      int {
+        from 16,
+        to 59,
+        id tpg {
+          accession "DAA00001",
+          version 1
+        }
+      },
+      int {
+        from 16,
+        to 59,
+        id genbank {
+          accession "AAAA01000001",
+          version 1
+        }
+      },
+      int {
+        from 16,
+        to 59,
+        id pdb {
+          mol "1ABC",
+          chain 66,
+          chain-id "B"
+        }
+      },
+      int {
+        from 16,
+        to 59,
+        id other {
+          accession "NC_000002",
+          version 1
+        }
+      },
+      int {
+        from 16,
+        to 59,
+        id other {
+          accession "NM_000001",
+          version 1
+        }
+      },
+      int {
+        from 16,
+        to 59,
+        id local str "amp"
+      },
+      int {
+        from 16,
+        to 59,
+        id local str "lowfirst"
+      },
+      int {
+        from 16,
+        to 59,
+        id local str "tildes"
+      },
+      int {
+        from 16,
+        to 59,
+        id local id 1
+      },
+      int {
+        from 16,
+        to 59,
+        id gi 77
+      },
+      int {
+        from 16,
+        to 59,
+        id genbank {
+          accession "AY000001",
+          version 1
+        }
+      },
+      int {
+        from 16,
+        to 59,
+        id local str "ctrla"
+      },
+      int {
+        from 16,
+        to 59,
+        id local str "xm"
+      },
+      int {
+        from 16,
+        to 59,
+        id other {
+          accession "XM_000001",
+          version 1
+        }
+      },
+      int {
+        from 16,
+        to 59,
+        id general {
+          db "SRA",
+          tag str "SRR1.1"
+        }
+      }
+    },
+    more FALSE
+  }
+}

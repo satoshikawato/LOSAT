@@ -4,17 +4,17 @@
 
 /// The codings that `Pack` chooses for IUPACna residues without gaps.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Coding {
+pub(crate) enum Coding {
     Ncbi2na,
     Ncbi4na,
 }
 
 /// One segment of the packed residues (`IPackTarget::NewSegment`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct Segment {
-    pub(super) coding: Coding,
-    pub(super) start: u32,
-    pub(super) length: u32,
+pub(crate) struct Segment {
+    pub(crate) coding: Coding,
+    pub(crate) start: u32,
+    pub(crate) length: u32,
 }
 
 /// `kBestCodingsWithoutGaps.iupacna`: NCBI2na for `A`, `C`, `G`, `T`, `U` in either
@@ -424,9 +424,21 @@ const fn ncbi2na_code(residue: u8) -> u8 {
 }
 
 /// The NCBI4na code of the IUPACna letters (`CIupacnaTo4na`'s rows: the table has the
-/// code in the high and in the low half of a byte), which is also their NCBI8na code.
+/// code in the high and in the low half of a byte), which is also their NCBI8na code. The
+/// table has the codes of the letters in either case; every other row is 15 (`N`), the
+/// hyphen of a reader without `fParseGaps` among them.
+///
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-394,409-410
+/// ```c++
+/// const Uint1 CIupacnaTo4na::scm_Table[512] = {
+///     0xf0,0xf,  0xf0,0xf,  0xf0,0xf,  0xf0,0xf,
+///     0xf0,0xf,  0xf0,0xf,  0xf0,0xf,  0xf0,0xf,
+/// ...
+///     0xf0,0xf,  0x10,0x1,  0xe0,0xe,  0x20,0x2,
+///     0xd0,0xd,  0xf0,0xf,  0xf0,0xf,  0x40,0x4,
+/// ```
 const fn ncbi4na_code(residue: u8) -> u8 {
-    match residue {
+    match residue.to_ascii_uppercase() {
         b'A' => 1,
         b'C' => 2,
         b'M' => 3,
@@ -441,8 +453,7 @@ const fn ncbi4na_code(residue: u8) -> u8 {
         b'K' => 12,
         b'D' => 13,
         b'B' => 14,
-        b'N' => 15,
-        _ => 0,
+        _ => 15,
     }
 }
 
@@ -502,7 +513,7 @@ const NCBI4NA_CODES: [u8; 256] = {
 ///     return length;
 /// }
 /// ```
-pub(super) fn iupacna_to_ncbi2na(src: &[u8]) -> Vec<u8> {
+pub(crate) fn iupacna_to_ncbi2na(src: &[u8]) -> Vec<u8> {
     let mut dst = Vec::with_capacity(src.len().div_ceil(4));
     let mut chunks = src.chunks_exact(4);
     dst.extend((&mut chunks).map(|four| {
@@ -553,7 +564,7 @@ pub(super) fn iupacna_to_ncbi2na(src: &[u8]) -> Vec<u8> {
 ///     return length;
 /// }
 /// ```
-pub(super) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
+pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
     let mut dst = Vec::with_capacity(src.len().div_ceil(2));
     let mut chunks = src.chunks_exact(2);
     dst.extend(
@@ -797,6 +808,37 @@ mod tests {
         assert_eq!(iupacna_to_ncbi4na(b"ACN"), [0x12, 0xf0]);
         assert_eq!(ncbi8na_to_ncbi4na(&[1, 2, 15]).unwrap(), [0x12, 0xf0]);
         assert_eq!(ncbi8na_to_ncbi4na(&[]).unwrap(), [0u8; 0]);
+    }
+
+    /// Every row of `CIupacnaTo4na::scm_Table` (sequtil_tables.cpp:392-457, read from NCBI's
+    /// source on 2026-11-12): the rows of these letters in either case, 15 for every other
+    /// byte.
+    #[test]
+    fn ncbi4na_codes_are_the_rows_of_the_table() {
+        let rows: [(u8, u8); 15] = [
+            (b'A', 1),
+            (b'B', 14),
+            (b'C', 2),
+            (b'D', 13),
+            (b'G', 4),
+            (b'H', 11),
+            (b'K', 12),
+            (b'M', 3),
+            (b'R', 5),
+            (b'S', 6),
+            (b'T', 8),
+            (b'U', 8),
+            (b'V', 7),
+            (b'W', 9),
+            (b'Y', 10),
+        ];
+        for byte in 0..=255u8 {
+            let expected = rows
+                .iter()
+                .find(|&&(letter, _)| letter == byte || letter.to_ascii_lowercase() == byte)
+                .map_or(15, |&(_, code)| code);
+            assert_eq!(ncbi4na_code(byte), expected, "byte {byte:#04x}");
+        }
     }
 
     /// The NCBI8na codes that `s_FixBioseqDeltas` reads from a literal equal the NCBI4na

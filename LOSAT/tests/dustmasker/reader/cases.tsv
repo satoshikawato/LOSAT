@@ -1,0 +1,179 @@
+# name<TAB>program<TAB>arguments (shell words, run in this directory; a leading NAME=VALUE sets the environment).
+# NCBI BLAST+ 2.17.0 dustmasker 1.0.0 and segmasker on ws (env_blast), 2026-11-12/13, ad-RG-K-1 wp-fasta: the FASTA reader
+# (CMaskFastaReader) beyond ../cases.tsv. Inputs: in/ (gen.py, gen2.py of the probe) and ../in/. Outputs: ncbi/<name>.{out,err,rc}.
+fix_crlf_fasta	dustmasker	-in ../in/crlf.fa -outfmt fasta
+fix_dup_fasta	dustmasker	-in ../in/dup.fa -outfmt fasta
+fix_long_fasta	dustmasker	-in ../in/long.fa -outfmt fasta
+fix_more_defl_fasta	dustmasker	-in ../in/more_defl.fa -outfmt fasta
+fix_protfirst_fasta	dustmasker	-in ../in/protfirst.fa -outfmt fasta
+u_fasta	dustmasker	-in in/u.fa -outfmt fasta
+u_int_ps	dustmasker	-in in/u.fa -parse_seqids
+u_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/u.fa
+u_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/u.fa -parse_seqids
+hyph_fasta	dustmasker	-in in/hyph.fa -outfmt fasta
+hyph_int_ps	dustmasker	-in in/hyph.fa -parse_seqids
+hyph_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/hyph.fa
+hyph_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/hyph.fa -parse_seqids
+gapline_fasta	dustmasker	-in in/gapline.fa -outfmt fasta
+gapline_int_ps	dustmasker	-in in/gapline.fa -parse_seqids
+gapline_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/gapline.fa
+gapline_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/gapline.fa -parse_seqids
+gapprefix_fasta	dustmasker	-in in/gapprefix.fa -outfmt fasta
+gapprefix_int_ps	dustmasker	-in in/gapprefix.fa -parse_seqids
+gapprefix_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/gapprefix.fa
+gapprefix_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/gapprefix.fa -parse_seqids
+comments_fasta	dustmasker	-in in/comments.fa -outfmt fasta
+comments_int_ps	dustmasker	-in in/comments.fa -parse_seqids
+comments_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/comments.fa
+comments_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/comments.fa -parse_seqids
+onlycomments_fasta	dustmasker	-in in/onlycomments.fa -outfmt fasta
+onlycomments_int_ps	dustmasker	-in in/onlycomments.fa -parse_seqids
+onlycomments_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/onlycomments.fa
+onlycomments_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/onlycomments.fa -parse_seqids
+blanklines_fasta	dustmasker	-in in/blanklines.fa -outfmt fasta
+blanklines_int_ps	dustmasker	-in in/blanklines.fa -parse_seqids
+blanklines_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/blanklines.fa
+blanklines_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/blanklines.fa -parse_seqids
+implausible_fasta	dustmasker	-in in/implausible.fa -outfmt fasta
+implausible_int_ps	dustmasker	-in in/implausible.fa -parse_seqids
+implausible_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/implausible.fa
+implausible_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/implausible.fa -parse_seqids
+implausible2_fasta	dustmasker	-in in/implausible2.fa -outfmt fasta
+implausible2_int_ps	dustmasker	-in in/implausible2.fa -parse_seqids
+implausible2_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/implausible2.fa
+implausible2_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/implausible2.fa -parse_seqids
+midempty_fasta	dustmasker	-in in/midempty.fa -outfmt fasta
+midempty_int_ps	dustmasker	-in in/midempty.fa -parse_seqids
+midempty_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/midempty.fa
+midempty_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/midempty.fa -parse_seqids
+lastempty_fasta	dustmasker	-in in/lastempty.fa -outfmt fasta
+lastempty_int_ps	dustmasker	-in in/lastempty.fa -parse_seqids
+lastempty_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/lastempty.fa
+lastempty_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/lastempty.fa -parse_seqids
+lastempty_nonl_fasta	dustmasker	-in in/lastempty_nonl.fa -outfmt fasta
+lastempty_nonl_int_ps	dustmasker	-in in/lastempty_nonl.fa -parse_seqids
+lastempty_nonl_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/lastempty_nonl.fa
+lastempty_nonl_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/lastempty_nonl.fa -parse_seqids
+badonly_fasta	dustmasker	-in in/badonly.fa -outfmt fasta
+badonly_int_ps	dustmasker	-in in/badonly.fa -parse_seqids
+badonly_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/badonly.fa
+badonly_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/badonly.fa -parse_seqids
+digitsfirst_fasta	dustmasker	-in in/digitsfirst.fa -outfmt fasta
+digitsfirst_int_ps	dustmasker	-in in/digitsfirst.fa -parse_seqids
+digitsfirst_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/digitsfirst.fa
+digitsfirst_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/digitsfirst.fa -parse_seqids
+spaces_fasta	dustmasker	-in in/spaces.fa -outfmt fasta
+spaces_int_ps	dustmasker	-in in/spaces.fa -parse_seqids
+spaces_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/spaces.fa
+spaces_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/spaces.fa -parse_seqids
+ambig40_fasta	dustmasker	-in in/ambig40.fa -outfmt fasta
+ambig40_int_ps	dustmasker	-in in/ambig40.fa -parse_seqids
+ambig40_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ambig40.fa
+ambig40_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ambig40.fa -parse_seqids
+longtitle_fasta	dustmasker	-in in/longtitle.fa -outfmt fasta
+longtitle_int_ps	dustmasker	-in in/longtitle.fa -parse_seqids
+longtitle_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/longtitle.fa
+longtitle_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/longtitle.fa -parse_seqids
+mods_fasta	dustmasker	-in in/mods.fa -outfmt fasta
+mods_int_ps	dustmasker	-in in/mods.fa -parse_seqids
+mods_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/mods.fa
+mods_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/mods.fa -parse_seqids
+seqintitle_fasta	dustmasker	-in in/seqintitle.fa -outfmt fasta
+seqintitle_int_ps	dustmasker	-in in/seqintitle.fa -parse_seqids
+seqintitle_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/seqintitle.fa
+seqintitle_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/seqintitle.fa -parse_seqids
+invalidres_fasta	dustmasker	-in in/invalidres.fa -outfmt fasta
+invalidres_int_ps	dustmasker	-in in/invalidres.fa -parse_seqids
+invalidres_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/invalidres.fa
+invalidres_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/invalidres.fa -parse_seqids
+ps_badlocal_fasta	dustmasker	-in in/ps_badlocal.fa -outfmt fasta
+ps_badlocal_int_ps	dustmasker	-in in/ps_badlocal.fa -parse_seqids
+ps_badlocal_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_badlocal.fa
+ps_badlocal_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_badlocal.fa -parse_seqids
+ps_badlocal2_fasta	dustmasker	-in in/ps_badlocal2.fa -outfmt fasta
+ps_badlocal2_int_ps	dustmasker	-in in/ps_badlocal2.fa -parse_seqids
+ps_badlocal2_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_badlocal2.fa
+ps_badlocal2_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_badlocal2.fa -parse_seqids
+ps_badlocal3_fasta	dustmasker	-in in/ps_badlocal3.fa -outfmt fasta
+ps_badlocal3_int_ps	dustmasker	-in in/ps_badlocal3.fa -parse_seqids
+ps_badlocal3_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_badlocal3.fa
+ps_badlocal3_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_badlocal3.fa -parse_seqids
+ps_longid_fasta	dustmasker	-in in/ps_longid.fa -outfmt fasta
+ps_longid_int_ps	dustmasker	-in in/ps_longid.fa -parse_seqids
+ps_longid_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_longid.fa
+ps_longid_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_longid.fa -parse_seqids
+ps_noid_fasta	dustmasker	-in in/ps_noid.fa -outfmt fasta
+ps_noid_int_ps	dustmasker	-in in/ps_noid.fa -parse_seqids
+ps_noid_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_noid.fa
+ps_noid_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_noid.fa -parse_seqids
+ps_comma_fasta	dustmasker	-in in/ps_comma.fa -outfmt fasta
+ps_comma_int_ps	dustmasker	-in in/ps_comma.fa -parse_seqids
+ps_comma_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_comma.fa
+ps_comma_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_comma.fa -parse_seqids
+ps_rangeonly_fasta	dustmasker	-in in/ps_rangeonly.fa -outfmt fasta
+ps_rangeonly_int_ps	dustmasker	-in in/ps_rangeonly.fa -parse_seqids
+ps_rangeonly_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_rangeonly.fa
+ps_rangeonly_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_rangeonly.fa -parse_seqids
+ps_blank_fasta	dustmasker	-in in/ps_blank.fa -outfmt fasta
+ps_blank_int_ps	dustmasker	-in in/ps_blank.fa -parse_seqids
+ps_blank_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_blank.fa
+ps_blank_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_blank.fa -parse_seqids
+ps_nucid_err_fasta	dustmasker	-in in/ps_nucid_err.fa -outfmt fasta
+ps_nucid_err_int_ps	dustmasker	-in in/ps_nucid_err.fa -parse_seqids
+ps_nucid_err_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_nucid_err.fa
+ps_nucid_err_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_nucid_err.fa -parse_seqids
+ps_nucid_warn_fasta	dustmasker	-in in/ps_nucid_warn.fa -outfmt fasta
+ps_nucid_warn_int_ps	dustmasker	-in in/ps_nucid_warn.fa -parse_seqids
+ps_nucid_warn_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_nucid_warn.fa
+ps_nucid_warn_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_nucid_warn.fa -parse_seqids
+nops_counter_fasta	dustmasker	-in in/nops_counter.fa -outfmt fasta
+nops_counter_int_ps	dustmasker	-in in/nops_counter.fa -parse_seqids
+nops_counter_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/nops_counter.fa
+nops_counter_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/nops_counter.fa -parse_seqids
+protletters_fasta	dustmasker	-in in/protletters.fa -outfmt fasta
+protletters_int_ps	dustmasker	-in in/protletters.fa -parse_seqids
+protletters_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/protletters.fa
+protletters_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/protletters.fa -parse_seqids
+emptydefline_only_fasta	dustmasker	-in in/emptydefline_only.fa -outfmt fasta
+emptydefline_only_int_ps	dustmasker	-in in/emptydefline_only.fa -parse_seqids
+emptydefline_only_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/emptydefline_only.fa
+emptydefline_only_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/emptydefline_only.fa -parse_seqids
+gaponly_fasta	dustmasker	-in in/gaponly.fa -outfmt fasta
+gaponly_int_ps	dustmasker	-in in/gaponly.fa -parse_seqids
+gaponly_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/gaponly.fa
+gaponly_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/gaponly.fa -parse_seqids
+nul_fasta	dustmasker	-in in/nul.fa -outfmt fasta
+nul_int_ps	dustmasker	-in in/nul.fa -parse_seqids
+nul_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/nul.fa
+nul_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/nul.fa -parse_seqids
+hibytes_fasta	dustmasker	-in in/hibytes.fa -outfmt fasta
+hibytes_int_ps	dustmasker	-in in/hibytes.fa -parse_seqids
+hibytes_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/hibytes.fa
+hibytes_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/hibytes.fa -parse_seqids
+tab_nops_fasta	dustmasker	-in in/tab_nops.fa -outfmt fasta
+tab_nops_int_ps	dustmasker	-in in/tab_nops.fa -parse_seqids
+tab_nops_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/tab_nops.fa
+tab_nops_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/tab_nops.fa -parse_seqids
+gt_in_data_fasta	dustmasker	-in in/gt_in_data.fa -outfmt fasta
+gt_in_data_int_ps	dustmasker	-in in/gt_in_data.fa -parse_seqids
+gt_in_data_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/gt_in_data.fa
+gt_in_data_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/gt_in_data.fa -parse_seqids
+cr_only_fasta	dustmasker	-in in/cr_only.fa -outfmt fasta
+cr_only_int_ps	dustmasker	-in in/cr_only.fa -parse_seqids
+cr_only_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/cr_only.fa
+cr_only_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/cr_only.fa -parse_seqids
+ps_seqidwarn_int_ps	dustmasker	-in in/ps_seqidwarn.fa -parse_seqids
+ps_seqidwarn_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/ps_seqidwarn.fa -parse_seqids
+ps_num_int_ps	dustmasker	-in in/ps_num.fa -parse_seqids
+seg_segp_fasta	segmasker	-in in/segp.fa -outfmt fasta
+seg_segp_warn	segmasker	DIAG_POST_LEVEL=Warning -in in/segp.fa
+seg_segp_empty_fasta	segmasker	-in in/segp_empty.fa -outfmt fasta
+seg_segp_hyph_fasta	segmasker	-in in/segp_hyph.fa -outfmt fasta
+seg_segp_hyph_warn	segmasker	DIAG_POST_LEVEL=Warning -in in/segp_hyph.fa -outfmt fasta
+seg_noheader	segmasker	-in in/segp_noheader.fa
+seg_implausible	segmasker	-in in/segp_implausible.fa
+seg_rangeonly_ps	segmasker	-in in/ps_rangeonly.fa -parse_seqids
+seg_badlocal_ps	segmasker	-in in/ps_badlocal.fa -parse_seqids
+seg_seqidwarn_ps	segmasker	-in in/ps_seqidwarn.fa -parse_seqids
+seg_onlycomments	segmasker	-in in/onlycomments.fa
+seg_longid_ps	segmasker	-in in/ps_longid.fa -parse_seqids

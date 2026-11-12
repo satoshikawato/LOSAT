@@ -227,7 +227,7 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     //     }                                                                       \
     // ```
     if let Some(exception) = error.ncbi_exception() {
-        return NativeError::exception(&exception).into();
+        return NativeError::exception(exception).into();
     }
     match error.ncbi_message() {
         Some(text) => NativeError {

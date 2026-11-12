@@ -286,6 +286,7 @@ fn rejected_variable(name: &OsStr) -> Option<String> {
 /// `=0`, or (`blastn.ini`) with `NCBI_DONT_USE_NCBIRC` or `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`;
 /// one in the directory of the executable in every case.
 fn registry_search_path(
+    program: &str,
     env: &dyn Fn(&str) -> Option<OsString>,
     process: &ProcessFacts,
 ) -> Result<Vec<PathBuf>, String> {
@@ -334,7 +335,7 @@ fn registry_search_path(
     }
     // The path is made when the usage report's registry looks for `.ncbirc`, or else later
     // (`usage_report_reads_ncbirc`).
-    let arguments_set = !usage_report_reads_ncbirc(env);
+    let arguments_set = !usage_report_reads_ncbirc(program, env);
     path.extend((process.program_dirs)(arguments_set)?);
     path.extend(tail);
     Ok(path)
@@ -714,7 +715,6 @@ fn unix_program_name(
 
 /// `path` without its trailing '/'s (`CDirEntry::DeleteTrailingPathSeparator` on Unix,
 /// ncbifile.cpp:465-472): empty when it has only '/'s.
-#[cfg(any(unix, test))]
 fn trim_trailing_slashes(path: &[u8]) -> &[u8] {
     match path.iter().rposition(|&byte| byte != b'/') {
         Some(at) => &path[..=at],
@@ -823,9 +823,9 @@ fn trim_trailing_slashes(path: &[u8]) -> &[u8] {
 /// warning and stops following them: `None` then (a loop of links; the path that the system
 /// resolved to run the program, within its own limit of 40 links on Linux, never reaches it,
 /// but the name "ncbi" of a program before its arguments are set can, `program_directories`).
-/// Without `read_link`, never `None`.
-#[cfg(any(unix, test))]
-fn normalize_path(
+/// Without `read_link`, never `None`. rpsbproc's launch path (`rpsbproc::program_paths`,
+/// `eIgnoreLinks`) is normalized here on every target.
+pub(crate) fn normalize_path(
     path: &[u8],
     read_link: Option<&dyn Fn(&[u8]) -> Option<Vec<u8>>>,
 ) -> Option<Vec<u8>> {
@@ -2137,8 +2137,30 @@ fn replays_to_stderr(program: &str) -> bool {
 /// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1634-1648 (`IncludeNcbircIfAllowed`,
 /// quoted at `check_ncbi_application_settings`)
-fn usage_report_reads_ncbirc(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
-    usage_report_variable(env) != Some(Some(false)) && !ncbirc_turned_off(env)
+fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsString>) -> bool {
+    has_usage_report(program)
+        && usage_report_variable(env) != Some(Some(false))
+        && !ncbirc_turned_off(env)
+}
+
+/// Whether `program`'s NCBI application has BLAST's usage report (`CBlastUsageReport`, a member
+/// of the BLAST+ applications, which reads `BLAST_USAGE_REPORT` and `.ncbirc` before `AppMain`).
+/// rpsbproc's has none (no `CBlastUsageReport` in RpsbProc 0.5.1's source): NCBI's rpsbproc
+/// (the 2025-05-13 package and bioconda's 0.5.1) with a `.ncbirc` of a malformed line posts
+/// nothing for `-version` and its `Critical` once for `-h` and for a run (env parity probe of
+/// 2026-11-12 on ws), the configuration load's only.
+fn has_usage_report(program: &str) -> bool {
+    program != "rpsbproc"
+}
+
+/// LOSAT's refusal of a registry file that NCBI's rpsbproc reports when it loads its
+/// configuration (`application_start`): its exception reports name the place of its own
+/// toolkit build, which LOSAT does not write.
+fn rpsbproc_registry_refusal(path: &Path) -> String {
+    format!(
+        "the registry file {} has an error that NCBI's rpsbproc reports when it starts; this is not supported by LOSAT's rpsbproc",
+        path.display()
+    )
 }
 
 /// `BLAST_USAGE_REPORT` as `NStr::StringToBool` reads it (`usage_report_reads_ncbirc`): `None`
@@ -2383,14 +2405,14 @@ fn application_start(
     // The usage report reads `BLAST_USAGE_REPORT` first, before it makes its registry: a value
     // that is not a Boolean aborts NCBI, `-version` and `-h` included (NCBI BLAST+ 2.17.0 with
     // `abc` or an empty value: rc 134, g_reg probes `m2.ver`, `m2.h`, `m2.empty`).
-    if usage_report_variable(env) == Some(None) {
+    if has_usage_report(program) && usage_report_variable(env) == Some(None) {
         start.usage_report = Err(format!(
             "the environment variable BLAST_USAGE_REPORT has the value {:?}, which is not a Boolean of NCBI BLAST+ (it aborts); this is not supported by LOSAT",
             env("BLAST_USAGE_REPORT").unwrap_or_default().to_string_lossy()
         ));
         return ended(start);
     }
-    let search_path = match registry_search_path(env, process) {
+    let search_path = match registry_search_path(program, env, process) {
         Ok(path) => path,
         Err(reason) => {
             start.settings = Err(environment_refusal.clone().unwrap_or(reason));
@@ -2405,7 +2427,7 @@ fn application_start(
             .map(|path| (read_registry_file(&path, Layer::SystemWide), path))
     };
     // The usage report.
-    let usage_report_reads = usage_report_reads_ncbirc(env);
+    let usage_report_reads = usage_report_reads_ncbirc(program, env);
     let mut usage_read = None;
     if usage_report_reads {
         match &ncbirc {
@@ -2417,7 +2439,7 @@ fn application_start(
             Some((Ok(None), _)) | None => {}
         }
     }
-    if usage_report_variable(env) != Some(Some(false)) {
+    if has_usage_report(program) && usage_report_variable(env) != Some(Some(false)) {
         if let Some(reason) = usage_report_entry_refusal(env, usage_read) {
             start.usage_report = Err(reason);
             return ended(start);
@@ -2444,8 +2466,12 @@ fn application_start(
     let mut posts = String::new();
     if let Some((path, read)) = &ini {
         start.library_note = start.library_note.take().or(library_note(path, read));
+        if (read.error.is_some() || read.stream_failed) && !has_usage_report(program) {
+            start.config = Err(rpsbproc_registry_refusal(path));
+            return ended(start);
+        }
         if let Some(error) = &read.error {
-            let report = error.report_with_title(106, 15, "Application's initialization failed");
+            let report = error.report_default_ex(106, 15, "Application's initialization failed");
             start.config = match &environment_refusal {
                 Some(reason) => Err(reason.clone()),
                 None => Ok(ConfigLoad::Failed(report)),
@@ -2471,6 +2497,10 @@ fn application_start(
                 let kept = usage_report_reads && read.error.is_none() && ini.is_none();
                 if !kept {
                     posts.push_str(&system_wide_posts(read));
+                }
+                if !has_usage_report(program) && !system_wide_posts(read).is_empty() {
+                    start.config = Err(rpsbproc_registry_refusal(path));
+                    return ended(start);
                 }
                 start.library_note = start.library_note.take().or(library_note(path, read));
                 ncbirc_entries = Some((path.as_path(), read.entries.as_slice()));
@@ -2708,7 +2738,7 @@ mod tests {
             home_by_uid: &no_home,
             program_dirs: &dirs,
         };
-        let search = |pairs| registry_search_path(&env(pairs), &process).unwrap();
+        let search = |pairs| registry_search_path("blastn", &env(pairs), &process).unwrap();
         let only = search(&[("NCBI_CONFIG_PATH", "/a;/b")]);
         assert_eq!(only, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
         // ':' splits the path outside Windows only (metareg.cpp:54-56).
@@ -2754,7 +2784,7 @@ mod tests {
                 _ if name == variable => Some(OsString::from(value)),
                 _ => None,
             };
-            let path = registry_search_path(&env, &process).unwrap();
+            let path = registry_search_path("blastn", &env, &process).unwrap();
             let last = dirs(set).unwrap();
             assert_eq!(
                 &path[path.len() - last.len()..],
@@ -2809,7 +2839,7 @@ mod tests {
             home_by_uid: &|| Some(OsString::new()),
             program_dirs: &no_dirs,
         };
-        let path = registry_search_path(&env(&[]), &process).unwrap();
+        let path = registry_search_path("blastn", &env(&[]), &process).unwrap();
         assert_eq!(path[0], PathBuf::from("."));
         assert!(!path.contains(&PathBuf::new()), "{path:?}");
     }
@@ -3319,8 +3349,8 @@ mod tests {
             std::fs::create_dir_all(&home).unwrap();
             for (file, content) in [
                 (cwd.join("blastn.ini"), &row[4]),
-                (cwd.join(".ncbirc"), &row[5]),
-                (home.join(".ncbirc"), &row[6]),
+                (cwd.join(SYSTEM_WIDE_REGISTRY), &row[5]),
+                (home.join(SYSTEM_WIDE_REGISTRY), &row[6]),
             ] {
                 let _ = std::fs::remove_file(&file);
                 if content != "<unset>" {
@@ -3405,7 +3435,7 @@ mod tests {
         let settings_with =
             |program: &str, variable: Option<&str>| start_with(program, variable).settings;
         let settings = |program: &str| settings_with(program, None);
-        let ncbirc = dir.join(".ncbirc");
+        let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
         std::fs::write(&ncbirc, "[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\n").unwrap();
         for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
             assert_eq!(
@@ -3739,6 +3769,50 @@ mod tests {
             "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = {line})\n\n",
             crate::ncbi_exception::NCBI_BUILD_ROOT
         )
+    }
+
+    // NCBI's rpsbproc 0.5.1 (the 2025-05-13 package and bioconda's, env parity probe of
+    // 2026-11-12 on ws; quoted at `has_usage_report`): no usage report, so neither its read of
+    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a file that rpsbproc reports is LOSAT's refusal.
+    #[test]
+    fn rpsbproc_starts_without_the_usage_report() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-rpsbproc-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
+        let start = |pairs: &[(&str, &str)]| {
+            let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+            all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+            let env = |name: &str| {
+                all.iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| OsString::from(value))
+            };
+            application_start(
+                "rpsbproc",
+                all.iter()
+                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+                &env,
+                &NO_PROCESS,
+            )
+        };
+        std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\n").unwrap();
+        let read = start(&[("BLAST_USAGE_REPORT", "abc")]);
+        assert_eq!(read.usage_report, Ok(String::new()));
+        assert_eq!(read.config, Ok(ConfigLoad::Loaded(String::new())));
+        assert_eq!(read.settings.unwrap().blastdb, Ok(Some("/db".to_string())));
+        std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\ngarbage\n").unwrap();
+        let malformed = start(&[]);
+        assert_eq!(malformed.usage_report, Ok(String::new()));
+        assert!(malformed.config.unwrap_err().contains("LOSAT's rpsbproc"));
+        assert!(malformed.settings.unwrap_err().contains("LOSAT's rpsbproc"));
+        std::fs::remove_file(&ncbirc).unwrap();
+        std::fs::write(dir.join("rpsbproc.ini"), "garbage\n").unwrap();
+        assert!(start(&[]).config.unwrap_err().contains("LOSAT's rpsbproc"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-211,

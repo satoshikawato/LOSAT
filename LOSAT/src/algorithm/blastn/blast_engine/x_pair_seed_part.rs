@@ -501,7 +501,8 @@ pub(super) struct PartStats {
     /// LOSAT_X_PAIRPARHOME: the runs folded (locks of a partition that went through one strip
     /// or more, empty partitions of strips included), and the strips of partitions folded by a
     /// participant whose home the partition is not (a partition without a participant at home,
-    /// the slowest partition, any partition once every strip was handed out)
+    /// the slowest partition, any partition once every strip was handed out; EXPERIMENT
+    /// LOSAT_X_SEEDPIECE: the pieces of partitions so folded)
     pub(super) runs: u64,
     pub(super) away: u64,
     /// the partitions of strips of the stage (strips x partitions; EXPERIMENT LOSAT_X_SEEDPIECE:

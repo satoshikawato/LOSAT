@@ -649,7 +649,9 @@ where
             let st = &mut guard.0;
             // (only the participant that holds p's lock moves p's lane)
             let mut v = lane.load(Ordering::Relaxed);
-            let mut folded = 0u64;
+            // (the steps: a piece folded or a strip left; `away` counts the pieces only, so that
+            // it stays within `units`, the pieces made times the partitions)
+            let (mut folded, mut pieces) = (0u64, 0u64);
             while strip_of(v) < n {
                 let (i, k) = (strip_of(v), v as u32);
                 let published = strips[i].published.load(Ordering::Acquire);
@@ -668,6 +670,7 @@ where
                     }
                     drop(arena);
                     v = pack(i, k + 1);
+                    pieces += 1;
                 } else if published & DONE != 0 {
                     v = pack(i + 1, 0);
                 } else {
@@ -684,7 +687,7 @@ where
             if folded > 0 {
                 my_runs += 1;
                 if kind != Run::Home {
-                    my_away += folded;
+                    my_away += pieces;
                 }
             }
             folded

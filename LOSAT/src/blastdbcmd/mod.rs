@@ -192,9 +192,6 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
             return 0;
         }
         Preparsed::Refused(word) => return diag.refuse(&unsupported_option(word)),
-        Preparsed::Words { conffile: true, .. } => {
-            return diag.refuse(&unsupported_option("-conffile"))
-        }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit` loads the

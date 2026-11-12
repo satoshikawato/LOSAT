@@ -213,11 +213,36 @@ fn run_main_entry() -> Result<()> {
         }
     }
     let program_name = program.map(str::to_string);
+    let dryrun = program.is_some()
+        && matches!(
+            crate::blastinput::ncbi_environment::preparse(&argv[2..]),
+            crate::blastinput::ncbi_environment::Preparsed::Words { dryrun: true, .. }
+        );
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match crate::cli::try_parse_from(argv) {
         Ok(cli) => cli,
         Err(error) => exit_on_parse_error(&error, argv_is_rpsbproc),
     };
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:704-706, 292-296
+    // ```c++
+    //             try {
+    //                 *exit_code = m_DryRun ? DryRun() : Run();
+    //             }
+    // ...
+    // int CNcbiApplicationAPI::DryRun(void)
+    // {
+    //     ERR_POST_X(1, Info << "DryRun: default implementation does nothing");
+    //     return 0;
+    // }
+    // ```
+    // `-dryrun` (`ncbi_environment::preparse`): the arguments have passed their definitions (the
+    // parser above), and NCBI's BLAST programs, makeblastdb and blastdbcmd keep the default
+    // `DryRun`, whose `Info` post is below the diagnostics' level: nothing else runs, nothing is
+    // written, exit status 0 (NCBI BLAST+ 2.17.0: a missing `-query` or `-db` file, no `-query`,
+    // `-out FILE` not made; line RG item E1b). rpsbproc refuses it (item E1c).
+    if dryrun {
+        return Ok(());
+    }
     // The messages of tblastx's and rpsblast's runs go where the diagnostics go
     // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
     // target from here, where NCBI's `Run` makes its handler. LOSAT's parser errors above stay on

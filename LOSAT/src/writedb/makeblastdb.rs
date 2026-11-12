@@ -133,7 +133,10 @@ pub struct MakedbArgs {
     #[arg(long)]
     pub hash_index: bool,
     /// Taxonomy ID to assign to all sequences
-    #[arg(long, value_name = "TaxID", value_parser = clap::value_parser!(i32).range(0..),
+    // NCBI's integer and its constraint (`nonnegative_ncbi_integer`): `0x10` is 16 (NCBI BLAST+
+    // 2.17.0, line RG item E1b probe `makeblastdb.k.taxid.12`: rc 0 with `-dryrun`).
+    #[arg(long, value_name = "TaxID",
+          value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_integer,
           conflicts_with = "taxid_map")]
     pub taxid: Option<i32>,
     /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>

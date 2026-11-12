@@ -253,8 +253,15 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         }
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
     };
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:704-706 (quoted at
+    // `cli::main_entry`: blastdbcmd keeps the default `DryRun`, which writes nothing and returns
+    // 0, after the arguments have passed their definitions). The library API runs no application
+    // start, which reads `-dryrun` (`cli::toolkit_file_word_refusal`).
     if dryrun {
-        return diag.refuse(&unsupported_option("-dryrun"));
+        if start.is_none() {
+            return diag.refuse(&crate::cli::toolkit_file_word_refusal(PROGRAM, "-dryrun"));
+        }
+        return 0;
     }
     let settings =
         match crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastdbcmd") {

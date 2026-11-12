@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import blastn_regression_fixtures as fixtures  # noqa: E402
 import ci_fast_regressions as fast  # noqa: E402
 import db_search_fixtures as db_fixtures  # noqa: E402
+import fasta_input_fixtures as fasta_input  # noqa: E402
+import range_regression_fixtures as range_fixtures  # noqa: E402
 import tblastx_regression_fixtures as tblastx_fixtures  # noqa: E402
 import xinclude_fixtures as xinclude  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
@@ -483,6 +485,68 @@ class StartupTraceNoticeTests(unittest.TestCase):
         failures = self.check("print('losat 1.0')\nsys.stderr.write('warning\\n')\nsys.exit(1)")
         self.assertTrue(any("exited" in failure for failure in failures))
         self.assertTrue(any("stderr without" in failure for failure in failures))
+
+
+STAND_IN_NCBI = '#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n'
+
+
+def stand_in_bin(directory: Path, programs) -> Path:
+    """Stand-in NCBI programs that print the value of BLAST_USAGE_REPORT (`unset` without it)."""
+    bin_dir = directory / "bin"
+    bin_dir.mkdir()
+    for program in programs:
+        script = bin_dir / program
+        script.write_text(STAND_IN_NCBI)
+        script.chmod(0o755)
+    return bin_dir
+
+
+@unittest.skipUnless(os.name == "posix", "the stand-in NCBI programs are shell scripts")
+class NcbiUsageReportOffTests(unittest.TestCase):
+    """NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+    (blast_usage_report.cpp:195-220): the harnesses' NCBI runs have it (db_search_fixtures.ncbi_env), the
+    runs of LOSAT keep their environment."""
+
+    def caller_env(self, home: str) -> dict[str, str]:
+        # the freeze commands refuse to run with these set or with a ~/.ncbirc
+        env = {k: v for k, v in os.environ.items() if k not in fasta_input.REPORT_ENV + range_fixtures.REPORT_ENV}
+        return env | {"HOME": home, "BLAST_USAGE_REPORT": "true"}
+
+    def test_fasta_input_freeze(self):
+        one = next(r for r in fasta_input.build_rows() if r.kind == "ncbi" and fasta_input.network_safe(r) is None)
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = stand_in_bin(Path(tmp), {"blastn", one.program})
+            written = []
+            args = argparse.Namespace(ncbi_bin=str(bin_dir), out=str(Path(tmp) / "out"), no_netns=True, rows=None,
+                                      match=None, tier=None, verify=False, jobs=1)
+            with unittest.mock.patch.object(fasta_input, "build_rows", lambda: [one]), \
+                    unittest.mock.patch.object(fasta_input, "read_manifest", lambda: []), \
+                    unittest.mock.patch.object(fasta_input, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.dict(os.environ, self.caller_env(tmp), clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                fasta_input.command_freeze(args)
+                # LOSAT's run keeps the caller's environment
+                self.assertEqual(fasta_input.execute([str(bin_dir / one.program)], one, False)[1], b"true")
+            self.assertEqual((Path(tmp) / "out" / f"{one.row_id}.out").read_bytes(), b"false")
+            self.assertEqual((Path(tmp) / "out" / f"{one.row_id}.merged").read_bytes(), b"false")
+            self.assertEqual(written[0][1], "false")  # the version line: `blastn -version`'s output
+
+    def test_range_regression_freeze(self):
+        case = range_fixtures.CASES[0]
+        program = case[1].split(" ", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = stand_in_bin(Path(tmp), {"blastn", program})
+            fixtures_dir = Path(tmp) / "fixtures"
+            with unittest.mock.patch.object(range_fixtures, "CASES", [case]), \
+                    unittest.mock.patch.object(range_fixtures, "FIXTURES", fixtures_dir), \
+                    unittest.mock.patch.object(range_fixtures, "MANIFEST", fixtures_dir / "manifest.tsv"), \
+                    unittest.mock.patch.dict(os.environ, self.caller_env(tmp), clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                range_fixtures.command_freeze(argparse.Namespace(bin_dir=str(bin_dir)))
+                # LOSAT's runs (`check_one`) go through run_case without `env_of`
+                self.assertEqual(fixtures.run_case(str(bin_dir / program), [], "x", "", "").stdout, b"true")
+            self.assertEqual((fixtures_dir / f"{case[0]}.out").read_bytes(), b"false")
+            self.assertIn("of false (", (fixtures_dir / "manifest.tsv").read_text())
 
 
 if __name__ == "__main__":

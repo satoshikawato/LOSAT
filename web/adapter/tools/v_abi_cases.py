@@ -260,7 +260,7 @@ def window_masker() -> list[dict]:
     that the CLI cannot open. The NCBI-frozen rows of LOSAT/tests/fixtures/blastn_regression/
     manifest.tsv (`wm.*`) without an environment, in their format (0, 6 and 7 compared with the CLI,
     another format as the search's `-outfmt`), and the rows of LOSAT/tests/fixtures/winmask_blastn/
-    cases.tsv without an environment whose counts are a file (the counts that cannot be read, from
+    cases.tsv with `-window_masker_db` and without an environment whose counts are a file (the counts that cannot be read, from
     `make_counts`) or a name of no file, in outfmt 0, 6 and 7: those that fail, with the CLI's error
     and its place among the other errors."""
     sys.path.insert(0, str(REPO / "LOSAT/tests"))
@@ -291,10 +291,13 @@ def window_masker() -> list[dict]:
             search["frozen"]["custom" if custom else outfmt] = frozen
 
     for row in regression.read_manifest():
-        if row["case_id"].startswith("wm.") and not row["env"] and not row["losat_extra"]:
+        if (row["case_id"].startswith("wm.") and not row["env"] and not row["losat_extra"]
+                and "-window_masker_db" in shlex.split(row["argv"])):
             add(row["case_id"], ["blastn", *shlex.split(row["argv"])], row["stdout_sha256"], row["exit"] != "0")
     errors.make_counts()
     for case, env, argv in errors.read_cases():
+        if "-window_masker_db" not in argv:
+            continue  # -window_masker_taxid (line NP WW2)
         value = argv[argv.index("-window_masker_db") + 1]
         counts = engine / value
         if env or "-db" in argv or (value and counts.exists() and not counts.is_file()) or case == "unreadable":

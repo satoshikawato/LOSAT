@@ -82,7 +82,7 @@ pub(crate) use crate::utils::seg::SegMasker;
 
 pub(crate) use super::args::{TblastxArgs, TblastxMatrix};
 pub(crate) use super::chaining::UngappedHit;
-pub(crate) use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED_BITS};
+pub(crate) use super::constants::GAP_TRIGGER_BIT_SCORE;
 pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };

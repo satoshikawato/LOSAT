@@ -691,6 +691,33 @@ impl XSink for Vec<u32> {
 }
 
 /// The words of one query offset, as `add_word_hits` adds them (module header).
+/// No NCBI counterpart: a query word as `XWords` reads it: a slice of the table's word length
+/// (`[u8]`, read at run time) or an array of a word length fixed by the build's instance
+/// (`[u8; W]`, BLASTX's `x_bx_buckets_on`, item SC9 of line NP), whose length and checks the
+/// compiler then folds, as it did for `-word_size 5` when that was BLASTX's only compressed one.
+trait XQueryWord {
+    /// The word length of the type, `None` for a slice.
+    const LEN: Option<usize>;
+    /// The letters.
+    fn letters(&self) -> &[u8];
+}
+
+impl XQueryWord for [u8] {
+    const LEN: Option<usize> = None;
+    #[inline(always)]
+    fn letters(&self) -> &[u8] {
+        self
+    }
+}
+
+impl<const W: usize> XQueryWord for [u8; W] {
+    const LEN: Option<usize> = Some(W);
+    #[inline(always)]
+    fn letters(&self) -> &[u8] {
+        self
+    }
+}
+
 struct XWords<'a> {
     word_length: usize,
     alphabet: usize,
@@ -706,6 +733,13 @@ struct XWords<'a> {
 }
 
 impl<'a> XWords<'a> {
+    /// No NCBI counterpart: the word length of a word of type `Q` (`XQueryWord`): the type's, or
+    /// the table's.
+    #[inline(always)]
+    fn length_of<Q: XQueryWord + ?Sized>(&self) -> usize {
+        Q::LEN.unwrap_or(self.word_length)
+    }
+
     fn new(
         header: &'a XHeader,
         threshold: i32,
@@ -781,7 +815,8 @@ impl<'a> XWords<'a> {
     // ```
     /// Gives `sink` every cell that `add_word_hits` appends the offset of `word` to, in its order.
     #[inline]
-    fn for_each_word(&self, word: &[u8], sink: &mut impl XSink) {
+    fn for_each_word<Q: XQueryWord + ?Sized>(&self, query_word: &Q, sink: &mut impl XSink) {
+        let word = query_word.letters();
         let mut self_score = 0i32;
         for &residue in word {
             let compressed = self.compress_table[residue as usize] as usize;
@@ -792,7 +827,7 @@ impl<'a> XWords<'a> {
         }
         if self.threshold == 0 || self_score < self.threshold {
             let (index, skip) = compute_compressed_index(
-                self.word_length,
+                self.length_of::<Q>(),
                 word,
                 self.alphabet,
                 self.scaled_compress_table,
@@ -808,7 +843,7 @@ impl<'a> XWords<'a> {
         for &residue in &word[1..] {
             score += self.info.row_max[residue as usize];
         }
-        self.neighbors(word, score, 0, 0, sink);
+        self.neighbors(query_word, score, 0, 0, sink);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053
@@ -846,20 +881,21 @@ impl<'a> XWords<'a> {
     // terms of `compute_encoded_compressed_index`). At the last position the loop's letters are the
     // prefix of the sorted row up to the first score below the threshold (`partition_point`; the row
     // does not increase, checked in `new`).
-    fn neighbors(
+    fn neighbors<Q: XQueryWord + ?Sized>(
         &self,
-        query_word: &[u8],
+        word: &Q,
         mut score: i32,
         current_pos: usize,
         partial: u32,
         sink: &mut impl XSink,
     ) {
+        let query_word = word.letters();
         let curr_query_char = query_word[current_pos] as usize;
         score -= self.info.row_max[curr_query_char];
         let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
         let threshold = self.threshold;
 
-        if current_pos == self.word_length - 1 {
+        if current_pos == self.length_of::<Q>() - 1 {
             let count =
                 row_sorted.partition_point(|&letter_score| score + letter_score >= threshold);
             sink.many(partial, &self.last[curr_query_char][..count]);
@@ -868,7 +904,7 @@ impl<'a> XWords<'a> {
 
         let char_sorted = &self.info.matrix_sorted_char[curr_query_char];
         let scale = self.power[current_pos];
-        if current_pos + 2 == self.word_length {
+        if current_pos + 2 == self.length_of::<Q>() {
             // The call for the last position, inline: the same statements as the branch above.
             let last_char = query_word[current_pos + 1] as usize;
             let last_row = &self.info.matrix_sorted[last_char][..self.alphabet];
@@ -890,7 +926,7 @@ impl<'a> XWords<'a> {
                 break;
             }
             self.neighbors(
-                query_word,
+                word,
                 score + letter_score,
                 current_pos + 1,
                 partial + u32::from(char_sorted[i]) * scale,
@@ -2060,10 +2096,11 @@ impl XSink for XBucketChunks {
 /// fits 32 bits of `hits`, so there is no packed copy of the appends in `hits`: each append goes
 /// as it is made to its bucket's chunks (`XBucketChunks`), in place of the record of the appends
 /// and its partition, and each bucket's cells are filled from them. Declined as `x_buckets_on`,
-/// and where the query has more than `X_U16_LETTERS` letters.
+/// and where the query has more than `X_U16_LETTERS` letters. `WORD` is the word length
+/// (`x_bx_build_compressed_lookup`'s), a constant of the instance down to the neighbouring words
+/// (`XQueryWord`).
 #[allow(clippy::too_many_arguments)]
-fn x_bx_buckets_on(
-    word_size: usize,
+fn x_bx_buckets_on<const WORD: usize>(
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
@@ -2071,6 +2108,7 @@ fn x_bx_buckets_on(
     overflow_cell_capacity: usize,
     pooled: bool,
 ) -> XBucketBuild<u16> {
+    let word_size = WORD;
     if query.len() > X_U16_LETTERS {
         return XBucketBuild::Declined;
     }
@@ -2116,6 +2154,8 @@ fn x_bx_buckets_on(
         let mut declined = false;
         x_for_each_offset(word_size, query, &locations[range], |offset, word| {
             appends.high = (offset as u32) << 16;
+            // `x_for_each_offset` gives words of `word_size` letters.
+            let word: &[u8; WORD] = word.try_into().expect("a word of the word length");
             words.for_each_word(word, &mut appends);
             if appends.total > max_appends {
                 too_large = true;
@@ -3195,15 +3235,17 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
 /// (`x_bx_buckets_on`; the count-and-fill builder's table narrowed where the bucket fill declines),
 /// on vectors kept between builds with `LOSAT_X_BXCLUTPOOL` (`blastx::seed::Lookup`'s drop gives
 /// them back). A query of more than `X_U16_LETTERS` letters gets `x_tbn_build_compressed_lookup`'s
-/// table, also on kept vectors.
+/// table, also on kept vectors. One instance per word length `WORD` (`-word_size` 5 to 7, chosen
+/// once per query batch by `blastx::seed`), so that each build's loops take their word length as a
+/// constant, as the one of `-word_size 5` did when it was the only one (item SC9 of line NP).
 #[inline(never)]
-pub(crate) fn x_bx_build_compressed_lookup(
-    word_size: usize,
+pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
 ) -> Option<Result<XBxCompressedLookup, ()>> {
+    let word_size = WORD;
     if query.len() > X_U16_LETTERS {
         return x_build_compressed_on(
             word_size,
@@ -3228,8 +3270,7 @@ pub(crate) fn x_bx_build_compressed_lookup(
         return reference();
     }
     let bucket = if x_bpffill_on() {
-        x_bx_buckets_on(
-            word_size,
+        x_bx_buckets_on::<WORD>(
             scaled_threshold,
             query,
             locations,
@@ -4324,7 +4365,7 @@ mod tests {
                       locations: &[(i32, i32)],
                       tables: &[std::ops::Range<usize>],
                       pooled: bool| {
-            match x_bx_buckets_on(5, 1100, query, locations, tables, usize::MAX >> 8, pooled) {
+            match x_bx_buckets_on::<5>(1100, query, locations, tables, usize::MAX >> 8, pooled) {
                 XBucketBuild::Built(Some(XFlatBuild::Table(table))) => table,
                 _ => panic!("BLASTX's bucket fill builds this table"),
             }
@@ -4405,18 +4446,18 @@ mod tests {
         let query = random_subject(&mut rng, X_U16_LETTERS + 1, 0);
         let all = [(0, query.len() as i32 - 1)];
         assert!(matches!(
-            x_bx_build_compressed_lookup(5, 1100, &query, &all, &[0..1]),
+            x_bx_build_compressed_lookup::<5>(1100, &query, &all, &[0..1]),
             Some(Ok(XBxCompressedLookup::Wide(_)))
         ));
         let query = &query[..X_U16_LETTERS];
         assert!(matches!(
-            x_bx_build_compressed_lookup(5, 1100, query, &[(0, query.len() as i32 - 1)], &[0..1]),
+            x_bx_build_compressed_lookup::<5>(1100, query, &[(0, query.len() as i32 - 1)], &[0..1]),
             Some(Ok(XBxCompressedLookup::Flat(_)))
         ));
         let swapped = [(5_000, 9_999), (0, 4_999)];
         let tables = [0..1, 1..2];
         let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
-            x_bx_buckets_on(5, 1100, query, &swapped, &tables, usize::MAX >> 8, false)
+            x_bx_buckets_on::<5>(1100, query, &swapped, &tables, usize::MAX >> 8, false)
         else {
             panic!("BLASTX's bucket fill builds this table");
         };

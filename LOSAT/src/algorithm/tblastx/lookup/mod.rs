@@ -271,8 +271,12 @@ pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 // ```
 pub(crate) use backbone::x_pair_lut;
 // The reference builder's table of a BLASTX lookup query, for blastx::seed's tests (item SC9 of line
-// NP); no NCBI counterpart for the re-export itself.
-#[cfg(test)]
+// NP, a test of threaded builds); no NCBI counterpart for the re-export itself.
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(crate) use backbone::x_reference_table_from_prepared;
 
 #[cfg(test)]

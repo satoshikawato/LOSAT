@@ -473,6 +473,12 @@ fn x_wide_parts<T: Send, R: Send>(
     parts: Vec<T>,
     f: &(dyn Fn(T) -> R + Sync),
 ) -> Vec<R> {
+    // Without threads every part runs on this thread, wherever the build was to run.
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let _ = on;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

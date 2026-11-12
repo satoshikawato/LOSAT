@@ -580,13 +580,15 @@ fn x_compressed_lookup(
     threshold: f64,
     word: i32,
 ) -> Result<Lookup> {
-    x_bx_build_compressed_lookup(
-        usize::try_from(word)?,
-        x_compressed_scaled_threshold(threshold),
-        query,
-        segments,
-        &[0..segments.len()],
-    )
+    // The build of the word length, as a constant of its instance (`x_bx_build_compressed_lookup`).
+    let scaled = x_compressed_scaled_threshold(threshold);
+    let tables = [0..segments.len()];
+    match word {
+        5 => x_bx_build_compressed_lookup::<5>(scaled, query, segments, &tables),
+        6 => x_bx_build_compressed_lookup::<6>(scaled, query, segments, &tables),
+        7 => x_bx_build_compressed_lookup::<7>(scaled, query, segments, &tables),
+        _ => None,
+    }
     .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
     .map(Lookup::Compressed)
     .map_err(|()| {

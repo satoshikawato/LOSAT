@@ -241,14 +241,21 @@ pub(super) fn run(
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(out);
-    let result = masks_of_input(options, stdin, &mut writer, &mut out);
+    let mut result = masks_of_input(options, stdin, &mut writer, &mut out);
     // A refusal of LOSAT's stops before NCBI's run would end, and a closed pipe ends it where
     // SIGPIPE ends NCBI's: nothing more is written.
     if !matches!(result, Err(Failure::Refused(_) | Failure::ClosedPipe)) {
-        writer.finish(&mut out)?;
+        if let Err(error) = writer.finish(&mut out) {
+            result = Err(error.into());
+        }
+    }
+    // NCBI's `cerr` is tied to `cout`: the output is flushed before the diagnostics of a
+    // failure, and a closed pipe ends the run there, without them.
+    let _ = out.flush();
+    if out.closed() {
+        return Err(Failure::ClosedPipe);
     }
     result?;
-    let _ = out.flush();
     serial_write_failure(&out, options.outfmt)
 }
 

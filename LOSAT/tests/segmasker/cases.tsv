@@ -2,7 +2,7 @@
 # in/ made by remaining-gaps-20261112/K/k2/probe/gen_inputs.py (proteins with low-complexity pieces, ORFs of tests/fasta/NZ_CP006932.fasta, the dustmasker reader inputs with protein letters), db/ by NCBI makeblastdb 2.17.0 from in/
 # (basic, deflines -> defl, more_defl -parse_seqids -> mdefl_ps, ambig, short, lcr; nucl.fa as a nucleotide db/nucl), the alias files of the dustmasker fixtures as .pal. The rows with an error were run again on the official Linux x64 release
 # (local oracle), which wrote the same bytes but its build tree in the NCBI C++ Exception texts: those name the official tree here, and @CWD@ in the expected text is this directory.
-# The logfile_null rows come from the local oracle. Not frozen: -version, -version-full and -xmlhelp (LOSAT prints its own version and refuses the others, as dustmasker).
+# The logfile_null rows and help_full come from the local oracle. Not frozen: -version, -version-full and -xmlhelp (LOSAT prints its own version and refuses the others, as dustmasker).
 basic_int	-in in/basic.fa
 basic_int_ps	-in in/basic.fa -parse_seqids
 lcr_int	-in in/lcr.fa
@@ -494,3 +494,4 @@ logfile_null	-in in/noexist.fa -logfile /dev/null
 logfile_null_ok	-in in/basic.fa -logfile /dev/null
 logfile_null_conf	-in in/basic.fa -conffile conf/malformed.ini -logfile /dev/null
 logfile_null_noheader	-in in/noheader.fa -logfile /dev/null
+help_full	-help-full

@@ -2609,6 +2609,7 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
                 )
             };
             let mut fence_hit = false;
+            let mut scratch = S::traceback_scratch();
             // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-512
             // ```c
             //            BLAST_GappedAlignmentWithTraceback(program_number, query,
@@ -2628,6 +2629,7 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
                 gap_open,
                 gap_extend,
                 x_drop_final,
+                &mut scratch,
                 &mut fence_hit,
             );
             if fence_hit {

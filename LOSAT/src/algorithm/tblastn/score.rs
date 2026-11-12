@@ -46,6 +46,11 @@ pub(super) trait TbnScore: Copy + Send + Sync {
     /// The two-hit extension of the PSSM (`XPssmWalks`); none for the matrix, whose word finder
     /// picks its own walks.
     type Walks: XUngapWalks;
+    /// The memory of one traceback (`GapAlignScratch` for the matrix's kernel).
+    type TracebackScratch;
+
+    /// A traceback's memory, made where the traceback of an HSP makes it.
+    fn traceback_scratch() -> Self::TracebackScratch;
 
     /// The walks of the two-hit extension, or `None` for the matrix's own.
     fn x_walks(self) -> Option<Self::Walks>;
@@ -115,6 +120,7 @@ pub(super) trait TbnScore: Copy + Send + Sync {
         gap_open: i32,
         gap_extend: i32,
         x_drop: i32,
+        scratch: &mut Self::TracebackScratch,
         fence_hit: &mut bool,
     ) -> Option<BlastpGapAlignResult>;
 }
@@ -126,6 +132,12 @@ pub(super) struct MatrixScore;
 impl TbnScore for MatrixScore {
     type Scratch = GapAlignScratch;
     type Walks = std::convert::Infallible;
+    type TracebackScratch = GapAlignScratch;
+
+    #[inline(always)]
+    fn traceback_scratch() -> Self::TracebackScratch {
+        GapAlignScratch::new()
+    }
 
     #[inline(always)]
     fn x_walks(self) -> Option<Self::Walks> {
@@ -231,9 +243,9 @@ impl TbnScore for MatrixScore {
         gap_open: i32,
         gap_extend: i32,
         x_drop: i32,
+        scratch: &mut Self::TracebackScratch,
         fence_hit: &mut bool,
     ) -> Option<BlastpGapAlignResult> {
-        let mut scratch = GapAlignScratch::new();
         blast_gapped_alignment_with_traceback_in_window(
             query,
             subject,
@@ -244,7 +256,7 @@ impl TbnScore for MatrixScore {
             gap_open,
             gap_extend,
             x_drop,
-            &mut scratch,
+            scratch,
             Some(fence_hit),
         )
     }
@@ -259,6 +271,11 @@ pub(super) struct PssmScore<'a>(pub(super) &'a QueryPssm);
 impl<'a> TbnScore for PssmScore<'a> {
     type Scratch = (GapAlignScratch, PssmGapScratch);
     type Walks = XPssmWalks<'a>;
+    type TracebackScratch = PssmGapScratch;
+
+    fn traceback_scratch() -> Self::TracebackScratch {
+        PssmGapScratch::new()
+    }
 
     fn x_walks(self) -> Option<Self::Walks> {
         Some(XPssmWalks(self.0))
@@ -367,6 +384,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         gap_open: i32,
         gap_extend: i32,
         x_drop: i32,
+        scratch: &mut Self::TracebackScratch,
         fence_hit: &mut bool,
     ) -> Option<BlastpGapAlignResult> {
         let traced = pssm_gapped_alignment_with_traceback(
@@ -378,7 +396,7 @@ impl<'a> TbnScore for PssmScore<'a> {
             gap_open,
             gap_extend,
             x_drop,
-            &mut PssmGapScratch::new(),
+            scratch,
         );
         *fence_hit = traced.fence_hit;
         Some(BlastpGapAlignResult {

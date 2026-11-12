@@ -619,7 +619,7 @@ pub(super) fn chunk_subjects_on_pool(
             let table = slot.get()?;
             let mut kept = Vec::new();
             for oid in first..end {
-                let mut computed = compute_subject_any(
+                let computed = compute_subject_any(
                     subjects,
                     batch,
                     params,
@@ -632,8 +632,6 @@ pub(super) fn chunk_subjects_on_pool(
                     oid,
                     x_containment,
                 )?;
-                computed.seeds = Vec::new();
-                computed.initial = Vec::new();
                 if !computed.is_empty() {
                     kept.push((oid, computed));
                 }

@@ -91,15 +91,6 @@ fn tree_hsp(h: &PreliminaryHsp, batch: &PreparedQueryBatch) -> TreeHsp {
 //        */
 //       if (program_number == eBlastTypeRpsBlast ||
 // ```
-pub fn ordinary_traceback(
-    input: &[PreliminaryHsp],
-    batch: &PreparedQueryBatch,
-    _parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject: &[u8],
-) -> Result<Vec<RedoneHsp>> {
-    ordinary_traceback_observed(input, batch, _parameters, options, subject, &mut |_, _| {})
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-407
 // ```c++
 //        */

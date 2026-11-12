@@ -80,7 +80,6 @@ pub(super) fn local_kappa_redo_params(
     max_query_length: i32,
     mode: BlastCompoAdjustMode,
     unified_p: bool,
-    expect_value: f64,
     do_sum_stats: bool,
     final_xdrop_bits: f64,
     extension_final_xdrop: i32,
@@ -165,22 +164,17 @@ pub(super) fn local_kappa_redo_params(
         gapping_params: BlastCompoGappingParams {
             gap_open: ((gap_open as f64) * scale).round() as i32,
             gap_extend: ((gap_extend as f64) * scale).round() as i32,
-            decline_align: 0,
             x_dropoff: redo_xdrop,
             context: Cell::new(None),
         },
         compo_adjust_mode: mode,
         alphsize: BLASTAA_SIZE as i32,
         composition_test_index: i32::from(unified_p),
-        unified_p,
         log_k: 0.0,
         score_divisor: scale,
-        restricted_alignment: false,
         smith_waterman: false,
-        is_same_adjustment: false,
         near_identical_cutoff: (1.74 * std::f64::consts::LN_2) / first_valid_scaled_lambda,
         position_based: false,
-        re_matrix_adjustment_pseudocounts: 20,
         ccat_query_length: max_query_length,
         query_is_translated: false,
         subject_is_translated: true,
@@ -189,8 +183,6 @@ pub(super) fn local_kappa_redo_params(
         } else {
             1
         },
-        cutoff_evalue: expect_value,
-        do_link_hsps: do_sum_stats,
     })
 }
 
@@ -246,7 +238,6 @@ mod tests {
             120,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            10.0,
             true,
             30.0,
             70,

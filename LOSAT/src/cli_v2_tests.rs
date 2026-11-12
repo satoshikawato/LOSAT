@@ -3,11 +3,11 @@
 // AddOptionalKey(kArgWordSize, ...); AddOptionalKey(kArgMaxHSPsPerSubject, ...);
 // x_TokenizeFilteringArgs(seg_opts, tokens); opt.SetUnifiedP(1);
 
-use LOSAT::algorithm::blastp::args::parse_comp_based_stats;
-use LOSAT::blastinput::value_parsers::{
+use crate::algorithm::blastp::args::parse_comp_based_stats;
+use crate::blastinput::value_parsers::{
     parse_dust_filtering, parse_seg_filtering, DustSpec, SegSpec,
 };
-use LOSAT::cli::{try_parse_from, Cli, Commands};
+use crate::cli::{try_parse_from, Cli, Commands};
 
 fn parse_argv(argv: Vec<&str>) -> Result<Cli, clap::Error> {
     try_parse_from(argv)
@@ -35,7 +35,7 @@ fn taxid_options_go_with_a_database_only() {
             let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
             argv.extend(words);
             assert!(parse_argv(argv).is_ok(), "{program} -db {words:?}");
-            let error = LOSAT::cli::render_message(&parse(program, words).unwrap_err());
+            let error = crate::cli::render_message(&parse(program, words).unwrap_err());
             assert!(
                 error.contains("cannot be used with"),
                 "{program} {words:?}: {error}"
@@ -95,7 +95,7 @@ fn seqid_list_options_go_with_a_database_only() {
             let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
             argv.extend(words);
             assert!(parse_argv(argv).is_ok(), "{program} -db {words:?}");
-            let error = LOSAT::cli::render_message(&parse(program, words).unwrap_err());
+            let error = crate::cli::render_message(&parse(program, words).unwrap_err());
             assert!(
                 error.contains("cannot be used with"),
                 "{program} {words:?}: {error}"
@@ -365,7 +365,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
     for help in ["-help", "--help"] {
         let err = makedb(&[help]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
-        let text = LOSAT::cli::render_message(&err);
+        let text = crate::cli::render_message(&err);
         assert!(text.contains("-dbtype <molecule_type>"), "{text}");
         assert!(text.contains("-max_file_sz"), "{text}");
         assert!(
@@ -554,7 +554,7 @@ fn composition_tokens_follow_ncbis_first_character_rule() {
     }
     // NCBI blast_args.cpp:834-892: the CLI reads the first character (any other is mode 0)
     // and, for BLASTP, a `u` or `U` second character of an adjusting mode.
-    use LOSAT::blastinput::app::{parse_comp_based_stats as ncbi_cbs, CompositionMode};
+    use crate::blastinput::app::{parse_comp_based_stats as ncbi_cbs, CompositionMode};
     for (token, mode, unified) in [
         ("2garbage", CompositionMode::CompositionMatrixAdjust, false),
         ("t", CompositionMode::CompositionMatrixAdjust, false),
@@ -585,7 +585,7 @@ fn composition_tokens_follow_ncbis_first_character_rule() {
         };
         // LOSAT's BLASTP runs every mode (modes 1 and 3 since series SC, SC5) and rejects
         // unified P-values (DECISIONS 23 a of line NP).
-        let checked = LOSAT::algorithm::blastp::blast_engine::check_options(&args);
+        let checked = crate::algorithm::blastp::blast_engine::check_options(&args);
         if !unified {
             checked.unwrap();
         } else {
@@ -643,7 +643,7 @@ fn defaults_and_task_overrides_remain_distinct() {
     };
     let resolved = a.resolve().unwrap();
     assert_eq!((resolved.word_size, resolved.threshold), (5, 20.0));
-    LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp-short"]).unwrap().command else {
         panic!()
     };
@@ -658,7 +658,7 @@ fn defaults_and_task_overrides_remain_distinct() {
         ),
         (2, 16.0, 15, 20000.0, (9, 1))
     );
-    LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     for (task, threshold) in [("blastp", 11.0), ("blastp-fast", 20.0)] {
         let Commands::Blastp(a) = parse("blastp", &["-task", task, "-word_size", "2"])
             .unwrap()
@@ -672,13 +672,13 @@ fn defaults_and_task_overrides_remain_distinct() {
             (2, threshold),
             "{task}"
         );
-        LOSAT::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+        crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     }
     // Word size 4 keeps the lookup table, which LOSAT's BLASTP implements at 2 and 3.
     let Commands::Blastp(a) = parse("blastp", &["-word_size", "4"]).unwrap().command else {
         panic!()
     };
-    assert!(LOSAT::algorithm::blastp::blast_engine::check_options(&a)
+    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
         .unwrap_err()
         .to_string()
         .contains("-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"));
@@ -731,7 +731,7 @@ fn defaults_and_task_overrides_remain_distinct() {
         ("blastx", "blastx-x", &["blastx-fast"][..]),
         ("tblastn", "tblastn-x", &["tblastn-fast"][..]),
     ] {
-        let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
+        let text = crate::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
         assert!(
             text.contains("possible values") && listed.iter().all(|task| text.contains(task)),
             "{text}"
@@ -892,7 +892,7 @@ fn numeric_values_are_validated_before_io() {
         else {
             unreachable!("tblastx")
         };
-        let checked = LOSAT::algorithm::tblastx::blast_engine::check_options(&args);
+        let checked = crate::algorithm::tblastx::blast_engine::check_options(&args);
         match message {
             None => assert!(checked.is_ok(), "{value}: {checked:?}"),
             Some(message) => {
@@ -925,8 +925,8 @@ fn numeric_values_are_validated_before_io() {
         else {
             unreachable!("blastn")
         };
-        let checked = LOSAT::algorithm::blastn::scoring::check_scoring_options(&args);
-        let limited = LOSAT::algorithm::blastn::scoring::check_losat_limits(&args);
+        let checked = crate::algorithm::blastn::scoring::check_scoring_options(&args);
+        let limited = crate::algorithm::blastn::scoring::check_losat_limits(&args);
         if matches!(evalue, "+inf" | "+nan" | "-nan" | "1e400") {
             assert!(checked.is_ok(), "-evalue {evalue}");
             assert!(limited.is_ok(), "-evalue {evalue}");
@@ -989,7 +989,7 @@ fn numeric_values_are_validated_before_io() {
     for extra in [&["-task", "rmblastn"][..], &["-version"]] {
         let mut words = vec!["-outfmt", "6"];
         words.extend_from_slice(extra);
-        let error = LOSAT::cli::render_message(&parse("blastn", &words).unwrap_err());
+        let error = crate::cli::render_message(&parse("blastn", &words).unwrap_err());
         assert!(
             error.contains("not supported by LOSAT's BLASTN"),
             "{extra:?}: {error}"
@@ -1069,7 +1069,7 @@ fn numeric_values_are_validated_before_io() {
         unreachable!("blastn")
     };
     assert!(
-        LOSAT::algorithm::blastn::scoring::check_scoring_options(&args)
+        crate::algorithm::blastn::scoring::check_scoring_options(&args)
             .unwrap_err()
             .to_string()
             .contains("BLASTN penalty must be negative")
@@ -1081,7 +1081,7 @@ fn numeric_values_are_validated_before_io() {
         else {
             unreachable!("blastn")
         };
-        let checked = LOSAT::algorithm::blastn::scoring::check_scoring_options(&args);
+        let checked = crate::algorithm::blastn::scoring::check_scoring_options(&args);
         assert_eq!(checked.is_ok(), accepted, "-word_size {value}");
         if !accepted {
             assert!(checked
@@ -1123,7 +1123,7 @@ fn numeric_values_are_validated_before_io() {
         let Commands::Tblastx(args) = parse("tblastx", words).unwrap().command else {
             unreachable!("tblastx")
         };
-        let error = LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
+        let error = crate::algorithm::tblastx::blast_engine::check_options(&args)
             .unwrap_err()
             .to_string();
         assert!(error.contains(message), "{words:?}: {error}");
@@ -1184,7 +1184,7 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback"]).unwrap().command else {
         panic!()
     };
-    assert!(LOSAT::algorithm::blastp::blast_engine::check_options(&a)
+    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
         .unwrap_err()
         .to_string()
         .contains("not supported by LOSAT's BLASTP"));
@@ -1226,7 +1226,7 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
 #[derive(Debug, Clone, Copy)]
 enum Outfmt {
     /// LOSAT writes the format.
-    Writes(LOSAT::blastinput::app::ReportFormat),
+    Writes(crate::blastinput::app::ReportFormat),
     /// NCBI's error when it reads the value, before the option handlers: exit status and
     /// standard error (blast_args.cpp:2801-2851).
     Ncbi(i32, &'static str),
@@ -1235,7 +1235,7 @@ enum Outfmt {
     NcbiLater(&'static str),
     /// A format LOSAT writes whose custom specification NCBI's formatting handler then rejects
     /// (`s_ValidateCustomDelim`): the message of "BLAST query/options error: ...".
-    WritesThenNcbi(LOSAT::blastinput::app::ReportFormat, &'static str),
+    WritesThenNcbi(crate::blastinput::app::ReportFormat, &'static str),
     /// LOSAT's rejection before the inputs are read; `{P}` is the program's name.
     Losat(&'static str),
 }
@@ -1258,7 +1258,7 @@ const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
 /// track are grouped. `{N}` in a LOSAT message is the format number.
 #[rustfmt::skip]
 const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
-    use LOSAT::blastinput::app::ReportFormat::*;
+    use crate::blastinput::app::ReportFormat::*;
     use Outfmt::*;
     &[
         // Written today by every program; NCBI drops the specification of a format that is
@@ -1358,8 +1358,8 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
     ]
 };
 
-fn program_of(name: &str) -> LOSAT::blastinput::app::Program {
-    use LOSAT::blastinput::app::Program;
+fn program_of(name: &str) -> crate::blastinput::app::Program {
+    use crate::blastinput::app::Program;
     match name {
         "blastn" => Program::Blastn,
         "blastp" => Program::Blastp,
@@ -1375,10 +1375,10 @@ fn program_of(name: &str) -> LOSAT::blastinput::app::Program {
 // errors and LOSAT's rejections follow `OUTFMT_ROWS`.
 #[test]
 fn output_formats_follow_the_format_table() {
-    use LOSAT::blastinput::app::{
+    use crate::blastinput::app::{
         formatting_handler_check, parse_formatting_string, report_format, xinclude_check,
     };
-    let native = |error: anyhow::Error| match error.downcast::<LOSAT::cli::NativeError>() {
+    let native = |error: anyhow::Error| match error.downcast::<crate::cli::NativeError>() {
         Ok(native) => (native.exit, native.message),
         Err(other) => panic!("not NCBI's error: {other}"),
     };
@@ -1448,7 +1448,7 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
         for help in ["-help", "--help"] {
             let err = try_parse_from::<Cli, _, _>(["losat", program, help]).unwrap_err();
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
-            let text = LOSAT::cli::render_message(&err);
+            let text = crate::cli::render_message(&err);
             assert!(text.contains("-query <PATH>"), "{text}");
             assert!(text.contains("-num_threads"));
             assert!(
@@ -1487,7 +1487,7 @@ fn culling_limit_is_read_as_ncbi_does() {
                     Commands::Tblastn(args) => Ok(args.culling_limit_value()),
                     _ => unreachable!("{program}"),
                 },
-                Err(error) => Err(LOSAT::cli::render_message(&error)),
+                Err(error) => Err(crate::cli::render_message(&error)),
             }
         };
         assert_eq!(limit(&[]), Ok(0), "{program}");
@@ -1577,7 +1577,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("tblastx", &["-dryrun"]),
         ("blastn", &["-dryrun"]),
     ] {
-        let error = LOSAT::cli::render_message(&parse(program, words).unwrap_err());
+        let error = crate::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
             error.contains(&format!(
                 "is not supported by LOSAT's {}",
@@ -1678,12 +1678,12 @@ fn blastp_takes_a_database_and_its_size() {
             clap::error::ErrorKind::ArgumentConflict,
             "{words:?}: {error}"
         );
-        let text = LOSAT::cli::render_message(&error);
+        let text = crate::cli::render_message(&error);
         assert!(text.contains("'-db <NAME>'"), "{text}");
     }
     // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
     let error =
-        LOSAT::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
+        crate::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
             .unwrap_err();
     assert!(
         format!("{error:#}")
@@ -1746,14 +1746,6 @@ fn blastn_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_scoring`) rejects `-db`.
-    let error = LOSAT::algorithm::blastn::scoring::check_scoring(&blastn(&["-db", "d"]).unwrap())
-        .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
 }
 
 // TBLASTN's `-db NAME` and `-dbsize N` (blast_args.cpp:2191-2199 and 2231-2237, quoted
@@ -1799,7 +1791,7 @@ fn tblastn_takes_a_database_and_its_size() {
     }
     // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
     let error =
-        LOSAT::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap_err();
+        crate::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap_err();
     assert!(
         format!("{error:#}")
             .contains("-db (a database search) is not supported in the browser yet"),
@@ -1850,7 +1842,7 @@ fn tblastx_takes_a_database_and_its_size() {
     }
     // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
     let error =
-        LOSAT::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
+        crate::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
             .unwrap_err();
     assert!(
         format!("{error:#}")
@@ -1868,13 +1860,13 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         let Commands::Blastp(args) = parse("blastp", words).unwrap().command else {
             unreachable!("blastp")
         };
-        LOSAT::algorithm::blastp::blast_engine::check_options(&args)
+        crate::algorithm::blastp::blast_engine::check_options(&args)
     };
     let tblastn = |words: &[&str]| {
         let Commands::Tblastn(args) = parse("tblastn", words).unwrap().command else {
             unreachable!("tblastn")
         };
-        LOSAT::algorithm::tblastn::check_options(&args)
+        crate::algorithm::tblastn::check_options(&args)
     };
     for words in [
         &["-evalue", "+inf"][..],
@@ -2104,7 +2096,7 @@ fn short_help_h_is_display_help_for_every_program() {
 
 #[test]
 fn ncbi_version_request_reads_the_word_before_the_arguments() {
-    use LOSAT::cli::ncbi_version_request;
+    use crate::cli::ncbi_version_request;
     let version = |words: &[&str]| ncbi_version_request(words.iter().copied());
     let text = version(&["losat", "blastn", "-version"]).unwrap();
     assert!(

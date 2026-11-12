@@ -214,7 +214,6 @@ pub fn redo_params(
         gapping_params: BlastCompoGappingParams {
             gap_open: options.gap_open * 32,
             gap_extend: options.gap_extend * 32,
-            decline_align: 0,
             // blast_kappa.c:2374-2382 (`core::x_drop::redo_x_dropoff`).
             x_dropoff: crate::core::x_drop::redo_x_dropoff(
                 options.gap_x_dropoff_final,
@@ -226,15 +225,11 @@ pub fn redo_params(
         compo_adjust_mode: compo_adjust_mode(options.composition),
         alphsize: BLASTAA_SIZE as i32,
         composition_test_index: 0,
-        unified_p: false,
         log_k: 0.0,
         score_divisor: scale,
-        restricted_alignment: false,
         smith_waterman: false,
-        is_same_adjustment: false,
         near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,
         position_based: false,
-        re_matrix_adjustment_pseudocounts: 20,
         ccat_query_length: batch
             .contexts
             .iter()
@@ -248,8 +243,6 @@ pub fn redo_params(
         } else {
             1
         },
-        cutoff_evalue: options.evalue,
-        do_link_hsps: do_link,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1896-1913
@@ -660,7 +653,6 @@ pub(crate) fn redo_context_observed(
     scratch: &mut GapAlignScratch,
     workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
-    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     let mut incoming = None;
     let mut tail = &mut incoming;
@@ -712,12 +704,7 @@ pub(crate) fn redo_context_observed(
     //                                         &LambdaRatio            // local
     //                                 );
     // ```
-    trace(BlastRedoTraceEvent::MatchStart {
-        context: context_index,
-        count: input.iter().filter(|h| h.context == context_index).count(),
-        matrix: matrix_state.as_ref(),
-    });
-    let result = blast_redo_one_match_with_workspace_queries_and_matrix_observed(
+    let result = blast_redo_one_match_with_workspace_queries_and_matrix(
         &incoming,
         params,
         &matching,
@@ -726,7 +713,6 @@ pub(crate) fn redo_context_observed(
         &CALLBACKS,
         workspace,
         matrix_state,
-        trace,
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3641-3647
     // ```c++
@@ -738,10 +724,6 @@ pub(crate) fn redo_context_observed(
     //                     }
     //
     // ```
-    trace(BlastRedoTraceEvent::MatchEnd {
-        context: context_index,
-        matrix: matrix_state.as_ref(),
-    });
     params.gapping_params.context.set(old);
     result
 }
@@ -869,29 +851,12 @@ pub struct RedoneHsp {
 // ```
 // BLASTX's untranslated protein subject has frame 0 throughout this owner;
 // the NCBI subject-frame equality predicate is therefore always true here.
-fn reap_contained_hsps(
-    output: Vec<RedoneHsp>,
-    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
-) -> Vec<RedoneHsp> {
+fn reap_contained_hsps(output: Vec<RedoneHsp>) -> Vec<RedoneHsp> {
     let mut slots: Vec<Option<RedoneHsp>> = output.into_iter().map(Some).collect();
-    for (index, candidate) in slots.iter().enumerate() {
-        let h = &candidate.as_ref().expect("live input HSP").hsp;
-        trace(BlastRedoTraceEvent::ReapList {
-            phase: "IN",
-            index,
-            context: h.context,
-            frame: h.frame,
-            score: h.score,
-            q_start: h.q_start,
-            q_end: h.q_end,
-            s_start: h.s_start,
-            s_end: h.s_end,
-        });
-    }
     for index in 1..slots.len() {
         let h = &slots[index].as_ref().expect("live candidate HSP").hsp;
         let mut contained = false;
-        for (previous_index, other) in slots[..index].iter().enumerate() {
+        for other in &slots[..index] {
             let Some(other) = other else { continue };
             let p = &other.hsp;
             let result = p.frame == h.frame
@@ -904,145 +869,16 @@ fn reap_contained_hsps(
                 && p.s_start <= h.s_end
                 && h.s_end <= p.s_end
                 && h.score <= p.score;
-            trace(BlastRedoTraceEvent::ReapCompare {
-                index,
-                previous_index,
-                result,
-            });
             if result {
                 contained = true;
                 break;
             }
         }
-        trace(BlastRedoTraceEvent::ReapContained {
-            frame: h.frame,
-            score: h.score,
-            q_start: h.q_start,
-            q_end: h.q_end,
-            s_start: h.s_start,
-            s_end: h.s_end,
-            result: contained,
-        });
         if contained {
             slots[index] = None;
         }
     }
-    let retained: Vec<RedoneHsp> = slots.into_iter().flatten().collect();
-    for (index, candidate) in retained.iter().enumerate() {
-        let h = &candidate.hsp;
-        trace(BlastRedoTraceEvent::ReapList {
-            phase: "OUT",
-            index,
-            context: h.context,
-            frame: h.frame,
-            score: h.score,
-            q_start: h.q_start,
-            q_end: h.q_end,
-            s_start: h.s_start,
-            s_end: h.s_end,
-        });
-    }
-    retained
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3675
-// ```c++
-//                 hsp_list = Blast_HSPListNew(0);
-//                 for (frame_index = 0;
-//                         frame_index < numFrames;
-//                         frame_index++, context_index++) {
-//                     incoming_aligns = incoming_align_set[frame_index];
-//                     if (!incoming_aligns) {
-//                         continue;
-//                     }
-//                     /*
-//                      * All alignments in thisMatch should be to the same query
-//                      */
-//                     kbp = sbp->kbp_gap[context_index];
-//                     if (smithWaterman) {
-//                         *pStatusCode =
-//                                 Blast_RedoOneMatchSmithWaterman(
-//                                         alignments,
-//                                         redo_align_params,
-//                                         incoming_aligns,
-//                                         numAligns[frame_index],
-//                                         kbp->Lambda,
-//                                         kbp->logK,
-//                                         &matchingSeq,
-//                                         query_info,
-//                                         numQueries,
-//                                         matrix,
-//                                         BLASTAA_SIZE,
-//                                         NRrecord,
-//                                         forbidden,
-//                                         redoneMatches,
-//                                         &pvalueForThisPair,
-//                                         compositionTestIndex,
-//                                         &LambdaRatio
-//                                 );
-//                     } else {
-//                         *pStatusCode =
-//                                 Blast_RedoOneMatch(
-//                                         alignments,             // thread-local
-//                                         redo_align_params,      // thread-local
-//                                         incoming_aligns,        // thread-local
-//                                         numAligns[frame_index], // local
-//                                         kbp->Lambda,            // thread-local
-//                                         &matchingSeq,           // thread-local
-//                                         -1,                     // const
-//                                         query_info,             // thread-local
-//                                         numContexts,            // thread-local
-//                                         matrix,                 // thread-local
-//                                         BLASTAA_SIZE,           // const
-//                                         NRrecord,               // thread-local
-//                                         &pvalueForThisPair,     // local
-//                                         compositionTestIndex,   // thread-local
-//                                         &LambdaRatio            // local
-//                                 );
-//                     }
-//
-//                     if (*pStatusCode != 0) {
-//                         goto match_loop_cleanup;
-//                     }
-//
-//                     if (alignments[context_index] != NULL) {
-//                         Int2 qframe = frame_index;
-//                         if (program_number == eBlastTypeBlastx) {
-//                             if (qframe < 3) {
-//                                 qframe++;
-//                             } else {
-//                                 qframe = 2 - qframe;
-//                             }
-//                         }
-//                         *pStatusCode =
-//                                 s_HSPListFromDistinctAlignments(hsp_list,
-//                                         &alignments[context_index],
-//                                         matchingSeq.index,
-//                                         queryInfo, qframe);
-//                         if (*pStatusCode) {
-//                             goto match_loop_cleanup;
-//                         }
-//                     }
-//                     BlastCompo_AlignmentsFree(&incoming_aligns, NULL);
-//                     incoming_align_set[frame_index] = NULL;
-//                 }
-//
-//                 if (hsp_list->hspcnt > 1) {
-//                     s_HitlistReapContained(hsp_list->hsp_array,
-//                             &hsp_list->hspcnt);
-//                 }
-//                 *pStatusCode =
-//                         s_HitlistEvaluateAndPurge(&best_score, &best_evalue,
-// ```
-pub fn redo_list(
-    input: &[PreliminaryHsp],
-    batch: &PreparedQueryBatch,
-    parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject: &[u8],
-) -> Result<Vec<RedoneHsp>> {
-    let mut state = KappaState::new(batch, parameters, options)?;
-    state.redo_list(input, batch, subject)
+    slots.into_iter().flatten().collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
@@ -1199,69 +1035,6 @@ impl KappaState {
             matrix: None,
         })
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3641
-    // ```c++
-    //                 hsp_list = Blast_HSPListNew(0);
-    //                 for (frame_index = 0;
-    //                         frame_index < numFrames;
-    //                         frame_index++, context_index++) {
-    //                     incoming_aligns = incoming_align_set[frame_index];
-    //                     if (!incoming_aligns) {
-    //                         continue;
-    //                     }
-    //                     /*
-    //                      * All alignments in thisMatch should be to the same query
-    //                      */
-    //                     kbp = sbp->kbp_gap[context_index];
-    //                     if (smithWaterman) {
-    //                         *pStatusCode =
-    //                                 Blast_RedoOneMatchSmithWaterman(
-    //                                         alignments,
-    //                                         redo_align_params,
-    //                                         incoming_aligns,
-    //                                         numAligns[frame_index],
-    //                                         kbp->Lambda,
-    //                                         kbp->logK,
-    //                                         &matchingSeq,
-    //                                         query_info,
-    //                                         numQueries,
-    //                                         matrix,
-    //                                         BLASTAA_SIZE,
-    //                                         NRrecord,
-    //                                         forbidden,
-    //                                         redoneMatches,
-    //                                         &pvalueForThisPair,
-    //                                         compositionTestIndex,
-    //                                         &LambdaRatio
-    //                                 );
-    //                     } else {
-    //                         *pStatusCode =
-    //                                 Blast_RedoOneMatch(
-    //                                         alignments,             // thread-local
-    //                                         redo_align_params,      // thread-local
-    //                                         incoming_aligns,        // thread-local
-    //                                         numAligns[frame_index], // local
-    //                                         kbp->Lambda,            // thread-local
-    //                                         &matchingSeq,           // thread-local
-    //                                         -1,                     // const
-    //                                         query_info,             // thread-local
-    //                                         numContexts,            // thread-local
-    //                                         matrix,                 // thread-local
-    //                                         BLASTAA_SIZE,           // const
-    //                                         NRrecord,               // thread-local
-    //                                         &pvalueForThisPair,     // local
-    //                                         compositionTestIndex,   // thread-local
-    //                                         &LambdaRatio            // local
-    //                                 );
-    // ```
-    pub fn redo_list(
-        &mut self,
-        input: &[PreliminaryHsp],
-        batch: &PreparedQueryBatch,
-        subject: &[u8],
-    ) -> Result<Vec<RedoneHsp>> {
-        self.redo_list_observed(input, batch, subject, &mut |_| {})
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3502,3625-3641
     // ```c
     //                 matrix               = matrix_tld[tid];
@@ -1330,7 +1103,6 @@ impl KappaState {
         input: &[PreliminaryHsp],
         batch: &PreparedQueryBatch,
         subject: &[u8],
-        trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
     ) -> Result<Vec<RedoneHsp>> {
         let query_index = input.first().map(|h| h.context / 6);
         ensure!(
@@ -1353,7 +1125,6 @@ impl KappaState {
                 &mut self.scratch,
                 &mut self.workspace,
                 &mut self.matrix,
-                trace,
             )?;
             for (context, alignments) in result.alignments_by_query.into_iter().enumerate() {
                 let mut current = alignments;
@@ -1452,7 +1223,7 @@ impl KappaState {
         // }
         // ```
         if output.len() > 1 {
-            Ok(reap_contained_hsps(output, trace))
+            Ok(reap_contained_hsps(output))
         } else {
             Ok(output)
         }
@@ -1548,7 +1319,7 @@ mod contained_reap_tests {
                 .collect();
             expected.sort_by_key(|(slot, _)| *slot);
             let input = entries.into_iter().map(|(h, _)| h).collect();
-            let actual = reap_contained_hsps(input, &mut |_| {});
+            let actual = reap_contained_hsps(input);
             let actual_hsps: Vec<PreliminaryHsp> = actual.into_iter().map(|h| h.hsp).collect();
             let expected_hsps: Vec<PreliminaryHsp> = expected.into_iter().map(|(_, h)| h).collect();
             assert_eq!(actual_hsps, expected_hsps, "direct C boundary case {name}");

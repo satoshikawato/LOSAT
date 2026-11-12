@@ -288,16 +288,19 @@ impl Column {
     }
 
     /// The date the column was written.
+    #[cfg(test)]
     pub fn date(&self) -> &[u8] {
         &self.date
     }
 
     /// The number of sequences the column has a blob for.
+    #[cfg(test)]
     pub fn num_oids(&self) -> i32 {
         self.num_oids
     }
 
     /// The length of the data section, as the index file states it.
+    #[cfg(test)]
     pub fn data_length(&self) -> i64 {
         self.data_length
     }

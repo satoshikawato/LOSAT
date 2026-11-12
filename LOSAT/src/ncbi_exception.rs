@@ -160,7 +160,8 @@ impl NcbiException {
         }
     }
 
-    /// Where the exception was thrown.
+    /// Where the exception was thrown (for the tests; the report reads the field in `report_this`).
+    #[cfg(test)]
     pub fn site(&self) -> ThrowSite {
         self.site
     }
@@ -472,6 +473,35 @@ mod tests {
         assert_eq!(
             factory.what(),
             "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp\", line 63: Error: (Exception::format error) file too short\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n"
+        );
+    }
+
+    // blastn 2.17.0 (the official Linux x64 release) with a `blastn.ini` of the line `garbage`
+    // (env parity g_reg probe `x_ini`, 2026-11-11): `NCBI_REPORT_EXCEPTION_X(15, "Application's
+    // initialization failed", e)` of the application layer (error code 106), and of a chain.
+    #[test]
+    fn a_report_with_a_title_has_a_line_per_exception_then_the_title() {
+        let site = ThrowSite {
+            file: "src/corelib/ncbireg.cpp",
+            line: 722,
+            kind: "CRegistryException::eEntry",
+            function: Some("ncbi::IRWRegistry::x_Read"),
+        };
+        let e = NcbiException::with_pos(site, "Invalid registry entry format: 'garbage'", 1);
+        assert_eq!(
+            e.report_default_ex(106, 15, "Application's initialization failed"),
+            "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n"
+        );
+        let outer = NcbiException::new(site, "first").rethrow(
+            ThrowSite {
+                kind: "CAppException::eSetupDiag",
+                ..site
+            },
+            "second",
+        );
+        assert_eq!(
+            outer.report_default_ex(106, 15, "T"),
+            "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n"
         );
     }
 

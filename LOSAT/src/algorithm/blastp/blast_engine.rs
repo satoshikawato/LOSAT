@@ -22,9 +22,9 @@ use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
-use crate::algorithm::tblastx::constants::{
-    GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
-};
+use crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE;
+#[cfg(test)]
+use crate::algorithm::tblastx::constants::{X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bp_build_compressed_lookup, x_bp_build_compressed_lookup_of, x_bpclut_on, XCompressedLookup,
     XFlatCompressedLookup, X_BLASTP, X_BLASTP_MATRIX,
@@ -845,13 +845,14 @@ fn blastp_gapped_x_dropoff_raw(bits: f64, lambda: f64) -> i32 {
 //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
 //         extendParams->gap_x_dropoff_final);
 // ```
+// `final_bits` is `-xdrop_gap_final` or BLASTP's default (`ResolvedBlastpArgs`); the conversion is
+// the protein programs' (`core::x_drop::redo_x_dropoff`).
 fn blastp_redo_x_dropoff(
+    final_bits: f64,
     scaled_gapped_lambda: f64,
-    _gapped_params: &crate::stats::KarlinParams,
     x_drop_gapped_final: i32,
 ) -> i32 {
-    blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, scaled_gapped_lambda)
-        .max(x_drop_gapped_final)
+    crate::core::x_drop::redo_x_dropoff(final_bits, scaled_gapped_lambda, x_drop_gapped_final)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2438-2448
@@ -1394,11 +1395,12 @@ fn blastp_concatenated_query_length(contexts: &[QueryContext]) -> i32 {
 //    (Int4)(sbp->scale_factor *
 //           ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
 // ```
-fn blastp_x_dropoff_init_for_context(ctx: &QueryContext) -> i32 {
+// `bits` is `-xdrop_ungap` or BLASTP's default (`ResolvedBlastpArgs`).
+fn blastp_x_dropoff_init_for_context(ctx: &QueryContext, bits: f64) -> i32 {
     if !ctx.is_valid {
         return 0;
     }
-    x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ctx.karlin_params, 1.0)
+    x_drop_raw_score(bits, &ctx.karlin_params, 1.0)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:917-940
@@ -7687,7 +7689,6 @@ fn write_reports_without_queries(
                 };
                 let config = PairwiseConfig {
                     line_length: 60,
-                    show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
@@ -8877,11 +8878,26 @@ fn run_resolved_in_pool(
     //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
     //         params->gap_x_dropoff);
     // ```
-    let x_drop_gapped =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_PRELIM as f64, gapped_params.lambda);
-    let x_drop_gapped_final =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, gapped_params.lambda)
-            .max(x_drop_gapped);
+    // The X-drops in bits are `-xdrop_gap` and `-xdrop_gap_final` or BLASTP's defaults
+    // (`ResolvedBlastpArgs`), converted as the protein programs convert them (`core::x_drop`); the
+    // contexts of a batch share the matrix's gapped Lambda, the smallest one. An X-drop that NCBI's
+    // gapped kernels cannot size is refused before the search.
+    let x_drop_bits = (args.x_drop_gapped_bits, args.x_drop_final_bits);
+    let (x_drop_gapped, x_drop_gapped_final) =
+        crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
+    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
+    // after IDENTITY's reset too; the same choice as `ordinary_traceback` below).
+    if !args.ungapped {
+        crate::core::x_drop::check_gapped_x_dropoffs(
+            "BLASTP",
+            x_drop_bits,
+            (x_drop_gapped, x_drop_gapped_final),
+            (args.scoring.gap_open, args.scoring.gap_extend),
+            args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats
+                || args.psi_search.is_some()
+                || args.rps_search.is_some(),
+        )?;
+    }
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); the batches
     // here are those that NCBI searches (`read_query_batches`).
@@ -9298,7 +9314,7 @@ fn run_resolved_in_pool(
     // / `sbp->kbp_std`), not per-query lookup composition estimates.
     let x_dropoff_per_context: Vec<i32> = contexts
         .iter()
-        .map(blastp_x_dropoff_init_for_context)
+        .map(|ctx| blastp_x_dropoff_init_for_context(ctx, args.x_drop_ungapped_bits))
         .collect();
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
     // ```c++
@@ -11319,10 +11335,9 @@ fn run_resolved_in_pool(
                 gap_open: ((args.scoring.gap_open as f64) * local_scaling_factor).round() as i32,
                 gap_extend: ((args.scoring.gap_extend as f64) * local_scaling_factor).round()
                     as i32,
-                decline_align: 0,
                 x_dropoff: blastp_redo_x_dropoff(
+                    args.x_drop_final_bits,
                     scaled_gapped_lambda,
-                    &gapped_params,
                     x_drop_gapped_final,
                 ),
                 context: std::cell::Cell::new(None),
@@ -11335,7 +11350,6 @@ fn run_resolved_in_pool(
             // ```
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: i32::from(args.comp_based_stats.unified_p),
-            unified_p: args.comp_based_stats.unified_p,
             log_k: gapped_params.k.ln(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3584-3690
             // ```c
@@ -11345,24 +11359,19 @@ fn run_resolved_in_pool(
             //                          localScalingFactor);
             // ```
             score_divisor: local_scaling_factor,
-            restricted_alignment: false,
             smith_waterman: false,
             near_identical_cutoff: blastp_redo_near_identical_cutoff(scaled_gapped_lambda),
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: contexts[q_idx].aa_len as i32,
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: blastp_redo_cutoff_score(do_link_hsps, 0, local_scaling_factor),
-            cutoff_evalue: args.evalue,
-            do_link_hsps,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
             // ```c
             // Nearly identical alignments are computed with exact subjects,
             // and others with segged subjects; this makes comparing end
             // points more difficult.
             // ```
-            is_same_adjustment: false,
         })
     };
 
@@ -12738,8 +12747,6 @@ fn run_resolved_in_pool(
         None => total_db_len,
     };
     let context = ReportContext {
-        query_name: None,
-        query_length: query_lengths.first().copied(),
         subject_name: Some(subject_name_label.clone()),
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
         // ```c++
@@ -12754,8 +12761,6 @@ fn run_resolved_in_pool(
             Some(database) => database.name().to_string(),
             None => format!("User specified sequence set (Input: {subject_input_label})"),
         }),
-        database_num_sequences: Some(shown_num_sequences),
-        database_total_letters: Some(shown_total_letters),
         program: args.app.ncbi_name().to_string(),
     };
 
@@ -13703,7 +13708,6 @@ fn run_resolved_in_pool(
                 // (`args.line_length`: rpsblast's `-line_length`, else 60.)
                 let pairwise_config = PairwiseConfig {
                     line_length: args.line_length,
-                    show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
@@ -14346,6 +14350,9 @@ mod tests {
             qcov_hsp_perc: None,
             culling_limit: None,
             ungapped: false,
+            xdrop_ungap: None,
+            xdrop_gap: None,
+            xdrop_gap_final: None,
             window_size: None,
             matrix: None,
             gap_open: None,
@@ -14530,7 +14537,6 @@ mod tests {
     fn make_query_context(q_idx: u32, frame_base: i32) -> QueryContext {
         QueryContext {
             q_idx,
-            f_idx: 0,
             frame: 1,
             aa_seq: vec![0, 1, 2, 3, 0],
             aa_seq_nomask: None,
@@ -15445,7 +15451,7 @@ mod tests {
             );
 
         assert_eq!(
-            blastp_redo_x_dropoff(scaled_lambda, &gapped, unscaled_final),
+            blastp_redo_x_dropoff(X_DROP_GAPPED_FINAL as f64, scaled_lambda, unscaled_final),
             blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, scaled_lambda)
                 .max(unscaled_final)
         );
@@ -15990,7 +15996,7 @@ mod tests {
         let gumbel = lookup_protein_gumbel_params(&scoring, 10_000)
             .expect("supported blastp gumbel parameters");
 
-        assert_eq!(blastp_x_dropoff_init_for_context(&invalid), 0);
+        assert_eq!(blastp_x_dropoff_init_for_context(&invalid, 7.0), 0);
         assert_eq!(
             blastp_hit_cutoff_score_for_context(
                 &invalid,

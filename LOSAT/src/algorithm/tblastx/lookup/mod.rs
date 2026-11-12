@@ -31,14 +31,15 @@ pub(crate) use backbone::x_prepare_blosum62_lookup_query_in_pool;
 pub(crate) use backbone::x_lookup_contexts_for_profile_in_pool;
 // EXPERIMENT (LOSAT_X_BPLKPFLAT): the lookup query with the contexts' Karlin blocks left to the
 // caller (`blastp/x_query_blocks.rs`); no NCBI counterpart for the re-export itself.
+#[cfg(test)]
+pub use backbone::build_ncbi_lookup;
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(crate) use backbone::XBlosum62LookupQuery;
 pub use backbone::{
-    build_direct_lookup, build_ncbi_lookup, BackboneCell, BackboneCell16, BlastAaLookupTable,
-    XCell, XHit, AA_HITS_PER_CELL,
+    BackboneCell, BackboneCell16, BlastAaLookupTable, XCell, XHit, AA_HITS_PER_CELL,
 };
 // LOSAT_X_TBNLUTLEAN: the summary line `main` prints at exit (re-exported by `tblastn`). No NCBI
 // counterpart: it prints counters and changes no value NCBI computes.
@@ -71,17 +72,6 @@ use crate::utils::matrix::BLASTAA_SIZE;
 pub const LOOKUP_WORD_LENGTH: usize = 3;
 pub const LOOKUP_ALPHABET_SIZE: usize = BLASTAA_SIZE; // 28 (NCBI standard)
 
-/// Get the charsize (bits per residue) for NCBI-style indexing
-/// ilog2(28) + 1 = 5
-pub const fn get_charsize() -> usize {
-    5
-}
-
-/// Get the mask for k-mer indexing
-pub const fn get_mask() -> usize {
-    (1usize << (LOOKUP_WORD_LENGTH * get_charsize())) - 1
-}
-
 // Presence Vector - NCBI style (PV_ARRAY_TYPE = Uint4, 32-bit).
 // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:41-44
 pub(crate) const PV_ARRAY_BTS: usize = 5;
@@ -112,34 +102,19 @@ pub(crate) fn compute_backbone_size(
     backbone_size + 1
 }
 
-#[inline(always)]
-pub(crate) fn compute_mask(word_length: usize, charsize: usize) -> usize {
-    (1usize << (word_length * charsize)) - 1
-}
-
+#[cfg(test)]
 #[inline(always)]
 pub(crate) fn encode_kmer_3(aa0: usize, aa1: usize, aa2: usize, charsize: usize) -> usize {
     (aa0 << (2 * charsize)) | (aa1 << charsize) | aa2
 }
 
-/// Encode a 3-mer starting at `pos` in `seq` using the NCBI-style bit-shift index.
-/// Uses BLASTAA_SIZE = 28 alphabet.
-pub fn encode_aa_kmer(seq: &[u8], pos: usize) -> Option<usize> {
-    if pos + (LOOKUP_WORD_LENGTH - 1) >= seq.len() {
-        return None;
-    }
-    let a0 = seq[pos] as usize;
-    let a1 = seq[pos + 1] as usize;
-    let a2 = seq[pos + 2] as usize;
-    // NCBI accepts all residues 0-27
-    if a0 >= LOOKUP_ALPHABET_SIZE || a1 >= LOOKUP_ALPHABET_SIZE || a2 >= LOOKUP_ALPHABET_SIZE {
-        return None;
-    }
-    let charsize = ilog2(LOOKUP_ALPHABET_SIZE) + 1; // 5
-    Some(encode_kmer_3(a0, a1, a2, charsize))
+#[inline(always)]
+pub(crate) fn compute_mask(word_length: usize, charsize: usize) -> usize {
+    (1usize << (word_length * charsize)) - 1
 }
 
 /// Test if a k-mer index is set in the presence vector
+#[cfg(test)]
 #[inline(always)]
 pub fn pv_test(pv: &[u32], index: usize) -> bool {
     // NCBI PV_TEST macro:
@@ -156,28 +131,10 @@ pub(crate) fn pv_set(pv: &mut [u32], index: usize) {
     pv[index >> PV_ARRAY_BTS] |= 1u32 << (index & PV_ARRAY_MASK);
 }
 
-/// Encode a k-mer from three amino acid indices (0-27 each).
-/// Uses NCBI-style bit-shift indexing with BLASTAA_SIZE=28.
-pub fn encode_kmer(aa0: usize, aa1: usize, aa2: usize) -> usize {
-    let charsize = ilog2(LOOKUP_ALPHABET_SIZE) + 1; // 5
-    encode_kmer_3(aa0, aa1, aa2, charsize)
-}
-
-/// Decode a k-mer index back to three amino acid indices.
-pub fn decode_kmer(index: usize) -> (usize, usize, usize) {
-    let charsize = ilog2(LOOKUP_ALPHABET_SIZE) + 1; // 5
-    let mask = (1 << charsize) - 1;
-    let aa2 = index & mask;
-    let aa1 = (index >> charsize) & mask;
-    let aa0 = (index >> (2 * charsize)) & mask;
-    (aa0, aa1, aa2)
-}
-
 /// Query context - stores per-frame information for a query
 #[derive(Clone)]
 pub struct QueryContext {
     pub q_idx: u32,
-    pub f_idx: u8,
     pub frame: i8,
     pub aa_seq: Vec<u8>,
     pub aa_seq_nomask: Option<Vec<u8>>,
@@ -197,30 +154,6 @@ pub struct QueryContext {
     /// NCBI: `kbp[context]` - Karlin parameters for this context
     /// Reference: link_hsps.c line 750-752, 866-867
     pub karlin_params: KarlinParams,
-}
-
-/// Compute unmasked intervals from SEG mask ranges
-pub(crate) fn compute_unmasked_intervals(
-    seg_masks: &[(usize, usize)],
-    aa_len: usize,
-) -> Vec<(usize, usize)> {
-    if seg_masks.is_empty() {
-        return vec![(0, aa_len)];
-    }
-    let mut result = Vec::new();
-    let mut pos = 0;
-    let mut sorted = seg_masks.to_vec();
-    sorted.sort_by_key(|m| m.0);
-    for &(s, e) in &sorted {
-        if pos < s {
-            result.push((pos, s));
-        }
-        pos = pos.max(e);
-    }
-    if pos < aa_len {
-        result.push((pos, aa_len));
-    }
-    result
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-453
@@ -270,6 +203,14 @@ pub(crate) use backbone::{x_tbx_build_ncbi_lookup, x_tbxlut_reach_stub};
 //                                       query, location);
 // ```
 pub(crate) use backbone::x_pair_lut;
+// The reference builder's table of a BLASTX lookup query, for blastx::seed's tests (item SC9 of line
+// NP, a test of threaded builds); no NCBI counterpart for the re-export itself.
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) use backbone::x_reference_table_from_prepared;
 
 #[cfg(test)]
 mod lookup_tests;

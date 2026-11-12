@@ -400,12 +400,8 @@ pub struct FinalKarlin {
     pub h_ungapped: f64,
 }
 
-/// Writes `value` as a document (`WriteFileHeader`, the object, `EndOfWrite` and the separator).
-pub fn write_pssm_with_parameters<E: Encoder>(enc: &mut E, value: &PssmWithParameters) {
-    write_document(enc, value, None);
-}
-
-/// `write_pssm_with_parameters`, with `karlin` in place of the six values of `finalData`.
+/// The document of a PSSM (`WriteFileHeader`, the object, `EndOfWrite` and the separator), with
+/// `karlin` in place of the six values of `finalData`.
 fn write_document<E: Encoder>(
     enc: &mut E,
     value: &PssmWithParameters,

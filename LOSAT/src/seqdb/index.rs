@@ -14,10 +14,12 @@ use super::{SeqDbError, SeqType};
 #[derive(Debug)]
 pub struct IndexFile {
     /// Format version, 4 or 5.
+    #[cfg(test)]
     pub version: u32,
     /// Sequence type stored in the file.
     pub seqtype: SeqType,
     /// Volume number (version 5 only).
+    #[cfg(test)]
     pub volume_number: Option<u32>,
     /// Volume title, as stored.
     pub title: Vec<u8>,
@@ -216,7 +218,9 @@ impl<'a, S: Source + ?Sized> Cursor<'a, S> {
 
 /// The values of an index file before its arrays, and where the arrays start.
 struct Fixed {
+    #[cfg(test)]
     version: u32,
+    #[cfg(test)]
     volume_number: Option<u32>,
     title: Vec<u8>,
     lmdb_file: Option<Vec<u8>>,
@@ -322,6 +326,9 @@ impl IndexFile {
         }
         let db_seqtype = cursor.be_u32()?;
         let volume_number = if dbv5 { Some(cursor.be_u32()?) } else { None };
+        // Only the tests look at the volume number (a version 5 file has one).
+        #[cfg(not(test))]
+        let _ = volume_number;
         let title = cursor.string()?;
         let lmdb_file = if dbv5 { Some(cursor.string()?) } else { None };
         let date = cursor.string()?;
@@ -352,7 +359,9 @@ impl IndexFile {
             SeqType::Protein => 0,
         };
         Ok(Fixed {
+            #[cfg(test)]
             version,
+            #[cfg(test)]
             volume_number,
             title,
             lmdb_file,
@@ -368,8 +377,10 @@ impl IndexFile {
 
     fn with_offsets(fixed: Fixed, seqtype: SeqType, offsets: Offsets) -> Self {
         Self {
+            #[cfg(test)]
             version: fixed.version,
             seqtype,
+            #[cfg(test)]
             volume_number: fixed.volume_number,
             title: fixed.title,
             lmdb_file: fixed.lmdb_file,
@@ -759,6 +770,7 @@ impl IndexFile {
     // }
     // ```
     /// Byte range of the ambiguity data of `oid` (nucleotide volumes only).
+    #[cfg(test)]
     pub fn ambiguity_range(&self, oid: u32) -> Result<Option<(u64, u64)>, SeqDbError> {
         Ok(self
             .ambiguity_words(oid)?
@@ -766,6 +778,7 @@ impl IndexFile {
     }
 
     /// The ambiguity range of `oid` as stored (`ambiguity_range`).
+    #[cfg(test)]
     pub(super) fn ambiguity_words(&self, oid: u32) -> Result<Option<(u32, u32)>, SeqDbError> {
         match self.seqtype {
             SeqType::Protein => Ok(None),

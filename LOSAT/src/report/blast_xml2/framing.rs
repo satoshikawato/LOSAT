@@ -135,6 +135,13 @@ pub trait SideFiles {
             .and_then(|()| file.flush())
             .map_err(|_| side_file_write_error())
     }
+
+    /// Whether the n-th side file can be opened, asked without leaving a mark by a run that holds
+    /// its side files in memory, where NCBI opens the file (`FsSideFiles::check_openable`). Side
+    /// files that are no files of their own (a caller's receiver) can always be.
+    fn check_openable(&self, _n: u32) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// The side files of a run that writes none (outfmt 15 and 16), and of the callers that have
@@ -167,6 +174,10 @@ impl SideFiles for RunSideFiles {
 
     fn write_file(&mut self, n: u32, report: &[u8]) -> Result<()> {
         (**self).write_file(n, report)
+    }
+
+    fn check_openable(&self, n: u32) -> io::Result<()> {
+        (**self).check_openable(n)
     }
 }
 

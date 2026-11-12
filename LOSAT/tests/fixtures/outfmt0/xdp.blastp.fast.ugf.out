@@ -1,0 +1,465 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_protein_subject.faa).
+           13 sequences; 11,222 total letters
+
+
+
+Query= BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62125.1 wsv282-like protein [Litopenaeus vannamei majanivirus ...  340     3e-116
+
+
+> BDT62125.1 wsv282-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=417
+
+ Score = 340 bits (871),  Expect = 3e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.132    0.379    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4449456
+
+
+Query= BDT62529.1 innexin [Metapenaeus ensis majanivirus]
+
+Length=386
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62158.1 innexin [Litopenaeus vannamei majanivirus Nimav-1_LVa]     273     6e-92
+
+
+> BDT62158.1 innexin [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+Length=400
+
+ Score = 273 bits (699),  Expect = 6e-92, Method: Compositional matrix adjust.
+ Identities = 134/308 (44%), Positives = 193/308 (63%), Gaps = 29/308 (9%)
+
+Query  94   ASVAHPGVGTYNSKTDDVKLYHTYYQWVPFILFFQALMFYSPHWLWKIWEGGKVQSTIAG  153
+              +A+PGVG   S  DD K +H YYQWVPF+LF Q LMFY+PHWLWK WE GK++S I G
+Sbjct  67   TGLAYPGVGP--SLPDDTKTHHAYYQWVPFVLFLQGLMFYAPHWLWKTWENGKLESIIMG  124
+
+Query  154  LSVPIKSNQERQKVTLGLIEYLRASHRHHDYYAKKYLFCEFLSILNCILNILLLNKFLNG  213
+            L+ PI + +ER+     L++YL  S  HH++YA K+ FCE L+I+NC+ N+  +N+FL G
+Sbjct  125  LATPIMNKEERRDKIQLLVDYLCNSLHHHNFYAIKFFFCELLNIINCLFNMWFMNRFLGG  184
+
+Query  214  MFLDYGNKVLAYYQNDNVTTINPMTIVFPKVTKCSVPLYGASGSKEIKDLLCILALNNFN  273
+            MFL YG  VL++ + +     +PM ++FP+VTKCS   YG SG+ EI DL+C+LALN  N
+Sbjct  185  MFLTYGTDVLSFTETNQEERTDPMIVIFPRVTKCSFHTYGPSGTVEIHDLMCVLALNIIN  244
+
+Query  274  DKIFLFMWFWLIILSVLNTLNFIYHVLIFVIP---------------HTRKIYLNRIAKD  318
+            +KI++ MWFW I+L+V++   FIY +L+F +P               H +K+    ++K 
+Sbjct  245  EKIYVIMWFWFIVLTVISITAFIYRLLMFYVPVIRSTLLFQKPASMLHYKKVLDQNVSKK  304
+
+Query  319  LQTSNFFNQVGDSFFLYLVKKNVDTLTFDYLFSNLFENLHNFSI-----DVIEKPKEKSV  373
+            L       Q+GD F +YL+ KN++ L+FD L   LF  L++  I     D     KE+ V
+Sbjct  305  L-------QIGDLFLIYLLSKNMEMLSFDSLLEELFLRLNDQHIYLPDHDQSNTYKERDV  357
+
+Query  374  FKGMGKRN  381
+            F+ +  +N
+Sbjct  358  FEMINSKN  365
+
+
+ Score = 59.3 bits (142),  Expect = 1e-12, Method: Compositional matrix adjust.
+ Identities = 27/56 (48%), Positives = 37/56 (66%), Gaps = 0/56 (0%)
+
+Query  1   MIPISVLANLRSLFKGKNSEVDINSKIFKLQYRTTTTILFCLCLLITTNSLVGNPI  56
+           M+ + +L  LR L K  ++  DI S +FKL YR T  +LF  CLL++ NSLVG+PI
+Sbjct  1   MVLVGLLTGLRGLVKTNHNAADIYSAVFKLHYRFTAMMLFSFCLLVSANSLVGDPI  56
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.141    0.439    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3492640
+
+
+Query= BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]
+
+Length=408
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62172.1 wsv306-like protein [Litopenaeus vannamei majanivirus ...  259     1e-85
+
+
+> BDT62172.1 wsv306-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=446
+
+ Score = 259 bits (663),  Expect = 1e-85, Method: Compositional matrix adjust.
+ Identities = 115/160 (72%), Positives = 135/160 (84%), Gaps = 4/160 (3%)
+
+Query  253  FNNQYPLQFHCNEEMNAGIMMAAYQDNDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYE  312
+            ++ +  LQFHCNEEM AGIMMAA++D DG ILP+CVCT+P YLTGPTCKHRTYN VVDYE
+Sbjct  287  YDERRDLQFHCNEEMGAGIMMAAFRDGDGTILPVCVCTHPMYLTGPTCKHRTYNSVVDYE  346
+
+Query  313  LWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQPLAAHFAQSLQMRG  372
+            LWE++G  +FLTDP NDY KAN IC+  T+NTTAVF+ERDG F CQPLAAHFAQSLQ+RG
+Sbjct  347  LWEESGIPEFLTDPLNDYTKANNICQRTTLNTTAVFEERDGTFKCQPLAAHFAQSLQLRG  406
+
+Query  373  PYEPALILDKDYIDSLNVN----QSFKINIDYLDLLNKFY  408
+            PYEPALILD+DY+D++N N    +  KINIDYLDLL KF+
+Sbjct  407  PYEPALILDRDYVDAVNNNSNHQEGIKINIDYLDLLKKFW  446
+
+
+ Score = 137 bits (344),  Expect = 4e-39, Method: Compositional matrix adjust.
+ Identities = 65/147 (44%), Positives = 96/147 (65%), Gaps = 2/147 (1%)
+
+Query  27   HYKPNCATVNIFCTSDKDCHLQCSSAVHYANSHDTGIDKEQQDSSTIIINLCNLLTNQCE  86
+            H KPNC  V++FCT D+DCH+QC+S      SHD  ++KE  D S I I+LCN  T +CE
+Sbjct  7    HVKPNCTAVDVFCTDDRDCHIQCASGALSILSHDASLEKE--DHSVITIHLCNKSTKRCE  64
+
+Query  87   PNMIQKGYYDMAINDLKKLSQMEKFLPKAMWDYIKINDGKRFIVARARFYENLSFHLKEG  146
+            PN+I +G+Y MA+ D  +L + +  L K++  Y+  ++GK FI+ARARFYE LS +L++ 
+Sbjct  65   PNVILRGFYKMAMRDFGRLIEKKTSLTKSLQSYLYAHNGKYFILARARFYEKLSLYLRDD  124
+
+Query  147  TLLDAAIQRIINEHKKNNKRNYSNKLQ  173
+              L+ AI +I  EH +  K   + K++
+Sbjct  125  ENLEMAIYKIRTEHLRKRKTYLNEKIR  151
+
+
+ Score = 31.6 bits (70),  Expect = 0.001, Method: Compositional matrix adjust.
+ Identities = 20/58 (34%), Positives = 33/58 (57%), Gaps = 8/58 (14%)
+
+Query  177  IVDDDNDNISMDLYVKQLFGRTAKPSS--------SQDIILTRDLEHDKKRGEYCTLI  226
+            +++DDN  ISM  +  Q+FG  +  +S         + ++LTR  E+D++RGEY   I
+Sbjct  198  MINDDNVAISMGKFKLQVFGPRSTITSLTKVEEEEEEKVVLTRAKEYDEQRGEYIQRI  255
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.135    0.409    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3724080
+
+
+Query= BDT62620.1 wsv325-like protein [Metapenaeus ensis majanivirus]
+
+Length=436
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62143.1 wsv325-like protein [Litopenaeus vannamei majanivirus ...  167     1e-50
+
+
+> BDT62143.1 wsv325-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=380
+
+ Score = 167 bits (423),  Expect = 1e-50, Method: Compositional matrix adjust.
+ Identities = 98/221 (44%), Positives = 123/221 (56%), Gaps = 24/221 (11%)
+
+Query  219  TTVGIDCTRRPPVSSVVLYKYPSNVPYDATETYMCDCSNHYQLLNQSNILYSNTEKEAIK  278
+             TV I+CT RPPV+SVVLY Y  NV  D TE  MCDC +H QLLN    + S    + I 
+Sbjct  181  ATVTINCTTRPPVASVVLYGYQQNVRDDQTEMLMCDCRDHRQLLNIPVPISS----DDIV  236
+
+Query  279  IDSGHVPKLIFPLPGMKPIISNPATTLSSLGQYEPIMGSTLINRPNTLLLDMNGPCTGLP  338
+            I +   P L FP PG+ P+IS P+TT+S+ G   PI+GSTLINR + LLLD+NGPCTGLP
+Sbjct  237  ISTSPTPTLTFPFPGLTPVISEPSTTISASGVKHPIIGSTLINRSDNLLLDLNGPCTGLP  296
+
+Query  339  DGSYDVVQGPTTTITTTTTTATTTTTTTTPVITNTTTSTSTTLSQGKISNRDLNSFLNTH  398
+            DGSY VV+          T     T  T  V+T+  +S+        I   DLN +LNTH
+Sbjct  297  DGSYSVVE---------RTDDDNQTHNTGAVVTDDASSS--------ILREDLNLYLNTH  339
+
+Query  399  PKKFYKLWSNNQNTTA---TVANTTRPNRIVCSSGIISKLE  436
+            P +    W  + +       V     P RI C SG +S +E
+Sbjct  340  PVELQNGWKGDDHRNRHGYLVGGNCAPVRIKCVSGTLSNIE  380
+
+
+ Score = 88.6 bits (218),  Expect = 3e-22, Method: Compositional matrix adjust.
+ Identities = 44/78 (56%), Positives = 55/78 (71%), Gaps = 12/78 (15%)
+
+Query  88   IFTDPFLYFASANCAFFKKYNLLNGNSFNK-----------EIILPQPPKKMTAFTIPFR  136
+            IF DPFLYFA+ N  FFK YN+LN N+F+K           +++LP  P  MTAFTIP+R
+Sbjct  81   IFEDPFLYFAAVNAKFFKYYNILN-NNFDKGEDKKPHSSSLQLMLPHLPTMMTAFTIPYR  139
+
+Query  137  SLVFNKNYKLTKEEIASY  154
+            S+VFNKNYKL K +IA+Y
+Sbjct  140  SIVFNKNYKLDKSDIAAY  157
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.130    0.377    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4003167
+
+
+Query= BDT62567.1 wsv332-like protein [Metapenaeus ensis majanivirus]
+
+Length=849
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62170.1 wsv332-like protein [Litopenaeus vannamei majanivirus ...  571     0.0  
+
+
+> BDT62170.1 wsv332-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=824
+
+ Score = 571 bits (1471),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 308/600 (51%), Positives = 407/600 (68%), Gaps = 31/600 (5%)
+
+Query  213  NPMAVLSMALRLFCHKNIDDQVQIQELEKKNNNIAIVPLKHILLSLID-YSSNFHTQIK-  270
+            NP+ VLS  L+LFCHK ID      E   K+  +  +PLK ILL++ID YS N  +Q + 
+Sbjct  194  NPVLVLSQVLQLFCHKTID-----VEKHSKDETLIQIPLKLILLNMIDVYSPNTGSQPRQ  248
+
+Query  271  -IVDFASTEIESFHQSQWQSLLKNKIGNISFEYRGFILLTYCALLFFPFCRNAQTFKLIN  329
+             I  F +  I S H + W  L++N+I  +  EYR F +L YCALL+ P CR  QTFKL N
+Sbjct  249  YIDSFDAHGIHS-HNTGWTDLIQNRIAGMPLEYRFFTMLIYCALLYLPCCRADQTFKLAN  307
+
+Query  330  LYIETILFKICYNAAEVLFCASTNSTREKDNGKFINYVNSYTVSNILSSPIRIEKAIDQV  389
+            LYIETIL K+CYNAAE L CAS N+T EKDNG FI+Y+NSY VSN+LSS IRIEKAI  +
+Sbjct  308  LYIETILLKMCYNAAETLSCASLNNTSEKDNGNFISYMNSYAVSNVLSSTIRIEKAISNI  367
+
+Query  390  YNNQDLKQITNILTCITGINDEMNNATCRDKILTEMIRLYSPSGFLKSNH----KSEMRN  445
+            +N Q L+ +  ILT    I  EM+N   ++K+L EM R+++ S FLKS +     S++R+
+Sbjct  368  HNKQYLRDVFRILTNNNHIISEMDNVAIKEKLLKEMERIFTNSTFLKSQYPRVSTSDVRS  427
+
+Query  446  VRNVELFKILGEIQMIDKTSFQVVIGKDLVNRYSKGNNIRANHFHILSMLPRANNLSSDS  505
+            VRN+ELFKILGEI     ++ QVV    ++N +S GNNIR N+FHILSMLPRA  LSS+ 
+Sbjct  428  VRNIELFKILGEINT-KNSNIQVVFNNSIINHHSNGNNIRVNNFHILSMLPRAEKLSSEK  486
+
+Query  506  QAQSYIDNYLEQDDKQTQCVNLRNFAGWWMGIIDGIINEKGNELMMG--NKNIS---MRT  560
+             +Q YI+NY +Q+DK+    +L NFAGWWMGIIDG I E G  +     +KN S   MR 
+Sbjct  487  NSQCYIENYFDQEDKEK--FSLGNFAGWWMGIIDGAIGENGKTIKARQLDKNSSSNIMRL  544
+
+Query  561  ILSDTIRQVFKNRYISPFLLSHSFLPPQKTLTNNGRDMFDDKKNKVEVQESQKLCVFSSW  620
+            +LS+TI++V+KNRY+S  LLS+S LP  K + NNG+ +     ++VE QESQ+LCVFSS 
+Sbjct  545  VLSNTIKEVYKNRYLSFKLLSYSHLPDNKVIANNGQGLIVS-SSRVEAQESQRLCVFSSL  603
+
+Query  621  QIPNIIGANCSILAPIQIEMALTHPQVWNNFISKIMFFIERFNMDCYRGVFDKIFEPEHN  680
+            Q P+IIGANCSILAP+QIE+ALT P+ W  F++KIM+FIERFN+DCYR     + EP   
+Sbjct  604  QTPDIIGANCSILAPMQIEIALTRPKSWIQFVTKIMYFIERFNVDCYREFLKMMSEPLDE  663
+
+Query  681  K---SSKFLENIPQLINGNFTAHNDYTKQMSIIFKQVFDTTKQQYIEGANTESLVTTNKI  737
+            K    S+ +E +PQ+  G  T  ++  K +S +  + FD  K QY+EG+   S     + 
+Sbjct  664  KDENRSRLIEKLPQMF-GQGTMSDENVKHISTLLHKAFDVVKCQYVEGSYASS-----QF  717
+
+Query  738  SKYTNSEKRLYSFDKIYDILRDIIINNNQNPQVYLQYSHQLLTLFSEIDDFLINALKIKG  797
+              Y   EKRL  F+++Y+ILRDII+ +NQNP+ YL +S  LL+++SEIDDFLI+ALKIKG
+Sbjct  718  PDYKMGEKRLSLFEEVYNILRDIILTHNQNPRAYLTHSRLLLSIYSEIDDFLIDALKIKG  777
+
+
+ Score = 135 bits (340),  Expect = 1e-35, Method: Compositional matrix adjust.
+ Identities = 76/180 (42%), Positives = 113/180 (63%), Gaps = 25/180 (14%)
+
+Query  25   GLFTEGGLCLINVESIDQRHKRIKNNSKENEIINKESNNFLSSLITLCHGEESLKMLPCF  84
+            GLF EGG+C++N ESI QR K+  ++ +E E IN ES  FLS++++LCHG E+LK+LP F
+Sbjct  9    GLFIEGGMCIVNTESISQRIKQTTSD-EEREFINTESVKFLSTIVSLCHGREALKLLPSF  67
+
+Query  85   EQLGKTLIDGVVKNSSQMTY-----------EENSASNSNSNSNDNNIINQQDMNENDLN  133
+            + LGKTLI  + K+S  MT            E+N A+ +++    N          +D  
+Sbjct  68   DALGKTLIQ-IFKHSEFMTVSSGGGGGGGGDEDNDAATASTTRGSN--------GGSDNC  118
+
+Query  134  IIQDISIDVIKSAF-FSSGDIKDKMIKPIIKLLAGYNPFRLKENLYFISCD---NDSCPC  189
+            +++++S+DVIKS F  SS +  + +I+ +IK+LAGYNPF+LKEN+Y + CD      C C
+Sbjct  119  LVREMSLDVIKSMFSSSSAETINNLIRSVIKVLAGYNPFKLKENMYIVMCDAGKKKKCIC  178
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.132    0.377    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8238738
+
+
+Query= BDT62581.1 wsv303-like protein [Metapenaeus ensis majanivirus]
+
+Length=698
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62187.1 wsv303-like protein [Litopenaeus vannamei majanivirus ...  435     1e-145
+
+
+> BDT62187.1 wsv303-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=779
+
+ Score = 435 bits (1119),  Expect = 1e-145, Method: Compositional matrix adjust.
+ Identities = 209/313 (67%), Positives = 250/313 (80%), Gaps = 14/313 (4%)
+
+Query  84   PHIIDKTTIIKSLNETSQKQFTAIRLRETYPPCSILIFSMGSVIVVGLKKLGLTRLSVLQ  143
+            P +IDK  ++KSLNETSQKQFTA+RLRE YPPCSILIFSMGSVI+VGL+KLGLT LSVLQ
+Sbjct  46   PFLIDKDIMVKSLNETSQKQFTALRLREEYPPCSILIFSMGSVIIVGLRKLGLTPLSVLQ  105
+
+Query  144  AVSAIADTQKHPITISNVEIVNVVSTFNLFKLHFWNLKEFFRKNKIAFTYVPESFPGLFF  203
+            AVSAIADTQ+HPITISNVEIVNVVSTFNLFKL+F +LKEFFR++KIAFT+VP+SFPGLFF
+Sbjct  106  AVSAIADTQEHPITISNVEIVNVVSTFNLFKLNFPSLKEFFREHKIAFTHVPDSFPGLFF  165
+
+Query  204  KILVPVRHLKDGETIGSYYTRVARERENGDQDAIKRNFRGKTVLIFQVGKCTILGSCGGD  263
+            K+LVP+RHLK GETIG YYTR ARERE+GD +A+K+NFRGKTVL+FQVGKCTILG+CGGD
+Sbjct  166  KVLVPIRHLKRGETIGGYYTRAARERESGDTEAMKKNFRGKTVLVFQVGKCTILGACGGD  225
+
+Query  264  DIQVAFKMLFGFLWYFIDRSIYLSDDELEEQRKLYHIPPLSWYLMTDFFLRTEPNCKLSS  323
+            DI V FKMLFGF WYFID  ++LSD+E E  +K YHIPPLSWYLMTDFFLRT P+ +L S
+Sbjct  226  DIHVIFKMLFGFFWYFIDNLVHLSDEEFENGKKKYHIPPLSWYLMTDFFLRTVPDYQLKS  285
+
+Query  324  NVVFSTMLASIKSEKVINNRYSIFIKN------AVDRLTFTKSKMLRRIKAEENNKVWVR  377
+            NV+F+ +  S+ S+K + ++ +    +      A D LT  + +MLR        + W  
+Sbjct  286  NVIFADLFPSLASKKTLVDKCTSLYSSPSSLDVATDFLTVIRQRMLR--------QTWRE  337
+
+Query  378  DAIMRMMPLLPSP  390
+            D     + LL  P
+Sbjct  338  DYREWFLKLLVVP  350
+
+
+ Score = 47.8 bits (112),  Expect = 2e-08, Method: Compositional matrix adjust.
+ Identities = 21/35 (60%), Positives = 26/35 (74%), Gaps = 0/35 (0%)
+
+Query  1   MNTNIVKLMNNTYTIDNLCIGISLDFGKNVENTNF  35
+           MN  I K+ +N YT DNLCIG+SLDFG+N +N  F
+Sbjct  1   MNRRIEKIAHNRYTRDNLCIGVSLDFGQNQQNVYF  35
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.135    0.391    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6680745
+
+
+Query= BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]
+
+Length=1046
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.310    0.129    0.354    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 10249344
+
+
+Query= BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]
+
+Length=154
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]     39.7    3e-07
+
+
+> BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+Length=462
+
+ Score = 39.7 bits (91),  Expect = 3e-07, Method: Compositional matrix adjust.
+ Identities = 24/69 (35%), Positives = 35/69 (51%), Gaps = 1/69 (1%)
+
+Query  36   LYSAYDTIIPAQGKGLVKTDIQIGLPP-NCYGRIAPRSGLALKHHIDVGAGVVDRDYQGN  94
+              +A D  IP     LV T I + LP  +CY ++           I+V AGV+D DY+G 
+Sbjct  206  FLAAEDCSIPPDSSKLVGTGIAVSLPSMSCYMQLQSPPLSPCYSDINVQAGVIDADYRGE  265
+
+Query  95   VGVVLFNHA  103
+            V V++ N +
+Sbjct  266  VKVLINNRS  274
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.140    0.414    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1147392
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_protein_subject.faa).
+    Posted date:  Unknown
+  Number of letters in database: 11,222
+  Number of sequences in database:  13
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 20
+Window for multiple hits: 40

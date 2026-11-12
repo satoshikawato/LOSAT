@@ -65,12 +65,9 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    let mut db = SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    // The errors of the alias files' counts depend on the list (`restrict_database`).
+    let db = SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
     db.check_accession_tables()
-        .map_err(DatabaseOpenError::Reader)?;
-    // What the reports show of each name of the list (NCBI's formatter opens them again
-    // before the search; `pairwise_database`).
-    db.read_name_records(name)
         .map_err(DatabaseOpenError::Reader)?;
     Ok(db)
 }
@@ -99,22 +96,50 @@ pub(crate) fn open_database(
     })
 }
 
-/// Restricts the search's database `db` to the taxid or seqid list of the command line
-/// (line DI-8, `DbFilterArgs::resolve`; none: the whole database), as NCBI's `CSeqDB` opened
-/// with the list (`SeqDb::restrict`): NCBI's errors are `BLAST Database error: <text>` with
-/// exit status 2 (`database_error`), and the warnings NCBI writes go to `diagnostics`
+/// Restricts the search's database `db` (opened as `name` by `open_database`) to the taxid or
+/// seqid list of the command line (line DI-8, `DbFilterArgs::resolve`; none: the whole
+/// database), as NCBI's `CSeqDB` opened with the list (`SeqDb::restrict`), then reads what its
+/// alias files' counts and the reports need: NCBI's errors are `BLAST Database error: <text>`
+/// with exit status 2 (`database_error`), and the warnings NCBI writes go to `diagnostics`
 /// (`LOG_POST(Warning << ...)`: the text alone; `ERR_POST`: `Warning: [<program>] <text>`,
 /// the program in lower case as `SetDiagPostPrefix` names it; an `ERR_POST` of an error
 /// before a throw: `Error: [<program>] <text>`), before an error too.
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
+    name: &str,
     list: Option<&crate::seqdb::DbList>,
     diagnostics: &mut dyn std::io::Write,
     program: &str,
 ) -> Result<()> {
-    let Some(list) = list else {
-        return Ok(());
-    };
+    if let Some(list) = list {
+        apply_list(db, list, diagnostics, program)?;
+    }
+    // NCBI's `CSeqDB` of the search meets the errors of the alias files' counts after the
+    // list (`SeqDb::check_alias_values`); its formatter then opens each name of the list again
+    // without it, before the search (`pairwise_database`), and meets the others there.
+    db.check_alias_values()
+        .map_err(|error| database_error(error, program))?;
+    // NCBI asks for the length of OID 0 only where the statistics' total is not positive
+    // (blast_setup.c:925-937, quoted at `SeqDb::statistics_numbers`): over volumes without
+    // sequences an alias file's `LENGTH` or `STATS_TOTLEN` makes NCBI search none instead of
+    // its `Database memory map file error`, which LOSAT does not follow (line RG, D1a-2).
+    if db.num_oids() == 0 && !db.statistics_length_is_empty() {
+        return Err(refusal(
+            "an alias file's LENGTH or STATS_TOTLEN over volumes without sequences",
+            program,
+        ));
+    }
+    db.read_name_records(name)
+        .map_err(|error| database_error(error, program))
+}
+
+/// `restrict_database` with a list.
+fn apply_list(
+    db: &mut SeqDb,
+    list: &crate::seqdb::DbList,
+    diagnostics: &mut dyn std::io::Write,
+    program: &str,
+) -> Result<()> {
     let mut warnings = Vec::new();
     let restricted = db.restrict(list, &mut warnings);
     let prefix = program.to_ascii_lowercase();
@@ -131,15 +156,17 @@ pub(crate) fn restrict_database(
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
-/// makes of its request (`ArchiveHandle::set_database_filter`). `dbsize` is whether `-dbsize` is
-/// given: with a list that keeps no sequence the `EffectiveSearchSpace` option then counts the
-/// length adjustment with no sequence, which the searches do not compute (probes E14 and E17 of
-/// line DI-8): LOSAT refuses it.
+/// makes of its request (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
+/// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
+/// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
+/// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
+/// searches read the length of OID 0 as one sequence (probes E14 and E17 of line DI-8): LOSAT
+/// refuses it.
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
-    filtered_empty: bool,
+    empty_length: bool,
     searchsp: bool,
     dbsize: bool,
     program: &str,
@@ -147,14 +174,14 @@ pub(crate) fn note_archive_database_filter(
     let Some(handle) = archive else {
         return Ok(());
     };
-    if filtered_empty && dbsize {
+    if empty_length && dbsize {
         anyhow::bail!(
             "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
     handle.set_database_filter(
         filter.archive_parameter(list_taxids),
-        filtered_empty && !searchsp,
+        empty_length && !searchsp,
     );
     Ok(())
 }
@@ -192,6 +219,20 @@ pub(crate) fn note_archive_database_filter(
 /// exit status 2; everything else is LOSAT's refusal, in LOSAT's wording (`program` is
 /// the program that refuses).
 pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
+    // ```c++
+    //     catch (const CException& e) {                                           \
+    //         LOG_POST(Error << "Error: " << e.what());                           \
+    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+    //     }                                                                       \
+    // ```
+    if let Some(exception) = error.ncbi_exception() {
+        return NativeError {
+            exit: 255,
+            message: format!("Error: {}\n", exception.what()),
+        }
+        .into();
+    }
     match error.ncbi_message() {
         Some(text) => NativeError {
             exit: 2,
@@ -205,6 +246,19 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
 /// LOSAT's refusal of a database that `program` does not search as NCBI does.
 pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
+}
+
+/// LOSAT's refusal of statistics that read 0 sequences of a positive total length
+/// (`SeqDb::statistics_count_is_zero`), for a search of `program` without the Gumbel block:
+/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG).
+pub(crate) fn check_statistics_count(db: &SeqDb, program: &str) -> Result<()> {
+    if db.statistics_count_is_zero() {
+        return Err(refusal(
+            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
+            program,
+        ));
+    }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251
@@ -1516,7 +1570,7 @@ fn refuse_id_of_a_query(
         return Err(parsed_refusal(
             ordinal,
             "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \
-             for it)",
+             for it in the reports of that query's batch)",
             program,
         ));
     }

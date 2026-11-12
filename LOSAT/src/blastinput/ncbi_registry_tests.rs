@@ -441,3 +441,44 @@ fn the_notice_and_the_last_value_are_ncbis() {
     assert_eq!(read.last_value("NCBI", "BLASTDB"), Some(&b"/c"[..]));
     assert_eq!(read.last_value("BLAST", "DATA_LOADERS"), None);
 }
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:783-799 (quoted at `RepeatedEntry`).
+// NCBI BLAST+ 2.17.0 on 2026-11-12 (line NP M3c review `d1`): `[WINDOW_MASKER]
+// WINDOW_MASKER_PATH` at lines 2 and 3 gives `Found multiple [WINDOW_MASKER] WINDOW_MASKER_PATH
+// settings; using the one from line 3`. An entry repeats the section and the name without case,
+// while the value stored is not empty; the line is the entry's last (continuation lines count);
+// entries before the first section and `[NCBI] .Inherits` repeat nothing; those above a malformed
+// line are kept with the error.
+#[test]
+fn entries_set_again_are_recorded_with_their_line() {
+    let repeated = |read: &RegistryRead| {
+        read.repeated
+            .iter()
+            .map(|entry| (entry.section.clone(), entry.name.clone(), entry.line))
+            .collect::<Vec<_>>()
+    };
+    let at = |section: &str, name: &str, line| (section.to_string(), name.to_string(), line);
+    let read = unix(b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /u\nWINDOW_MASKER_PATH = /w\n");
+    assert_eq!(
+        repeated(&read),
+        [at("WINDOW_MASKER", "WINDOW_MASKER_PATH", 3)]
+    );
+    assert_eq!(
+        repeated_entry_post(&read.repeated[0], "blastn"),
+        "Warning: (110.8) [blastn] Found multiple [WINDOW_MASKER] WINDOW_MASKER_PATH settings; using the one from line 3\n"
+    );
+    let read =
+        unix(b"[Blast]\nBlastDB = /a\n\n[BLAST]\nblastdb = /b\\\nc\nblastdb = \nBLASTDB = /d\n");
+    assert_eq!(
+        repeated(&read),
+        [at("BLAST", "blastdb", 6), at("BLAST", "blastdb", 7)]
+    );
+    // The value before is empty: no entry to `HasEntry`.
+    let read = unix(b"[BLAST]\nBLASTDB =\nBLASTDB = /a\nBLASTDB = \"\"\nBLASTDB = /b\n");
+    assert_eq!(repeated(&read), [at("BLAST", "BLASTDB", 4)]);
+    let read = unix(b"BLASTDB = /a\nBLASTDB = /b\n[NCBI]\n.Inherits = a\n.Inherits = b\n");
+    assert!(read.repeated.is_empty());
+    let read = unix(b"[BLAST]\nBLASTDB = /a\nBLASTDB = /b\n[my blast]\n");
+    assert!(read.error.is_some());
+    assert_eq!(repeated(&read), [at("BLAST", "BLASTDB", 3)]);
+}

@@ -320,7 +320,8 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
 }
 
 /// The build tree that the official Linux x64 release of NCBI BLAST+ 2.17.0 names in its `T0`
-/// lines (as `ncbi_exception::NCBI_BUILD_ROOT`).
+/// lines (as `ncbi_exception::NCBI_BUILD_ROOT`). The registry tests that use it and the helpers
+/// below run on Unix only.
 #[cfg(unix)]
 const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
@@ -336,9 +337,9 @@ fn critical(line: usize) -> String {
 #[cfg(unix)]
 const INI_REPORT: &str = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
 
-/// The name of the system-wide registry file (`ncbi.ini` on Windows).
+/// The name of the system-wide registry file on Unix (Windows names it `ncbi.ini`).
 #[cfg(unix)]
-const NCBIRC: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+const NCBIRC: &str = ".ncbirc";
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663 and
 // c++/src/corelib/ncbiapp.cpp:669-674 (quoted at `ncbi_environment::ApplicationStart`). NCBI

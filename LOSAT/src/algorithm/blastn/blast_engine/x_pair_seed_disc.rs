@@ -40,7 +40,7 @@
 //! offset and the bounds test; a discontiguous word has no word extension, since
 //! `word_length == lut_word_length`). Phase 2, on the owner thread only: the seeds of strip
 //! 0, 1, 2, ... in that order go through `fold_two_hit`, a statement-for-statement copy of
-//! the two-hit diagonal-hash branch of `process_offset_pairs` (`run.rs`): the retrieve with
+//! the two-hit diagonal-hash branch of `extend_offset_pairs` (`pair_extend.rs`): the retrieve with
 //! `last_hit` and `hit_saved`, the `last_hit` test, the window test, `s_TypeOfWord` with and
 //! without `check_double`, the off-diagonal search (`pair_extend::off_diagonal_found`), the
 //! ungapped extension, the cutoff, `ungapped_hits.push` and every diagonal-hash insert with its
@@ -63,7 +63,7 @@
 //! with the diagonal array instead of the hash (a query block of at most 8000 letters) runs
 //! on the same strips, folded by the owner thread through `fold_two_hit_array`, a
 //! statement-for-statement copy of the two-hit diagonal-array branch of
-//! `process_offset_pairs` (`run_array`, `seed_stage_array`).
+//! `extend_offset_pairs` (`run_array`, `seed_stage_array`).
 
 use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
@@ -375,8 +375,8 @@ fn scan_strip_disc_csr<O: SeedOut>(
 ///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
 ///                           hit_ready, s_off_pos, window_size + Delta + 1);
 /// ```
-/// Phase 2 (owner only): the rest of `process_offset_pairs` for the seeds of one strip, in
-/// order, statement for statement for the diagonal hash in two-hit mode; the debug, trace
+/// Phase 2 (owner only): the rest of `pair_extend::extend_offset_pairs` for the seeds of one
+/// strip, in order, statement for statement for the diagonal hash in two-hit mode; the debug, trace
 /// and diagonal-array branches are outside the scope and left out, and the small-query
 /// word extension (`small_na_word`) is out of the scope, so `s_TypeOfWord` checks the query
 /// masks only.
@@ -1222,7 +1222,7 @@ pub(super) fn run(
 ///     }
 /// ```
 /// EXPERIMENT (LOSAT_X_PAIRPARDISCARR), phase 2 on the owner thread: the seeds of one strip
-/// through the two-hit diagonal-array branch of `process_offset_pairs` (`run.rs`,
+/// through the two-hit diagonal-array branch of `extend_offset_pairs` (`pair_extend.rs`,
 /// `s_BlastnDiagTableExtendInitialHit`), statement for statement: `fold_two_hit` with the
 /// table reads and writes of the array (the diagonal masked by `diag_mask`, the bounds test
 /// against `diag_array_size`, `last_hit` and `flag` in `hit_level_array`, the length in

@@ -549,10 +549,7 @@ mod tests {
             log: log.clone(),
             sink: true,
         };
-        let mut warnings = QueryWarnings {
-            before: &case.warnings,
-            sink: &mut sink,
-        };
+        let mut warnings = QueryWarnings::new(&case.warnings, &mut sink);
         let args = (
             &case.hit_lists[..],
             &case.query_ids[..],

@@ -30,7 +30,9 @@ fn taxid_options_go_with_a_database_only() {
         &["-negative_taxidlist", "t.txt"],
         &["-no_taxid_expansion"],
     ];
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast",
+    ] {
         for words in lists {
             let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
             argv.extend(words);
@@ -1512,7 +1514,9 @@ fn culling_limit_is_read_as_ncbi_does() {
 // NCBI blast_args.cpp:1961: -parse_deflines is a flag of every search program.
 #[test]
 fn parse_deflines_is_a_flag_of_every_search_program() {
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast",
+    ] {
         assert!(parse(program, &["-parse_deflines"]).is_ok(), "{program}");
         assert!(
             parse(program, &["-parse_deflines", "true"]).is_err(),
@@ -1528,7 +1532,9 @@ fn parse_deflines_is_a_flag_of_every_search_program() {
 // NCBI blast_args.cpp:2663: -show_gis is a flag of every search program.
 #[test]
 fn show_gis_is_a_flag_of_every_search_program() {
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast",
+    ] {
         assert!(parse(program, &["-show_gis"]).is_ok(), "{program}");
         assert!(parse(program, &["-show_gis", "true"]).is_err(), "{program}");
     }
@@ -1552,16 +1558,8 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("tblastn", &["-db_soft_mask", "11"]),
         ("tblastx", &["-db_soft_mask", "11"]),
         ("blastp", &["-gilist", "ids.gil"]),
-        // Line DI-8 ported the taxid and seqid list options to BLASTP's database search, not to
-        // PSIBLAST's.
-        ("psiblast", &["-taxids", "9606"]),
-        ("psiblast", &["-no_taxid_expansion"]),
-        ("psiblast", &["-seqidlist", "ids.txt"]),
-        ("psiblast", &["-negative_seqidlist", "ids.txt"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
-        // Line NP ported it to BLASTP, not to PSIBLAST.
-        ("psiblast", &["-lcase_masking"]),
         ("blastp", &["-version"]),
         // Line RG X1 ported the X-drops to BLASTP, not to PSIBLAST.
         ("psiblast", &["-xdrop_gap_final", "30"]),

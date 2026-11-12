@@ -54,14 +54,14 @@ pub(super) const NO_RANGE: SeqRange = SeqRange {
     to: u32::MAX - 1,
 };
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1246-1270
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
 // ```c++
 // int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
 // {
 //     S2N_CONVERT_GUARD_EX(flags);
 //     Int8 value = StringToInt8(str, flags, base);
 //     if ( value < kMin_Int  ||  value > kMax_Int ) {
-//         S2N_CONVERT_ERROR_OVERFLOW(int);
+//         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
 //     }
 //     return (int) value;
 // }
@@ -74,7 +74,7 @@ fn string_to_int(text: &str) -> Result<i32, String> {
     i32::try_from(number).map_err(|_| {
         format!(
             "Cannot convert string '{}' to int, overflow",
-            args::printable_string(text)
+            crate::ncbi_str::printable_string(text.as_bytes())
         )
     })
 }

@@ -584,7 +584,14 @@ fn short_subject_cutoff_uses_adapter_minimum_ten() {
     let records = read_fasta(&path, false, false).unwrap();
     let full = prepare_queries(&records, &o).unwrap();
     let mut p = score_block(&full);
-    super::parameters::subject_parameters(&full, &mut p, &o, 8, 1, 8, None).unwrap();
+    super::parameters::subject_parameters(
+        &full,
+        &mut p,
+        &o,
+        super::parameters::SubjectNumbers::one(8),
+        None,
+    )
+    .unwrap();
     // Pinned NCBI CALL0 context0: qlen6468, subject8, min length10 -> max cutoff18.
     assert_eq!(p[0].hit_cutoff_max, 18);
     assert_eq!(p[0].word_cutoff, 18);

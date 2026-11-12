@@ -3,9 +3,10 @@
 //! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast 2.17.0
 //! `-outfmt 11` of E. coli K-12 MG1655 proteins against CDD v3.22, the data files are CDD v3.22
 //! cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
-//! error and exit status (and the `-o` file); a `refuse` case is refused by LOSAT (the sites and
-//! motifs of `-t feats` and `-t both`, item PS16b; the XML input, item PS16d) before any byte of
-//! output. NCBI is not run here.
+//! error and exit status (and the `-o` file); a `refuse` case is refused by LOSAT (exit 1, the
+//! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
+//! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md). NCBI is not
+//! run here.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -103,6 +104,58 @@ fn cases() -> Vec<[String; 5]> {
         .collect()
 }
 
+/// Makes the data directory of a case's `setup` in `dir`: `data-with:<a>+<b>`, the directory
+/// `<b>/` holding the data files with those of `data_with/<a>/` and then of `data_with/<b>/` in
+/// their place; `data-without:<file>`, `data_missing/` without that file.
+fn set_up(dir: &Path, setup: &str) {
+    let _ = fs::remove_file(dir.join("out.txt"));
+    let _ = fs::remove_dir_all(dir.join("data_missing"));
+    if let Some(with) = setup.strip_prefix("data-with:") {
+        let layers: Vec<&str> = with.split('+').collect();
+        let target = dir.join(layers[layers.len() - 1]);
+        copy_files(&dir.join("data"), &target);
+        for layer in layers {
+            copy_files(&fixtures().join("data_with").join(layer), &target);
+        }
+    }
+    if let Some(without) = setup.strip_prefix("data-without:") {
+        fs::create_dir_all(dir.join("data_missing")).unwrap();
+        for entry in fs::read_dir(dir.join("data")).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name().to_str() != Some(without) {
+                fs::copy(
+                    entry.path(),
+                    dir.join("data_missing").join(entry.file_name()),
+                )
+                .unwrap();
+            }
+        }
+    }
+}
+
+/// Compares a run's stdout, stderr and exit status with `<dir>/<case>.{out,err,rc}` by bytes
+/// (the text is only shown).
+fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
+    let expected = |suffix: &str| fs::read(dir.join(format!("{case}.{suffix}"))).unwrap();
+    for (name, got, want) in [
+        ("stdout", out, expected("out")),
+        ("stderr", err, expected("err")),
+    ] {
+        assert!(
+            *got == want,
+            "{case}: {name}\nLOSAT:\n{}\nexpected:\n{}",
+            String::from_utf8_lossy(got),
+            String::from_utf8_lossy(&want)
+        );
+    }
+    let rc: i32 = String::from_utf8(expected("rc"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(status, rc, "{case}: exit status");
+}
+
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
     let run_dir = RunDir::new("compare");
@@ -113,45 +166,11 @@ fn rpsbproc_gives_ncbis_bytes() {
         if usage != "compare" {
             continue;
         }
-        let _ = fs::remove_file(dir.join("out.txt"));
-        let _ = fs::remove_dir_all(dir.join("data_missing"));
-        if let Some(with) = setup.strip_prefix("data-with:") {
-            copy_files(&dir.join("data"), &dir.join(with));
-            copy_files(&fixtures().join("data_with").join(with), &dir.join(with));
-        }
-        if let Some(without) = setup.strip_prefix("data-without:") {
-            fs::create_dir_all(dir.join("data_missing")).unwrap();
-            for entry in fs::read_dir(dir.join("data")).unwrap() {
-                let entry = entry.unwrap();
-                if entry.file_name().to_str() != Some(without) {
-                    fs::copy(
-                        entry.path(),
-                        dir.join("data_missing").join(entry.file_name()),
-                    )
-                    .unwrap();
-                }
-            }
-        }
+        set_up(dir, &setup);
         let stdin = (stdin != "-").then(|| fixtures().join(&stdin));
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
-        let expected = |suffix: &str| fs::read(oracle.join(format!("{case}.{suffix}"))).unwrap();
-        assert_eq!(
-            String::from_utf8_lossy(&out),
-            String::from_utf8_lossy(&expected("out")),
-            "{case}: stdout"
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&err),
-            String::from_utf8_lossy(&expected("err")),
-            "{case}: stderr"
-        );
-        let rc: i32 = String::from_utf8(expected("rc"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert_eq!(status, rc, "{case}: exit status");
+        assert_same(&oracle, &case, &out, &err, status);
         let outfile = oracle.join(format!("{case}.outfile"));
         if outfile.exists() {
             assert_eq!(
@@ -162,34 +181,42 @@ fn rpsbproc_gives_ncbis_bytes() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 96);
+    assert_eq!(compared, 132);
 }
 
+// The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and
+// leave no part of a line on standard output (the report is cut before the refused site; the
+// files of `refused/` hold LOSAT's bytes, NCBI's output up to that line, README.md).
 #[test]
 fn rpsbproc_refuses_what_it_does_not_give() {
     let run_dir = RunDir::new("refuse");
     let dir = &run_dir.0;
+    let expected = fixtures().join("refused");
     let mut refused = 0;
-    for [case, usage, _, _, arguments] in cases() {
+    for [case, usage, stdin, setup, arguments] in cases() {
         if usage != "refuse" {
             continue;
         }
+        set_up(dir, &setup);
+        let stdin = (stdin != "-").then(|| fixtures().join(&stdin));
         let words: Vec<&str> = arguments.split(' ').collect();
-        let (out, err, status) = rpsbproc(dir, &words, None);
-        let err = String::from_utf8_lossy(&err);
+        let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
+        assert_eq!(status, 1, "{case}");
+        assert!(out.is_empty() || out.ends_with(b"\n"), "{case}: stdout");
+        let last = err
+            .strip_suffix(b"\n")
+            .and_then(|err| err.split(|&byte| byte == b'\n').next_back())
+            .unwrap_or_default();
         assert!(
-            out.is_empty(),
-            "{case}: stdout {}",
-            String::from_utf8_lossy(&out)
+            last.starts_with(b"Error: ")
+                && String::from_utf8_lossy(last).contains(" is not supported by LOSAT's rpsbproc"),
+            "{case}: {}",
+            String::from_utf8_lossy(&err)
         );
-        assert_ne!(status, 0, "{case}");
-        assert!(
-            err.contains("not supported by LOSAT's rpsbproc"),
-            "{case}: {err}"
-        );
+        assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 4);
+    assert_eq!(refused, 5);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`

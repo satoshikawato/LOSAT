@@ -76,7 +76,6 @@ impl SegSet {
     }
 
     /// `GetSegs`.
-    #[cfg(test)]
     pub(crate) fn segs(&self) -> &[Seg] {
         &self.segs
     }
@@ -428,6 +427,169 @@ impl SegSet {
             }
         }
         out.extend_from_slice(&old[curr..]);
+        self.segs = out;
+    }
+
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:281-291
+    // ```c++
+    // SeqPos_t CSegSetTmpl<SEGTYPE>::GetLeft(void) const
+    // {
+    // 	return IsEmpty() ? -1 : m_lstContainer.begin()->from;
+    // }
+    //
+    // SeqPos_t CSegSetTmpl<SEGTYPE>::GetRight(void) const
+    // {
+    // 	return IsEmpty() ? -1 : m_lstContainer.rbegin()->to;
+    // }
+    // ```
+    pub(crate) fn left(&self) -> i64 {
+        self.segs.first().map_or(-1, |seg| seg.from)
+    }
+
+    /// `GetRight`.
+    pub(crate) fn right(&self) -> i64 {
+        self.segs.last().map_or(-1, |seg| seg.to)
+    }
+
+    /// `GetOriTo(citer)` of a range: `ori_from + (to - from) / m_iFactor`.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:332-337
+    // ```c++
+    // SeqPos_t CSegSetTmpl<SEGTYPE>::GetOriTo(typename TSegs::const_iterator citer, SeqPos_t pos) const
+    // {
+    // 	//return citer->ori_from + (citer->to - citer->from) / m_iFactor;
+    // 	if (pos < 0) pos = citer->to;
+    // 	return citer->ori_from + (pos - citer->from) / m_iFactor;
+    // }
+    // ```
+    pub(crate) fn ori_to(seg: &Seg) -> i64 {
+        seg.ori_from + (seg.to - seg.from)
+    }
+
+    /// `TSeqAlignment::MapSegSet(segset, false)` of a protein alignment: this set (positions on
+    /// the model, the slave row) turned into positions on the query (the master row) along the
+    /// aligned segments (`m_vecMStarts`, `m_vecSStarts`, `m_vecLens`), keeping `ori_from`.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1180-1250
+    // ```c++
+    // void TSeqAlignment::MapSegSet(CSegSet &segset, bool doConvert) const
+    // {
+    // 	if (segset.IsEmpty()) return;
+    //
+    // 	CSegSet::TSegs::iterator iter = segset.m_lstContainer.begin();
+    // 	size_t idx = 0;
+    //
+    // 	while (iter != segset.m_lstContainer.end())
+    // 	{
+    // 		if (idx >= m_vecLens.size() || m_vecSStarts[idx] > iter->to)	// discard this seg
+    // 		{
+    // 			CSegSet::TSegs::iterator temp = iter;
+    // 			++iter;
+    // 			segset.m_lstContainer.erase(temp);
+    // 		}
+    // 		else
+    // 		{
+    // 			SeqPos_t diff = m_vecSStarts[idx] - m_vecMStarts[idx];
+    // 			SeqPos_t end = m_vecSStarts[idx] + m_vecLens[idx] - 1;
+    // 			if (end >= iter->to)	//No trunction from right side
+    // 			{
+    // 				if (iter->from < m_vecSStarts[idx])	//segment shrinked from left. deal with ori_from
+    // 				{
+    // 					iter->ori_from += (m_vecSStarts[idx] - iter->from);// / segset.m_iFactor;
+    // 					iter->from = m_vecSStarts[idx];
+    // 				}
+    //
+    // 				if (end == iter->to)	//seg happens to end at aligned seg
+    // 					++idx;	//here is the chance to advance idx
+    //
+    //
+    // 				// -- mapping
+    // 				iter->from -= diff;
+    // 				iter->to -= diff;
+    //
+    // 				++iter;
+    // 			}
+    // 			else if (end >= iter->from)	//end < iter->to, truncate from right side
+    // 			{
+    // 				CSegSet::TSeg temp(iter->from, end);
+    // 				temp.ori_from = iter->ori_from;
+    //
+    // 				if (temp.from < m_vecSStarts[idx])
+    // 				{
+    // 					temp.ori_from += (m_vecSStarts[idx] - temp.from);// / segset.m_iFactor;
+    // 					temp.from = m_vecSStarts[idx];
+    // 				}
+    //
+    // 				// -- mapping
+    // 				temp.from -= diff;
+    // 				temp.to -= diff;
+    // 				segset.m_lstContainer.emplace(iter, temp);
+    //
+    // 				// -- cut original seg for next round
+    // 				iter->ori_from += (end - iter->from + 1);// / segset.m_iFactor;
+    // 				iter->from = end + 1;
+    // 				//iter->ori_from += (iter->from) / segset.m_iFactor;
+    // 				++idx;
+    // 			}
+    // 			else	//end < iter->from, step to next denseg
+    // 				++idx;
+    // 		}
+    // 	}
+    //
+    // 	// -- check motif
+    // 	...
+    // 	// -- if protein to na, convert to na coord
+    // 	if (doConvert) Pr2NaConvert(segset);
+    // }
+    // ```
+    // (`Pr2NaConvert` changes a set only for a nucleotide query, item PS16c. NCBI changes the
+    // list in place; LOSAT writes the new ranges in order into a new list.)
+    pub(crate) fn map_through(&mut self, m_starts: &[i32], s_starts: &[i32], lens: &[u32]) {
+        if self.segs.is_empty() {
+            return;
+        }
+        let old = std::mem::take(&mut self.segs);
+        let mut out = Vec::with_capacity(old.len() + 1);
+        let mut idx = 0usize;
+        let mut source = old.into_iter();
+        let mut current = source.next();
+        while let Some(mut iter) = current {
+            if idx >= lens.len() || i64::from(s_starts[idx]) > iter.to {
+                current = source.next();
+                continue;
+            }
+            let start = i64::from(s_starts[idx]);
+            let diff = start - i64::from(m_starts[idx]);
+            let end = start + i64::from(lens[idx]) - 1;
+            if end >= iter.to {
+                if iter.from < start {
+                    iter.ori_from += start - iter.from;
+                    iter.from = start;
+                }
+                if end == iter.to {
+                    idx += 1;
+                }
+                iter.from -= diff;
+                iter.to -= diff;
+                out.push(iter);
+                current = source.next();
+            } else if end >= iter.from {
+                let mut temp = Seg::new(iter.from, end);
+                temp.ori_from = iter.ori_from;
+                if temp.from < start {
+                    temp.ori_from += start - temp.from;
+                    temp.from = start;
+                }
+                temp.from -= diff;
+                temp.to -= diff;
+                out.push(temp);
+                iter.ori_from += end - iter.from + 1;
+                iter.from = end + 1;
+                idx += 1;
+                current = Some(iter);
+            } else {
+                idx += 1;
+                current = Some(iter);
+            }
+        }
         self.segs = out;
     }
 

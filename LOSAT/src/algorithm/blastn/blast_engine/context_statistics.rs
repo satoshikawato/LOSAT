@@ -319,7 +319,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // error: Database memory map file error`, exit status 3, for outfmt 0, 6 and 7.
     if any_valid_context {
         if let SubjectSource::Database(database) = subjects {
-            if database.metadata().db_num_seqs == 0 {
+            if database.num_oids() == 0 {
                 return Err(database_search_error(
                     database::PreliminaryReadError("Database memory map file error").into(),
                     first_batch,

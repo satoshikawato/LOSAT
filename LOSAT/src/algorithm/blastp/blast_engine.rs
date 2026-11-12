@@ -5388,11 +5388,14 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .in_id_scope(args.id_scope.clone());
+            if resolved.rps_search.is_some() {
+                rps_hooks::check_alias_keys(&database, args.app.name())?;
+            }
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.filtered_empty(),
+                database.statistics_length_is_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
@@ -6180,7 +6183,7 @@ fn psiblast_stop_at_invalid_query(
         })
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.printed_num_sequences() == 0)
+    let empty_database = database.is_some_and(|database| database.num_oids() == 0)
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
@@ -9099,7 +9102,7 @@ fn run_resolved_in_pool(
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
-        database.printed_num_sequences() == 0
+        database.num_oids() == 0
             && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(
@@ -9205,6 +9208,11 @@ fn run_resolved_in_pool(
         Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
             .unwrap_or(database.statistics_num_sequences() as usize),
     };
+    // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
+    // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
+    if let Some(database) = database.filter(|_| args.old_fsc) {
+        database.check_statistics_count(args.app.name())?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
     //    /* use overriding value from effective lengths options or the real value

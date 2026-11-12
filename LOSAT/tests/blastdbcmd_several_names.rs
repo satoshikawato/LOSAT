@@ -178,14 +178,12 @@ fn several_names_are_ncbi_s_bytes() {
     }
 }
 
-/// What LOSAT refuses on a list, with the lines written before the refusal: a volume that an alias
-/// and a name both give, for every option, as the search programs do (NCBI's `-info` counts its
-/// sequences twice, 39 for 21; its `-entry` answers); `-ipg`
+/// What LOSAT refuses on a list, with the lines written before the refusal (a volume that an alias
+/// and a name both give is read since line RG's D1a: `blastdbcmd_alias_keys.rs`, `A30`-`A32`): `-ipg`
 /// without PIG files, where NCBI writes an OID it never set; an algorithm that the volume of a
 /// sequence does not know, where NCBI reads the masks of another one.
 #[rustfmt::skip]
 const REFUSED: &[(&str, &[&str], usize)] = &[
-    ("N389", &["-db", "db/palias db/p5", "-info"], 0),
     ("N1198", &["-db", "db/p4 db/p4n", "-ipg", "1001", "-outfmt", "%o %a %P"], 0),
     ("N1387", &["-db", "../seqdb/db/mask_nucl_v4 ../seqdb/db/mask_nucl_ids", "-entry", "all", "-outfmt", "%o|%a|%l|%m100"], 8),
 ];

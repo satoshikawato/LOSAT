@@ -1385,9 +1385,12 @@ mod cutoff_boundary_tests {
                 &batch,
                 &mut parameters,
                 &options,
-                db,
-                1,
-                length as usize,
+                super::super::parameters::SubjectNumbers {
+                    total: db,
+                    count: 1,
+                    shortest: (length as usize).max(10),
+                    average: db as i32,
+                },
                 None,
             )
             .unwrap();

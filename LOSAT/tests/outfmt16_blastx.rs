@@ -526,7 +526,7 @@ fn a_taxid_that_is_in_the_database_but_never_reported_does_not_refuse_the_run() 
     }
 }
 
-/// The rows `db.x16_bx_taxid.*` of `db_search_manifest.tsv` (outfmt 15 and 16 of BLASTX with a taxonomy
+/// The rows `db.x16_bx_taxid.*` of `db_search_manifest/blastx.tsv` (outfmt 15 and 16 of BLASTX with a taxonomy
 /// database in `BLASTDB`, the offset error of `[blastx]` on standard error), at one, four, eight
 /// and sixteen threads: the bytes of NCBI BLAST+ 2.17.0 (`blastx -num_threads 1`) for stdout,
 /// stderr and the exit status; the rows of kind `losat-rejection` write nothing and name their
@@ -534,7 +534,7 @@ fn a_taxid_that_is_in_the_database_but_never_reported_does_not_refuse_the_run() 
 #[test]
 fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
+    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest/blastx.tsv")).unwrap();
     let mut rows = 0;
     for line in manifest
         .lines()

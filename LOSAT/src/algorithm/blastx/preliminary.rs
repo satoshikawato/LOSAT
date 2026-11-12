@@ -438,8 +438,8 @@ pub(crate) fn gapped_observed(
 /// BLOSUM62's keeps its code.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn gapped_observed_of(
-    scoring: super::seed::MatrixBx,
+pub(crate) fn gapped_observed_of<S: super::seed::BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,

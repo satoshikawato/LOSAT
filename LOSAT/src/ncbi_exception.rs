@@ -3,7 +3,8 @@
 //! an exception, with one `T0` line per exception of the chain. This module is the one owner of
 //! that text; each place NCBI throws from keeps its [`ThrowSite`] next to the port of the code
 //! that throws (`ncbi_str`, `writedb::data_size`, `writedb::build_db`, `utils::winmask`,
-//! `seqid::parse`, `blastinput::db_filter`).
+//! `seqid::parse`, `blastinput::db_filter`, BLASTN's `-use_index` warning in
+//! `blastn::blast_engine::run`).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:370-384
 //! ```c

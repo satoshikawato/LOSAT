@@ -38,6 +38,8 @@ mod library_api;
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../ncbi_lookup_paths.rs"]
+mod ncbi_lookup_paths;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]

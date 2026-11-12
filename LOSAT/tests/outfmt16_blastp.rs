@@ -356,7 +356,7 @@ fn a_taxdb_that_names_nothing_leaves_the_id_alone() {
     fs::remove_dir_all(dir).ok();
 }
 
-/// The rows `db.sa.x16_taxid.*` of `db_search_manifest.tsv` (OF5a part 1b: outfmt 15 and 16 with
+/// The rows `db.sa.x16_taxid.*` of `db_search_manifest/blastp.tsv` (OF5a part 1b: outfmt 15 and 16 with
 /// a taxonomy database in `BLASTDB`; the rows with `warn` in their name also have a query file with
 /// a reader warning, and some a `BATCH_SIZE`), at one, four, eight and sixteen threads: the bytes
 /// of NCBI BLAST+ 2.17.0 (`blastp -num_threads 1`) for stdout, stderr and the exit status; the rows
@@ -366,7 +366,7 @@ fn a_taxdb_that_names_nothing_leaves_the_id_alone() {
 #[test]
 fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
+    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest/blastp.tsv")).unwrap();
     let mut rows = 0;
     let mut warn_rows = 0;
     for line in manifest

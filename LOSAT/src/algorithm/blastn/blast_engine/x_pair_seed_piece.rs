@@ -44,8 +44,9 @@
 //! subject scratch, so a stage holds at most that many pieces whatever the subject, the query or
 //! the density of the seeds (and arenas only for as many pieces as it had at once: a piece takes
 //! the slot of one every partition has folded before a slot no piece has used, `Sched::take`, as
-//! the strips stage takes a new buffer only when it has none to give back); the strip the slowest partition is in (the lowest strip a partition has not folded all of)
-//! alone may take the last `RESERVED` slots, so that it can always go on (no wait for a piece
+//! the strips stage takes a new buffer only when it has none to give back); the strip the
+//! slowest partition is in (the lowest strip a partition has not folded all of) alone may take
+//! the last `RESERVED` slots, so that it can always go on (no wait for a piece
 //! nobody frees). A participant produces one piece per turn and parks the rest of the strip, so
 //! that a helper never holds a strip half-scanned (it can leave a stalled stage at any turn).
 //!
@@ -144,6 +145,8 @@ impl Links {
 pub(super) struct Store {
     seeds: Vec<MaybeUninit<Seed>>,
     pos: Vec<MaybeUninit<u32>>,
+    /// the seeds of a slot's region in the layout of the buffers (0 before the first stage)
+    len: usize,
 }
 
 impl Store {
@@ -156,12 +159,23 @@ impl Store {
         len: usize,
     ) -> impl Iterator<Item = (&mut [MaybeUninit<Seed>], &mut [MaybeUninit<u32>])> {
         let need = slots * len;
-        if self.seeds.len() < need {
+        // (a stage of another layout allocates anew, so that the pages the regions of the old one
+        // touched are not kept; one of the same layout with more slots takes the capacity the
+        // buffers have, above glibc's ceiling)
+        if self.len != len || self.seeds.capacity() < need || self.pos.capacity() < need {
             // (the old buffers go first, so that the two are not held at once)
             self.seeds = Vec::new();
             self.pos = Vec::new();
             self.seeds = uninit(need);
             self.pos = uninit(need);
+            self.len = len;
+        } else if self.seeds.len() < need {
+            // SAFETY: `MaybeUninit` needs no initialization, and both capacities are at least
+            // `need` (the test above).
+            unsafe {
+                self.seeds.set_len(need);
+                self.pos.set_len(need);
+            }
         }
         self.seeds[..need]
             .chunks_mut(len)

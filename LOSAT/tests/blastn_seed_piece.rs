@@ -152,8 +152,9 @@ fn search(
 /// For `query` against `subject` with `task_args`: the report with the switch off at four
 /// threads, then by default at two and four threads and with pieces of `small` seeds at two and
 /// three threads, the same bytes and standard error; those runs took the switch's path and never
-/// the reference's, in a partitioned stage (`LOSAT_X_PAIRPARFOLD`) of `stage`.
-fn check(query: &Path, subject: &Path, task_args: &[&str], stage: &str, small: &str) {
+/// the reference's, in a partitioned stage (`LOSAT_X_PAIRPARFOLD`), and reached the switch's side
+/// of each of `stages` (the stage, and the table's layout where the scan of a case depends on it).
+fn check(query: &Path, subject: &Path, task_args: &[&str], stages: &[&str], small: &str) {
     let (expected, expected_stderr) = search(query, subject, task_args, 4, &[(SWITCH, "0")]);
     assert!(!expected.is_empty(), "{task_args:?}: no hits");
     for (threads, value) in [(2, None), (4, None), (2, Some(small)), (3, Some(small))] {
@@ -173,7 +174,9 @@ fn check(query: &Path, subject: &Path, task_args: &[&str], stage: &str, small: &
             reach.sides("LOSAT_X_PAIRPARFOLD").0,
             "{at}: no partitioned stage"
         );
-        assert!(reach.sides(stage).0, "{at}: no stage of {stage}");
+        for stage in stages {
+            assert!(reach.sides(stage).0, "{at}: no stage of {stage}");
+        }
     }
 }
 
@@ -184,7 +187,7 @@ fn dc_megablast_csr() {
         &fasta("Sakai.fna"),
         &fasta("MG1655.fna"),
         &["-task", "dc-megablast"],
-        "LOSAT_X_PAIRPARDISC",
+        &["LOSAT_X_PAIRPARDISC", "LOSAT_X_DCCSR"],
         "97",
     );
 }
@@ -197,7 +200,7 @@ fn dc_megablast_chains() {
         &lc874_9800(&dir),
         &fasta("LC738868.fasta"),
         &["-task", "dc-megablast"],
-        "LOSAT_X_PAIRPARDISC",
+        &["LOSAT_X_PAIRPARDISC"],
         "5",
     );
 }
@@ -209,7 +212,7 @@ fn blastn_two_stage_table() {
         &fasta("LC738874.fasta"),
         &fasta("LC738868.fasta"),
         &["-task", "blastn"],
-        "LOSAT_X_PAIRPAR",
+        &["LOSAT_X_PAIRPAR", "LOSAT_X_BNCSR"],
         "5",
     );
 }
@@ -221,7 +224,7 @@ fn megablast_two_stage_table() {
         &fasta("LC738874.fasta"),
         &fasta("LC738868.fasta"),
         &["-task", "megablast"],
-        "LOSAT_X_PAIRPAR",
+        &["LOSAT_X_PAIRPAR"],
         "3",
     );
 }
@@ -234,7 +237,7 @@ fn blastn_short_direct_table() {
         &short_queries(&dir),
         &fasta("LC738868.fasta"),
         &["-task", "blastn-short"],
-        "LOSAT_X_PAIRPARNA",
+        &["LOSAT_X_PAIRPARNA"],
         "5",
     );
 }

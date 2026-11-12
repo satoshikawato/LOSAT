@@ -4097,12 +4097,23 @@ Scheduling (each value computed by one thread with the original function; order 
     the word's offset and where in the word it stopped (`Resume`: the pairs of a CSR cell's or the direct table's run
     it read, or the element of the first or second template's chain); the words still in the CSR's prefetch ring are
     dropped, and the next piece scans again from that word, going on in its run or chain from there
-    (`for_each_hit_from`, `for_each_hit2_from`), so no pair is read twice;
+    (`for_each_hit_from`, `for_each_hit2_from`), so no pair is read twice; a run the piece has room for goes through
+    the strips' own loop (`Cut::fit`), only one that may not fit through the loop that tests the room before each pair
+    (`Cut::run_cold`), so that the loads of the inputs `seed_of_pair` reads stay out of the loop as in the strips' scan
+    (a closure called from both loops stayed a call per pair, and a room test before each pair kept those loads in
+    the loop: about 30 and 17 instructions more per seed, dc-megablast of 31,168 cDNAs x 3 Mb at 4 threads, `perf`);
   - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (20 bytes each; P partitions),
-    each partition's seeds a chain of blocks in scan order; the arenas are a pool of 3 T + 2 (T threads), allocated at
-    their size once and kept in the subject scratch, the last two for the strip the slowest partition is in alone. So
-    the stage holds at most (3 T + 2) x (16,384 + 64 P) x 20 bytes whatever the subject, the query or the density of
-    the seeds: 17 MB at 16 threads, 79 MB at 64;
+    each partition's seeds a chain of blocks in scan order; the arenas are a pool of 3 T + 2 (T threads), the last two
+    for the strip the slowest partition is in alone, and a piece takes the slot of a piece every partition has folded
+    before a slot no piece has used (as the strips take a new buffer only when none can be given back). The pool's
+    seeds and positions are two buffers kept in the subject scratch, each slot a region of them, each allocated once
+    with a capacity above glibc's ceiling of the mmap threshold (`x_mapped::x_unthresholded_capacity`) and not
+    initialized: glibc maps them, their free leaves the threshold as it is, and only the pages of the blocks pieces
+    wrote are resident (an arena allocated by itself, 266-328 KiB, was mapped and its free raised the threshold to its
+    size, so that later blocks of up to that size came from the heap's arenas and stayed resident: blastn of the
+    cDNAs x 3 Mb at 16 threads, peak 1.13-1.15 of the strips'). So the stage holds at most
+    (3 T + 2) x (16,384 + 64 P) x 20 bytes whatever the subject, the query or the density of the seeds: 17 MB at 16
+    threads, 79 MB at 64;
   - a participant makes one piece per turn and parks the rest of its strip (any participant goes on with it), so
     no helper holds a strip half-scanned; a partition folds the pieces of a strip in order, then the next strip, and
     the positions count on across a strip's pieces, so the keys, the hits' order and the appended cells' numbers are

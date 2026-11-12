@@ -2619,6 +2619,12 @@ mod tests {
                                 used <= piece::PIECES_PER_THREAD * threads + piece::RESERVED,
                                 "{at}: {used} arenas"
                             );
+                            // a piece takes the slot of one every partition has folded before a
+                            // slot no piece has used: one thread folds each piece before it makes
+                            // the next one, so it holds at most two
+                            if threads == 1 {
+                                assert!(used <= 2, "{at}: {used} arenas on one thread");
+                            }
                             let pieced = (case + stage) % 2 == 1
                                 && (case / 2 + stage / 2).is_multiple_of(2)
                                 && piece_seeds > 0;

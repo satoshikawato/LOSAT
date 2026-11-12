@@ -181,7 +181,7 @@ trait SeedOut {
     }
 
     /// EXPERIMENT (LOSAT_X_SEEDPIECE): no room any more (a piece whose scan stopped, so that the
-    /// words the scan still hands out take the cold path of `Cut::run`).
+    /// words the scan still hands out go to `Cut::run_cold`, which leaves at once).
     #[inline(always)]
     fn close(&mut self) {}
 }

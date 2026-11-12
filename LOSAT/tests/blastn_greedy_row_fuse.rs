@@ -15,8 +15,9 @@
 //! build ran and how many distances the fused build ran. Every traceback runs the rows; the
 //! preliminary stage runs its own fused loop (GREEDYFUSE).
 //!
-//! Searches: NZ_CP006932 against itself (the frozen NCBI 2.17.0 report of `megablast_xdrop.rs`),
-//! and Sakai against MG1655 (`-outfmt 0`, the alignments letter by letter).
+//! Searches: NZ_CP006932 against itself (the frozen NCBI 2.17.0 report of
+//! `src/algorithm/blastn/blast_engine/megablast_xdrop_tests.rs`), and Sakai against MG1655
+//! (`-outfmt 0`, the alignments letter by letter).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

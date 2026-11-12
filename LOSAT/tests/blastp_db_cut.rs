@@ -11,8 +11,9 @@
 //! search of all queries and the block search of `LOSAT_X_BPQBLOCK`); the reach rows of the run
 //! with the switch on (`LOSAT_X_REACH`, `tests/reach_support`) show that the cut ran (and, at one
 //! thread, that the blocks keep 1 MiB). Each task and case runs at one thread count: the thread
-//! count sets only the number of blocks (`blocks_of_the_cut`), the blocks per round and the number
-//! of workers, and the report is written from the merged hit lists whatever the outfmt.
+//! count sets only the number of blocks (counted in the crate, see `FIXTURE_PSQ_BYTES`), the
+//! blocks per round and the number of workers, and the report is written from the merged hit
+//! lists whatever the outfmt.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413,1553-1554
 //! ```c
@@ -26,8 +27,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-use LOSAT::seqdb::{SeqDb, SeqType};
 
 mod reach_support;
 
@@ -216,32 +215,22 @@ fn same_reports(
     )
 }
 
-/// The blocks of the cut of the fixture database at `threads` threads: its sequence bytes
-/// (letters, one sentinel per sequence and one more: its `.psq` file) over 4 x threads, at least
-/// 4 KiB, as `SeqDb::next_block` cuts the sequences.
-fn blocks_of_the_cut(db: &Path, threads: u64) -> u64 {
-    let seqdb = SeqDb::open(db.to_str().unwrap(), SeqType::Protein).unwrap();
-    let bytes = seqdb.total_length() + u64::from(seqdb.num_seqs()) + 1;
-    assert_eq!(
-        bytes,
-        std::fs::metadata(db.with_extension("psq")).unwrap().len()
-    );
-    let cut = (bytes / (4 * threads)).clamp(4096, 1 << 20);
-    let (mut blocks, mut next) = (0, 0);
-    while let Some(range) = seqdb.next_block(next, cut) {
-        blocks += 1;
-        next = range.end_ordinal();
-    }
-    blocks
-}
+/// The size of the sequence file (`.psq`) of the fixture database. The in-crate test
+/// `fixture_tests` of `src/algorithm/blastp/blast_engine/database/x_db_cut.rs` makes the same
+/// database in process and counts the blocks of the cut (several at 2 and 4 threads) on a file
+/// of this size.
+const FIXTURE_PSQ_BYTES: u64 = 89_564;
 
 // blastp at 2 threads and blastp-fast at 4, one search of all queries.
 #[test]
 fn search_of_all_queries_reports_with_the_cut_are_the_reports_without_it() {
     let db = subject_database("all");
+    assert_eq!(
+        std::fs::metadata(db.with_extension("psq")).unwrap().len(),
+        FIXTURE_PSQ_BYTES,
+        "the cut is several blocks at 2 and 4 threads"
+    );
     for (task, threads) in [("blastp", 2u64), ("blastp-fast", 4)] {
-        let blocks = blocks_of_the_cut(&db, threads);
-        assert!(blocks > 2 * threads, "{threads} threads: {blocks} blocks");
         let one_thread = blastp(task, &db, 1, &[], &[], "6");
         let (cut, _) = same_reports(task, &db, threads as u32, &[], &[], "6", &one_thread);
         assert!(

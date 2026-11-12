@@ -85,7 +85,7 @@
 //!      a gap > slack >= window. At the first d' hit, flag 0 gives diff > slack >= window (too far).
 //!      Flag 1 comes from the last right extension of d, started by a hit (q0, s0), which wrote
 //!      `last_hit = s_last_off - (wordsize - 1) + D`. Its right walk ends at the end of q0's
-//!      context at the latest (`extend_hit_two_hit` walks at most `len_c - q_raw` letters right of
+//!      context at the latest (`extend_hit_two_hit_fitting` walks at most `len_c - q_raw` letters right of
 //!      the word start, the query slice ends there), so `s_last_off - s0 <= QL - q0`. A hit
 //!      (q', s') on d' has q' >= 0, so `s' - s0 = q' - q0 + m 2^k >= 2^k - q0 >= QL + window - q0`,
 //!      and `s' >= s_last_off + window`: the first d' hit is never masked; it resets the cell.
@@ -3857,7 +3857,7 @@ mod tests {
     /// of every frame, how often each branch was taken, and how many hits met a cell whose flag 1
     /// was written by a right extension on another raw diagonal (the masked-aliasing case of
     /// module doc item 3). The scores and the word length are those of `sc` (the extensions of
-    /// the reference loop without the sentinel walks: `extend_hit_two_hit` for BLOSUM62's
+    /// the reference loop without the sentinel walks: `extend_hit_two_hit_fitting` for BLOSUM62's
     /// instance, `extend_hit_two_hit_with` for the other).
     #[allow(clippy::too_many_arguments)]
     fn masked_reference<M: TbxScore>(

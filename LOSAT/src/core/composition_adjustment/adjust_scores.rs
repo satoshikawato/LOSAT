@@ -1407,88 +1407,6 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     alpha
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:329-337
-// ```c
-// double Blast_MatrixEntropy(double ** matrix, int alphsize, const double row_prob[],
-//                            const double col_prob[], double Lambda)
-// ```
-fn matrix_entropy(
-    matrix: &[Vec<f64>],
-    alphsize: usize,
-    row_prob: &[f64; COMPO_NUM_TRUE_AA],
-    col_prob: &[f64; COMPO_NUM_TRUE_AA],
-    lambda: f64,
-) -> f64 {
-    let mut entropy = 0.0;
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            let nat_score = lambda * matrix[i][j];
-            entropy += nat_score.exp() * nat_score * row_prob[i] * col_prob[j];
-        }
-    }
-    entropy
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:358-376
-// ```c
-// double Blast_TargetFreqEntropy(double ** target_freq)
-// ```
-fn target_freq_entropy(target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA]) -> f64 {
-    let mut row_prob = [0.0; COMPO_NUM_TRUE_AA];
-    let mut col_prob = [0.0; COMPO_NUM_TRUE_AA];
-    for (i, row) in target_freq.iter().enumerate() {
-        for (j, &freq) in row.iter().enumerate() {
-            row_prob[i] += freq;
-            col_prob[j] += freq;
-        }
-    }
-    let mut entropy = 0.0;
-    for (i, row) in target_freq.iter().enumerate() {
-        for (j, &freq) in row.iter().enumerate() {
-            entropy += freq * (freq / row_prob[i] / col_prob[j]).ln();
-        }
-    }
-    entropy
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:385-397
-// ```c
-// void Blast_CalcFreqRatios(double ** ratios, int alphsize,
-//                           double row_prob[], double col_prob[])
-// ```
-fn calc_freq_ratios_dense(
-    ratios: &mut [Vec<f64>],
-    alphsize: usize,
-    row_prob: &[f64],
-    col_prob: &[f64],
-) {
-    for i in 0..alphsize {
-        if row_prob[i] > 0.0 {
-            for j in 0..alphsize {
-                if col_prob[j] > 0.0 {
-                    ratios[i][j] /= row_prob[i] * col_prob[j];
-                }
-            }
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
-// ```c
-// void Blast_FreqRatioToScore(double ** matrix, int rows, int cols, double Lambda)
-// ```
-fn freq_ratio_to_score_dense(matrix: &mut [Vec<f64>], rows: usize, cols: usize, lambda: f64) {
-    for row in matrix.iter_mut().take(rows) {
-        for value in row.iter_mut().take(cols) {
-            if *value == 0.0 {
-                *value = COMPO_SCORE_MIN as f64;
-            } else {
-                *value = value.ln() / lambda;
-            }
-        }
-    }
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
 // ```c
 // void Blast_FreqRatioToScore(double ** matrix, int rows, int cols, double Lambda)
@@ -1737,42 +1655,6 @@ fn set_pair_ambig_probs_to_sum(probs: &mut [f64; COMPO_LARGEST_ALPHABET]) {
     probs[E_BCHAR] = probs[E_DCHAR] + probs[E_NCHAR];
     probs[E_ZCHAR] = probs[E_ECHAR] + probs[E_QCHAR];
     probs[E_JCHAR] = probs[E_ICHAR] + probs[E_LCHAR];
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:485-536
-// ```c
-// int Blast_EntropyOldFreqNewContext(...)
-// ```
-fn entropy_old_freq_new_context(
-    target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
-    row_prob: &[f64; COMPO_NUM_TRUE_AA],
-    col_prob: &[f64; COMPO_NUM_TRUE_AA],
-) -> Result<Option<f64>> {
-    let mut scores = dense_matrix_new(COMPO_NUM_TRUE_AA, COMPO_NUM_TRUE_AA);
-    let mut old_col_prob = [0.0; COMPO_NUM_TRUE_AA];
-    let mut old_row_prob = [0.0; COMPO_NUM_TRUE_AA];
-    for i in 0..COMPO_NUM_TRUE_AA {
-        for j in 0..COMPO_NUM_TRUE_AA {
-            old_row_prob[i] += target_freq[i][j];
-            old_col_prob[j] += target_freq[i][j];
-            scores[i][j] = target_freq[i][j];
-        }
-    }
-    calc_freq_ratios_dense(&mut scores, COMPO_NUM_TRUE_AA, &old_row_prob, &old_col_prob);
-    freq_ratio_to_score_dense(&mut scores, COMPO_NUM_TRUE_AA, COMPO_NUM_TRUE_AA, 1.0);
-    let (lambda, iter_count) =
-        calc_lambda_full_precision_from_scores(&scores, COMPO_NUM_TRUE_AA, row_prob, col_prob);
-    if iter_count < K_LAMBDA_ITERATION_LIMIT && lambda > 0.0 {
-        Ok(Some(matrix_entropy(
-            &scores,
-            COMPO_NUM_TRUE_AA,
-            row_prob,
-            col_prob,
-            lambda,
-        )))
-    } else {
-        Ok(None)
-    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:538-604
@@ -2897,27 +2779,13 @@ fn composition_matrix_adjust(
     gather_letter_probs(&mut row_probs, query_prob_std);
     gather_letter_probs(&mut col_probs, subject_prob_std);
 
-    let mut desired_re = 0.0;
-    match matrix_adjust_rule {
-        EMatrixAdjustRule::UnconstrainedRelEntropy => {}
-        EMatrixAdjustRule::RelEntropyOldMatrixNewContext => {
-            if let Some(value) =
-                entropy_old_freq_new_context(&workspace.mat_b, &row_probs, &col_probs)?
-            {
-                desired_re = value;
-            }
-        }
-        EMatrixAdjustRule::RelEntropyOldMatrixOldContext => {
-            desired_re = target_freq_entropy(&workspace.mat_b);
-        }
-        EMatrixAdjustRule::UserSpecifiedRelEntropy => {
-            desired_re = specified_re;
-        }
+    let desired_re = match matrix_adjust_rule {
+        EMatrixAdjustRule::UserSpecifiedRelEntropy => specified_re,
         _ => bail!(
             "unsupported matrix-adjust rule {:?} for composition matrix adjustment",
             matrix_adjust_rule
         ),
-    }
+    };
 
     apply_pseudocounts(
         &mut row_probs,
@@ -3205,24 +3073,10 @@ pub(crate) fn x_newton_input(
     let mut col_probs = [0.0; COMPO_NUM_TRUE_AA];
     gather_letter_probs(&mut row_probs, &query_composition.prob);
     gather_letter_probs(&mut col_probs, &subject_composition.prob);
-    let mut desired_re = 0.0;
-    match matrix_adjust_rule {
-        EMatrixAdjustRule::UnconstrainedRelEntropy => {}
-        EMatrixAdjustRule::RelEntropyOldMatrixNewContext => {
-            if let Some(value) =
-                entropy_old_freq_new_context(&workspace.mat_b, &row_probs, &col_probs).ok()?
-            {
-                desired_re = value;
-            }
-        }
-        EMatrixAdjustRule::RelEntropyOldMatrixOldContext => {
-            desired_re = target_freq_entropy(&workspace.mat_b);
-        }
-        EMatrixAdjustRule::UserSpecifiedRelEntropy => {
-            desired_re = K_FIXED_RE_BLOSUM62;
-        }
+    let desired_re = match matrix_adjust_rule {
+        EMatrixAdjustRule::UserSpecifiedRelEntropy => K_FIXED_RE_BLOSUM62,
         _ => return None,
-    }
+    };
     #[expect(
         clippy::neg_cmp_op_on_partial_ord,
         reason = "NCBI constrains the relative entropy only when desired_re > 0.0 (composition_adjustment.c:1396); `desired_re <= 0.0` would let NaN through"

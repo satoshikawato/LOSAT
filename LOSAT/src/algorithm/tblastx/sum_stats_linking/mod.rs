@@ -14,7 +14,7 @@
 //!
 //! - `params` - Parameter structures (LinkingParams, LinkHspCutoffs) and helpers
 //! - `cutoffs` - NCBI cutoff calculation (calculate_link_hsp_cutoffs_ncbi)
-//! - `linking` - Main linking algorithm (apply_sum_stats_even_gap_linking)
+//! - `linking` - Main linking algorithm (apply_sum_stats_even_gap_linking_with_parallel)
 //! - `linking_incr` - The per-group kernel `linking` runs by default (incremental recomputation)
 
 mod cutoffs;
@@ -23,10 +23,7 @@ mod linking_incr;
 mod params;
 
 // Re-export parameter types and functions
-pub use params::{
-    compute_avg_query_length_ncbi, find_smallest_lambda, find_smallest_lambda_params,
-    LinkHspCutoffs, LinkingParams, BLAST_GAP_DECAY_RATE,
-};
+pub use params::{compute_avg_query_length_ncbi, find_smallest_lambda_params, LinkingParams};
 
 // Re-export cutoff calculation
 pub use cutoffs::calculate_link_hsp_cutoffs_ncbi;
@@ -40,9 +37,7 @@ pub use cutoffs::calculate_link_hsp_cutoffs_ncbi;
 // }
 // ```
 // Re-export main linking functions
-pub use linking::{
-    apply_sum_stats_even_gap_linking, apply_sum_stats_even_gap_linking_with_parallel,
-};
+pub use linking::apply_sum_stats_even_gap_linking_with_parallel;
 
 // The in-place HSP list path
 // (tblastx/x_hsp_inplace.rs, a child module of `linking`). `ungapped_hit_sort.rs` calls its sort

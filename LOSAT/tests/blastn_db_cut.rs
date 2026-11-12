@@ -24,8 +24,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use LOSAT::seqdb::{SeqDb, SeqType};
-
 mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
@@ -63,7 +61,7 @@ fn temp_dir(label: &str) -> PathBuf {
 }
 
 /// Pieces of MG1655 of 1,000 bases every 5,000 bases (928 sequences, about 233 KB of sequence
-/// file: one block of 1 MiB, 8 blocks of the cut at 2 threads, 16 at 4), `count` of them from
+/// file: one block of 1 MiB, 9 blocks of the cut at 2 threads, 17 at 4), `count` of them from
 /// piece `first` on; piece 7 has a run of ten `N` and piece 300 an `R` and a `Y` (ambiguity data
 /// in the sequence file).
 fn pieces(first: usize, count: usize) -> Vec<u8> {
@@ -231,28 +229,28 @@ fn same_reports(
     reach.sides("LOSAT_X_BNDBCUT")
 }
 
-/// The blocks of the cut of the database `db` at `threads` threads: its 2-bit bytes and one byte
-/// per sequence over 4 x threads, at least 4 KiB, as `SeqDb::next_block` cuts the sequences.
-fn blocks_of_the_cut(db: &Path, threads: u64) -> u64 {
-    let seqdb = SeqDb::open(db.to_str().unwrap(), SeqType::Nucleotide).unwrap();
-    let bytes = seqdb.total_length() / 4 + u64::from(seqdb.num_seqs());
-    let cut = (bytes / (4 * threads)).clamp(4096, 1 << 20);
-    let (mut blocks, mut next) = (0, 0);
-    while let Some(range) = seqdb.next_block(next, cut) {
-        blocks += 1;
-        next = range.end_ordinal();
-    }
-    blocks
+/// The size of the sequence file (`.nsq`) of `db`. The in-crate test
+/// `fixture_tests` of `src/algorithm/blastn/blast_engine/x_db_cut.rs` makes the same databases
+/// in process and counts the blocks of the cut (several at 2 and 4 threads for the large
+/// database, one for the small one) on files of these sizes.
+fn sequence_file_bytes(db: &Path) -> u64 {
+    std::fs::metadata(db.with_extension("nsq")).unwrap().len()
 }
+
+/// The `.nsq` size of `database("tasks", 0, 10_000, &[])` (928 pieces).
+const LARGE_NSQ_BYTES: u64 = 233_200;
+/// The `.nsq` size of `database("small", 196, 12, &[])`.
+const SMALL_NSQ_BYTES: u64 = 3_013;
 
 // megablast, blastn and dc-megablast at 2 and 4 threads, tabular; megablast pairwise at 4.
 #[test]
 fn reports_with_the_cut_are_the_reports_without_it() {
     let db = database("tasks", 0, 10_000, &[]);
-    for threads in [2u64, 4] {
-        let blocks = blocks_of_the_cut(&db, threads);
-        assert!(blocks >= 2 * threads, "{threads} threads: {blocks} blocks");
-    }
+    assert_eq!(
+        sequence_file_bytes(&db),
+        LARGE_NSQ_BYTES,
+        "the cut is several blocks at 2 and 4 threads"
+    );
     for task in ["megablast", "blastn", "dc-megablast"] {
         let one_thread = blastn(task, &db, 1, &[], "6");
         for threads in [2u64, 4] {
@@ -284,7 +282,11 @@ fn the_cut_does_not_act_at_one_thread_or_on_a_database_of_one_block() {
     // Pieces 196-207 (about 3 KB of sequence file, with the hits of MG1655 1,000,001-1,010,000 in
     // pieces 200 and 201) are below the 4 KiB floor: one block at every thread count.
     let small = database("small", 196, 12, &[]);
-    assert_eq!(blocks_of_the_cut(&small, 4), 1);
+    assert_eq!(
+        sequence_file_bytes(&small),
+        SMALL_NSQ_BYTES,
+        "the cut is one block"
+    );
     let one_thread = blastn("megablast", &small, 1, &[], "6");
     let sides = same_reports("megablast", &small, 4, "6", &one_thread);
     assert!(sides.0, "one block of the 4 KiB floor: sides {sides:?}");

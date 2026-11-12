@@ -1113,54 +1113,6 @@ impl ShownSubjects<'_> {
     }
 }
 
-pub fn render(
-    writer: &mut impl Write,
-    options: &ResolvedOptions,
-    queries: &[FastaRecord],
-    subjects: &[FastaRecord],
-    subject_path: &Path,
-    batches: &mut [BatchResults],
-) -> Result<()> {
-    let no_parsed = RecordsParsed::default();
-    let shown = ShownSubjects::Fasta {
-        path: subject_path,
-        parsed: &no_parsed,
-    };
-    let mut stderr = std::io::stderr().lock();
-    write_prolog(writer, &mut stderr, options, subjects, &shown)?;
-    // This entry has no output file and no receiver of side files: outfmt 13 and 14 fail at their
-    // first report (`NoSideFiles`).
-    let mut xml2 = super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
-        super::blast_xml::xml2_writer(
-            kind,
-            options,
-            subjects,
-            &shown,
-            Box::new(crate::report::blast_xml2::NoSideFiles),
-        )
-    });
-    render_queries(
-        writer,
-        &mut stderr,
-        options,
-        queries,
-        subjects,
-        &shown,
-        batches,
-        0,
-        false,
-        xml2.as_mut(),
-    )?;
-    write_epilog(
-        writer,
-        &mut stderr,
-        options,
-        subjects,
-        &shown,
-        queries.len(),
-        xml2.as_mut(),
-    )
-}
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
 // ```c++
 //             	ITERATE(CSearchResultSet, result, *results) {

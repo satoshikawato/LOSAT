@@ -1,0 +1,158 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          132     1e-31
+
+
+>BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]
+Length=197
+
+ Score = 132 bits (333),  Expect = 1e-31, Method: Compositional matrix adjust.
+ Identities = 79/188 (42%), Positives = 105/188 (56%), Gaps = 9/188 (5%)
+
+Query  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+            T  G++ LV GPMFAGKS+ +  IYQ++    K C+F+KH  + RYGC     VTH+G+ 
+Sbjct  4    TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+
+Query  70   IEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDGTSDQ  128
+            I  C   S    L  V     D I IDEGQFF+DL       A KGKR+ +AALDG  +Q
+Sbjct  64   IRDCVATSV---LSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDGNYEQ  120
+
+Query  129  QMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAEM  183
+            Q+F  + KL+P  + I KL++ CMIC      +  K  P+     +D+    +CVGG E 
+Sbjct  121  QLFPSVIKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTET  180
+
+Query  184  YAAACRDC  191
+            Y A C  C
+Sbjct  181  YCAVCIGC  188
+
+
+
+Lambda      K        H
+   0.320    0.137    0.406 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000000
+Results from round 1
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       503     4e-143
+
+
+>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 503 bits (1294),  Expect = 4e-143, Method: Compositional matrix adjust.
+ Identities = 271/639 (42%), Positives = 380/639 (59%), Gaps = 30/639 (5%)
+
+Query  99   YNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQL---------PSVSAASVLRKHRAN  149
+            +N N + KK    I ++Q AT N +YA DII               ++   S  ++H  N
+Sbjct  189  FNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRHSNN  248
+
+Query  150  ADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNF  209
+                  K F  P  A F  ++LKAR YTPLS+LRS + G  HL S C+ VTET +++R+ 
+Sbjct  249  ------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIRRDA  302
+
+Query  210  SSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQ  269
+            +S++KW+ L+  P YF  AE +TNI+    S +  IR+ A   LI  +Q V   Y  I  
+Sbjct  303  NSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSEIHT  362
+
+Query  270  SCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKG  326
+            +C  A  K+     +  R  + P + WPVG+     K    +D SP   +   C  +   
+Sbjct  363  NCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH---  419
+
+Query  327  WIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEY  386
+                + + ++A++VFKLS  + E I++K+TTLL EV+  CK+W + R+ +  P HV   Y
+Sbjct  420  ----LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVPEAY  475
+
+Query  387  ASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAV  446
+                V I PSE +LEVK+GVYYML+TG+VIKFMT  E   EFV E++F   ++G +KGAV
+Sbjct  476  FPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLKGAV  535
+
+Query  447  GVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHG  505
+            GV  +C EGFC+EM+FAG+++ DVLNGDL C ++  V     N      KP  E++Q H 
+Sbjct  536  GVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRIDKP--EMIQHHM  593
+
+Query  506  SLCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVE  565
+            +  +++  LY VRMLQ TG LP+ L+ KC   ITDS +A+ +   MR+R LNQLPF L E
+Sbjct  594  APSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDRFLNQLPFALTE  653
+
+Query  566  IVNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERF  623
+            I+NIVTRLSQQGLVNPDIK+DNIVIDG TGQPKMIDFGL++P       K       E  
+Sbjct  654  IINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKVKRRNNPYPENV  713
+
+Query  624  FSNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVS  683
+            ++ +P TAPE++   +C+E AMT+GL+YL+  +++ L  RT D +  S+ TNI    ++ 
+Sbjct  714  YNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGSMKTNIKLSFLLG  773
+
+Query  684  KMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH  722
+              YD+  + RP+ Y +   I  CFP ++ I KLF +PKH
+Sbjct  774  LAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH  812
+
+
+
+Lambda      K        H
+   0.317    0.133    0.397 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000000
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

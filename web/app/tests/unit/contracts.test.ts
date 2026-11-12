@@ -12,6 +12,7 @@ import { BLOCK_STORE_CASES } from '../contract/block-store.contract';
 import { ENGINE_INPUT_CASES } from '../contract/engine-input.contract';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../contract/run-output.contract';
+import { NodeInflater } from './support/node-inflater';
 
 describe('BlockStore contract: memory', () => {
   for (const contractCase of BLOCK_STORE_CASES) {
@@ -50,6 +51,7 @@ describe('Run output contract: DataService with the memory store, in one thread'
       const data = new DataService({
         store,
         scanner: new FakeScanner(),
+        inflater: new NodeInflater(),
         checker: new FakeInputChecker(),
         digest: sha256Hex,
         newToken: () => `token-${++token}`,

@@ -1,0 +1,61 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/src2.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	206	NP_417755.1 30S ribosomal subunit protein S4 [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	440288	1	206	1.46341e-134	375.182	COG0522	RpsD	-	-
+1	Query_1	Specific	504374	1	206	1.08282e-131	367.902	NF003717	PRK05327	-	-
+1	Query_1	Specific	200066	3	206	1.31e-111	317.323	TIGR01017	rpsD_bact	-	-
+1	Query_1	Specific	177038	1	205	1.0671e-60	188.115	CHL00113	rps4	-	-
+1	Query_1	Specific	513205	3	95	1.46116e-32	113.025	pfam00163	Ribosomal_S4	-	-
+1	Query_1	Specific	238095	97	156	4.82428e-18	74.9785	cd00165	S4	-	530405
+1	Query_1	Non-specific	514298	97	143	3.92726e-15	66.7494	pfam01479	S4	-	530405
+1	Query_1	Specific	214638	97	151	6.0747e-15	66.4625	smart00363	S4	-	530405
+1	Query_1	Non-specific	512502	97	146	1.39237e-06	47.433	COG2302	YlmH	N	477410
+1	Query_1	Non-specific	512433	97	156	5.97328e-06	45.4363	COG1187	RsuA	C	-
+1	Query_1	Non-specific	440802	97	162	0.000213564	41.1969	COG1189	YqxC	C	-
+1	Query_1	Non-specific	177783	93	137	0.00401543	37.0364	PLN00189	PLN00189	NC	-
+1	Query_1	Non-specific	185484	93	137	0.00743337	36.2103	PTZ00155	PTZ00155	N	-
+ENDDOMAINS
+ENDQUERY
+QUERY	Query_2	Peptide	140	NP_415914.1 phenylacetyl-CoA thioesterase [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_2	Specific	131339	19	132	5.5444e-60	180.694	TIGR02286	PaaD	-	529137
+1	Query_2	Non-specific	161843	17	131	9.60316e-46	144.795	TIGR00369	unchar_dom_1	-	529137
+1	Query_2	Specific	441653	1	134	1.77481e-36	121.974	COG2050	PaaI	-	-
+1	Query_2	Specific	239527	21	127	1.49164e-30	106.103	cd03443	PaaI_thioesterase	-	529137
+1	Query_2	Specific	515362	48	123	1.59904e-18	74.2083	pfam03061	4HBT	-	529137
+1	Query_2	Non-specific	239524	34	127	9.77456e-17	70.5818	cd03440	hot_dog	-	529137
+1	Query_2	Non-specific	441633	52	126	3.88152e-05	41.0244	COG2030	MaoC	N	-
+1	Query_2	Non-specific	239526	27	105	6.69115e-05	39.8598	cd03442	BFIT_BACH	C	529137
+1	Query_2	Non-specific	239536	47	125	0.000258333	38.535	cd03452	MaoC_C	N	529137
+1	Query_2	Non-specific	238329	70	123	0.00207358	35.6597	cd00586	4HBT	N	529137
+1	Query_2	Non-specific	239533	81	122	0.00232283	35.9837	cd03449	R_hydratase	N	529137
+1	Query_2	Non-specific	440586	71	129	0.00242357	36.0293	COG0824	FadM	NC	-
+1	Query_2	Non-specific	239525	52	126	0.00248251	35.7027	cd03441	R_hydratase_like	N	529137
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

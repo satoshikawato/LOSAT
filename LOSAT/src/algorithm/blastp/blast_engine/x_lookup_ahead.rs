@@ -1104,7 +1104,6 @@ mod tests {
         a.len() == b.len()
             && a.iter().zip(b).all(|(a, b)| {
                 a.q_idx == b.q_idx
-                    && a.f_idx == b.f_idx
                     && a.frame == b.frame
                     && a.aa_seq == b.aa_seq
                     && a.aa_seq_nomask == b.aa_seq_nomask
@@ -1575,7 +1574,6 @@ mod tests {
     fn context(lambda: f64) -> QueryContext {
         QueryContext {
             q_idx: 1,
-            f_idx: 0,
             frame: 0,
             aa_seq: vec![0, 4, 7, 0],
             aa_seq_nomask: None,

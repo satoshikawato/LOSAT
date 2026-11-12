@@ -7,6 +7,10 @@ pub(crate) mod mapped_file;
 pub mod matrix;
 pub mod seg;
 mod seg_lnfact;
+// libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, quoted in the module): the order
+// in which rpsbproc's sorts leave equal elements (RpsbProc/src/common/cdalignproc_base.cpp:200,
+// ptrmap.hpp:171 of the 2025-05-13 package).
+pub(crate) mod std_sort;
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
 // (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;

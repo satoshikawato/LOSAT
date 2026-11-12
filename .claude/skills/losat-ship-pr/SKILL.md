@@ -65,8 +65,11 @@ twice per improvement).
 ## Watch CI
 
 - `ci.yml` (`rust`, `fast output regressions`) runs on every PR; `web.yml` runs when `web/**`,
-  `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. `rust` takes about 35 minutes
-  (it waits for `rust lint` and the two `cargo test (k/2)` shards), the others 5-20. A PR into
+  `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. `rust` takes 15-18 minutes
+  (it waits for `rust lint`, `cargo test (build)` and the three `cargo test (k/3)` shards),
+  `web result` about 18-23, the others 5-15. A push to a branch without a PR starts no `web.yml`
+  run: open the draft PR, or run `gh workflow run web.yml --ref <branch>` (the branch must
+  contain dev of 2026-11-12 or later, whose web.yml has that trigger). A PR into
   `dev` needs these (`rust`, `fast output regressions`, `web result`) and merges by auto-merge.
   `fast output regressions` also requires that the default run reaches the sides of the
   conditional switches that `switch_reach_expected.tsv` requires.

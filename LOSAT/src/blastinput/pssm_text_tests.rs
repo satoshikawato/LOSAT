@@ -116,6 +116,8 @@ fn reals_are_read_with_ncbis_arithmetic() {
 #[test]
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn libm_pow10_is_glibcs_pow() {
+    use crate::report::serial::asn_text_reader::libm_pow10;
+
     for exp in -400..=400 {
         let pow = 10f64.powf(f64::from(exp));
         assert_eq!(libm_pow10(exp).to_bits(), pow.to_bits(), "10^{exp}");

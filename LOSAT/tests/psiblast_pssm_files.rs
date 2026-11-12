@@ -335,3 +335,46 @@ fn an_unwritable_pssm_file_of_in_pssm_stops_before_round_1() {
     assert_eq!(ignored.stdout, run("6", &[]).stdout);
     assert!(names(&dir).is_empty());
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
+// ```c++
+//     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
+//         //m_Atlas.Unlock(locked);
+//
+//         string msg = string("Error: File (") + m_FileName + ") not found.";
+//
+//         NCBI_THROW(CSeqDBException, eFileErr, msg);
+//     }
+// ```
+// psiblast's preliminary search of a valid query reads a database whose sequence file is
+// missing: the reader's error reaches the application (no `CLocalBlast` catch), after the prolog,
+// exit 2, with the file's absolute path (NCBI 2.17.0 from `LOSAT/` with this relative `-db`;
+// probe `y.g.ps.tk.nopsq.0` of the PS5c review; line PS DECISIONS 31). The path depends on the
+// checkout, so this is a test here rather than a frozen row (Unix paths).
+#[cfg(unix)]
+#[test]
+fn a_missing_sequence_file_is_the_readers_database_error() {
+    let (_, home) = scratch("nopsq");
+    let output = losat_psiblast(&home)
+        .args(["-query", "tests/fasta/psiblast/tk.faa"])
+        .args(["-db", "tests/db_search/arch_sprot_nopsq"])
+        .args(["-outfmt", "0", "-num_threads", "1"])
+        .output()
+        .expect("run LOSAT CLI");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(2), "{stdout}");
+    let psq = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/arch_sprot_nopsq.psq");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        format!(
+            "BLAST Database error: Error: File ({}) not found.\n",
+            psq.display()
+        )
+    );
+    assert!(
+        stdout.starts_with("PSIBLAST 2.17.0+")
+            && stdout
+                .ends_with("Database: arch_sprot\n           2 sequences; 279 total letters\n\n"),
+        "{stdout}"
+    );
+}

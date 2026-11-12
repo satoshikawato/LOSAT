@@ -114,8 +114,7 @@ mod error;
 mod input;
 // The shared local search entry of the command line and the web ABIs: each program's `run_local`
 // and the routing of its outputs. It speaks the engine's types, so it stays outside the API.
-#[doc(hidden)]
-pub mod local_blast;
+pub(crate) mod local_blast;
 mod program;
 mod run;
 mod search;

@@ -1,5 +1,6 @@
-//! `-window_masker_db`: the query masks of WindowMasker (`utils::winmask`), which replace the
-//! DUST and lower-case masks of the queries, and NCBI's texts for its errors.
+//! `-window_masker_db` and `-window_masker_taxid`: the query masks of WindowMasker
+//! (`utils::winmask`), which replace the DUST and lower-case masks of the queries, and NCBI's
+//! texts for its errors.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
 //! ```c++
@@ -50,15 +51,20 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::cli::NativeError;
+use crate::report::blast_xml::filter::WindowMasker as FilterOption;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::winmask::{CountsSource, MaskerParams, SeqMasker, StatType, WinMaskError};
 
-/// The masker of `-window_masker_db`, or the error of its counts file, which NCBI reports
-/// when it sets up the first query batch (`batch_error`).
+/// The masker of `-window_masker_db` or `-window_masker_taxid`, or the error of its counts
+/// file, which NCBI reports when it sets up the first query batch (`batch_error`).
 pub struct WindowMasker {
-    /// The value of `-window_masker_db` as given (BLAST XML's filter string `W -d <name>;`,
-    /// the archive's `WindowMaskerDatabase`).
+    /// The counts file: the value of `-window_masker_db` as given (BLAST XML's filter string
+    /// `W -d <name>;`, the archive's `WindowMaskerDatabase`), or the file of
+    /// `-window_masker_taxid` (empty when there is none, as in NCBI).
     pub name: String,
+    /// The value of `-window_masker_taxid` (not 0; the filter string's `W -t <taxid>;`, the
+    /// archive's `WindowMaskerTaxId`), or `None` for `-window_masker_db`.
+    pub taxid: Option<i32>,
     masker: Result<SeqMasker, WinMaskError>,
 }
 
@@ -66,6 +72,7 @@ impl fmt::Debug for WindowMasker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WindowMasker")
             .field("name", &self.name)
+            .field("taxid", &self.taxid)
             .field("masker", &self.masker.as_ref().map(|_| "SeqMasker"))
             .finish()
     }
@@ -118,6 +125,15 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
             });
         }
     }
+    Ok(WindowMasker {
+        name: name.to_string(),
+        taxid: None,
+        masker: build(name, source),
+    })
+}
+
+/// `s_BuildSeqMasker( lstat )`: the masker made from the counts file `name`, or its error.
+fn build(name: &str, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:99-109
     // ```c++
     // CSeqMasker* s_BuildSeqMasker(const string & lstat)
@@ -129,16 +145,76 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
     //     Uint4 arg_cutoff_score           = 0; // [allow setting of this field?]
     // ```
     let params = MaskerParams::default();
-    let masker = source
+    source
         .counts(name, &params)
-        .and_then(|counts| SeqMasker::new(counts, &params));
+        .and_then(|counts| SeqMasker::new(counts, &params))
+}
+
+/// The masker of `-window_masker_taxid <taxid>` (not 0) with the counts file
+/// `<directory>/<taxid>/wmasker.obinary` (`directory`: the registry entry
+/// `[WINDOW_MASKER] WINDOW_MASKER_PATH`, `None` or empty for the current directory), which NCBI
+/// looks for when it sets up each query batch: a path that is no file is the empty name, whose
+/// error (`could not open `) each batch reports (`batch_error`). NCBI checks no format of the
+/// file (unlike `-window_masker_db`'s, `open`) and reads the ascii counts too, which LOSAT does not
+/// read: it refuses them before the search.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:418-422
+/// ```c++
+/// Blast_FindWindowMaskerLocTaxId(CBlastQueryVector & queries, int taxid)
+/// {
+///     string db = WindowMaskerTaxidToDb(taxid);
+///     Blast_FindWindowMaskerLoc(queries, db);
+/// }
+/// ```
+/// The directory and the file do not change during a run, so LOSAT looks for the file once.
+pub(crate) fn open_taxid(
+    taxid: i32,
+    directory: Option<&str>,
+    source: &dyn CountsSource,
+) -> anyhow::Result<WindowMasker> {
+    let file = crate::utils::winmask::taxid_stat_file(directory, taxid).map_err(|error| {
+        anyhow::anyhow!(
+            "-window_masker_taxid {taxid}: the current directory, where NCBI BLAST+ looks for the counts file, cannot be read ({error}); this is not supported by LOSAT's BLASTN"
+        )
+    })?;
+    let name = match file {
+        Some(path) => path.into_os_string().into_string().map_err(|path| {
+            anyhow::anyhow!(
+                "-window_masker_taxid {taxid}: the path of the counts file {} is not valid UTF-8; this is not supported by LOSAT's BLASTN",
+                std::path::Path::new(&path).display()
+            )
+        })?,
+        None => String::new(),
+    };
+    let masker = build(&name, source);
+    if let Err(WinMaskError::UnsupportedFormat(format)) = &masker {
+        let format = match format {
+            StatType::Ascii => "ascii",
+            StatType::OAscii => "optimized ascii",
+            StatType::Binary => "binary",
+            StatType::OBinary => "optimized binary",
+            StatType::Unknown => "unknown",
+        };
+        anyhow::bail!(
+            "-window_masker_taxid {taxid}: the windowmasker unit counts {name} are in the {format} format, which NCBI BLAST+ reads and LOSAT's BLASTN does not; this is not supported by LOSAT's BLASTN"
+        );
+    }
     Ok(WindowMasker {
-        name: name.to_string(),
+        name,
+        taxid: Some(taxid),
         masker,
     })
 }
 
 impl WindowMasker {
+    /// What BLAST XML's filter string writes for the masker (`W -t <taxid>;` or `W -d <name>;`).
+    pub(crate) fn filter_option(&self) -> FilterOption<'_> {
+        match self.taxid {
+            Some(taxid) => FilterOption::Taxid(taxid),
+            None => FilterOption::Database(&self.name),
+        }
+    }
+
     /// The error of the counts file when NCBI could not make the masker from it.
     pub(crate) fn build_error(&self) -> Option<&WinMaskError> {
         self.masker.as_ref().err()
@@ -367,6 +443,53 @@ mod tests {
         let binary = open(&counts_path("dm2L_u9.binary"), &FileCounts).unwrap();
         assert!(binary.build_error().is_none());
         assert_eq!(binary.name, counts_path("dm2L_u9.binary"));
+    }
+
+    // NCBI BLAST+ 2.17.0 blastn `-window_masker_taxid` (line NP M/STATE.md, "NCBI 2.17.0 の実機"):
+    // the file under the directory is used whatever its format is called; a path that is no file
+    // is the empty name, which fails each batch with `could not open ` and the factory's error;
+    // LOSAT refuses the ascii counts that NCBI reads, before the search.
+    #[test]
+    fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-blastn-window-masker-taxid-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (taxid, file) in [("562", "mg1655_u9.obinary"), ("7227", "dm2L_u9.binary")] {
+            std::fs::create_dir_all(dir.join(taxid)).unwrap();
+            std::fs::copy(counts_path(file), dir.join(taxid).join("wmasker.obinary")).unwrap();
+        }
+        std::fs::create_dir_all(dir.join("10")).unwrap();
+        std::fs::write(
+            dir.join("10/wmasker.obinary"),
+            b"##windowmasker-statistics-format-version:ascii 1.1.0\n9\nAAAAAAAAA 5\n",
+        )
+        .unwrap();
+        let root = dir.to_str().unwrap();
+        let found = open_taxid(562, Some(root), &FileCounts).unwrap();
+        assert_eq!(found.taxid, Some(562));
+        assert!(found.name.ends_with("wmasker.obinary"), "{}", found.name);
+        assert!(found.build_error().is_none());
+        assert_eq!(found.filter_option(), FilterOption::Taxid(562));
+        // A binary counts file under the optimized binary's name.
+        assert!(open_taxid(7227, Some(root), &FileCounts)
+            .unwrap()
+            .build_error()
+            .is_none());
+        let missing = open_taxid(9606, Some(root), &FileCounts).unwrap();
+        assert_eq!(missing.name, "");
+        let (warnings, error) = batch_error(missing.build_error().unwrap(), 2).unwrap();
+        assert!(warnings.is_empty());
+        let one = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open \n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n ");
+        assert_eq!(error.exit, 3);
+        assert_eq!(error.message, format!("BLAST engine error: {one}{one}\n"));
+        let ascii = open_taxid(10, Some(root), &FileCounts)
+            .unwrap_err()
+            .to_string();
+        assert!(ascii.contains("ascii format"), "{ascii}");
+        assert!(ascii.contains("not supported by LOSAT"), "{ascii}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // NCBI BLAST+ 2.17.0 (the official Linux x64 release) blastn with a counts file whose unit

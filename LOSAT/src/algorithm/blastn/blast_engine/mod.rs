@@ -34,3 +34,5 @@ pub(crate) use run::check_subjects_not_empty;
 // The end of a query reading and NCBI's message for a sequence without letters, shared with
 // TBLASTX (port plan step S5).
 pub(crate) use crate::blastinput::query_batch::{QueryReading, NO_DATA_MESSAGE};
+#[cfg(test)]
+mod megablast_xdrop_tests;

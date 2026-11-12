@@ -525,6 +525,7 @@ pub(crate) fn composition_mode(value: &str) -> u8 {
 // ```
 /// The fields that ABI v1 accepts (`web::v1_outfmt`, frozen, plan TD-1): the custom fields
 /// of BLASTX's report before it wrote them through the shared tabular writer.
+#[cfg(any(target_arch = "wasm32", test))]
 pub const FIELDS: &[&str] = &[
     "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
     "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",

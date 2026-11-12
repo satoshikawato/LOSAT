@@ -21,6 +21,7 @@
 
 use anyhow::Result;
 
+use super::evalue::EvalueStats;
 use super::gapalign::{
     pssm_gapped_alignment_with_traceback, pssm_get_offsets_for_gapped_alignment, PssmGapScratch,
 };
@@ -35,7 +36,7 @@ use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::KarlinParams;
 use crate::utils::matrix::blosum62_score_ncbistdaa_direct;
 
 /// What the traceback of every list reads: the PSSM, the query's one context, the subjects, the
@@ -53,8 +54,8 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) x_drop_final: i32,
     /// `kbp_gap_psi[0]`.
     pub(crate) karlin: &'a KarlinParams,
-    /// `sbp->gbp` (a PSSM search always has one: LOSAT's psiblast takes no `-searchsp`).
-    pub(crate) gumbel: &'a BlastGumbelBlk,
+    /// `sbp->gbp` and the context's effective search space, for the e-values.
+    pub(crate) stats: EvalueStats<'a>,
     pub(crate) expect_value: f64,
     pub(crate) hitlist_size: usize,
 }
@@ -224,7 +225,8 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
 
     /// `s_HSPListPostTracebackUpdate` (no linking, no RPS, a scale factor of 1): the e-values from
     /// `kbp_gap_psi` (Spouge's finite-size correction with the query's and the subject's
-    /// lengths), the e-value reap, the bit scores.
+    /// lengths, or without the Gumbel block the context's search space, `EvalueStats::e_value`),
+    /// the e-value reap, the bit scores.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:229-250
     /// ```c
@@ -242,10 +244,9 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
     fn post_traceback_update(&self, hsp_list: &mut BlastpHspList, subject_length: usize) {
         let query_length = self.context.aa_len as i32;
         for hsp in &mut hsp_list.hsps {
-            hsp.e_value = blast_spouge_stoe(
+            hsp.e_value = self.stats.e_value(
                 hsp.raw_score,
                 self.karlin,
-                self.gumbel,
                 query_length,
                 subject_length as i32,
             );

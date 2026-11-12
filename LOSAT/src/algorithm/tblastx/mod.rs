@@ -18,7 +18,6 @@ pub mod constants;
 mod database;
 pub mod diagnostics;
 pub mod extension;
-pub mod filtering;
 pub mod hsp_culling;
 // NCBI's HSP collector inside the search of a query batch: the hit lists of its queries.
 pub(crate) mod hit_collector;

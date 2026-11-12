@@ -108,7 +108,10 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Blastn(a) => &mut a.outfmt,
         Commands::Tblastx(a) => &mut a.outfmt,
         Commands::Blastx(a) => &mut a.outfmt,
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
         }
     }
@@ -359,14 +362,13 @@ fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), St
 /// `any_valid_context` in `blast_engine/run.rs`), which depends on the query's letters (a query
 /// of N only has none, and the same scores give rc 0 with a warning). `validate` has no query,
 /// so `run` makes these checks and stops with the CLI's message and exit code.
-/// `check_scoring_for_formats` makes them for a query of any letters, which rejects what the CLI
-/// accepts (WA-FM-01).
+/// Making them for a query of any letters would reject what the CLI accepts (WA-FM-01).
 fn blastn_group_check(
     args: &mut LOSAT::web_adapter::BlastnArgs,
     group: &[Output],
 ) -> Result<(), String> {
     use LOSAT::web_adapter::{check_losat_limits, check_scoring_options};
-    // The host has no database files (`check_scoring_for_formats`).
+    // The host has no database files.
     if args.db.is_some() {
         return Err("-db (a database search) is not supported in the browser yet".to_string());
     }
@@ -562,7 +564,10 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
             a.num_alignments,
         ],
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => [None; 3],
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => [None; 3],
     }
 }
 
@@ -576,7 +581,10 @@ fn num_threads(command: &Commands) -> usize {
         // A positive `i32` (the parser's `positive`).
         Commands::Blastx(a) => a.num_threads as usize,
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => 1,
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => 1,
     }
 }
 
@@ -782,7 +790,10 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), "BLASTX", query);
                 run_local_blastx(args, query, subject, &mut outputs)
             }
-            Commands::Psiblast(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {
+            Commands::Psiblast(_)
+            | Commands::Rpsblast(_)
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")
             }
         };

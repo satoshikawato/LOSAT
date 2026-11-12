@@ -90,13 +90,6 @@ pub enum WriteDbError {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// The operating system failed to give a file of a volume its final
-    /// name.
-    Rename {
-        from: PathBuf,
-        to: PathBuf,
-        source: std::io::Error,
-    },
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-259
@@ -141,9 +134,6 @@ impl std::fmt::Display for WriteDbError {
             WriteDbError::Io { path, source } => {
                 write!(f, "Error: {}: {source}", path.display())
             }
-            WriteDbError::Rename { from, to, source } => {
-                write!(f, "Error: {} -> {}: {source}", from.display(), to.display())
-            }
         }
     }
 }
@@ -151,7 +141,7 @@ impl std::fmt::Display for WriteDbError {
 impl std::error::Error for WriteDbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            WriteDbError::Io { source, .. } | WriteDbError::Rename { source, .. } => Some(source),
+            WriteDbError::Io { source, .. } => Some(source),
             _ => None,
         }
     }

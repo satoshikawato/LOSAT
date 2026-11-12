@@ -38,6 +38,7 @@ use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
+use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, SCALING_FACTOR};
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
@@ -168,7 +169,9 @@ impl RpsTraceback<'_> {
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redone = RedoMatch {
                 info: &info,
-                gumbel: self.gumbel,
+                // RPS-BLAST's search has the Gumbel block (its parser refuses `-searchsp` and
+                // `check_blastp_environment` `OLD_FSC`, item PS11c).
+                stats: EvalueStats::spouge(self.gumbel),
                 expect_value: self.expect_value,
                 query_length: length as i32,
                 rps_roles: true,

@@ -1,9 +1,11 @@
 // A thread worker of the ThreadHost (thread-host.ts): it instantiates the threaded module
 // on the shared memory, waits until the host starts a thread in it, runs that thread
-// (`wasi_thread_start`), and then prepares itself again for the next thread.
+// (`wasi_thread_start`), counts it off the instance's use count (instance-use.ts), and then
+// prepares itself again for the next thread.
 import { stopMessage } from '../reactor/abi';
 import { instantiateThread } from '../reactor/instance';
 import { createWasi, type WasiContext } from '../reactor/wasi';
+import { InstanceUse } from './instance-use';
 import {
   SLOT_FAILED,
   SLOT_PREPARING,
@@ -25,12 +27,23 @@ const scope = self as unknown as {
 let config: ThreadPrepare | undefined;
 let state: Int32Array | undefined;
 let faults: BroadcastChannel | undefined;
+let use: InstanceUse | undefined;
 let prepared: { readonly start: (tid: number, startArg: number) => void; readonly wasi: WasiContext } | undefined;
 
 function setState(value: number): void {
   if (state === undefined) return;
   Atomics.store(state, 0, value);
   Atomics.notify(state, 0);
+}
+
+/**
+ * The thread returned or stopped: the slot goes to `next` and the thread is counted off
+ * (InstanceUse.endThread); false if the ThreadHost did so first, and this worker is ending.
+ */
+function finish(next: number): boolean {
+  if (state === undefined || use === undefined || !use.endThread(state, next)) return false;
+  Atomics.notify(state, 0);
+  return true;
 }
 
 async function prepare(): Promise<void> {
@@ -64,11 +77,10 @@ function start(command: ThreadStart): void {
     // its own thread is inside the engine, so the main thread ends the runtime.
     const fault: ThreadFault = { type: 'fault', tid: command.tid, message: stopMessage(error, thread.wasi.output()) };
     faults?.postMessage(fault);
-    setState(SLOT_FAILED);
+    finish(SLOT_FAILED);
     return;
   }
-  setState(SLOT_PREPARING);
-  void prepare();
+  if (finish(SLOT_PREPARING)) void prepare();
 }
 
 scope.onmessage = (event) => {
@@ -77,6 +89,7 @@ scope.onmessage = (event) => {
     config = command;
     state = new Int32Array(command.slot);
     faults = new BroadcastChannel(command.faultChannel);
+    use = new InstanceUse(command.use);
     void prepare();
     return;
   }

@@ -95,10 +95,8 @@ pub fn open_file_input(path: &std::path::Path, role: &str) -> Result<std::fs::Fi
             Ok(inflated) => return Ok(inflated),
             Err(InflateFault::Data(error)) => {
                 return Err(anyhow::anyhow!(
-                    "-{role}: '{}' is named {suffix} but is not {format} data ({error}); LOSAT reads a file named {suffix} through {format}",
-                    path.display(),
-                    suffix = compression.suffix(),
-                    format = compression.format(),
+                    "-{role}: {}",
+                    compression.not_data(&path.display().to_string(), &error.to_string())
                 ));
             }
             Err(InflateFault::Copy(error)) => {

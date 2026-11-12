@@ -83,3 +83,11 @@ pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 pub use crate::blastinput::input_files::is_blank;
+
+// The decoders of compressed inputs (`blastinput/compressed.rs`): the name rule (`.gz`, `.bz2`,
+// `.zst`, in any case), the compression with its sentence for data that is not that format, and
+// the push form of the decoder that the command line's reader runs, which inflates a file the
+// application gives in pieces (`inflate_begin`/`inflate_chunk`/`inflate_end` of ABI v2).
+pub use crate::blastinput::compressed::compression_of_name;
+pub use crate::blastinput::compressed::Compression;
+pub use crate::blastinput::compressed::PushInflater;

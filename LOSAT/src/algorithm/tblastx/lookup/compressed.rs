@@ -137,15 +137,14 @@ pub struct CompressedLookupBackboneCell {
 //     Int4* scaled_compress_table;
 // } BlastCompressedAaLookupTable;
 // ```
+// `alphabet_size` and `backbone_size` are not stored: nothing reads them.
 #[derive(Clone, Debug)]
 pub struct BlastCompressedAaLookupTable {
     pub threshold: i32,
     pub word_length: i32,
-    pub alphabet_size: i32,
     pub compressed_alphabet_size: i32,
     pub reciprocal_alphabet_size: i32,
     pub longest_chain: i32,
-    pub backbone_size: i32,
     pub backbone: Vec<CompressedLookupBackboneCell>,
     pub overflow_cells: Vec<CompressedOverflowCell>,
     pub pv: Vec<u32>,
@@ -245,11 +244,9 @@ impl BlastCompressedAaLookupTable {
         Some(Self {
             threshold: x_compressed_scaled_threshold(threshold),
             word_length: word_size as i32,
-            alphabet_size: BLASTAA_SIZE as i32,
             compressed_alphabet_size: compressed_alphabet_size as i32,
             reciprocal_alphabet_size,
             longest_chain: 0,
-            backbone_size: backbone_size as i32,
             backbone: vec![CompressedLookupBackboneCell::default(); backbone_size],
             overflow_cells: Vec::new(),
             pv: Vec::new(),
@@ -600,6 +597,7 @@ impl BlastCompressedAaLookupTable {
     //     }
     // }
     // ```
+    #[cfg(test)]
     pub fn add_neighboring_words(
         &mut self,
         matrix: &CompressedScoreMatrix,
@@ -667,6 +665,7 @@ impl BlastCompressedAaLookupTable {
     //     while (curr_cell != NULL) { ... }
     // }
     // ```
+    #[cfg(test)]
     pub fn query_offsets_in_scan_order(&self, index: usize) -> Vec<i32> {
         let cell = &self.backbone[index];
         let numhits = cell.num_used;
@@ -1351,6 +1350,7 @@ fn compressed_score_matrix_of(
 // ```
 // `Some(Err(()))` when the words fill NCBI's overflow banks (`s_CompressedListGetNewCell`),
 // past which NCBI writes beyond `overflow_banks`.
+#[cfg(test)]
 pub fn build_blosum62_compressed_lookup(
     word_size: usize,
     threshold: f64,
@@ -1368,6 +1368,7 @@ pub fn build_blosum62_compressed_lookup(
 
 // `build_blosum62_compressed_lookup` with `overflow_cell_capacity` overflow cells (a parameter
 // for the tests).
+#[cfg(test)]
 fn build_blosum62_compressed_lookup_with_capacity(
     word_size: usize,
     threshold: f64,
@@ -2907,3 +2908,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "compressed_lookup_tests.rs"]
+mod compressed_lookup_tests;

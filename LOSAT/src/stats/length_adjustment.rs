@@ -163,18 +163,6 @@ pub fn compute_length_adjustment_ncbi(
     LengthAdjustmentResult { length_adjustment }
 }
 
-/// Simplified length adjustment for single-sequence comparisons.
-///
-/// This is a convenience wrapper for when comparing a query against a single subject
-/// (db_num_seqs = 1).
-pub fn compute_length_adjustment_simple(
-    query_length: i64,
-    subject_length: i64,
-    params: &KarlinParams,
-) -> LengthAdjustmentResult {
-    compute_length_adjustment_ncbi(query_length, subject_length, 1, params)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,15 +195,6 @@ mod tests {
         // Length adjustment should be positive
         assert!(result.length_adjustment >= 0);
         // Length adjustment should be less than query length
-        assert!(result.length_adjustment < 100);
-    }
-
-    #[test]
-    fn test_length_adjustment_single_sequence() {
-        let params = default_blosum62_params();
-        let result = compute_length_adjustment_simple(100, 1000, &params);
-
-        assert!(result.length_adjustment >= 0);
         assert!(result.length_adjustment < 100);
     }
 

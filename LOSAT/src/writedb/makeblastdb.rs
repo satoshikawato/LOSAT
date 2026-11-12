@@ -16,8 +16,9 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
+use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
 use crate::ncbi_str::string_to_uint8_data_size;
-use crate::seqdb::{SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:224-244
 // ```c++
@@ -245,10 +246,7 @@ impl MakedbError {
     pub fn exit_code(&self) -> i32 {
         match self {
             MakedbError::Build(
-                WriteDbError::Exception(_)
-                | WriteDbError::Other(_)
-                | WriteDbError::Io { .. }
-                | WriteDbError::Rename { .. },
+                WriteDbError::Exception(_) | WriteDbError::Other(_) | WriteDbError::Io { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
             MakedbError::Database(_) | MakedbError::Build(WriteDbError::Database(_)) => 2,
@@ -791,11 +789,7 @@ impl Read for CompressedInput<'_> {
 /// format, or are cut short (line GZ, DECISIONS 5; for `.gz`: where makeblastdb's decompressor
 /// fails, `compressed::GzipMembers`): exit status 1, the files of the build removed.
 fn compressed_fault_error(name: &str, compression: Compression, fault: &str) -> MakedbError {
-    unsupported(format!(
-        "-in: '{name}' is named {suffix} but is not {format} data ({fault}); LOSAT reads a file named {suffix} through {format}",
-        suffix = compression.suffix(),
-        format = compression.format(),
-    ))
+    unsupported(format!("-in: {}", compression.not_data(name, fault)))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:792-836
@@ -1276,9 +1270,19 @@ fn open_new_database(
     } else {
         SeqType::Nucleotide
     };
-    let located =
-        SeqDb::locate_one_name_metadata(new_db, seqtype, &|_| Some(title.as_bytes().to_vec()))
-            .map_err(MakedbError::Database)?;
+    // `CSeqDB` names its search path in the message of a database that is not there: the
+    // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB`. The registry was
+    // read, and its unreadable values refused, before the build (`check_ncbi_application_settings`
+    // in the callers of `run_with`).
+    let registry = check_ncbi_application_settings("makeblastdb")
+        .ok()
+        .and_then(|settings| settings.blastdb.ok().flatten());
+    let search =
+        SearchPath::from_environment(registry.as_deref()).map_err(MakedbError::Database)?;
+    let located = SeqDb::locate_one_name_metadata(new_db, seqtype, &search, &|_| {
+        Some(title.as_bytes().to_vec())
+    })
+    .map_err(MakedbError::Database)?;
     let output_db = db.output_db();
     let version = output_db.version();
     let totals = output_db.volume_totals();
@@ -1757,15 +1761,6 @@ mod tests {
                 }),
                 255,
                 "Error: p: no",
-            ),
-            (
-                MakedbError::Build(WriteDbError::Rename {
-                    from: "a".into(),
-                    to: "b".into(),
-                    source: io(),
-                }),
-                255,
-                "Error: a -> b: no",
             ),
         ] {
             assert_eq!(error.exit_code(), code, "{error}");

@@ -88,8 +88,29 @@ pub(super) fn search_rounds(
     let epilog = batches.stop.is_none();
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
-        if batches.stop.is_some() {
+        if let Some((_, error)) = batches.stop.as_ref() {
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
+            // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM
+            // of `-in_pssm` in round 1)
+            // An error of the PSSM query's search itself (NCBI's error, not LOSAT's refusal: a
+            // `kbp_psi` that is not valid, a database without sequences or whose sequence file
+            // cannot be opened, `psiblast_stop_at_invalid_query`) comes after round 1 has written
+            // the input PSSM's files; NCBI's check of the PSSM (`validation_error`) stops before
+            // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31).
+            let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
+                && args
+                    .psi_search
+                    .as_deref()
+                    .is_some_and(|psi| psi.validation_error.is_none());
+            if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
+                let (asn, ascii) = input.files(&plan.request)?;
+                RoundFiles::new(
+                    &plan.request,
+                    args.out.as_deref().filter(|path| path.as_os_str() != "-"),
+                )
+                .write(asn.as_deref(), ascii.as_deref())?;
+            }
         } else {
             write_reports_without_queries(args, subject_source, subject_label, outputs)?;
         }

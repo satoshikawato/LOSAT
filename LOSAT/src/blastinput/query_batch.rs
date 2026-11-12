@@ -1,38 +1,6 @@
 //! Query batches of a search (NCBI `CBlastInput::GetNextSeqBatch`).
 
-use std::ops::Range;
-
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
-
-/// Splits queries of the given lengths into NCBI's query batches.
-///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-/// ```c++
-///     TSeqPos size_read = 0;
-///     ...
-///     while (size_read < GetBatchSize()) {
-///         ...
-///             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-///         ...
-///         retval->AddQuery(q);
-/// ```
-/// The query that reaches the batch size stays in the current batch. The batch size
-/// depends on the program (`blast_input_aux.cpp:104-119`).
-pub fn query_batches(lengths: &[usize], batch_size: usize) -> Vec<Range<usize>> {
-    let mut batches = Vec::new();
-    let mut start = 0;
-    while start < lengths.len() {
-        let mut end = start;
-        let mut residues = 0usize;
-        while end < lengths.len() && residues < batch_size {
-            residues += lengths[end];
-            end += 1;
-        }
-        batches.push(start..end);
-        start = end;
-    }
-    batches
-}
 
 /// `NStr::StringToInt` with the default flags: an optional sign and decimal digits, within
 /// the range of an `int`, and nothing else (no spaces); `None` where NCBI throws its
@@ -538,7 +506,7 @@ pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
 
 #[cfg(test)]
 mod tests {
-    use super::{get_query_batch_size, ncbi_string_to_int, query_batches, BatchSizeMixer};
+    use super::{get_query_batch_size, ncbi_string_to_int, BatchSizeMixer};
     use crate::blastinput::seq_range::next_ranged_batch_end;
 
     /// The end of the batch that starts at `start` when no record is skipped. The batch size
@@ -625,11 +593,8 @@ mod tests {
 
     #[test]
     fn the_query_that_reaches_the_batch_size_stays_in_the_batch() {
-        assert_eq!(query_batches(&[19_999, 2, 1], 20_000), vec![0..2, 2..3]);
-        assert_eq!(
-            query_batches(&[], 20_000),
-            Vec::<std::ops::Range<usize>>::new()
-        );
+        assert_eq!(next_query_batch_end(&[19_999, 2, 1], 0, 20_000), 2);
+        assert_eq!(next_query_batch_end(&[19_999, 2, 1], 2, 20_000), 3);
     }
 
     #[test]

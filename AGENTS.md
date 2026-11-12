@@ -66,7 +66,10 @@ authoritative, current guidance for agent behavior in LOSAT.
      Rust runtime opens before `main`, so LOSAT discards the report and exits
      as the search ends; a `-query` or `-subject` whose name ends in `.gz`,
      `.bz2` or `.zst` is inflated before it is read (NCBI reads the file as
-     text and stops at its first line; exception 8). Errors raised after argument parsing, the outfmt 0 write
+     text and stops at its first line; exception 8); a failed write of `losat rpsbproc`'s
+     report, where NCBI's rpsbproc drops the writes and exits 0 (a closed pipe: SIGPIPE),
+     stops LOSAT with a message and exit 4, and a failed write to its standard error
+     (NCBI: SIGPIPE) with exit 4 and no message (exception 9). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
      file names, `.ncbirc` keys that change output, and NCBI C++ Toolkit
@@ -91,7 +94,12 @@ authoritative, current guidance for agent behavior in LOSAT.
      NCBI's `-taxids` of the root's children). Seqid lists with `-db`: an
      accession stored under more than about 500 sequences of a version 5
      database selects its first sequence (NCBI's LMDB lookup fails with
-     `Accessions to Oids lookup error`). Deterministic NCBI results, even wrong-looking ones, are
+     `Accessions to Oids lookup error`). TBLASTX: a cutoff whose quotient
+     `K * searchsp / E` passes the range of a double keeps the finite cutoff of
+     `ln K + ln searchsp - ln E` (NCBI's undefined conversion gives a cutoff of
+     1; version 1.12). rpsbproc: PSSM-IDs of 2^31 and more are
+     compared as signed 32-bit values without NCBI's `int` overflow, so every row
+     of the data is found (version 1.13). Deterministic NCBI results, even wrong-looking ones, are
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections. A sequence that a seqid list keeps without a
      definition line (NCBI drops its hits from every report without notice)
@@ -397,7 +405,9 @@ cd LOSAT && cargo fmt
   `cargo test --test <suite> <file>::`. A file that changes the process environment or process-wide
   state (`set_var`, `remove_var`, `set_current_dir`, `set_hook`, `take_hook`, rayon's
   `build_global`, the global allocator `#[global_allocator]`) gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite
-  share one process; `tests/suite_layout.rs` checks both.
+  share one process; `tests/suite_layout.rs` checks both. An integration test reaches the engine
+  through `LOSAT::api` and the `losat` binary only (every other module is `pub(crate)`); a test of
+  an engine item that `api` does not expose lives in the crate, as above.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates, on real short and long sequences.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing
@@ -425,10 +435,10 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 ├── Cargo.toml             # Test targets are listed by hand (`autotests = false`)
 ├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
-│   ├── lib.rs             # Module list; `api` is the public surface, the others are `#[doc(hidden)]` or `pub(crate)`
+│   ├── lib.rs             # Module list; `api` is the public surface, the others are `pub(crate)` but the hidden `web_adapter` and `main_entry`
 │   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
-│   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd
+│   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd, rpsbproc
 │   ├── common.rs          # Shared hit type, gap edit operations and the HSP comparators
 │   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
@@ -441,6 +451,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── seqid/             # Seq-ids of database sequences (CSeq_id, deflines, id formatting)
 │   ├── writedb/           # Writer of BLAST database volumes (NCBI CWriteDB) and `losat makeblastdb`
 │   ├── blastdbcmd/        # `losat blastdbcmd`: -info and sequence retrieval
+│   ├── rpsbproc/          # `losat rpsbproc`: NCBI's rpsbproc 0.5.1 (archives of rpsblast -outfmt 11, CDD data)
 │   ├── utils/             # DUST, SEG, WindowMasker, matrices, genetic codes, threading, switches (`xswitch`)
 │   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
 │   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)
@@ -510,6 +521,7 @@ remains subject to all the requirements above.
 - TBLASTX engine: `LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs`
 - BLASTN engine: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`
 - BLASTP engine: `LOSAT/src/algorithm/blastp/blast_engine.rs`
+- rpsbproc: `LOSAT/src/rpsbproc/mod.rs` (`run`)
 
 ---
 
@@ -533,8 +545,8 @@ remains subject to all the requirements above.
 
 ## Conventions and Porting Notes
 
-- Match NCBI function names when porting (example: `s_BlastAaExtendTwoHit` ->
-  `extend_hit_two_hit`).
+- Match NCBI function names when porting (example: `s_BlastAaScanSubject` ->
+  `s_blast_aa_scan_subject`).
 - Keep NCBI terminology in comments: query_offset, subject_offset, context, frame.
 - Use `#[inline]` for hot-path functions; use `unsafe` only when necessary and
   always add safety comments.

@@ -379,24 +379,6 @@ fn x_tree_cells(initial: usize) -> usize {
 //                  break;
 //              status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
 // ```
-pub fn gapped(
-    batch: &PreparedQueryBatch,
-    parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject: &[u8],
-    initial: &[InitHsp],
-    xdrop: i32,
-) -> Result<Vec<PreliminaryHsp>> {
-    gapped_observed(
-        batch,
-        parameters,
-        options,
-        subject,
-        initial,
-        xdrop,
-        &mut |_, _| {},
-    )
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3909-3921
 // ```c++
 //       tmp_hsp.context = context;

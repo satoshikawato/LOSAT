@@ -7,6 +7,7 @@
 // ABI and WASI are high. The page compares the two.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { sha256Hex } from '../../../src/infra/browser/platform';
+import { InstanceUse } from '../../../src/infra/engine-worker/instance-use';
 import { ThreadHost } from '../../../src/infra/engine-worker/thread-host';
 import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../src/infra/reactor/abi';
 import type { MemoryLimits } from '../../../src/infra/reactor/artifact';
@@ -48,7 +49,14 @@ async function runMode(
   request: HighMemoryRequest,
 ): Promise<HighMemoryMode> {
   const { memory, maximumPages } = createSharedMemory(limits);
-  const host = new ThreadHost({ module, memory, maximumPages, faultChannel: request.faultChannel, keeperChannel: `${request.faultChannel}:keeper` });
+  const host = new ThreadHost({
+    module,
+    memory,
+    maximumPages,
+    faultChannel: request.faultChannel,
+    keeperChannel: `${request.faultChannel}:keeper`,
+    use: InstanceUse.create(),
+  });
   try {
     // As instantiateThreadedMain, keeping the exports for fillLow.
     const wasi = createWasi();

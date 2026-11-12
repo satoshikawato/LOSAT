@@ -43,11 +43,7 @@ const ISAM_STRING_TYPE: i32 = 2;
 /// built: makeblastdb does not set `eAddTrace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IsamType {
-    /// `ePig`: protein identifier groups, never filled from FASTA input.
-    #[expect(
-        dead_code,
-        reason = "ePig is never built from FASTA input; kept for its row of the s_IsamExtension port (writedb_isam.cpp:56-96)"
-    )]
+    /// `ePig`: protein identifier groups, never filled from FASTA input ([`PigIsam`]).
     Pig,
     /// `eGi`: the numeric index of the GIs.
     Gi,
@@ -242,14 +238,14 @@ impl IsamFiles {
     //     m_DFile->RenameFileIndex(num_digits);
     // }
     // ```
-    fn rename_single(&mut self) -> Result<(), WriteDbError> {
-        self.index.rename_single()?;
-        self.data.rename_single()
+    fn rename_single(&mut self) {
+        self.index.rename_single();
+        self.data.rename_single();
     }
 
-    fn rename_file_index(&mut self, num_digits: u32) -> Result<(), WriteDbError> {
-        self.index.rename_file_index(num_digits)?;
-        self.data.rename_file_index(num_digits)
+    fn rename_file_index(&mut self, num_digits: u32) {
+        self.index.rename_file_index(num_digits);
+        self.data.rename_file_index(num_digits);
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:819-825
@@ -274,6 +270,56 @@ impl IsamFiles {
     fn abandon(&mut self) {
         self.index.abandon();
         self.data.abandon();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:88-96,196-200,344-347,386-389
+// ```c++
+//         if (m_Protein) {
+//             m_PigIsam.Reset(new CWriteDB_Isam(ePig,
+//                                               dbname,
+//                                               protein,
+//                                               index,
+//                                               max_file_size,
+//                                               false));
+//         }
+// ...
+//         if (m_Protein && (! m_PigIsam->CanFit(1))) {
+// ...
+//             if (m_Protein) {
+//                 m_PigIsam->Close();
+//             }
+// ...
+//         if (m_Protein) {
+//             m_PigIsam->RenameSingle();
+//         }
+// ```
+/// `m_PigIsam` of a protein volume with indices: never filled from FASTA input, so its files
+/// (`.ppi`, `.ppd`) are never written; it takes part in the volume's fit check (`CanFit(1)`),
+/// and `RenameSingle` and `RenameFileIndex` rename a file of those names that is already there.
+#[derive(Debug)]
+pub(crate) struct PigIsam {
+    files: IsamFiles,
+}
+
+impl PigIsam {
+    pub(crate) fn new(dbname: &str, index: u32, max_file_size: u64) -> Self {
+        Self {
+            files: IsamFiles::new(IsamType::Pig, dbname, true, index, max_file_size),
+        }
+    }
+
+    /// `CanFit(1)` of an index that stays empty: 2 * 8 bytes against the file size limit.
+    pub(crate) fn can_fit(&self) -> bool {
+        16 < self.files.index.max_file_size()
+    }
+
+    pub(crate) fn rename_single(&mut self) {
+        self.files.rename_single();
+    }
+
+    pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
+        self.files.rename_file_index(num_digits);
     }
 }
 
@@ -1304,12 +1350,12 @@ impl StringIsam {
         self.files.close()
     }
 
-    pub(crate) fn rename_single(&mut self) -> Result<(), WriteDbError> {
-        self.files.rename_single()
+    pub(crate) fn rename_single(&mut self) {
+        self.files.rename_single();
     }
 
-    pub(crate) fn rename_file_index(&mut self, num_digits: u32) -> Result<(), WriteDbError> {
-        self.files.rename_file_index(num_digits)
+    pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
+        self.files.rename_file_index(num_digits);
     }
 
     pub(crate) fn list_files(&self, files: &mut Vec<String>) {
@@ -1466,12 +1512,12 @@ impl NumericIsam {
         self.files.close()
     }
 
-    pub(crate) fn rename_single(&mut self) -> Result<(), WriteDbError> {
-        self.files.rename_single()
+    pub(crate) fn rename_single(&mut self) {
+        self.files.rename_single();
     }
 
-    pub(crate) fn rename_file_index(&mut self, num_digits: u32) -> Result<(), WriteDbError> {
-        self.files.rename_file_index(num_digits)
+    pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
+        self.files.rename_file_index(num_digits);
     }
 
     pub(crate) fn list_files(&self, files: &mut Vec<String>) {

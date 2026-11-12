@@ -5,12 +5,15 @@
 //! The switch is read once per process, so every search runs in a child process: this test
 //! binary again, running only `child_search` with the variables of its arm (`BATCH_SIZE` makes
 //! small batches and `LOSAT_X_BPQBLOCK=1` closes a block at every batch end, so the fixture pair has
-//! three blocks or more). The child writes what the call wrote (each output, the warnings, the hit
-//! records as `Debug` text and the observer's ranges) to files and checks the observer's ranges
-//! against the outputs and the records (`assert_observer_ranges`, with each record's `q_idx`
-//! against the `qseqid` of its row). The parent compares the block search with the search of all
-//! queries (`LOSAT_X_BPQBLOCK=0`) and with the CLI run of each format, and counts the
-//! `[TIMING] blastp_total` lines (one per search of a query set) to tell whether the blocks ran.
+//! three blocks or more). The child searches through `LOSAT::api` (`run_collect`: the hit records
+//! and the observer, which the API gives `run_local`; `run`: neither) and writes what the call
+//! wrote (each output, the warnings, the hit records as `Debug` text and the ranges of the rows
+//! and sections) to files, after checking the ranges against the outputs and the records (each
+//! record's `q_idx` against the `qseqid` of its row). The parent compares the block search with
+//! the search of all queries (`LOSAT_X_BPQBLOCK=0`) and with the CLI run of each format, and
+//! counts the `[TIMING] blastp_total` lines (one per search of a query set) to tell whether the
+//! blocks ran. The calls of `run_local` with the observer alone or with `OutputSink::File` sinks
+//! have no spelling in the API, so this file no longer reaches them.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
 //! ```c++
@@ -28,12 +31,8 @@ mod run_local_support;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use run_local_support::{assert_observer_ranges, field, reader_records, run_formats, temp_path};
-use LOSAT::api::local_blast::{
-    run_local_blastp, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
-};
-use LOSAT::blastinput::fasta_reader::ReaderConfig;
-use LOSAT::cli::{try_parse_from, Cli, Commands};
+use run_local_support::{assert_observer_ranges, field, temp_path, Files};
+use LOSAT::api::{read_fasta, Program, Role};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
@@ -92,17 +91,15 @@ impl Drop for Inputs {
     }
 }
 
-/// What the call gives the caller besides the outputs.
+/// What the call gives the caller besides the outputs: `run` (no hit records, no observer) or
+/// `run_collect` (the hit records and the observer). The calls that `run_local` takes with the
+/// observer alone or with `OutputSink::File` sinks cannot be made through `LOSAT::api`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Observe {
     /// No hit records, no observer.
     Nothing,
     /// The hit records and the observer.
     Both,
-    /// The observer alone.
-    ObserverOnly,
-    /// Nothing, each output a file the call creates.
-    Files,
 }
 
 impl Observe {
@@ -110,8 +107,6 @@ impl Observe {
         match self {
             Observe::Nothing => "nothing",
             Observe::Both => "both",
-            Observe::ObserverOnly => "observer",
-            Observe::Files => "files",
         }
     }
 
@@ -119,8 +114,6 @@ impl Observe {
         match name {
             "nothing" => Observe::Nothing,
             "both" => Observe::Both,
-            "observer" => Observe::ObserverOnly,
-            "files" => Observe::Files,
             _ => panic!("observe {name}"),
         }
     }
@@ -261,18 +254,6 @@ fn without_timing(bytes: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Counts the events of an observer that comes without the hit records.
-struct CountingObserver(usize);
-
-impl FormatObserver for CountingObserver {
-    fn hsp_begin(&mut self, _format: usize, _hsp: HspIndex) {
-        self.0 += 1;
-    }
-    fn hsp_end(&mut self, _format: usize, _hsp: HspIndex) {
-        self.0 += 1;
-    }
-}
-
 /// `child_search`'s name in this test binary: the harness names a test by its module path below the
 /// crate root, which is `run_local_blastp_blocks::` when this file is a module of a suite binary.
 fn child_test_name() -> String {
@@ -296,123 +277,68 @@ fn child_search() {
     };
     let dir = Path::new(dir);
     let observe = Observe::parse(observe);
-    let queries = reader_records(Path::new(query), ReaderConfig::query("BLASTP", true, true));
-    let subjects = reader_records(
-        Path::new(subject),
-        ReaderConfig::subject("BLASTP", true, true),
-    );
-    let args = || {
-        let argv = [
-            "LOSAT",
-            "blastp",
-            "-query",
-            query,
-            "-subject",
-            subject,
-            "-evalue",
-            "0.001",
-            "-num_threads",
-            threads,
-        ];
-        let cli: Cli = try_parse_from(argv).expect("blastp argv");
-        match cli.command {
-            Commands::Blastp(args) => args,
-            _ => unreachable!("blastp subcommand"),
-        }
-    };
+    let (query, subject) = (Path::new(query), Path::new(subject));
+    let files = Files::new(Program::Blastp, query, subject);
+    let options = ["-evalue", "0.001", "-num_threads", threads];
     let write = |name: &str, bytes: &[u8]| std::fs::write(dir.join(name), bytes).expect(name);
-    if observe == Observe::Files {
-        let paths: Vec<PathBuf> = (0..formats.len())
-            .map(|index| dir.join(format!("out{index}")))
-            .collect();
-        let mut diagnostics = Vec::new();
-        {
-            let mut outputs = ReportOutputs {
-                formats: formats
-                    .iter()
-                    .zip(&paths)
-                    .map(|(&outfmt, path)| FormatOutput {
-                        outfmt,
-                        sink: OutputSink::File(path),
-                    })
-                    .collect(),
-                diagnostics: &mut diagnostics,
-                hits: None,
-                observer: None,
-            };
-            run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs).expect("run_local");
-        }
-        write("diagnostics", &diagnostics);
-        write("done", b"");
-        return;
-    }
-    if observe == Observe::ObserverOnly {
-        let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
-        let mut diagnostics = Vec::new();
-        let mut observer = CountingObserver(0);
-        {
-            let mut outputs = ReportOutputs {
-                formats: formats
-                    .iter()
-                    .zip(sinks.iter_mut())
-                    .map(|(&outfmt, sink)| FormatOutput {
-                        outfmt,
-                        sink: OutputSink::Writer(sink),
-                    })
-                    .collect(),
-                diagnostics: &mut diagnostics,
-                hits: None,
-                observer: Some(&mut observer),
-            };
-            run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs).expect("run_local");
-        }
-        assert!(observer.0 > 0, "the observer saw no HSP");
-        for (index, bytes) in sinks.iter().enumerate() {
+    if observe == Observe::Nothing {
+        let written = files.write(formats, &options);
+        written.result.expect("run");
+        for (index, bytes) in written.outputs.iter().enumerate() {
             write(&format!("out{index}"), bytes);
         }
-        write("diagnostics", &diagnostics);
+        write("diagnostics", &written.diagnostics);
         write("done", b"");
         return;
     }
-    let run = run_formats(formats, observe == Observe::Both, |outputs| {
-        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
-    });
-    if observe == Observe::Both && formats.starts_with(&WEB) {
-        assert_observer_ranges(&run, [0, 1, 2], &format!("blastp {formats:?} n{threads}"));
-        // Each record's query is the query of its outfmt 6 row (the first word of the fixture's
+    let run = files.collect(formats, &options);
+    let queries = read_fasta(
+        Program::Blastp,
+        Role::Query,
+        &std::fs::read(query).expect("query"),
+    )
+    .expect("query records");
+    if formats.starts_with(&WEB) {
+        // The rows and sections lie where the hit records say (`assert_observer_ranges`), and
+        // each record's query is the query of its outfmt 6 row (the first word of the fixture's
         // definition lines is the `qseqid`).
-        for &(hsp, start, end) in &run.ranges[1] {
-            let q_idx = run.hits[hsp].hit.q_idx as usize;
+        assert_observer_ranges(&run, [0, 1, 2], &format!("blastp {formats:?} n{threads}"));
+        for (hsp, span) in run.reports[1].spans.iter().enumerate() {
+            let span = span.clone().expect("a row");
+            let q_idx = run.hsps[hsp].q_idx;
             let title = String::from_utf8_lossy(&queries[q_idx].title).into_owned();
             assert_eq!(
-                field(&run.outputs[1][start..end], 0),
+                field(&run.reports[1].bytes[span], 0),
                 title.split_whitespace().next().expect("an id"),
                 "HSP {hsp}: q_idx {q_idx}"
             );
         }
-        let last = run.hits.last().expect("hits").hit.q_idx as usize;
+        let last = run.hsps.last().expect("hits").q_idx;
         assert!(
             last >= queries.len() / 2,
             "the hits must reach the later blocks (last q_idx {last} of {})",
             queries.len()
         );
     }
-    for (index, bytes) in run.outputs.iter().enumerate() {
-        write(&format!("out{index}"), bytes);
+    for (index, report) in run.reports.iter().enumerate() {
+        write(&format!("out{index}"), &report.bytes);
     }
     write("diagnostics", &run.diagnostics);
     write(
         "hits",
-        run.hits
+        run.hsps
             .iter()
             .map(|hit| format!("{hit:?}\n"))
             .collect::<String>()
             .as_bytes(),
     );
-    write(
-        "ranges",
-        format!("{:?}\n{:?}\n", run.ranges, run.subjects).as_bytes(),
-    );
+    let spans: Vec<_> = run.reports.iter().map(|report| &report.spans).collect();
+    let headings: Vec<_> = run
+        .reports
+        .iter()
+        .map(|report| &report.subject_headings)
+        .collect();
+    write("ranges", format!("{spans:?}\n{headings:?}\n").as_bytes());
     write("done", b"");
 }
 
@@ -496,12 +422,11 @@ fn calls_the_block_search_takes_and_does_not() {
             run.searches
         );
     }
-    // An observer without the hit records; several outputs that are not the caller's writers; an
-    // output the block search does not write (outfmt 15 and 16); the block search off (with one
-    // outfmt 6 output with the records and the observer, and with three outputs).
+    // An output the block search does not write (outfmt 15 and 16); the block search off (with one
+    // outfmt 6 output with the records and the observer, and with three outputs). (The calls with
+    // the observer alone and with outputs that are not the caller's writers cannot be made through
+    // `LOSAT::api`: `run_collect` gives the records with the observer, `run` neither.)
     for (formats, observe, extra) in [
-        (&WEB[..], Observe::ObserverOnly, None),
-        (&WEB[..], Observe::Files, None),
         (&["0", "6", "7", "15", "16"][..], Observe::Both, None),
         (&WEB[1..2], Observe::Both, Some(BLOCK_OFF)),
         (&WEB[..], Observe::Both, Some(BLOCK_OFF)),

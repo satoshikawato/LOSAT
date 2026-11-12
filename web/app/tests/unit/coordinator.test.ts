@@ -19,6 +19,7 @@ import type {
   ValidationResult,
 } from '../../src/ports/engine';
 import { DIAGNOSTICS_STREAM } from '../../src/ports/run-output';
+import { NodeInflater } from './support/node-inflater';
 
 const request: SearchRequest = {
   program: 'blastn',
@@ -34,6 +35,7 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
   const data = new DataService({
     store,
     scanner: new FakeScanner(),
+    inflater: new NodeInflater(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,

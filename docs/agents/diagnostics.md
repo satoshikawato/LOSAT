@@ -74,6 +74,8 @@ give.
 The variables of the diagnostic build (the entries marked "(diagnostic build)" below):
 
 ```text
+BLEMIR_DEBUG
+BLEMIR_DEBUG_WINDOW
 LOSAT_DEBUG_BLASTP_TRACE_HSP
 LOSAT_DEBUG_BLASTP_WSSV
 LOSAT_DEBUG_CHAINING
@@ -257,12 +259,16 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_BLASTX_WORKER_LOG=<file>` (cargo feature `blastx-worker-probe` only) the file that the
   probe appends its lines to (BLASTX's workers and every program's search pool); without it a run
   with `-num_threads` above 1 panics.
-- `BLEMIR_DEBUG=1` BLASTN lookup-table sizes and engine debug lines on stderr (any value turns it
-  on; `blastn/lookup.rs`, `blastn/blast_engine/run.rs`). Like `LOSAT_DEBUG_BLASTN`, it turns off the
-  streamed reports of BLASTN (`x_debug_output`); the report bytes do not change.
-  `BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end"` adds a `Focusing on window` line under
-  `BLEMIR_DEBUG` and filters no line; set on its own, it turns off some faster BLASTN paths
-  (`LOSAT_X_QGROUPPAR`, `LOSAT_X_DIAGLV`) without changing the report bytes.
+- `BLEMIR_DEBUG=1` (diagnostic build) BLASTN lookup-table sizes and engine debug lines on stderr
+  (any value turns it on; `blastn/lookup.rs`, `blastn/blast_engine/run.rs`). Like
+  `LOSAT_DEBUG_BLASTN`, it turns off the streamed reports of BLASTN (`x_debug_output`); the report
+  bytes do not change.
+  `BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end"` (diagnostic build) adds a `Focusing on
+  window` line under `BLEMIR_DEBUG` and filters no line; set on its own, it turns off some faster
+  BLASTN paths (`LOSAT_X_QGROUPPAR`, `LOSAT_X_DIAGLV`: the `diagnostics` fields and `x_lv_ref` of
+  `blastn/blast_engine/run.rs`) without changing the report bytes. Both are read through
+  `utils/xdiag.rs`: a build without the `diagnostics` feature ignores them, so they turn nothing
+  off there, and `main` writes the one notice line for each that is set.
 
 ## Performance switches (on by default)
 
@@ -4347,13 +4353,13 @@ Scheduling (each value computed by one thread with the original function; order 
   or several one at a time under `LOSAT_X_BNFEWSUBJ`): the preliminary gapped
   loop of a subject chunk and the traceback of the subject run per query on the search pool instead of on the thread
   that owns the subject over all queries in one order (`blastn/blast_engine/x_qgroup_par.rs`, dispatched in
-  `search_query_batch` for the preliminary loop and in `traceback_list::traceback_subject_hits` for the traceback). NCBI runs both loops of a subject on one thread with one interval tree
+  `prelim_hsp_list::gapped_hsp_list` for the preliminary loop and in `traceback_list::traceback_subject_hits` for the traceback). NCBI runs both loops of a subject on one thread with one interval tree
   (`blast_gapalign.c:3850,3917-3922`, `blast_traceback.c:375,404-405`); with one subject (`-subject` with one record,
   the loop's batches of a query file) the look-ahead helpers only computed alignments ahead of that loop, and the two
   loops with the purges and sorts around them were 57 % of a blastn batch's wall at 16 threads (5,000 and 31,168 cDNAs
   against 3 Mb of 2L; v4-D session 8 probe, `results/s8_probe_i9/REPORT.md`). Form: the chunk's ungapped hits are split
   by query in the order the seed stage saved them (a counting sort), each query task sorts its hits with the batch's
-  comparator (stable), runs the same loop body (the loop is a closure, `x_prelim_list`, called once on the owner with
+  comparator (stable), runs the same loop body (the loop is `prelim_hsp_list::gapped_score_list`, called once on the owner with
   the look-ahead helpers or once per query without them) and purges its list; the purged lists are concatenated in query
   order and sorted by score as before (rayon's stable `par_sort_by` on the search pool). The kept HSPs of the traceback
   are the queries' hit lists one after another, so each query's slice runs the traceback loop (`trace_hsp_list`, no
@@ -5287,7 +5293,7 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms.
 - `LOSAT_X_REDOCONTAINIDX=1` blastp, blastx and tblastn (speed; in the strict set from the pull request that added
   it, 2026-10-25; `=0` turns it off; `core/composition_adjustment/x_align_index.rs` `x_contains`, `x_add_distinct`,
-  `x_finish`, used by `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix_observed`): the
+  `x_finish`, used by `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix`): the
   composition-based redo of one match keeps, for each query, the alignments it has redone so far (NCBI's list
   `alignments[query_index]` of `Blast_RedoOneMatch`, newest first) and asks two questions of it for every HSP:
   whether the HSP is contained in an alignment that scores enough more (`s_IsContained`, `redo_alignment.c`
@@ -6184,7 +6190,7 @@ Scheduling (each value computed by one thread with the original function; order 
   at 8 threads (the default before both: 21 and 19 MiB).
 - TBXUNGAP (graduated 2026-10-26, in the set since 2026-10-18; no variable; always on, every target, the
   wasm32 builds (LOSAT Web) since 2026-10-19; the reference walks stay as the fallback below) the
-  two-hit ungapped extension (`extend_hit_two_hit`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
+  two-hit ungapped extension (`extend_hit_two_hit_with`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
   `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks) reads its scores from one 256 x 256 byte table
   (`q << 8 | s`, the scores of `get_score` for every two bytes, `BLAST_SCORE_MIN` stored as -128) and runs
   each walk in a function of its own (`tblastx/extension/x_two_hit_fast.rs`, exactness argument in its
@@ -6328,7 +6334,7 @@ Scheduling (each value computed by one thread with the original function; order 
   2 Ki letters or more):
   a hit that passes the two-hit test records its extension in a batch of 16, prefetches the query and
   subject lines the extension reads first and marks its cell (flag 1, the slot in `last_hit`); the
-  batch is resolved by `extend_hit_two_hit` when it is full and at the end of the unit, its init HSPs
+  batch is resolved by `extend_hit_two_hit_with` when it is full and at the end of the unit, its init HSPs
   saved in slot order, and a later hit on a marked cell resolves that one extension first. Each cell
   goes through the states of `scan_unit` in its order and the unit's list is the same element for
   element. The extension of a hit starts at a random position of the query group, so on a large query

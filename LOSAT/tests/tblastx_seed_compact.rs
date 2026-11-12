@@ -132,10 +132,11 @@ fn compact(stderr: &str) -> [u64; 4] {
     )
 }
 
-/// The bytes a record saves: the size of an `InitHSP` minus the 28 bytes of the record.
-fn saved_per_record() -> u64 {
-    (std::mem::size_of::<LOSAT::algorithm::tblastx::blast_gapalign::InitHSP>() - 28) as u64
-}
+/// The bytes a record saves: the size of an `InitHSP` (72 bytes) minus the 28 bytes of the
+/// record. The in-crate test `init_hsp_size_is_the_one_the_seed_compact_test_counts`
+/// (`src/algorithm/tblastx/init_hsp_size_tests.rs`) asserts that the engine's `InitHSP` has this
+/// size, so that a change of the struct fails there and names this constant.
+const SAVED_PER_RECORD: u64 = 44;
 
 /// Checks the counters of a search whose units took `subjects` subjects on the compact path, and
 /// that they are those of `[X_STATS] PAIRPAR` (one chunk per frame: every init HSP of a chunk
@@ -154,11 +155,7 @@ fn assert_compact_ran(stderr: &str, subjects: u64, what: &str) {
         "{what}:\n{stderr}"
     );
     assert!(units > 0 && records > 0, "{what}:\n{stderr}");
-    assert_eq!(
-        bytes_saved,
-        records * saved_per_record(),
-        "{what}:\n{stderr}"
-    );
+    assert_eq!(bytes_saved, records * SAVED_PER_RECORD, "{what}:\n{stderr}");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372

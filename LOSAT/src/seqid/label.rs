@@ -543,6 +543,18 @@ pub fn both_upper_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2086 (quoted at
+// `both_upper_version`): without `fLabel_UpperCase`, `eBoth` is the type, `|` and
+// `x_GetLabel_Content` (`label_content`).
+/// `GetLabel(eDefault, fLabel_Default)` (`eBoth` with `fLabel_Version`, not upper-cased):
+/// `lcl|Query_1`, `ref|NP_000549.1`, `gnl|CDD:1234`, `gi|123` (rpsbproc's query label,
+/// `CSeq_id::GetStringDescr(eFormat_BestWithVersion)`).
+pub fn both_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
+    out.extend_from_slice(FASTA_TAGS[usize::from(id.alternative())]);
+    out.push(b'|');
+    label_content(id, true, false, out);
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3416-3550
 // ```c++
 // string CSeq_id::ComposeOSLT(list<string>* secondary_id_list,

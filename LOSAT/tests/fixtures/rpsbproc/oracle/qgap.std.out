@@ -1,0 +1,42 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/qgap.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Standard
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	432	NP_418598.1 adenylosuccinate synthetase [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	503303	2	432	0	871.674	NF002223	PRK01117	-	-
+1	Query_1	Specific	439874	4	427	0	813.861	COG0104	PurA	-	-
+1	Query_1	Specific	513682	6	424	0	766.521	pfam00709	Adenylsucc_synt	-	-
+1	Query_1	Specific	197875	4	425	0	747.383	smart00788	Adenylsucc_synt	-	532181
+1	Query_1	Specific	272949	6	431	0	733.966	TIGR00184	purA	-	532181
+1	Query_1	Non-specific	178129	1	427	0	555.408	PLN02513	PLN02513	-	532181
+1	Query_1	Specific	349762	3	425	0	507.807	cd03108	AdSS	-	532181
+1	Query_1	Non-specific	509730	3	425	1.93177e-136	397.166	NF010355	PRK13783	-	-
+1	Query_1	Non-specific	509731	5	430	8.75909e-122	361.771	NF010357	PRK13785	-	-
+1	Query_1	Non-specific	504081	6	427	1.01103e-91	280.614	NF003295	PRK04293	-	-
+1	Query_1	Non-specific	468496	6	323	2.57348e-34	129.412	NF038379	amino_Aden_PurZ	-	-
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

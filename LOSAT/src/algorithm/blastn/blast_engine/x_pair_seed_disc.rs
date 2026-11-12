@@ -42,8 +42,9 @@
 //! 0, 1, 2, ... in that order go through `fold_two_hit`, a statement-for-statement copy of
 //! the two-hit diagonal-hash branch of `process_offset_pairs` (`run.rs`): the retrieve with
 //! `last_hit` and `hit_saved`, the `last_hit` test, the window test, `s_TypeOfWord` with and
-//! without `check_double`, the off-diagonal search, the ungapped extension, the cutoff,
-//! `ungapped_hits.push` and every diagonal-hash insert with its arguments. The owner sees
+//! without `check_double`, the off-diagonal search (`pair_extend::off_diagonal_found`), the
+//! ungapped extension, the cutoff, `ungapped_hits.push` and every diagonal-hash insert with its
+//! arguments. The owner sees
 //! the reference sequence of pairs and makes every state change with the same statements in
 //! the same order, so the hit list and the diagonal hash are the reference's whatever the
 //! number of threads and strips.

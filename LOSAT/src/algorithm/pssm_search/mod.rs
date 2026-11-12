@@ -24,6 +24,7 @@
 //!         sbp->kbp_gap = sbp->kbp_gap_psi;
 //! ```
 
+pub(crate) mod evalue;
 pub(crate) mod gapalign;
 pub(crate) mod lookup;
 pub(crate) mod prelim;

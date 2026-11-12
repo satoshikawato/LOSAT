@@ -271,11 +271,13 @@ impl EcvtDigits {
     }
 
     /// `*dec`: the decimal exponent of the first digit.
+    #[cfg(test)]
     pub fn dec(&self) -> i32 {
         self.dec
     }
 
     /// `*sign`: -1 or 1; 0 for +0 and for precision 0.
+    #[cfg(test)]
     pub fn sign(&self) -> i32 {
         self.sign
     }

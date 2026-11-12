@@ -153,8 +153,10 @@ pub trait SamLetters {
 }
 
 /// No letters (the specification has no `SQ`).
+#[cfg(test)]
 pub struct NoLetters;
 
+#[cfg(test)]
 impl SamLetters for NoLetters {
     fn letters(&mut self, _: SamRow, _: usize, _: usize, _: usize, _: &mut Vec<u8>) -> Result<()> {
         Ok(())

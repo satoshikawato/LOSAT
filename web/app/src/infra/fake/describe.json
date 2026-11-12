@@ -185,6 +185,11 @@
     "takes_value": true
    },
    {
+    "flag": "-window_masker_taxid",
+    "help": "Enable WindowMasker filtering using a Taxonomic ID",
+    "takes_value": true
+   },
+   {
     "flag": "-window_masker_db",
     "help": "Enable WindowMasker filtering using this repeats database.",
     "takes_value": true

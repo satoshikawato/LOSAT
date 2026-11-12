@@ -1,7 +1,7 @@
 id	design_ref	requirement	status	stages	verification
 REQ-01	§2.1 検索	BLASTN・BLASTP・BLASTX・TBLASTN・TBLASTX の5program。すべてにoutfmt 0相当の詳細アラインメント表示	initial	E1a E1b E1c E1d E2a-1 E2a-2 E2b SX W4	V-NAT V-ABI V-BR
 REQ-02	§2.1 入口	検索タブと結果タブ。NCBI Web BLASTに馴染みのある操作。UI・ヘルプ・エラーは英語	initial	W0 W3 W4	V-APP
-REQ-03	§2.1 入力	生配列／FASTAの貼り付け、FASTA・multi-FASTA（.gz と .zst の圧縮も読む。.bz2 は読まない、DW-45）、複数ファイル、ドラッグ＆ドロップ、アクセッション番号からの取得（設計 §13.4）	initial	W2 W3	V-APP
+REQ-03	§2.1 入力	生配列／FASTAの貼り付け、FASTA・multi-FASTA（.gz、.bz2、.zst の圧縮も読む、DW-45）、複数ファイル、ドラッグ＆ドロップ、アクセッション番号からの取得（設計 §13.4）	initial	W2 W3	V-APP
 REQ-04	§2.1 選択	配列種別とprogramは手動で選ぶ。BLASTNのtask選択。query側／subject側の遺伝暗号表	initial	W3	V-APP V-ABI
 REQ-05	§2.1 入力検証	元ヘッダーと大文字小文字を保持。重複IDは内部IDで区別。不正レコードは明示的に除外	initial	W2 W3	V-APP
 REQ-06	§2.1 入力検証	領域は座標入力とプレビュー選択で指定する。その役割のレコードが1つのときだけ指定でき、-query_loc / -subject_loc になる（計画 DW-9）。BLASTXも同じ（計画 DW-11、DW-39 で実施）	initial	E2d SX W3	V-NAT V-APP
@@ -23,5 +23,5 @@ REQ-21	§13, §13.4	研究データ（配列、ヘッダー、ファイル名、
 REQ-22	§9.4	Wake Lock（既定で有効。外す選択は手持ちの端末にだけ出す、計画 DW-41）、終了前の注意、スリープ／バックグラウンドの注意、復帰時の状態確認	initial	W3	V-APP
 REQ-23	§12.2	セッションの読み込みで検索を自動開始しない。元FASTAは明示的に選び直し、照合してからつなぎ直す	initial	W6	V-APP
 REQ-24	§2.2 後続	PWA（manifest は DW-50、アイコンは DW-44 で出した。Service Worker とアプリ内のインストールの案内はまだ）、複数レコードのドットプロット、次のqueryにする操作、逆相補化・表示方向の変更、環状境界をまたぐ抽出、短いquery向けの特別対応、高度なpause/resume、初回・更新時の自動試験	deferred	-	-
-REQ-25	§2.2 対象外	巨大公開DB、全ゲノム自動注釈、多重アラインメント、系統解析、クラウド同期、高度な図編集、GenBank/GFF3入力、bzip2（.bz2）圧縮FASTAの直接入力（.gz と .zst は REQ-03 で対象）、Query/Subject入替、gbdraw専用連携、自己ホスト用パッケージ、ネイティブ版	out-of-scope	-	-
+REQ-25	§2.2 対象外	巨大公開DB、全ゲノム自動注釈、多重アラインメント、系統解析、クラウド同期、高度な図編集、GenBank/GFF3入力、Query/Subject入替、gbdraw専用連携、自己ホスト用パッケージ、ネイティブ版	out-of-scope	-	-
 REQ-26	§2.2, §18	SVG/PNG、トラック、all-vs-all、外部API/SDK、実行差分比較、表示調整、元の核酸文字列の併記の時期、列とフィルターの完全な定義表	undecided	計画 §10	-

@@ -678,6 +678,12 @@ impl SearchPath {
         Self::new(&cwd, blastdb.as_deref(), registry)
     }
 
+    /// The search path that holds the current directory only (`SeqDb::open`: `BLASTDB` and
+    /// the registry are not consulted).
+    pub(crate) fn current_dir() -> Result<Self, SeqDbError> {
+        Self::new(&std::env::current_dir().unwrap_or_default(), None, None)
+    }
+
     /// The string NCBI names in its "No alias or index file found" message:
     /// the directories, each followed by the separator.
     pub fn as_str(&self) -> &str {
@@ -1757,11 +1763,13 @@ pub(super) fn resolve_in(
 /// Resolves the one database `db_base` (a path without extension, taken as
 /// it is): an alias file when `db_base.{p|n}al` exists, else the single
 /// volume `db_base.{p|n}in`. `local_copy` says where the volumes named in an
-/// alias file are looked for.
+/// alias file are looked for; `search` is the search path that a database which is not there
+/// names in NCBI's message (the files are looked for at `db_base` only).
 pub(super) fn resolve_one_name(
     db_base: &str,
     seqtype: SeqType,
     local_copy: LocalCopy<'_>,
+    search: &SearchPath,
 ) -> Result<AliasTree, SeqDbError> {
     let mut resolver = Resolver {
         seqtype,
@@ -1778,8 +1786,10 @@ pub(super) fn resolve_one_name(
     let db_base = fix_delimiters(db_base);
     if !exists(&resolver.alias_path(&db_base)) && !exists(&resolver.index_path(&db_base)) {
         return Err(SeqDbError::NotFound(format!(
-            "No alias or index file found for {} database [{db_base}].",
-            seqtype.name()
+            "No alias or index file found for {} database [{db_base}] in search path [{}]. \
+             Please verify the spelling of the BLAST database and its molecule type.",
+            seqtype.name(),
+            search.as_str()
         )));
     }
     let mut root = AliasNode::default();
@@ -1856,7 +1866,7 @@ pub(crate) fn find_volume_paths(
     db_base: &str,
     seqtype: SeqType,
 ) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
-    let tree = resolve_one_name(db_base, seqtype, LocalCopy::No)?;
+    let tree = resolve_one_name(db_base, seqtype, LocalCopy::No, &SearchPath::current_dir()?)?;
     let mut alias_files = std::collections::BTreeSet::new();
     collect_alias_files(&tree.root, &mut alias_files);
     Ok((tree.volumes, alias_files.into_iter().collect()))

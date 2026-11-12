@@ -15,10 +15,12 @@
 //! calls that the type writers make, with one implementation per format (`asn_text`,
 //! `json`, `asn_ber`); `seqalign` the Seq-annot of Seq-aligns of outfmt 8, 9 and 12 (`write_query`; the per-query
 //! step `write_query_to` and the hit-list loop `write_hit_list_seqaligns` that the programs share);
-//! `pssm` the `PssmWithParameters` of psiblast's `-out_pssm`.
+//! `pssm` the `PssmWithParameters` of psiblast's `-out_pssm`; `asn_text_reader` the lexical layer of
+//! NCBI's ASN.1 text object stream, which LOSAT's readers of ASN.1 text share.
 
 pub mod asn_ber;
 pub mod asn_text;
+pub(crate) mod asn_text_reader;
 pub mod encoder;
 pub mod json;
 pub mod pssm;
@@ -26,8 +28,10 @@ pub mod real;
 pub mod seqalign;
 pub mod xml;
 
+pub use seqalign::SerialFormat;
 pub(crate) use seqalign::{write_hit_list_seqaligns, write_query_to};
-pub use seqalign::{write_query, SeqAlignError, SerialFormat};
+#[cfg(test)]
+pub use seqalign::{write_query, SeqAlignError};
 
 #[cfg(test)]
 mod asn_ber_tests;

@@ -28,17 +28,20 @@ import type {
   StoredResultsCheck,
 } from '../../ports/data';
 import type { HspRecord } from '../../ports/engine';
+import type { FileInflater } from '../../ports/inflate';
 import type { InputCheck, InputChecker } from '../../ports/input-check';
 import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from '../../ports/run-output';
 import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
-import { compressionOfName, inflateFile, refusedCompressionOfName } from './inflate';
+import { inflateFile } from './inflate';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
   readonly scanner: RecordScanner;
+  /** The engine's inflation of a file named `.gz`, `.bz2` or `.zst`, for addSource. */
+  readonly inflater: FileInflater;
   /** The engine's reading of an input (`register`), for checkInput. */
   readonly checker: InputChecker;
   /** Lower-case hex SHA-256. */
@@ -113,11 +116,7 @@ export class DataService implements DataGateway {
 
   async addSource(file: File): Promise<SourceRef> {
     if (!(file instanceof Blob)) throw new TypeError('a source must be a File');
-    const refused = refusedCompressionOfName(file.name);
-    if (refused !== undefined) {
-      throw new Error(`'${file.name}' is named ${refused}; the web app reads .gz and .zst, not bzip2 (the command line does)`);
-    }
-    if (compressionOfName(file.name) !== undefined) file = await inflateFile(file);
+    file = await inflateFile(file, this.deps.inflater);
     const sourceId = this.deps.newToken();
     this.sources.set(sourceId, file);
     return { sourceId, name: file.name, size: file.size };

@@ -1,5 +1,5 @@
 // Which sources of the data layer the search draft still uses (SURVEY #15). The Data worker
-// keeps a source (its File: a pasted text, or the inflated bytes of a .gz or .zst, are held in
+// keeps a source (its File: a pasted text, or the inflated bytes of a .gz, .bz2 or .zst, are held in
 // memory) and every record table made of it until it is told to drop them. The holders:
 // - the form: the sources that its cards show (both FASTA reader kinds of a source share its id);
 // - an index that is still running, until its card shows the source;

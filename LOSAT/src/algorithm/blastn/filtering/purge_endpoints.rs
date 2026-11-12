@@ -1295,8 +1295,6 @@ pub struct ReevalParams {
     pub lambda: f64,
     pub k: f64,
     pub eff_searchsp: i64,
-    pub db_len: usize,
-    pub db_num_seqs: usize,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1864-1870
     // ```c
     // score = hsp->score;

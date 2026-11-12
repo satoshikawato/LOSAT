@@ -691,6 +691,7 @@ impl SegMasker {
     }
 
     /// Create a SEG masker with default parameters (window=12, locut=2.2, hicut=2.5)
+    #[cfg(test)]
     pub fn with_defaults() -> Self {
         Self::new(12, 2.2, 2.5)
     }

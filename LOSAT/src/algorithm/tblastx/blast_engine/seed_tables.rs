@@ -305,7 +305,7 @@ pub(super) fn seed_batch<S: TbxScore>(
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the reference frame loops' extensions may take the walks
-    // the sentinels stop (not with the debug output of `extend_hit_two_hit`); another matrix's
+    // the sentinels stop (not with the debug output of `extend_hit_two_hit_fitting`); another matrix's
     // need its byte table (`TbxScore::x_sent_walks`).
     let tbx_sent = sc.x_sent_walks()
         && !extension_debug_enabled

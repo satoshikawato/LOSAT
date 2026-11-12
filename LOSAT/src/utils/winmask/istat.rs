@@ -59,11 +59,6 @@ pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
     discover(&mut file)
 }
 
-/// [`discover_stat_type`] on an opened file or an in-memory copy of one.
-pub fn discover_stat_type_in<R: Read + Seek>(r: &mut R) -> Result<StatFile, WinMaskError> {
-    discover(r)
-}
-
 /// Where NCBI's counts readers throw the format errors that LOSAT's readers report: the
 /// message, and the place that the `T0` line of NCBI's exception report names
 /// (`WinMaskError::create_report`).

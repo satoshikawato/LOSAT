@@ -1,10 +1,11 @@
-//! The shared BLASTX entry `run_local` writes outfmt 0, 6 and 7 from one search. Every format
-//! must be byte-identical to the CLI run that requests only that format and to the frozen NCBI
-//! BLAST+ 2.17.0 bytes (`outfmt0_manifest.tsv`), the warnings must be written once, as the CLI
-//! writes them to standard error, and the observer must report the exact bytes of every HSP in
-//! every format. The records are those of NCBI's reader (`fasta_reader`), which LOSAT Web
-//! registers; the CLI reads with BLASTX's own reader, so the two readers are compared over the
-//! FASTA-input fixtures too.
+//! The shared BLASTX entry `run_local` (which `LOSAT::api` calls) writes outfmt 0, 6 and 7 from
+//! one search. Every format must be byte-identical to the CLI run that requests only that format
+//! and to the frozen NCBI BLAST+ 2.17.0 bytes (`outfmt0_manifest.tsv`), the warnings must be
+//! written once, as the CLI writes them to standard error, and the api's ranges must be those of
+//! every HSP in every format. The records are those of NCBI's reader (`fasta_reader`), which
+//! LOSAT Web registers; the CLI reads with BLASTX's own reader, so the two readers are compared
+//! over the FASTA-input fixtures too. The entry's own contract (its observer, its refusals, its
+//! typed errors) is checked in the crate, `LOSAT/src/api/local_blast_tests/blastx.rs`.
 
 mod run_local_support;
 
@@ -12,15 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, assert_tabular_ranges, cli_out_path, fixture_sequence,
-    run_formats_with, temp_path, Run,
+    assert_observer_ranges, cli_out_path, fixture_sequence, temp_path, Files, Written,
 };
-use LOSAT::algorithm::blastx::BlastxArgs;
-use LOSAT::api::local_blast::{
-    run_local_blastx, with_run_pool, FormatOutput, OutputSink, ReportOutputs,
-};
-use LOSAT::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
-use LOSAT::cli::{try_parse_from, Cli, Commands};
+use LOSAT::api::{Error, Outcome, Program};
 
 const FORMATS: [&str; 3] = ["0", "6", "7"];
 
@@ -29,73 +24,8 @@ fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Parses the BLASTX options. `query` and `subject` are display names only.
-fn blastx_args(query: &str, subject: &str, extra: &[&str]) -> BlastxArgs {
-    let mut argv = vec!["losat", "blastx", "-query", query, "-subject", subject];
-    argv.extend_from_slice(extra);
-    let cli: Cli = try_parse_from(argv).expect("blastx argv");
-    match cli.command {
-        Commands::Blastx(args) => args,
-        _ => unreachable!("blastx subcommand"),
-    }
-}
-
-/// The records of a FASTA file as NCBI's reader reads it, or its error.
-fn records(path: &Path, config: ReaderConfig) -> Result<Vec<FastaRecord>, String> {
-    let file = std::fs::File::open(path).expect("FASTA");
-    read_all(&mut FastaInputSource::from_file(file, config), &mut |_| {
-        Ok(())
-    })
-    .map_err(|error| format!("{error:?}"))
-}
-
-/// The queries as NCBI's nucleotide reader reads them (LOSAT Web's `register`).
-fn queries(path: &Path) -> Result<Vec<FastaRecord>, String> {
-    records(path, ReaderConfig::query("BLASTX", false, true))
-}
-
-/// The subjects as NCBI's protein reader reads them (LOSAT Web's `register`).
-fn subjects(path: &Path) -> Result<Vec<FastaRecord>, String> {
-    records(path, ReaderConfig::subject("BLASTX", true, true))
-}
-
-/// `run_local` over `queries` and `subjects` (shown as `inputs`' names), with a sink of its own for
-/// each format: the result, the outputs and the diagnostics.
-fn try_run(
-    inputs: &Inputs,
-    queries: &[FastaRecord],
-    subjects: &[FastaRecord],
-    formats: &[&str],
-    extra: &[&str],
-) -> (anyhow::Result<()>, Vec<Vec<u8>>, Vec<u8>) {
-    let mut sinks = vec![Vec::new(); formats.len()];
-    let mut diagnostics = Vec::new();
-    let result = {
-        let mut outputs = ReportOutputs {
-            formats: formats
-                .iter()
-                .zip(sinks.iter_mut())
-                .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
-                    sink: OutputSink::Writer(sink),
-                })
-                .collect(),
-            diagnostics: &mut diagnostics,
-            hits: None,
-            observer: None,
-        };
-        run_local_blastx(
-            blastx_args(&inputs.query, &inputs.subject, extra),
-            queries,
-            subjects,
-            &mut outputs,
-        )
-    };
-    (result, sinks, diagnostics)
-}
-
 /// The input paths of a run, as given to the CLI (relative to the crate's directory or
-/// absolute); `run_local` shows them as its display names.
+/// absolute); the api shows them as its display names.
 struct Inputs {
     query: String,
     subject: String,
@@ -113,23 +43,24 @@ impl Inputs {
         crate_dir().join(name)
     }
 
-    /// `run_local` with every format of `formats`.
-    fn run(&self, formats: &[&str], extra: &[&str], observe: bool) -> Run {
-        self.run_with(formats, extra, observe, observe)
+    /// `with` the files of the search, shown by the names that the CLI is given.
+    fn with_files<T>(&self, with: impl FnOnce(Files<'_>) -> T) -> T {
+        let (query, subject) = (Self::path(&self.query), Self::path(&self.subject));
+        let mut files = Files::new(Program::Blastx, &query, &subject);
+        files.names = Some((&self.query, &self.subject));
+        with(files)
     }
 
-    /// `run`, with the observer and the hit records requested apart.
-    fn run_with(&self, formats: &[&str], extra: &[&str], observe: bool, hits: bool) -> Run {
-        let queries = queries(&Self::path(&self.query)).expect("query records");
-        let subjects = subjects(&Self::path(&self.subject)).expect("subject records");
-        run_formats_with(formats, observe, hits, |outputs| {
-            run_local_blastx(
-                blastx_args(&self.query, &self.subject, extra),
-                &queries,
-                &subjects,
-                outputs,
-            )
-        })
+    /// The api's search of `formats` with the options `extra`: the reports, the records and the
+    /// warnings.
+    fn collect(&self, formats: &[&str], extra: &[&str]) -> Outcome {
+        self.with_files(|files| files.collect(formats, extra))
+    }
+
+    /// The api's search of `formats` with the options `extra`, with what the writers hold when it
+    /// fails.
+    fn write(&self, formats: &[&str], extra: &[&str]) -> Written {
+        self.with_files(|files| files.write(formats, extra))
     }
 
     /// The CLI run of one format: its exit status, output file and standard error.
@@ -221,16 +152,19 @@ impl Drop for Batches {
     }
 }
 
-/// Checks that one `run_local` call of outfmt 0, 6 and 7 equals the single-format CLI runs and,
-/// for inputs with hits, that its observer and hits agree with the reports.
+/// Checks that one api call of outfmt 0, 6 and 7 equals the single-format CLI runs and,
+/// for inputs with hits, that its ranges and hits agree with the reports.
 fn assert_matches_cli(inputs: &Inputs, extra: &[&str], hits: bool, context: &str) {
-    let together = inputs.run(&FORMATS, extra, true);
+    let together = inputs.collect(&FORMATS, extra);
     if hits {
         assert_observer_ranges(&together, [0, 1, 2], context);
     } else {
-        assert!(together.hits.is_empty(), "{context}: no hits");
+        assert!(together.hsps.is_empty(), "{context}: no hits");
         assert!(
-            together.ranges.iter().all(Vec::is_empty),
+            together
+                .reports
+                .iter()
+                .all(|report| report.spans.iter().all(Option::is_none)),
             "{context}: no ranges"
         );
     }
@@ -238,7 +172,7 @@ fn assert_matches_cli(inputs: &Inputs, extra: &[&str], hits: bool, context: &str
         let (ok, output, stderr) = inputs.cli(outfmt, extra);
         assert!(ok, "{context}: CLI outfmt {outfmt} failed");
         assert!(
-            together.outputs[index] == output,
+            together.reports[index].bytes == output,
             "{context}: outfmt {outfmt} differs from the CLI"
         );
         assert_eq!(
@@ -261,6 +195,9 @@ fn assert_matches_cli(inputs: &Inputs, extra: &[&str], hits: bool, context: &str
 // ...
 //         formatter.PrintEpilog(opt);
 // ```
+// The half of the test of this name in the crate (`local_blast_tests/blastx.rs`) checks the
+// observer's ranges against the entry's hit records; this half compares the reports and the
+// warnings with the CLI runs, and the api's ranges with its hit records.
 #[test]
 fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     let batches = Batches::new();
@@ -285,19 +222,9 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
             }
         }
     }
-    // The observer without the hit records numbers the HSPs of later batches on from those of
-    // the earlier ones, as with them; outfmt 0 need not come first.
-    let inputs = batches.inputs();
-    let tabular = inputs.run_with(&["6", "7"], &["-num_threads", "2"], true, false);
-    assert!(tabular.hits.is_empty());
-    let rows = assert_tabular_ranges(&tabular, 0, Some(1), "observer without hits");
-    let reordered = inputs.run(&["7", "0", "6"], &["-num_threads", "2"], true);
-    assert_observer_ranges(&reordered, [1, 2, 0], "outfmt 7, 0, 6");
-    assert_eq!(rows, reordered.hits.len());
-    assert!(tabular.ranges == [reordered.ranges[2].clone(), reordered.ranges[0].clone()]);
     // The second batch holds the reader's warnings: they come after the reports of the first
     // batch's queries (its query warnings), as the CLI writes them.
-    let run = batches.inputs().run(&["6"], &[], false);
+    let run = batches.inputs().collect(&["6"], &[]);
     let diagnostics = String::from_utf8_lossy(&run.diagnostics);
     let empty = diagnostics
         .find("Query_1 empty record")
@@ -315,6 +242,9 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 // ```
 // The pairwise report's counts differ by format: formats that need different hit lists are
 // searched by separate calls (LOSAT Web's search groups), which may share one pool.
+// The half of the test of this name in the crate checks that the entry refuses formats that need
+// different hit list sizes; this half compares the api, which splits them into searches itself,
+// with the CLI runs.
 #[test]
 fn display_counts_of_the_pairwise_report() {
     let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
@@ -326,35 +256,34 @@ fn display_counts_of_the_pairwise_report() {
         "-num_threads",
         "2",
     ];
-    let queries = queries(&Inputs::path(&inputs.query)).unwrap();
-    let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-    let (refused, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &FORMATS, &extra);
-    let error = refused.expect_err("formats with different hit list sizes are refused");
-    assert!(
-        error.to_string().contains("different hit list sizes"),
-        "{error}"
+    let (pairwise, tabular) = (
+        inputs.collect(&["0"], &extra),
+        inputs.collect(&["6", "7"], &extra),
     );
-    assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
-    let (pairwise, tabular) = with_run_pool(2, "BLASTX", || {
-        (
-            inputs.run(&["0"], &extra, false),
-            inputs.run(&["6", "7"], &extra, false),
-        )
-    });
     let (ok, output, stderr) = inputs.cli("0", &extra);
     assert!(ok);
-    assert!(pairwise.outputs[0] == output, "outfmt 0");
+    assert!(pairwise.reports[0].bytes == output, "outfmt 0");
     assert_eq!(pairwise.diagnostics, stderr, "outfmt 0 warnings");
     for (index, outfmt) in ["6", "7"].iter().enumerate() {
         let (ok, output, stderr) = inputs.cli(outfmt, &extra);
         assert!(ok);
-        assert!(tabular.outputs[index] == output, "outfmt {outfmt}");
+        assert!(tabular.reports[index].bytes == output, "outfmt {outfmt}");
         assert_eq!(tabular.diagnostics, stderr, "outfmt {outfmt} warnings");
     }
     assert!(
         String::from_utf8_lossy(&tabular.diagnostics).contains("-num_descriptions is ignored"),
         "the tabular formats' warning"
     );
+    // All three formats in one call: the api searches the pairwise format and the tabular ones
+    // apart, and the warnings are those of the tabular formats' search.
+    let all = inputs.collect(&FORMATS, &extra);
+    assert!(
+        all.reports[0].bytes == pairwise.reports[0].bytes,
+        "outfmt 0"
+    );
+    assert!(all.reports[1].bytes == tabular.reports[0].bytes, "outfmt 6");
+    assert!(all.reports[2].bytes == tabular.reports[1].bytes, "outfmt 7");
+    assert_eq!(all.diagnostics, tabular.diagnostics, "warnings");
 }
 
 /// The rows of `outfmt0_manifest.tsv` of BLASTX with outfmt 0, 6 or 7 (6 and 7 with custom fields
@@ -419,10 +348,10 @@ fn formats_of_one_search_equal_the_frozen_ncbi_rows() {
         let mut formats = vec![outfmt.as_str()];
         formats.extend(FORMATS.iter().filter(|&&f| f != outfmt));
         let inputs = Inputs::new(&query, &subject);
-        let run = inputs.run(&formats, &extra, false);
+        let run = inputs.collect(&formats, &extra);
         let expected = std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.out")))
             .expect("frozen NCBI output");
-        assert!(run.outputs[0] == expected, "{id}: differs from NCBI");
+        assert!(run.reports[0].bytes == expected, "{id}: differs from NCBI");
         if let Ok(stderr) =
             std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.err")))
         {
@@ -433,6 +362,23 @@ fn formats_of_one_search_equal_the_frozen_ncbi_rows() {
             );
         }
     }
+}
+
+/// Whether the CLI's standard error holds the api's error message: the api joins an error and its
+/// causes by `: `, the CLI writes `Error: ` and the error, then `Caused by:` and each cause on a
+/// line of its own, so every part of the message comes in the standard error, in order.
+fn error_is_in_stderr(message: &str, stderr: &[u8]) -> bool {
+    let stderr = String::from_utf8_lossy(stderr);
+    let mut from = 0;
+    message
+        .split(": ")
+        .all(|part| match stderr[from..].find(part) {
+            Some(at) => {
+                from += at + part.len();
+                true
+            }
+            None => false,
+        })
 }
 
 /// The FASTA-input fixtures that BLASTX can read: each nucleotide query file against the base
@@ -482,25 +428,25 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
         for extra in [&[][..], &["-lcase_masking"][..]] {
             let inputs = Inputs::new(&query, &subject);
             let (ok, output, stderr) = inputs.cli("6", extra);
-            let read = queries(&Inputs::path(&query))
-                .and_then(|q| subjects(&Inputs::path(&subject)).map(|s| (q, s)));
-            let (query_records, subject_records) = match read {
-                Ok(records) => records,
-                Err(error) => {
-                    // A first line that NCBI may fetch as a Seq-id: LOSAT Web's `register` refuses
-                    // it (NCBI's reader with its data loaders); BLASTX's reader reads the line.
-                    if query.contains("/seqid3.") || subject.contains("/seqid3.") {
-                        assert!(error.contains("data loader"), "{query} {subject}: {error}");
-                        continue;
-                    }
-                    if ok {
-                        differences.push(format!("{query} {subject} {extra:?}: reader {error}"));
-                    }
+            let run = inputs.write(&["6"], extra);
+            // The api reads the files before any report: a reader error comes with no output.
+            if let Err(Error::Input(error)) = &run.result {
+                // A first line that NCBI may fetch as a Seq-id: LOSAT Web's `register` refuses
+                // it (NCBI's reader with its data loaders); BLASTX's reader reads the line.
+                if query.contains("/seqid3.") || subject.contains("/seqid3.") {
+                    assert!(error.contains("data loader"), "{query} {subject}: {error}");
                     continue;
                 }
-            };
-            let (result, outputs, diagnostics) =
-                try_run(&inputs, &query_records, &subject_records, &["6"], extra);
+                if ok {
+                    differences.push(format!("{query} {subject} {extra:?}: reader {error}"));
+                }
+                continue;
+            }
+            let Written {
+                result,
+                outputs,
+                diagnostics,
+            } = run;
             if let Some(difference) = ReaderDifference::of(&query) {
                 difference.check(ok, &stderr, &result, &diagnostics, &query);
                 continue;
@@ -510,14 +456,14 @@ fn the_records_of_ncbis_reader_search_as_blastxs_reader_reads_them() {
                 Ok(()) => ok && outputs[0] == output && diagnostics == stderr,
                 Err(error) => {
                     !ok && diagnostics == stderr[..diagnostics.len().min(stderr.len())]
-                        && String::from_utf8_lossy(&stderr).contains(&error.to_string())
+                        && error_is_in_stderr(error.message(), &stderr)
                 }
             };
             if !same {
                 differences.push(format!(
-                    "{query} {subject} {extra:?}: CLI ok={ok} stderr={:?}; run_local {:?} diagnostics={:?}",
+                    "{query} {subject} {extra:?}: CLI ok={ok} stderr={:?}; the api {:?} diagnostics={:?}",
                     String::from_utf8_lossy(&stderr),
-                    result.as_ref().map_err(|e| e.to_string()),
+                    result.as_ref().map_err(|e| e.message()),
                     String::from_utf8_lossy(&diagnostics),
                 ));
             }
@@ -610,11 +556,11 @@ fn a_records_title_warning_follows_its_data_warnings() {
     )
     .expect("write subject");
     let inputs = Inputs::new(&query, &subject);
-    let run = inputs.run(&["6"], &[], false);
+    let run = inputs.collect(&["6"], &[]);
     let (ok, output, cli_stderr) = inputs.cli("6", &[]);
     let _ = std::fs::remove_file(&query);
     let _ = std::fs::remove_file(&subject);
-    assert!(ok && !output.is_empty() && run.outputs[0] == output);
+    assert!(ok && !output.is_empty() && run.reports[0].bytes == output);
     let ncbi = "CFastaReader: Hyphens are invalid and will be ignored around line 2
 FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 36
 FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?
@@ -654,7 +600,7 @@ impl ReaderDifference {
         &self,
         cli_ok: bool,
         cli_stderr: &[u8],
-        result: &anyhow::Result<()>,
+        result: &Result<(), Error>,
         diagnostics: &[u8],
         context: &str,
     ) {
@@ -668,178 +614,6 @@ impl ReaderDifference {
             }
         }
     }
-}
-
-/// The side files of outfmt 13 and 14 without a file name are refused, as are the ids of the
-/// deflines of records that kept none, before anything is written.
-#[test]
-fn refusals_come_before_any_output() {
-    let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
-    for (formats, extra) in [
-        (&["14"][..], &[][..]),
-        (&["6"][..], &["-parse_deflines"][..]),
-    ] {
-        let queries = queries(&Inputs::path(&inputs.query)).unwrap();
-        let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-        let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, formats, extra);
-        let error = result.expect_err("refused");
-        assert!(
-            error.to_string().contains("not supported in"),
-            "{formats:?} {extra:?}: {error}"
-        );
-        assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
-    }
-}
-
-/// `check_options` (LOSAT Web's `validate`) fails where a run of the same formats fails before it
-/// searches, with the run's error: LOSAT Web's refusals, LOSAT's BLASTX limits, formats that need
-/// different hit lists, and NCBI's errors of the options, among them the hit list size of each
-/// format (`-num_alignments 0` empties the tabular formats' list only).
-#[test]
-fn check_options_fails_as_a_run_does() {
-    let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
-    let queries = queries(&Inputs::path(&inputs.query)).unwrap();
-    let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-    let mut failed = 0;
-    for (formats, extra) in [
-        (&FORMATS[..], &[][..]),
-        (&["11"][..], &[][..]),
-        // NCBI's formatting handler: a custom delimiter that a field uses (W10).
-        (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
-        (&["6"][..], &["-parse_deflines"][..]),
-        // NCBI's error of a matrix BLASTX does not take (IDENTITY, `std_matrix_only`).
-        (&FORMATS[..], &["-matrix", "IDENTITY"][..]),
-        (&FORMATS[..], &["-evalue", "0"][..]),
-        (&FORMATS[..], &["-ungapped"][..]),
-        (&["6", "7"][..], &["-num_alignments", "0"][..]),
-        (&["0"][..], &["-num_alignments", "0"][..]),
-        (&["0", "6"][..], &["-num_alignments", "3"][..]),
-        // The ranges' syntax where the command line reads them: the subject range before the
-        // query range, both after LOSAT's limits and before NCBI's errors of the options.
-        (&FORMATS[..], &["-query_loc", "2-1"][..]),
-        (&FORMATS[..], &["-subject_loc", "abc"][..]),
-        (
-            &FORMATS[..],
-            &["-query_loc", "2-1", "-subject_loc", "5-1"][..],
-        ),
-        (
-            &FORMATS[..],
-            &["-subject_loc", "2-1", "-matrix", "IDENTITY"][..],
-        ),
-        (&FORMATS[..], &["-query_loc", "2-1", "-evalue", "0"][..]),
-        (
-            &FORMATS[..],
-            &["-query_loc", "1-100", "-subject_loc", "2-50"][..],
-        ),
-    ] {
-        let args = blastx_args(&inputs.query, &inputs.subject, extra);
-        let checked = LOSAT::algorithm::blastx::check_options(&args, formats)
-            .map_err(|error| format!("{error:#}"));
-        let (result, _, _) = try_run(&inputs, &queries, &subjects, formats, extra);
-        let run = result.map_err(|error| format!("{error:#}"));
-        assert_eq!(checked, run, "{formats:?} {extra:?}");
-        failed += usize::from(run.is_err());
-    }
-    // Every case but the three searches and the valid ranges fails.
-    assert_eq!(failed, 12);
-}
-
-/// Values that the command line's parser refuses and a caller of `run_local` can set itself get
-/// NCBI's errors of the options where NCBI's core checks them (blast_options.c:1312-1348 for the
-/// word size, :1510-1516 for the hit list size; blast_aux.cpp:662-673 for a task NCBI does not
-/// know, read in lower case), else LOSAT's refusal of what it does not run, instead of a search.
-#[test]
-fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
-    let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
-    let queries = queries(&Inputs::path(&inputs.query)).unwrap();
-    let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-    let cases: [(&str, fn(&mut BlastxArgs)); 11] = [
-        ("Word-size must be greater than zero", |a| {
-            a.word_size = Some(0)
-        }),
-        (
-            "Word-size must be less than 8 for a tblastn, blastp or blastx search",
-            |a| a.word_size = Some(8),
-        ),
-        (
-            "-word_size 4 is not supported by LOSAT's BLASTX (word sizes 3 and 5 are)",
-            |a| a.word_size = Some(4),
-        ),
-        ("No hits are being saved", |a| a.max_target_seqs = Some(-1)),
-        (
-            "the task blastp is not supported by LOSAT's BLASTX (use blastx or blastx-fast)",
-            |a| a.task = "blastp".into(),
-        ),
-        ("'blastz' is not a supported task", |a| {
-            a.task = "BLASTZ".into()
-        }),
-        ("Argument \"strand\". Illegal value", |a| {
-            a.strand = "up".into()
-        }),
-        (
-            "an -evalue that is not finite (inf) is not supported by LOSAT's BLASTX",
-            |a| a.evalue = f64::INFINITY,
-        ),
-        (
-            "the SEG locut or hicut \"+nan\" (not a finite decimal number) is not supported by LOSAT's BLASTX",
-            |a| a.seg = "12 +nan 2.5".into(),
-        ),
-        ("Invalid number of arguments to filtering option", |a| {
-            a.seg = "12 2.2".into()
-        }),
-        // The filtering handler comes before the query options handler.
-        ("Invalid number of arguments to filtering option", |a| {
-            a.seg = "12 2.2".into();
-            a.query_loc = Some("5-1".into());
-        }),
-    ];
-    for (message, set) in cases {
-        let mut args = blastx_args(&inputs.query, &inputs.subject, &[]);
-        set(&mut args);
-        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
-        let result = {
-            let mut outputs = ReportOutputs {
-                formats: vec![FormatOutput {
-                    outfmt: "6",
-                    sink: OutputSink::Writer(&mut sink),
-                }],
-                diagnostics: &mut diagnostics,
-                hits: None,
-                observer: None,
-            };
-            run_local_blastx(args, &queries, &subjects, &mut outputs)
-        };
-        let error = format!("{:#}", result.expect_err(message));
-        assert!(error.contains(message), "{message}: {error}");
-        assert!(sink.is_empty(), "{message}");
-    }
-    // The database entry checks the task first too (before the database is opened).
-    let mut args = blastx_args(&inputs.query, &inputs.subject, &[]);
-    args.db = Some("no_such_database".into());
-    args.task = "blastz".into();
-    let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
-    let result = {
-        let mut outputs = ReportOutputs {
-            formats: vec![FormatOutput {
-                outfmt: "6",
-                sink: OutputSink::Writer(&mut sink),
-            }],
-            diagnostics: &mut diagnostics,
-            hits: None,
-            observer: None,
-        };
-        LOSAT::api::local_blast::run_local_database_blastx(
-            args,
-            &queries,
-            LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
-            &mut outputs,
-        )
-    };
-    let error = format!("{:#}", result.expect_err("refused"));
-    assert!(
-        error.contains("'blastz' is not a supported task"),
-        "{error}"
-    );
 }
 
 /// A query whose first batch ends on its first record only when the batch counts the whole record:
@@ -895,7 +669,9 @@ fn short_subject_between_warnings() -> PathBuf {
 /// `-query_loc` and `-subject_loc` cut the records as the command line cuts them: the reports of
 /// the three formats from one search equal the CLI's of each format, with queries skipped or
 /// without letters in the range, subjects without letters, lower-case masks, the minus strand and
-/// queries of several batches, at 1, 2 and 4 threads.
+/// queries of several batches, at 1, 2 and 4 threads. The half of the test of this name in the crate
+/// checks the observer's ranges of the same cases; this half compares the reports and the
+/// warnings with the CLI runs, and the api's ranges with its hit records.
 #[test]
 fn ranges_cut_the_records_as_the_command_line_does() {
     let batches = Batches::new();
@@ -981,7 +757,9 @@ fn ranges_cut_the_records_as_the_command_line_does() {
 /// output and warnings: a subject whose interval starts past its end stops the reading of the
 /// subjects after its warnings, and a batch whose queries are all skipped is NCBI's `Empty
 /// CBlastQueryVector`, the first batch before any report, a later one after the reports of the
-/// earlier batches.
+/// earlier batches. The half of the test of this name in the crate checks that the entry's error
+/// is the typed `NativeError`; this half compares the partial output, the warnings and the message
+/// with the CLI runs (`Files::write`: the writers keep what was written before the error).
 #[test]
 fn errors_of_the_ranges_follow_the_command_line() {
     let batches = Batches::new();
@@ -1008,15 +786,16 @@ fn errors_of_the_ranges_follow_the_command_line() {
         for threads in ["1", "2", "4"] {
             let extra = [ranges, &["-num_threads", threads][..]].concat();
             let context = format!("{} {extra:?}", inputs.query);
-            let queries = queries(&Inputs::path(&inputs.query)).unwrap();
-            let subjects = subjects(&Inputs::path(&inputs.subject)).unwrap();
-            let (result, outputs, diagnostics) =
-                try_run(inputs, &queries, &subjects, &FORMATS, &extra);
+            let Written {
+                result,
+                outputs,
+                diagnostics,
+            } = inputs.write(&FORMATS, &extra);
             let error = result.expect_err(&context);
-            let native = error
-                .downcast_ref::<LOSAT::cli::NativeError>()
-                .unwrap_or_else(|| panic!("{context}: {error:#}"));
-            assert!(native.message.contains(message), "{context}: {error:#}");
+            assert!(
+                matches!(error, Error::Search(_)) && error.message().contains(message),
+                "{context}: {error}"
+            );
             for (index, outfmt) in FORMATS.iter().enumerate() {
                 let (ok, output, stderr) = inputs.cli(outfmt, &extra);
                 assert!(!ok, "{context}: the CLI of outfmt {outfmt} fails too");
@@ -1026,7 +805,7 @@ fn errors_of_the_ranges_follow_the_command_line() {
                 );
                 assert_eq!(
                     String::from_utf8_lossy(
-                        &[&diagnostics[..], native.message.as_bytes()].concat()
+                        &[&diagnostics[..], error.message().as_bytes()].concat()
                     ),
                     String::from_utf8_lossy(&stderr),
                     "{context}: outfmt {outfmt}'s warnings and error"
@@ -1189,17 +968,19 @@ fn environment_child() {
         return;
     };
     let inputs = Inputs::new("tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa");
-    let queries = queries(&Inputs::path(&inputs.query)).expect("query records");
-    let subjects = subjects(&Inputs::path(&inputs.subject)).expect("subject records");
-    let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &FORMATS, &[]);
+    let Written {
+        result,
+        outputs,
+        diagnostics,
+    } = inputs.write(&FORMATS, &[]);
     let written = match result {
         Ok(()) => [b"ok\n".to_vec(), outputs.concat(), diagnostics].concat(),
         Err(error) => {
             assert!(
                 outputs.iter().all(Vec::is_empty) && diagnostics.is_empty(),
-                "{error:#}"
+                "{error}"
             );
-            format!("refused: {error:#}\n").into_bytes()
+            format!("refused: {error}\n").into_bytes()
         }
     };
     std::fs::write(out, written).expect("write the child's file");

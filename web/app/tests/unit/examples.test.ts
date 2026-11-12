@@ -8,12 +8,15 @@ import { PROGRAMS, programById, sequenceKind } from '../../src/domain/programs';
 import { BrowserFileDownloader } from '../../src/infra/browser/example-downloader';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
+import { inflateFile } from '../../src/infra/data/inflate';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeDeletionChannel, FakeFileDownloader, FakeFileSaver, MemoryExampleStore } from '../../src/infra/fake/fake-examples';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { DownloadProgress, DownloadResult, ExampleDeletions, ExampleStore } from '../../src/ports/example';
+import type { WholeFileInflater } from '../../src/ports/inflate';
+import { NodeInflater } from './support/node-inflater';
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');
 const UNIPROT = exampleById('uniprot-ecoli-k12');
@@ -33,6 +36,7 @@ function setup(
   const data = new DataService({
     store: new MemoryBlockStore(),
     scanner: new FakeScanner(),
+    inflater: new NodeInflater(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,
@@ -117,7 +121,7 @@ describe('ExampleLoader', () => {
 
     examples.load('refseq-16s-bacteria');
     await settle();
-    expect(downloader.requests).toEqual([{ url: SIXTEEN_S.url, maxBytes: EXAMPLE_BYTE_LIMIT }]);
+    expect(downloader.requests).toEqual([{ url: SIXTEEN_S.url, maxBytes: EXAMPLE_BYTE_LIMIT, fileName: SIXTEEN_S.fileName }]);
     const state = draft.state.get();
     expect(state.query.paste).toBe(exampleQuery(SIXTEEN_S, 'blastn'));
     expect(state.subject.paste).toBe('');
@@ -382,30 +386,49 @@ describe('Example copies outside the browser (line WF-3)', () => {
 
 describe('BrowserFileDownloader', () => {
   const TEXT = '>a\nACGT\n'.repeat(1000);
-  const run = async (respond: () => Response | Promise<Response>, options: { maxBytes?: number; signal?: AbortSignal } = {}) => {
+  /**
+   * The Data worker's inflation as the page sees it: the path of a source (inflate.ts) over the
+   * Node double of the engine's decoders; the files it was given are recorded.
+   */
+  const recording = () => {
+    const given: Array<[string, number | undefined]> = [];
+    const inflater: WholeFileInflater = {
+      inflateFile: (file, maxBytes) => {
+        given.push([file.name, maxBytes]);
+        return inflateFile(file, new NodeInflater(), maxBytes);
+      },
+    };
+    return { inflater, given };
+  };
+  const run = async (
+    respond: () => Response | Promise<Response>,
+    options: { maxBytes?: number; signal?: AbortSignal; inflater?: WholeFileInflater } = {},
+  ) => {
     const calls: Array<[string, RequestInit | undefined]> = [];
     const progress: DownloadProgress[] = [];
+    const { inflater, given } = recording();
     const downloader = new BrowserFileDownloader({
+      inflater: options.inflater ?? inflater,
       fetch: async (input, init) => {
         calls.push([String(input), init]);
         return respond();
       },
     });
     const result = await downloader.download(
-      { url: 'https://ftp.ncbi.nlm.nih.gov/x.fna.gz', maxBytes: options.maxBytes ?? EXAMPLE_BYTE_LIMIT },
+      { url: 'https://ftp.ncbi.nlm.nih.gov/x.fna.gz', maxBytes: options.maxBytes ?? EXAMPLE_BYTE_LIMIT, fileName: 'x.fna' },
       (p) => progress.push(p),
       options.signal ?? new AbortController().signal,
     );
-    return { result, calls, progress };
+    return { result, calls, progress, given };
   };
   const text = async (result: DownloadResult) => {
     if (!result.ok) throw new Error(`expected a file, got ${JSON.stringify(result)}`);
     return result.data.text();
   };
 
-  it('decompresses a gzip body, reports the bytes against Content-Length, and sends no cookie or referrer', async () => {
+  it("inflates a gzip body with the engine's path in the Data worker, reports the bytes against Content-Length, and sends no cookie or referrer", async () => {
     const gz = gzipSync(TEXT);
-    const { result, calls, progress } = await run(
+    const { result, calls, progress, given } = await run(
       () =>
         new Response(gz, {
           headers: { 'Content-Length': String(gz.length), 'Last-Modified': 'Tue, 27 Oct 2026 12:04:14 GMT' },
@@ -413,15 +436,18 @@ describe('BrowserFileDownloader', () => {
     );
     expect(await text(result)).toBe(TEXT);
     expect(result).toMatchObject({ ok: true, downloadedBytes: gz.length, version: '2026-10-27' });
+    // The body is the set's file as its site names it.
+    expect(given).toEqual([['x.fna.gz', EXAMPLE_BYTE_LIMIT]]);
     expect(progress.at(-1)).toEqual({ bytes: gz.length, total: gz.length });
     expect(calls[0]![1]).toMatchObject({ credentials: 'omit', referrerPolicy: 'no-referrer' });
   });
 
-  it('keeps a body that is not gzip as it is, and names UniProt releases', async () => {
-    const { result, progress } = await run(() => new Response(TEXT, { headers: { 'X-UniProt-Release': '2026_03' } }));
+  it('keeps a body that is not gzip as it is, without the inflation, and names UniProt releases', async () => {
+    const { result, progress, given } = await run(() => new Response(TEXT, { headers: { 'X-UniProt-Release': '2026_03' } }));
     expect(await text(result)).toBe(TEXT);
     expect(result).toMatchObject({ version: 'UniProt release 2026_03' });
     expect(progress.at(-1)).toEqual({ bytes: TEXT.length });
+    expect(given).toEqual([]);
   });
 
   it('reports a status, a damaged gzip, a body too large and an unreachable site', async () => {
@@ -433,7 +459,15 @@ describe('BrowserFileDownloader', () => {
     const gz = gzipSync(TEXT);
     const cut = (await run(() => new Response(gz.subarray(0, gz.length - 20)))).result;
     expect(cut).toMatchObject({ ok: false, reason: 'corrupt' });
+    // The engine's sentence is the detail.
+    const sentence = "'x.fna.gz' is named .gz but is not gzip data (incomplete deflate stream); LOSAT reads a file named .gz through gzip";
+    const engine: WholeFileInflater = { inflateFile: () => Promise.reject(new Error(sentence)) };
+    expect((await run(() => new Response(gz), { inflater: engine })).result).toEqual({ ok: false, reason: 'corrupt', detail: sentence });
+    // Too large once inflated, and too large as it comes.
     expect((await run(() => new Response(gz), { maxBytes: 100 })).result).toEqual({ ok: false, reason: 'too-large' });
+    const large = await run(() => new Response(TEXT), { maxBytes: 100 });
+    expect(large.result).toEqual({ ok: false, reason: 'too-large' });
+    expect(large.given).toEqual([]);
     const away = await run(() => Promise.reject(new TypeError('Failed to fetch')));
     expect(away.result).toEqual({ ok: false, reason: 'unreachable', detail: 'Failed to fetch' });
     const broken = new ReadableStream<Uint8Array>({
@@ -445,7 +479,7 @@ describe('BrowserFileDownloader', () => {
     expect((await run(() => new Response(broken))).result).toEqual({ ok: false, reason: 'unreachable', detail: 'network error' });
   });
 
-  it('rejects when the user cancels', async () => {
+  it('rejects when the user cancels, during the download or during the inflation', async () => {
     const controller = new AbortController();
     const body = new ReadableStream<Uint8Array>({
       start(stream) {
@@ -460,5 +494,13 @@ describe('BrowserFileDownloader', () => {
       { signal: controller.signal },
     );
     await expect(pending).rejects.toThrow('cancelled');
+    const later = new AbortController();
+    const slow: WholeFileInflater = {
+      inflateFile: async (file, maxBytes) => {
+        later.abort(new DOMException('cancelled while inflating', 'AbortError'));
+        return inflateFile(file, new NodeInflater(), maxBytes);
+      },
+    };
+    await expect(run(() => new Response(gzipSync(TEXT)), { signal: later.signal, inflater: slow })).rejects.toThrow('cancelled while inflating');
   });
 });

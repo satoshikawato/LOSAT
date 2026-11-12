@@ -1288,7 +1288,7 @@ fn x_target_list(
     out.into_boxed_slice()
 }
 
-// `charsize` of the alphabet (`ilog2(alphabet_size) + 1`, cited at `get_charsize`). The T(s)
+// `charsize` of the alphabet (`ilog2(alphabet_size) + 1`, 5 for 28 letters). The T(s)
 // enumeration below takes the alphabet as constants: its loops are the lean build's hottest code,
 // and as arguments from two call sites (the pool's ranges, the serial pass) they cost BUSCO's
 // eukaryota set against a 108 kb database 0.88 G instructions of 14.7 G at one thread.
@@ -3600,7 +3600,6 @@ mod tests {
         for (a, b) in contexts.iter().zip(&ref_contexts) {
             assert!(
                 a.q_idx == b.q_idx
-                    && a.f_idx == b.f_idx
                     && a.frame == b.frame
                     && a.aa_seq == b.aa_seq
                     && a.aa_seq_nomask == b.aa_seq_nomask

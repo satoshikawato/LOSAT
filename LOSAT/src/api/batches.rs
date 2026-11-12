@@ -128,7 +128,7 @@ fn batch_sizes(command: &Commands, inputs: Inputs<'_>) -> anyhow::Result<BatchSi
         //             input.Reset(new CBlastInput(&*fasta, 1));
         // ```
         Commands::Psiblast(_) => BatchSizes::Fixed(1),
-        Commands::Rpsblast(_) | Commands::Makedb(_) => {
+        Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     })
@@ -263,7 +263,10 @@ impl Batches<'_> {
             Commands::Psiblast(args) => args.first_query_ordinal = range.start,
             // BLASTX's messages show the record's own id; rpsblast is refused by
             // `Program::parse`.
-            Commands::Blastx(_) | Commands::Rpsblast(_) | Commands::Makedb(_) => {}
+            Commands::Blastx(_)
+            | Commands::Rpsblast(_)
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => {}
         }
         let ordinals = searched_queries(query_range, inputs.query);
         let mut diagnostics = CountingWriter::new();

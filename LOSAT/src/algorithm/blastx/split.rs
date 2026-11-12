@@ -2,7 +2,7 @@
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
-    preliminary::{sort_by_score, PreliminaryHsp},
+    preliminary::PreliminaryHsp,
     query_setup::{prepare_queries, PreparedQueryBatch},
 };
 use crate::algorithm::blastn::query_split::{
@@ -271,6 +271,8 @@ pub fn validate_chunk_size(size: u64) -> Result<()> {
 // ```
 #[derive(Clone, Debug)]
 pub struct QueryChunk {
+    /// Read by the tests that check the split against NCBI's chunk bounds.
+    #[cfg(test)]
     pub range: Range<usize>,
     pub absolute_contexts: Vec<i32>,
     pub corrections: Vec<i32>,
@@ -497,6 +499,7 @@ pub fn split_queries(
     }
     if count == 1 {
         return Ok(vec![QueryChunk {
+            #[cfg(test)]
             range: 0..length,
             absolute_contexts: (0..full.contexts.len() as i32).collect(),
             corrections: vec![0; full.contexts.len()],
@@ -614,6 +617,7 @@ pub fn split_queries(
             })
             .collect();
         Ok(QueryChunk {
+            #[cfg(test)]
             range: start..end,
             absolute_contexts,
             corrections: vec![i32::MAX; 6],
@@ -845,69 +849,6 @@ fn absolute_length(chunks: &[QueryChunk], index: isize, absolute: i32) -> i32 {
         .unwrap_or(0)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:492-526
-// ```c++
-//        }
-//        fprintf(stderr, "\n");
-// #endif
-//
-//        for (j = 0; j < hitlist->hsplist_count; j++) {
-//            BlastHSPList *hsplist = hitlist->hsplist_array[j];
-//
-//            for (k = 0; k < hsplist->hspcnt; k++) {
-//                BlastHSP *hsp = hsplist->hsp_array[k];
-//                Int4 local_context = hsp->context;
-// #ifdef _DEBUG
-//                ASSERT(local_context <= max_ctx);
-//                ASSERT(local_context < num_ctx);
-//                ASSERT(local_context < num_ctx_offsets);
-// #endif
-//
-//                hsp->context = context_list[local_context];
-//                hsp->query.offset += offset_list[local_context];
-//                hsp->query.end += offset_list[local_context];
-//                hsp->query.gapped_start += offset_list[local_context];
-//                hsp->query.frame = BLAST_ContextToFrame(stream2->program,
-//                                                        hsp->context);
-//            }
-//
-//            hsplist->query_index = global_query;
-//        }
-//
-//        Blast_HitListMerge(results1->hitlist_array + i,
-//                           results2->hitlist_array + global_query,
-//                           contexts_per_query, split_points,
-//                           (Int4)SplitQueryBlk_GetChunkOverlapSize(squery_blk),
-//                           SplitQueryBlk_AllowGap(squery_blk));
-//    }
-//
-//    /* Sort to the canonical order, which the merge may not have done. */
-// ```
-pub fn adjust_chunk_hsps(hsps: &mut [PreliminaryHsp], chunk: &QueryChunk) -> Result<[i32; 6]> {
-    let mut points = [-1; 6];
-    for (c, &abs) in chunk.absolute_contexts.iter().enumerate() {
-        if abs >= 0 {
-            points[abs as usize % 6] = chunk.corrections[c];
-        }
-    }
-    for h in hsps {
-        let c = h.context;
-        let abs = chunk.absolute_contexts[c];
-        ensure!(abs >= 0, "HSP belongs to invalid split context");
-        let offset = chunk.corrections[c];
-        h.context = abs as usize;
-        h.q_start += offset;
-        h.q_end += offset;
-        h.q_gapped_start += offset;
-        h.frame = if abs % 6 < 3 {
-            (abs % 6 + 1) as i8
-        } else {
-            -((abs % 6 - 2) as i8)
-        };
-    }
-    Ok(points)
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531
 // ```c++
 // s_BlastMergeTwoHSPs(BlastHSP* hsp1, BlastHSP* hsp2, Boolean allow_gap)
@@ -973,189 +914,6 @@ pub(crate) fn merge_two(a: &mut PreliminaryHsp, b: &PreliminaryHsp) -> bool {
     }
     a.score = a.score.max((density * (a.q_end - a.q_start) as f64) as i32);
     true
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2911-3003
-// ```c++
-//    }
-//    else {            /* query seq is split */
-//
-//       /* An HSP can be a candidate for merging if it lies in the
-//          overlap region. Whether this is true depends on whether the
-//          HSP starts to the left of the split point, or ends to the
-//          right of the overlap region. A complication is that 'left'
-//          and 'right' have opposite meaning when the HSP is on the
-//          minus strand of the query sequence */
-//
-//       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
-//          hsp1 = combined_hsp_list->hsp_array[index1];
-//          offset_idx = hsp1->context % contexts_per_query;
-//          if (split_offsets[offset_idx] < 0) continue;
-//          if ((hsp1->query.frame >= 0 && hsp1->query.end >
-//                          split_offsets[offset_idx]) ||
-//              (hsp1->query.frame < 0 && hsp1->query.offset <
-//                          split_offsets[offset_idx] + chunk_overlap_size)) {
-//             /* At least part of this HSP lies in the overlap strip. */
-//             hsp_var = combined_hsp_list->hsp_array[hspcnt1];
-//             combined_hsp_list->hsp_array[hspcnt1] = hsp1;
-//             combined_hsp_list->hsp_array[index1] = hsp_var;
-//             ++hspcnt1;
-//          }
-//       }
-//       for (index2 = 0; index2 < hsp_list->hspcnt; index2++) {
-//          hsp2 = hsp_list->hsp_array[index2];
-//          offset_idx = hsp2->context % contexts_per_query;
-//          if (split_offsets[offset_idx] < 0) continue;
-//          if ((hsp2->query.frame < 0 && hsp2->query.end >
-//                          split_offsets[offset_idx]) ||
-//              (hsp2->query.frame >= 0 && hsp2->query.offset <
-//                          split_offsets[offset_idx] + chunk_overlap_size)) {
-//             /* At least part of this HSP lies in the overlap strip. */
-//             hsp_var = hsp_list->hsp_array[hspcnt2];
-//             hsp_list->hsp_array[hspcnt2] = hsp2;
-//             hsp_list->hsp_array[index2] = hsp_var;
-//             ++hspcnt2;
-//          }
-//       }
-//    }
-//
-//    /* the merge process is independent of whether merging happens
-//       between query chunks or subject chunks */
-//
-//    if (hspcnt1 > 0 && hspcnt2 > 0) {
-//       hspp1 = combined_hsp_list->hsp_array;
-//       hspp2 = hsp_list->hsp_array;
-//
-//       for (index1 = 0; index1 < hspcnt1; index1++) {
-//
-//          hsp1 = hspp1[index1];
-//
-//          for (index2 = 0; index2 < hspcnt2; index2++) {
-//
-//             hsp2 = hspp2[index2];
-//
-//             /* Skip already deleted HSPs, or HSPs from different contexts */
-//             if (!hsp2 || hsp1->context != hsp2->context)
-//                continue;
-//
-//             /* Short read qureies are shorter than the overlap region and may
-//                already have a traceback */
-//             if (short_reads) {
-//                 hspp2[index2] = Blast_HSPFree(hsp2);
-//                 continue;
-//             }
-//
-//             /* we have to determine the starting diagonal of one HSP
-//                and the ending diagonal of the other */
-//
-//             if (contexts_per_query < 0 || hsp1->query.frame >= 0) {
-//                end_diag = s_HSPEndDiag(hsp1);
-//                start_diag = s_HSPStartDiag(hsp2);
-//             }
-//             else {
-//                end_diag = s_HSPEndDiag(hsp2);
-//                start_diag = s_HSPStartDiag(hsp1);
-//             }
-//
-//             if (ABS(end_diag - start_diag) < OVERLAP_DIAG_CLOSE) {
-//                if (s_BlastMergeTwoHSPs(hsp1, hsp2, allow_gap)) {
-//                   /* Free the second HSP. */
-//                   hspp2[index2] = Blast_HSPFree(hsp2);
-//                }
-//             }
-//          }
-//       }
-//
-//       /* Purge the nulled out HSPs from the new HSP list */
-//       Blast_HSPListPurgeNullHSPs(hsp_list);
-//    }
-//
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2757-2770
-// ```c++
-//
-//    if (new_hspcnt >= hsp_list->hspcnt + combined_hsp_list->hspcnt) {
-//       /* All HSPs from both arrays are saved */
-//       for (index=combined_hsp_list->hspcnt, index1=0;
-//            index1<hsp_list->hspcnt; index1++) {
-//          if (hsp_list->hsp_array[index1] != NULL)
-//             combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
-//       }
-//       combined_hsp_list->hspcnt = new_hspcnt;
-//       Blast_HSPListSortByScore(combined_hsp_list);
-//    } else {
-//       /* Not all HSPs are be saved; sort both arrays by score and save only
-//          the new_hspcnt best ones.
-//          For the merged set of HSPs, allocate array the same size as in the
-// ```
-pub fn merge_chunk_hsps(
-    combined: &mut Vec<PreliminaryHsp>,
-    mut incoming: Vec<PreliminaryHsp>,
-    points: &[i32; 6],
-    overlap: i32,
-    max_hsps: usize,
-) {
-    if incoming.is_empty() {
-        return;
-    }
-    if combined.is_empty() {
-        *combined = incoming;
-        return;
-    }
-    let mut nold = 0;
-    for i in 0..combined.len() {
-        let h = &combined[i];
-        let point = points[h.context % 6];
-        if point >= 0
-            && (if h.frame >= 0 {
-                h.q_end > point
-            } else {
-                h.q_start < point + overlap
-            })
-        {
-            combined.swap(nold, i);
-            nold += 1;
-        }
-    }
-    let mut nnew = 0;
-    for i in 0..incoming.len() {
-        let h = &incoming[i];
-        let point = points[h.context % 6];
-        if point >= 0
-            && (if h.frame < 0 {
-                h.q_end > point
-            } else {
-                h.q_start < point + overlap
-            })
-        {
-            incoming.swap(nnew, i);
-            nnew += 1;
-        }
-    }
-    let mut removed = vec![false; incoming.len()];
-    for a in &mut combined[..nold] {
-        for (i, b) in incoming[..nnew].iter().enumerate() {
-            if removed[i] || a.context != b.context {
-                continue;
-            }
-            let (end_diag, start_diag) = if a.frame >= 0 {
-                (a.q_end - a.s_end, b.q_start - b.s_start)
-            } else {
-                (b.q_end - b.s_end, a.q_start - a.s_start)
-            };
-            if (end_diag - start_diag).abs() < 10 && merge_two(a, b) {
-                removed[i] = true;
-            }
-        }
-    }
-    combined.extend(
-        incoming
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, h)| (!removed[i]).then_some(h)),
-    );
-    sort_by_score(combined);
-    combined.truncate(max_hsps);
 }
 
 #[cfg(test)]

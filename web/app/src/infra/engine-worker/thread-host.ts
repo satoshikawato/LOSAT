@@ -17,7 +17,10 @@
 // pool spawns, and they cannot return while it waits, because the engine's thread library holds a
 // lock across `thread-spawn` that an ending thread needs (S09). A search of N threads therefore
 // has one set of N-1 thread workers, all ready before the search starts (`prepare`).
+import { growToMaximum } from '../reactor/shared-memory';
+import type { InstanceUse } from './instance-use';
 import {
+  SLOT_ENDED,
   SLOT_FAILED,
   SLOT_PREPARING,
   SLOT_READY,
@@ -39,6 +42,12 @@ export interface ThreadHostOptions {
   readonly faultChannel: string;
   /** BroadcastChannel name on which the main thread asks the keeper to grow the memory (memory-keeper.ts). */
   readonly keeperChannel: string;
+  /**
+   * The use count of the instance (instance-use.ts): each thread counts from its spawn until
+   * it returns, so that the Gateway does not end the runtime at once while a thread may grow
+   * the memory.
+   */
+  readonly use: InstanceUse;
   readonly createWorker?: () => Worker;
   /** Starts the keeper of the memory (tests may start a fake one). */
   readonly createKeeper?: () => Worker;
@@ -99,6 +108,8 @@ export class ThreadHost {
    * Gateway could not have the memory grown before it ends the runtime during the search.
    */
   async prepare(count: number): Promise<void> {
+    // A runtime that the Gateway ends starts no thread worker (runtime.ts, load).
+    if (this.options.use.retiring()) throw new ThreadHostError('the runtime is ending');
     const total = count;
     while (this.slots.length < total) this.slots.push(this.createSlot());
     const deadline = performance.now() + (this.options.readyTimeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -122,6 +133,8 @@ export class ThreadHost {
   readonly spawn = (startArg: number): number => {
     const slot = this.claim();
     if (slot === undefined) return -1;
+    // Counted before it can start; the thread worker counts it off when the thread returns.
+    this.options.use.startThread();
     const tid = this.nextTid++;
     const started = new Int32Array(new SharedArrayBuffer(4));
     const command: ThreadCommand = { type: 'start', tid, startArg, started: started.buffer as SharedArrayBuffer };
@@ -133,18 +146,48 @@ export class ThreadHost {
     const outcome = Atomics.compareExchange(started, 0, START_PENDING, START_ABANDONED);
     if (outcome === START_TAKEN) return tid;
     slot.error = `thread ${tid} did not start`;
-    Atomics.store(slot.state, 0, SLOT_FAILED);
+    this.options.use.endThread(slot.state, SLOT_FAILED);
     // The search cannot go on as the engine planned it; the main thread ends this runtime.
     this.fault({ type: 'fault', tid, message: `The engine stopped: thread ${tid} did not start in time` });
     return -1;
   };
 
-  /** Ends every thread worker and the keeper. */
-  terminate(): void {
+  /**
+   * Ends every thread worker and the keeper, and returns true; false, ending nothing, once the
+   * Gateway ends the runtime, which may be waiting for the keeper's answer (instance-use.ts).
+   * A thread that still runs may be growing the memory, and WebKit crashes the page when
+   * workers with instances on it end while a thread grows it (growToMaximum). The memory is
+   * then first grown to its maximum, where no thread can grow it, as the Gateway has the
+   * keeper do before it ends a runtime whose threaded instance is in use. A slot runs from its
+   * spawn until its thread returns, and a thread of a pool may not have returned when the
+   * search did (see above), for example when the next search of the runtime runs on the other
+   * module (runtime.ts, load). Such a thread cannot count itself off once its worker ends, so
+   * it is counted off here, after the grow. Once a thread has started here, the ending is
+   * itself a use, until every thread is counted off: a Gateway that ends the runtime meanwhile
+   * asks the keeper rather than ending it at once, and then the keeper stays. A thread starts
+   * only after `prepare`, so the keeper listens then; before, no thread is counted.
+   */
+  terminate(): boolean {
+    const { use } = this.options;
+    if (this.nextTid === 1) {
+      if (use.retiring()) return false;
+    } else {
+      if (!use.enter()) return false;
+      if (this.slots.some((slot) => Atomics.load(slot.state, 0) === SLOT_RUNNING)) {
+        try {
+          growToMaximum({ memory: this.options.memory, maximumPages: this.options.maximumPages });
+        } catch {
+          // The workers end all the same; the memory stays as it is (memory-keeper.ts).
+        }
+      }
+      for (const slot of this.slots) use.endThread(slot.state, SLOT_ENDED);
+      if (!use.leaveLast()) return false;
+    }
     for (const slot of this.slots.splice(0)) slot.worker.terminate();
     this.keeper.terminate();
     this.faults?.close();
     this.faults = undefined;
+    return true;
   }
 
   private fault(message: ThreadFault): void {
@@ -181,7 +224,8 @@ export class ThreadHost {
     };
     worker.onerror = (event) => {
       slot.error = `a thread worker failed: ${event.message}`;
-      Atomics.store(state, 0, SLOT_FAILED);
+      // An error that ended a thread that ran counts it off.
+      if (!this.options.use.endThread(state, SLOT_FAILED)) Atomics.store(state, 0, SLOT_FAILED);
     };
     const command: ThreadCommand = {
       type: 'prepare',
@@ -189,6 +233,7 @@ export class ThreadHost {
       memory: this.options.memory,
       slot: state.buffer as SharedArrayBuffer,
       faultChannel: this.options.faultChannel,
+      use: this.options.use.buffer,
     };
     worker.postMessage(command);
     return slot;

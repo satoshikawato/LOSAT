@@ -14,8 +14,10 @@
 //! `mdb_node_move`, `mdb_page_merge`, `mdb_update_key`, the rebalance of non-root pages,
 //! `MDB_WRITEMAP`, `MDB_NOMEMINIT`, `MDB_MULTIPLE`, `MDB_REVERSEKEY`, `MDB_INTEGERDUP`,
 //! sub-pages of non-`MDB_DUPFIXED` databases and the split of a LEAF2 page without
-//! `MDB_APPEND`. The lock file, the memory map and the syncs change no byte of the data file
-//! and are left out: clean pages are read back from the file instead of the map.
+//! `MDB_APPEND`. The memory map and the syncs change no byte of the data file and are left out:
+//! clean pages are read back from the file instead of the map. The lock file is created and
+//! removed as LMDB and the writers do, with the bytes of a lock file that was never used
+//! (`write_lock_file`).
 
 mod cursor;
 mod midl;
@@ -100,9 +102,6 @@ const MDB_LAST_ERRCODE: i32 = -30780;
 const EINVAL: i32 = 22;
 const EIO: i32 = 5;
 const ENOMEM: i32 = 12;
-/// `EISDIR` of Linux and macOS (an `errno` value; Windows reports a directory otherwise).
-#[cfg(unix)]
-const EISDIR: i32 = 21;
 /// Not an LMDB code: a path of mdb.c that makeblastdb does not reach and that is not
 /// ported; the name of the path is in `Env::unreachable`.
 const MDB_UNREACHABLE: i32 = -1_000_000;
@@ -419,6 +418,9 @@ enum Track {
 pub(crate) struct Env {
     file: File,
     path: PathBuf,
+    /// `<path>-lock`, removed when the environment is dropped. `None` until `create` has
+    /// finished: an environment whose open failed has no destructor to remove the file.
+    lock: Option<PathBuf>,
     psize: usize,
     me_flags: u32,
     mapsize: u64,
@@ -545,32 +547,20 @@ impl Env {
         // ...
         // 	rc = mdb_fopen(env, fname, MDB_O_LOCKS, mode, &env->me_lfd);
         // ```
-        // LMDB opens (creates) its lock file `<path>-lock` before the data file. LOSAT writes
-        // no lock file (PD-LOSAT-DATABASE-SEARCH); it asks the file system about that name
-        // without creating it, so that the open fails where LMDB's open of the lock file fails:
-        // a name the file system cannot hold (`ENAMETOOLONG`: with makeblastdb's `NAME.pdb`,
-        // an output name of 247 bytes and more where a file name has at most 255) or, on Unix,
-        // a directory of that name (`open` gives `EISDIR`), before the data file is made.
-        // makeblastdb removes a directory of that name with its contents before
-        // (`DeleteBlastDb`, `crate::writedb::dir_entry`), so the directory is one that could not
-        // be removed. On Windows LMDB's `CreateFileW` gives a Windows error code, not `EISDIR`,
-        // and that case is not checked (not compared with a makeblastdb run on Windows).
-        let mut lock = path.as_os_str().to_owned();
-        lock.push("-lock");
-        let lock = PathBuf::from(lock);
-        match std::fs::metadata(&lock) {
-            #[cfg(unix)]
-            Ok(meta) if meta.is_dir() => {
-                return Err(LmdbError::Mdb {
-                    func: "mdb_env_open",
-                    code: EISDIR,
-                })
-            }
-            Err(source) if source.kind() != std::io::ErrorKind::NotFound => {
-                return Err(LmdbError::Io { path: lock, source })
-            }
-            _ => {}
-        }
+        // LMDB opens (creates) its lock file `<path>-lock` before the data file; one that cannot
+        // be created stops `mdb_env_open` there (a name the file system cannot hold,
+        // `ENAMETOOLONG`: with makeblastdb's `NAME.pdb`, an output name of 247 bytes and more
+        // where a file name has at most 255; a directory of that name, which `open` refuses
+        // with `EISDIR`; makeblastdb removes a directory of that name with its contents before
+        // (`DeleteBlastDb`, `crate::writedb::dir_entry`), so the directory is one that could
+        // not be removed). The file stays when a later step of `mdb_env_open` fails (the data
+        // file that cannot be created): only the destructor of an environment that was opened
+        // removes it (`Env::drop`).
+        let lock = lock_path(path);
+        write_lock_file(&lock).map_err(|source| LmdbError::Io {
+            path: lock.clone(),
+            source,
+        })?;
         // The map size (`Uint8` in NCBI's layer) reaches LMDB as a `size_t`. A size the
         // platform's `size_t` cannot hold (a 32-bit platform) would be cut by that conversion;
         // LOSAT refuses it with the error the map of such a size gets (`ENOMEM`) instead, before
@@ -610,6 +600,7 @@ impl Env {
         let mut env = Env {
             file,
             path: path.to_path_buf(),
+            lock: None,
             psize,
             me_flags: MDB_NOSUBDIR | MDB_ENV_ACTIVE,
             mapsize: 0,
@@ -707,6 +698,8 @@ impl Env {
         env.maxfree_1pg = ((psize - PAGEHDRSZ) / 8) as i64 - 1;
         env.nodemax = (((psize - PAGEHDRSZ) / MDB_MINKEYS) & !1) - 2;
         env.maxpg = env.mapsize / psize as u64;
+        // `mdb_env_open` has succeeded: from here on the writer's destructor removes the file.
+        env.lock = Some(lock);
         Ok(env)
     }
 
@@ -1783,8 +1776,8 @@ impl Env {
         self.file.write_all(b)
     }
 
-    /// Close the environment (`mdb_env_close`, which writes nothing) and remove the lock
-    /// file as `CWriteDB_LMDB`/`CWriteDB_TaxID` do after it.
+    /// Close the environment (`mdb_env_close`, which writes nothing); the lock file goes
+    /// with it (`Env::drop`), as `CWriteDB_LMDB` and `CWriteDB_TaxID` remove it after it.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72
     // ```c++
     // CWriteDB_LMDB::~CWriteDB_LMDB()
@@ -1794,23 +1787,119 @@ impl Env {
     //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
     //     CFile(m_Db+"-lock").Remove();
     // ```
-    // LMDB's lock file holds only the reader table and the process id; LOSAT does not
-    // create it, and removes one left at the path so that the files are as makeblastdb
-    // leaves them. A lock file that LMDB could not create stops `Env::create` as it stops
-    // `mdb_env_open` (PD-LOSAT-DATABASE-SEARCH).
     pub(crate) fn close(mut self) -> Result<(), LmdbError> {
         self.txn_abort();
-        let flushed = self.file.flush();
-        let mut lock = self.path.clone().into_os_string();
-        lock.push("-lock");
-        let lock = PathBuf::from(lock);
-        // `CFile(name).Remove()`: `CDirEntry::Remove(eRecursive)`.
-        let _ = crate::writedb::dir_entry::remove(&lock);
-        flushed.map_err(|source| LmdbError::Io {
+        self.file.flush().map_err(|source| LmdbError::Io {
             path: self.path.clone(),
             source,
         })
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72,437-444
+// ```c++
+//     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
+//     CFile(m_Db+"-lock").Remove();
+// ```
+// The destructors of `CWriteDB_LMDB` and `CWriteDB_TaxID` remove the lock file whenever the
+// writer is destroyed, also when an exception of the build unwinds the stack; a writer whose
+// constructor did not finish (the data file that `mdb_env_open` could not create) has no
+// destructor, and its lock file stays (a data file that cannot be made, a header that cannot
+// be written, a file that cannot be given its length: probes of 2026-11-11 and 2026-11-12). An
+// `Env` that `create` has not finished (`lock` is `None`) is that writer: it removes nothing.
+// The removal is `CFile(name).Remove()`: `CDirEntry::Remove(eRecursive)`; its result is not
+// looked at. Where makeblastdb aborts instead of unwinding (a destructor that throws), it leaves
+// the lock files; LOSAT, which ends with an error there, removes them (PD-LOSAT-DATABASE-SEARCH).
+impl Drop for Env {
+    fn drop(&mut self) {
+        if let Some(lock) = &self.lock {
+            let _ = crate::writedb::dir_entry::remove(lock);
+        }
+    }
+}
+
+/// `<path>-lock`: LMDB's name of the lock file of a `MDB_NOSUBDIR` environment.
+// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:4160-4164
+// ```c
+// static const mdb_nchar_t *const mdb_suffixes[2][2] = {
+// 	{ MDB_NAME("/data.mdb"), MDB_NAME("")      },
+// 	{ MDB_NAME("/lock.mdb"), MDB_NAME("-lock") }
+// };
+// ```
+fn lock_path(path: &Path) -> PathBuf {
+    let mut lock = path.as_os_str().to_owned();
+    lock.push("-lock");
+    PathBuf::from(lock)
+}
+
+// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:4739-4800,4880-4915 (mdb_env_setup_locks)
+// ```c
+// 	rc = mdb_fopen(env, fname, MDB_O_LOCKS, mode, &env->me_lfd);
+// 	...
+// 	rsize = (env->me_maxreaders-1) * sizeof(MDB_reader) + sizeof(MDB_txninfo);
+// 	if (size < rsize && *excl > 0) {
+// 		if (ftruncate(env->me_lfd, rsize) != 0) goto fail_errno;
+// 	...
+// 		memset(env->me_txns->mti_rmutex, 0, sizeof(*env->me_txns->mti_rmutex));
+// 		memset(env->me_txns->mti_wmutex, 0, sizeof(*env->me_txns->mti_wmutex));
+// 		...
+// 		rc = pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+// 		if (!rc) rc = pthread_mutexattr_setrobust(&mattr, PTHREAD_MUTEX_ROBUST);
+// 		if (!rc) rc = pthread_mutex_init(env->me_txns->mti_rmutex, &mattr);
+// 		if (!rc) rc = pthread_mutex_init(env->me_txns->mti_wmutex, &mattr);
+// 		...
+// 		env->me_txns->mti_magic = MDB_MAGIC;
+// 		env->me_txns->mti_format = MDB_LOCK_FORMAT;
+// 		env->me_txns->mti_txnid = 0;
+// 		env->me_txns->mti_numreaders = 0;
+// ```
+// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:540,780-784 (MDB_MAGIC, MDB_LOCK_FORMAT)
+// ```c
+// #define MDB_MAGIC	 0xBEEFC0DE
+// #define MDB_LOCK_FORMAT \
+// 	((uint32_t) \
+// 	 ((MDB_LOCK_VERSION) \
+// 	  /* Flags which describe functionality */ \
+// 	  + (((MDB_PIDLOCK) != 0) << 16)))
+// ```
+/// The size of a new lock file: `(126 - 1) * sizeof(MDB_reader) + sizeof(MDB_txninfo)`,
+/// 125 reader slots of 64 bytes and a header of three 64-byte cache lines.
+const LOCK_FILE_SIZE: usize = 8192;
+
+/// The bytes of a lock file that no transaction has used, as makeblastdb 2.17.0 of the Linux
+/// x86-64 release (glibc, `MDB_USE_POSIX_MUTEX` with robust process-shared mutexes) leaves one
+/// whose environment did not finish opening (the data file or its header could not be written)
+/// and the one of an environment that no write transaction began (the same bytes in every run
+/// of the probes of 2026-11-11 and 2026-11-12). The lock file of an environment that was opened
+/// and then aborted holds more (`0x44` = 1 once a write transaction began, `0x30` = 1 after
+/// a commit); LOSAT ends an aborting build with an error and removes the file instead, so it
+/// never leaves those. The bytes are `mti_magic` and `mti_format` (`MDB_LOCK_VERSION` 1 in the
+/// low half, `MDB_PIDLOCK` in bit 16), and the `__kind` of the read mutex (offset 0x18) and of the write mutex (0x50), which is
+/// `PTHREAD_MUTEX_ROBUST_NORMAL_NP | PTHREAD_PROCESS_SHARED` (0x10 + 0x80). Every other byte is 0.
+/// Other platforms keep other things in the file (a macOS semaphore name, a Windows mutex
+/// name): their bytes are not compared (PD-LOSAT-DATABASE-SEARCH).
+fn lock_file_bytes() -> [u8; LOCK_FILE_SIZE] {
+    let mut bytes = [0u8; LOCK_FILE_SIZE];
+    bytes[0..4].copy_from_slice(&0xBEEF_C0DEu32.to_le_bytes());
+    bytes[4..8].copy_from_slice(&0x0001_0001u32.to_le_bytes());
+    bytes[0x18] = 0x90;
+    bytes[0x50] = 0x90;
+    bytes
+}
+
+/// `mdb_fopen(env, fname, MDB_O_LOCKS, 0664, ...)` and the initialisation of the lock region:
+/// the file is created (or an existing one opened) and holds the bytes of a new lock file.
+fn write_lock_file(lock: &Path) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o664);
+    }
+    let mut file = options.open(lock)?;
+    file.set_len(LOCK_FILE_SIZE as u64)?;
+    file.write_all(&lock_file_bytes())
 }
 
 /// The data of a put: bytes, or the size of an `MDB_RESERVE` item whose bytes the caller

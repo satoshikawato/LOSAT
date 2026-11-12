@@ -31,6 +31,24 @@ run:
 | `NCBI_CONFIG_PATH`, `NCBI`, `HOME`, `NCBI_DONT_USE_LOCAL_CONFIG` | Where the configuration files are looked for: the directories of `NCBI_CONFIG_PATH` if it is set (an empty element stands for the default path, and an empty `NCBI_CONFIG_PATH` means no directory); otherwise the current directory, the home directory, `NCBI`, `/etc` (the Windows directory on Windows) and the program's directories. `NCBI_DONT_USE_LOCAL_CONFIG` leaves out the current directory and the home directory. |
 | `NCBI_DONT_USE_NCBIRC`, `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` | Do not read `.ncbirc`. |
 
+## WindowMasker files of `blastn -window_masker_taxid`
+
+`blastn -window_masker_taxid <taxid>` masks the queries with the counts file `<directory>/<taxid>/wmasker.obinary`. LOSAT finds the directory as NCBI BLAST+ does, in this order: the first one that is set (an empty value too) wins, and an empty value or none means the current directory. With the taxid 0, no WindowMasker is used and no file is needed.
+
+| Variable or entry | Effect |
+| :--- | :--- |
+| `NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH` | The directory, before every other source. |
+| `WINDOW_MASKER_PATH` | The directory, after the variable above. |
+| `[WINDOW_MASKER] WINDOW_MASKER_PATH` in `.ncbirc` | The directory, after both variables: the first `.ncbirc` on the search path, also when `<program>.ini` sets `[NCBI] DONT_USE_NCBIRC`; `NCBI_DONT_USE_NCBIRC` and `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` skip it. `<program>.ini`'s entry is not read. |
+
+A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search with NCBI's error at the first query batch the file cannot mask (exit status 3). LOSAT refuses, before any output:
+
+- a counts file in the ascii or optimized ascii format there (NCBI BLAST+ reads them);
+- when `<program>.ini` turns `.ncbirc` off for the program, a `.ncbirc` that LOSAT does not read as NCBI BLAST+ does: a syntax error, a value with a backslash or a quote inside in any entry, a section or entry name NCBI BLAST+ does not accept, `[NCBI] .Inherits`;
+- a directory or path that is not UTF-8, and a current directory it cannot read.
+
+LOSAT Web refuses `-window_masker_taxid` other than 0.
+
 The home directory is `HOME` (an empty `HOME` means no home directory), or without `HOME` the
 account's home directory; on Windows it is `APPDATA`, else `USERPROFILE`. Without `HOME` and without an account
 entry for the user, NCBI BLAST+ looks the account up by the login name, which LOSAT cannot do, so
@@ -43,15 +61,16 @@ directory or on `PATH` when it has no directory, so a `blastn` shim's directory)
 the `losat` executable when it is another one (on Windows the directory of the `losat`
 executable).
 
-A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_LOADERS`, and
-`[NCBI] DONT_USE_NCBIRC` (in `<program>.ini` it skips `.ncbirc`), which LOSAT reads as NCBI
-BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
+A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_LOADERS`,
+`[NCBI] DONT_USE_NCBIRC` (in `<program>.ini` it skips `.ncbirc`) and `[WINDOW_MASKER]
+WINDOW_MASKER_PATH` (see above), which LOSAT reads as NCBI BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
 and `BLASTMAT`, `BLASTDB_NUCL_DATA_LOADER`, `BLASTDB_PROT_DATA_LOADER`, `IGDATA`,
 `BLAST_USAGE_REPORT` (a Boolean) and `[NCBI] DATA`, which change no output of LOSAT's programs. A
 file with any other entry, one that LOSAT cannot read, or one that NCBI BLAST+ reports as
 malformed, stops the run, and so does an `NCBI_CONFIG__<SECTION>__<NAME>` variable for another
-entry. A value with a backslash or a quote inside stops every program for `DATA_LOADERS`, a run
-that opens a database for `BLASTDB`, and `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
+entry. A value with a backslash or a quote inside stops every program for `DATA_LOADERS` and
+`WINDOW_MASKER_PATH`, a run that opens a database for `BLASTDB`, and `makeblastdb -parse_seqids`
+for `MAX_SEQID_LENGTH`.
 
 ## Variables that change a search or a report
 
@@ -60,11 +79,11 @@ These change the output as they change NCBI BLAST+'s output. They are not needed
 | Variable | Effect |
 | :--- | :--- |
 | `BATCH_SIZE` | The number of query letters searched together (NCBI's query batch). A value that is not an integer stops the run. `psiblast` searches one query at a time and does not read it, as in NCBI BLAST+. |
-| `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` | The length of the pieces a long query is split into, and their overlap. An empty value counts as unset; a value that is not an integer stops the run, and a non-integer `OVERLAP_CHUNK_SIZE` also stops `rpsblast`, where NCBI BLAST+ does not read it. With a translated query (`blastx`, `tblastx`) a chunk size that is not a multiple of 3 is NCBI's error `Split query chunk size must be divisible by 3` (exit status 3). Splitting values that NCBI BLAST+ does not search correctly are refused: a negative chunk size above a negative overlap, an overlap so close to the chunk size that NCBI splits a chunk again, and in blastx an overlap that is not a multiple of 3. |
+| `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` | The length of the pieces a long query is split into, and their overlap. An empty value counts as unset; a value that is not an integer stops the run. `rpsblast` never splits a query and, as NCBI BLAST+ does, does not read `OVERLAP_CHUNK_SIZE` (a non-integer value is ignored there; `CHUNK_SIZE` is still read). With a translated query (`blastx`, `tblastx`) a chunk size that is not a multiple of 3 is NCBI's error `Split query chunk size must be divisible by 3` (exit status 3). Splitting values that NCBI BLAST+ does not search correctly are refused: a negative chunk size above a negative overlap, an overlap so close to the chunk size that NCBI splits a chunk again, and in blastx an overlap that is not a multiple of 3. |
 | `ARCHIVE_FORMAT` | The encoding of `-outfmt 11`: unset or empty for text ASN.1, a value starting with `bin` (any case) for binary ASN.1, `xml` (any case) for XML; any other value writes no archive, as in NCBI BLAST+. |
 | `ADAPTIVE_CBS` | Any value, an empty one too, with composition-based statistics: `blastp`, `psiblast`, `rpsblast`, `blastx` and `tblastn` keep a larger preliminary hit list (1,500 subjects, or twice the hit list size and 50 more from a hit list size of 1,000), and with a hit list size (`-max_target_seqs`) below 1,000 all of them but `psiblast` cut that list by E-value before the final alignments, as NCBI BLAST+ does. The reported hits can grow or shrink. |
 | `CTOOLKIT_COMPATIBLE` | Any value: `-outfmt 0` writes `(bits)` in place of `(Bits)` above the hit list. |
-| `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx` and `tblastn` compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. `psiblast` and `rpsblast` refuse it (see [Variables that LOSAT refuses](#variables-that-losat-refuses)). |
+| `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx`, `tblastn` and `psiblast` (every round) compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. `rpsblast` refuses it (see [Variables that LOSAT refuses](#variables-that-losat-refuses)). |
 | `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not an integer stops the run (NCBI BLAST+ stops before its report), except when every format is `-outfmt 11`, which `psiblast` and `rpsblast` do not write. |
 
 ## makeblastdb
@@ -90,7 +109,7 @@ giving a different output.
 | Variable | Where | What it does in NCBI BLAST+ |
 | :--- | :--- | :--- |
 | `BL2SEQ_LEGACY` | a search with `-subject` | Searches each subject on its own and writes the legacy bl2seq report. |
-| `OLD_FSC` | `psiblast`, `rpsblast` | Computes E-values without the finite-size correction. |
+| `OLD_FSC` | `rpsblast` | Computes E-values without the finite-size correction. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` | the search programs, with a `-db` built with `-parse_seqids` | Changes which id of a sequence is shown. |
 | `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` (a non-empty value) | makeblastdb | Stores other titles for some FASTA definition lines (with a tab, a Ctrl-A, or white space at their ends). |
 | `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`, `[BLAST] MAX_SEQID_LENGTH` (a value other than 0 that NCBI converts) | `makeblastdb -parse_seqids` | Sets the longest Seq-id that makeblastdb parses. |

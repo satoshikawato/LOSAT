@@ -4,10 +4,6 @@
 
 use crate::stats::KarlinParams;
 
-/// NCBI BLAST_GAP_DECAY_RATE (ungapped search default)
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:68
-pub const BLAST_GAP_DECAY_RATE: f64 = 0.5;
-
 /// Parameters for HSP linking cutoffs
 /// These are the outputs from calculate_link_hsp_cutoffs_ncbi()
 #[derive(Debug, Clone, Copy)]
@@ -52,16 +48,6 @@ pub fn find_smallest_lambda_params(params_list: &[KarlinParams]) -> Option<Karli
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .cloned()
-}
-
-/// Find smallest Lambda value from a list of context parameters
-/// Returns the minimum lambda value (f64::MAX if list is empty or all invalid)
-pub fn find_smallest_lambda(params_list: &[KarlinParams]) -> f64 {
-    params_list
-        .iter()
-        .filter(|p| p.lambda > 0.0)
-        .map(|p| p.lambda)
-        .fold(f64::MAX, f64::min)
 }
 
 /// Compute NCBI-style average query length from nucleotide lengths

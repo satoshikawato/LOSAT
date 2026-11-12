@@ -5,24 +5,8 @@ use crate::algorithm::tblastx::constants::*;
 #[test]
 fn test_x_drop_constants() {
     // X-drop values should match NCBI BLAST protein defaults
-    // NCBI uses 7 bits and converts to raw score at runtime:
-    //   ceil(7 * ln(2) / lambda) = ceil(15.27...) = 16  (BLOSUM62 ungapped lambda≈0.3176)
-    assert_eq!(X_DROP_UNGAPPED, 16);
     assert_eq!(X_DROP_GAPPED_PRELIM, 15);
     assert_eq!(X_DROP_GAPPED_FINAL, 25);
-}
-
-#[test]
-fn test_stop_codon_encoding() {
-    // STOP_CODON should be 24 (index in NCBI matrix order: ARNDCQEGHILKMFPSTWYVBJZX*)
-    assert_eq!(STOP_CODON, 24);
-}
-
-#[test]
-fn test_gap_penalties() {
-    // Gap penalties should match NCBI BLAST protein defaults
-    assert_eq!(GAP_OPEN, -11);
-    assert_eq!(GAP_EXTEND, -1);
 }
 
 #[test]

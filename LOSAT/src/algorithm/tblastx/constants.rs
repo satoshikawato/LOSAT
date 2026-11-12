@@ -15,28 +15,11 @@
 /// We use the raw score value directly to match NCBI behavior.
 pub const X_DROP_UNGAPPED_BITS: f64 = 7.0;
 
-/// Pre-calculated X-drop raw score for ungapped protein alignments
-/// NCBI formula: ceil(7 bits * ln(2) / lambda) where lambda ≈ 0.3176 for BLOSUM62
-/// 7 * 0.693 / 0.3176 = 15.27 → ceil = 16
-/// Used directly in extension functions.
-pub const X_DROP_UNGAPPED: i32 = 16;
-
 /// BLAST_GAP_X_DROPOFF_PROT for preliminary extension
 pub const X_DROP_GAPPED_PRELIM: i32 = 15;
 
 /// BLAST_GAP_X_DROPOFF_FINAL_PROT for final traceback
 pub const X_DROP_GAPPED_FINAL: i32 = 25;
-
-/// Stop codon encoding - index 24 in NCBI BLAST matrix order (ARNDCQEGHILKMFPSTWYVBJZX*)
-/// BLOSUM62 gives stop codon scores of -4 vs other AAs, +1 vs itself
-pub const STOP_CODON: u8 = 24;
-
-/// Default gap penalties for protein alignments (BLOSUM62 defaults, NCBI compatible)
-/// BLAST_GAP_OPEN_PROT
-pub const GAP_OPEN: i32 = -11;
-
-/// BLAST_GAP_EXTN_PROT
-pub const GAP_EXTEND: i32 = -1;
 
 /// Minimum ungapped score threshold for keeping hits
 /// NCBI BLAST outputs down to bit score ~22.1, which corresponds to raw score ~46 for BLOSUM62.
@@ -44,12 +27,6 @@ pub const GAP_EXTEND: i32 = -1;
 /// Setting to 14 to capture more low-scoring hits that may be improved by sum-statistics linking.
 /// This matches the observed minimum score range (12-21) that was being filtered out.
 pub const MIN_UNGAPPED_SCORE: i32 = 14;
-
-/// NCBI BLAST cutoff E-value for TBLASTX ungapped extensions
-/// This is used to calculate the minimum score cutoff for extensions.
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:80
-/// #define CUTOFF_E_TBLASTX 1e-300
-pub const CUTOFF_E_TBLASTX: f64 = 1e-300;
 
 /// NCBI BLAST gap trigger bit score for protein searches
 /// HSPs with bit scores above this threshold are considered significant enough

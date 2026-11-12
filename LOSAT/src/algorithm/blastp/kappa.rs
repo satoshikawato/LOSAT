@@ -2269,7 +2269,6 @@ mod tests {
                 crate::core::composition_adjustment::redo_alignment::BlastCompoGappingParams {
                     gap_open: 11,
                     gap_extend: 1,
-                    decline_align: 0,
                     x_dropoff: 50,
                     context: std::cell::Cell::new(None),
                 },
@@ -2277,21 +2276,15 @@ mod tests {
                 crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode::CompositionMatrixAdjust,
             alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            unified_p: false,
             log_k: 0.0,
             score_divisor: 1.0,
-            restricted_alignment: false,
             smith_waterman: false,
-            is_same_adjustment: false,
             near_identical_cutoff: 0.0,
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: 80,
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 0,
-            cutoff_evalue: 10.0,
-            do_link_hsps: false,
         }
     }
 

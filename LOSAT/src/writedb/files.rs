@@ -233,57 +233,16 @@ impl WriteDbFile {
         let _ = std::fs::remove_file(&self.fname);
     }
 
-    // The error names both paths: the system's message does not say which
-    // of the two it is about (a destination that is a directory, a source
-    // that is gone).
-    // A file that was never created (an ISAM file without entries, a `.pog` of a volume
-    // without sequences) only changes its name; NCBI's `CDirEntry::Rename` of a missing
-    // file renames nothing.
-    fn rename_to(&mut self, new_name: String) -> Result<(), WriteDbError> {
-        if !self.created {
-            self.fname = new_name;
-            return Ok(());
-        }
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:2510-2559 (CDirEntry::Rename)
-        // ```c++
-        //     EType dst_type = dst.GetType();
-        //
-        //     // If destination exists...
-        //
-        //     if ( dst_type != eUnknown ) {
-        //         ...
-        //         // Overwrite destination entry
-        //         if ( F_ISSET(flags, fRF_Overwrite) ) {
-        //             if ( dst.Exists() ) {
-        //                 dst.Remove();
-        //             }
-        //         }
-        //     }
-        //
-        //     // On some platform rename() fails if destination entry exists,
-        //     // on others it can overwrite destination.
-        //     // For consistency return FALSE if destination already exists.
-        //     if ( dst.Exists() ) {
-        //         // this means Remove() has failed, and error is set already
-        //         LOG_ERROR(21, "CDirEntry::Rename(): Destination path exists: " + GetPath());
-        //         return false;
-        //     }
-        // ```
-        // With `fRF_Overwrite` an entry at the new name is removed first, with
-        // `CDirEntry::Remove(eRecursive)`: a directory of that name goes with its contents
-        // (makeblastdb 2.17.0 replaces a directory `NAME.pin` with the index file). A
-        // destination that stays makes the rename below fail, which LOSAT reports where
-        // makeblastdb, which does not check the result, goes on.
-        if std::fs::symlink_metadata(&new_name).is_ok() {
-            let _ = super::dir_entry::remove(Path::new(&new_name));
-        }
-        std::fs::rename(&self.fname, &new_name).map_err(|source| WriteDbError::Rename {
-            from: PathBuf::from(&self.fname),
-            to: PathBuf::from(&new_name),
-            source,
-        })?;
+    // `fn1.Rename(m_Fname, CDirEntry::fRF_Overwrite)` of `RenameSingle` and `RenameFileIndex`,
+    // after which `m_Fname` is the new name whether the rename worked or not: makeblastdb does
+    // not look at the result. A volume file whose destination cannot be freed stays under its
+    // old name (`CDirEntry::Rename`, `super::dir_entry::rename_overwrite`) and the build goes
+    // on; a source that does not exist (an ISAM file without entries, a `.pog` of a volume
+    // without sequences) renames nothing, and an existing file of that name that LOSAT never
+    // wrote is renamed as NCBI renames it.
+    fn rename_to(&mut self, new_name: String) {
+        let _ = super::dir_entry::rename_overwrite(Path::new(&self.fname), Path::new(&new_name));
         self.fname = new_name;
-        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:267-277
@@ -300,9 +259,9 @@ impl WriteDbFile {
     //     fn1.Rename(m_Fname, CDirEntry::fRF_Overwrite);
     // }
     // ```
-    pub(crate) fn rename_single(&mut self) -> Result<(), WriteDbError> {
+    pub(crate) fn rename_single(&mut self) {
         self.use_index = false;
-        self.rename_to(format!("{}.{}", self.base_name, self.extension))
+        self.rename_to(format!("{}.{}", self.base_name, self.extension));
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:279-304
@@ -339,9 +298,9 @@ impl WriteDbFile {
     // becomes `0005` and volume 123 becomes `00123`. For index 0 the
     // conversion of `log10(0) + 1` (minus infinity) to `unsigned int` gives 0
     // on the reference platform (x86-64), so volume 0 is renamed as well.
-    pub(crate) fn rename_file_index(&mut self, num_digits: u32) -> Result<(), WriteDbError> {
+    pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
         if orig_num_digits(self.index) == num_digits {
-            return Ok(());
+            return;
         }
         let zeros = "0".repeat(num_digits.saturating_sub(2) as usize);
         self.rename_to(format!(
@@ -350,7 +309,7 @@ impl WriteDbFile {
             self.index / 10,
             self.index % 10,
             self.extension
-        ))
+        ));
     }
 }
 

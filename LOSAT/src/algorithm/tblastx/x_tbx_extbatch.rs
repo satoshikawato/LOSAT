@@ -33,7 +33,7 @@
 //! frames do not fit the core's caches, those loads wait on memory. Here a hit that passes the
 //! test becomes a candidate: its inputs are recorded in a slot of a batch, the cache lines its
 //! extension reads first are prefetched, and its cell gets a pending mark. The batch is resolved,
-//! by `extend_hit_two_hit` (the function `x_hit` calls), when it holds `BATCH` candidates and at
+//! by `extend_hit_two_hit_fitting` (the function `x_hit` calls), when it holds `BATCH` candidates and at
 //! the end of the unit; until then the scan goes on, and the prefetched lines arrive meanwhile.
 //!
 //! The pending mark is `flag = 1` with the slot number (`0..BATCH`) in `last_hit`. A real cell
@@ -122,7 +122,7 @@ fn x_extbatch_units(min_ki: Option<usize>, mut spans: impl Iterator<Item = usize
     min_ki.is_some_and(|ki| spans.any(|span| span / 1024 >= ki))
 }
 
-/// One held-back extension: the inputs of `extend_hit_two_hit` and of the init HSP, then its
+/// One held-back extension: the inputs of `extend_hit_two_hit_fitting` and of the init HSP, then its
 /// result once resolved.
 #[derive(Clone, Copy, Default)]
 struct XCand {
@@ -182,7 +182,7 @@ impl XPendBatch {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605 (module doc)
 // The extension of one candidate and the cell write of `x_hit` (the statements after its call of
-// `extend_hit_two_hit`), the flag written with the value, since the cell holds the pending mark.
+// `extend_hit_two_hit_fitting`), the flag written with the value, since the cell holds the pending mark.
 /// Runs the extension of `c` and writes its cell as `x_hit` does (`SENT`: LOSAT_X_TBXUNGAPSENT, as
 /// in `x_hit`).
 ///
@@ -252,7 +252,7 @@ unsafe fn resolve<M: TbxScore, const SENT: usize>(
 }
 
 /// The result of `c`'s extension, (q_start, q_end, s_start, score, right_extend, s_last_off) of
-/// `extend_hit_two_hit`, into `c` and its cell, as `x_hit` writes them.
+/// `extend_hit_two_hit_fitting`, into `c` and its cell, as `x_hit` writes them.
 ///
 /// SAFETY: as `resolve`.
 #[inline(always)]
@@ -991,7 +991,7 @@ mod tests {
         assert!(!x_extbatch_units(Some(2), std::iter::empty()));
     }
 
-    // No NCBI counterpart: the batch resolution against `extend_hit_two_hit` on every candidate,
+    // No NCBI counterpart: the batch resolution against `extend_hit_two_hit_fitting` on every candidate,
     // with the cell writes and the init HSPs of `x_hit`, some candidates resolved early.
     #[test]
     fn batch_resolution_equals_extend_hit_two_hit() {

@@ -90,8 +90,8 @@ git diff --cached --name-only -z | xargs -0 -I{} sh -c 'printf "%s\t%s\n" "$(git
   prerelease created with `--latest=false`; download it back and compare sha256 before the
   commit that points at it. The evidence directory keeps `README.md` (release, asset, sha256,
   file count, bytes) and `MANIFEST.tsv` (path, bytes, sha256 per file). Creating the release
-  pushes a tag, which starts the push workflows filtered only by `paths:` (`web.yml`,
-  `benchmark-plots.yml`).
+  pushes a tag, which starts the push workflows filtered only by `paths:`
+  (`benchmark-plots.yml`).
 
 ## Finish
 

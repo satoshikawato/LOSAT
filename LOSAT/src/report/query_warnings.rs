@@ -95,6 +95,7 @@ impl QueryWarnings<'_> {
 ///
 /// `index` is the 0-based position of the query in the input; `program` is the lower-case
 /// program name that NCBI's diagnostics print (`[tblastn]`, `[blastn]`).
+#[cfg(test)]
 pub fn invalid_query_warning<R: InputRecord>(program: &str, index: usize, query: &R) -> Vec<u8> {
     query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
 }

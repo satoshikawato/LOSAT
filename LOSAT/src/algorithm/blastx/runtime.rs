@@ -161,12 +161,6 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     // ```
     fn restored(&mut self, _batch: &PreparedQueryBatch, _params: &[ContextParameters]) {}
 
-    fn matrix(
-        &mut self,
-        _oid: usize,
-        _event: crate::core::composition_adjustment::redo_alignment::BlastRedoTraceEvent<'_>,
-    ) {
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
     // ```c++
     // BlastCompo_HeapWouldInsert(BlastCompo_Heap * self,
@@ -368,9 +362,7 @@ fn x_speculate_match(
     X_REDO_PROBE.with(|probe| probe.set(0));
     let encoded = subjects.read_encoded(list.oid).ok()?;
     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
-    let redone = worker
-        .redo_list_observed(&input, batch, &encoded, &mut |_| {})
-        .ok()?;
+    let redone = worker.redo_list_observed(&input, batch, &encoded).ok()?;
     let probe = X_REDO_PROBE.with(|probe| probe.get());
     if probe & 2 != 0 {
         return None;
@@ -1955,10 +1947,7 @@ impl PreliminarySink for Runtime<'_> {
                     let x_t = super::x_timing::lap();
                     let encoded = self.subjects.read_encoded(list.oid)?;
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
-                    let redone =
-                        state.redo_list_observed(&input, batch, &encoded, &mut |event| {
-                            self.observer.matrix(list.oid, event)
-                        })?;
+                    let redone = state.redo_list_observed(&input, batch, &encoded)?;
                     let finalized = finalize_redone(
                         &redone,
                         batch,

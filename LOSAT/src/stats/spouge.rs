@@ -24,7 +24,11 @@ use super::tables::KarlinParams;
 #[derive(Debug, Clone, Copy)]
 pub struct BlastGumbelBlk {
     pub lambda: f64,
+    // `C` and `G`: read by the tests that compare the table with NCBI's (`b`, `beta` and `tau`
+    // are made from `G` once).
+    #[cfg(test)]
     pub c: f64,
+    #[cfg(test)]
     pub g: f64,
     pub a: f64,
     pub alpha: f64,
@@ -84,7 +88,9 @@ pub fn lookup_protein_gumbel_params(
     let alpha_un = ungapped.0[9];
     Some(BlastGumbelBlk {
         lambda: row.0[3],
+        #[cfg(test)]
         c: row.0[8],
+        #[cfg(test)]
         g,
         a,
         alpha,

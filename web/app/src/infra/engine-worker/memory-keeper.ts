@@ -1,9 +1,9 @@
 // The keeper of the threaded instance's shared memory (thread-host.ts makes one for each
 // memory): a worker of the Engine worker that holds the memory and runs nothing else, so that
 // it can grow the memory while the Engine worker and the thread workers run a search. Before
-// the Gateway ends the Engine worker during a search (a cancel, a thread that reports a
-// fault), it asks the keeper on a BroadcastChannel to grow the memory to its maximum
-// (gateway.ts, retire; growToMaximum).
+// the Gateway ends the Engine worker while its threaded instance is in use (a cancel, a thread
+// that reports a fault; instance-use.ts), it asks the keeper on a BroadcastChannel to grow the
+// memory to its maximum (gateway.ts, retire; growToMaximum).
 //
 // The main thread does not hold the memory itself. A thread that is sent a shared memory keeps
 // it until that thread collects the message. In WebKit 26.5 (Playwright's build on Linux), a
@@ -30,7 +30,13 @@ export class MemoryKeeper {
     this.channel = channel;
     channel.onmessage = (event: MessageEvent<KeeperGrow>) => {
       if (event.data?.type !== 'grow') return;
-      growToMaximum(shared);
+      try {
+        growToMaximum(shared);
+      } catch {
+        // The Gateway ends a runtime whose threaded instance is in use only on the answer
+        // (gateway.ts, retire), so it comes also then; the memory stays as it is, as when the
+        // browser cannot give its maximum.
+      }
       const grown: KeeperGrown = { type: 'grown' };
       channel.postMessage(grown);
     };

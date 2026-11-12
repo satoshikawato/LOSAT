@@ -71,7 +71,7 @@ export function createApp(options: AppOptions = {}): App {
     now: () => performance.now(),
   });
   const examples = new ExampleLoader({
-    downloader: new BrowserFileDownloader(),
+    downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
     draft,
     deletions: browserExampleDeletions(),

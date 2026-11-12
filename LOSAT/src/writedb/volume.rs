@@ -6,7 +6,7 @@ use super::files::{
     make_short_name, orig_num_digits, DbVersion, HeaderFile, IndexFile, OffsetArrays, SequenceFile,
 };
 use super::id_set::LabelSet;
-use super::isam::{GiIndex, IsamType, NumericIsam, StringIsam, StringIsamScratch};
+use super::isam::{GiIndex, IsamType, NumericIsam, PigIsam, StringIsam, StringIsamScratch};
 use super::WriteDbError;
 use crate::seqid::{label, ParsedSeqId};
 
@@ -40,9 +40,8 @@ pub(crate) struct IndexScratch {
 /// indices (`m_Indices != eNoIndex`).
 #[derive(Debug)]
 struct VolumeIndices {
-    /// `m_PigIsam` (protein only): never filled from FASTA input, its files are never
-    /// written; only its `CanFit(1)` takes part in the volume's fit check.
-    pig_max_file_size: Option<u64>,
+    /// `m_PigIsam` (protein only).
+    pig: Option<PigIsam>,
     /// `m_GiIsam`.
     gi: NumericIsam,
     /// `m_AccIsam` (version 4 only).
@@ -204,11 +203,7 @@ impl Volume {
             } = scratch;
             id_set.clear();
             VolumeIndices {
-                pig_max_file_size: protein.then_some(if max_file_size == 0 {
-                    1000 * 1000 * 1000 - 1
-                } else {
-                    max_file_size
-                }),
+                pig: protein.then(|| PigIsam::new(dbname, index, max_file_size)),
                 gi: NumericIsam::new(IsamType::Gi, dbname, protein, index, max_file_size),
                 acc: (version != DbVersion::V5).then(|| {
                     StringIsam::new(IsamType::Acc, dbname, protein, index, max_file_size, acc)
@@ -412,8 +407,7 @@ impl Volume {
             {
                 overfull = true;
             }
-            // `m_PigIsam->CanFit(1)` of an index that stays empty: 2 * 8 bytes.
-            if indices.pig_max_file_size.is_some_and(|max| 16 >= max) {
+            if indices.pig.as_ref().is_some_and(|pig| !pig.can_fit()) {
                 overfull = true;
             }
             if indices.hash.as_ref().is_some_and(|hash| !hash.can_fit(1)) {
@@ -570,23 +564,26 @@ impl Volume {
     //         }
     //     }
     // ```
-    // The files of the PIG index are never created; renaming them changes nothing.
-    pub(crate) fn rename_single(&mut self) -> Result<(), WriteDbError> {
+    // The files of the PIG index are never created; a file of their names that is there
+    // is renamed all the same.
+    pub(crate) fn rename_single(&mut self) {
         self.vol_name = self.dbname.clone();
-        self.idx.file_mut().rename_single()?;
-        self.hdr.file_mut().rename_single()?;
-        self.seq.file_mut().rename_single()?;
+        self.idx.file_mut().rename_single();
+        self.hdr.file_mut().rename_single();
+        self.seq.file_mut().rename_single();
         if let Some(indices) = &mut self.indices {
-            indices.gi.rename_single()?;
-            if let Some(acc) = &mut indices.acc {
-                acc.rename_single()?;
+            if let Some(pig) = &mut indices.pig {
+                pig.rename_single();
             }
-            indices.gi_index.file_mut().rename_single()?;
+            indices.gi.rename_single();
+            if let Some(acc) = &mut indices.acc {
+                acc.rename_single();
+            }
+            indices.gi_index.file_mut().rename_single();
             if let Some(hash) = &mut indices.hash {
-                hash.rename_single()?;
+                hash.rename_single();
             }
         }
-        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:419-428
@@ -624,10 +621,10 @@ impl Volume {
     //         }
     //     }
     // ```
-    pub(crate) fn rename_file_index(&mut self, num_digits: u32) -> Result<(), WriteDbError> {
-        self.idx.file_mut().rename_file_index(num_digits)?;
-        self.hdr.file_mut().rename_file_index(num_digits)?;
-        self.seq.file_mut().rename_file_index(num_digits)?;
+    pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
+        self.idx.file_mut().rename_file_index(num_digits);
+        self.hdr.file_mut().rename_file_index(num_digits);
+        self.seq.file_mut().rename_file_index(num_digits);
         if self.index == 0 || orig_num_digits(self.index) < num_digits {
             let index_filename = self.idx.file().filename();
             if let Some(t) = index_filename.rfind('.') {
@@ -635,16 +632,18 @@ impl Volume {
             }
         }
         if let Some(indices) = &mut self.indices {
-            indices.gi.rename_file_index(num_digits)?;
-            if let Some(acc) = &mut indices.acc {
-                acc.rename_file_index(num_digits)?;
+            if let Some(pig) = &mut indices.pig {
+                pig.rename_file_index(num_digits);
             }
-            indices.gi_index.file_mut().rename_file_index(num_digits)?;
+            indices.gi.rename_file_index(num_digits);
+            if let Some(acc) = &mut indices.acc {
+                acc.rename_file_index(num_digits);
+            }
+            indices.gi_index.file_mut().rename_file_index(num_digits);
             if let Some(hash) = &mut indices.hash {
-                hash.rename_file_index(num_digits)?;
+                hash.rename_file_index(num_digits);
             }
         }
-        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:461-465

@@ -546,7 +546,6 @@ mod tests {
     fn make_context() -> QueryContext {
         QueryContext {
             q_idx: 0,
-            f_idx: 0,
             frame: 1,
             aa_seq: vec![0, 1, 1, 1, 1, 1, 0],
             aa_seq_nomask: None,
@@ -691,7 +690,6 @@ mod tests {
         let contexts = vec![
             QueryContext {
                 q_idx: 0,
-                f_idx: 0,
                 frame: 1,
                 aa_seq: vec![0, 1, 1, 1, 1, 1, 0],
                 aa_seq_nomask: None,
@@ -703,7 +701,6 @@ mod tests {
             },
             QueryContext {
                 q_idx: 1,
-                f_idx: 0,
                 frame: 1,
                 aa_seq: vec![0, 1, 1, 1, 1, 1, 0],
                 aa_seq_nomask: None,
@@ -796,7 +793,6 @@ mod tests {
     fn test_get_ungapped_hsp_list_fails_fast_on_negative_context_relative_query_start() {
         let contexts = vec![QueryContext {
             q_idx: 0,
-            f_idx: 0,
             frame: 1,
             aa_seq: vec![0, 1, 1, 1, 1, 1, 0],
             aa_seq_nomask: None,
@@ -883,3 +879,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "init_hsp_size_tests.rs"]
+mod init_hsp_size_tests;

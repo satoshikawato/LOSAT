@@ -107,16 +107,34 @@ pub fn main_entry() -> Result<()> {
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` is read
     // before the program's arguments, `cli::ncbi_version_request`).
+    let argv_is_rpsbproc = argv.get(1).is_some_and(|word| word == "rpsbproc");
     if let Some(text) = crate::cli::ncbi_version_request(argv.iter().cloned()) {
-        print!("{text}");
+        if argv_is_rpsbproc {
+            crate::rpsbproc::write_stdout(&text);
+        } else {
+            print!("{text}");
+        }
         return Ok(());
     }
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match crate::cli::try_parse_from(argv) {
         Ok(cli) => cli,
         Err(error) => {
-            let message = crate::cli::render_message(&error);
-            if error.use_stderr() {
+            // rpsbproc's arguments are not the single-dash words of the BLAST programs.
+            let message = if argv_is_rpsbproc {
+                crate::cli::render_rpsbproc_message(&error)
+            } else {
+                crate::cli::render_message(&error)
+            };
+            // rpsbproc's messages and help are written without a panic on a closed stream
+            // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
+            if argv_is_rpsbproc {
+                if error.use_stderr() {
+                    crate::rpsbproc::write_stderr(&message);
+                } else {
+                    crate::rpsbproc::write_stdout(&message);
+                }
+            } else if error.use_stderr() {
                 eprint!("{message}");
             } else {
                 print!("{message}");
@@ -338,6 +356,21 @@ pub fn main_entry() -> Result<()> {
                 return Err(error);
             }
         }
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1870
+        // ```c++
+        // 	return CRpsbProcApp().AppMain(argc, argv);
+        // ```
+        // rpsbproc ends with its own status (`Run`'s `m_app_status`, or the application layer's
+        // for an exception); LOSAT's refusals are errors (exit 1), written as `main` writes an
+        // error, through `rpsbproc::write_stderr` (a closed standard error: exit 4).
+        Commands::Rpsbproc(args) => match crate::rpsbproc::run(args) {
+            crate::rpsbproc::Outcome::Exit(0) => {}
+            crate::rpsbproc::Outcome::Exit(code) => std::process::exit(code),
+            crate::rpsbproc::Outcome::Refused(message) => {
+                crate::rpsbproc::write_stderr(&format!("Error: {message}\n"));
+                std::process::exit(1);
+            }
+        },
         Commands::Tblastn(args) => {
             // NCBI's application layer reads its environment and registry files before
             // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change

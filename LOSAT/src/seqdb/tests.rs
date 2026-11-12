@@ -1286,6 +1286,7 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
         &name,
         SeqType::Protein,
         super::alias::LocalCopy::Dir(here.to_str().unwrap()),
+        &SearchPath::current_dir().unwrap(),
     )
     .unwrap();
     assert_eq!(read.volumes, [path(&here, "db.00"), path(&sub, "db.01")]);

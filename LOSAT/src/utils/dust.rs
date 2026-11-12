@@ -115,12 +115,6 @@ impl MaskedInterval {
     pub fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
-
-    /// Check if a position is within this masked interval
-    #[inline]
-    pub fn contains(&self, pos: usize) -> bool {
-        pos >= self.start && pos < self.end
-    }
 }
 
 /// Perfect interval - represents a region that exceeds the complexity threshold
@@ -176,6 +170,7 @@ impl DustMasker {
     }
 
     /// Create a DUST masker with default parameters
+    #[cfg(test)]
     pub fn with_defaults() -> Self {
         Self::new(20, 64, 1)
     }
@@ -1177,15 +1172,6 @@ impl<'a> TripletWindow<'a> {
     }
 }
 
-/// Check if a k-mer starting at position overlaps with any masked interval
-pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -> bool {
-    let end = start + kmer_len;
-    intervals.iter().any(|interval| {
-        // Check if [start, end) overlaps with [interval.start, interval.end)
-        start < interval.end && end > interval.start
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1386,26 +1372,6 @@ mod tests {
         let seq = b"AC";
         let intervals = masker.mask_sequence(seq);
         assert!(intervals.is_empty());
-    }
-
-    #[test]
-    fn test_is_kmer_masked() {
-        let intervals = vec![MaskedInterval::new(10, 20), MaskedInterval::new(30, 40)];
-
-        // K-mer completely before masked region
-        assert!(!is_kmer_masked(&intervals, 0, 5));
-
-        // K-mer overlapping start of masked region
-        assert!(is_kmer_masked(&intervals, 8, 5));
-
-        // K-mer completely within masked region
-        assert!(is_kmer_masked(&intervals, 12, 5));
-
-        // K-mer overlapping end of masked region
-        assert!(is_kmer_masked(&intervals, 18, 5));
-
-        // K-mer between masked regions
-        assert!(!is_kmer_masked(&intervals, 22, 5));
     }
 
     #[test]

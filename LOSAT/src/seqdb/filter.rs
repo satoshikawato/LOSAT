@@ -2548,6 +2548,13 @@ impl SeqDb {
     /// (NCBI's `GetSeqLengthApprox` for a nucleotide, from the index alone), `SCAN_WINDOW` index
     /// entries at a time: the chunks of TBLASTN's `-db` search (`XDbStream::x_approx_lengths`,
     /// `x_kept_cut`). An error of the index ends the visit; the sequences before it were visited.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     pub fn x_approx_lengths(&self, mut visit: impl FnMut(u32)) -> Result<(), SeqDbError> {
         for (at, volume) in self.volumes.iter().enumerate() {
             let start = self.volume_starts[at];

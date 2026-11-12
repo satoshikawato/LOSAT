@@ -126,7 +126,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
 
     /// `extend_hit_two_hit_reference(self, ..)` (debug output off) from the table walks of
     /// TBXUNGAP with the matrix's byte table, or `None` when the reference has to run. BLOSUM62's
-    /// instance takes `extend_hit_two_hit` instead (`extend_hit_two_hit_with`).
+    /// instance takes `extend_hit_two_hit_with` instead.
     // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
     #[inline(always)]
     fn table_two_hit(

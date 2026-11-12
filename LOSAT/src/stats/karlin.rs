@@ -1,4 +1,3 @@
-use super::search_space::SearchSpace;
 use super::tables::KarlinParams;
 
 /// Calculate bit score from raw score using Karlin-Altschul statistics
@@ -8,14 +7,6 @@ use super::tables::KarlinParams;
 pub fn bit_score(raw_score: i32, params: &KarlinParams) -> f64 {
     let ln2 = 2.0_f64.ln();
     (params.lambda * (raw_score as f64) - params.k.ln()) / ln2
-}
-
-/// Calculate E-value from bit score and search space
-///
-/// Formula: E = m * n * 2^(-S')
-/// where m*n is the effective search space, S' is the bit score
-pub fn evalue(bit_score: f64, search_space: &SearchSpace) -> f64 {
-    search_space.effective_space * 2.0_f64.powf(-bit_score)
 }
 
 /// Calculate E-value from raw score and search space (NCBI BLAST_KarlinStoE_simple compatible)
@@ -55,31 +46,5 @@ mod tests {
         // Verify the formula: S' = (lambda * S - ln(K)) / ln(2)
         let expected = (0.267 * 100.0 - 0.041_f64.ln()) / 2.0_f64.ln();
         assert!((bs - expected).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_evalue() {
-        let _params = KarlinParams {
-            lambda: 0.267,
-            k: 0.041,
-            h: 0.14,
-            alpha: 1.9,
-            beta: -30.0,
-        };
-
-        let search_space = SearchSpace {
-            effective_space: 100000.0,
-            length_adjustment: 0,
-        };
-
-        let bs = 50.0; // bit score
-        let ev = evalue(bs, &search_space);
-
-        // E-value should be very small for high bit scores
-        assert!(ev < 1.0);
-
-        // Verify the formula: E = m * n * 2^(-S')
-        let expected = 100000.0 * 2.0_f64.powf(-50.0);
-        assert!((ev - expected).abs() < 1e-10);
     }
 }

@@ -346,3 +346,7 @@ mod tests {
         assert_eq!(x_cut_block_bytes(0, 2, small), X_MIN_BLOCK_BYTES);
     }
 }
+
+#[cfg(test)]
+#[path = "x_db_cut_fixture_tests.rs"]
+mod fixture_tests;

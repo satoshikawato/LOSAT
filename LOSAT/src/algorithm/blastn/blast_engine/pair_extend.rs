@@ -102,6 +102,11 @@ pub(super) struct LutHit {
 /// dropped); otherwise the query and subject offsets of the word's start and the left and right
 /// extensions (the trace prints these two).
 ///
+/// Preconditions, which the caller (`process_offset_pairs`) checks before the call: the hit is
+/// dropped unless `q_off0 + lut_word_length <= q_context_end` and `kmer_start + lut_word_length <=
+/// s_len`, and `s_range` is at most the subject's length. The unchecked reads of the packed
+/// subject and of the sentinel query buffer below rely on them.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1093-1095,1120-1124,1138-1144
 /// (`s_BlastNaExtend`; `s_BlastSmallNaExtend` at :1504-1566 for the small-query table)
 /// ```c
@@ -124,8 +129,8 @@ pub(super) struct LutHit {
 ///         s_offset -= ext_left;
 /// ```
 /// `#[inline(always)]`: the scan calls it for every lookup table hit; out of line it took 35
-/// instructions a call (callgrind, n1: dc-megablast +1.4 %, with the off-diagonal search's call),
-/// so it keeps the shape it had inside `process_offset_pairs`.
+/// instructions a call (callgrind, n1: dc-megablast with `LOSAT_X_BNDCONE=0` +1.4 %, with the
+/// off-diagonal search's call), so it keeps the shape it had inside `process_offset_pairs`.
 #[inline(always)]
 pub(super) fn word_extend_pair(
     x: &PairExtendInputs<'_>,
@@ -329,7 +334,9 @@ pub(super) fn word_extend_pair(
                 }
                 // NCBI BLAST: if (base mismatch) break;
                 // Reference: na_ungapped.c:1129-1131
-                // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
+                // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds: `s_off + (ext_to -
+                // ext_left) <= s_range` (tested above) and `s_range` is at most the subject's length
+                // (the fn's preconditions).
                 let s_byte = unsafe { *search_seq_packed.get_unchecked(s_idx) };
                 let s_base = (s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6;
                 // SAFETY: q_right is bounded by the outer-sentinel query buffer.
@@ -347,7 +354,7 @@ pub(super) fn word_extend_pair(
             }
 
             // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
-            // Reference: na_ungapped.c:1125
+            // Reference: na_ungapped.c:1139-1140
             if ext_left + ext_right < ext_to {
                 // Word_length match failed, skip this seed
                 return None;
@@ -478,8 +485,8 @@ pub(super) struct OffDiagonal<'d> {
 ///             }
 /// ```
 /// `#[inline(always)]`: the scan calls it for every single word in two-hit mode; out of line it
-/// took 38 instructions a call with `scan_range` 0 (callgrind, n1 dc-megablast), so it keeps the
-/// shape it had inside the scan's closures.
+/// took 38 instructions a call with `scan_range` 0 (callgrind, n1 dc-megablast with
+/// `LOSAT_X_BNDCONE=0`), so it keeps the shape it had inside the scan's closures.
 #[inline(always)]
 pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
     let OffDiagonal {
@@ -497,7 +504,8 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
         s_off_pos,
         s_end_pos,
     } = od;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:657
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:657 (the diagonal table's
+    // `s_BlastnDiagTableExtendInitialHit`), :824 (the hash's `s_BlastnDiagHashExtendInitialHit`)
     // ```c
     //     Boolean off_found = FALSE;
     // ```

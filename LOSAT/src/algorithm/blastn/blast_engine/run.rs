@@ -14333,10 +14333,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                                     s_end += extended;
                                     s_end_pos += extended;
 
-                                    // NCBI reference: na_ungapped.c:852-881 - off-diagonal search (DiagHash version)
+                                    // NCBI reference: na_ungapped.c:685-717 (the diagonal array's,
+                                    // `s_BlastnDiagTableExtendInitialHit`) and :852-886 (the hash's,
+                                    // `s_BlastnDiagHashExtendInitialHit`) - off-diagonal search
                                     if word_type == 1 {
-                                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:853-854
+                                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:686-687,853-854
                                         // ```c
+                                        //         if (word_type == 1) {
+                                        //             /* try off-diagonals */
+                                        // ...
                                         //         if (word_type == 1) {
                                         //             /* try off-diagonal */
                                         // ```

@@ -1,0 +1,28 @@
+{
+  "version": "1.2",
+  "dbname": "j_nseq",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "ak nseq",
+  "number-of-letters": 700,
+  "number-of-sequences": 5,
+  "last-updated": "2026-10-29T19:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 55087,
+  "bytes-to-cache": 2717,
+  "files": [
+    "j_nseq.pal",
+    "p5.pdb",
+    "p5.phr",
+    "p5.pin",
+    "p5.pjs",
+    "p5.pnd",
+    "p5.pni",
+    "p5.pog",
+    "p5.pos",
+    "p5.pot",
+    "p5.psq",
+    "p5.ptf",
+    "p5.pto"
+  ]
+}

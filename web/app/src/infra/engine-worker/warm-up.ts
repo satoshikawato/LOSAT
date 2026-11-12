@@ -14,8 +14,11 @@ import { programById, type ProgramId, type SequenceKind } from '../../domain/pro
 import { REGION_FLAG } from '../../domain/region';
 import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../reactor/abi';
 
-/** Options whose values are positions in the user's inputs: the warm-up leaves them out. */
-const INPUT_OPTIONS: ReadonlySet<string> = new Set(Object.values(REGION_FLAG));
+/**
+ * Options whose values are positions in the user's inputs, or the name of a file of the user's
+ * (the counts of -window_masker_db, which the instance may not hold yet): the warm-up leaves them out.
+ */
+const INPUT_OPTIONS: ReadonlySet<string> = new Set([...Object.values(REGION_FLAG), '-window_masker_db']);
 
 // The standard genetic code, codons in TCAG order.
 const BASES = 'TCAG';

@@ -1,0 +1,12 @@
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+RPSBlast session 0 start...
+Calculating....
+Error: a motif match for which NCBI's rpsbproc holds 1 GiB or more at once (its match records with their copies on its stack and the string of the residues; a repeat that does not advance, such as `<*`, grows the records until the memory runs out; NCBI's result depends on the host's memory) is not supported by LOSAT's rpsbproc: site 'catalytic site', motif 'H-{<}(0,67108863)-{<}(0,67108863)-K'

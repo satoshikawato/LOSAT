@@ -1,0 +1,12 @@
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+RPSBlast session 0 start...
+Calculating....
+Error: a site or motif at position 49 of a query with 0 residues (NCBI reads outside the sequence) is not supported by LOSAT's rpsbproc

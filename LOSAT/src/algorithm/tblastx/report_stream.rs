@@ -342,7 +342,7 @@ mod tests {
         let answers = |pool: &SearchPool<'_>| {
             ["nucl_v5", "nrefuse_v5"].map(|name| {
                 let database = open(name);
-                let count = database.printed_num_seqs();
+                let count = database.num_oids();
                 formats.map(|format| {
                     [count, count - 1].map(|max| database_check(&database, format, max, pool))
                 })

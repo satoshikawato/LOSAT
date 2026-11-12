@@ -22,9 +22,9 @@ use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
-use crate::algorithm::tblastx::constants::{
-    GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
-};
+use crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE;
+#[cfg(test)]
+use crate::algorithm::tblastx::constants::{X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bp_build_compressed_lookup, x_bp_build_compressed_lookup_of, x_bpclut_on, XCompressedLookup,
     XFlatCompressedLookup, X_BLASTP, X_BLASTP_MATRIX,
@@ -845,13 +845,14 @@ fn blastp_gapped_x_dropoff_raw(bits: f64, lambda: f64) -> i32 {
 //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
 //         extendParams->gap_x_dropoff_final);
 // ```
+// `final_bits` is `-xdrop_gap_final` or BLASTP's default (`ResolvedBlastpArgs`); the conversion is
+// the protein programs' (`core::x_drop::redo_x_dropoff`).
 fn blastp_redo_x_dropoff(
+    final_bits: f64,
     scaled_gapped_lambda: f64,
-    _gapped_params: &crate::stats::KarlinParams,
     x_drop_gapped_final: i32,
 ) -> i32 {
-    blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, scaled_gapped_lambda)
-        .max(x_drop_gapped_final)
+    crate::core::x_drop::redo_x_dropoff(final_bits, scaled_gapped_lambda, x_drop_gapped_final)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2438-2448
@@ -1394,11 +1395,12 @@ fn blastp_concatenated_query_length(contexts: &[QueryContext]) -> i32 {
 //    (Int4)(sbp->scale_factor *
 //           ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
 // ```
-fn blastp_x_dropoff_init_for_context(ctx: &QueryContext) -> i32 {
+// `bits` is `-xdrop_ungap` or BLASTP's default (`ResolvedBlastpArgs`).
+fn blastp_x_dropoff_init_for_context(ctx: &QueryContext, bits: f64) -> i32 {
     if !ctx.is_valid {
         return 0;
     }
-    x_drop_raw_score(X_DROP_UNGAPPED_BITS, &ctx.karlin_params, 1.0)
+    x_drop_raw_score(bits, &ctx.karlin_params, 1.0)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:917-940
@@ -2479,6 +2481,18 @@ enum BlastpReport {
 }
 
 impl BlastpReport {
+    /// Whether the report's writer writes the warnings that come after the last query's report
+    /// before its epilog (`QueryWarnings::after_last_query`): psiblast's reports, outfmt 0, 6, 7,
+    /// 10 and 20.
+    fn writes_after_last_query(self) -> bool {
+        matches!(
+            self,
+            BlastpReport::Text(
+                OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
+            ) | BlastpReport::CustomTabular(_)
+        )
+    }
+
     /// Whether NCBI writes a query's result warnings with its report
     /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
     fn writes_query_warnings(self) -> bool {
@@ -2961,6 +2975,10 @@ fn write_blastp_tabular_hit_lists(
         }
     }
 
+    // The warnings after the last query's report (`QueryWarnings::after_last_query`).
+    if let Some(warnings) = warnings {
+        warnings.after_last_query(hit_lists.len(), &mut *writer)?;
+    }
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`). The count is every query
     // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCK) the last block of
@@ -3213,17 +3231,10 @@ fn psiblast_pssms(
     keys: psi_round::SubjectKeys<'_>,
 ) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
     use crate::algorithm::psiblast::pssm::{
-        ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord,
-        PssmScoring, PssmStop,
+        query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord, PssmScoring, PssmStop,
     };
     use crate::core::psi::KarlinBlk;
-    let subject = |s_idx: u32| -> Vec<u8> {
-        match shown_subjects.letters(s_idx as usize) {
-            Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
-            Some(ShownLetters::Stored(residues)) => residues.to_vec(),
-            None => Vec::new(),
-        }
-    };
+    let subject = |s_idx: u32| keys.letters(shown_subjects, s_idx);
     let scoring = PssmScoring {
         matrix: args.scoring.matrix,
         matrix_name: &args.matrix_name,
@@ -3292,6 +3303,7 @@ fn psiblast_pssms(
             psi_ungapped: ungapped,
             psi_gapped: gapped,
         };
+        let mut unread = Vec::new();
         let made = query_pssm(
             request,
             scoring,
@@ -3306,8 +3318,12 @@ fn psiblast_pssms(
             &subject,
             &|s_idx| keys.key(s_idx),
             ancillary,
-        )
-        .and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
+            &mut unread,
+        );
+        let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
+        keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
+        files.add_read_warnings(query, warnings);
+        let made = made.and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
         if let Err(error) = made {
             return Err(PssmStop {
                 query,
@@ -5372,11 +5388,14 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .in_id_scope(args.id_scope.clone());
+            if resolved.rps_search.is_some() {
+                rps_hooks::check_alias_keys(&database, args.app.name())?;
+            }
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.filtered_empty(),
+                database.statistics_length_is_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
@@ -6164,7 +6183,7 @@ fn psiblast_stop_at_invalid_query(
         })
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.printed_num_sequences() == 0)
+    let empty_database = database.is_some_and(|database| database.num_oids() == 0)
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
@@ -6551,13 +6570,15 @@ fn search(
         0
     };
     // The searches and reports of the batches up to the input record `input_done` and
-    // the searched query `searched_done`.
+    // the searched query `searched_done`; `stopped`: the PSSM files of a PSSM's stop at the last
+    // of them (`BlastpReports::stopped_pssms`).
     let search_batches_once = |args: ResolvedBlastpArgs,
                                outputs: &mut ReportOutputs<'_>,
                                pool: &crate::utils::threading::SearchPool<'_>,
                                input_done: usize,
                                searched_done: usize,
-                               epilog: bool|
+                               epilog: bool,
+                               stopped: Option<crate::algorithm::psiblast::pssm::PssmFiles>|
      -> Result<()> {
         let done_input = seq_range::QueryInput {
             placements: seq_range::Placements(
@@ -6580,6 +6601,7 @@ fn search(
             subject_placements: &subjects.placements,
             x_ordinal_base: 0,
         };
+        let stopped = std::sync::Mutex::new(stopped);
         let reports = BlastpReports {
             reader_warnings: &batches.warnings[..searched_done],
             identity_warned,
@@ -6589,6 +6611,7 @@ fn search(
             x_xml2_carry: None,
             last_call: true,
             psi_round: None,
+            stopped_pssms: Some(&stopped),
             titles_may_refuse,
         };
         run_resolved_in_pool(
@@ -6631,25 +6654,50 @@ fn search(
                           epilog: bool|
      -> Result<()> {
         if args.psi_pssm.is_none() {
-            return search_batches_once(args, outputs, pool, input_done, searched_done, epilog);
+            return search_batches_once(
+                args,
+                outputs,
+                pool,
+                input_done,
+                searched_done,
+                epilog,
+                None,
+            );
         }
-        let mut prefix_args = args.clone();
-        prefix_args.psi_pssm = None;
-        match search_batches_once(args, outputs, pool, input_done, searched_done, epilog) {
+        let again_args = args.clone();
+        match search_batches_once(args, outputs, pool, input_done, searched_done, epilog, None) {
             Err(error) if error.is::<crate::algorithm::psiblast::pssm::PssmStop>() => {
-                let stop = error
+                let crate::algorithm::psiblast::pssm::PssmStop {
+                    query,
+                    error,
+                    files,
+                } = error
                     .downcast::<crate::algorithm::psiblast::pssm::PssmStop>()
                     .expect("the error was checked to be a PssmStop");
                 let after = batches
                     .starts
-                    .partition_point(|&(_, searched)| searched <= stop.query);
+                    .partition_point(|&(_, searched)| searched <= query);
                 let input_end = batches
                     .starts
                     .get(after)
                     .map_or(input_done, |&(input, _)| input.min(input_done));
-                search_batches_once(prefix_args, outputs, pool, input_end, stop.query + 1, false)?;
-                stop.files.commit()?;
-                Err(stop.error)
+                // The queries up to the failing one, searched and reported again with the PSSMs
+                // made before it (`BlastpReports::stopped_pssms`): the reads of each PSSM (up to
+                // the failing query's) look their taxids up after the query's report, and their
+                // messages follow it, before the next query's warnings (the failing query's after
+                // its report), as where no PSSM stops (review 1 of line DBID pssmread, L1; review
+                // 3, H1). The files are written after the reports, then the run stops with the
+                // PSSM's error.
+                search_batches_once(
+                    again_args,
+                    outputs,
+                    pool,
+                    input_end,
+                    query + 1,
+                    false,
+                    Some(files),
+                )?;
+                Err(error)
             }
             other => other,
         }
@@ -6937,6 +6985,7 @@ fn search(
                                     .then_some(&x_xml2_carry),
                                 last_call: index + 1 == blocks.len(),
                                 psi_round: None,
+                                stopped_pssms: None,
                                 titles_may_refuse,
                             },
                             x_block,
@@ -7885,6 +7934,8 @@ fn unsearched_batches_then_engine_error(
         // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
         last_call: true,
         psi_round: None,
+        // BLASTP only (`args.app` above): no psiblast PSSM stops here.
+        stopped_pssms: None,
         titles_may_refuse: reports.titles_may_refuse,
     };
     if let Err(error) = run_resolved_in_pool(
@@ -7938,6 +7989,13 @@ struct BlastpReports<'a> {
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
     psi_round: Option<&'a crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    /// The PSSM files and read messages of the queries up to a psiblast PSSM's stop
+    /// (`psiblast::pssm::PssmStop`), for the search again of those queries (`search`): the call
+    /// takes them for its own (`psiblast_pssms` makes none), so the PSSMs' reads look their taxids
+    /// up after each query's report as NCBI's did (`ListedTitles::pssm_load_texts`) and their
+    /// messages come where a run that does not stop writes them. `None` (or empty) elsewhere.
+    stopped_pssms:
+        Option<&'a std::sync::Mutex<Option<crate::algorithm::psiblast::pssm::PssmFiles>>>,
     /// With the BLAST archive (outfmt 11): a searched query or a subject that `search` read has a
     /// title the archive cannot write, so the call checks its own queries and subjects where it
     /// writes the archive (`run_resolved_in_pool`); without such a title no call can refuse.
@@ -8139,6 +8197,7 @@ fn search_split_query_batches(
                     x_xml2_carry: None,
                     last_call: false,
                     psi_round: None,
+                    stopped_pssms: None,
                     // The call of the whole query writes the archive.
                     titles_may_refuse: false,
                 },
@@ -8876,11 +8935,26 @@ fn run_resolved_in_pool(
     //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
     //         params->gap_x_dropoff);
     // ```
-    let x_drop_gapped =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_PRELIM as f64, gapped_params.lambda);
-    let x_drop_gapped_final =
-        blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, gapped_params.lambda)
-            .max(x_drop_gapped);
+    // The X-drops in bits are `-xdrop_gap` and `-xdrop_gap_final` or BLASTP's defaults
+    // (`ResolvedBlastpArgs`), converted as the protein programs convert them (`core::x_drop`); the
+    // contexts of a batch share the matrix's gapped Lambda, the smallest one. An X-drop that NCBI's
+    // gapped kernels cannot size is refused before the search.
+    let x_drop_bits = (args.x_drop_gapped_bits, args.x_drop_final_bits);
+    let (x_drop_gapped, x_drop_gapped_final) =
+        crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
+    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
+    // after IDENTITY's reset too; the same choice as `ordinary_traceback` below).
+    if !args.ungapped {
+        crate::core::x_drop::check_gapped_x_dropoffs(
+            "BLASTP",
+            x_drop_bits,
+            (x_drop_gapped, x_drop_gapped_final),
+            (args.scoring.gap_open, args.scoring.gap_extend),
+            args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats
+                || args.psi_search.is_some()
+                || args.rps_search.is_some(),
+        )?;
+    }
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); the batches
     // here are those that NCBI searches (`read_query_batches`).
@@ -9028,7 +9102,7 @@ fn run_resolved_in_pool(
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
-        database.printed_num_sequences() == 0
+        database.num_oids() == 0
             && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(
@@ -9134,6 +9208,11 @@ fn run_resolved_in_pool(
         Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
             .unwrap_or(database.statistics_num_sequences() as usize),
     };
+    // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
+    // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
+    if let Some(database) = database.filter(|_| args.old_fsc) {
+        database.check_statistics_count(args.app.name())?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
     //    /* use overriding value from effective lengths options or the real value
@@ -9297,7 +9376,7 @@ fn run_resolved_in_pool(
     // / `sbp->kbp_std`), not per-query lookup composition estimates.
     let x_dropoff_per_context: Vec<i32> = contexts
         .iter()
-        .map(blastp_x_dropoff_init_for_context)
+        .map(|ctx| blastp_x_dropoff_init_for_context(ctx, args.x_drop_ungapped_bits))
         .collect();
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
     // ```c++
@@ -11319,8 +11398,8 @@ fn run_resolved_in_pool(
                 gap_extend: ((args.scoring.gap_extend as f64) * local_scaling_factor).round()
                     as i32,
                 x_dropoff: blastp_redo_x_dropoff(
+                    args.x_drop_final_bits,
                     scaled_gapped_lambda,
-                    &gapped_params,
                     x_drop_gapped_final,
                 ),
                 context: std::cell::Cell::new(None),
@@ -12635,8 +12714,31 @@ fn run_resolved_in_pool(
     );
     // `-out_pssm`'s PSSM, before it is made (a later query's PSSM error reruns the search without
     // the files, review 2 of line DBID weakbatch H2).
-    if let (Some(_), Some(titles)) = (args.psi_pssm.as_ref(), listed_titles.as_ref()) {
-        titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
+    // What the PSSMs read by the subjects' Seq-align ids (`-out_pssm`'s and each round's next
+    // one, `ListedTitles::pssm_reads`), refused where one is made: `-out_pssm`'s here, a
+    // round's below.
+    let pssm_reads = match (
+        args.psi_pssm.is_some() || reports.psi_round.is_some(),
+        listed_titles.as_ref(),
+        database,
+    ) {
+        // The length of each query's hit list after the formatter's cut (`prune_by_size`, below).
+        (true, Some(titles), Some(database)) => titles.pssm_reads(
+            database,
+            &hit_lists,
+            &batch_prefetch,
+            args.inclusion_ethresh,
+            prefetch_taxids,
+            &|query| match psiblast_kept.as_ref() {
+                _ if !args.app.prunes_after_traceback() => usize::MAX,
+                Some(kept) => kept[query],
+                None => args.max_target_seqs,
+            },
+        )?,
+        _ => database::PssmReads::default(),
+    };
+    if args.psi_pssm.is_some() {
+        pssm_reads.check()?;
     }
     let subject_keys = psi_round::SubjectKeys {
         listed_ordinals: listed_subjects
@@ -12645,9 +12747,16 @@ fn run_resolved_in_pool(
         parsed: listed_titles
             .as_ref()
             .map_or(&[][..], |titles| titles.parsed.as_slice()),
+        reads: &pssm_reads,
     };
-    let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
+    // The search again of the queries up to a PSSM's stop takes the PSSMs made before it
+    // (`BlastpReports::stopped_pssms`).
+    let stopped_pssms = reports
+        .stopped_pssms
+        .and_then(|stopped| stopped.lock().expect("the stopped PSSMs").take());
+    let mut psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
         match args.psi_pssm.as_ref() {
+            Some(_) if stopped_pssms.is_some() => stopped_pssms,
             Some(request) => Some(psiblast_pssms(
                 &args,
                 request,
@@ -12679,11 +12788,13 @@ fn run_resolved_in_pool(
     // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,
     // H1: psiblast_app.cpp:291-309 `ComputePssmForNextIteration`) reads the letters of the
     // subjects before the cut by their Seq-align ids.
-    if let (Some(io), Some(titles)) = (reports.psi_round, listed_titles.as_ref()) {
+    if let Some(io) = reports.psi_round {
         if io.makes_next() {
-            titles.check_pssm_subjects(&hit_lists, &batch_prefetch, args.inclusion_ethresh)?;
+            pssm_reads.check()?;
         }
     }
+    // Whether this call makes a PSSM: `-out_pssm`'s, or a round's for the next round.
+    let pssm_made = args.psi_pssm.is_some() || reports.psi_round.is_some_and(|io| io.makes_next());
     let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
         hit_lists
             .iter_mut()
@@ -12976,8 +13087,8 @@ fn run_resolved_in_pool(
         // ```
         // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`, and each round's PSSM for the next
         // round) reads the letters of each included subject by its Seq-align id, as those formats
-        // do (review 1 of line DBID tabfields, H1). `check_pssm_subjects` refuses those, before the
-        // cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
+        // do (review 1 of line DBID tabfields, H1). `ListedTitles::pssm_reads` reads those, before
+        // the cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
         // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
             &hit_lists,
@@ -13065,22 +13176,47 @@ fn run_resolved_in_pool(
                     None => blastp_hit_list_hsp_count(lists),
                 };
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !prefetch_taxids || rows == crate::report::tabular::SubjectFetch::Never {
+                    if !prefetch_taxids {
                         continue;
                     }
                     for query in batch.searched.clone() {
-                        let shown = std::slice::from_ref(&hit_lists[query]);
-                        // Rows that read a subject only for its identities (`nident` alone) read
-                        // none of a query whose HSPs have none, which looks no taxid up.
-                        let mut fetched =
-                            database::ListedTitles::fetched_ranks(shown, rows).peekable();
-                        if rows == crate::report::tabular::SubjectFetch::Every
-                            || fetched.peek().is_some()
-                        {
-                            let messages = titles.prefetch_messages(database, fetched)?;
-                            query_warning_lines[query].extend(messages);
+                        if rows != crate::report::tabular::SubjectFetch::Never {
+                            let shown = std::slice::from_ref(&hit_lists[query]);
+                            // Rows that read a subject only for its identities (`nident` alone)
+                            // read none of a query whose HSPs have none, which looks no taxid up.
+                            let mut fetched =
+                                database::ListedTitles::fetched_ranks(shown, rows).peekable();
+                            if rows == crate::report::tabular::SubjectFetch::Every
+                                || fetched.peek().is_some()
+                            {
+                                let messages = titles.prefetch_messages(database, fetched)?;
+                                query_warning_lines[query].extend(messages);
+                            }
+                            open_for_rows(shown)?;
                         }
-                        open_for_rows(shown)?;
+                        // The query's PSSM reads after its report (psiblast_app.cpp:283-308):
+                        // the blobs it loads first look their taxids up then, and NCBI writes
+                        // their texts among the PSSM's warnings (`ListedTitles::pssm_load_texts`).
+                        if pssm_made {
+                            let texts = titles.pssm_load_texts(
+                                database,
+                                &pssm_reads,
+                                query,
+                                hit_lists[query].as_ref(),
+                                args.inclusion_ethresh,
+                            )?;
+                            if texts.iter().any(|(_, text)| !text.is_empty()) {
+                                if let Some(files) = psiblast_pssms.as_mut() {
+                                    files.read_messages(query).add_load_texts(texts);
+                                } else if let Some(io) = reports.psi_round {
+                                    let mut outcome =
+                                        io.outcome.lock().expect("the round's outcome");
+                                    if let Some(outcome) = outcome.as_mut() {
+                                        outcome.next_warnings.add_load_texts(texts);
+                                    }
+                                }
+                            }
+                        }
                     }
                     continue;
                 }
@@ -13208,6 +13344,30 @@ fn run_resolved_in_pool(
         .as_ref()
         .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
     // The warnings are written once, with the first format (`QueryWarnings`).
+    // NCBI makes each query's PSSM after the query's report (`psiblast_pssms`): the warnings of
+    // its reads come before the next query's warnings, and the last query's after its report,
+    // before the epilog (psiblast_app.cpp:304-308 and 562, `PrintEpilog`; review 2 of line DBID
+    // pssmread, H4), where the first format's writer puts them
+    // (`QueryWarnings::after_last_query`; the others have no epilog: after the reports).
+    let mut pssm_read_warnings_after = Vec::new();
+    if let Some(files) = psiblast_pssms.as_mut() {
+        let queries = query_warning_lines.len();
+        for (query, warnings) in files.take_read_warnings() {
+            match query_warning_lines.get_mut(query + 1) {
+                Some(next) => {
+                    next.splice(0..0, warnings);
+                }
+                None if format_plans
+                    .first()
+                    .is_some_and(|outfmt| outfmt.writes_after_last_query()) =>
+                {
+                    query_warning_lines.resize(queries + 1, Vec::new());
+                    query_warning_lines[queries].extend(warnings);
+                }
+                None => pssm_read_warnings_after.extend(warnings),
+            }
+        }
+    }
     let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
@@ -14081,6 +14241,7 @@ fn run_resolved_in_pool(
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     output_result?;
+    outputs.diagnostics.write_all(&pssm_read_warnings_after)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321
     // ```c++
     //        if (m_CmdLineArgs->GetSaveLastPssm()) {
@@ -14333,6 +14494,9 @@ mod tests {
             qcov_hsp_perc: None,
             culling_limit: None,
             ungapped: false,
+            xdrop_ungap: None,
+            xdrop_gap: None,
+            xdrop_gap_final: None,
             window_size: None,
             matrix: None,
             gap_open: None,
@@ -15431,7 +15595,7 @@ mod tests {
             );
 
         assert_eq!(
-            blastp_redo_x_dropoff(scaled_lambda, &gapped, unscaled_final),
+            blastp_redo_x_dropoff(X_DROP_GAPPED_FINAL as f64, scaled_lambda, unscaled_final),
             blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, scaled_lambda)
                 .max(unscaled_final)
         );
@@ -15976,7 +16140,7 @@ mod tests {
         let gumbel = lookup_protein_gumbel_params(&scoring, 10_000)
             .expect("supported blastp gumbel parameters");
 
-        assert_eq!(blastp_x_dropoff_init_for_context(&invalid), 0);
+        assert_eq!(blastp_x_dropoff_init_for_context(&invalid, 7.0), 0);
         assert_eq!(
             blastp_hit_cutoff_score_for_context(
                 &invalid,

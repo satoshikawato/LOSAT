@@ -1,0 +1,45 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/tie2.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	2e-06
+QUERY	Query_1	Peptide	430	NP_415929.1 phosphatase domain-containing protein YnbD [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	350376	295	429	3.06789e-55	179.393	cd14527	DSP_bac	-	531719
+1	Query_1	Specific	239481	47	197	9.57818e-33	122.036	cd03386	PAP2_Aur1_like	-	529117
+ENDDOMAINS
+SITES
+1	Query_1	Specific	catalytic site	C376,R382	2	2	350376
+1	Query_1	Specific	active site	Y98,R106,S132,L133,H134,T168,H174,D178	8	8	239481
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

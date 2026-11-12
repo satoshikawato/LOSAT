@@ -8,6 +8,8 @@ and the Owner approves". Twenty switches entered `STRICT_SET` after the rule rea
 193657f3a (2026-11-06): 1 approved by the Owner as a deadline fallback, whose deadline is its fold
 into the default form in stage S3 (Owner, 2026-11-06), 14 inside an existing rule, 5 without an
 Owner approval, which the Owner chose to fold into the default form (Owner, 2026-11-05).
+One more switch, `BXW4CAP` (#1030, 2026-11-12), is a new rule that the Owner approved as a deadline
+fallback (Owner, 2026-11-12); its row is the last of the table.
 
 - (i) The Owner approved it as a deadline fallback. The Owner's words and date are given, with how
   they were read.
@@ -50,6 +52,7 @@ Owner approval, which the Owner chose to fold into the default form (Owner, 2026
 | `MBCSR` | blastn | #636 (2026-10-30 15:19) | megablast's 4^12-cell table when the subjects' letters are at least 8 times the word-loop positions plus the cells; `X_MB12_LETTERS_PER_POSITION = 8` (`blastn/x_bn_csr.rs:194`) | (iii) | New cost-model threshold. No Owner approval of the rule; the body records Owner-delegated decisions. To be folded in S3 (Owner, 2026-11-05). |
 | `BXCLUTCAP` | blastx | #648 (2026-10-30 23:53) | compressed lookup tables where `LOSAT_X_BXUNITCAP`'s rule is asked; new capacity `CLUT_UNIT_CAP = 3` and a few-subjects clause (`blastx/x_bx_mem.rs:154`) | (iii) | New capacity and subject-count rule. No Owner approval of the rule; the body records Owner-delegated decisions. To be folded in S3 (Owner, 2026-11-05). |
 | `BNPVONCE` | blastn | #650 (2026-10-31 03:03) | packed CSR heads whose bit array is at most `X_PV_ONCE_MAX_BITS = 1 << 20` bytes (`blastn/blast_engine/run.rs:3249`) | (iii) | New cache-size threshold. No Owner approval of the rule; the body records Owner-delegated decisions. To be folded in S3 (Owner, 2026-11-05). |
+| `BXW4CAP` | blastx | #1030 (2026-11-12; the row lands with it) | 4-letter lookup tables (`-word_size 4`) where `LOSAT_X_BXUNITCAP`'s rule is asked; new capacity `W4_UNIT_CAP = 1` (`blastx/x_bx_mem.rs:169`) with `BXCLUTCAP`'s few-subjects clause, and a capped unit of such a table left `ceil(threads / K)` threads also when its subjects are one task (`blastx/x_bx_mem.rs:310`) | (i) | Owner, 2026-11-12: 「K = 1, table built in 8 parts の方がいいように見えるんだけど気のせい？」 (K = 1 with the table built in 8 parts looks better to me, or is it just me?), then 「Q1=A」, choosing option A of #1030's question (at most one query unit at a time with its table built on the threads, against option B: a unit per thread, the table shrunk later) from its numbers (50 cDNAs x yeast proteins at 8 threads: 189 MB instead of 820 MB, NCBI 241 MB, in 0.95 of the time; 800 cDNAs: 463 MB instead of 1,222 MB in 1.16 of the time). The sessions that asked read it as the approval of the rule as a deadline fallback, on the condition that 16 and 32 threads are measured before it lands; the deadline is the 4-letter table's memory reduced in shape (line NP, SC9b), when the rule goes and no switch is left. |
 
 For each switch in (iii), the Owner chose to fold it into the default form in stage S3 (one form for
 every input, or removed with its rule), and confirmed that the 2026-11-01 answer about `BPDBWIDE`

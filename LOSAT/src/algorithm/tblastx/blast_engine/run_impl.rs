@@ -1300,6 +1300,23 @@ fn check_ncbi_options(
             "Word-size must be less than 6 for protein comparison",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:608-618 (the initial
+    // word options' check, after the lookup table's and before the hit saving options')
+    // ```c
+    //    if (program_number != eBlastTypeBlastn  &&
+    //        program_number != eBlastTypeMapping &&
+    //        (!Blast_ProgramIsPhiBlast(program_number)) &&
+    //        options->x_dropoff <= 0.0)
+    //    {
+    //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //                             "x_dropoff must be greater than zero");
+    //          return BLASTERR_OPTION_VALUE_INVALID;
+    //    }
+    // ```
+    // (`<= 0.0` is false for NaN, as in C.)
+    if args.x_drop_ungapped_bits() <= 0.0 {
+        return Err(options_error("x_dropoff must be greater than zero"));
+    }
     // The hit saving options' check of the hit list size comes before the e-value's.
     counts.validate()?;
     if args.evalue <= 0.0 {
@@ -1382,7 +1399,7 @@ fn open_search_database(
                 args.archive.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.filtered_empty(),
+                database.statistics_length_is_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTX",
@@ -1863,7 +1880,7 @@ fn search(
     let whole_subjects = Placements::default();
     let (stream, stores_error) = match &source {
         SubjectSource::Database(database) => {
-            let opened = if database.printed_num_seqs() == 0 {
+            let opened = if database.num_oids() == 0 {
                 Err(crate::algorithm::common::database::PreliminaryReadError(
                     "Database memory map file error",
                 )
@@ -1897,6 +1914,7 @@ fn search(
                 numbers: SubjectSetNumbers {
                     total: stores.iter().map(|store| store.len() as i64).sum(),
                     count: records.len() as i64,
+                    link_total: stores.iter().map(|store| store.len() as i64).sum(),
                     dbsize: args.dbsize,
                     searchsp: args.searchsp,
                 },
@@ -4456,6 +4474,9 @@ fn search_query_batch<S: TbxScore>(
     // database index's numbers).
     let db_length_nucl = numbers.total;
     let db_num_seqs = numbers.count;
+    // The linking cutoffs read `BlastSeqSrcGetTotLen`, not the statistics' total
+    // (`SubjectSetNumbers::link_total`).
+    let link_db_length_nucl = numbers.link_total;
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:535-560
     // if (valid_context_found) { return 0; } else { return 1; }
     // NCBI reference: c++/src/algo/blast/api/local_blast.cpp:177-178,206-208
@@ -4698,7 +4719,7 @@ fn search_query_batch<S: TbxScore>(
             cutoffs: calculate_link_hsp_cutoffs_ncbi(
                 avg_query_length,
                 subject_len_nucl,
-                db_length_nucl,
+                link_db_length_nucl,
                 cutoff_score_min,
                 1.0,
                 BLAST_GAP_DECAY_RATE,

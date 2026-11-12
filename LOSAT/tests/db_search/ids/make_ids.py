@@ -117,6 +117,40 @@ Seq-align ids): the databases `psr_*` from the FASTA of the same names (copies o
 and their controls, for the query `psr_q.faa`) and the aliases `psr_cp.pal`, `psr_cbxp.pal`, `psr_jx.pal`, `psr_cul.pal`,
 `psr_cue.pal` and `psr_k.pal`, and the nucleotide database `psr_gimn` from `psr_gimn.fna` (queries `psr_qp.fna`,
 `psr_qm.fna`). `--pssmrows-only` builds only these.
+Line DBID pssmread (the letters psiblast's PSSM reads by a Seq-align id): `prd_av` (gb|AAA00001| of A, whose lookup
+gives gb|AAA00001.1|, an unrelated sequence Y of the same length, first: the PSSM reads Y's letters), `prd_as1` (Y one
+letter shorter than A's HSP: NCBI warns and the row is the query's) and its version 4 copy `prd_as1_4`, `prd_ad` (Y as
+dbj|AAA00001.1|: read), `prd_ar` (Y as ref|AAA00001.1|, whose ids do not compare equal: the loader keeps none and NCBI
+warns), `prd_t2` (A in two HSPs over a short Y: two warnings), from the FASTA of the same names, for the queries
+`prd_q.faa`, `prd_q2.faa` (two queries), `prd_q3.faa` (three, the second with an O) and the PSSM query `prd_q.asn.gz`.
+Review 1 of that line: `prd_u0y` (Y `gi|777|gb|YYY00001.1|`) and `prd_ua` (`lcl|777` before `gi|777`, so that NCBI's
+formatters find no sequence by `gi|777` in its database, and B), read through the alias `prd_unf.pal` (`prd_u0y` first: NCBI reads Y's letters for the
+unfetchable subject and does not warn); `prd_zunf0y` (Y `lcl|777` before `gi|777`) and `prd_zunfa` (`gi|777` and B), read
+through `prd_zunf.pal` (the lookup gives Y, whose kept definition line does not hold `gi|777`: NCBI warns); `prd_otag`
+(`gnl|BL_ORD_ID|0` stored with a text tag, which makes the lookup throw: NCBI warns and goes on) and its version 4 copy
+`prd_otag_4`; `prd_wk5` (Y `ref|AAA00001.1|` kept by nothing, C `gb|AAA00001.2|` read first and matched weakly to A) and
+`prd_ah4` (Y `lcl|AAA00001.1`, A `gb|AAA00001.1|`, Z `gb|ZZZ00001.1|` with `emb|AAA00001.1|` in its second definition
+line: another sequence also holds A's id); `prd_txself` (A itself, `gb|AAA00001.1|`, with taxid 99990 by
+`-taxid_map prd_txself.map`, B without; the PSSM's own load reads the taxonomy database).
+Review 2 of that line: `prd_xg0y` (Y `gnl|DB|OTHER ^A gnl|DB|SEQA`) and `prd_xga` (A `gnl|DB|SEQA`, B) through
+`prd_xg.pal` (NCBI's scope reads Y's second definition line, which holds A's id); `prd_tw0y` (Y
+`gb|AAA00002.1|gb|AAA00001.1|`, taxid 99990 by `prd_tw0y.map`) and `prd_twa` (A `gb|AAA00001.1|`, B) through `prd_tw.pal`
+(GetBioseq's filter keeps no line of Y: no taxid lookup); `prd_paha` (a copy of `prd_ua`) and `prd_pahc8` (C
+`gi|888|gb|CCC00001.1| ^A gi|777`) through `prd_pah.pal` (another holder of `gi|777`; a list is read in the order of
+its names); `prd_tu2y` (Y `gi|777|gb|YYY00001.1|` of 20 letters,
+taxid 99990 by `prd_tu2y.map`) before `prd_ua` through `prd_tu.pal` (the prefetch reads Y for the unfetchable A); and
+the nucleotide `prdn_u0y`/`prdn_ua` (`prdn_u.nal`) and `prdn_z0y`/`prdn_za` (`prdn_z.nal`), the same shapes as
+`prd_unf`/`prd_zunf`, for the minus-strand query `prdn_qrc.fna` (BLASTN and TBLASTX prefetch the length of a
+minus-strand Seq-align's subject); `prd_mb0ys` (Y `gb|BBB00001.1|`, 100 letters) and `prd_mbab` (A, B `gb|BBB00001|`,
+C) through `prd_mb.pal` for `tests/psiblast_pssm_read_order.rs` (the last query's PSSM warning before the epilog).
+Review 3 of that line: `prd_np` and its version 4 copy `prd_np_4` from `prd_np.faa` (A and B without `-parse_seqids`,
+taxid 99990 by `-taxid 99990`: the PSSM reads them by `gnl|BL_ORD_ID|n` and looks their taxid up), and `prd_tc` (A
+`gb|AAA00001.1|` taxid 99990 and B `gb|BBB00001.1|` taxid 150 by `prd_tc.map`, one slot of NCBI's taxonomy cache).
+Review 4 of that line (the slot of NCBI's taxonomy cache that 99990 and 150 share, maps of the same names): `prd_m` (A
+with the definition lines `gb|AAA00001.1|` taxid 99990, `gb|CCC00001.1|` 150 and `gb|DDD00001.1|` 99990: one load looks
+99990 up twice around 150), `prd_m2` (A `gb|AAA00001.1|` 99990 and `gb|CCC00001.1|` 150, then B `gb|BBB00001.1|` 99990)
+and `prd_ax` (A `gb|AAA00001.1|` 99990 and X `gb|XXX00001.1|` 150, a random sequence that no PSSM reads).
+`--pssmread-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:
 `pjoin_a.*`, `pjoin_b.*`, `pjoin_c.*` and `njoin_a.*`, `njoin_b.*`, `njoin_c.*` from the FASTA of the same names, read
@@ -264,6 +298,49 @@ def build_pssmrows(args: argparse.Namespace) -> None:
             f"DBLIST {names}\n")
 
 
+def build_pssmread(args: argparse.Namespace) -> None:
+    for name, fasta, version in (("prd_av", "prd_av.faa", "5"), ("prd_as1", "prd_as1.faa", "5"),
+                                 ("prd_ad", "prd_ad.faa", "5"), ("prd_ar", "prd_ar.faa", "5"),
+                                 ("prd_t2", "prd_t2.faa", "5"), ("prd_as1_4", "prd_as1.faa", "4"),
+                                 ("prd_u0y", "prd_u0y.faa", "5"), ("prd_ua", "prd_ua.faa", "5"),
+                                 ("prd_zunf0y", "prd_zunf0y.faa", "5"), ("prd_zunfa", "prd_zunfa.faa", "5"),
+                                 ("prd_otag", "prd_otag.faa", "5"), ("prd_otag_4", "prd_otag.faa", "4"),
+                                 ("prd_wk5", "prd_wk5.faa", "5"), ("prd_ah4", "prd_ah4.faa", "5"),
+                                 ("prd_txself", "prd_txself.faa", "5"),
+                                 ("prd_xg0y", "prd_xg0y.faa", "5"), ("prd_xga", "prd_xga.faa", "5"),
+                                 ("prd_tw0y", "prd_tw0y.faa", "5"), ("prd_twa", "prd_twa.faa", "5"),
+                                 ("prd_paha", "prd_paha.faa", "5"), ("prd_pahc8", "prd_pahc8.faa", "5"),
+                                 ("prd_tu2y", "prd_tu2y.faa", "5"), ("prd_mb0ys", "prd_mb0ys.faa", "5"),
+                                 ("prd_mbab", "prd_mbab.faa", "5"),
+                                 ("prdn_u0y", "prdn_u0y.fna", "5"), ("prdn_ua", "prdn_ua.fna", "5"),
+                                 ("prdn_z0y", "prdn_z0y.fna", "5"), ("prdn_za", "prdn_za.fna", "5"),
+                                 ("prd_tc", "prd_tc.faa", "5"), ("prd_m", "prd_m.faa", "5"),
+                                 ("prd_m2", "prd_m2.faa", "5"), ("prd_ax", "prd_ax.faa", "5")):
+        maps = {"prd_txself": "prd_txself.map", "prd_tw0y": "prd_tw0y.map", "prd_tu2y": "prd_tu2y.map",
+                "prd_tc": "prd_tc.map", "prd_m": "prd_m.map", "prd_m2": "prd_m2.map", "prd_ax": "prd_ax.map"}
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta),
+             "-dbtype", "nucl" if fasta.endswith(".fna") else "prot", "-parse_seqids",
+             "-blastdb_version", version, "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)]
+            + (["-taxid_map", str(HERE / maps[name])] if name in maps else []),
+            check=True, stdout=subprocess.DEVNULL)
+    # Without parsed Seq-ids: the PSSM reads by the ordinal id (review 3 of line DBID pssmread, H1).
+    for name, version in (("prd_np", "5"), ("prd_np_4", "4")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "prd_np.faa"), "-dbtype", "prot",
+             "-taxid", "99990", "-blastdb_version", version, "-title", f"{name} (no parsed Seq-ids)",
+             "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, names, extension in (("prd_unf", "prd_u0y prd_ua", "pal"), ("prd_zunf", "prd_zunf0y prd_zunfa", "pal"),
+                                    ("prd_xg", "prd_xg0y prd_xga", "pal"), ("prd_tw", "prd_tw0y prd_twa", "pal"),
+                                    ("prd_pah", "prd_paha prd_pahc8", "pal"), ("prd_tu", "prd_tu2y prd_ua", "pal"),
+                                    ("prd_mb", "prd_mb0ys prd_mbab", "pal"),
+                                    ("prdn_u", "prdn_u0y prdn_ua", "nal"), ("prdn_z", "prdn_z0y prdn_za", "nal")):
+        (args.out / f"{alias}.{extension}").write_text(
+            f"#\n# Alias file of line DBID, pssmread\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
+            f"DBLIST {names}\n")
+
+
 def build_join(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxid in (("pjoin_a", "pjoin_a.faa", "prot", None), ("pjoin_b", "pjoin_b.faa", "prot", None),
                                        ("pjoin_c", "pjoin_c.faa", "prot", None), ("pjoin_bt", "pjoin_b.faa", "prot", "9606"),
@@ -302,6 +379,7 @@ def main() -> int:
     ap.add_argument("--pfwarn-only", action="store_true", help="build only the databases of line DBID pfwarn")
     ap.add_argument("--weakbatch-only", action="store_true", help="build only the databases of line DBID weakbatch")
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
+    ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -332,6 +410,9 @@ def main() -> int:
         return 0
     if args.pssmrows_only:
         build_pssmrows(args)
+        return 0
+    if args.pssmread_only:
+        build_pssmread(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -452,6 +533,7 @@ def main() -> int:
     build_pfwarn(args)
     build_weakbatch(args)
     build_pssmrows(args)
+    build_pssmread(args)
     return 0
 
 

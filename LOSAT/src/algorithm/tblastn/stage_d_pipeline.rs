@@ -97,9 +97,10 @@ pub(super) struct LocalStageDProfile<'a> {
 pub(super) struct DatabaseNumbers {
     pub total_length: u64,
     pub num_seqs: u64,
-    /// The scanned shortest length in nucleotides with a list (`SeqDb::min_length`,
-    /// line DI-8), `None` for a whole database.
-    pub min_length: Option<u32>,
+    /// `CSeqDB::GetMinLength` in nucleotides (`SeqDb::min_length`): the alias files'
+    /// `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH` without a list, the scanned shortest length
+    /// with one (line DI-8).
+    pub min_length: i32,
 }
 
 /// The numbers of the subject set behind the statistics: a database's (`database`), or,
@@ -219,14 +220,12 @@ impl SubjectSetNumbers {
     }
 
     /// The shortest subject length of the hit-saving cutoff, in residues
-    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH` (with a
-    /// list, its scanned shortest length: line DI-8), a FASTA set its shortest record raised
-    /// to it.
+    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `CSeqDB::GetMinLength`
+    /// (`SeqDb::min_length`), a FASTA set its shortest record raised to
+    /// `BLAST_SEQSRC_MINLENGTH`.
     pub(super) fn min_subject_length(&self, subjects: &SubjectLetters<'_>) -> usize {
         let shortest = match self.database {
-            Some(database) => database
-                .min_length
-                .map_or(Self::MIN_LENGTH, |shortest| shortest as usize),
+            Some(database) => usize::try_from(database.min_length).unwrap_or(0),
             None => subjects
                 .lengths()
                 .min()
@@ -255,6 +254,8 @@ pub(super) struct LocalStageDScoring {
     pub window: i32,
     pub gap_xdrop_bits: f64,
     pub final_xdrop_bits: f64,
+    /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap` or 7.
+    pub word_xdrop_bits: f64,
 }
 
 impl Default for LocalStageDScoring {
@@ -268,6 +269,7 @@ impl Default for LocalStageDScoring {
             window: 40,
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
+            word_xdrop_bits: 7.0,
         }
     }
 }
@@ -1129,7 +1131,8 @@ fn run_local_search_with_pool(
     // ```
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
-    // answers 10 (`SubjectSetNumbers::min_subject_length`).
+    // answers `GetMinLength` (`SubjectSetNumbers::min_subject_length`); a quotient of 0 is
+    // NCBI's engine error of the first searched batch (`tblastn_app.rs`).
     // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
     let min_subject_length = if profile.subject_set.old_fsc {
         total_nt / num_subjects.max(1)
@@ -2238,10 +2241,13 @@ fn preliminary_profile<'a>(
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         // NCBI blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
-        // converted as the x86-64 build does (INT_MIN beyond Int4).
-        gap_xdrop: crate::core::blast_util::ncbi_int4_from_double(
-            (scoring.gap_xdrop_bits * std::f64::consts::LN_2) / gapped.lambda,
-        ),
+        // converted as the x86-64 build does (INT_MIN beyond Int4; `core::x_drop`).
+        gap_xdrop: crate::core::x_drop::gapped_x_dropoffs(
+            scoring.gap_xdrop_bits,
+            scoring.final_xdrop_bits,
+            gapped.lambda,
+        )
+        .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
         hsp_num_max: i32::MAX as usize,
     }
@@ -2650,7 +2656,8 @@ fn query_set_setup(
             do_sum_stats: inputs.do_sum_stats,
             max_intron_length: 0,
             gap_trigger_bits: 22.0,
-            word_xdrop_bits: 7.0,
+            // `-xdrop_ungap` or 7 bits (`LocalStageDScoring::word_xdrop_bits`).
+            word_xdrop_bits: inputs.scoring.word_xdrop_bits,
             scale_factor: 1.0,
             gumbel: inputs.gumbel,
             eff_searchsp_override,
@@ -4992,6 +4999,7 @@ mod tests {
                 window: 60,
                 gap_xdrop_bits: 15.0,
                 final_xdrop_bits: 25.0,
+                word_xdrop_bits: 7.0,
             },
             Some(&mut boundary),
         )

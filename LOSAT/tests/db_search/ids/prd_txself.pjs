@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "prd_txself",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_txself (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-11T14:21:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 50049,
+  "bytes-to-cache": 631,
+  "files": [
+    "prd_txself.pdb",
+    "prd_txself.phr",
+    "prd_txself.pin",
+    "prd_txself.pog",
+    "prd_txself.pos",
+    "prd_txself.pot",
+    "prd_txself.psq",
+    "prd_txself.ptf",
+    "prd_txself.pto"
+  ]
+}

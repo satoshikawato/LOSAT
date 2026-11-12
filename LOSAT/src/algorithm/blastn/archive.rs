@@ -54,6 +54,9 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.word_size = args.word_size.map(|size| size as i32);
     inputs.perc_identity = args.percent_identity;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
+    // (`-ungapped` with outfmt 11 is refused, `cli_output_formats`; the search strategy records
+    // it, probe `ung` of RG-F1.)
+    inputs.ungapped = args.ungapped;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
     inputs.penalty = args.penalty;
     inputs.reward = args.reward;

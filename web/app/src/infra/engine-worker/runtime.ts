@@ -32,6 +32,8 @@ export interface RuntimeOptions {
    * (gateway.ts, retire).
    */
   readonly onThreadedSearch?: () => void;
+  /** Test builds only: called before each output of a search, which it may stop by throwing. */
+  readonly beforeOutput?: () => void;
 }
 
 interface Retained {
@@ -120,6 +122,7 @@ export class EngineRuntime {
       loaded.instance.wasi.clear();
       phase('running');
       abi.run(argv, query.handle, subject.handle, (stream, bytes) => {
+        this.options.beforeOutput?.();
         if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
       });
       const linearBytesAfter = abi.memoryBytes();
@@ -141,7 +144,10 @@ export class EngineRuntime {
       };
     } finally {
       if (abi.stoppedBy === undefined) releaseQuery();
-      else this.dispose();
+      // A stopped threaded instance keeps its thread workers and the keeper: threads of the
+      // search may still run and grow the memory, so the Gateway ends this worker once the
+      // keeper has grown it (gateway.ts, retire). The Gateway ends the runtime on the stop.
+      else if (loaded.path === 'serial') this.dispose();
     }
   }
 

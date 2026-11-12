@@ -303,6 +303,13 @@ def window_masker() -> list[dict]:
         # Exit 255 and 1 are the errors of the options and their files, before the first query
         # batch: the CLI writes no output. Exit 3 is the first batch's error, after the outfmt 0 prolog.
         add(f"winmask_blastn.{case}", ["blastn", *argv], None, rc != 0, prolog=rc == 3)
+        # The counts file's error before the options checked after it (the query range, the
+        # expect value of each search's checks), in validate as in run.
+        if case == "ascii":
+            for option in (["-query_loc", "5-1"], ["-evalue", "0"]):
+                at = argv.index("-outfmt")
+                add(f"winmask_blastn.ascii{option[0]}", ["blastn", *argv[:at], *option, *argv[at:]], None, True,
+                    prolog=False)
     return list(searches.values())
 
 

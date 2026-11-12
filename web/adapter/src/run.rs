@@ -264,6 +264,14 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
             .and_then(|()| args.resolve_dust())
             .and_then(|()| {
+                if names_registered_counts(&args) {
+                    args.window_masker_counts = Some(crate::files::source());
+                    args.resolve_window_masker()
+                } else {
+                    Ok(())
+                }
+            })
+            .and_then(|()| {
                 parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
                     .map(|_| ())
             })
@@ -937,6 +945,17 @@ fn link_format0(
             }
         }
     }
+}
+
+/// Whether `validate` checks the file of `-window_masker_db`, where the command line checks it:
+/// after `-dust`, before the query range and the other options (`resolve_window_masker`, with the
+/// CLI's message for a format other than the two binary ones). Only for a name that is registered:
+/// a host that validates an argv without its files (the application's control reactor) leaves the
+/// file to `run`, where a name that is not registered is the CLI's file that cannot be opened.
+fn names_registered_counts(args: &LOSAT::web_adapter::BlastnArgs) -> bool {
+    args.window_masker_db
+        .as_deref()
+        .is_some_and(crate::files::registered)
 }
 
 /// The counts source of BLASTN's `-window_masker_db`: the named input files registered when the

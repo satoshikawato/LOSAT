@@ -248,15 +248,15 @@ function registerCounts(reactor, counts, search) {
   const name = search.argv[at + 1];
   const file = path.resolve(search.cwd, name);
   const known = counts.get(name);
-  if (known && known.file === file) return { name, registered: false };
+  if (known && known.file === file) return { name, held: "kept" };
   if (known) {
     assert.equal(reactor.call("losat_web2_file_release", known.handle).status, 0);
     counts.delete(name);
   }
-  if (name === "" || !fs.existsSync(file) || !fs.statSync(file).isFile()) return { name, registered: false };
+  if (name === "" || !fs.existsSync(file) || !fs.statSync(file).isFile()) return { name, held: "absent" };
   const { handle } = registerFile(reactor, name, file);
   counts.set(name, { handle, file });
-  return { name, registered: true };
+  return { name, held: "registered" };
 }
 
 async function openSerial(wasmPath) {
@@ -616,10 +616,20 @@ async function main() {
       assert.ok(q.status > 0, `register query: ${q.error}`);
       const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
       const named = registerCounts(reactor, counts, search);
-      if (named) named.registered ? countsRegistered++ : countsKept++;
+      if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
         const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
+        // The application validates the argv on the instance that holds its counts file, then runs it
+        // (abi_v2.md §4): an error of validate is the CLI's first error.
+        if (named && named.held !== "absent") {
+          const validated = reactor.call("losat_web2_validate", argv);
+          if (search.expect === "failure" && validated.status !== 0) {
+            assert.ok(expected.stderr.toString().endsWith(validated.error), `${engine.name} n${threads} ${search.cases.join(",")}: validate gives the CLI's error (${validated.error})`);
+          } else {
+            assert.equal(validated.status, 0, `${engine.name} n${threads} ${search.cases.join(",")}: validate: ${validated.error}`);
+          }
+        }
         const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
         if (waitForWorkers) await waitForWorkers();
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;

@@ -287,6 +287,16 @@ impl CountsSource for RegisteredCounts {
     }
 }
 
+/// Whether a file of this name is registered (`file_end` succeeded and it was not released).
+pub fn registered(name: &str) -> bool {
+    files()
+        .lock()
+        .expect("files")
+        .registered
+        .values()
+        .any(|file| file.name == name)
+}
+
 /// The source of the counts files for a run: the files registered now, by name.
 pub fn source() -> Arc<dyn CountsSource> {
     let files = files().lock().expect("files");

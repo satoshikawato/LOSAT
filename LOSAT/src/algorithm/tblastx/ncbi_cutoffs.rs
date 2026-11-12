@@ -54,8 +54,9 @@ pub fn x_drop_raw_score(
     ungapped_params: &KarlinParams,
     scale_factor: f64,
 ) -> i32 {
-    // NCBI: (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda))
-    (scale_factor * (x_drop_bits * NCBIMATH_LN2 / ungapped_params.lambda).ceil()) as i32
+    // NCBI: (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda)),
+    // converted as the x86-64 build does past Int4 (`core::x_drop`, shared by the protein programs).
+    crate::core::x_drop::ungapped_x_dropoff(x_drop_bits, ungapped_params.lambda, scale_factor)
 }
 
 /// Calculate gap_trigger raw score from bit score using UNGAPPED Karlin params.

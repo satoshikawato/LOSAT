@@ -392,6 +392,10 @@ impl RpsblastArgs {
             qcov_hsp_perc: None,
             culling_limit: None,
             ungapped: false,
+            // rpsblast's X-drops are its RPS engine's (`rps`).
+            xdrop_ungap: None,
+            xdrop_gap: None,
+            xdrop_gap_final: None,
             window_size: self.window_size,
             matrix: None,
             gap_open: None,

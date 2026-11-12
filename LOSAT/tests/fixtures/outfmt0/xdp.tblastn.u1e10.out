@@ -1,0 +1,180 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_tblastn_subject.fna).
+           5 sequences; 31,000 total letters
+
+
+
+Query= BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]
+
+Length=480
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.395    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4274650
+
+
+Query= BDT62529.1 innexin [Metapenaeus ensis majanivirus]
+
+Length=386
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.140    0.437    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3340916
+
+
+Query= BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]
+
+Length=408
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.136    0.419    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3562302
+
+
+Query= BDT62620.1 wsv325-like protein [Metapenaeus ensis majanivirus]
+
+Length=436
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.136    0.412    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3832098
+
+
+Query= BDT62567.1 wsv332-like protein [Metapenaeus ensis majanivirus]
+
+Length=849
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.136    0.399    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7916037
+
+
+Query= BDT62581.1 wsv303-like protein [Metapenaeus ensis majanivirus]
+
+Length=698
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.138    0.403    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6427520
+
+
+Query= BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]
+
+Length=1046
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.314    0.130    0.366    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9877580
+
+
+Query= BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]
+
+Length=154
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.140    0.414    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1091124
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_tblastn_subject.fna).
+    Posted date:  Unknown
+  Number of letters in database: 31,000
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

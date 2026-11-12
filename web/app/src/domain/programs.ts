@@ -230,6 +230,9 @@ const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lowe
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
 const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit window size', ...integer };
+const xdropUngap: ParameterField = { flag: '-xdrop_ungap', label: 'X-dropoff, ungapped (bits)', ...decimal };
+const xdropGap: ParameterField = { flag: '-xdrop_gap', label: 'X-dropoff, preliminary gapped (bits)', ...decimal };
+const xdropGapFinal: ParameterField = { flag: '-xdrop_gap_final', label: 'X-dropoff, final gapped (bits)', ...decimal };
 
 // BLAST+'s -num_descriptions / -num_alignments (NCBI's page has them as "Descriptions" / "Alignments" of its
 // display settings; they also set the hit list sizes, so a run may search twice, abi_v2.md §7).
@@ -369,7 +372,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         ...PROTEIN_SCORING,
       },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
-      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
+      {
+        title: OTHER,
+        placement: 'algorithm',
+        fields: [numDescriptions, numAlignments, threshold, windowSize, xdropUngap, xdropGap, xdropGapFinal, maxHsps],
+      },
     ],
   },
   {
@@ -409,6 +416,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           numAlignments,
           threshold,
           windowSize,
+          xdropUngap,
+          xdropGap,
+          xdropGapFinal,
           maxHsps,
           { flag: '-strand', label: 'Query strand', kind: 'choice' },
           { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
@@ -447,8 +457,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           numAlignments,
           threshold,
           windowSize,
-          { flag: '-xdrop_gap', label: 'X-dropoff, preliminary gapped (bits)', ...decimal },
-          { flag: '-xdrop_gap_final', label: 'X-dropoff, final gapped (bits)', ...decimal },
+          xdropUngap,
+          xdropGap,
+          xdropGapFinal,
           { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
         ],
       },
@@ -479,7 +490,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
-      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize] },
+      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, xdropUngap] },
     ],
   },
 ] satisfies ProgramDescriptor[]);

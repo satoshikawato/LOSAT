@@ -45,6 +45,8 @@ pub(crate) struct RpsPrelim<'a> {
     pub(crate) prelim_hitlist_size: usize,
     /// The query's index (the lists' `query_index`).
     pub(crate) query_index: u32,
+    /// The program of LOSAT's refusals.
+    pub(crate) program: &'static str,
 }
 
 /// The memory of one worker's preliminary stage, kept from query to query.
@@ -54,6 +56,8 @@ pub(crate) struct RpsPrelimScratch {
     tree: BlastIntervalTree,
     hsps: Vec<BlastpPreliminaryHsp>,
     gap: PssmGapScratch,
+    /// The query's HSPs of its contexts so far (`finish`).
+    combined: Vec<BlastpPreliminaryHsp>,
 }
 
 impl RpsPrelimScratch {
@@ -64,6 +68,7 @@ impl RpsPrelimScratch {
             tree: BlastIntervalTree::new(0, 1, 0, 1),
             hsps: Vec::new(),
             gap: PssmGapScratch::new(),
+            combined: Vec::new(),
         }
     }
 }
@@ -140,14 +145,16 @@ fn sort_init_hsps_by_score(init_hsps: &mut [RpsInitHsp]) {
 }
 
 impl RpsPrelim<'_> {
-    /// The query's preliminary hit list on this volume (`subject_seq`: the query's letters and
-    /// the trailing sentinel, `subject->sequence`), or `None` when it has no HSP. The lists' oids
-    /// are the profiles' local ordinal ids.
-    pub(crate) fn search_query(
+    /// The preliminary HSPs of one context of the query on this volume (`subject_seq`: its
+    /// letters and the trailing sentinel, `subject->sequence`; `frame`: its frame, 0 for a protein
+    /// query), sorted by score, after those of the query's earlier contexts in `scratch`
+    /// (`finish`), as `s_BlastSearchEngineOneContext` gives them to `Blast_HSPListAppend`.
+    pub(crate) fn search_frame(
         &self,
         scratch: &mut RpsPrelimScratch,
         subject_seq: &[u8],
-    ) -> Result<Option<BlastpHitList<XPrelimHsp>>> {
+        frame: i8,
+    ) -> Result<()> {
         let subject_len = subject_seq.len() - 1;
         let subject = &subject_seq[..subject_len];
         let RpsPrelimScratch {
@@ -156,6 +163,7 @@ impl RpsPrelim<'_> {
             tree,
             hsps,
             gap,
+            combined,
         } = scratch;
         init_hsps.clear();
         word_finder(&self.word, word, subject, init_hsps);
@@ -164,7 +172,7 @@ impl RpsPrelim<'_> {
         //             if (init_hitlist->total == 0) continue;
         // ```
         if init_hsps.is_empty() {
-            return Ok(None);
+            return Ok(());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:282
         // ```c
@@ -187,8 +195,31 @@ impl RpsPrelim<'_> {
         {
             hsps.sort_by(score_compare);
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
+        // ```c
+        //                 Blast_HSPListAppend(&hsp_list, &hsp_list_out, kHspNumMax);
+        // ```
+        // Without a cap (`hsp_num_max` 0: `INT4_MAX`, blast_hits.c:213-226) the lists of the
+        // frames are concatenated in the frame order (`s_BlastHSPListsCombineByScore`).
+        combined.extend(hsps.iter().map(|hsp| BlastpPreliminaryHsp {
+            subject_frame: frame.into(),
+            ..*hsp
+        }));
+        Ok(())
+    }
+
+    /// The query's preliminary hit list on this volume from the HSPs of its contexts
+    /// (`search_frame`; emptied here), with the e-values of the length `stat_length`
+    /// (`RpsQuery::stat_length`), or `None` when it has no HSP. The lists' oids are the profiles'
+    /// local ordinal ids.
+    pub(crate) fn finish(
+        &self,
+        scratch: &mut RpsPrelimScratch,
+        stat_length: usize,
+    ) -> Option<BlastpHitList<XPrelimHsp>> {
+        let hsps = &mut scratch.combined;
         if hsps.is_empty() {
-            return Ok(None);
+            return None;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:882-899
         // ```c
@@ -236,7 +267,7 @@ impl RpsPrelim<'_> {
                 self.stats.e_value(
                     hsp.raw_score,
                     &self.karlin,
-                    subject_len as i32,
+                    stat_length as i32,
                     hsp.query_length as i32,
                 )
             } else {
@@ -246,10 +277,11 @@ impl RpsPrelim<'_> {
                 evalued.push(XPrelimHsp { hsp: *hsp, e_value });
             }
         }
+        hsps.clear();
         if evalued.is_empty() {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(self.collect(evalued)))
+        Some(self.collect(evalued))
     }
 
     /// `s_BlastHSPCollectorRun_RPS`: the HSPs sorted by context, then by score, one list per
@@ -415,7 +447,8 @@ impl RpsPrelim<'_> {
                 || (ungapped.q_start + ungapped.length) as usize > profile_length
             {
                 bail!(
-                    "a profile database whose scores extend an ungapped alignment across two profiles (NCBI BLAST+ asserts against it) is not supported by LOSAT's RPSBLAST"
+                    "a profile database whose scores extend an ungapped alignment across two profiles (NCBI BLAST+ asserts against it) is not supported by LOSAT's {}",
+                    self.program
                 );
             }
             let candidate = TreeHsp {

@@ -211,7 +211,7 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
                     query_nomask,
                     query_length: ctx.aa_len,
                     tree_query_bound: self.total_query_span,
-                    subject,
+                    subject: TraceSubject::One(subject),
                     gap_open: self.gap_open,
                     gap_extend: self.gap_extend,
                     x_drop_final: self.x_drop_final,
@@ -220,7 +220,8 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
                 },
                 hsps,
                 scratch,
-            ),
+            )
+            .0,
             best_evalue: f64::MAX,
         };
         self.post_traceback_update(&mut hsp_list, subject.len());
@@ -282,8 +283,8 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
     pub(crate) query_length: usize,
     /// `query_blk->length + 1`, the query bound of NCBI's containment tree.
     pub(crate) tree_query_bound: i32,
-    /// The subject's letters.
-    pub(crate) subject: &'a [u8],
+    /// The subject's letters, or a translated subject's frames.
+    pub(crate) subject: TraceSubject<'a>,
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
     pub(crate) x_drop_final: i32,
@@ -292,9 +293,49 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
     pub(crate) matrix: ScoringMatrix,
 }
 
+/// The subject of a list's traceback: its letters, or the frames of a translated subject
+/// (rpstblastn's query: NCBI's `kTranslateSubject`), each HSP aligned on its frame's letters
+/// (`subject.frame`), without `AdjustSubjectRange`, inside a containment tree whose subject bound
+/// is `tree_bound`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:416-421
+/// ```c
+///             if (program_number == eBlastTypeRpsTblastn) {
+///                  const Int4 context = BLAST_FrameToContext(hsp->subject.frame, program_number);
+///                  subject = translation_buffer + frame_offsets[context] + 1;
+///                  subject_length = frame_offsets[context+1] - frame_offsets[context] - 1;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:461-468
+/// ```c
+///          if (!kTranslateSubject && !kSmithWaterman) {
+///              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+///                                 query_length, &start_shift);
+/// ```
+#[derive(Clone, Copy)]
+pub(crate) enum TraceSubject<'a> {
+    One(&'a [u8]),
+    Frames {
+        /// The frames' letters in the context order (`BLAST_FrameToContext`).
+        frames: &'a [&'a [u8]],
+        tree_bound: i32,
+    },
+}
+
+impl<'a> TraceSubject<'a> {
+    /// The letters an HSP of the subject's frame `frame` aligns on.
+    fn of(self, frame: i32) -> &'a [u8] {
+        match self {
+            Self::One(letters) => letters,
+            Self::Frames { frames, .. } => frames[crate::core::blast_util::frame_to_context(frame)],
+        }
+    }
+}
+
 /// The loop of `Blast_TracebackFromHSPList` over one list's HSPs with a PSSM, then the purge of
 /// common endpoints, the sort by score and the containment pass: the traced HSPs with their
-/// counts, before `s_HSPListPostTracebackUpdate`.
+/// counts, before `s_HSPListPostTracebackUpdate`, and the length of the subject (frame) of the
+/// last HSP aligned past the containment test (`stat_length`, blast_traceback.c:433; 0 when
+/// none was).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:367-373
 /// ```c
@@ -306,11 +347,15 @@ pub(crate) fn trace_hsps<R: PssmRows>(
     inputs: &TraceHsps<'_, R>,
     hsps: impl Iterator<Item = BlastpPreliminaryHsp>,
     scratch: &mut PssmGapScratch,
-) -> Vec<BlastpHsp> {
+) -> (Vec<BlastpHsp>, usize) {
     let query_nomask = inputs.query_nomask;
-    let subject = inputs.subject;
-    let mut tree = BlastIntervalTree::new(0, inputs.tree_query_bound, 0, subject.len() as i32 + 1);
+    let (tree_subject_bound, translated) = match inputs.subject {
+        TraceSubject::One(letters) => (letters.len() as i32 + 1, false),
+        TraceSubject::Frames { tree_bound, .. } => (tree_bound, true),
+    };
+    let mut tree = BlastIntervalTree::new(0, inputs.tree_query_bound, 0, tree_subject_bound);
     let mut traced: Vec<Traced> = Vec::new();
+    let mut stat_length = 0usize;
     for mut hsp in hsps {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-405
         // ```c
@@ -320,6 +365,10 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         // ```
         if inputs.contained_before && tree.contains_hsp(&tree_hsp(&hsp), 0, 0) {
             continue;
+        }
+        let subject = inputs.subject.of(hsp.subject_frame);
+        if !subject.is_empty() {
+            stat_length = subject.len();
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-447
         // ```c
@@ -361,12 +410,16 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         //              hsp->subject.gapped_start = s_start;
         //          }
         // ```
-        let (s_start, s_length, shift) = adjust_subject_range(
-            hsp.gapped_subject_start as usize,
-            subject.len(),
-            hsp.gapped_query_start as usize,
-            inputs.query_length,
-        );
+        let (s_start, s_length, shift) = if translated {
+            (hsp.gapped_subject_start as usize, subject.len(), 0)
+        } else {
+            adjust_subject_range(
+                hsp.gapped_subject_start as usize,
+                subject.len(),
+                hsp.gapped_query_start as usize,
+                inputs.query_length,
+            )
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
         // ```c
         //            BLAST_GappedAlignmentWithTraceback(program_number, query,
@@ -450,6 +503,7 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             continue;
         }
         tree.add_hsp(node, 0, IndexMethod::QueryAndSubject);
+        let subject = inputs.subject.of(hsp.subject_frame);
         final_hsps.push(final_hsp(
             &hsp,
             edit_script,
@@ -458,7 +512,7 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             inputs.matrix,
         ));
     }
-    final_hsps
+    (final_hsps, stat_length)
 }
 
 /// The interval-tree node of an HSP of the context at offset 0.
@@ -594,5 +648,60 @@ pub(super) fn final_hsp(
         gap_info: Some(edit_script),
         num_positives,
         comp_adjustment_method: 0,
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    fn hsp(frame: i32, query: (i32, i32), subject: (i32, i32), score: i32) -> BlastpPreliminaryHsp {
+        BlastpPreliminaryHsp {
+            query_start: query.0,
+            query_end: query.1,
+            subject_start: subject.0,
+            subject_end: subject.1,
+            gapped_query_start: query.0,
+            gapped_subject_start: subject.0,
+            raw_score: score,
+            query_context: 0,
+            query_frame: 0,
+            subject_frame: frame,
+            query_length: 100,
+            q_idx: 0,
+            s_idx: 0,
+        }
+    }
+
+    // blast_traceback.c:402-405 (quoted at `trace_hsps`): before each alignment of a translated
+    // subject, an HSP inside one traced before is dropped when their subject frames have the
+    // same sign (`BlastIntervalTreeContainsHSP` compares the signs only, blast_itree.c), so a
+    // frame +2 HSP inside a frame +1 one is contained and a frame -1 one is not.
+    #[test]
+    fn containment_reads_the_sign_of_the_subject_frame_only() {
+        let mut tree = BlastIntervalTree::new(0, 101, 0, 101);
+        tree.add_hsp(
+            tree_hsp(&hsp(1, (10, 60), (10, 60), 500)),
+            0,
+            IndexMethod::QueryAndSubject,
+        );
+        assert!(tree.contains_hsp(&tree_hsp(&hsp(2, (20, 40), (20, 40), 100)), 0, 0));
+        assert!(!tree.contains_hsp(&tree_hsp(&hsp(-1, (20, 40), (20, 40), 100)), 0, 0));
+        assert!(!tree.contains_hsp(&tree_hsp(&hsp(1, (5, 40), (20, 40), 100)), 0, 0));
+    }
+
+    // blast_traceback.c:416-421 (quoted at `TraceSubject`): each HSP aligns on its own frame.
+    #[test]
+    fn a_translated_subject_gives_each_hsp_its_frames_letters() {
+        let frames: [&[u8]; 6] = [b"a", b"b", b"c", b"d", b"e", b"f"];
+        let subject = TraceSubject::Frames {
+            frames: &frames,
+            tree_bound: 3,
+        };
+        let letters: Vec<&[u8]> = [1, 2, 3, -1, -2, -3]
+            .map(|frame| subject.of(frame))
+            .to_vec();
+        assert_eq!(letters, frames.to_vec());
+        assert_eq!(TraceSubject::One(b"xyz").of(0), b"xyz");
     }
 }

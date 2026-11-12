@@ -609,6 +609,10 @@ pub fn psiblast_query_coverage(value: &str) -> Result<f64, String> {
 pub fn rpsblast_query_coverage(value: &str) -> Result<f64, String> {
     percentage(value, "RPSBLAST")
 }
+/// An RPSTBLASTN `-qcov_hsp_perc` value (`percentage`).
+pub fn rpstblastn_query_coverage(value: &str) -> Result<f64, String> {
+    percentage(value, "RPSTBLASTN")
+}
 /// A BLASTX `-qcov_hsp_perc` value (`percentage`).
 pub fn blastx_query_coverage(value: &str) -> Result<f64, String> {
     percentage(value, "BLASTX")
@@ -768,6 +772,11 @@ pub fn psiblast_real(value: &str) -> Result<f64, String> {
 /// A real argument of RPSBLAST (`ncbi_double`).
 pub fn rpsblast_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "RPSBLAST")
+}
+
+/// A real argument of RPSTBLASTN (`ncbi_double`).
+pub fn rpstblastn_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "RPSTBLASTN")
 }
 
 /// A real argument of TBLASTN (`ncbi_double`).

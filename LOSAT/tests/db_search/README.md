@@ -305,7 +305,10 @@ search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it 
 `db.gap.*`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:
-`python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`.
+`python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`. A freeze runs NCBI BLAST+ with its usage
+report off (`BLAST_USAGE_REPORT=false` in each NCBI run's environment, `db_search_fixtures.ncbi_env`): without it NCBI
+BLAST+ 2.17.0 sends each run's parameters to NCBI when it ends (`blast_usage_report.cpp:195-220`). LOSAT's runs
+(`check`) do not get the variable.
 
 OF5a (XML2 and JSON, outfmt 15 and 16): `x16_taxid.faa` (the two `-subject` records of the XML2 probe sprot_tax, `st1` and
 `st2`) and `x16_taxid_q.faa` (its query), and `x16_taxid`, built from them with a taxid in each definition line (only `.pin
@@ -1098,7 +1101,7 @@ most 9 in BLOSUM62).
       makeblastdb -in "pa1 pb1 pc1 pd1" -input_type blastdb -dbtype prot -blastdb_version 4 -title "nz reppo" \
           -out $D/nz_reppo
 
-## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a, PS11b and PS11c-1)
+## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a, PS11b, PS11c-1 and PS12a)
 
 - `rps_mini` (version 5), `rps_mini4` (version 4) and `rps_mini26` (version 4, a 26-column `.rps` with the 26-letter
   magic `0x1e16` in `.rps` and `.loo`, its `.freq` left at 28 columns, as NCBI's own test database `rpstest_le`):
@@ -1107,7 +1110,9 @@ most 9 in BLOSUM62).
   frequency ratios of two psiblast rounds against `paja` with their scores computed by makeprofiledb at its default
   scale 100 (as CDD's). `rps/build.sh NCBI_BIN OUT_DIR` records how they were made with NCBI BLAST+ 2.17.0; makeprofiledb
   writes the date into the index files, so the committed `.gz` files are the fixtures (a rebuild differs).
-  `rps_pam30.aux` is `rps_mini.aux` with `PAM30` and gap costs 9/1 (row `db.rps.rej.matrix`).
+  `rps_pam30.aux` is `rps_mini.aux` with `PAM30` and gap costs 9/1 (row `db.rps.rej.matrix`). `empty.aux` is an empty
+  file (0 bytes), put in place of `rps_mini.aux` for NCBI's engine error of a `.aux` without a matrix name (row
+  `db.rpstbn.emptyaux.6`).
 - `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
   `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
   the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one
@@ -1129,6 +1134,21 @@ most 9 in BLOSUM62).
   letters, 1,563 bytes, with 401 of its 1,473 letters in lower case at random: Python's `random.seed(7)`, then one
   `random.random() < 0.3` draw per letter over the first 30 records of `PajaWSV.faa` in file order, a letter lowered
   where it is true; with `-lcase_masking` some of its HSPs have identities on masked letters only).
+- rpstblastn's queries (PS12a, rows `db.rpstbn.*`): `tests/fasta/rps/nq.fna`, `nedge.fna` and `odd.fna`, written by
+  `tests/fasta/rps/build_nq.py` (seeded back-translations of `q40.faa`, the docstring there says how): `nq.fna`
+  (12,440 bytes, two query batches of 10,000 letters; its first query `stopq` has stop codons only in frame +1, then 15
+  records of alternating strands and flanks), `nedge.fna` (5,498 bytes: queries of 1 to 12 letters, cuts of 570 to 572
+  letters and their reverse complements, a run of N, a lower-case run, ambiguity codes) and `odd.fna` (a 4-letter
+  query, an empty one, one of N); `-query_loc 1-2` on `nedge.fna` gives a batch without a valid frame. The empty query
+  file is `tests/db_search/empty.faa`.
+- PS12a review A rows: `tests/fasta/rps/bound1.fna` (11,101 bytes: `n9999`, 9,999 letters of N, and `t2` of 2 letters,
+  which fill rpstblastn's first query batch of 10,000 letters without a valid frame, then `v900`, 900 letters of a
+  valid record in the next batch; lines of 60 letters) and `tests/fasta/rps/allx.faa` (42 bytes: two records of X
+  only, 20 and 12 letters, a protein batch without a valid query), written by hand for the review's probes, and
+  `tests/fasta/rps/tkcut570.fna` (the record `tkcut570` of `nedge.fna` alone, 589 bytes: rows `db.rpstbn.ll1.0`, `ll.0`,
+  `sort.0`, `3v.0`, `mix2v.*`), and `tests/fasta/rps/nq4.fna` (the first four records of `nq.fna`, 2,922 bytes: rows
+  `segsoft.0`, `pdsg.0`; review B S1 kept PS12's outfmt 0 rows small). Rows `db.rpstbn.mix2v.*` and `db.rps.mix2v.ds.0`
+  search `rps_mini` (3 profiles) and `rps_tie.00` (1 profile) as two volumes (`rps-gz:rps_mini+rps_tie.00`).
 
 ## outfmt 11 titles where NCBI's search fails (line NP, series SM, DECISIONS 25)
 

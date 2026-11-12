@@ -42,6 +42,7 @@ pub(crate) mod redo;
 pub(crate) mod rescale;
 pub(crate) mod scan;
 pub(crate) mod traceback;
+pub(crate) mod volumes;
 pub(crate) mod wordfinder;
 
 use crate::algorithm::pssm_search::rows::PssmRows;

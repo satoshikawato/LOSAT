@@ -261,7 +261,7 @@ pub struct RpsblastArgs {
 }
 
 /// An `-mt_mode` value of rpsblast: an integer from 0 to 1.
-fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
+pub(crate) fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
     let mode = ncbi_integer_at_least(value, 0)?;
     u8::try_from(mode)
         .ok()
@@ -406,27 +406,39 @@ impl RpsblastArgs {
 
     /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its
     /// errors are NCBI's); the formats that NCBI runs and LOSAT's RPSBLAST does not write yet are
-    /// refused (item PS15a). Outfmt 17 goes on to NCBI's own error (`formatting_handler_check`).
+    /// refused (item PS15a, `check_rps_outfmt`).
     pub fn check_outfmt(outfmt: &str) -> Result<()> {
-        let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
-        if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
-            use crate::blastinput::app::ReportFormat;
-            if !matches!(
+        check_rps_outfmt(outfmt, "RPSBLAST", false)
+    }
+}
+
+/// The refusal of an `-outfmt` that NCBI's RPS programs run and LOSAT's `program` (RPSBLAST,
+/// RPSTBLASTN) does not write yet (item PS15a): every format but 0, 6, 7 and 10. Outfmt 17 goes on
+/// to NCBI's own error (`formatting_handler_check`), and with `xinclude_to_ncbi` outfmt 13 and 14
+/// too (to the standard output: NCBI's "Please provide a file name", `app::xinclude_check_for`).
+pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bool) -> Result<()> {
+    use crate::blastinput::app::ReportFormat;
+    let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
+    if let Some(format) = ReportFormat::from_number(choice.number) {
+        let ncbi_error =
+            xinclude_to_ncbi && matches!(format, ReportFormat::Json | ReportFormat::Xml2);
+        if !ncbi_error
+            && !matches!(
                 format,
                 ReportFormat::Pairwise
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
                     | ReportFormat::Sam
-            ) {
-                bail!(
-                    "output format {} is not supported by LOSAT's RPSBLAST",
-                    choice.number
-                );
-            }
+            )
+        {
+            bail!(
+                "output format {} is not supported by LOSAT's {program}",
+                choice.number
+            );
         }
-        Ok(())
     }
+    Ok(())
 }
 
 #[cfg(test)]

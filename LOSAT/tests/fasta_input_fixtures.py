@@ -65,6 +65,9 @@ import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
+
 ENGINE = Path(__file__).resolve().parents[1]
 FIXTURES = ENGINE / "tests/fixtures/fasta_input"
 REL = "tests/fixtures/fasta_input"
@@ -1131,8 +1134,11 @@ def row_argv(row: Row, losat: bool) -> list[str]:
     return argv
 
 
-def execute(command: list[str], row: Row, merged: bool) -> tuple[int, bytes, bytes]:
-    kw: dict = dict(cwd=ENGINE, env=clean_env(row.env), timeout=TIMEOUT)
+def execute(command: list[str], row: Row, merged: bool, ncbi: bool = False) -> tuple[int, bytes, bytes]:
+    """The run of `command` with the row's standard input; an NCBI run (`ncbi`) gets BLAST_USAGE_REPORT=false
+    (db_search_fixtures.ncbi_env), LOSAT's the cleaned environment as it is."""
+    env = clean_env(row.env)
+    kw: dict = dict(cwd=ENGINE, env=ncbi_env(env) if ncbi else env, timeout=TIMEOUT)
     handle = None
     try:
         mode, path = stdin_of(row)
@@ -1157,9 +1163,9 @@ def execute(command: list[str], row: Row, merged: bool) -> tuple[int, bytes, byt
             handle.close()
 
 
-def streams(command: list[str], row: Row) -> dict[str, object]:
-    rc, out, err = execute(command, row, False)
-    rc2, merged, _ = execute(command, row, True)
+def streams(command: list[str], row: Row, ncbi: bool = False) -> dict[str, object]:
+    rc, out, err = execute(command, row, False, ncbi)
+    rc2, merged, _ = execute(command, row, True, ncbi)
     return {"rc": rc, "rc_merged": rc2, "stdout": out, "stderr": err, "combined": merged}
 
 
@@ -1298,7 +1304,7 @@ def freeze_one(ncbi_bin: Path, out: Path, row: Row, netns: bool) -> tuple[Row, s
     reason = network_safe(row)
     if reason:
         return row, f"refused: {reason}"
-    result = streams(ncbi_command(ncbi_bin, row, netns), row)
+    result = streams(ncbi_command(ncbi_bin, row, netns), row, ncbi=True)
     if result["rc"] == -999 or result["rc_merged"] == -999:
         return row, "error: timeout"
     (out / f"{row.row_id}.out").write_bytes(result["stdout"])
@@ -1360,7 +1366,8 @@ def command_freeze(args) -> int:
     ncbi_bin = Path(args.ncbi_bin).resolve()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    version = subprocess.run([str(ncbi_bin / "blastn"), "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
+    version = subprocess.run([str(ncbi_bin / "blastn"), "-version"], capture_output=True, text=True,
+                             env=ncbi_env(dict(os.environ))).stdout.strip().replace("\n", "; ")
     netns = not args.no_netns and subprocess.run(["unshare", "-rn", "true"], capture_output=True).returncode == 0
     defined = build_rows()
     selected = filter_rows([r for r in defined if r.kind == "ncbi"], args.rows, args.match, args.tier)

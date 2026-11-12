@@ -1192,3 +1192,22 @@ The other queries are `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and `taxfilt
 - `db.acbs.blastx.wrap*` and `db.acbs.blastx.rej*` search `bslice` with a `-max_target_seqs` whose preliminary
   size NCBI's 32-bit int wraps: 2147483647 (48 with composition-based statistics), 1073741824 without them
   (10), and 1073741824 with them (negative: NCBI crashes, LOSAT refuses).
+
+## Alias-file keys (line RG, series D, D1a)
+
+Rows `db.ak.*`: alias files of `aliaskeys/` over `taxfilter/tfp`, `taxfilter/tfn` (its volumes `tfn.00` and `tfn.01` too) and
+`multidb/p4a` (PSIBLAST reads databases without parsed Seq-ids), written by hand for the keys NCBI's `CSeqDB` reads
+(`remaining-gaps-20261112/D/fixtures/make_d1a_fixtures.py` writes them and the rows): `NSEQ` and `LENGTH` that are not the
+sums of the volumes (`p_nseq`, `p_nseqhi`, `p_nseqonly`, `p_nseqplus`, `p_nseq0`: each query's warning `Filtering resulted
+in an empty database.` and a search that goes on, `p_nseq4g`: NCBI's `int` of 4294967297 is 1, `n_nseq`, `n_nseq4g`,
+`s_range`), `STATS_NSEQ` and `STATS_TOTLEN` (`p_stats`, `p_statsn`, `p_statsl`, `p_statsz`, `p_statsnest`, `p_statsover`, the
+`-dbsize` row, `p_statsl` with `p_r123` in one `-db`, `n_stats`, `s_stats`), `MIN_SEQ_LENGTH` (`p_min`, `n_min1`: TBLASTN's
+`The average subject length is too short`, exit 3, `n_min1000`), `MAX_SEQ_LENGTH abc` (never read), `VDBLIST` (`p_vdb`),
+`FIRST_OID` / `LAST_OID` ranges (`p_range`, `p_nest` and `p_rin`: nested ranges ANDed, `p_union`: two alias files over one
+volume ORed, `p_twice`: an alias file and the volume itself, `p_dupvol`: one volume twice in a `DBLIST`, `p_first0`, `p_last2`,
+`p_empty`, `p_beyond`, `p_r312` and `p_r312s` with `-taxids` and `-negative_taxids`, `p_range` with `-seqidlist`, `n_range`,
+`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone). The ncbi rows were frozen with NCBI
+BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the release build on the developer machine, the same
+bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
+`p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the
+developer machine.

@@ -614,7 +614,7 @@ fn open_search_database(
                 args.archive.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.filtered_empty(),
+                database.statistics_length_is_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTN",
@@ -1262,6 +1262,11 @@ fn search(
         // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
         old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
+    // Without the Gumbel block NCBI's shortest subject length is the statistics' average
+    // (blast_setup.c:975), which divides by their number of sequences.
+    if let Some(database) = database.filter(|_| subject_set.old_fsc) {
+        database.check_statistics_count()?;
+    }
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
     // US-ASCII (NCBI's stream throws): refused before the search, and before anything is
@@ -1351,10 +1356,35 @@ fn search(
         // database is checked as NCBI's first read would fail, with the same error, and each
         // sequence is read where it is searched (`common/x_db_stream.rs`).
         let mut x_stream = None;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+        // ```c
+        //    if (sbp->gbp) {
+        //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+        //        if (Blast_SubjectIsTranslated(program_number)) {
+        //            min_subject_length/=3;
+        //        }
+        //    ...
+        //    if(min_subject_length <=0) {
+        // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+        //    }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+        // ```c
+        //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+        //         new_msg->message = strdup("The average subject length is too short");
+        // ```
+        // With the Gumbel block a database's `GetMinLength` below 3 (an alias file's
+        // `MIN_SEQ_LENGTH` 1 or 2, a list's shortest sequence) leaves no residue
+        // (`min_subject_length` is NCBI's `Uint4`): the setup of the first batch with a valid
+        // context fails after the database's first OID is found and before any sequence is read.
+        // NCBI 2.17.0 (probe of line RG D1a, `db.ak.tbn.min1.6`): `BLAST engine error: The
+        // average subject length is too short`, exit status 3.
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.printed_num_seqs() == 0 {
+                let read = if database.num_oids() == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
+                } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
+                    Err(PreliminaryReadError("The average subject length is too short").into())
                 } else {
                     database.x_stream(resolved.num_threads).map(|stream| {
                         x_stream = Some(stream);

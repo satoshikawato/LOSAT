@@ -1,0 +1,42 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/sd2.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	678	NP_417616.1 outer membrane lipoprotein - activator of MrcA activity [Escherichia coli str. K-12 substr. MG1655]
+SITES
+1	Query_1	Specific	putative ligand binding site	L387,L388,K389,N408,Q409,L454,T543,S570	8	8	380562
+ENDSITES
+MOTIFS
+1	Query_1	TPR repeat	Q66	92E	0
+1	Query_1	TPR repeat	R99	127P	0
+ENDMOTIFS
+ENDQUERY
+QUERY	Query_2	Peptide	153	NP_418053.1 tetratricopeptide-like domain-containing protein YibG [Escherichia coli str. K-12 substr. MG1655]
+ENDQUERY
+ENDSESSION	1
+ENDDATA

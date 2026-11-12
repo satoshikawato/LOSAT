@@ -551,6 +551,10 @@ pub(crate) struct SubjectSetNumbers {
     pub(crate) total: i64,
     /// The number of subjects (`-db`: the index's count).
     pub(crate) count: i64,
+    /// `BlastSeqSrcGetTotLen`, which the linking cutoffs read (blast_engine.c:1407, 1451-1455):
+    /// `total`, except for a database whose alias files give `STATS_TOTLEN` (the statistics' total)
+    /// or whose list kept no sequence (`GetTotalLength`, `SeqDb::total_length`).
+    pub(crate) link_total: i64,
     /// `-dbsize`.
     pub(crate) dbsize: Option<i64>,
     /// `-searchsp`.
@@ -563,6 +567,7 @@ impl SubjectSetNumbers {
         Self {
             total: records.iter().map(|record| record.seq().len() as i64).sum(),
             count: records.len() as i64,
+            link_total: records.iter().map(|record| record.seq().len() as i64).sum(),
             dbsize,
             searchsp: None,
         }

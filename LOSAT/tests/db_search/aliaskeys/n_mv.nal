@@ -1,0 +1,3 @@
+DBLIST ../taxfilter/tfn.00 ../taxfilter/tfn.01
+FIRST_OID 10
+LAST_OID 14

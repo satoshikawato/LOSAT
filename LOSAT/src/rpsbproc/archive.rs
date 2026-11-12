@@ -31,7 +31,8 @@
 //! `Seqdesc` variants other than `title` and `user`, `Seq-annot`, `Int-fuzz`, the `Seq-loc`
 //! variants other than `int` and `packed-int`, the `Seq-align` members `bounds` and `ext`,
 //! the segments other than `denseg`, the large `Blast4-value` variants, the `phi-alignments`,
-//! `pssm` and `simple-results` of the results, and `Seq-ext`, `Seq-hist` and `gap` data).
+//! `pssm` and `simple-results` of the results, the `Seq-ext` variants other than `delta` and
+//! the `loc` items of a `delta`, and `Seq-hist` and `gap` data).
 //!
 //! What LOSAT does not read is noted while the object is read and refused once the object is
 //! read whole (`ArchiveStream::next_archive`): NCBI may still fail to read the object, which then
@@ -144,6 +145,9 @@ pub(crate) struct Query {
     pub(crate) length: Option<u32>,
     /// `inst.seq-data`: its variant and its letters (or bytes).
     pub(crate) seq_data: Option<(&'static str, Vec<u8>)>,
+    /// The `seq-data` of the literals of `inst.ext delta`, in order (literals without data or
+    /// with `gap` data and `loc` items are left out, as `Get1LetterSeqData` skips them).
+    pub(crate) delta_literals: Vec<(&'static str, Vec<u8>)>,
 }
 
 /// `Blast4-get-search-results-reply`, with what rpsbproc reads.
@@ -1484,19 +1488,8 @@ impl<R: Read> ArchiveStream<R> {
                 5 => {
                     self.reader.enumerated(&SEQ_INST_STRAND)?;
                 }
-                6 => {
-                    let variant = self.reader.choice(&SEQ_DATA)?;
-                    let name = SEQ_DATA[variant];
-                    let data = match name {
-                        "iupacna" | "iupacaa" | "ncbieaa" => self.string()?,
-                        "gap" => {
-                            self.skip_value()?;
-                            Vec::new()
-                        }
-                        _ => self.reader.octets()?,
-                    };
-                    query.seq_data = Some((name, data));
-                }
+                6 => query.seq_data = Some(self.seq_data()?),
+                7 => self.seq_ext(query)?,
                 _ => self.skip_value()?,
             }
         }
@@ -1504,6 +1497,90 @@ impl<R: Read> ArchiveStream<R> {
             return Err(self.reader.error("a mandatory member is missing"));
         }
         Ok(())
+    }
+
+    /// A `Seq-data`: its variant and its letters (or bytes).
+    fn seq_data(&mut self) -> Result<(&'static str, Vec<u8>)> {
+        let variant = self.reader.choice(&SEQ_DATA)?;
+        let name = SEQ_DATA[variant];
+        let data = match name {
+            "iupacna" | "iupacaa" | "ncbieaa" => self.string()?,
+            "gap" => {
+                self.skip_value()?;
+                Vec::new()
+            }
+            _ => self.reader.octets()?,
+        };
+        Ok((name, data))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:303-324
+    // ```text
+    // Seq-ext ::= CHOICE {
+    //     seg Seg-ext ,        -- segmented sequences
+    //     ref Ref-ext ,        -- hot link to another sequence (a view)
+    //     map Map-ext ,        -- ordered map of markers
+    //     delta Delta-ext }
+    // ...
+    // Delta-ext ::= SEQUENCE OF Delta-seq
+    //
+    // Delta-seq ::= CHOICE {
+    //     loc Seq-loc ,       -- point to a sequence
+    //     literal Seq-literal }   -- a piece of sequence
+    //
+    // Seq-literal ::= SEQUENCE {
+    //     length INTEGER ,         -- must give a length in residues
+    //     fuzz Int-fuzz OPTIONAL , -- could be unsure
+    //     seq-data Seq-data OPTIONAL } -- may have the data
+    // ```
+    // `Get1LetterSeqData` reads the literals' data of a `delta` (`query::fill_sequence`); the
+    // other variants and the `loc` items give no residues and are read as values, and a
+    // literal of `gap` data is skipped (`SeqDataTo1LtrSeq` gives it no letters and -1, which
+    // `Get1LetterSeqData` does not append). The `length` of a literal is `TSeqPos` (unsigned,
+    // seq.def:13-14).
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:151,193-194
+    // ```c++
+    // 	dst.clear();
+    // ...
+    // 	default:
+    // 		iDataType = -1;
+    // ```
+    fn seq_ext(&mut self, query: &mut Query) -> Result<()> {
+        const NAMES: [&str; 4] = ["seg", "ref", "map", "delta"];
+        if self.reader.choice(&NAMES)? != 3 {
+            return self.skip_value();
+        }
+        let mut block_start = self.reader.start_block()?;
+        while self.reader.next_element(&mut block_start)? {
+            if self.reader.choice(&["loc", "literal"])? == 0 {
+                self.skip_value()?;
+                continue;
+            }
+            let mut members = self.reader.begin_members()?;
+            let mut length = false;
+            while let Some(index) = self
+                .reader
+                .next_member(&mut members, &["length", "fuzz", "seq-data"])?
+            {
+                match index {
+                    0 => {
+                        self.reader.uint4()?;
+                        length = true;
+                    }
+                    1 => self.skip_value()?,
+                    _ => {
+                        let data = self.seq_data()?;
+                        if data.0 != "gap" {
+                            query.delta_literals.push(data);
+                        }
+                    }
+                }
+            }
+            if !length {
+                return Err(self.reader.error("a mandatory member is missing"));
+            }
+        }
+        self.reader.end_block()
     }
 
     /// A `Seq-align-set` (SET OF Seq-align).

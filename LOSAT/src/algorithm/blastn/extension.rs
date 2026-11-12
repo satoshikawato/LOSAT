@@ -138,7 +138,18 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    let x = -x_dropoff;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
+    // 913-917 and 1755-1759)
+    // ```c
+    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
+    //             }else {
+    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
+    //                                  -(cutoffs->x_dropoff), ungapped_data,
+    // ```
+    // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
+    // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
+    let x = x_dropoff.wrapping_neg();
     let q_len = q_seq.len();
 
     let mut base: isize = 3 - (s_off % COMPRESSION_RATIO) as isize;
@@ -774,7 +785,18 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     reduced_cutoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    let x = -x_dropoff;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
+    // 913-917 and 1755-1759)
+    // ```c
+    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
+    //             }else {
+    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
+    //                                  -(cutoffs->x_dropoff), ungapped_data,
+    // ```
+    // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
+    // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
+    let x = x_dropoff.wrapping_neg();
     let q_len = q_seq.len();
 
     let len = (COMPRESSION_RATIO - (s_off % COMPRESSION_RATIO)) % COMPRESSION_RATIO;

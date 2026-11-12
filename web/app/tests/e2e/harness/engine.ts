@@ -694,6 +694,30 @@ export async function highMemory(
   }
 }
 
+/**
+ * Starts `rounds` workers one after another (wait-worker.ts), each with a shared memory of
+ * `maximumPages` of its own and an instance of the module at `url`, whose export `park` waits on
+ * that memory without a timeout, and ends each 50 ms after it began to wait. Returns what each
+ * worker said: `waiting`, or that it could not have its memory (and the rounds stop there).
+ */
+export async function endWaitingWorkers(url: string, rounds: number, maximumPages: number): Promise<string[]> {
+  const module = await WebAssembly.compile(await (await fetch(url)).arrayBuffer());
+  const answers: string[] = [];
+  for (let round = 0; round < rounds; round++) {
+    const worker = new Worker(new URL('./wait-worker.ts', import.meta.url), { type: 'module' });
+    const answer = await new Promise<string>((resolve) => {
+      worker.onmessage = (event: MessageEvent<string>) => resolve(event.data);
+      worker.onerror = (event) => resolve(`the worker failed: ${event.message}`);
+      worker.postMessage({ module, maximumPages });
+    });
+    answers.push(answer);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    worker.terminate();
+    if (answer !== 'waiting') break;
+  }
+  return answers;
+}
+
 /** What the browser offers for the threaded module. */
 export function capabilities(): Record<string, unknown> {
   return {

@@ -71,6 +71,8 @@ interface Slot {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** The longest wait of this worker's thread at a time (spawn), as the module's own waits. */
+const WAIT_SLICE_MS = 100;
 
 export class ThreadHost {
   private readonly slots: Slot[] = [];
@@ -139,7 +141,12 @@ export class ThreadHost {
     const started = new Int32Array(new SharedArrayBuffer(4));
     const command: ThreadCommand = { type: 'start', tid, startArg, started: started.buffer as SharedArrayBuffer };
     slot.worker.postMessage(command);
-    Atomics.wait(started, 0, START_PENDING, this.options.startTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+    // In slices: WebKit never ends a worker whose thread waits without returning, and keeps the
+    // shared memory with it (LOSAT/tests/wasi_shared_memory.js, the module's waits).
+    const deadline = performance.now() + (this.options.startTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+    for (let left = deadline - performance.now(); left > 0; left = deadline - performance.now()) {
+      if (Atomics.wait(started, 0, START_PENDING, Math.min(left, WAIT_SLICE_MS)) !== 'timed-out') break;
+    }
     // The thread worker takes the start (pending -> taken) unless the host gives up first
     // (pending -> abandoned): a thread must never start after its spawn returned -1, because
     // the engine frees its start argument then.

@@ -209,7 +209,7 @@ function replaceBody(bytes, index, replacement) {
 
 test("the guarded module carries its record and is returned as it is when guarded again", () => {
   const guarded = guardSharedMemory(fixture());
-  assert.deepEqual(guarded.record, { version: 3, fill: 1, copy: 1, grow: 0, atomic: 0, atomic_helpers: 0 });
+  assert.deepEqual(guarded.record, { version: 4, fill: 1, copy: 1, grow: 0, atomic: 0, atomic_helpers: 0 });
   assert.deepEqual(guardRecord(guarded.bytes), guarded.record);
   assert.deepEqual(guarded.bytes.subarray(-marker(guarded.record).length), marker(guarded.record));
   assert.equal(guardRecord(fixture()), null);
@@ -230,26 +230,26 @@ test("verifyGuarded rejects unguarded, forged, partly guarded and miscounted mod
     ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
     ...section(3, vector(types.map((type) => [type]))),
     ...section(10, vector(types.map(() => body([])))),
-    ...marker({ version: 3, fill: 1, copy: 0, grow: 0, atomic: 0, atomic_helpers: 0 }),
+    ...marker({ version: 4, fill: 1, copy: 0, grow: 0, atomic: 0, atomic_helpers: 0 }),
   ]);
   assert.ok(WebAssembly.validate(functions(0)));
   assert.throws(() => verifyGuarded(functions(0)), /the guard's helpers are missing/);
   assert.throws(() => verifyGuarded(functions(0, 0)), /the guard's helpers are missing/);
   assert.throws(() => verifyGuarded(functions(0, 0, 0)), /do not have the guard's type/);
-  assert.throws(() => verifyGuarded(Buffer.concat([fixture(), marker({ version: 3, fill: 1, copy: 1, grow: 0, atomic: 0, atomic_helpers: 0 })])),
+  assert.throws(() => verifyGuarded(Buffer.concat([fixture(), marker({ version: 4, fill: 1, copy: 1, grow: 0, atomic: 0, atomic_helpers: 0 })])),
     /not the guard's bodies/);
   const original = fixture({ extra: [[...args, 0xfc, 10, 0, 0]] });
   const guarded = guardSharedMemory(original);
-  assert.deepEqual(guarded.record, { version: 3, fill: 1, copy: 2, grow: 0, atomic: 0, atomic_helpers: 0 });
+  assert.deepEqual(guarded.record, { version: 4, fill: 1, copy: 2, grow: 0, atomic: 0, atomic_helpers: 0 });
   // extra0 (defined function 3) with its original memory.copy instead of the helper call.
   const partly = replaceBody(guarded.bytes, 3, body([...args, 0xfc, 10, 0, 0]).slice(1));
   assert.ok(WebAssembly.validate(partly));
   assert.throws(() => verifyGuarded(partly), /function 4 has an unguarded memory\.copy/);
   const tail = marker(guarded.record).length;
   const recount = (record) => Buffer.concat([guarded.bytes.subarray(0, -tail), marker(record)]);
-  assert.throws(() => verifyGuarded(recount({ version: 3, fill: 2, copy: 2, grow: 0, atomic: 0, atomic_helpers: 0 })), /record counts 2 fills, 2 copies, 0 grows and 0 atomics/);
+  assert.throws(() => verifyGuarded(recount({ version: 4, fill: 2, copy: 2, grow: 0, atomic: 0, atomic_helpers: 0 })), /record counts 2 fills, 2 copies, 0 grows and 0 atomics/);
   assert.throws(() => guardSharedMemory(recount({ version: 2, fill: 1, copy: 2, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
-  assert.throws(() => guardSharedMemory(recount({ version: 3, fill: 0, copy: 0, grow: 0, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
+  assert.throws(() => guardSharedMemory(recount({ version: 4, fill: 0, copy: 0, grow: 0, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
 });
 
 test("the guard command writes a verified module; a decline or nothing to guard exits 1 without output", () => {
@@ -266,7 +266,7 @@ test("the guard command writes a verified module; a decline or nothing to guard 
   try {
     fs.writeFileSync(file("in.wasm"), fixture());
     const written = json("guard", file("in.wasm"), file("out.wasm"));
-    assert.deepEqual([written.version, written.fill, written.copy, written.guarded_before], [3, 1, 1, false]);
+    assert.deepEqual([written.version, written.fill, written.copy, written.guarded_before], [4, 1, 1, false]);
     assert.deepEqual(fs.readFileSync(file("out.wasm")), guardSharedMemory(fixture()).bytes);
     assert.equal(json("verify", file("out.wasm")).sha256, written.output_sha256);
     // A guarded input is written as it is.
@@ -305,15 +305,21 @@ const ATOMICS = [
 ];
 const alignOf = (size) => Math.log2(size);
 
+// The import that the helper of a wait calls between its slices (function 0 of the fixtures).
+const WASI_YIELD = { wasi_snapshot_preview1: { sched_yield: () => 0 } };
+const yieldImport = (type) => [...name("wasi_snapshot_preview1"), ...name("sched_yield"), 0, ...uleb(type)];
+
 // One exported function per entry of `ops`: its parameters are the instruction's operands.
-function atomicFixture(ops) {
+// Function 0 is the import of sched_yield (`yieldType`: its type, () -> i32 by default; null: none).
+function atomicFixture(ops, { yieldType = [0x60, 0, 1, I32] } = {}) {
   const types = ops.map(({ values, result }) => [0x60, values.length + 1, I32, ...values, result.length, ...result]);
+  const imported = yieldType === null ? 0 : 1;
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
-    ...section(1, vector(types)),
-    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+    ...section(1, vector([...types, ...(yieldType === null ? [] : [yieldType])])),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4], ...(yieldType === null ? [] : [yieldImport(ops.length)])])),
     ...section(3, vector(ops.map((_, i) => uleb(i)))),
-    ...section(7, vector(ops.map((_, i) => [...name(`op${i}`), 0, ...uleb(i)]))),
+    ...section(7, vector(ops.map((_, i) => [...name(`op${i}`), 0, ...uleb(i + imported)]))),
     ...section(10, vector(ops.map(({ sub, values, size, offset }) => body([
       0x20, 0, ...values.flatMap((_, i) => [0x20, i + 1]),
       0xfe, ...uleb(sub), alignOf(size), ...uleb(offset),
@@ -352,7 +358,7 @@ test("every atomic instruction: guarded results, memory and traps match original
             new Uint8Array(memory.buffer).fill(0);
             const view = new DataView(memory.buffer);
             for (let at = 0; at < 65536; at += 4096) view.setUint32(at, at + 1, true);
-            return { memory, fn: new WebAssembly.Instance(module, { env: { memory } }).exports[`op${i}`] };
+            return { memory, fn: new WebAssembly.Instance(module, { env: { memory }, ...WASI_YIELD }).exports[`op${i}`] };
           };
           const a = make(original);
           const b = make(guarded);
@@ -391,7 +397,7 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
   const original = [0x20, 0, 0x20, 1, 0xfe, 0x1e, 2, 8];
   const partly = replaceBody(guarded.bytes, 0, body(original).slice(1));
   assert.ok(WebAssembly.validate(partly));
-  assert.throws(() => verifyGuarded(partly), /function 0 has an unguarded atomic instruction 0xfe 30/);
+  assert.throws(() => verifyGuarded(partly), /function 1 has an unguarded atomic instruction 0xfe 30/);
   // The first atomic helper without its bound check is the same operation, and is not the guard's.
   const forged = replaceBody(guarded.bytes, 5, body(original).slice(1));
   assert.ok(WebAssembly.validate(forged));
@@ -400,6 +406,84 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
   const recount = (record) => Buffer.concat([guarded.bytes.subarray(0, -tail), marker(record)]);
   assert.throws(() => verifyGuarded(recount({ ...guarded.record, atomic: 3 })), /0 fills, 0 copies, 0 grows and 3 atomics/);
   assert.throws(() => guardSharedMemory(recount({ ...guarded.record, atomic_helpers: 3 })), /unsupported losat\.shared_memory_guard record/);
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// A wait waits in slices and calls sched_yield between them (the header of wasi_shared_memory.js):
+// WebKit ends a worker whose thread waits only there. The results are the instruction's.
+const WAIT_CHILD = `
+  const { Worker } = require("node:worker_threads");
+  const [original, guarded] = process.argv.slice(1).map((file) => new WebAssembly.Module(require("node:fs").readFileSync(file)));
+  const run = (module) => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
+    let yields = 0;
+    const { op0: wait32, op1: wait64 } = new WebAssembly.Instance(module, {
+      env: { memory }, wasi_snapshot_preview1: { sched_yield: () => { yields += 1; return 0; } } }).exports;
+    const timed = (call) => { yields = 0; const start = performance.now(); const result = call(); return { result, yields, ms: performance.now() - start }; };
+    const out = {
+      notEqual: timed(() => wait32(16, 1, -1n)),
+      atOnce: timed(() => wait32(16, 0, 0n)),
+      timed250: timed(() => wait32(16, 0, 250_000_000n)),
+      wait64: timed(() => wait64(24, 0n, 120_000_000n)),
+    };
+    // A notify 150 ms later wakes a wait without a timeout.
+    const notifier = new Worker("const { workerData } = require('node:worker_threads');"
+      + "setTimeout(() => Atomics.notify(new Int32Array(workerData), 4, 1), 150);", { eval: true, workerData: memory.buffer });
+    out.notified = timed(() => wait32(16, 0, -1n));
+    notifier.terminate();
+    return out;
+  };
+  console.log(JSON.stringify({ original: run(original), guarded: run(guarded) }));
+`;
+
+test("a wait waits in slices with sched_yield between them, and a notify wakes it at once", { timeout: 60000 }, () => {
+  const waits = [{ ...ATOMICS[1], offset: 0 }, { ...ATOMICS[2], offset: 0 }];
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-wait-"));
+  try {
+    const original = path.join(directory, "original.wasm");
+    const guarded = path.join(directory, "guarded.wasm");
+    fs.writeFileSync(original, atomicFixture(waits));
+    fs.writeFileSync(guarded, guardSharedMemory(atomicFixture(waits)).bytes);
+    const run = spawnSync(process.execPath, ["-e", WAIT_CHILD, original, guarded], { encoding: "utf8", timeout: 30000 });
+    assert.equal(run.status, 0, run.stderr);
+    const { original: before, guarded: after } = JSON.parse(run.stdout);
+    for (const name of Object.keys(before)) assert.equal(after[name].result, before[name].result, name);
+    assert.deepEqual(Object.values(after).map((r) => r.result), [1, 2, 2, 2, 0]);
+    // 250 ms in slices of 100, 100 and 50 ms; 120 ms in 100 and 20; neither shorter than asked.
+    assert.deepEqual([after.notEqual.yields, after.atOnce.yields, after.timed250.yields, after.wait64.yields], [0, 0, 2, 1]);
+    assert.ok(after.timed250.ms >= 249 && after.wait64.ms >= 119, JSON.stringify(after));
+    // The notify came in the second slice or later, and woke the wait without waiting out its slice.
+    assert.ok(after.notified.yields >= 1 && after.notified.ms < 1000, JSON.stringify(after.notified));
+    assert.equal(before.timed250.yields + before.notified.yields, 0);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("without sched_yield a wait helper waits once; a sched_yield that is not () -> i32 is refused", () => {
+  const waits = [{ ...ATOMICS[1], offset: 0 }, { ...ATOMICS[2], offset: 0 }];
+  assert.throws(() => guardSharedMemory(atomicFixture(waits, { yieldType: [0x60, 0, 0] })),
+    /wasi_snapshot_preview1\.sched_yield is not a function \(\) -> i32/);
+  // Without the import the helpers are the single wait (the hosts' fixtures); they verify, return the
+  // instruction's results, and differ from the helpers of a module that imports it.
+  const once = guardSharedMemory(atomicFixture(waits, { yieldType: null }));
+  assert.ok(verifyGuarded(once.bytes));
+  assert.equal(once.atomic, 2);
+  const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
+  const { op0: wait32, op1: wait64 } = new WebAssembly.Instance(new WebAssembly.Module(once.bytes), { env: { memory } }).exports;
+  assert.deepEqual([wait32(16, 1, -1n), wait32(16, 0, 0n), wait64(24, 1n, -1n), wait64(24, 0n, 1_000_000n)], [1, 2, 1, 2]);
+  const sliced = guardSharedMemory(atomicFixture(waits)).bytes;
+  assert.ok(verifyGuarded(sliced));
+  assert.ok(sliced.length > once.bytes.length);
+  const guarded = guardSharedMemory(atomicFixture([waits[0]]));
+  assert.deepEqual(verifyGuarded(guarded.bytes), guarded.record);
+  // The wait helper (defined function 4, after op0 and the fill, copy and grow helpers) as the bare
+  // instruction, one wait without slices: not the guard's.
+  const bare = body([0x20, 0, 0x20, 1, 0x20, 2, 0xfe, 1, 2, 0]).slice(1);
+  const forged = replaceBody(guarded.bytes, 4, bare);
+  assert.ok(WebAssembly.validate(forged));
+  assert.throws(() => verifyGuarded(forged), /not the guard's bodies/);
 });
 
 // The stale bound itself, on the engine, for every atomic instruction. On V8 a helper's own entry
@@ -421,12 +505,14 @@ const STALE_CHILD = `
   const memory = new WebAssembly.Memory({ initial: 1, maximum: 256, shared: true });
   const view = new Int32Array(memory.buffer);
   new Uint8Array(memory.buffer, 1024, 192).fill(84);
-  const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory } }).exports;
+  const wasi = { wasi_snapshot_preview1: { sched_yield: () => 0 } };
+  const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory }, ...wasi }).exports;
   const worker = new Worker(\`
     const { workerData, parentPort } = require("node:worker_threads");
     const { module, memory } = workerData;
     const view = new Int32Array(memory.buffer);
-    const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory } }).exports;
+    const wasi = { wasi_snapshot_preview1: { sched_yield: () => 0 } };
+    const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory }, ...wasi }).exports;
     const outcomes = {};
     for (const [label, probe] of Object.entries(probes)) {
       try { outcomes[label] = probe(); } catch (err) { outcomes[label] = err.message; }
@@ -470,9 +556,9 @@ function staleProbes(probes) {
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, vector([[0x60, 0, 1, I32], [0x60, 1, I32, 1, I32]])),
-    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, ...uleb(256)]])),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, ...uleb(256)], yieldImport(0)])),
     ...section(3, vector([...labels.map(() => [0]), [1]])),
-    ...section(7, vector([...labels.map((label, i) => [...name(label), 0, i]), [...name("grow"), 0, labels.length]])),
+    ...section(7, vector([...labels.map((label, i) => [...name(label), 0, i + 1]), [...name("grow"), 0, labels.length + 1]])),
     ...section(10, vector([...labels.map((label) => body([
       0x41, entered, 0x41, 1, 0xfe, 0x17, 2, 0,
       0x41, entered, 0x41, 1, 0xfe, 0, 2, 0, 0x1a,
@@ -570,7 +656,7 @@ test("memory.grow: guarded results and size match original Wasm, and the largest
     });
   };
   const guarded = guardSharedMemory(growFixture());
-  assert.deepEqual(guarded.record, { version: 3, fill: 0, copy: 0, grow: 1, atomic: 0, atomic_helpers: 0 });
+  assert.deepEqual(guarded.record, { version: 4, fill: 0, copy: 0, grow: 1, atomic: 0, atomic_helpers: 0 });
   assert.deepEqual(verifyGuarded(guarded.bytes), guarded.record);
   const page = 65536;
   // A failed grow writes nothing; a grow by 0 records the size too; the original leaves the cell alone.
@@ -593,5 +679,5 @@ test("verifyGuarded rejects an unguarded memory.grow, a forged helper and a wron
   const tail = marker(guarded.record).length;
   const recount = (record) => Buffer.concat([guarded.bytes.subarray(0, -tail), marker(record)]);
   assert.throws(() => verifyGuarded(recount({ ...guarded.record, grow: 2 })), /0 fills, 0 copies, 2 grows and 0 atomics/);
-  assert.throws(() => guardSharedMemory(recount({ version: 3, fill: 0, copy: 0, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
+  assert.throws(() => guardSharedMemory(recount({ version: 4, fill: 0, copy: 0, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
 });

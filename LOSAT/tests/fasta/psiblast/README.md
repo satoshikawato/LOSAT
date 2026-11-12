@@ -54,3 +54,6 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   batch); `ps5c_qx_tk.faa`: `ps5c_qx.faa`, then `tk.faa`. With `BATCH_SIZE=1` and a search that fails in its
   setup (here the empty database `tests/seqdb/db/empty`), NCBI reports the first batch, then the error of the
   second (blastp rows `db.empty.unsearched.*`).
+- `ps7_mixed.fna` (PS7, tblastn `-in_pssm` with `-subject`, rows `ps7.subj.*` of `tests/outfmt0_manifest.tsv`): the
+  first record of `tests/db_search/tslice.fna`, an empty record (`Subject sequence contains no data`) and the second
+  record in lower case.

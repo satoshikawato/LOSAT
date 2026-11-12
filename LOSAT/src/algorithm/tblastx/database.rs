@@ -206,6 +206,7 @@ impl TblastxDatabase {
         SubjectSetNumbers {
             total: i64::try_from(total).expect("checked when opened"),
             count: i64::from(count),
+            link_total: i64::try_from(self.db.total_length()).expect("checked when opened"),
             dbsize,
             searchsp: None,
         }

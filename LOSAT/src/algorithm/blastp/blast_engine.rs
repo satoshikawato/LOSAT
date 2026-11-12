@@ -5374,6 +5374,9 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .in_id_scope(args.id_scope.clone());
+            if resolved.rps_search.is_some() {
+                rps_hooks::check_alias_keys(&database, args.app.name())?;
+            }
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,

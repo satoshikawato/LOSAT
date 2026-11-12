@@ -1914,6 +1914,7 @@ fn search(
                 numbers: SubjectSetNumbers {
                     total: stores.iter().map(|store| store.len() as i64).sum(),
                     count: records.len() as i64,
+                    link_total: stores.iter().map(|store| store.len() as i64).sum(),
                     dbsize: args.dbsize,
                     searchsp: args.searchsp,
                 },
@@ -4473,6 +4474,9 @@ fn search_query_batch<S: TbxScore>(
     // database index's numbers).
     let db_length_nucl = numbers.total;
     let db_num_seqs = numbers.count;
+    // The linking cutoffs read `BlastSeqSrcGetTotLen`, not the statistics' total
+    // (`SubjectSetNumbers::link_total`).
+    let link_db_length_nucl = numbers.link_total;
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:535-560
     // if (valid_context_found) { return 0; } else { return 1; }
     // NCBI reference: c++/src/algo/blast/api/local_blast.cpp:177-178,206-208
@@ -4715,7 +4719,7 @@ fn search_query_batch<S: TbxScore>(
             cutoffs: calculate_link_hsp_cutoffs_ncbi(
                 avg_query_length,
                 subject_len_nucl,
-                db_length_nucl,
+                link_db_length_nucl,
                 cutoff_score_min,
                 1.0,
                 BLAST_GAP_DECAY_RATE,

@@ -119,6 +119,16 @@ pub(crate) fn restrict_database(
     // without it, before the search (`pairwise_database`), and meets the others there.
     db.check_alias_values()
         .map_err(|error| database_error(error, program))?;
+    // NCBI asks for the length of OID 0 only where the statistics' total is not positive
+    // (blast_setup.c:925-937, quoted at `SeqDb::statistics_numbers`): over volumes without
+    // sequences an alias file's `LENGTH` or `STATS_TOTLEN` makes NCBI search none instead of
+    // its `Database memory map file error`, which LOSAT does not follow (line RG, D1a-2).
+    if db.num_oids() == 0 && !db.statistics_length_is_empty() {
+        return Err(refusal(
+            "an alias file's LENGTH or STATS_TOTLEN over volumes without sequences",
+            program,
+        ));
+    }
     db.read_name_records(name)
         .map_err(|error| database_error(error, program))
 }

@@ -1574,6 +1574,17 @@ impl SeqDb {
         }
     }
 
+    /// Whether the alias files give an OID range (`FIRST_OID`, `LAST_OID`) or a key that
+    /// changes the statistics or the shortest length (`STATS_NSEQ`, `STATS_TOTLEN`,
+    /// `MIN_SEQ_LENGTH`): RPS-BLAST, which searches the volumes' profiles by OID, refuses them
+    /// (`rps_hooks::check_alias_keys`).
+    pub fn alias_ranges_or_statistics(&self) -> bool {
+        self.alias_mask.is_some()
+            || self.stats_num_seqs != 0
+            || self.stats_total_length != 0
+            || !matches!(self.alias_totals.min_seq_length, Ok(0))
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
     // ```c++
     //     Int8 total_length = BlastSeqSrcGetTotLenStats(seqsrc);

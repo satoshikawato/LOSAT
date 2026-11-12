@@ -1131,7 +1131,8 @@ fn run_local_search_with_pool(
     // ```
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
-    // answers 10 (`SubjectSetNumbers::min_subject_length`).
+    // answers `GetMinLength` (`SubjectSetNumbers::min_subject_length`); a quotient of 0 is
+    // NCBI's engine error of the first searched batch (`tblastn_app.rs`).
     // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
     let min_subject_length = if profile.subject_set.old_fsc {
         total_nt / num_subjects.max(1)

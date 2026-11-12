@@ -181,7 +181,8 @@ impl BlastpDatabase {
         self.taxdb.prefetch_refused(&self.db)
     }
 
-    /// The number of sequences (`CSeqDB::GetNumSeqs`).
+    /// The number of included sequences (`SeqDb::num_seqs`: the OIDs that the alias files'
+    /// ranges and a list include, not NCBI's `GetNumSeqs`).
     pub(super) fn num_sequences(&self) -> u32 {
         self.db.num_seqs()
     }

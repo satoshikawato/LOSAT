@@ -1298,13 +1298,29 @@ impl Run<'_, '_> {
             .lookup
             .as_ref()
             .expect("an IPG request looks ids up");
-        lookup.pig_to_oid(pig)?.ok_or_else(|| {
-            Stop::refused(
-                "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
+        lookup
+            .pig_to_oid(pig)?
+            .ok_or_else(|| {
+                Stop::refused(
+                    "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
                  writes an OID it never set"
+                        .to_string(),
+                )
+            })
+            .and_then(|oid| {
+                match oid {
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:
+            // 1110-1121 (`PigToOid` asks the volumes, not the OID list): NCBI writes the
+            // sequence of an OID that an alias file's range leaves out, which LOSAT's formatters
+            // (by ordinal id) do not read.
+            Some(oid) if !self.source.db.includes_oid(oid) => Err(Stop::refused(
+                "-ipg and -ipg_batch for a PIG whose OID an alias file's FIRST_OID or LAST_OID \
+                 leaves out (NCBI writes it)"
                     .to_string(),
-            )
-        })
+            )),
+            other => Ok(other),
+        }
+            })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:219-222

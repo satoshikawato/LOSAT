@@ -302,11 +302,15 @@ Version 5 and the options added to the writer:
 - LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are made as makeblastdb makes them:
   LMDB creates each when it opens its environment, before the data file, with 8192 bytes of a
   lock region that no transaction has used, and the writer removes it when it is destroyed,
-  also when the build ends with an error. A lock file stays where makeblastdb leaves it: when
-  LMDB has made the lock file and cannot make the data file (a directory of the data file's
-  name that the removal of the old database could not delete: `BLAST Database error: LMDB
-  runtime error: mdb_env_open: Is a directory`, exit status 2), the lock file of that
-  environment is left, and with it the `NAME.pdb` of the other environment when it is the
+  also when the build ends with an error that makeblastdb reports. Where makeblastdb aborts
+  instead (the crash inputs listed below, and a write that fails while its LMDB writer is
+  destroyed, for example on a full disk) it leaves both lock files, with the `.pot` and `.pto`
+  files; LOSAT ends those builds with an error and removes the lock files. A lock file stays
+  where makeblastdb leaves it: when LMDB has made the lock file and cannot finish opening the
+  environment (a directory of the data file's name that the removal of the old database could
+  not delete: `BLAST Database error: LMDB runtime error: mdb_env_open: Is a directory`, exit
+  status 2; or a data file that cannot be written, `No space left on device`), the lock file of
+  that environment is left, and with it the `NAME.pdb` of the other environment when it is the
   `NAME.ptf` that cannot be made. A lock file that LMDB cannot create stops LOSAT where it
   stops makeblastdb: an output name of 247 bytes or more, whose `NAME.pdb-lock` passes the
   file-name limit of 255 bytes, ends with "BLAST Database error: LMDB runtime error:

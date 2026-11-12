@@ -418,8 +418,9 @@ enum Track {
 pub(crate) struct Env {
     file: File,
     path: PathBuf,
-    /// `<path>-lock`, created with the environment and removed with it.
-    lock: PathBuf,
+    /// `<path>-lock`, removed when the environment is dropped. `None` until `create` has
+    /// finished: an environment whose open failed has no destructor to remove the file.
+    lock: Option<PathBuf>,
     psize: usize,
     me_flags: u32,
     mapsize: u64,
@@ -599,7 +600,7 @@ impl Env {
         let mut env = Env {
             file,
             path: path.to_path_buf(),
-            lock,
+            lock: None,
             psize,
             me_flags: MDB_NOSUBDIR | MDB_ENV_ACTIVE,
             mapsize: 0,
@@ -697,6 +698,8 @@ impl Env {
         env.maxfree_1pg = ((psize - PAGEHDRSZ) / 8) as i64 - 1;
         env.nodemax = (((psize - PAGEHDRSZ) / MDB_MINKEYS) & !1) - 2;
         env.maxpg = env.mapsize / psize as u64;
+        // `mdb_env_open` has succeeded: from here on the writer's destructor removes the file.
+        env.lock = Some(lock);
         Ok(env)
     }
 
@@ -1801,12 +1804,17 @@ impl Env {
 // The destructors of `CWriteDB_LMDB` and `CWriteDB_TaxID` remove the lock file whenever the
 // writer is destroyed, also when an exception of the build unwinds the stack; a writer whose
 // constructor did not finish (the data file that `mdb_env_open` could not create) has no
-// destructor, and its lock file stays. `Env` is the writer's environment: it exists only once
-// `Env::create` has opened both files. The removal is `CFile(name).Remove()`:
-// `CDirEntry::Remove(eRecursive)`; its result is not looked at.
+// destructor, and its lock file stays (a data file that cannot be made, a header that cannot
+// be written, a file that cannot be given its length: probes of 2026-11-11 and 2026-11-12). An
+// `Env` that `create` has not finished (`lock` is `None`) is that writer: it removes nothing.
+// The removal is `CFile(name).Remove()`: `CDirEntry::Remove(eRecursive)`; its result is not
+// looked at. Where makeblastdb aborts instead of unwinding (a destructor that throws), it leaves
+// the lock files; LOSAT, which ends with an error there, removes them (PD-LOSAT-DATABASE-SEARCH).
 impl Drop for Env {
     fn drop(&mut self) {
-        let _ = crate::writedb::dir_entry::remove(&self.lock);
+        if let Some(lock) = &self.lock {
+            let _ = crate::writedb::dir_entry::remove(lock);
+        }
     }
 }
 
@@ -1860,10 +1868,13 @@ const LOCK_FILE_SIZE: usize = 8192;
 
 /// The bytes of a lock file that no transaction has used, as makeblastdb 2.17.0 of the Linux
 /// x86-64 release (glibc, `MDB_USE_POSIX_MUTEX` with robust process-shared mutexes) leaves one
-/// whose environment did not finish opening, and as it leaves the two of an aborted build with
-/// the one the abort left unused (the same bytes in every run of a probe of 2026-11-11):
-/// `mti_magic` and `mti_format` (`MDB_LOCK_VERSION` 1 in the low half, `MDB_PIDLOCK` in bit 16),
-/// and the `__kind` of the read mutex (offset 0x18) and of the write mutex (0x50), which is
+/// whose environment did not finish opening (the data file or its header could not be written)
+/// and the one of an environment that no write transaction began (the same bytes in every run
+/// of the probes of 2026-11-11 and 2026-11-12). The lock file of an environment that was opened
+/// and then aborted holds more (`0x44` = 1 once a write transaction began, `0x30` = 1 after
+/// a commit); LOSAT ends an aborting build with an error and removes the file instead, so it
+/// never leaves those. The bytes are `mti_magic` and `mti_format` (`MDB_LOCK_VERSION` 1 in the
+/// low half, `MDB_PIDLOCK` in bit 16), and the `__kind` of the read mutex (offset 0x18) and of the write mutex (0x50), which is
 /// `PTHREAD_MUTEX_ROBUST_NORMAL_NP | PTHREAD_PROCESS_SHARED` (0x10 + 0x80). Every other byte is 0.
 /// Other platforms keep other things in the file (a macOS semaphore name, a Windows mutex
 /// name): their bytes are not compared (PD-LOSAT-DATABASE-SEARCH).

@@ -320,3 +320,24 @@ fn a_lock_file_stays_when_the_data_file_cannot_be_created() {
     assert_eq!(os_code(&e), Some(21), "{e}");
     assert!(!f.0.exists());
 }
+
+// `mdb_env_open` that fails after the data file exists (here: the first write of the file's
+// header, on a device that is always full) is the constructor of the writer that did not finish:
+// makeblastdb 2.17.0 leaves the lock file (probe of 2026-11-12: a full tmpfs, exit status 2,
+// `NAME.ptf-lock` of 8192 bytes left). The data file is a link to `/dev/full`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_lock_file_stays_when_the_data_file_cannot_be_written() {
+    if !Path::new("/dev/full").exists() {
+        eprintln!("skipped (no /dev/full)");
+        return;
+    }
+    let f = TempFile::new("lockfull");
+    let lock = f.0.parent().unwrap().join("db.pdb-lock");
+    std::os::unix::fs::symlink("/dev/full", &f.0).unwrap();
+    let Err(e) = Env::create(&f.0, 700_000_000, &LINUX) else {
+        panic!("a data file on a full device");
+    };
+    assert_eq!(os_code(&e), Some(28), "{e}");
+    assert_eq!(std::fs::metadata(&lock).unwrap().len(), 8192);
+}

@@ -483,6 +483,7 @@ mod tests {
         std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o3755)).unwrap();
         // Root reads any directory; the case then says nothing.
         if std::fs::read_dir(stuck.join("locked")).is_ok() {
+            eprintln!("skipped (running as root)");
             return;
         }
         assert!(!remove(&stuck));
@@ -557,6 +558,7 @@ mod tests {
             .unwrap();
         // Root reads any directory; the case then says nothing.
         if std::fs::read_dir(dst.join("locked")).is_ok() {
+            eprintln!("skipped (running as root)");
             return;
         }
         assert!(!rename_overwrite(&src, &dst));

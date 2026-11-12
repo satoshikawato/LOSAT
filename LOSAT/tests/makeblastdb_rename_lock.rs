@@ -574,6 +574,9 @@ fn run(case_name: &str, kind: Kind, setup: Option<&Setup>) -> Outcome {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command
         .current_dir(&tmp.0)
+        // `$HOME/.ncbirc` is read like the one of the current directory: it would change the
+        // search path that the messages name.
+        .env("HOME", &tmp.0)
         .arg("makeblastdb")
         .args(["-in", "in.fa"])
         .args(args)
@@ -707,6 +710,7 @@ fn running_as_root(tag: &str) -> bool {
 #[test]
 fn renames_that_fail_and_lock_files_end_as_makeblastdb_ends() {
     if running_as_root("table") {
+        eprintln!("skipped (running as root)");
         return;
     }
     let mut failures = Vec::new();
@@ -738,6 +742,7 @@ fn renames_that_fail_and_lock_files_end_as_makeblastdb_ends() {
 #[test]
 fn the_lock_files_makeblastdb_leaves_hold_the_bytes_of_an_unused_lock_region() {
     if running_as_root("bytes") {
+        eprintln!("skipped (running as root)");
         return;
     }
     let mut expected = vec![0u8; 8192];
@@ -768,6 +773,7 @@ fn the_lock_files_makeblastdb_leaves_hold_the_bytes_of_an_unused_lock_region() {
             ])
             .arg(d.join("db"))
             .env_remove("BLASTDB")
+            .env("HOME", &tmp.0)
             .output()
             .unwrap()
             .status

@@ -324,9 +324,11 @@ fn parse_blastn_args(
         // The frozen web ABI v1 has no `-soft_masking` (refused below as an unknown flag).
         soft_masking: None,
         // The frozen web ABI v1 (plan TD-1) has no WindowMasker.
+        window_masker_taxid: None,
         window_masker_db: None,
         window_masker: None,
         window_masker_counts: None,
+        window_masker_path: None,
         // ABI v1 writes no tabular field list.
         tabular_taxdb: None,
         strand: "both".to_string(),

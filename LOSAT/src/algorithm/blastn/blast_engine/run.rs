@@ -5814,8 +5814,8 @@ struct BlastnReportInputs<'a> {
     /// The DUST options as NCBI's filter string prints them (BLAST XML's `Parameters_filter`);
     /// `None`: no DUST.
     dust: Option<(i32, i32, i32)>,
-    /// `-window_masker_db` as given (the filter string's `W -d <name>;`).
-    window_masker_db: Option<&'a str>,
+    /// The WindowMasker option (the filter string's `W -d <name>;` or `W -t <taxid>;`).
+    window_masker: Option<crate::report::blast_xml::filter::WindowMasker<'a>>,
     /// `-soft_masking` (the filter string's `m;`).
     soft_masking: bool,
     /// The database length behind the effective lengths (`-dbsize`, or the total of the
@@ -6744,7 +6744,7 @@ fn post_process_hits_and_write(
                 dust_masks: report.archive_dust,
                 unsearched: &unsearched,
                 lcase_masking: report.lcase_masking,
-                window_masker: report.window_masker_db.is_some(),
+                window_masker: report.window_masker.is_some(),
                 both_strands: report.both_strands,
                 minus_strand: report.minus_strand,
                 spans: report.batch_spans,
@@ -6898,9 +6898,7 @@ fn post_process_hits_and_write(
             let filter = crate::report::blast_xml::filter::filter_string(
                 report.dust,
                 None,
-                report
-                    .window_masker_db
-                    .map(crate::report::blast_xml::filter::WindowMasker::Database),
+                report.window_masker,
                 report.soft_masking,
             );
             let subject_records = report.subjects.records();
@@ -7776,6 +7774,7 @@ fn search_cli(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.resolve_dust()?;
+    args.window_masker_path = Some(settings.window_masker_path.clone());
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
@@ -8207,10 +8206,18 @@ fn run_local_formats(
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
     // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
-    // Web's registered inputs); a caller that gives none has no file to read.
+    // Web's registered inputs); a caller that gives none has no file to read. The directory of
+    // `-window_masker_taxid` is the registry's that the caller read; LOSAT Web has none.
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
             "-window_masker_db (a WindowMasker counts file) is not supported in the browser yet"
+        );
+    }
+    if args.window_masker_taxid.is_some_and(|taxid| taxid != 0)
+        && (args.window_masker_path.is_none() || args.window_masker_counts.is_none())
+    {
+        anyhow::bail!(
+            "-window_masker_taxid (a directory of WindowMasker counts files) is not supported in the browser yet"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
@@ -8334,6 +8341,7 @@ fn search_database(
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
     args.resolve_dust()?;
+    args.window_masker_path = Some(settings.window_masker_path.clone());
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
@@ -10500,8 +10508,8 @@ fn x_query_batch_letters(task: &str) -> u64 {
 /// the reports written after the loop, where that output comes before them.
 fn x_debug_output(args: &BlastnArgs) -> bool {
     args.verbose
+        || crate::utils::xdiag::var_os("BLEMIR_DEBUG").is_some()
         || [
-            "BLEMIR_DEBUG",
             "LOSAT_DEBUG_BLASTN",
             "LOSAT_DEBUG_COORDS",
             "LOSAT_DEBUG_COORDS_START",
@@ -10976,7 +10984,10 @@ fn write_reports_untimed(
         dust: args.dust.params().map(|(level, window, linker)| {
             (level as i32, window as u32 as i32, linker as u32 as i32)
         }),
-        window_masker_db: args.window_masker_db.as_deref(),
+        window_masker: args
+            .window_masker
+            .as_deref()
+            .map(super::super::window_masker::WindowMasker::filter_option),
         soft_masking: args.soft_masking(),
         eff_db_length: if args.db_length() > 0 {
             args.db_length()
@@ -11101,14 +11112,16 @@ fn context_lengths(
     Ok((length_adjustment, effective_search_space))
 }
 
-/// LOSAT's rejection of an error of the masks of `-window_masker_db` that the batch loop does
-/// not report as NCBI does (`window_masker::rejection`).
+/// LOSAT's rejection of an error of the masks of `-window_masker_db` or `-window_masker_taxid`
+/// that the batch loop does not report as NCBI does (`window_masker::rejection`).
 fn window_masker_rejection(
     args: &BlastnArgs,
     error: &crate::utils::winmask::WinMaskError,
 ) -> anyhow::Error {
     super::super::window_masker::rejection(
-        args.window_masker_db.as_deref().unwrap_or_default(),
+        args.window_masker
+            .as_deref()
+            .map_or("", |masker| masker.name.as_str()),
         error,
     )
 }

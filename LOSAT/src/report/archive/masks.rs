@@ -71,29 +71,11 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
     enc.member("locations", 0);
     enc.begin_list(false);
     enc.element();
-    enc.variant("Seq-loc", "packed-int", 4);
-    enc.begin_named("Packed-seqint");
-    enc.begin_list(false);
-    for &(from, to) in &mask.intervals {
-        enc.element();
-        enc.begin_sequence("Seq-interval");
-        enc.member("from", 0);
-        enc.int(from);
-        enc.end_member();
-        enc.member("to", 1);
-        enc.int(to);
-        enc.end_member();
-        enc.member("id", 3);
-        match &mask.best {
-            Some(id) => SeqId::Db(id).write(enc),
-            None => SeqId::Local(&mask.id).write(enc),
-        }
-        enc.end_member();
-        enc.end_sequence();
-    }
-    enc.end_list();
-    enc.end_named();
-    enc.end_variant();
+    let id = match &mask.best {
+        Some(id) => SeqId::Db(id),
+        None => SeqId::Local(&mask.id),
+    };
+    write_packed_int(enc, &id, mask.intervals.iter().copied());
     enc.end_list();
     enc.end_member();
     enc.member("frame", 1);
@@ -103,4 +85,82 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
     enc.end_named();
     enc.end_member();
     enc.end_sequence();
+}
+
+/// A `Seq-loc` `packed-int` value: one `Seq-interval` (`from`, `to`, `id`; no strand) for each
+/// interval of `intervals` (0-based, inclusive), each with the Seq-id `id` (`CSeq_loc(id,
+/// ranges)`, as the Blast4 masks and the mask writers of dustmasker build it).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:72-79
+/// ```c++
+///     CPacked_seqint::TRanges masked_ranges;
+///     masked_ranges.reserve(mask.size());
+///     ITERATE(TMaskList, itr, mask) {
+///         masked_ranges.push_back
+///             (CPacked_seqint::TRanges::value_type(itr->first, itr->second));
+///     }
+///     CConstRef<CSeq_id> id = bsh.GetSeqId();
+///     CSeq_loc seqloc(const_cast<CSeq_id&>(*id), masked_ranges);
+/// ```
+pub fn write_packed_int<E: Encoder>(
+    enc: &mut E,
+    id: &SeqId<'_>,
+    intervals: impl IntoIterator<Item = (i32, i32)>,
+) {
+    enc.variant("Seq-loc", "packed-int", 4);
+    enc.begin_named("Packed-seqint");
+    enc.begin_list(false);
+    for (from, to) in intervals {
+        enc.element();
+        enc.begin_sequence("Seq-interval");
+        enc.member("from", 0);
+        enc.int(from);
+        enc.end_member();
+        enc.member("to", 1);
+        enc.int(to);
+        enc.end_member();
+        enc.member("id", 3);
+        id.write(enc);
+        enc.end_member();
+        enc.end_sequence();
+    }
+    enc.end_list();
+    enc.end_named();
+    enc.end_variant();
+}
+
+/// `CSeq_loc(id, ranges)`: a Seq-loc `int` for one interval, else `packed-int`
+/// (`write_packed_int`); the mask writers of dustmasker build their Seq-locs so.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:173-182
+/// ```c++
+/// CSeq_loc::CSeq_loc(TId& id, TRanges ranges, TStrand strand)
+/// {
+///     InvalidateCache();
+///     if ( ranges.size() == 1 ) {
+///         SetInt(*new CSeq_interval(id,
+///             ranges.front().GetFrom(), ranges.front().GetTo(), strand));
+///     } else {
+///         SetPacked_int(*new CPacked_seqint(id, ranges, strand));
+///     }
+/// }
+/// ```
+pub fn write_ranges_seq_loc<E: Encoder>(enc: &mut E, id: &SeqId<'_>, intervals: &[(i32, i32)]) {
+    if let [(from, to)] = *intervals {
+        enc.variant("Seq-loc", "int", 3);
+        enc.begin_sequence("Seq-interval");
+        enc.member("from", 0);
+        enc.int(from);
+        enc.end_member();
+        enc.member("to", 1);
+        enc.int(to);
+        enc.end_member();
+        enc.member("id", 3);
+        id.write(enc);
+        enc.end_member();
+        enc.end_sequence();
+        enc.end_variant();
+    } else {
+        write_packed_int(enc, id, intervals.iter().copied());
+    }
 }

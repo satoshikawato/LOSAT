@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "prot",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/protfirst.fa",
+  "number-of-letters": 845,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-12T23:18:00",
+  "number-of-volumes": 1,
+  "bytes-total": 38003,
+  "bytes-to-cache": 960,
+  "files": [
+    "prot.pdb",
+    "prot.phr",
+    "prot.pin",
+    "prot.pot",
+    "prot.psq",
+    "prot.ptf",
+    "prot.pto"
+  ]
+}

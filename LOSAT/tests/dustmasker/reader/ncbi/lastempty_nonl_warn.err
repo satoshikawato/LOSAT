@@ -1,0 +1,2 @@
+Error: (CObjReaderParseException::eNoResidues) FASTA-Reader: No residues given (m_Pos = 3)
+Error: (106.16) Application's execution failed (CObjReaderParseException::eNoResidues) FASTA-Reader: No residues given (m_Pos = 3)

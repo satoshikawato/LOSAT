@@ -175,7 +175,14 @@ impl<'b> XmlEncoder<'b, true> {
     /// One `Blast4-archive` document of outfmt 11 with `ARCHIVE_FORMAT=xml`, in NCBI's object
     /// mode; `Encoder::flush_to` hands its bytes to a sink element by element.
     pub fn archive(out: &'b mut Vec<u8>) -> Self {
-        Self::new(out, Piece::NcbiObject, "NCBI-Blast4")
+        Self::ncbi_object(out, "NCBI-Blast4")
+    }
+
+    /// One document of a root type of the ASN.1 module `module` written as the archive is
+    /// (`os << MSerial_Xml << object`): dustmasker's `Seq-loc` (`NCBI-Seqloc`) and
+    /// `Blast-db-mask-info` (`NCBI-BlastDL`).
+    pub fn ncbi_object(out: &'b mut Vec<u8>, module: &'static str) -> Self {
+        Self::new(out, Piece::NcbiObject, module)
     }
 }
 
@@ -586,6 +593,44 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             self.value_attribute(name);
         } else {
             self.fail(SerialError::XmlUnsupported("ENUMERATED value"));
+        }
+    }
+
+    /// `WriteEnum` of an INTEGER with named values in the object mode: ` value="name">`, the
+    /// number, and the closing tag that `end_named` writes.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:442-456
+    /// ```c++
+    ///     if ( !m_SkipNextTag && !values.GetName().empty() ) {
+    ///         OpenTagStart();
+    ///         m_Output.PutString(values.GetName());
+    ///         if ( !skipname ) {
+    ///             m_Output.PutString(" value=\"");
+    ///             m_Output.PutString(valueName);
+    ///             m_Output.PutChar('\"');
+    ///         }
+    ///         if ( values.IsInteger() ) {
+    ///             OpenTagEnd();
+    ///             m_Output.PutInt4(value);
+    ///             CloseTagStart();
+    ///             m_Output.PutString(values.GetName());
+    ///             CloseTagEnd();
+    ///         }
+    /// ```
+    fn named_int(&mut self, name: &str, value: i32) {
+        if OBJECT {
+            if self.pending_elem {
+                self.open_element();
+            }
+            debug_assert_eq!(self.out.last(), Some(&b'>'));
+            self.out.pop();
+            self.out.extend_from_slice(b" value=\"");
+            self.out.extend_from_slice(name.as_bytes());
+            self.out.extend_from_slice(b"\">");
+            let mut buffer = itoa_i64(i64::from(value));
+            self.out.extend_from_slice(buffer.text());
+        } else {
+            self.fail(SerialError::XmlUnsupported("INTEGER with named values"));
         }
     }
 

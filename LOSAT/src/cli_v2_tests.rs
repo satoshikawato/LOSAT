@@ -1570,7 +1570,6 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("psiblast", &["-xdrop_gap_final", "30"]),
         ("psiblast", &["-xdrop_gap", "30"]),
         ("psiblast", &["-xdrop_ungap", "3"]),
-        ("blastn", &["-logfile", "log"]),
         ("blastp", &["-xmlhelp"]),
         ("tblastn", &["-version-full"]),
         ("tblastx", &["-help-full"]),
@@ -1925,8 +1924,6 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
             &["-out", "-version"][..],
             &["-out", "-dryrun"],
             &["-evalue", "-version-full"],
-            &["-out", "-logfile"],
-            &["-out", "-conffile=x.ini"],
         ] {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
@@ -1936,6 +1933,64 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
         }
         assert!(parse(program, &["-out", "o.txt"]).is_ok(), "{program}");
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
+// `ncbi_environment::preparse`): `-logfile FILE` and `-conffile FILE` go to the argument reader
+// with their values, a last `-logfile` or `-conffile` without one is dropped. The command line's
+// application start reads them (`cli::main_entry`); a parser's caller without one, as these
+// tests and the library API and the Web engine, refuses them (`toolkit_file_word_error`).
+#[test]
+fn toolkit_file_options_need_the_command_lines_application_start() {
+    assert!(crate::blastinput::ncbi_environment::application_start_of_process().is_none());
+    for (program, upper) in [
+        ("blastn", "BLASTN"),
+        ("blastp", "BLASTP"),
+        ("blastx", "BLASTX"),
+        ("tblastn", "TBLASTN"),
+        ("tblastx", "TBLASTX"),
+    ] {
+        for words in [
+            &["-logfile", "log.txt"][..],
+            &["-logfile=log.txt"],
+            &["-conffile", "x.ini"],
+            &["-conffile=x.ini"],
+            &["-out", "-conffile=x.ini"],
+            &["-logfile", "-dryrun"],
+        ] {
+            let error = parse(program, words).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!(
+                    "runs on the command line of LOSAT's {upper} only: the library API and the Web engine run no NCBI application start"
+                )),
+                "{program} {words:?}: {error}"
+            );
+        }
+        // A last word without its value is dropped, as NCBI drops it.
+        assert!(
+            parse(program, &["-evalue", "1", "-logfile"]).is_ok(),
+            "{program}"
+        );
+        assert!(
+            parse(program, &["-evalue", "1", "-conffile"]).is_ok(),
+            "{program}"
+        );
+        // `-out` then has no value: the parser's error.
+        assert!(parse(program, &["-out", "-logfile"]).is_err(), "{program}");
+    }
+    // makeblastdb's library run refuses `-conffile` too; a last word without value is dropped.
+    let makedb = |words: &[&str]| {
+        let mut argv = vec!["losat", "makeblastdb", "-in", "x.faa", "-dbtype", "prot"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv)
+    };
+    let error = makedb(&["-conffile", "c.ini"]).unwrap_err().to_string();
+    assert!(
+        error.contains("runs on the command line of LOSAT's makeblastdb only"),
+        "{error}"
+    );
+    assert!(makedb(&["-conffile"]).is_ok());
+    assert!(makedb(&["-logfile"]).is_ok());
 }
 
 #[test]

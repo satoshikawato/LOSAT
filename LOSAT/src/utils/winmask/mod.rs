@@ -4,10 +4,10 @@
 //! Ported: the masker with the settings blastn builds (`s_BuildSeqMasker`,
 //! `c++/src/algo/blast/api/winmask_filter.cpp:99-154`) and the integer thresholds of the
 //! windowmasker application (`-window`, `-t_extend`, `-t_thres`, `-t_high`, `-t_low`,
-//! `-set_t_high`, `-set_t_low`); the optimized binary and binary counts readers; the format
-//! check. Not ported: the merge pass, the "min" trigger and discontiguous units (neither caller
-//! can turn them on, `win_mask_config.cpp:336-343`), the `-t_*_pct` settings, and the ascii
-//! readers.
+//! `-set_t_high`, `-set_t_low`); the readers of the four counts formats (optimized binary,
+//! binary, optimized ascii, ascii); the format check. Not ported: the merge pass, the "min"
+//! trigger and discontiguous units (neither caller can turn them on,
+//! `win_mask_config.cpp:336-343`), and the `-t_*_pct` settings.
 
 mod istat;
 mod ncbi_report;
@@ -21,6 +21,8 @@ mod tests;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
+
+use crate::ncbi_exception::NcbiException;
 
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
@@ -81,10 +83,31 @@ pub enum WinMaskError {
     /// The factory's own `eCreateFail`: "unrecognized unit counts format"
     /// (`seq_masker_istat_factory.cpp:340`) or a `std::exception` it caught (`:361-366`).
     CreateFail { message: String },
-    /// A format NCBI reads but LOSAT does not (the ascii and optimized ascii counts).
-    UnsupportedFormat(StatType),
-    /// `CSeqMaskerException::eValidation` (`seq_masker.cpp:121-126`).
-    WindowSize { window: u8, unit: u8 },
+    /// An exception thrown inside the factory whose message LOSAT builds as NCBI's: those of
+    /// the ascii reader (its syntax and parameter errors, `CSeqMaskerUsetSimple`'s order of the
+    /// units) and the `NStr` conversions of the ascii reader and of the metadata's version
+    /// (`CStringException`). The factory rethrows it as "could not create a unit counts
+    /// container" (`seq_masker_istat_factory.cpp:358-359`). `warnings` as for `Format`.
+    Exception {
+        exception: Box<NcbiException>,
+        warnings: Vec<String>,
+    },
+    /// `CSeqMaskerException::eValidation` (`seq_masker.cpp:121-126`). `warnings`: those the
+    /// counts reader posted before (`UnitCounts::warnings`).
+    WindowSize {
+        window: u8,
+        unit: u8,
+        warnings: Vec<String>,
+    },
+    /// A unit size above 16 (from an ascii counts file, whose reader does not check it): the
+    /// masker's units are 32-bit (`CSeqMaskerWindow::TUnit`) and NCBI's reverse complement of
+    /// a unit (`CSeqMaskerUtil::reverse_complement`) then shifts it by 32 bits or more, which
+    /// C++ leaves undefined.
+    UnitSize { unit: u8 },
+    /// An optimized ascii file whose hash parameters line ends, or fails, before `field` (`k`,
+    /// `roff` or `bc`) while NCBI's checks read it: NCBI leaves it uninitialized
+    /// (`seq_masker_istat_oascii.cpp:82-87, 111`).
+    UnsetHashParameter { field: &'static str },
     /// A cache bit array of 0 words (units of 1 or 2 letters) that the cache boost would read:
     /// NCBI reads past its `new Uint4[0]` (`seq_masker_cache_boost.cpp:40-48`).
     EmptyCacheBitArray { unit: u8 },
@@ -109,26 +132,24 @@ impl fmt::Display for WinMaskError {
             Self::Open { name } => write!(f, "could not open {name}"),
             Self::Format { site, .. } => f.write_str(site.message()),
             Self::CreateFail { message } => f.write_str(message),
-            Self::UnsupportedFormat(t) => write!(
-                f,
-                "windowmasker unit counts in the {} format are not supported by LOSAT",
-                match t {
-                    StatType::Ascii => "ascii",
-                    StatType::OAscii => "oascii",
-                    StatType::Binary => "binary",
-                    StatType::OBinary => "obinary",
-                    StatType::Unknown => "unknown",
-                }
-            ),
+            Self::Exception { exception, .. } => f.write_str(exception.get_msg()),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:121-125
             // ```c
             //         os << "window size (" << (int)window_size << ") "
             //               "must be greater or equal to unit size (" <<
             //               (int)ustat->UnitSize() << ")";
             // ```
-            Self::WindowSize { window, unit } => write!(
+            Self::WindowSize { window, unit, .. } => write!(
                 f,
                 "window size ({window}) must be greater or equal to unit size ({unit})"
+            ),
+            Self::UnsetHashParameter { field } => write!(
+                f,
+                "the hash parameters line of the optimized ascii counts does not set {field}, which NCBI BLAST+ then checks uninitialized (undefined behaviour in C++)"
+            ),
+            Self::UnitSize { unit } => write!(
+                f,
+                "units of {unit} letters do not fit the masker's 32-bit units, which NCBI BLAST+ shifts past their width there (undefined behaviour in C++)"
             ),
             Self::EmptyCacheBitArray { unit } => write!(
                 f,
@@ -217,10 +238,14 @@ impl SeqMasker {
     ///     trigger_score = score = new CSeqMaskerScoreMean( ustat );
     /// ```
     /// `ustat` must have been read with the same `params` (the thresholds are set there).
+    /// `window_size` is a `Uint1`: an ascii file's unit size of 252 to 255 gives a window of
+    /// 0 to 3 letters and NCBI's error (NCBI BLAST+ 2.17.0, line NP M3d). A unit size of 17 to
+    /// 251 passes that check; LOSAT refuses it ([`WinMaskError::UnitSize`]) before any masking,
+    /// where NCBI's reverse complement of every unit is undefined.
     pub fn new(ustat: Arc<UnitCounts>, params: &MaskerParams) -> Result<Self, WinMaskError> {
         let unit = ustat.unit_size();
         let window_size = if params.window_size == 0 {
-            unit + 4
+            unit.wrapping_add(4)
         } else {
             params.window_size
         };
@@ -228,7 +253,11 @@ impl SeqMasker {
             return Err(WinMaskError::WindowSize {
                 window: window_size,
                 unit,
+                warnings: ustat.warnings().to_vec(),
             });
+        }
+        if unit > 16 {
+            return Err(WinMaskError::UnitSize { unit });
         }
         Ok(Self { ustat, window_size })
     }
@@ -236,6 +265,11 @@ impl SeqMasker {
     #[cfg(test)]
     pub fn unit_counts(&self) -> &UnitCounts {
         &self.ustat
+    }
+
+    /// The warnings that NCBI posted while it read the counts file (`UnitCounts::warnings`).
+    pub fn warnings(&self) -> &[String] {
+        self.ustat.warnings()
     }
 
     #[cfg(test)]

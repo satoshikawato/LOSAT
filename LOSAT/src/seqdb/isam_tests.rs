@@ -964,9 +964,9 @@ fn version_check_drops_other_versions() {
 // The `NStr` conversions of this module are tested with `crate::ncbi_str`.
 #[test]
 fn atoi_reads_as_the_c_library() {
-    assert_eq!(atoi(b" 42xyz"), 42);
-    assert_eq!(atoi(b"-3"), -3);
-    assert_eq!(atoi(b""), 0);
+    assert_eq!(crate::ncbi_str::c_atoi(b" 42xyz"), 42);
+    assert_eq!(crate::ncbi_str::c_atoi(b"-3"), -3);
+    assert_eq!(crate::ncbi_str::c_atoi(b""), 0);
 }
 
 // ---------------------------------------------------------------------------------------------

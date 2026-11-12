@@ -52,7 +52,7 @@
     "reused_ncbi_records": [
       "LOSAT/tests/ncbi_platform_variance_v011.json",
       "LOSAT/tests/outfmt0_manifest.tsv",
-      "LOSAT/tests/db_search_manifest.tsv",
+      "LOSAT/tests/db_search_manifest",
       "LOSAT/tests/blastn_parity_manifest.tsv",
       "LOSAT/tests/blastp_v010_parity_manifest.tsv",
       "LOSAT/tests/tblastx_v010_parity_manifest.tsv",

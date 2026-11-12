@@ -1121,6 +1121,28 @@ fn run_local_search_with_pool(
     let total_nt = usize::try_from(profile.subject_set.total_nt(&subjects))?;
     let stats_nt = usize::try_from(profile.subject_set.eff_length_nt(total_nt as u64))?;
     let num_subjects = profile.subject_set.num_seqs(&subjects);
+    let query_lengths: Vec<i32> = queries
+        .iter()
+        .map(|query| i32::try_from(query.len()))
+        .collect::<std::result::Result<_, _>>()?;
+    // NCBI c++/src/algo/blast/core/blast_options.c:908-936;
+    // core/blast_stat.c:2547-2605: reject scoring schemes absent from
+    // the pinned NCBI gapped table before any search.
+    let spec = ProteinScoringSpec {
+        matrix: scoring.matrix,
+        gap_open: scoring.gap_open,
+        gap_extend: scoring.gap_extend,
+    };
+    ensure!(
+        protein_scoring_supported(&spec),
+        "unsupported TBLASTN protein scoring scheme"
+    );
+    let gapped = lookup_protein_params(&spec);
+    let ungapped = lookup_protein_params_ungapped(scoring.matrix);
+    // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
+    // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
+    // BLAST_KarlinStoE_simple with the context's effective search space.
+    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
     // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // ```c
     //             if ( !m_Subjects.empty() ) {
@@ -1160,34 +1182,13 @@ fn run_local_search_with_pool(
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
     // answers 10 (`SubjectSetNumbers::min_subject_length`).
-    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
-    let min_subject_length = if profile.subject_set.old_fsc {
+    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975). The block
+    // itself decides, as `sbp->gbp` does in NCBI, here and in the average-length error below.
+    let min_subject_length = if gumbel.is_none() {
         total_nt / num_subjects.max(1)
     } else {
         profile.subject_set.min_subject_length(&subjects)
     };
-    let query_lengths: Vec<i32> = queries
-        .iter()
-        .map(|query| i32::try_from(query.len()))
-        .collect::<std::result::Result<_, _>>()?;
-    // NCBI c++/src/algo/blast/core/blast_options.c:908-936;
-    // core/blast_stat.c:2547-2605: reject scoring schemes absent from
-    // the pinned NCBI gapped table before any search.
-    let spec = ProteinScoringSpec {
-        matrix: scoring.matrix,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
-    };
-    ensure!(
-        protein_scoring_supported(&spec),
-        "unsupported TBLASTN protein scoring scheme"
-    );
-    let gapped = lookup_protein_params(&spec);
-    let ungapped = lookup_protein_params_ungapped(scoring.matrix);
-    // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
-    // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
-    // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
     let options_searchsp = profile.subject_set.searchsp;
     let QuerySetSetup {
         working_frames,
@@ -1226,14 +1227,11 @@ fn run_local_search_with_pool(
     //    }
     // ```
     // Without the Gumbel block (`-searchsp` or `OLD_FSC`; LOSAT's tblastn has no ungapped
-    // search) a set of subjects whose average is below one letter, in nucleotides, fails the
-    // setup of a batch that NCBI searches (one with a valid context): `tblastn_app::search`
-    // fails it with NCBI's engine error after the reports of the batches before
-    // (`SubjectLengthInvalid`).
-    if profile.subject_set.old_fsc
-        && valid_contexts.iter().any(|&valid| valid)
-        && min_subject_length == 0
-    {
+    // search, which has none either, blast_setup.c:517-527) a set of subjects whose average is
+    // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
+    // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
+    // reports of the batches before (`SubjectLengthInvalid`).
+    if gumbel.is_none() && valid_contexts.iter().any(|&valid| valid) && min_subject_length == 0 {
         return Err(SubjectLengthInvalid.into());
     }
     let batch_setup = LocalBatchSetup {

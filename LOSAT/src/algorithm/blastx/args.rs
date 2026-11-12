@@ -669,7 +669,7 @@ pub struct ResolvedOptions {
     pub db_length: i64,
     pub effective_search_space: i64,
     /// Whether `-searchsp` was given, at any value, or the environment variable `OLD_FSC` is set
-    /// (`app::old_fsc_environment`): NCBI then has no Gumbel block (`gumbel_block`).
+    /// (`app::old_fsc_environment`): NCBI then has no Gumbel block (`has_gumbel_block`).
     pub old_fsc: bool,
 
     pub evalue: f64,
@@ -704,6 +704,34 @@ pub struct ResolvedOptions {
     /// `qcovs` by; read by `native::run` where NCBI's query options handler reads it (after the
     /// subjects), `None` otherwise.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
+// ```c
+//     /* FSCOLD: to switch back to original FSC, comment out the following line */
+//     use_old_fsc = getenv("OLD_FSC");
+//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
+// ```c
+//        if (scoring_options->gapped_calculation) {
+//        ...
+//        } else {
+//           ASSERT(sbp->kbp_gap == NULL);
+//           /* for ungapped cases we do not have gbp filled */
+//           if (sbp->gbp) {
+//               sfree(sbp->gbp);
+//               sbp->gbp=NULL;
+// ```
+impl ResolvedOptions {
+    /// Whether NCBI's score block has its Gumbel block (`sbp->gbp`): a gapped search without
+    /// `-searchsp` and `OLD_FSC` (`old_fsc`). Every choice between the Gumbel block's rules and
+    /// those without it (the block itself, `parameters::gumbel_block`; the length of the
+    /// hit-saving cutoff and its average-length error, `parameters::subject_parameters`; the
+    /// report's block) asks this.
+    pub fn has_gumbel_block(&self) -> bool {
+        self.gapped && !self.old_fsc
+    }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 // ```c++

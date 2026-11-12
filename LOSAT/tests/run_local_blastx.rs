@@ -1014,9 +1014,8 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
     let subjects_warning = "Warning: [blastx] Subject_2 b: Subject sequence contains no data\n\
                             Warning: [blastx] Subject_3 c: Subject sequence contains no data\n";
     let error = "BLAST engine error: The average subject length is too short\n";
-    let prolog_end = format!(
-        "Database: User specified sequence set (Input: {path}).\n           3 sequences; 1 total letters\n\n"
-    );
+    // The prolog's database line wraps a long path as NCBI's does, so only its end is compared.
+    let prolog_end = "           3 sequences; 1 total letters\n\n";
     for (args, env, first_batch) in [
         (&["-searchsp", "1000"][..], &[][..], false),
         (
@@ -1044,11 +1043,14 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
             );
             match (outfmt, first_batch) {
                 ("0", false) => assert!(
-                    stdout.starts_with("BLASTX 2.17.0+\n") && stdout.ends_with(&prolog_end),
+                    stdout.starts_with("BLASTX 2.17.0+\n")
+                        && stdout.contains("Database: User specified sequence set (Input:")
+                        && stdout.ends_with(prolog_end),
                     "{stdout}"
                 ),
                 ("0", true) => assert!(
                     stdout.starts_with("BLASTX 2.17.0+\n")
+                        && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(&format!(
                             "{prolog_end}\n\nQuery= qx all N\n\nLength=90\n\n\n***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nEffective search space used: 0\n"
                         )),
@@ -1064,4 +1066,19 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
             }
         }
     }
+    // The boundary: an average of exactly one letter (blastx `-subject` of "MMM", ``, ``)
+    // is searched, exit 0, by NCBI 2.17.0 and LOSAT alike (review of env parity F, review_f/).
+    let one = TempFasta::new(
+        "blastx_average_one.faa",
+        &[("a", &b"MMM"[..]), ("b", &b""[..]), ("c", &b""[..])],
+    );
+    let (code, _, stderr) = run_local_support::subject_cli(
+        "blastx",
+        &query,
+        &one.0,
+        &["-searchsp", "1000", "-outfmt", "6"],
+        &[],
+    );
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(stderr, subjects_warning);
 }

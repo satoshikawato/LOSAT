@@ -238,16 +238,10 @@ pub(crate) fn gapped_karlin(options: &ResolvedOptions) -> KarlinParams {
 //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
-// ```c
-//     /* FSCOLD: to switch back to original FSC, comment out the following line */
-//     use_old_fsc = getenv("OLD_FSC");
-//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-// ```
-/// The Gumbel block of a gapped search, none with `-searchsp` (at any value) or `OLD_FSC`
-/// (`ResolvedOptions::old_fsc`).
+/// The Gumbel block of a gapped search, none with `-searchsp` (at any value) or `OLD_FSC`, nor in
+/// an ungapped search (`ResolvedOptions::has_gumbel_block`).
 pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGumbelBlk> {
-    if options.old_fsc {
+    if !options.has_gumbel_block() {
         return None;
     }
     lookup_protein_gumbel_params(
@@ -622,7 +616,7 @@ pub fn subject_parameters(
     // status 3, as every other error of this setup (`native::database_search_error`; NCBI
     // 2.17.0 blastx `-subject` of three empty records, or of `M`, `` and ``, with `-searchsp`,
     // `OLD_FSC` or `-ungapped -comp_based_stats 0`, env parity probe f_probe of 2026-11-12).
-    let n = if options.gapped && !options.old_fsc {
+    let n = if options.has_gumbel_block() {
         i32::try_from(min_subject_length.max(10))?
     } else {
         avg_subject_length
@@ -637,11 +631,7 @@ pub fn subject_parameters(
         fixed_spaces,
     )?;
     let gapped = gapped_karlin(options);
-    let gumbel = if options.gapped {
-        gumbel_block(options, db_length)
-    } else {
-        None
-    };
+    let gumbel = gumbel_block(options, db_length);
     let decay = if options.sum_stats
         && (!options.gapped
             || options.max_intron_length == 0

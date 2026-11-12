@@ -534,6 +534,21 @@
     ]
    },
    {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
+    "takes_value": true
+   },
+   {
     "flag": "-window_size",
     "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion; 15 (PAM30's) for blastp-short]",
     "takes_value": true
@@ -613,7 +628,10 @@
      "-soft_masking": "false",
      "-threshold": "11",
      "-window_size": "40",
-     "-word_size": "3"
+     "-word_size": "3",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "blastp-fast": {
      "-culling_limit": "0",
@@ -628,7 +646,10 @@
      "-soft_masking": "false",
      "-threshold": "20",
      "-window_size": "40",
-     "-word_size": "5"
+     "-word_size": "5",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "blastp-short": {
      "-culling_limit": "0",
@@ -643,7 +664,10 @@
      "-soft_masking": "false",
      "-threshold": "16",
      "-window_size": "15",
-     "-word_size": "2"
+     "-word_size": "2",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {
@@ -1100,6 +1124,21 @@
     "takes_value": true
    },
    {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
+    "takes_value": true
+   },
+   {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit [default: 0, no culling]",
     "takes_value": true
@@ -1218,7 +1257,10 @@
      "-sum_stats": "true",
      "-threshold": "12",
      "-window_size": "40",
-     "-word_size": "3"
+     "-word_size": "3",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "blastx-fast": {
      "-culling_limit": "0",
@@ -1233,7 +1275,10 @@
      "-sum_stats": "true",
      "-threshold": "20",
      "-window_size": "40",
-     "-word_size": "5"
+     "-word_size": "5",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {
@@ -1536,6 +1581,11 @@
     "takes_value": true
    },
    {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
+   },
+   {
     "flag": "-xdrop_gap",
     "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
     "takes_value": true
@@ -1677,7 +1727,8 @@
      "-window_size": "40",
      "-word_size": "3",
      "-xdrop_gap": "15",
-     "-xdrop_gap_final": "25"
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     },
     "tblastn-fast": {
      "-culling_limit": "0",
@@ -1695,7 +1746,8 @@
      "-window_size": "40",
      "-word_size": "5",
      "-xdrop_gap": "15",
-     "-xdrop_gap_final": "25"
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {
@@ -2071,6 +2123,11 @@
     ]
    },
    {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions [default: 7]",
+    "takes_value": true
+   },
+   {
     "flag": "-window_size",
     "help": "Two-hit window size for triggering ungapped extension (default: 40, or the matrix's suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX",
     "takes_value": true
@@ -2160,7 +2217,8 @@
      "-soft_masking": "false",
      "-threshold": "13",
      "-window_size": "40",
-     "-word_size": "3"
+     "-word_size": "3",
+     "-xdrop_ungap": "7"
     }
    },
    "by": {

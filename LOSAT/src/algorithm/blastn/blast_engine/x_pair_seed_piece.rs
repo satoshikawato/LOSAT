@@ -106,44 +106,19 @@ const EMPTY: Chain = Chain {
     fill: BLOCK as u16,
 };
 
-/// No NCBI counterpart (scheduling only): one piece's seeds, cut by partition: blocks of `BLOCK`
-/// seeds (and their positions in the strip's scan order) taken in order (`used`), each
-/// partition's blocks linked in its order (`next`). Its size is set once for the partition count
-/// (`reset`) and does not change with the seeds.
+/// No NCBI counterpart (scheduling only): the chains of a slot's piece: its blocks of `BLOCK`
+/// seeds taken in order (`used`), each partition's blocks linked in its order (`next`, its first
+/// and last block in `chains`). Kept in the subject scratch from one stage to the next; the seeds
+/// are in the pool's `Store`.
 #[derive(Default)]
-pub(super) struct Arena {
-    // (not initialized when allocated, so that only the pages of the blocks a piece takes become
-    // resident: a stage of few seeds holds few pages whatever the arena's size; a slot is read
-    // only after a push of the same piece wrote it, `for_each_run`)
-    seeds: Vec<MaybeUninit<Seed>>,
-    pos: Vec<MaybeUninit<u32>>,
+pub(super) struct Links {
     next: Vec<u16>,
     chains: Vec<Chain>,
     used: u16,
 }
 
-impl Arena {
-    /// The blocks of an arena for `parts` partitions: `piece_seeds` seeds in any cut, since a
-    /// partition's last block is the only one not full.
-    fn blocks(parts: usize, piece_seeds: usize) -> usize {
-        piece_seeds.div_ceil(BLOCK) + parts
-    }
-
-    /// Empty, for `parts` partitions and pieces of `piece_seeds` seeds (allocated at its size
-    /// the first time).
-    fn reset(&mut self, parts: usize, piece_seeds: usize) {
-        let blocks = Self::blocks(parts, piece_seeds);
-        if self.next.len() != blocks {
-            self.seeds = uninit(blocks * BLOCK);
-            self.pos = uninit(blocks * BLOCK);
-            self.next = vec![NONE; blocks];
-        }
-        self.chains.clear();
-        self.chains.resize(parts, EMPTY);
-        self.used = 0;
-    }
-
-    /// (tests) whether the arena was allocated (a slot of the pool a stage used).
+impl Links {
+    /// (tests) whether a stage used the slot.
     #[cfg(all(
         test,
         feature = "parallel",
@@ -152,12 +127,90 @@ impl Arena {
     pub(super) fn allocated(&self) -> bool {
         !self.next.is_empty()
     }
+}
+
+/// No NCBI counterpart (scheduling only): the seeds and their positions in the strip's scan
+/// order of every slot of the pool, slot `s` at `s * len..(s + 1) * len` (`len`: an arena's
+/// blocks of `BLOCK` seeds), kept in the subject scratch from one stage to the next.
+///
+/// Each buffer is one allocation whose capacity is above glibc's ceiling of the mmap threshold
+/// (`utils/x_mapped.rs` `x_unthresholded_capacity`), not initialized: glibc maps it, its free
+/// leaves the threshold as it is, and only the pages of the blocks pieces wrote are resident.
+/// (An arena allocated by itself, 266-328 KiB of seeds, was mapped and its free raised glibc's
+/// threshold to its size, so that later blocks of up to that size came from the arenas of the
+/// heap and stayed resident there: BLASTN cDNA x genome -subject at 16 threads, peak x1.13-1.15
+/// of the strips stage, x1.04 with the threshold held at 128 KiB, line EB s14u / s14w.)
+#[derive(Default)]
+pub(super) struct Store {
+    seeds: Vec<MaybeUninit<Seed>>,
+    pos: Vec<MaybeUninit<u32>>,
+}
+
+impl Store {
+    /// The regions of `slots` slots of `len` seeds each (the buffers allocated anew when they
+    /// are too small).
+    #[allow(clippy::type_complexity)]
+    fn slots(
+        &mut self,
+        slots: usize,
+        len: usize,
+    ) -> impl Iterator<Item = (&mut [MaybeUninit<Seed>], &mut [MaybeUninit<u32>])> {
+        let need = slots * len;
+        if self.seeds.len() < need {
+            // (the old buffers go first, so that the two are not held at once)
+            self.seeds = Vec::new();
+            self.pos = Vec::new();
+            self.seeds = uninit(need);
+            self.pos = uninit(need);
+        }
+        self.seeds[..need]
+            .chunks_mut(len)
+            .zip(self.pos[..need].chunks_mut(len))
+    }
+}
+
+/// No NCBI counterpart (scheduling only): one slot of the pool in a stage: one piece's seeds, cut
+/// by partition, in its region of the `Store` (blocks of `BLOCK` seeds and their positions) and
+/// the chains of its blocks (`Links`). Its size is set for the partition count (`reset`) and
+/// does not change with the seeds.
+pub(super) struct Arena<'s> {
+    // (not initialized, so that only the pages of the blocks a piece takes become resident: a
+    // stage of few seeds holds few pages whatever the arena's size; a slot is read only after a
+    // push of the same piece wrote it, `for_each_run`)
+    seeds: &'s mut [MaybeUninit<Seed>],
+    pos: &'s mut [MaybeUninit<u32>],
+    links: Links,
+}
+
+impl Arena<'_> {
+    /// The blocks of an arena for `parts` partitions: `piece_seeds` seeds in any cut, since a
+    /// partition's last block is the only one not full.
+    fn blocks(parts: usize, piece_seeds: usize) -> usize {
+        piece_seeds.div_ceil(BLOCK) + parts
+    }
+
+    /// Empty, for `parts` partitions and pieces of `piece_seeds` seeds (its region of the
+    /// `Store` is `blocks * BLOCK` seeds; its links allocated at their size the first time).
+    fn reset(&mut self, parts: usize, piece_seeds: usize) {
+        let blocks = Self::blocks(parts, piece_seeds);
+        assert!(
+            self.seeds.len() == blocks * BLOCK && self.pos.len() == blocks * BLOCK,
+            "LOSAT_X_SEEDPIECE: an arena's region of the store"
+        );
+        let links = &mut self.links;
+        if links.next.len() != blocks {
+            links.next = vec![NONE; blocks];
+        }
+        links.chains.clear();
+        links.chains.resize(parts, EMPTY);
+        links.used = 0;
+    }
 
     /// Partition p's seeds of the piece in scan order, with their positions, through `f`: one
     /// call per run of consecutive blocks of its chain.
     #[inline]
     fn for_each_run(&self, p: usize, mut f: impl FnMut(&[Seed], &[u32])) {
-        let chain = self.chains[p];
+        let chain = self.links.chains[p];
         if chain.head == NONE {
             return;
         }
@@ -174,7 +227,7 @@ impl Arena {
                 f(seeds, pos);
                 return;
             }
-            let next = self.next[b] as usize;
+            let next = self.links.next[b] as usize;
             if next != b + 1 {
                 let (a, z) = (first * BLOCK, (b + 1) * BLOCK);
                 // SAFETY: as above; blocks `first..=b` are full.
@@ -188,10 +241,14 @@ impl Arena {
     }
 }
 
-/// `n` slots, not initialized (allocated, not written: the pages stay untouched until used).
+/// `n` slots, not initialized (allocated, not written: the pages stay untouched until used), in
+/// a buffer whose free leaves glibc's mmap threshold as it is (`Store`).
 fn uninit<T>(n: usize) -> Vec<MaybeUninit<T>> {
-    let mut v = Vec::with_capacity(n);
-    // SAFETY: `MaybeUninit<T>` needs no initialization, and the capacity is `n`.
+    let mut v = Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+        n,
+        std::mem::size_of::<T>(),
+    ));
+    // SAFETY: `MaybeUninit<T>` needs no initialization, and the capacity is at least `n`.
     unsafe { v.set_len(n) };
     v
 }
@@ -211,7 +268,9 @@ unsafe fn written<T>(s: &[MaybeUninit<T>]) -> &[T] {
 /// `limit` (`room`, which `Cut` reads).
 pub(in super::super) struct PieceSink<'a> {
     table: &'a [u16; DIAGHASH_NUM_BUCKETS],
-    arena: &'a mut Arena,
+    seeds: &'a mut [MaybeUninit<Seed>],
+    pos: &'a mut [MaybeUninit<u32>],
+    links: &'a mut Links,
     k: u32,
     limit: u32,
 }
@@ -220,7 +279,7 @@ impl SeedOut for PieceSink<'_> {
     #[inline(always)]
     fn push(&mut self, seed: Seed) {
         let p = self.table[bucket_of(&seed)] as usize;
-        let a = &mut *self.arena;
+        let a = &mut *self.links;
         debug_assert!(p < a.chains.len());
         // SAFETY: the table holds `bucket % parts` and there are `parts` chains (`reset`).
         let chain = unsafe { a.chains.get_unchecked_mut(p) };
@@ -243,12 +302,13 @@ impl SeedOut for PieceSink<'_> {
             chain.fill = 0;
         }
         let at = chain.tail as usize * BLOCK + chain.fill as usize;
-        debug_assert!(at < a.seeds.len());
+        debug_assert!(at < self.seeds.len());
         // SAFETY: `chain.tail` is a block below `next.len()` (the test above when it was taken)
-        // and `fill < BLOCK`, so `at` is below `blocks * BLOCK`, the length of both.
+        // and `fill < BLOCK`, so `at` is below `blocks * BLOCK`, the length of both regions
+        // (`Arena::reset`).
         unsafe {
-            a.seeds.get_unchecked_mut(at).write(seed);
-            a.pos.get_unchecked_mut(at).write(self.k);
+            self.seeds.get_unchecked_mut(at).write(seed);
+            self.pos.get_unchecked_mut(at).write(self.k);
         }
         chain.fill += 1;
         self.k += 1;
@@ -360,11 +420,16 @@ where
         .drain(..)
         .map(|st| Mutex::new(OwnLines(st)))
         .collect();
-    let mut arenas = std::mem::take(&mut scratch.arenas);
-    // (a stage of fewer threads than the one before keeps only its own slots' arenas)
-    arenas.truncate(slots_n);
-    arenas.resize_with(slots_n, Arena::default);
-    let pool: Vec<RwLock<Arena>> = arenas.into_iter().map(RwLock::new).collect();
+    let mut links = std::mem::take(&mut scratch.arenas);
+    // (a stage of fewer threads than the one before keeps only its own slots' links)
+    links.truncate(slots_n);
+    links.resize_with(slots_n, Links::default);
+    let mut store = std::mem::take(&mut scratch.store);
+    let pool: Vec<RwLock<Arena<'_>>> = store
+        .slots(slots_n, Arena::blocks(parts, piece_seeds) * BLOCK)
+        .zip(links)
+        .map(|((seeds, pos), links)| RwLock::new(Arena { seeds, pos, links }))
+        .collect();
     let sched = Mutex::new(Sched {
         parked: Vec::new(),
         free: Vec::with_capacity(slots_n),
@@ -480,17 +545,20 @@ where
             (strip, from, k, slot)
         };
         let (next, k_end, empty) = {
-            let mut arena = write(&pool[slot as usize]);
+            let mut guard = write(&pool[slot as usize]);
+            let arena = &mut *guard;
             arena.reset(parts, piece_seeds);
             let mut sink = PieceSink {
                 table: &table,
-                arena: &mut arena,
+                seeds: arena.seeds,
+                pos: arena.pos,
+                links: &mut arena.links,
                 k,
                 limit: k + piece_seeds as u32,
             };
             let next = scan(strip, from, &mut sink);
             let k_end = sink.k;
-            (next, k_end, arena.used == 0)
+            (next, k_end, arena.links.used == 0)
         };
         let st = &strips[strip];
         let count = if empty {
@@ -756,7 +824,8 @@ where
     scratch.parts = states;
     scratch.arenas = pool
         .into_iter()
-        .map(|a| a.into_inner().unwrap_or_else(PoisonError::into_inner))
+        .map(|a| a.into_inner().unwrap_or_else(PoisonError::into_inner).links)
         .collect();
+    scratch.store = store;
     stats
 }

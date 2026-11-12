@@ -465,8 +465,10 @@ pub(in super::super) struct PartScratch {
     raw: Vec<Vec<Seed>>,
     order: Vec<(u64, u32, u32)>,
     apps: Vec<(u64, u32, u32)>,
-    /// EXPERIMENT (LOSAT_X_SEEDPIECE): the pool of piece arenas (allocated when first used).
-    arenas: Vec<piece::Arena>,
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): the chains of the pool's slots (allocated when first
+    /// used) and the pool's seeds (`piece::Store`).
+    arenas: Vec<piece::Links>,
+    store: piece::Store,
     /// (tests) LOSAT_X_SEEDPIECE's stage as a test asks for it: `None` as the switch says,
     /// `Some(0)` the strips' lists, `Some(k)` pieces of `k` seeds.
     #[cfg(test)]

@@ -646,7 +646,10 @@ fn write_run(
                 search_options,
                 asks,
                 results,
-                query_scopes.borrow().as_ref(),
+                query_scopes
+                    .borrow()
+                    .as_ref()
+                    .map(|scopes| scopes.from_query(queries_before)),
                 &mut *diagnostics,
             )?),
             None => None,

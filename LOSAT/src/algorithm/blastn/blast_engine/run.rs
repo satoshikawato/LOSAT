@@ -9399,12 +9399,23 @@ fn run_in_pool(
     let mut titles = database::DatabaseTitles::new();
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
     // loop cuts the batches.
+    // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`):
+    // outfmt 5 reads the queries' letters, which keeps the records read before the search
+    // (`x_query_drop::Rule`), and `-parse_deflines` reads no query as a stream.
+    let subject_records = matches!(source, SubjectSource::Prepared(_));
+    let xml = output_formats.contains(&BlastnOutputFormat::Xml);
     let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
-        matches!(source, SubjectSource::Prepared(_)),
-        output_formats.contains(&BlastnOutputFormat::Xml),
+        subject_records,
+        xml,
         "BLASTN",
-    );
+    )
+    .map(|scopes| match &queries {
+        x_query_stream::Queries::Records { input, .. } if xml && !subject_records => {
+            scopes.with_whole_run_of(input)
+        }
+        _ => scopes,
+    });
     let megablast = args.task == "megablast";
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
     // ```c

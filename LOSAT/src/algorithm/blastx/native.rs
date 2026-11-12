@@ -1088,7 +1088,11 @@ fn run_inner(
                             })?,
                         };
                         if let Some(scopes) = query_scopes.borrow().as_ref() {
-                            reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
+                            reported.refuse_ids_of_queries(
+                                results,
+                                options.gapped,
+                                scopes.from_query(queries_before),
+                            )?;
                         }
                         (
                             None,
@@ -1136,7 +1140,10 @@ fn run_inner(
                     &options,
                     ReportedAsks::of(&options),
                     results,
-                    query_scopes.borrow().as_ref(),
+                    query_scopes
+                        .borrow()
+                        .as_ref()
+                        .map(|scopes| scopes.from_query(queries_before)),
                     diagnostics,
                 )
                 .inspect_err(|error| {
@@ -1336,7 +1343,7 @@ pub(super) fn reported_batch(
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
-    query_scopes: Option<&crate::blastinput::query_batch::QueryScopes>,
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     diagnostics: &mut dyn Write,
 ) -> Result<ReportedSubjects> {
     use super::x_timing::Run as XRun;

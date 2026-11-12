@@ -287,8 +287,8 @@ impl Opening {
     /// before it (the switch does not act on its regular file), read on the search's `threads`
     /// threads (`x_query_scan_par::store_parts`), or `None` where the search's reader reads them
     /// (one thread, standard input or a file that is not regular, the BLAST archive,
-    /// `-parse_deflines`, whose reader refuses a Seq-id read twice across the file, and the cases
-    /// of that module).
+    /// `-parse_deflines`, whose reader numbers the records without ids across the file and adds
+    /// every record to the search's scope of ids, and the cases of that module).
     pub(super) fn store_parts(
         &mut self,
         config: ReaderConfig,

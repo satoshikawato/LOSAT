@@ -381,6 +381,18 @@ impl QueryScopes {
         Ok(())
     }
 
+    /// `with_whole_run` of the ids of the input records `records` (every query of the run), where
+    /// NCBI's scope holds them when the reports read the database sequences (outfmt 5) and the
+    /// batches are cut as the search goes (blastn's, tblastx's loops).
+    pub(crate) fn with_whole_run_of(self, records: &[FastaRecord]) -> Self {
+        if self.span != QueryScopeSpan::Run {
+            return self;
+        }
+        let mut whole_run = QueryScope::default();
+        whole_run.add_ids_of(records.iter().filter_map(FastaRecord::believed));
+        self.with_whole_run(whole_run)
+    }
+
     /// The scope of the searched query `query` (of the batches added; `whole_run` if set).
     pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
         if let Some(whole_run) = &self.whole_run {

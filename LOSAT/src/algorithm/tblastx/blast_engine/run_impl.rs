@@ -3249,14 +3249,24 @@ fn run_batch_loop(
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); query_records.len()];
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
     // loop reads the batches. A streamed run has none that refuses (`report_stream::check`).
+    // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`).
+    let subject_records = matches!(subjects.shown, ShownSubjects::Fasta { .. });
+    let xml = crate::blastinput::query_batch::outfmts_have_xml(
+        outputs.formats.iter().map(|format| format.outfmt),
+    );
     let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
-        matches!(subjects.shown, ShownSubjects::Fasta { .. }),
-        crate::blastinput::query_batch::outfmts_have_xml(
-            outputs.formats.iter().map(|format| format.outfmt),
-        ),
+        subject_records,
+        xml,
         "TBLASTX",
-    );
+    )
+    .map(|scopes| {
+        if xml && !subject_records {
+            scopes.with_whole_run_of(query_runs.input_records)
+        } else {
+            scopes
+        }
+    });
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
     // ```c++
     //     if (m_FormatType == CFormattingArgs::eAsnText

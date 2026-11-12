@@ -795,14 +795,15 @@ impl ReportedSubjects {
     }
 
     /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each reported sequence
-    /// with parsed Seq-ids of the batches `batches` (their hit lists named by their ranks,
-    /// `for_batch`), with the scope that `scopes` gives the query of its report
-    /// (`BatchResults::query_ordinal` and the query's index).
+    /// with parsed Seq-ids of the batches `batches` of one reader batch (their hit lists named by
+    /// their ranks, `for_batch`), with the scope that `scopes` (numbered from the reader batch's
+    /// first query) gives the query of its report (`BatchResults::query_ordinal`, which counts
+    /// from the reader batch, and the query's index).
     pub(crate) fn refuse_ids_of_queries(
         &self,
         batches: &[BatchResults],
         gapped: bool,
-        scopes: &crate::blastinput::query_batch::QueryScopes,
+        scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());

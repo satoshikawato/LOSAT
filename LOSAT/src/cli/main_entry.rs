@@ -34,6 +34,22 @@ use crate::cli::{Cli, Commands};
 /// calls `api` instead.
 #[doc(hidden)]
 pub fn main_entry() -> Result<()> {
+    let result = run_main_entry();
+    // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
+    // the standard error went to the `-logfile` target (tblastx and rpsblast,
+    // `ncbi_environment::run_messages_follow_log`): written as `main`'s `Result` writes them,
+    // exit status 1. NCBI's errors are written by the run itself (`exit_on_native_error`), where
+    // NCBI writes them. Line RG DECISIONS 32.
+    if let Err(error) = &result {
+        if let Some(mut terminal) = crate::blastinput::ncbi_environment::terminal_stderr() {
+            let _ = writeln!(terminal, "Error: {error:?}");
+            std::process::exit(1);
+        }
+    }
+    result
+}
+
+fn run_main_entry() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
     // counterpart; it reads the clock only with LOSAT_TIMING.
     crate::utils::xtiming::start();
@@ -90,7 +106,8 @@ pub fn main_entry() -> Result<()> {
         .get(1)
         .and_then(|word| word.to_str())
         .filter(|word| crate::cli::ENTRY_NAMES.contains(word));
-    let start = program.map(crate::blastinput::ncbi_environment::start_application);
+    let start = program
+        .map(|program| crate::blastinput::ncbi_environment::start_application(program, &argv[2..]));
     if let Some(start) = start {
         match start.usage_report() {
             Ok(text) => {
@@ -140,9 +157,8 @@ pub fn main_entry() -> Result<()> {
     // ```
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
     // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
-    // makes F, with the usage report's messages. Of LOSAT's programs here only makeblastdb runs
-    // with it; the search programs refuse it as they read their arguments (decision D9), after
-    // the file is made, as NCBI makes it.
+    // makes F, with the usage report's messages. rpsbproc refuses it as it reads its arguments
+    // (line RG item E1c), after the file is made, as NCBI makes it.
     let mut target = match program {
         Some(_) => {
             use crate::blastinput::ncbi_environment::{diag_target, log_file};
@@ -165,13 +181,16 @@ pub fn main_entry() -> Result<()> {
         return Ok(());
     }
     // NCBI reads the other words of that scan there too (`ncbi_environment::preparse`): a full
-    // version is printed, and a `-conffile` file is loaded in place of `<program>.ini`. LOSAT
-    // refuses both (`cli::ncbi_toolkit_word_error`) before the configuration load.
+    // version is printed, which LOSAT refuses (`cli::ncbi_toolkit_word_error`) before the
+    // configuration load. The file of `-conffile` is that load's (`start_application`); rpsbproc
+    // refuses it (line RG item E1c).
     if let Some(program) = program {
         use crate::blastinput::ncbi_environment::{preparse, Preparsed};
         let refused = match preparse(&argv[2..]) {
             Preparsed::Refused(word) => Some(word),
-            Preparsed::Words { conffile: true, .. } => Some("-conffile"),
+            Preparsed::Words {
+                conffile: Some(_), ..
+            } if program == "rpsbproc" => Some("-conffile"),
             _ => None,
         };
         if let Some(word) = refused {
@@ -193,12 +212,75 @@ pub fn main_entry() -> Result<()> {
             Err(reason) => return Err(anyhow::Error::msg(reason)),
         }
     }
-    drop(target);
+    let program_name = program.map(str::to_string);
+    let dryrun = program.is_some()
+        && matches!(
+            crate::blastinput::ncbi_environment::preparse(&argv[2..]),
+            crate::blastinput::ncbi_environment::Preparsed::Words { dryrun: true, .. }
+        );
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match crate::cli::try_parse_from(argv) {
         Ok(cli) => cli,
         Err(error) => exit_on_parse_error(&error, argv_is_rpsbproc),
     };
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296
+    // ```c++
+    //             try {
+    //                 *exit_code = m_DryRun ? DryRun() : Run();
+    //             }
+    // ...
+    // int CNcbiApplicationAPI::DryRun(void)
+    // {
+    //     ERR_POST_X(1, Info << "DryRun: default implementation does nothing");
+    //     return 0;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:424-431, 1035-1041
+    // ```c++
+    //     CDiagContext::SetupDiag(diag, m_Config, eDCM_Flush, m_LogFile);
+    //     CDiagContext::x_FinalizeSetupDiag();
+    //
+    //     // Setup the standard features from the config file.
+    //     // Don't call till after LoadConfig()
+    //     // NOTE: this will override environment variables,
+    //     // except DIAG_POST_LEVEL which is Set*Fixed*.
+    //     x_HonorStandardSettings();
+    // ...
+    //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+    //     if ( !post_level.empty() ) {
+    //         EDiagSev sev;
+    //         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
+    //             SetDiagFixedPostLevel(sev);
+    //         }
+    //     }
+    // ```
+    // `-dryrun` (`ncbi_environment::preparse`): the arguments have passed their definitions (the
+    // parser above), and NCBI's BLAST programs, makeblastdb and blastdbcmd keep the default
+    // `DryRun`: nothing else runs, exit status 0 (NCBI BLAST+ 2.17.0: a missing `-query` or `-db`
+    // file, no `-query`, `-out FILE` not made; line RG item E1b). Its `Info` post is written when
+    // the diagnostics' settings, applied before it (`DIAG_POST_LEVEL`, the registry's `[DEBUG]`,
+    // `[Diag]`, `[LOG]`), let it through: LOSAT refuses the settings it refuses in a run, which
+    // include those, with the same check (line RG DECISIONS E1b-6). rpsbproc refuses `-dryrun`
+    // (item E1c).
+    if dryrun {
+        if let Some(name) = program_name.as_deref() {
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings(name)
+                .map_err(anyhow::Error::msg)?;
+        }
+        return Ok(());
+    }
+    // The messages of tblastx's and rpsblast's runs go where the diagnostics go
+    // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
+    // target from here, where NCBI's `Run` makes its handler. LOSAT's parser errors above stay on
+    // the standard error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1).
+    match program_name.as_deref() {
+        Some(name) if crate::blastinput::ncbi_environment::run_messages_follow_log(name) => {
+            if let Err(reason) = target.into_standard_error(name) {
+                return Err(anyhow::Error::msg(reason));
+            }
+        }
+        _ => drop(target),
+    }
     if startup_trace {
         eprintln!("[startup] after clap parse");
     }
@@ -419,12 +501,16 @@ pub fn main_entry() -> Result<()> {
         // ```
         // rpsbproc ends with its own status (`Run`'s `m_app_status`, or the application layer's
         // for an exception); LOSAT's refusals are errors (exit 1), written as `main` writes an
-        // error, through `rpsbproc::write_stderr` (a closed standard error: exit 4).
+        // error, through `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the
+        // message may quote data bytes).
         Commands::Rpsbproc(args) => match crate::rpsbproc::run(args) {
             crate::rpsbproc::Outcome::Exit(0) => {}
             crate::rpsbproc::Outcome::Exit(code) => std::process::exit(code),
             crate::rpsbproc::Outcome::Refused(message) => {
-                crate::rpsbproc::write_stderr(&format!("Error: {message}\n"));
+                let mut line = b"Error: ".to_vec();
+                line.extend_from_slice(&message);
+                line.push(b'\n');
+                crate::rpsbproc::write_stderr_bytes(&line);
                 std::process::exit(1);
             }
         },

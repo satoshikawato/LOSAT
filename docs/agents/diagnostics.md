@@ -1480,7 +1480,7 @@ Rebuilding less:
   `LOSAT_X_PAIRPARDISCARR` (diagonal array) also run without a pool: a chunk in their scope (a subject this thread searches by itself, unmasked, `scan_range` 0, no
   debug or trace) is scanned in their strips on this thread and folded in strip order, as the runs of their shadows
   without a pool already were (`blastn/blast_engine/x_pair_seed_disc.rs`); megablast given `-template_type` (a
-  discontiguous table) takes them too. Before, such a chunk took the reference fold (`process_offset_pairs`), which
+  discontiguous table) takes them too. Before, such a chunk took the reference fold (`extend_offset_pairs`), which
   keeps neither the memo of `LOSAT_X_DIAGLV2` nor the lean folds of `LOSAT_X_FOLDLEAN` (it reads the CSR table of
   `LOSAT_X_DCCSR` as the stage does). Exact for the stages' reason: the owner folds every
   pair in the reference order with the reference statements whatever the number of threads (their entries). Many subjects on a pool keep the reference
@@ -3692,7 +3692,7 @@ Scheduling (each value computed by one thread with the original function; order 
   starts (two threads or more on unix with the `parallel` feature, a regular file of `LOSAT_X_QSCANPARMIN` bytes or more,
   4 MiB, no `\r` or `>?` in it, each part read to its end), and also not where a record of a part after the first has
   a reader message (its text may name a line, counted from the part's start), a record's local ID is not its reader's
-  counter's, `-parse_deflines` (its reader refuses an id read twice across the file) or the archive; elsewhere the
+  counter's, `-parse_deflines` (its records with ids take no number of the reader's counter, and its reader adds every record to the search's scope of ids) or the archive; elsewhere the
   search's reader reads the file into parts of at most 1 MiB (`read_parts`; a part is closed before a record that
   would pass the mark). A complete part gives back the room it did not take, so the commit charge follows what is
   held where memory is not overcommitted (Windows). Before, the reader kept every record (an
@@ -4216,7 +4216,7 @@ Scheduling (each value computed by one thread with the original function; order 
   letters with both strands, so a query of at most about 4000 bases; `LOSAT_X_PAIRPARDISC` takes the hash only).
   Same scope otherwise (`scan_range` 0, unmasked subject, a subject the thread searches by itself, no debug or trace). The pool threads scan
   the strips of `LOSAT_X_PAIRPARDISC` (same kernel, same strips), and the owner thread folds the pairs in scan
-  order through a statement-for-statement copy of the two-hit diagonal-array branch of `process_offset_pairs`
+  order through a statement-for-statement copy of the two-hit diagonal-array branch of `extend_offset_pairs`
   (`s_BlastnDiagTableExtendInitialHit`: the diagonal masked by `diag_mask`, `last_hit` and `flag` in
   `hit_level_array`, the hit length as a byte in `hit_len_array`; `fold_two_hit_array` in
   `blastn/blast_engine/x_pair_seed_disc.rs`). The array of such a block has at most 8192 + window diagonals, and
@@ -4417,8 +4417,9 @@ Scheduling (each value computed by one thread with the original function; order 
   test), which are the only readers of the retrieve; the insert still walks the chain itself, and the next
   seed reads only the table, so the bound needs no term for the insert, and the hit list and the table
   are the reference's (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in
-  the reference fold (`process_offset_pairs`, not with debug, trace or window diagnostics, which print the
-  values read) and in the strips folds of PAIRPAR and `LOSAT_X_PAIRPARDISC`; the off-diagonal
+  the two reference scans (`extend_offset_pairs` for the two-stage tables, and the seed closure of the
+  other tables, which blastn-short's word 7 reaches; not with debug, trace or window diagnostics, which
+  print the values read) and in the strips folds of PAIRPAR and `LOSAT_X_PAIRPARDISC`; the off-diagonal
   retrieves (`scan_range`) stay walks. With the switch off the table has no bounds, an insert tests the
   length of an empty vector, and the retrieves walk as before (callgrind, release: +0.005 to +0.10 %
   instructions against the base).
@@ -4458,7 +4459,7 @@ Scheduling (each value computed by one thread with the original function; order 
   and the merge of `LOSAT_X_PAIRPARFOLD` keep the memo with the chains. Only the strips fold of `LOSAT_X_PAIRPARDISC`
   keeps and reads it: each stage makes it again from `LOSAT_X_DIAGLV`'s bounds at its start (`x_lv2_reset`: no latest
   insert, `other` the bucket's bound, which answers no cell exactly where the bound skips), so the reference fold
-  (`process_offset_pairs`: one thread without `LOSAT_X_BNDCONE`, and every worker with many subjects) runs the code before the switch
+  (`extend_offset_pairs`: one thread without `LOSAT_X_BNDCONE`, and every worker with many subjects) runs the code before the switch
   (`DiagHashTable::insert_plain`, `retrieve_below::<false>`) and may change the table between stages. (Keeping the memo
   in the reference fold made 100 16S queries against a 16S database at 16 threads x1.008 slower, where the walks it
   saves are one cell long.) One-hit tables (megablast, blastn, blastn-short) keep no memo, and the one-hit strips folds
@@ -4500,7 +4501,7 @@ Scheduling (each value computed by one thread with the original function; order 
   itself (na_ungapped.c:531 `if (word_length == lut_word_length) return 1;`, always so for a discontiguous word: no call, no
   arguments, the offsets unchanged and nothing extended) and inlines the diagonal-hash insert
   (`DiagHashTable::insert_inl`: the statements of `insert_plain`, or of `insert_memo` with the memo). Same statements in the same order. The reference
-  fold (`process_offset_pairs`) is not changed (one-thread searches reach the strips folds with `LOSAT_X_BNDCONE`).
+  fold (`extend_offset_pairs`) is not changed (one-thread searches reach the strips folds with `LOSAT_X_BNDCONE`).
   Tests: the dc strips stage tests of `x_pair_seed_disc.rs` (both instances on a table with bounds and memo),
   `LOSAT/tests/blastn_diag_lv.rs` (`the_memo_and_the_lean_folds_give_the_same_report`).
   Evidence: with `LOSAT_X_DIAGLV2`'s (above); this switch alone (ab6) x0.957 on 31,168 cDNAs at 16 threads

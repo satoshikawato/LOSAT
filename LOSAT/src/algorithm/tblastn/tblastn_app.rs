@@ -6,6 +6,7 @@ use std::io::Write;
 
 use super::args::{search_settings, ResolvedTblastnArgs, SearchSettings, TblastnArgs};
 use super::database::TblastnDatabase;
+use super::stage_d_pipeline::SubjectLengthInvalid;
 use super::stage_d_pipeline::{
     run_local_for_report_threads, LocalStageDProfile, SubjectSetNumbers,
 };
@@ -19,11 +20,17 @@ use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::tabular::SubjectFetch;
 
-/// The failure of the batch whose search a read of the database
-/// failed (`common::x_db_stream::XReadError`), as the check's error fails the first batch with a valid
-/// context: a reader error of NCBI's own is the engine error; LOSAT's refusal (and any other
+/// The failure of a batch whose search failed where NCBI's fails it with its engine error: a
+/// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
+/// batch with a valid context, when the reader's error is NCBI's own, and the average subject
+/// length of the setup (`stage_d_pipeline::SubjectLengthInvalid`). LOSAT's refusal (and any other
 /// error) is returned as `Err` to stop the run.
-fn x_read_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
+fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
+    if error.is::<SubjectLengthInvalid>() {
+        return Ok(crate::blastinput::app::engine_error(
+            SubjectLengthInvalid::TEXT,
+        ));
+    }
     let error = match error.downcast::<XReadError>() {
         Ok(XReadError(read)) => read,
         Err(error) => return Err(error),
@@ -601,13 +608,12 @@ fn open_search_database(
                 list,
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis)
-            .in_id_scope(args.id_scope.clone());
+            .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.filtered_empty(),
+                database.statistics_length_is_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTN",
@@ -845,11 +851,12 @@ fn search_cli(
 ///         		ERR_POST(Warning << warning);
 ///         		continue;
 /// ```
-/// NCBI's gapped tblastn never stops for the average subject length, also when every
-/// subject is without letters: its shortest subject is raised to `BLAST_SEQSRC_MINLENGTH`
-/// before the division by 3 (`run_local_search_with_pool` ports blast_setup.c:969-973 and
-/// seqsrc_multiseq.cpp:226-240; LOSAT rejects `-ungapped` and `OLD_FSC`, the two ways to a
-/// search without `sbp->gbp`).
+/// NCBI's gapped tblastn with the Gumbel block never stops for the average subject length,
+/// also when every subject is without letters: its shortest subject is raised to
+/// `BLAST_SEQSRC_MINLENGTH` before the division by 3 (`run_local_search_with_pool` ports
+/// blast_setup.c:969-980 and seqsrc_multiseq.cpp:226-240). Without it (`-searchsp` or
+/// `OLD_FSC`; LOSAT rejects `-ungapped`) the average is used, and below one letter the batch
+/// fails (`stage_d_pipeline::SubjectLengthInvalid`).
 fn before_prolog(
     subjects: &[FastaRecord],
     x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
@@ -978,11 +985,6 @@ pub fn run_local_database(
     args.archive = super::archive::handle_for(&args, archive_requested)?
         .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    args.id_scope = crate::algorithm::common::database::database_id_scope(
-        args.parse_deflines,
-        query_records,
-        "TBLASTN",
-    )?;
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -1254,6 +1256,11 @@ fn search(
         // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
         old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
     };
+    // Without the Gumbel block NCBI's shortest subject length is the statistics' average
+    // (blast_setup.c:975), which divides by their number of sequences.
+    if let Some(database) = database.filter(|_| subject_set.old_fsc) {
+        database.check_statistics_count()?;
+    }
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
     // US-ASCII (NCBI's stream throws): refused before the search, and before anything is
@@ -1286,13 +1293,26 @@ fn search(
     // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
     // queries without letters), after the reports of the batches before (without the
     // epilog) and the messages of that batch's records (`read_query_batches`).
-    let batches = crate::blastinput::query_batch::read_query_batches(
+    let mut batches = crate::blastinput::query_batch::read_query_batches(
         input_records,
         &searched_queries,
         &query_input,
         reading,
         batch_size,
+        crate::blastinput::query_batch::QueryScopes::of_search(
+            args.parse_deflines,
+            database.is_none(),
+            args.parse_deflines
+                && crate::blastinput::query_batch::outfmts_have_xml(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
+            "TBLASTN",
+        ),
     );
+    // LOSAT's refusal of two queries of one scope with one id comes before any report.
+    if let Some(refusal) = batches.query_refusal.take() {
+        return Err(refusal);
+    }
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
     // that stops at its first batch gives NCBI's error.
     if batches.searched_done > 0 {
@@ -1343,10 +1363,35 @@ fn search(
         // database is checked as NCBI's first read would fail, with the same error, and each
         // sequence is read where it is searched (`common/x_db_stream.rs`).
         let mut x_stream = None;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+        // ```c
+        //    if (sbp->gbp) {
+        //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+        //        if (Blast_SubjectIsTranslated(program_number)) {
+        //            min_subject_length/=3;
+        //        }
+        //    ...
+        //    if(min_subject_length <=0) {
+        // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+        //    }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+        // ```c
+        //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+        //         new_msg->message = strdup("The average subject length is too short");
+        // ```
+        // With the Gumbel block a database's `GetMinLength` below 3 (an alias file's
+        // `MIN_SEQ_LENGTH` 1 or 2, a list's shortest sequence) leaves no residue
+        // (`min_subject_length` is NCBI's `Uint4`): the setup of the first batch with a valid
+        // context fails after the database's first OID is found and before any sequence is read.
+        // NCBI 2.17.0 (probe of line RG D1a, `db.ak.tbn.min1.6`): `BLAST engine error: The
+        // average subject length is too short`, exit status 3.
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.printed_num_seqs() == 0 {
+                let read = if database.num_oids() == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
+                } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
+                    Err(PreliminaryReadError("The average subject length is too short").into())
                 } else {
                     database.x_stream(resolved.num_threads).map(|stream| {
                         x_stream = Some(stream);
@@ -1433,9 +1478,9 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
-        // A read of the database that failed while the batches
-        // were searched ahead: they are searched again one at a time below, so that the batch
-        // that reads it fails after the reports of the batches before.
+        // A read of the database that failed while the batches were searched ahead, or a batch
+        // whose setup failed (`SubjectLengthInvalid`): they are searched again one at a time
+        // below, so that the batch that fails does after the reports of the batches before.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
@@ -1459,7 +1504,7 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error) if error.is::<XReadError>() => None,
+            Err(error) if error.is::<XReadError>() || error.is::<SubjectLengthInvalid>() => None,
             Err(error) => return Err(error),
         };
         for range in query_input
@@ -1508,7 +1553,7 @@ fn search(
                 // batch fails it as the check's error would (below).
                 match x_searched_here {
                     Ok(report) => report,
-                    Err(error) => match x_read_failure(error) {
+                    Err(error) => match batch_failure(error) {
                         Ok(failure) => {
                             failed = Some((range, failure));
                             break;
@@ -1591,6 +1636,21 @@ fn search(
                         }
                         Err(error) => return Err(error),
                     }
+                }
+                if let Some(scopes) = batches.query_scopes.as_ref() {
+                    crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                        &titles,
+                        batch_results
+                            .iter()
+                            .enumerate()
+                            .flat_map(|(index, hitlist)| {
+                                hitlist.lists().iter().filter_map(move |list| {
+                                    Some((range.start + index, u32::try_from(list.oid).ok()?))
+                                })
+                            }),
+                        scopes,
+                        "TBLASTN",
+                    )?;
                 }
             }
             results.append(&mut batch_results);
@@ -1746,7 +1806,7 @@ fn search(
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.
-                .map_err(|error| x_read_failure(error).unwrap_or_else(|error| error))?,
+                .map_err(|error| batch_failure(error).unwrap_or_else(|error| error))?,
             ),
             None => None,
         };
@@ -2124,7 +2184,7 @@ mod tests {
     // with LOSAT's refusal or any other error, as the check's error does.
     #[test]
     fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
-        let engine = x_read_failure(
+        let engine = batch_failure(
             XReadError(PreliminaryReadError("Database memory map file error").into()).into(),
         )
         .expect("the engine error");
@@ -2136,9 +2196,24 @@ mod tests {
             native.message,
             "BLAST engine error: Database memory map file error\n"
         );
-        let refusal = x_read_failure(XReadError(anyhow::anyhow!("refused")).into()).unwrap_err();
+        let refusal = batch_failure(XReadError(anyhow::anyhow!("refused")).into()).unwrap_err();
         assert_eq!(refusal.to_string(), "refused");
-        let other = x_read_failure(anyhow::anyhow!("other")).unwrap_err();
+        let other = batch_failure(anyhow::anyhow!("other")).unwrap_err();
         assert_eq!(other.to_string(), "other");
+    }
+
+    // NCBI 2.17.0 tblastn with `-searchsp` or `OLD_FSC` and `-subject` of three empty records
+    // (env parity probe f_probe of 2026-11-12): the batch fails with NCBI's engine error.
+    #[test]
+    fn a_short_average_subject_length_fails_the_batch_with_the_engine_error() {
+        let native = batch_failure(SubjectLengthInvalid.into())
+            .expect("the engine error")
+            .downcast::<crate::cli::NativeError>()
+            .expect("a NativeError");
+        assert_eq!(native.exit, 3);
+        assert_eq!(
+            native.message,
+            "BLAST engine error: The average subject length is too short\n"
+        );
     }
 }

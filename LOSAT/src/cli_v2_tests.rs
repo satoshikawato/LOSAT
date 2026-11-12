@@ -30,7 +30,9 @@ fn taxid_options_go_with_a_database_only() {
         &["-negative_taxidlist", "t.txt"],
         &["-no_taxid_expansion"],
     ];
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast",
+    ] {
         for words in lists {
             let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
             argv.extend(words);
@@ -1512,7 +1514,9 @@ fn culling_limit_is_read_as_ncbi_does() {
 // NCBI blast_args.cpp:1961: -parse_deflines is a flag of every search program.
 #[test]
 fn parse_deflines_is_a_flag_of_every_search_program() {
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast",
+    ] {
         assert!(parse(program, &["-parse_deflines"]).is_ok(), "{program}");
         assert!(
             parse(program, &["-parse_deflines", "true"]).is_err(),
@@ -1528,7 +1532,9 @@ fn parse_deflines_is_a_flag_of_every_search_program() {
 // NCBI blast_args.cpp:2663: -show_gis is a flag of every search program.
 #[test]
 fn show_gis_is_a_flag_of_every_search_program() {
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+    for program in [
+        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast",
+    ] {
         assert!(parse(program, &["-show_gis"]).is_ok(), "{program}");
         assert!(parse(program, &["-show_gis", "true"]).is_err(), "{program}");
     }
@@ -1552,30 +1558,16 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("tblastn", &["-db_soft_mask", "11"]),
         ("tblastx", &["-db_soft_mask", "11"]),
         ("blastp", &["-gilist", "ids.gil"]),
-        // Line DI-8 ported the taxid and seqid list options to BLASTP's database search, not to
-        // PSIBLAST's.
-        ("psiblast", &["-taxids", "9606"]),
-        ("psiblast", &["-no_taxid_expansion"]),
-        ("psiblast", &["-seqidlist", "ids.txt"]),
-        ("psiblast", &["-negative_seqidlist", "ids.txt"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
-        // Line NP ported it to BLASTP, not to PSIBLAST.
-        ("psiblast", &["-lcase_masking"]),
         ("blastp", &["-version"]),
         // Line RG X1 ported the X-drops to BLASTP, not to PSIBLAST.
         ("psiblast", &["-xdrop_gap_final", "30"]),
         ("psiblast", &["-xdrop_gap", "30"]),
         ("psiblast", &["-xdrop_ungap", "3"]),
-        ("blastn", &["-logfile", "log"]),
         ("blastp", &["-xmlhelp"]),
         ("tblastn", &["-version-full"]),
         ("tblastx", &["-help-full"]),
-        // NCBI ncbiargs.cpp:88: -dryrun, which NCBI accepts without searching.
-        ("blastp", &["-dryrun"]),
-        ("tblastn", &["-dryrun"]),
-        ("tblastx", &["-dryrun"]),
-        ("blastn", &["-dryrun"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
@@ -1908,8 +1900,8 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
 fn toolkit_words_in_an_option_value_are_rejected_as_options() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
-    // in an option's value (`-out -version` prints the version). LOSAT rejects them (D9)
-    // in that place too, instead of writing a file named "-version". The parser refuses
+    // in an option's value (`-out -version` prints the version). LOSAT rejects the full
+    // versions (D9) in that place too, instead of writing a file named "-version". The parser refuses
     // `-version` (the Web engine's); the command line prints it before parsing
     // (`ncbi_version_request_reads_the_word_before_the_arguments`).
     for (program, upper) in [
@@ -1918,13 +1910,7 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
         ("tblastn", "TBLASTN"),
         ("tblastx", "TBLASTX"),
     ] {
-        for words in [
-            &["-out", "-version"][..],
-            &["-out", "-dryrun"],
-            &["-evalue", "-version-full"],
-            &["-out", "-logfile"],
-            &["-out", "-conffile=x.ini"],
-        ] {
+        for words in [&["-out", "-version"][..], &["-evalue", "-version-full"]] {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
                 error.contains(&format!("is not supported by LOSAT's {upper}")),
@@ -1933,6 +1919,69 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
         }
         assert!(parse(program, &["-out", "o.txt"]).is_ok(), "{program}");
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
+// `ncbi_environment::preparse`): `-logfile FILE` and `-conffile FILE` go to the argument reader
+// with their values, a last `-logfile` or `-conffile` without one is dropped. The command line's
+// application start reads them (`cli::main_entry`); a parser's caller without one, as these
+// tests and the library API and the Web engine, refuses them (`toolkit_file_word_error`).
+#[test]
+fn toolkit_file_options_need_the_command_lines_application_start() {
+    assert!(crate::blastinput::ncbi_environment::application_start_of_process().is_none());
+    for (program, upper) in [
+        ("blastn", "BLASTN"),
+        ("blastp", "BLASTP"),
+        ("blastx", "BLASTX"),
+        ("tblastn", "TBLASTN"),
+        ("tblastx", "TBLASTX"),
+    ] {
+        for words in [
+            &["-logfile", "log.txt"][..],
+            &["-logfile=log.txt"],
+            &["-conffile", "x.ini"],
+            &["-conffile=x.ini"],
+            &["-out", "-conffile=x.ini"],
+            &["-logfile", "-dryrun"],
+            // `-dryrun` (line RG item E1b): the command line's entry ends the run after the
+            // arguments; in an option's value too, as NCBI reads it there.
+            &["-dryrun"],
+            &["-evalue", "1", "-dryrun"],
+            &["-out", "-dryrun"],
+        ] {
+            let error = parse(program, words).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!(
+                    "runs on the command line of LOSAT's {upper} only: the library API and the Web engine run no NCBI application start"
+                )),
+                "{program} {words:?}: {error}"
+            );
+        }
+        // A last word without its value is dropped, as NCBI drops it.
+        assert!(
+            parse(program, &["-evalue", "1", "-logfile"]).is_ok(),
+            "{program}"
+        );
+        assert!(
+            parse(program, &["-evalue", "1", "-conffile"]).is_ok(),
+            "{program}"
+        );
+        // `-out` then has no value: the parser's error.
+        assert!(parse(program, &["-out", "-logfile"]).is_err(), "{program}");
+    }
+    // makeblastdb's library run refuses `-conffile` too; a last word without value is dropped.
+    let makedb = |words: &[&str]| {
+        let mut argv = vec!["losat", "makeblastdb", "-in", "x.faa", "-dbtype", "prot"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv)
+    };
+    let error = makedb(&["-conffile", "c.ini"]).unwrap_err().to_string();
+    assert!(
+        error.contains("runs on the command line of LOSAT's makeblastdb only"),
+        "{error}"
+    );
+    assert!(makedb(&["-conffile"]).is_ok());
+    assert!(makedb(&["-logfile"]).is_ok());
 }
 
 #[test]

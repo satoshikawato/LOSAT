@@ -1,0 +1,233 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: protein slice of a shrimp virus proteome
+           35 sequences; 14,391 total letters
+
+Results from round 1
+
+
+Query= dup2 first
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61857.1 innexin [Penaeus monodon majanivirus A]                    320     4e-114
+BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus mon...  23.5    0.076 
+BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus mon...  18.5    4.0   
+BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus mon...  18.1    4.8   
+BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus A]        18.1    5.3   
+BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]        17.7    7.6   
+
+
+>BDT61857.1 innexin [Penaeus monodon majanivirus A]
+Length=378
+
+ Score = 320 bits (820),  Expect = 4e-114, Method: Compositional matrix adjust.
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+
+Query  1    MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPISCVYD  60
+            MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPISCVYD
+Sbjct  1    MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPISCVYD  60
+
+Query  61   SGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAISSPGIGTHNLSDPVTYHAYYQWVPFM  120
+            SGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAISSPGIGTHNLSDPVTYHAYYQWVPFM
+Sbjct  61   SGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAISSPGIGTHNLSDPVTYHAYYQWVPFM  120
+
+Query  121  LFIQGLLFYAPHYIWKTWEGGRMQSITADL  150
+            LFIQGLLFYAPHYIWKTWEGGRMQSITADL
+Sbjct  121  LFIQGLLFYAPHYIWKTWEGGRMQSITADL  150
+
+
+>BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus 
+monodon majanivirus A]
+Length=261
+
+ Score = 23.5 bits (49),  Expect = 0.076, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 16/26 (62%), Gaps = 3/26 (12%)
+
+Query  102  HNLSDPVTYHAYYQWVPFMLFIQGLL  127
+            HN  DP++ HA  QW P   +IQ ++
+Sbjct  170  HN-DDPISVHA--QWSPDCEYIQAIV  192
+
+
+>BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus 
+monodon majanivirus A]
+Length=577
+
+ Score = 18.5 bits (36),  Expect = 4.0, Method: Composition-based stats.
+ Identities = 9/27 (33%), Positives = 13/27 (48%), Gaps = 6/27 (22%)
+
+Query  53   DPISCVYDSGHPK------LNDKVVNT  73
+            D + CV + G+P       L D+V  T
+Sbjct  317  DVVKCVLEMGYPSCIVRACLKDRVEQT  343
+
+
+>BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus 
+monodon majanivirus A]
+Length=728
+
+ Score = 18.1 bits (35),  Expect = 4.8, Method: Compositional matrix adjust.
+ Identities = 11/33 (33%), Positives = 16/33 (48%), Gaps = 5/33 (15%)
+
+Query  98   GIGTHNLS---DPVTYHAYYQWVPFMLFIQGLL  127
+            G+G  N     DP T HA   W P   +++ L+
+Sbjct  315  GVGIRNWEKGDDPWTQHA--MWNPECHYVRTLM  345
+
+
+>BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus A]
+Length=592
+
+ Score = 18.1 bits (35),  Expect = 5.3, Method: Composition-based stats.
+ Identities = 12/38 (32%), Positives = 17/38 (45%), Gaps = 2/38 (5%)
+
+Query  90   DMSAISSPGIGTHNLSDPVTYHAYYQWVPFMLFIQGLL  127
+            D+S I SP +G     D +   A Y       +I+ LL
+Sbjct  64   DISDIISPNVGVDK--DVLKMQAVYSTCDPDTYIENLL  99
+
+
+>BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]
+Length=918
+
+ Score = 17.7 bits (34),  Expect = 7.6, Method: Composition-based stats.
+ Identities = 5/10 (50%), Positives = 8/10 (80%), Gaps = 0/10 (0%)
+
+Query  85   NRPYRDMSAI  94
+            +RPY D++ I
+Sbjct  630  DRPYSDLANI  639
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.139    0.456    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1312838
+Results from round 1
+
+
+Query= dup2 second
+
+Length=146
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61894.1 dUTPase [Penaeus monodon majanivirus A]                    300     7e-110
+BDT61939.1 wsv306-like protein [Penaeus monodon majanivirus A]        20.4    0.90  
+BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus A]        18.1    5.0   
+BDT61901.1 hypothetical protein [Penaeus monodon majanivirus A]       17.3    7.8   
+BDT61900.1 wsv303-like protein [Penaeus monodon majanivirus A]        17.3    8.7   
+
+
+>BDT61894.1 dUTPase [Penaeus monodon majanivirus A]
+Length=146
+
+ Score = 300 bits (769),  Expect = 7e-110, Method: Compositional matrix adjust.
+ Identities = 146/146 (100%), Positives = 146/146 (100%), Gaps = 0/146 (0%)
+
+Query  1    MSELNNVLKFKKLTEHAFTPSKGSKLAAGFDLYSAYDLTIPANGKSLVKTDIQIELPEGC  60
+            MSELNNVLKFKKLTEHAFTPSKGSKLAAGFDLYSAYDLTIPANGKSLVKTDIQIELPEGC
+Sbjct  1    MSELNNVLKFKKLTEHAFTPSKGSKLAAGFDLYSAYDLTIPANGKSLVKTDIQIELPEGC  60
+
+Query  61   YGRIAPRSGLSWKHHLDVGAGVIDRDYRGDIGVILFNHAKSDYKVKKGDRIAQLICEKII  120
+            YGRIAPRSGLSWKHHLDVGAGVIDRDYRGDIGVILFNHAKSDYKVKKGDRIAQLICEKII
+Sbjct  61   YGRIAPRSGLSWKHHLDVGAGVIDRDYRGDIGVILFNHAKSDYKVKKGDRIAQLICEKII  120
+
+Query  121  YPDIEQVEELTKTERGEGGYGSTGKQ  146
+            YPDIEQVEELTKTERGEGGYGSTGKQ
+Sbjct  121  YPDIEQVEELTKTERGEGGYGSTGKQ  146
+
+
+>BDT61939.1 wsv306-like protein [Penaeus monodon majanivirus A]
+Length=426
+
+ Score = 20.4 bits (41),  Expect = 0.90, Method: Compositional matrix adjust.
+ Identities = 9/31 (29%), Positives = 18/31 (58%), Gaps = 0/31 (0%)
+
+Query  65   APRSGLSWKHHLDVGAGVIDRDYRGDIGVIL  95
+            +P   L +  + ++GAG++   +R   G+IL
+Sbjct  269  SPSRELQFHCNEEMGAGIMMAAFRDGDGIIL  299
+
+
+>BDT61938.1 wsv308-like protein [Penaeus monodon majanivirus A]
+Length=592
+
+ Score = 18.1 bits (35),  Expect = 5.0, Method: Composition-based stats.
+ Identities = 8/22 (36%), Positives = 13/22 (59%), Gaps = 5/22 (23%)
+
+Query  88   RGDIG-----VILFNHAKSDYK  104
+            RG+IG       ++NH K+ +K
+Sbjct  288  RGEIGKRNDPCYIYNHVKNIFK  309
+
+
+>BDT61901.1 hypothetical protein [Penaeus monodon majanivirus 
+A]
+Length=325
+
+ Score = 17.3 bits (33),  Expect = 7.8, Method: Compositional matrix adjust.
+ Identities = 6/18 (33%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+
+Query  73  KHHLDVGAGVIDRDYRGD  90
+           K+   +  G+I   YR D
+Sbjct  35  KNDYHISQGIIHHTYRND  52
+
+
+>BDT61900.1 wsv303-like protein [Penaeus monodon majanivirus A]
+Length=851
+
+ Score = 17.3 bits (33),  Expect = 8.7, Method: Compositional matrix adjust.
+ Identities = 7/25 (28%), Positives = 11/25 (44%), Gaps = 0/25 (0%)
+
+Query  64   IAPRSGLSWKHHLDVGAGVIDRDYR  88
+             AP S    +HH  +   +I  D +
+Sbjct  689  FAPLSNYRTQHHQSLQTRLILEDLK  713
+
+
+
+Lambda      K        H        a         alpha
+   0.316    0.138    0.403    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1261854
+
+
+  Database: protein slice of a shrimp virus proteome
+    Posted date:  Oct 16, 2026  1:46 AM
+  Number of letters in database: 14,391
+  Number of sequences in database:  35
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -4,16 +4,16 @@
 //! file, the header file and the sequence file, each with NCBI's rule for
 //! "does another sequence fit".
 
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use super::ofstream::OfStream;
 use super::WriteDbError;
 
 /// `CWriteDB_File`: one output file of a volume.
 #[derive(Debug)]
 pub(crate) struct WriteDbFile {
-    writer: Option<BufWriter<File>>,
+    /// `m_RealFile`: the `ofstream` of the file, without a file until `Create`.
+    stream: OfStream,
     base_name: String,
     extension: &'static str,
     index: u32,
@@ -96,17 +96,13 @@ impl WriteDbFile {
     //         return 1000*1000*1000 - 1;
     //     }
     // ```
-    // NCBI does not check that the file opened or that a write succeeded;
-    // LOSAT reports the failure instead of leaving a damaged database.
-    fn create(
-        base_name: &str,
-        extension: &'static str,
-        index: u32,
-        max_file_size: u64,
-    ) -> Result<Self, WriteDbError> {
+    // NCBI does not test the stream: a file that cannot be opened (a directory of its name
+    // that the removal of the old database could not delete) is written to nowhere and the
+    // build goes on, as makeblastdb's (`super::ofstream`).
+    fn create(base_name: &str, extension: &'static str, index: u32, max_file_size: u64) -> Self {
         let mut file = Self::lazy(base_name, extension, index, max_file_size);
-        file.create_now()?;
-        Ok(file)
+        file.create_now();
+        file
     }
 
     /// The constructor with `always_create` false: the file is named but created only by
@@ -118,7 +114,7 @@ impl WriteDbFile {
         max_file_size: u64,
     ) -> Self {
         Self {
-            writer: None,
+            stream: OfStream::new(),
             base_name: base_name.to_string(),
             extension,
             index,
@@ -134,15 +130,11 @@ impl WriteDbFile {
         }
     }
 
-    /// `CWriteDB_File::Create`: creates the file under its current name.
-    pub(crate) fn create_now(&mut self) -> Result<(), WriteDbError> {
-        let file = File::create(&self.fname).map_err(|source| WriteDbError::Io {
-            path: PathBuf::from(&self.fname),
-            source,
-        })?;
-        self.writer = Some(BufWriter::with_capacity(1 << 16, file));
+    /// `CWriteDB_File::Create`: `m_RealFile.open(m_Fname.c_str(), ios::out | ios::binary)`
+    /// under the current name.
+    pub(crate) fn create_now(&mut self) {
         self.created = true;
-        Ok(())
+        self.stream.open(Path::new(&self.fname));
     }
 
     /// `m_Created`.
@@ -155,13 +147,6 @@ impl WriteDbFile {
         self.max_file_size
     }
 
-    fn io_error(&self, source: std::io::Error) -> WriteDbError {
-        WriteDbError::Io {
-            path: PathBuf::from(&self.fname),
-            source,
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:218-221
     // ```c++
     //     m_RealFile.write(data.data(), data.length());
@@ -172,7 +157,8 @@ impl WriteDbFile {
     // `m_Offset` is an `unsigned int`: past 4 GiB it wraps and the offsets of
     // the index no longer name the data. makeblastdb limits `-max_file_sz`
     // below 4 GiB, but a volume takes its first sequence whatever its size;
-    // LOSAT stops instead of writing offsets that wrapped.
+    // LOSAT stops instead of writing offsets that wrapped. The write itself is not
+    // tested: `m_Offset` grows also when the stream failed.
     pub(crate) fn write(&mut self, data: &[u8]) -> Result<u32, WriteDbError> {
         let end = u64::from(self.offset) + data.len() as u64;
         if end > u64::from(u32::MAX) {
@@ -182,12 +168,7 @@ impl WriteDbFile {
                 self.fname
             )));
         }
-        let Some(writer) = self.writer.as_mut() else {
-            return Err(self.io_error(std::io::Error::other("the file is closed")));
-        };
-        if let Err(source) = writer.write_all(data) {
-            return Err(self.io_error(source));
-        }
+        self.stream.write(data);
         self.offset = end as u32;
         Ok(self.offset)
     }
@@ -206,31 +187,25 @@ impl WriteDbFile {
         self.write(&value.to_be_bytes())
     }
 
-    pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
-        if let Some(mut writer) = self.writer.take() {
-            if let Err(source) = writer.flush() {
-                return Err(self.io_error(source));
-            }
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:259-265
+    // ```c++
+    // void CWriteDB_File::Close()
+    // {
+    //     x_Flush();
+    //     if (m_Created) {
+    //         m_RealFile.close();
+    //     }
+    // }
+    // ```
+    /// The end of `Close` (after the file's own `x_Flush`): the stream is closed.
+    pub(crate) fn close(&mut self) {
+        if self.created {
+            self.stream.close();
         }
-        Ok(())
     }
 
     pub(crate) fn filename(&self) -> &str {
         &self.fname
-    }
-
-    /// Drops the file handle without writing what is still buffered.
-    pub(crate) fn abandon(&mut self) {
-        if let Some(writer) = self.writer.take() {
-            let (_file, _unwritten) = writer.into_parts();
-        }
-    }
-
-    /// Drops the file handle and removes the file: what a volume does with
-    /// the files it created when one of its files cannot be created.
-    pub(crate) fn discard(&mut self) {
-        self.abandon();
-        let _ = std::fs::remove_file(&self.fname);
     }
 
     // `fn1.Rename(m_Fname, CDirEntry::fRF_Overwrite)` of `RenameSingle` and `RenameFileIndex`,
@@ -497,13 +472,13 @@ impl IndexFile {
         version: DbVersion,
         sizeof_long: u64,
         arrays: OffsetArrays,
-    ) -> Result<Self, WriteDbError> {
+    ) -> Self {
         let file = WriteDbFile::create(
             dbname,
             if protein { "pin" } else { "nin" },
             index,
             max_file_size,
-        )?;
+        );
         let lmdb_name = match version {
             DbVersion::V4 => Vec::new(),
             DbVersion::V5 => make_lmdb_name(dbname, protein).into_bytes(),
@@ -518,7 +493,7 @@ impl IndexFile {
         amb.clear();
         hdr.push(0);
         seq.push(1);
-        Ok(Self {
+        Self {
             file,
             protein,
             title: title.to_vec(),
@@ -534,7 +509,7 @@ impl IndexFile {
             hdr,
             seq,
             amb,
-        })
+        }
     }
 
     /// `m_Letters`: the residues or bases of the volume.
@@ -678,6 +653,9 @@ impl IndexFile {
     // to the offset arrays would double what a volume of many sequences
     // holds at its close (UniRef50: 16.6 million sequences in one volume,
     // 127 MiB of arrays and 127 MiB of copy; makedb-v5 survey/MEM_RCA.md).
+    // The stream (`super::ofstream`) gets the same bytes in the same order in
+    // fewer calls; nothing reads its state, and a device that fills keeps the
+    // bytes that fitted, as with NCBI's calls.
     pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         let mut pad_date = self.date.clone();
         while overhead(
@@ -739,7 +717,8 @@ impl IndexFile {
         self.hdr.clear();
         self.seq.clear();
         self.amb.clear();
-        self.file.close()
+        self.file.close();
+        Ok(())
     }
 
     /// The offset arrays, emptied by `close`, for the next volume.
@@ -768,19 +747,14 @@ pub(crate) struct HeaderFile {
 }
 
 impl HeaderFile {
-    pub(crate) fn create(
-        dbname: &str,
-        protein: bool,
-        index: u32,
-        max_file_size: u64,
-    ) -> Result<Self, WriteDbError> {
+    pub(crate) fn create(dbname: &str, protein: bool, index: u32, max_file_size: u64) -> Self {
         let file = WriteDbFile::create(
             dbname,
             if protein { "phr" } else { "nhr" },
             index,
             max_file_size,
-        )?;
-        Ok(Self { file, data_size: 0 })
+        );
+        Self { file, data_size: 0 }
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:365-382
@@ -818,7 +792,7 @@ impl HeaderFile {
         Ok(offset)
     }
 
-    pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
+    pub(crate) fn close(&mut self) {
         self.file.close()
     }
 
@@ -859,7 +833,7 @@ impl SequenceFile {
             if protein { "psq" } else { "nsq" },
             index,
             max_file_size,
-        )?;
+        );
         file.write(&[0])?;
         Ok(Self { file })
     }
@@ -940,7 +914,7 @@ impl SequenceFile {
         Ok((off_seq, off_amb))
     }
 
-    pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
+    pub(crate) fn close(&mut self) {
         self.file.close()
     }
 

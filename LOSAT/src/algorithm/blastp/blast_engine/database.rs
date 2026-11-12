@@ -69,14 +69,6 @@ pub(super) use x_listed_lean::x_assert_same_titles_and_letters;
 pub(super) use x_listed_lean::x_bp_listed_lean;
 pub(super) use x_redo_db_subjects::XShownResidues;
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
-// ```c
-// #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
-// ```
-/// The length that a database answers for its shortest sequence
-/// (`BlastSeqSrcGetMinSeqLen`, seqdbimpl.cpp:128-136).
-pub(super) const BLAST_SEQSRC_MINLENGTH: i32 = 10;
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
 // ```c
 // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
@@ -124,15 +116,6 @@ impl BlastpDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors, which name `program`.
     #[cfg(test)]
@@ -156,7 +139,7 @@ impl BlastpDatabase {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids (line DBID): BLASTP (ID2a) and psiblast read it.
         shared::check_seqids(&db, settings, program)?;
-        shared::restrict_database(&mut db, list, diagnostics, program)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, program)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -189,7 +172,8 @@ impl BlastpDatabase {
         self.taxdb.prefetch_refused(&self.db)
     }
 
-    /// The number of sequences (`CSeqDB::GetNumSeqs`).
+    /// The number of included sequences (`SeqDb::num_seqs`: the OIDs that the alias files'
+    /// ranges and a list include, not NCBI's `GetNumSeqs`).
     pub(super) fn num_sequences(&self) -> u32 {
         self.db.num_seqs()
     }
@@ -204,13 +188,11 @@ impl BlastpDatabase {
     // }
     // ```
     /// The shortest sequence length of the preliminary hit cutoff (`BlastSeqSrcGetMinSeqLen`,
-    /// `min_subject_length` of `BLAST_GapAlignSetUp`): `BLAST_SEQSRC_MINLENGTH` for a whole
-    /// database, the scanned shortest length with a list (line DI-8: `SeqDb::min_length`).
+    /// `min_subject_length` of `BLAST_GapAlignSetUp`): `CSeqDB::GetMinLength`
+    /// (`SeqDb::min_length`: the alias files' `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH`
+    /// without a list, the scanned shortest length with one, line DI-8).
     pub(super) fn cutoff_subject_length(&self) -> i32 {
-        match self.db.min_length() {
-            Some(shortest) => i32::try_from(shortest).unwrap_or(i32::MAX),
-            None => BLAST_SEQSRC_MINLENGTH,
-        }
+        self.db.min_length()
     }
 
     /// The total length the statistics read (`SeqDb::statistics_numbers`).
@@ -223,6 +205,12 @@ impl BlastpDatabase {
         self.db.filtered_empty()
     }
 
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(super) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
+    }
+
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
@@ -233,10 +221,16 @@ impl BlastpDatabase {
         self.db.statistics_numbers().1
     }
 
-    /// The number of sequences the reports print: the whole database's, also with a taxid
-    /// list (`SeqDb::printed_num_seqs`).
-    pub(super) fn printed_num_sequences(&self) -> u32 {
-        self.db.printed_num_seqs()
+    /// LOSAT's refusal of statistics of 0 sequences for a search of `program` without the
+    /// Gumbel block (`shared::check_statistics_count`).
+    pub(super) fn check_statistics_count(&self, program: &str) -> Result<()> {
+        shared::check_statistics_count(&self.db, program)
+    }
+
+    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
+    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    pub(super) fn num_oids(&self) -> u32 {
+        self.db.num_oids()
     }
 
     /// The total length as the engine holds it.
@@ -1116,6 +1110,38 @@ pub(super) enum ListedShown {
 }
 
 impl ListedTitles<'_> {
+    /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each subject with
+    /// parsed Seq-ids of the final hit lists `hit_lists`, with the scope of the query whose list
+    /// reaches it (`scopes`): the reports of each query batch ask for the batch's own, also of a
+    /// subject that a list of another batch reached first.
+    pub(super) fn refuse_ids_of_queries(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            for hsp_list in &hit_list.hsplist_array[..count] {
+                let rank = hsp_list.oid as usize;
+                if let Some(subject) = &self.parsed[rank] {
+                    shared::refuse_id_of_a_query(
+                        subject,
+                        self.listed.ordinals[rank],
+                        scopes.of_query(query),
+                        self.program,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
     /// list).
     fn title(&self, rank: usize) -> &[u8] {

@@ -1830,7 +1830,7 @@ fn pairwise_metadata(
         } else {
             Default::default()
         },
-        gumbel: (options.gapped && !options.old_fsc).then(|| {
+        gumbel: options.has_gumbel_block().then(|| {
             lookup_protein_gumbel_params(&scoring, total as i64)
                 .expect("the gap costs are in the matrix's table (`args.rs`)")
         }),

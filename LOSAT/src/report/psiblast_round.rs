@@ -119,11 +119,7 @@ pub(crate) fn write_psiblast_round_report(
         // The query's warnings come before its preamble, after the report written so far
         // (`QueryWarnings::before_query`).
         if let Some(warnings) = warnings.as_deref_mut() {
-            if let Some(lines) = warnings.before.get(q_idx).filter(|lines| !lines.is_empty()) {
-                writer.flush()?;
-                warnings.sink.write_all(lines)?;
-                warnings.sink.flush()?;
-            }
+            warnings.before_query(q_idx, writer)?;
         }
         let group = QueryGroup::new(query_hits, subject_titles, |previous, s_idx| {
             sections.joins(previous, s_idx)

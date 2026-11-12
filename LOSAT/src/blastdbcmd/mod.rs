@@ -192,8 +192,16 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
             return 0;
         }
         Preparsed::Refused(word) => return diag.refuse(&unsupported_option(word)),
-        Preparsed::Words { conffile: true, .. } => {
-            return diag.refuse(&unsupported_option("-conffile"))
+        // The file of `-conffile` is the configuration of the command line's application start
+        // (`start_application`); the library API runs none (`cli::toolkit_file_word_refusal`).
+        Preparsed::Words {
+            conffile: Some(_), ..
+        } if start.is_none() => {
+            return diag.refuse(&crate::cli::toolkit_file_word_refusal(PROGRAM, "-conffile"))
+        }
+        // So is `-dryrun`, which the command line's entry ends after the arguments.
+        Preparsed::Words { dryrun: true, .. } if start.is_none() => {
+            return diag.refuse(&crate::cli::toolkit_file_word_refusal(PROGRAM, "-dryrun"))
         }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
@@ -249,14 +257,18 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         }
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
     };
-    if dryrun {
-        return diag.refuse(&unsupported_option("-dryrun"));
-    }
     let settings =
         match crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastdbcmd") {
             Ok(settings) => settings,
             Err(reason) => return diag.refuse(&reason),
         };
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
+    // `cli::main_entry`: blastdbcmd keeps the default `DryRun`, which returns 0 after the
+    // arguments have passed their definitions; LOSAT refuses the settings it refuses in a run
+    // first, as the diagnostics' settings let its `Info` post through).
+    if dryrun {
+        return 0;
+    }
     let registry = match &settings.blastdb {
         Ok(value) => value.as_deref(),
         Err(reason) => return diag.refuse(&refusal(reason)),
@@ -477,9 +489,12 @@ fn open_database(
         let Some(&seqtype) = types.next() else {
             unreachable!("at least one sequence type is tried");
         };
-        let opened = SeqDb::open_in(name, seqtype, path).and_then(|mut db| {
+        // The alias files' counts fail where NCBI's constructor reaches them, which the list of
+        // `-target_only` moves (`SeqDb::check_alias_values`).
+        let opened = SeqDb::open_search_in(name, seqtype, path).and_then(|mut db| {
             let volumes = SeqDb::info_volumes(name, seqtype, path)?;
             prepare(&mut db)?;
+            db.check_alias_values()?;
             Ok((db, volumes))
         });
         match opened {
@@ -499,9 +514,22 @@ fn open_database(
 //         }                                                                   \
 //     }                                                                       \
 // ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
+// ```c++
+//     catch (const CException& e) {                                           \
+//         LOG_POST(Error << "Error: " << e.what());                           \
+//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+//     }                                                                       \
+// ```
 /// A reader error: NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>`
-/// with exit status 2, else LOSAT's refusal.
+/// with exit status 2, another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias
+/// file's value that does not convert) as `Error: <what()>` with exit status 255, else LOSAT's
+/// refusal.
 fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
+    if let Some(exception) = error.ncbi_exception() {
+        diag.post(&format!("Error: {}", exception.what()));
+        return 255;
+    }
     match error.ncbi_message() {
         Some(text) => {
             diag.post(&format!("BLAST Database error: {text}"));
@@ -568,9 +596,12 @@ fn with_commas(n: u64) -> String {
 // ```
 /// The text of `-info` for `db` up to its filtering algorithms.
 ///
-/// `-exact_length` changes nothing here: NCBI's exact total differs from the total only when
-/// its totals are counted over a filtered list of sequences (an alias file with `GILIST`,
-/// `SEQIDLIST`, `OIDLIST`, ..., seqdbimpl.cpp:104-131), which LOSAT's reader refuses.
+/// The counts are `GetNumSeqs` and `GetTotalLength` of the database opened without a list:
+/// the walks of the alias tree (`SeqDb::printed_num_seqs`). `-exact_length` changes nothing
+/// here: NCBI's exact total differs from the total only when its totals are counted over a
+/// filtered list of sequences (an alias file with `GILIST`, `SEQIDLIST`, `OIDLIST`, ...,
+/// seqdbimpl.cpp:104-131), which LOSAT's reader refuses; the OID ranges (`FIRST_OID`,
+/// `LAST_OID`) do not make NCBI scan.
 fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
     let letters = match db.seqtype() {
         SeqType::Protein => "residues",
@@ -583,8 +614,8 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
         out,
         "\t{} sequences; {} total {letters}\n\nDate: {}\tLongest sequence: {} {letters}\n\n\
          BLASTDB Version: {}\n",
-        with_commas(u64::from(db.num_seqs())),
-        with_commas(db.total_length()),
+        with_commas(u64::from(db.printed_num_seqs())),
+        with_commas(db.printed_total_length()),
         db.date(),
         with_commas(u64::from(db.max_length())),
         if db.is_version5() { "5" } else { "4" },

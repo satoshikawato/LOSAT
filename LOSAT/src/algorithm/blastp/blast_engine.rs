@@ -3284,12 +3284,9 @@ fn psiblast_pssms(
         }
         let ordinal = ranges.query_input.ordinal(query);
         let record = &ranges.input_records[ordinal];
-        let id = crate::report::serial::pssm::ObjectId::Str(
-            format!(
-                "Query_{}",
-                args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
-            )
-            .into_bytes(),
+        let id = crate::algorithm::psiblast::pssm::fasta_query_id(
+            record,
+            args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1,
         );
         let ungapped = &contexts[query].karlin_params;
         let ungapped = KarlinBlk {
@@ -5389,13 +5386,15 @@ fn open_search_database(
                 list,
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis)
-            .in_id_scope(args.id_scope.clone());
+            .showing_gis(args.show_gis);
+            if resolved.rps_search.is_some() {
+                rps_hooks::check_alias_keys(&database, args.app.name())?;
+            }
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.filtered_empty(),
+                database.statistics_length_is_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
@@ -5482,7 +5481,26 @@ fn search_cli(
     // come when the options are processed and the subjects set up.
     if let Some(psi) = resolved.psi_search.clone() {
         crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, &psi)?;
-        let records = vec![psi.query().clone()];
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
+        // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
+        // ```c++
+        //         CBlastFormat formatter(opt, *db_adapter,
+        //                                fmt_args->GetFormattedOutputChoice(),
+        //                                query_opts->GetParseDeflines(),
+        // ```
+        // With `-parse_deflines` the reports believe the PSSM query's Seq-id as they believe a
+        // FASTA query's (NCBI BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`), and
+        // its id joins the search's scope as a FASTA query's does: NCBI shows a subject with that
+        // id as the PSSM's query (its title and letters), refused as for a FASTA query
+        // (`IdScope::add_record`; a database sequence with it, `query_batch::QueryScopes`).
+        let mut query = psi.query().clone();
+        if resolved.parse_deflines {
+            query = query.believing_local_id();
+            if let (Some(scope), Some(believed)) = (args.id_scope.as_deref(), query.believed()) {
+                scope.add_record(&believed.ids, None, "query", args.app.name())?;
+            }
+        }
+        let records = vec![query];
         // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's below.
         if let Some(request) = resolved
             .psi_rounds
@@ -5822,11 +5840,6 @@ pub fn run_local_database(
     args.archive = super::archive::handle_for(&args, archive_requested)?
         .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    args.id_scope = crate::algorithm::common::database::database_id_scope(
-        args.parse_deflines,
-        query_records,
-        args.app.name(),
-    )?;
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -6183,7 +6196,7 @@ fn psiblast_stop_at_invalid_query(
         })
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
-    let empty_database = database.is_some_and(|database| database.printed_num_sequences() == 0)
+    let empty_database = database.is_some_and(|database| database.num_oids() == 0)
         && contexts
             .first()
             .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
@@ -6484,7 +6497,17 @@ fn search(
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.queries_begin();
     }
-    let batches = match args.app {
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`).
+    let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        database.is_none(),
+        args.parse_deflines
+            && crate::blastinput::query_batch::outfmts_have_xml(
+                outputs.formats.iter().map(|format| format.outfmt),
+            ),
+        args.app.name(),
+    );
+    let mut batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // ```c++
         //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
@@ -6497,6 +6520,7 @@ fn search(
                 &query_input,
                 reading,
                 batch_size,
+                query_scopes,
             )
         }
         BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
@@ -6508,9 +6532,14 @@ fn search(
                 &searched_queries,
                 &query_input,
                 reading,
+                query_scopes,
             ),
         ),
     };
+    // LOSAT's refusal of two queries of one scope with one id comes before any report.
+    if let Some(refusal) = batches.query_refusal.take() {
+        return Err(refusal);
+    }
     // psiblast `-in_pssm`: NCBI's check of the PSSM stops the run at its query
     // (`psiblast_stop_at_invalid_pssm`).
     let batches = psiblast_stop_at_invalid_pssm(&args, batches);
@@ -6613,6 +6642,10 @@ fn search(
             psi_round: None,
             stopped_pssms: Some(&stopped),
             titles_may_refuse,
+            query_scopes: batches
+                .query_scopes
+                .as_ref()
+                .map(|scopes| scopes.numbered_from(0)),
         };
         run_resolved_in_pool(
             args,
@@ -6987,6 +7020,10 @@ fn search(
                                 psi_round: None,
                                 stopped_pssms: None,
                                 titles_may_refuse,
+                                query_scopes: batches
+                                    .query_scopes
+                                    .as_ref()
+                                    .map(|scopes| scopes.numbered_from(block.start)),
                             },
                             x_block,
                         )
@@ -7940,6 +7977,7 @@ fn unsearched_batches_then_engine_error(
         // BLASTP only (`args.app` above): no psiblast PSSM stops here.
         stopped_pssms: None,
         titles_may_refuse: reports.titles_may_refuse,
+        query_scopes: reports.query_scopes,
     };
     if let Err(error) = run_resolved_in_pool(
         args.clone(),
@@ -8003,14 +8041,17 @@ struct BlastpReports<'a> {
     /// title the archive cannot write, so the call checks its own queries and subjects where it
     /// writes the archive (`run_resolved_in_pool`); without such a title no call can refuse.
     titles_may_refuse: bool,
+    /// Under `-parse_deflines` against a database, the scopes of the call's queries
+    /// (`query_batch::QueryScopes`, numbered from the call's first), whose ids the reported
+    /// subjects must not have (`ListedTitles::refuse_ids_of_queries`); `None` elsewhere.
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
 /// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`), `OLD_FSC` in RPSBLAST (BLASTP and PSIBLAST read it) and query split
-/// values that NCBI cannot convert (not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never
-/// splits). Other
+/// archive (`archive`) and query split values that NCBI cannot convert (not
+/// `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never splits). Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
 /// `kappa_query_batches`) and the query split (`search_split_query_batches`).
@@ -8024,10 +8065,6 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
         fasta_subjects,
         archive && app == BlastpApp::Blastp,
     )?;
-    // BLASTP and PSIBLAST read OLD_FSC as `-searchsp 0` (`ResolvedBlastpArgs::old_fsc`).
-    if app == BlastpApp::Rpsblast {
-        app::check_old_fsc(app_name)?;
-    }
     // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
     // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
     app::check_query_split_environment(app_name, false, app != BlastpApp::Rpsblast)??;
@@ -8203,6 +8240,7 @@ fn search_split_query_batches(
                     stopped_pssms: None,
                     // The call of the whole query writes the archive.
                     titles_may_refuse: false,
+                    query_scopes: None,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
             )?;
@@ -9107,7 +9145,7 @@ fn run_resolved_in_pool(
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
-        database.printed_num_sequences() == 0
+        database.num_oids() == 0
             && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
     }) {
         return Err(preliminary_search_error(
@@ -9213,6 +9251,11 @@ fn run_resolved_in_pool(
         Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
             .unwrap_or(database.statistics_num_sequences() as usize),
     };
+    // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
+    // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
+    if let Some(database) = database.filter(|_| args.old_fsc) {
+        database.check_statistics_count(args.app.name())?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
     //    /* use overriding value from effective lengths options or the real value
@@ -10832,6 +10875,7 @@ fn run_resolved_in_pool(
             contexts: &contexts,
             gapped_params: &gapped_params,
             gumbel: gapped_gumbel.as_ref(),
+            search_spaces: &exact_search_spaces,
             cutoff_subject_length,
             prelim_hitlist_size,
             batches: query_batches
@@ -12549,6 +12593,9 @@ fn run_resolved_in_pool(
         }),
         _ => None,
     };
+    if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
+        titles.refuse_ids_of_queries(&hit_lists, scopes)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-281
     // ```c++
     //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
@@ -13430,9 +13477,11 @@ fn run_resolved_in_pool(
         // format, and the archive saves the warnings of its batches' queries.
         let mut warnings = (warning_lines.is_some()
             || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive))
-        .then(|| crate::report::query_warnings::QueryWarnings {
-            before: warning_lines.take().unwrap_or(&[]),
-            sink: &mut *outputs.diagnostics,
+        .then(|| {
+            crate::report::query_warnings::QueryWarnings::new(
+                warning_lines.take().unwrap_or(&[]),
+                &mut *outputs.diagnostics,
+            )
         });
         let format_result: Result<()> = match outfmt {
             BlastpReport::Seqalign(serial) => (|| -> Result<()> {

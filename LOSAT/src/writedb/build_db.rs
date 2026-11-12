@@ -1132,6 +1132,10 @@ impl<'a> BuildDatabase<'a> {
     // that `x_EndBuild` writes to the log. `warn` gets them at that point, so
     // that the log and the messages keep makeblastdb's order when both
     // streams have one destination.
+    //
+    // A `Close` that threw leaves files open: they are removed open (their later writes go to
+    // the removed files), and the writer's destructors run after the removal
+    // (`WriteDb::destroy_after_failed_close`).
     /// `EndBuild`: closes the database; with `erase`, or when closing fails,
     /// removes its files. `Ok(false)` when no volume was created. `warn`
     /// takes the diagnostics of the close.
@@ -1139,9 +1143,6 @@ impl<'a> BuildDatabase<'a> {
         let close_error = self.output_db.close().err();
         self.post_diagnostics(warn);
         let erase = erase || close_error.is_some();
-        if erase {
-            self.output_db.abandon();
-        }
         let vols = self.output_db.list_volumes();
         let files = self.output_db.list_files();
         let _ = writeln!(self.log);
@@ -1156,6 +1157,9 @@ impl<'a> BuildDatabase<'a> {
             }
         }
         let _ = writeln!(self.log);
+        if close_error.is_some() {
+            self.output_db.destroy_after_failed_close();
+        }
         // `NCBI_RETHROW(*close_exception, CWriteDBException, eArgErr, close_exception->GetMsg())`:
         // an exception of the close becomes a creation error with its message only (no report).
         match close_error {
@@ -1168,8 +1172,8 @@ impl<'a> BuildDatabase<'a> {
             Some(WriteDbError::Exception(e)) => {
                 Err(WriteDbError::Creation(e.get_msg().to_string()))
             }
-            // LOSAT's own errors (a file that could not be written or
-            // renamed) and a failed allocation keep their kind.
+            // A creation error whose text is not UTF-8, an error of a write of LMDB's
+            // data file (`Io`) and a failed allocation keep their kind.
             Some(error) => Err(error),
             None => Ok(success),
         }

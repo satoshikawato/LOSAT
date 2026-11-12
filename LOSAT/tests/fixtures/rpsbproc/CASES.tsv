@@ -83,9 +83,9 @@ bad_trailgarb	compare	-	-	-i arch/bad/trailgarb.asn -d data -m full -t doms -f
 bad_trunc	compare	-	-	-i arch/bad/trunc.asn -d data -m full -t doms -f
 bad_twice_nonl	compare	-	-	-i arch/bad/twice_nonl.asn -d data -m full -t doms -f
 bad_unkmember	compare	-	-	-i arch/bad/unkmember.asn -d data -m full -t doms -f
-refuse_feats	refuse	-	-	-i arch/three.asn -d data -t feats
-refuse_both	refuse	-	-	-i arch/three.asn -d data -t both
-refuse_default_t	refuse	-	-	-i arch/three.asn -d data
+t_feats	compare	-	-	-i arch/three.asn -d data -t feats
+t_both	compare	-	-	-i arch/three.asn -d data -t both
+t_default	compare	-	-	-i arch/three.asn -d data
 refuse_xml	refuse	-	-	-i arch/one.xml -d data -t doms
 q_tab_utf8	compare	-	-	-i q_tab_utf8.asn -d data -t doms
 bracket_member	compare	-	-	-i bracket_member.asn -d data -t doms
@@ -99,3 +99,40 @@ d_bsnul	compare	-	data-with:d_bsnul	-i arch/three.asn -d d_bsnul -m rep -t doms 
 d_ct3	compare	-	data-with:d_ct3	-i arch/three.asn -d d_ct3 -m rep -t doms -f
 d_wsline	compare	-	data-with:d_wsline	-i arch/three.asn -d d_wsline -m rep -t doms -f
 xml_missing_input	compare	arch/one.xml	-	-i nofile.asn -d data -t doms
+both.three	compare	-	-	-i arch/three.asn -d data
+both.sd2	compare	-	-	-i arch/sd2.asn -d data
+both.src2	compare	-	-	-i arch/src2.asn -d data
+both.tie1	compare	-	-	-i arch/tie1.asn -d data
+both.tie2	compare	-	-	-i arch/tie2.asn -d data
+feats.three.full.f	compare	-	-	-i arch/three.asn -d data -t feats -m full -f
+feats.sd2.full.f	compare	-	-	-i arch/sd2.asn -d data -t feats -m full -f
+feats.qgap.rep.f	compare	-	-	-i arch/qgap.asn -d data -t feats -f
+both.src2.std.f	compare	-	-	-i arch/src2.asn -d data -t both -m std -f
+both.mstate	compare	-	data-with:sites	-i arch/mstate.asn -d sites
+feats.mstate.full	compare	-	data-with:sites	-i arch/mstate.asn -d sites -t feats -m full
+both.mfirst	compare	-	data-with:sites	-i arch/mfirst.asn -d sites
+both.gen2	compare	-	data-with:sites	-i arch/gen2.asn -d sites
+both.motdom	compare	-	data-with:sites	-i arch/motdom.asn -d sites
+feats.motdom.std	compare	-	data-with:sites	-i arch/motdom.asn -d sites -t feats -m std
+both.sdsite	compare	-	data-with:sites	-i arch/sdsite.asn -d sites
+feats.sdsite.full	compare	-	data-with:sites	-i arch/sdsite.asn -d sites -t feats -m full
+ctprev.gen2	compare	-	data-with:ctprev	-i arch/gen2.asn -d ctprev
+ctprev.gen2.feats.full.f	compare	-	data-with:ctprev	-i arch/gen2.asn -d ctprev -t feats -m full -f
+ctprev.three	compare	-	data-with:ctprev	-i arch/three.asn -d ctprev
+ctprev.mstate	compare	-	data-with:ctprev	-i arch/mstate.asn -d ctprev
+ctprev.sdsite	compare	-	data-with:ctprev	-i arch/sdsite.asn -d ctprev
+rootpid.gen2	compare	-	data-with:rootpid	-i arch/gen2.asn -d rootpid
+badmotif.mfirst	compare	-	data-with:badmotif	-i arch/mfirst.asn -d badmotif
+badmotif.mfirst.doms	compare	-	data-with:badmotif	-i arch/mfirst.asn -d badmotif -t doms
+rd1.mfirst	compare	-	data-with:sites+rd1	-i arch/mfirst.asn -d rd1
+rd5.mfirst	compare	-	data-with:sites+rd5	-i arch/mfirst.asn -d rd5
+both.mfirst_delta	compare	-	data-with:sites	-i arch/mfirst_delta.asn -d sites
+rd4.mfirst	compare	-	data-with:sites+rd4	-i arch/mfirst.asn -d rd4
+rd13.mfirst	compare	-	data-with:sites+rd13	-i arch/mfirst.asn -d rd13
+rd14.mfirst	compare	-	data-with:sites+rd14	-i arch/mfirst.asn -d rd14
+rd15.mfirst	compare	-	data-with:sites+rd15	-i arch/mfirst.asn -d rd15
+rd18.mfirst	compare	-	data-with:sites+rd18	-i arch/mfirst.asn -d rd18
+refuse_rd2.mfirst	refuse	-	data-with:sites+rd2	-i arch/mfirst.asn -d rd2
+refuse_rd19.mfirst	refuse	-	data-with:sites+rd19	-i arch/mfirst.asn -d rd19
+refuse_rd20.mfirst	refuse	-	data-with:sites+rd20	-i arch/mfirst.asn -d rd20
+refuse_nodata	refuse	-	data-with:sites	-i arch/q_nodata.asn -d sites

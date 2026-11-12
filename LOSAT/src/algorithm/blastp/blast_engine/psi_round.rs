@@ -308,6 +308,10 @@ fn run_queries(
                     psi_round: Some(&io),
                     stopped_pssms: None,
                     titles_may_refuse,
+                    query_scopes: batches
+                        .query_scopes
+                        .as_ref()
+                        .map(|scopes| scopes.numbered_from(query)),
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
             );
@@ -820,18 +824,16 @@ fn next_pssm(
     //     CRef<CSeqdesc> desc(new CSeqdesc);
     //     desc->SetTitle(m_QueryTitle);
     // ```
-    // The Seq-align's query id: `Query_<n>` of a FASTA query, the PSSM query's own id with
-    // `-in_pssm` (a `local id` stays an integer). The title is the query's (`s_GetQueryBioseq`
-    // gives the current PSSM's Bioseq, whose title is the input PSSM's, `""` without one), and its
-    // letters the round-1 query's, O as X (`encode_protein_sequence` in `query_pssm`).
+    // The Seq-align's query id: a FASTA query's (`fasta_query_id`: `Query_<n>`, or the id that
+    // `-parse_deflines` read), the PSSM query's own id with `-in_pssm` (a `local id` stays an
+    // integer). The title is the query's (`s_GetQueryBioseq` gives the current PSSM's Bioseq, whose
+    // title is the input PSSM's, `""` without one), and its letters the round-1 query's, O as X
+    // (`encode_protein_sequence` in `query_pssm`).
     let id = match &io.query_id {
-        Some(id) => id.clone(),
-        None => crate::report::serial::pssm::ObjectId::Str(
-            format!(
-                "Query_{}",
-                args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1
-            )
-            .into_bytes(),
+        Some(id) => crate::report::serial::pssm::PssmSeqId::Local(id.clone()),
+        None => crate::algorithm::psiblast::pssm::fasta_query_id(
+            record,
+            args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1,
         ),
     };
     let standard_ungapped = engine_block(&contexts[0].karlin_params);

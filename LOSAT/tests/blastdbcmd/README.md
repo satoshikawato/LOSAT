@@ -14,6 +14,11 @@ platform (`LOSAT/tests/blastdbcmd_batch_line_ends.rs`). Frozen on
 `B01`-`B61`, `C01`-`C20`, `F01`-`F34`, `S01`-`S46`, `D01`-`D112`, on 2026-10-31 `H01`-`H119`,
 `M01`-`M07` on 2026-10-29, on 2026-11-01 `I101`-`I1195`, `J101`-`J222`, `K01`-`K39` and
 `M101`-`M1003`, on 2026-11-02 `N101`-`N2042` and `O01`-`O47`; NCBI was not run on this tree).
+`A01`-`A32` (line RG, series D, D1a, 2026-11-12) are NCBI BLAST+ 2.17.0 blastdbcmd (the release build on the developer
+machine) run in this directory on the alias files of `db/ak/` (`NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`,
+`MIN_SEQ_LENGTH`, `FIRST_OID`, `LAST_OID`, `VDBLIST`, values that do not convert) over `p5`, `n5`, the volumes of `dv4` and
+`j/lst/p5`, and on `-db "db/palias db/p5"` (a volume that an alias and a name both give):
+`LOSAT/tests/blastdbcmd_alias_keys.rs`, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py`.
 `U01`, `U03` and `U04` (line SW, SW8, 2026-11-08) are NCBI BLAST+ 2.17.0 blastdbcmd on the
 developer machine, run with the words of the tests from the `blastdbcmd` directory of a copy of
 this layout whose `seqdb/db` held the five files of `user-column-db`

@@ -287,8 +287,8 @@ impl Opening {
     /// before it (the switch does not act on its regular file), read on the search's `threads`
     /// threads (`x_query_scan_par::store_parts`), or `None` where the search's reader reads them
     /// (one thread, standard input or a file that is not regular, the BLAST archive,
-    /// `-parse_deflines`, whose reader refuses a Seq-id read twice across the file, and the cases
-    /// of that module).
+    /// `-parse_deflines`, whose reader numbers the records without ids across the file and adds
+    /// every record to the search's scope of ids, and the cases of that module).
     pub(super) fn store_parts(
         &mut self,
         config: ReaderConfig,
@@ -496,8 +496,8 @@ impl Store {
         // the source starts from; where the parts are not taken, the source reads them (its
         // position is where it was: the parts read at offsets).
         // A part's reader numbers its records from the part's first (`-parse_deflines`, whose
-        // records with ids take no number and whose reader refuses an id read twice across the
-        // file, is never read batch by batch: `run.rs`).
+        // records with ids take no number and whose reader adds every record to the search's
+        // scope of ids, is never read batch by batch: `run.rs`).
         let parts = if !config.keep_defline && !config.parse_deflines {
             in_parts(&again, start)
         } else {

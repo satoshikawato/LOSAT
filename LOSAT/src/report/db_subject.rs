@@ -68,6 +68,18 @@ pub struct ParsedSubject {
     use_this_seqid: Vec<Vec<u8>>,
     /// `tabular_saccver`, kept for the reports of later query batches.
     saccver: std::sync::OnceLock<std::sync::Arc<[u8]>>,
+    /// `query_scope_keys`, made at the first report that asks.
+    query_scope_keys: std::sync::OnceLock<QueryScopeKeys>,
+}
+
+/// The keys by which NCBI's scope finds a query for the Seq-align id of a reported database
+/// sequence (`ParsedSubject::query_scope_keys`; `common::database::refuse_id_of_a_query`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryScopeKeys {
+    /// Its own keys (`defline_set::scope_keys`).
+    pub own: Vec<u64>,
+    /// The keys of the ids that it matches weakly (`id_scope::weak_keys`).
+    pub weak: Vec<u64>,
 }
 
 /// The `use_this_seqid` strings of a database subject, `subject` when it has parsed Seq-ids: a
@@ -272,6 +284,7 @@ impl ParsedSubject {
             local_record: false,
             use_this_seqid: Vec::new(),
             saccver: std::sync::OnceLock::new(),
+            query_scope_keys: std::sync::OnceLock::new(),
         })
     }
 
@@ -319,6 +332,7 @@ impl ParsedSubject {
             local_record: ids.subject_local(),
             use_this_seqid: Vec::new(),
             saccver: std::sync::OnceLock::new(),
+            query_scope_keys: std::sync::OnceLock::new(),
         }
     }
 
@@ -1095,6 +1109,18 @@ impl ParsedSubject {
             field(TabularId::Accession),
             field(TabularId::AccessionVersion),
         ])
+    }
+
+    /// The keys of the ids of queries that NCBI's scope would show for this sequence
+    /// (`QueryScopeKeys`), made once.
+    pub fn query_scope_keys(&self) -> &QueryScopeKeys {
+        self.query_scope_keys.get_or_init(|| {
+            let mut own = Vec::new();
+            scope_keys(self, &mut own);
+            let mut weak = Vec::new();
+            crate::seqid::id_scope::weak_keys(&self.alignment_id, &mut weak);
+            QueryScopeKeys { own, weak }
+        })
     }
 
     /// The `saccver` of `tabular_ids`, made once for a subject (`protein` is its database's).

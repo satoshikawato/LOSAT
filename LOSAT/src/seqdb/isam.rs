@@ -117,7 +117,7 @@ use std::path::{Path, PathBuf};
 
 use super::file::DbFile;
 use super::SeqDbError;
-use crate::ncbi_str::printable_string;
+use crate::ncbi_str::{string_to_int, string_to_int8, string_to_uint, ALLOW_TRAILING_SYMBOLS};
 use crate::seqid::accguide::{parse_flags, SeqIdWarning, SEQID_NOT_SET};
 use crate::seqid::label;
 use crate::seqid::model::{ObjectId, ParsedSeqId, TextseqId};
@@ -1899,7 +1899,7 @@ impl StringIsam {
         }
         if found {
             for line in &lines {
-                let oid = atoi(&line.data);
+                let oid = crate::ncbi_str::c_atoi(&line.data);
                 result
                     .oids
                     .push(u32::try_from(oid).map_err(|_| SeqDbError::Format {
@@ -2097,6 +2097,7 @@ impl StringIsam {
                 .ok_or_else(|| bad("a record has no line end"))?
                 + at;
             let oid = string_to_uint(&page[at..val_end])
+                .ok()
                 .and_then(|v| i32::try_from(v).ok())
                 .ok_or_else(|| {
                     bad(&format!(
@@ -2582,39 +2583,6 @@ fn batch_mode_error() -> SeqDbError {
     SeqDbError::NotFound("Error: Unable to use ISAM index in batch mode.".to_string())
 }
 
-/// `atoi` of the C library (C locale): leading white space, a sign, the digits; the `long` it
-/// reads, truncated to `int`.
-fn atoi(s: &[u8]) -> i32 {
-    let mut i = 0;
-    while i < s.len() && (s[i] == b' ' || (b'\t'..=b'\r').contains(&s[i])) {
-        i += 1;
-    }
-    let mut negative = false;
-    if i < s.len() && (s[i] == b'-' || s[i] == b'+') {
-        negative = s[i] == b'-';
-        i += 1;
-    }
-    let mut value: i64 = 0;
-    while i < s.len() && s[i].is_ascii_digit() {
-        value = value
-            .saturating_mul(10)
-            .saturating_add(i64::from(s[i] - b'0'));
-        i += 1;
-    }
-    (if negative { -value } else { value }) as i32
-}
-
-/// `NStr::StringToUInt(str)` with no flags: an optional `+`, digits only, at most `UINT_MAX`.
-fn string_to_uint(s: &[u8]) -> Option<u32> {
-    let digits = s.strip_prefix(b"+").unwrap_or(s);
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    digits.iter().try_fold(0u32, |n, &c| {
-        n.checked_mul(10)?.checked_add(u32::from(c - b'0'))
-    })
-}
-
 /// One entry of a list of string ids (`CSeqDBGiList::SSiOid`): the id and its OID, set by
 /// [`StringIsam::ids_to_oids`] (NCBI: -1 while unknown).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3066,38 +3034,6 @@ impl NegativeOids {
     }
 }
 
-/// `NStr::StringToInt(str, fConvErr_NoThrow | fAllowTrailingSymbols)`: an optional sign and
-/// digits, anything after them ignored; 0 when there are no digits or the number does not fit.
-fn string_to_int_trailing(s: &[u8]) -> i32 {
-    let mut pos = 0;
-    let mut sign = false;
-    match s.first() {
-        Some(b'-') => {
-            sign = true;
-            pos = 1;
-        }
-        Some(b'+') => pos = 1,
-        _ => {}
-    }
-    let pos0 = pos;
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(sign);
-    let mut n: i64 = 0;
-    while pos < s.len() && s[pos].is_ascii_digit() {
-        let delta = i64::from(s[pos] - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return 0;
-        }
-        n = n * 10 + delta;
-        pos += 1;
-    }
-    if pos == pos0 {
-        return 0;
-    }
-    let n = if sign { -n } else { n };
-    i32::try_from(n).unwrap_or(0)
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2735-2789
 // ```c++
 // void CSeqDBVol::x_CheckVersions(const string         & acc,
@@ -3168,7 +3104,8 @@ pub fn check_versions(
     let pos = acc.iter().position(|&c| c == b'.');
     // `acc.find(".")` is asserted to exist; without it `pos + 1` wraps to 0 and `nover` is `acc`.
     let ver_str = &acc[pos.map_or(0, |p| p + 1)..];
-    let vernum = string_to_int_trailing(ver_str);
+    // `fConvErr_NoThrow`: 0 for a text NCBI cannot convert.
+    let vernum = string_to_int(ver_str, ALLOW_TRAILING_SYMBOLS).unwrap_or(0);
     let mut nover = &acc[..pos.unwrap_or(acc.len())];
     while let Some(bar) = nover.iter().position(|&c| c == b'|') {
         nover = &nover[bar + 1..];
@@ -3244,64 +3181,6 @@ impl std::fmt::Display for SimplifyError {
 }
 
 impl std::error::Error for SimplifyError {}
-
-/// `NStr::StringToInt8(str)` with no flags: an optional sign and digits, nothing else.
-fn string_to_int8(s: &[u8]) -> Option<i64> {
-    let (negative, digits) = match s.first() {
-        Some(b'-') => (true, &s[1..]),
-        Some(b'+') => (false, &s[1..]),
-        _ => (false, s),
-    };
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let mut n: i128 = 0;
-    for &c in digits {
-        n = n * 10 + i128::from(c - b'0');
-        if n > i128::from(i64::MAX) + 1 {
-            return None;
-        }
-    }
-    let n = if negative { -n } else { n };
-    i64::try_from(n).ok()
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:845-860
-// ```c++
-//     Int8 limdiv = kMax_I8 / base;
-//     Int8 limoff = kMax_I8 % base + (sign ? 1 : 0);
-//     ...
-//     while (char ch = str[pos]) {
-//         int delta;  // corresponding numeric value of 'ch'
-//         // Check digit
-//         if (!s_IsGoodCharForRadix(ch, base, &delta)) {
-//             break;
-//         }
-//         // Check for overflow
-//         if (n >= limdiv  &&  (n > limdiv  ||  delta > limoff)) {
-//             S2N_CONVERSION_ERROR(int8_t, kEmptyStr, ERANGE, pos);
-//         }
-// ```
-/// Whether `NStr::StringToInt8(s)` fails with its ", overflow" message: the digits after an
-/// optional sign overflow before the first other byte (which fails without it).
-fn int8_digits_overflow(s: &[u8]) -> bool {
-    let negative = s.first() == Some(&b'-');
-    let digits = match s.first() {
-        Some(b'-' | b'+') => &s[1..],
-        _ => s,
-    };
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(negative);
-    let mut n: i64 = 0;
-    for &c in digits.iter().take_while(|c| c.is_ascii_digit()) {
-        let delta = i64::from(c - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return true;
-        }
-        n = n * 10 + delta;
-    }
-    false
-}
 
 /// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
 /// BDC).
@@ -3526,17 +3405,8 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
             if dbt.db == b"ti" {
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
-                    ObjectId::Str(text) => string_to_int8(text).ok_or_else(|| {
-                        SimplifyError::Exception(format!(
-                            "Cannot convert string '{}' to Int8{}",
-                            printable_string(text),
-                            if int8_digits_overflow(text) {
-                                ", overflow"
-                            } else {
-                                ""
-                            }
-                        ))
-                    })?,
+                    ObjectId::Str(text) => string_to_int8(text, 0)
+                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_string()))?,
                     ObjectId::Id(n) => i64::from(*n),
                 };
                 out.id_type = SeqDbIdType::Ti;
@@ -3892,7 +3762,7 @@ pub fn seqdb_simplify_accession(acc: &[u8]) -> Result<SimplifiedAccession, Simpl
             } else {
                 out.str_id = acc.to_vec();
             }
-        } else if string_to_int8(acc).is_some() {
+        } else if string_to_int8(acc, 0).is_ok() {
             out.str_id = [b"lcl|".as_slice(), acc].concat();
         } else {
             out.str_id = acc.to_vec();

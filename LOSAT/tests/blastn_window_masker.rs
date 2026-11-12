@@ -9,8 +9,9 @@
 //!
 //! `blastn -window_masker_taxid` (line NP M3) with the directories of counts files made here: the
 //! searches with a taxid's file (in every output format, with `-db`, `-strand minus` and a split
-//! batch), the directory from `WINDOW_MASKER_PATH`, `NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH`
-//! and `.ncbirc` (also when `blastn.ini` turns `.ncbirc` off), a taxid without a usable file (exit 3,
+//! batch; its ascii and optimized ascii counts, well-formed and damaged, line NP M3d), the
+//! directory from `WINDOW_MASKER_PATH`, `NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH` and
+//! `.ncbirc` (also when `blastn.ini` turns `.ncbirc` off), a taxid without a usable file (exit 3,
 //! as a damaged counts file) and the options given with it (NCBI's argument and input errors).
 //!
 //! The cases are `tests/fixtures/winmask_blastn/cases.tsv` with `<case>.out`, `.err` and `.rc`,
@@ -55,6 +56,71 @@ fn put(path: &Path, content: &[u8]) {
     let part = path.with_extension(format!("part{}", std::process::id()));
     std::fs::write(&part, content).unwrap();
     std::fs::rename(&part, path).unwrap();
+}
+
+/// The escapes of tests/winmask/text_counts.tsv: `\n`, `\r`, `\t` and `\\`.
+fn unescape(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            out.push(match chars.next().unwrap() {
+                'n' => b'\n',
+                'r' => b'\r',
+                't' => b'\t',
+                '\\' => b'\\',
+                other => panic!("text_counts.tsv: no escape \\{other}"),
+            });
+        } else {
+            let mut bytes = [0u8; 4];
+            out.extend_from_slice(c.encode_utf8(&mut bytes).as_bytes());
+        }
+    }
+    out
+}
+
+/// The files of tests/winmask/text_counts.tsv (the ascii and optimized ascii counts of line NP
+/// M3d), by their path under target/winmask_blastn/ (`text_counts` of
+/// make_blastn_error_fixtures.py).
+fn text_counts() -> Vec<(String, Vec<u8>)> {
+    let counts = engine().join("tests/winmask/counts");
+    let spec = std::fs::read_to_string(engine().join("tests/winmask/text_counts.tsv")).unwrap();
+    let mut files = Vec::new();
+    for row in spec.lines().map(|row| row.trim_end_matches('\r')) {
+        if row.is_empty() || row.starts_with('#') {
+            continue;
+        }
+        let mut cols = row.split('\t');
+        let taxid = cols.next().unwrap();
+        let base = cols.next().unwrap();
+        let mut lines: Vec<Vec<u8>> = if base == "-" {
+            vec![Vec::new()]
+        } else {
+            std::fs::read(counts.join(base))
+                .unwrap()
+                .split(|&byte| byte == b'\n')
+                .map(<[u8]>::to_vec)
+                .collect()
+        };
+        let (mut cut, mut crlf) = (None, false);
+        for edit in cols {
+            if edit == "crlf" {
+                crlf = true;
+            } else if let Some(n) = edit.strip_prefix("cut=") {
+                cut = Some(n.parse::<usize>().unwrap());
+            } else {
+                let (number, text) = edit.split_once('=').unwrap();
+                lines[number.parse::<usize>().unwrap() - 1] = unescape(text);
+            }
+        }
+        if let Some(cut) = cut {
+            lines.truncate(cut);
+            lines.push(Vec::new());
+        }
+        let end: &[u8] = if crlf { b"\r\n" } else { b"\n" };
+        files.push((format!("taxid/{taxid}/wmasker.obinary"), lines.join(end)));
+    }
+    files
 }
 
 /// The counts files of the cases (`make_counts` of make_blastn_error_fixtures.py).
@@ -104,31 +170,54 @@ fn make_counts() {
         // `-window_masker_taxid`: <dir>/<taxid>/wmasker.obinary, the directory named by the
         // registry files relative to LOSAT/.
         let rc = b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = target/winmask_blastn/taxid\n".to_vec();
-        // The system-wide registry file that NCBI reads (`ncbi.ini` on Windows, metareg.hpp:65-69):
-        // the case `taxid_ini_dont_use_ncbirc` gives the same bytes there.
-        let system_wide = if cfg!(windows) {
-            "cfg_inidont/ncbi.ini"
-        } else {
-            "cfg_inidont/.ncbirc"
+        // NCBI's system-wide file: `ncbi.ini` on Windows (`ncbi_environment`'s
+        // SYSTEM_WIDE_REGISTRY), whose NCBI reads it as the Linux build reads `.ncbirc`.
+        let system_wide = |dir: &str| {
+            format!(
+                "{dir}/{}",
+                if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" }
+            )
         };
-        let taxid_files: [(&str, Vec<u8>); 7] = [
-            ("taxid/562/wmasker.obinary", data.clone()),
-            ("taxid/-1/wmasker.obinary", data.clone()),
+        let ini_dont = b"[NCBI]\nDONT_USE_NCBIRC = 1\n".to_vec();
+        // Malformed system-wide files (line NP M3c): the entry above the line NCBI reports, the
+        // line before the entry, a file of one byte whose stream fails.
+        let rc_bad = [rc.as_slice(), b"[my blast]\nx = 1\n"].concat();
+        let rc_pre = [b"x y = 1\n".as_slice(), rc.as_slice()].concat();
+        // An entry set again (line NP M3c review): in a well-formed file, and above a malformed
+        // line.
+        let entry = &rc[rc.iter().position(|&byte| byte == b'\n').unwrap() + 1..];
+        let rc_dup = [rc.as_slice(), entry].concat();
+        let rc_dup_bad = [rc_dup.as_slice(), b"[my blast]\nx = 1\n"].concat();
+        let mut taxid_files: Vec<(String, Vec<u8>)> = vec![
+            ("taxid/562/wmasker.obinary".into(), data.clone()),
+            ("taxid/-1/wmasker.obinary".into(), data.clone()),
             (
-                "taxid/7/wmasker.obinary",
+                "taxid/7/wmasker.obinary".into(),
                 std::fs::read(work.join("unit17.obinary")).unwrap(),
             ),
             (
-                "taxid/10/wmasker.obinary",
+                "taxid/10/wmasker.obinary".into(),
                 std::fs::read(work.join("ascii.counts")).unwrap(),
             ),
-            ("home_rc/.ncbirc", rc.clone()),
-            (
-                "cfg_inidont/blastn.ini",
-                b"[NCBI]\nDONT_USE_NCBIRC = 1\n".to_vec(),
-            ),
-            (system_wide, rc),
+            ("home_rc/.ncbirc".into(), rc.clone()),
+            ("cfg_inidont/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_inidont"), rc),
+            ("cfg_rcbad/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcbad"), rc_bad.clone()),
+            (system_wide("cfg_rcbadapp"), rc_bad),
+            ("cfg_rcpre/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcpre"), rc_pre),
+            ("cfg_rcbom/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcbom"), b"\xef".to_vec()),
+            ("cfg_rcdup/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcdup"), rc_dup),
+            ("cfg_rcdupbad/blastn.ini".into(), ini_dont),
+            (system_wide("cfg_rcdupbad"), rc_dup_bad),
+            // Subjects with fewer letters than subjects (the average subject length is 0).
+            ("short.fa".into(), b">s1\nA\n>s2\n\n".to_vec()),
         ];
+        // The ascii and optimized ascii counts (line NP M3d).
+        taxid_files.extend(text_counts());
         for (name, content) in taxid_files {
             let path = work.join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -290,32 +379,37 @@ fn the_cases_give_ncbis_bytes_at_one_and_four_threads() {
     check("4");
 }
 
-// NCBI BLAST+ 2.17.0 reads the ascii counts under a taxid's directory (line NP M/STATE.md, f03 and
-// f04); LOSAT does not read that format and refuses it before any output.
+// Counts whose NCBI result is undefined, which LOSAT refuses when it reads the options, before
+// any output (the outfmt 0 header too): an ascii file whose unit size is 17 to 251 (its reader
+// does not check it; NCBI's masker then reverse-complements 32-bit units by 32 bits or more), and
+// an optimized ascii file whose hash parameters line ends before the shift (NCBI checks it
+// uninitialized; its errors change from one query's load to the next, line NP M3d review 2).
 #[test]
-fn ascii_counts_of_a_taxid_are_refused_before_any_output() {
+fn counts_that_ncbi_reads_undefined_are_refused_before_any_output() {
     make_counts();
-    let output = blastn()
-        .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")
-        .args([
-            "-query",
-            "tests/fixtures/blastn_regression/inputs/wm_query.fa",
-            "-subject",
-            "tests/fixtures/blastn_regression/inputs/s60k.fa",
-            "-window_masker_taxid",
-            "10",
-            "-outfmt",
-            "0",
-        ])
-        .output()
-        .expect("run losat");
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("ascii format") && stderr.contains("not supported by LOSAT"),
-        "{stderr}"
-    );
+    for (taxid, text) in [("48", "units of 17 letters"), ("60", "does not set bc")] {
+        let output = blastn()
+            .env("WINDOW_MASKER_PATH", "target/winmask_blastn/taxid")
+            .args([
+                "-query",
+                "tests/fixtures/blastn_regression/inputs/wm_query.fa",
+                "-subject",
+                "tests/fixtures/blastn_regression/inputs/s60k.fa",
+                "-window_masker_taxid",
+                taxid,
+                "-outfmt",
+                "0",
+            ])
+            .output()
+            .expect("run losat");
+        assert_eq!(output.status.code(), Some(1), "{taxid}");
+        assert!(output.stdout.is_empty(), "{taxid}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(text) && stderr.contains("not supported by LOSAT"),
+            "{stderr}"
+        );
+    }
 }
 
 #[test]

@@ -490,8 +490,30 @@ class TblastxOptions(TypedDict, total=False):
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
 
 class PsiblastOptions(TypedDict, total=False):
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: Literal['true', 'false']
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
+    show_gis: Literal['true', 'false']
+    """Show NCBI GIs in deflines?"""
+    parse_deflines: Literal['true', 'false']
+    """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
     evalue: float
@@ -539,6 +561,7 @@ class PsiblastOptions(TypedDict, total=False):
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
+    lcase_masking: Literal['true', 'false']
     use_sw_tback: Literal['true', 'false']
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""

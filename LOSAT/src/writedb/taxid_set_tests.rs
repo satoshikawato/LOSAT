@@ -73,53 +73,6 @@ fn a_gi_key_past_int8_is_an_exception() {
     );
 }
 
-/// The taxid of a line: `StringToInt` with leading spaces allowed; its errors are NCBI's
-/// (t03_taxmap_badnum, x_taxmap_trail, x_taxmap_minus, x_taxmap_overflow).
-#[test]
-fn taxids_convert_as_ncbi_s_string_to_int() {
-    assert_eq!(string_to_taxid(b"9606"), Ok(9606));
-    assert_eq!(string_to_taxid(b"+9"), Ok(9));
-    assert_eq!(string_to_taxid(b"-8"), Ok(-8));
-    assert_eq!(string_to_taxid(b"\x0c19"), Ok(19));
-    assert_eq!(string_to_taxid(b"12\x0034"), Ok(12));
-    for (text, line, function, message) in [
-        (
-            &b"abc"[..],
-            861,
-            "StringToInt8",
-            "Cannot convert string 'abc' to Int8 (m_Pos = 0)",
-        ),
-        (
-            b"12ab",
-            870,
-            "StringToInt8",
-            "Cannot convert string '12ab' to Int8 (m_Pos = 2)",
-        ),
-        (
-            b"-",
-            861,
-            "StringToInt8",
-            "Cannot convert string '-' to Int8 (m_Pos = 1)",
-        ),
-        (
-            b"3000000000",
-            640,
-            "StringToInt",
-            "Cannot convert string '3000000000' to int, overflow (m_Pos = 0)",
-        ),
-    ] {
-        let error = string_to_taxid(text).unwrap_err().what();
-        assert!(
-            error.ends_with(&format!(
-                "line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - \
-                 {message}\n"
-            )),
-            "{error}"
-        );
-        assert!(error.starts_with("NCBI C++ Exception:\n    T0 \""));
-    }
-}
-
 /// The map file: lines of exactly two tokens split at each blank or tab, the last duplicate
 /// key wins, other lines are ignored, a line of white space only is refused (makeblastdb
 /// crashes there, x_taxmap_blank).

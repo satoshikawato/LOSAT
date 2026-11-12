@@ -1072,8 +1072,29 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         assert!(batches >= 2, "{what}");
     }
     // `-parse_deflines`: the same queries under ids of their own stream; under their own ids (the
-    // database's) the third batch's report refuses them (`refuse_id_of_a_query`), after the
-    // reports of the first two with the switch.
+    // database's) a batch's report refuses a sequence with the id of one of that batch's queries
+    // (`refuse_id_of_a_query`: NCBI empties its scope after each batch, line RG, Q1c). Every query
+    // reports the database's last sequences (`-max_target_seqs 3`), so with the records in reverse
+    // order the third batch holds their ids and its report refuses them, after the reports of the
+    // first two with the switch; in their own order no batch of them reports its own (a later
+    // batch's refusal).
+    let reversed = dir.path("reversed.fna");
+    {
+        let text = std::fs::read_to_string(&query).unwrap();
+        let mut records: Vec<String> = Vec::new();
+        for line in text.lines() {
+            if line.starts_with('>') {
+                records.push(String::new());
+            }
+            let record = records.last_mut().unwrap();
+            record.push_str(line);
+            record.push('\n');
+        }
+        records.reverse();
+        std::fs::write(&reversed, records.concat()).unwrap();
+    }
+    let late_reversed = hits_late(&dir, reversed.to_str().unwrap());
+    let late_reversed = late_reversed.to_str().unwrap();
     let renamed = dir.path("renamed.fa");
     let mut at = 0;
     let text = std::fs::read_to_string(late).unwrap();
@@ -1093,8 +1114,8 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         (renamed, "6", 4),
         (renamed, "0", 1),
         (renamed, "17", 4),
-        (late, "7", 4),
-        (late, "0", 1),
+        (late_reversed, "7", 4),
+        (late_reversed, "0", 1),
     ] {
         let path = ids("nucl_v5");
         let mut args = [
@@ -1112,7 +1133,7 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         ];
         let what = format!("-parse_deflines {queries} outfmt {outfmt}");
         let extra = [("BATCH_SIZE", "1500")];
-        if queries == late {
+        if queries == late_reversed {
             let (off, on, (batches, _)) = refused_late(&what, &args, threads, &extra);
             args[3] = nohit;
             let (eight, _) = same_two(&what, &args, threads, &extra, None);

@@ -316,11 +316,10 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
     );
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the toolkit words LOSAT refuses.
+/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the toolkit words LOSAT refuses
+/// (`-dryrun`, probe B22, runs since line RG item E1b: `tests/ncbi_toolkit_dryrun.rs`).
 const REFUSALS: &[(&str, &[&str])] = &[
     ("B20", &["-db", "db/p5", "-info", "-version-full"]),
-    ("B21", &["-db", "db/p5", "-info", "-conffile", "x.ini"]),
-    ("B22", &["-db", "db/p5", "-info", "-dryrun"]),
     ("C06", &["-db", "db/p5", "-info", "-xmlhelp"]),
 ];
 
@@ -337,6 +336,31 @@ fn what_blastdbcmd_does_not_serve_is_refused_without_output() {
                 && stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n")
                 && stderr.lines().count() == 1,
             "{id} {words:?}: {stderr}"
+        );
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (quoted at
+// `ncbi_environment::conf_file_path`). NCBI BLAST+ 2.17.0 (probe B21, and line RG
+// `E/SURVEY_E1.md` `blastdbcmd.conf_missing`): a `-conffile` that is not a file is NCBI's
+// critical post, then its abort with exit status 255, before the arguments are read.
+#[test]
+fn a_conffile_that_is_not_a_file_aborts_as_ncbi_aborts() {
+    let dir = TestDir::new("conffile");
+    for words in [
+        &["-db", "db/p5", "-info", "-conffile", "x.ini"][..],
+        &["-conffile=x.ini", "-db", "db/p5", "-info"],
+        &["-h", "-conffile", "x.ini"],
+    ] {
+        let (stdout, stderr, code) = blastdbcmd(words, &dir.0);
+        assert_eq!(
+            (stdout, String::from_utf8(stderr).unwrap(), code),
+            (
+                Vec::new(),
+                "Critical: (106.23) Registry file \"x.ini\" not found, aborting.\n".to_string(),
+                255
+            ),
+            "{words:?}"
         );
     }
 }

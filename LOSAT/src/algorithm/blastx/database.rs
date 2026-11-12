@@ -78,15 +78,6 @@ impl BlastxDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
@@ -106,7 +97,7 @@ impl BlastxDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -118,6 +109,12 @@ impl BlastxDatabase {
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(crate) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()
+    }
+
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(crate) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -200,7 +197,7 @@ impl BlastxDatabase {
     /// query batch with a valid context, which the caller fails with it. The search checks each
     /// sequence where it first reads it (`XStreamDb::x_check`).
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
-        if self.db.printed_num_seqs() == 0 {
+        if self.db.num_oids() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let count = self.db.num_seqs();
@@ -240,7 +237,7 @@ impl BlastxDatabase {
 /// that fails during the search (`native::search_error`), whichever sequence the search's
 /// threads read first.
 pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
-    if db.printed_num_seqs() == 0 {
+    if db.num_oids() == 0 {
         return Err(PreliminaryReadError("Database memory map file error").into());
     }
     let mut longest = 0;
@@ -795,6 +792,40 @@ impl ReportedSubjects {
             Some([accession, version]) => [id, accession, version],
             None => [id, id, id],
         }
+    }
+
+    /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each reported sequence
+    /// with parsed Seq-ids of the batches `batches` of one reader batch (their hit lists named by
+    /// their ranks, `for_batch`), with the scope that `scopes` (numbered from the reader batch's
+    /// first query) gives the query of its report (`BatchResults::query_ordinal`, which counts
+    /// from the reader batch, and the query's index).
+    pub(crate) fn refuse_ids_of_queries(
+        &self,
+        batches: &[BatchResults],
+        gapped: bool,
+        scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for batch in batches {
+            for (qidx, lists) in batch.queries.iter().enumerate() {
+                for list in lists {
+                    if !super::report::reported(list, gapped) {
+                        continue;
+                    }
+                    if let Some(subject) = self.parsed_subject(list.oid) {
+                        shared::refuse_id_of_a_query(
+                            subject,
+                            self.ordinals[list.oid],
+                            scopes.of_query(batch.query_ordinal + qidx),
+                            PROGRAM,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none).

@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
+use crate::ncbi_str::string_to_non_negative_int;
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
@@ -16,7 +17,7 @@ use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
 use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
-use crate::seqid::parse::{seq_id_from_text, string_to_non_negative_int};
+use crate::seqid::parse::seq_id_from_text;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::args::{self, Args};
@@ -363,8 +364,8 @@ fn request(
 ) -> Result<bool, Stop> {
     let (mut config, kind) = init_search_request(args, source, diag)?;
     let line_length = args
-        .value("line_length")
-        .and_then(|value| value.parse::<u32>().ok())
+        .integer("line_length")
+        .and_then(|value| u32::try_from(value).ok())
         .unwrap_or(80);
     let mut formatter = match kind {
         OutputKind::Fasta => {
@@ -437,9 +438,12 @@ fn request(
         (None, None) => {
             if let Some(pig) = args.value("ipg") {
                 // The reader took a value of `int` (`AsInteger`).
-                let pig = pig
-                    .parse::<i32>()
-                    .map_err(|_| Stop::refused(format!("-ipg {pig} is not a number of 32 bits")))?;
+                let pig = args
+                    .integer("ipg")
+                    .and_then(|value| i32::try_from(value).ok())
+                    .ok_or_else(|| {
+                        Stop::refused(format!("-ipg {pig} is not a number of 32 bits"))
+                    })?;
                 run.ipg(pig, &config)
             } else if let Some(file) = args.value("ipg_batch") {
                 run.batch_pig(file, &mut config)
@@ -1001,8 +1005,12 @@ impl Run<'_, '_> {
                     .to_string(),
             ));
         }
+        // `oid` is NCBI's OID, one the database includes (the lookups keep only those:
+        // `IdLookup::visible`); the formatters read ordinal ids, which differ from the OIDs
+        // where an alias file's range or a list leaves OIDs out.
+        let ordinal = self.source.db.ordinal_of(oid);
         self.formatter
-            .write(self.source, oid, config, target, self.out)
+            .write(self.source, ordinal, config, target, self.out)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416
@@ -1014,10 +1022,10 @@ impl Run<'_, '_> {
     // 	}
     // }
     // ```
-    /// `-entry all`: every sequence in the order of its ordinal id.
+    /// `-entry all`: every included sequence in the order of its OID.
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
-        for oid in 0..self.ids.num_seqs {
-            self.write(oid, config, None)?;
+        for ordinal in 0..self.ids.num_seqs {
+            self.write(self.source.db.oid(ordinal), config, None)?;
         }
         Ok(())
     }
@@ -1294,13 +1302,29 @@ impl Run<'_, '_> {
             .lookup
             .as_ref()
             .expect("an IPG request looks ids up");
-        lookup.pig_to_oid(pig)?.ok_or_else(|| {
-            Stop::refused(
-                "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
+        lookup
+            .pig_to_oid(pig)?
+            .ok_or_else(|| {
+                Stop::refused(
+                    "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
                  writes an OID it never set"
+                        .to_string(),
+                )
+            })
+            .and_then(|oid| {
+                match oid {
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:
+            // 1110-1121 (`PigToOid` asks the volumes, not the OID list): NCBI writes the
+            // sequence of an OID that an alias file's range leaves out, which LOSAT's formatters
+            // (by ordinal id) do not read.
+            Some(oid) if !self.source.db.includes_oid(oid) => Err(Stop::refused(
+                "-ipg and -ipg_batch for a PIG whose OID an alias file's FIRST_OID or LAST_OID \
+                 leaves out (NCBI writes it)"
                     .to_string(),
-            )
-        })
+            )),
+            other => Ok(other),
+        }
+            })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:219-222
@@ -1414,7 +1438,7 @@ impl Run<'_, '_> {
     fn tax_id_list(&mut self, tax_ids: &BTreeSet<i32>, config: &Config) -> Result<bool, Stop> {
         let db = self.source.db;
         let oids: Vec<u32> = if db.is_restricted() {
-            (0..db.num_seqs()).collect()
+            (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect()
         } else {
             db.tax_id_lookup()?.tax_ids_to_oids(tax_ids)?
         };

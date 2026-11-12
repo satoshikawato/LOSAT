@@ -617,6 +617,9 @@ pub(super) struct QueryScan {
     /// written where the document holds it back (`written_queries`). `None` when the run reads
     /// to the end of the file, or stops at its first batch.
     pub stops_after: Option<usize>,
+    /// Under `-parse_deflines`, the scopes of the queries read, in the search's batches
+    /// (`prescan_queries`; `QueryScopes::read_ahead`).
+    pub query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 }
 
 /// Reads the query file once before the search (`scan_queries`), with the search's reader
@@ -626,7 +629,10 @@ pub(super) struct QueryScan {
 /// line that is not a defline; the run reads the file again and fails there as it always did,
 /// after the reports of the batches before it), and so does a record it refuses for every format
 /// (a title that is not UTF-8). A batch size of 0 reads no query (NCBI's first batch is empty and
-/// the search stops at it): nothing is checked.
+/// the search stops at it): nothing is checked. Under `-parse_deflines` (`query_scopes`, without a
+/// batch yet) the read adds each batch to the scopes of the queries (`QueryScopes::add_batch_ids`),
+/// so that LOSAT's refusal of two queries of one scope with one id comes before the first byte; the
+/// search then reads them from `QueryScan::query_scopes`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prescan_queries(
     file: std::fs::File,
@@ -636,12 +642,15 @@ pub(super) fn prescan_queries(
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     holds_back: bool,
+    mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 ) -> Result<QueryScan> {
     if batch_size == 0 {
         return Ok(QueryScan::default());
     }
     let mut stream = settings.stream_before_search(file);
-    scan_queries(options, holds_back, &mut |deliver| {
+    let mut delivered = 0usize;
+    let mut refusal = None;
+    let mut scan = scan_queries(options, holds_back, &mut |deliver| {
         super::input::read_fasta_stream_batches(
             &mut stream,
             false,
@@ -649,10 +658,30 @@ pub(super) fn prescan_queries(
             batch_size,
             false,
             range,
-            deliver,
+            &mut |batch| {
+                // A batch that NCBI fails (`deliver`'s error) reports nothing of its scope.
+                deliver(batch)?;
+                if let Some(scopes) = query_scopes.as_mut() {
+                    let added = scopes.add_batch_ids(
+                        batch.iter().filter_map(|record| record.believed()),
+                        delivered,
+                    );
+                    if let Err(error) = added {
+                        refusal = Some(error);
+                        anyhow::bail!("LOSAT refuses this batch");
+                    }
+                }
+                delivered += batch.len();
+                Ok(())
+            },
             &mut |_| Ok(()),
         )
-    })
+    })?;
+    if let Some(refusal) = refusal {
+        return Err(refusal);
+    }
+    scan.query_scopes = query_scopes.map(crate::blastinput::query_batch::QueryScopes::read_ahead);
+    Ok(scan)
 }
 
 /// Refuses the first query the writer would refuse (a title with a byte NCBI's XML stream cannot

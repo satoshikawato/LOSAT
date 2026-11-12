@@ -188,8 +188,8 @@ impl IsamFiles {
         page_size: i32,
         max_line_size: i32,
     ) -> Result<(), WriteDbError> {
-        self.index.create_now()?;
-        self.data.create_now()?;
+        self.index.create_now();
+        self.data.create_now();
         let samples = divide_round_up(num_terms, page_size);
         for value in [
             1,
@@ -219,9 +219,9 @@ impl IsamFiles {
     //     m_DFile->Close();
     // }
     // ```
-    fn close(&mut self) -> Result<(), WriteDbError> {
-        self.index.close()?;
-        self.data.close()
+    fn close(&mut self) {
+        self.index.close();
+        self.data.close();
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:154-164
@@ -258,18 +258,26 @@ impl IsamFiles {
     //     }
     // }
     // ```
-    // `Empty()` is false once the files were created (writedb_isam.cpp:828-835); the
-    // entries not written yet are not on disk, so only created files are listed.
-    fn list_files(&self, files: &mut Vec<String>) {
-        if self.index.created() {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:827-835
+    // ```c++
+    // bool CWriteDB_IsamIndex::Empty() const
+    // {
+    //     // Also test 'created' bit in case the file data has already
+    //     // been dumped and cleared.
+    //
+    //     return ! (m_StringSort.Size() ||
+    //               m_NumberTable.size() ||
+    //               m_Created);
+    // }
+    // ```
+    // An index with entries is listed before its files are made at the volume's close: a
+    // failed build removes those names too (a file that was there).
+    /// `ListFiles`: `has_entries` is whether the index holds entries not written yet.
+    fn list_files(&self, has_entries: bool, files: &mut Vec<String>) {
+        if has_entries || self.index.created() {
             files.push(self.index.filename().to_string());
             files.push(self.data.filename().to_string());
         }
-    }
-
-    fn abandon(&mut self) {
-        self.index.abandon();
-        self.data.abandon();
     }
 }
 
@@ -1347,7 +1355,8 @@ impl StringIsam {
         self.count = 0;
         self.tails.iter_mut().for_each(Vec::clear);
         self.tail_current = 0;
-        self.files.close()
+        self.files.close();
+        Ok(())
     }
 
     pub(crate) fn rename_single(&mut self) {
@@ -1359,11 +1368,7 @@ impl StringIsam {
     }
 
     pub(crate) fn list_files(&self, files: &mut Vec<String>) {
-        self.files.list_files(files);
-    }
-
-    pub(crate) fn abandon(&mut self) {
-        self.files.abandon();
+        self.files.list_files(self.count != 0, files);
     }
 
     /// The bytes of the records held (entries and tails, without the free ends of the last
@@ -1509,7 +1514,8 @@ impl NumericIsam {
         }
         // `x_Free`: `vector<SIdOid> tmp; m_NumberTable.swap(tmp);`.
         self.table = Vec::new();
-        self.files.close()
+        self.files.close();
+        Ok(())
     }
 
     pub(crate) fn rename_single(&mut self) {
@@ -1521,11 +1527,7 @@ impl NumericIsam {
     }
 
     pub(crate) fn list_files(&self, files: &mut Vec<String>) {
-        self.files.list_files(files);
-    }
-
-    pub(crate) fn abandon(&mut self) {
-        self.files.abandon();
+        self.files.list_files(!self.table.is_empty(), files);
     }
 }
 
@@ -1603,7 +1605,7 @@ impl GiIndex {
     /// `Close` (`x_Flush`).
     pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         if !self.gis.is_empty() {
-            self.file.create_now()?;
+            self.file.create_now();
             for value in [1, 0, 4, self.gis.len() as i32, 0, 0, 0, 0] {
                 self.file.write_int4(value)?;
             }
@@ -1617,7 +1619,8 @@ impl GiIndex {
             }
             self.gis = Vec::new();
         }
-        self.file.close()
+        self.file.close();
+        Ok(())
     }
 
     pub(crate) fn file_mut(&mut self) -> &mut WriteDbFile {

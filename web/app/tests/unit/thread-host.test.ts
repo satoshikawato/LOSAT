@@ -3,7 +3,7 @@
 // shared memory, and the use count of the threads. The real thread workers run in the
 // browsers (tests/e2e/engine.spec.ts).
 import { Worker as NodeWorker } from 'node:worker_threads';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { InstanceUse } from '../../src/infra/engine-worker/instance-use';
 import {
   SLOT_ENDED,
@@ -114,7 +114,7 @@ class FakeMemory {
 }
 
 /** `readyTimeoutMs` bounds only the cases that fail; a test whose worker must become ready in time raises it. */
-function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: KeeperBehaviour = 'ready') {
+function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: KeeperBehaviour = 'ready', startTimeoutMs = 50) {
   const workers: FakeThreadWorker[] = [];
   const keepers: FakeKeeper[] = [];
   const faultChannel = `test-faults-${Math.random()}`;
@@ -124,6 +124,8 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: Keepe
     threadWorkers: workers.map((worker) => worker.terminated),
     keepers: keepers.map((keeper) => keeper.terminated),
   }));
+  /** The calls of endWaits: the grows before it, and whether the thread workers had ended. */
+  const endedWaits: Array<{ grows: number; threadWorkersEnded: boolean[] }> = [];
   const threads = new ThreadHost({
     module: {} as WebAssembly.Module,
     memory: memory as unknown as WebAssembly.Memory,
@@ -132,7 +134,7 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: Keepe
     keeperChannel,
     use,
     readyTimeoutMs,
-    startTimeoutMs: 50,
+    startTimeoutMs,
     createWorker: () => {
       const worker = new FakeThreadWorker(behaviour);
       workers.push(worker);
@@ -143,8 +145,11 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: Keepe
       keepers.push(keeper);
       return keeper as unknown as Worker;
     },
+    endWaits: () => {
+      endedWaits.push({ grows: memory.grows.length, threadWorkersEnded: workers.map((worker) => worker.terminated) });
+    },
   });
-  return { threads, workers, keepers, memory, faultChannel, keeperChannel, use };
+  return { threads, workers, keepers, memory, faultChannel, keeperChannel, use, endedWaits };
 }
 
 describe('ThreadHost', () => {
@@ -202,7 +207,7 @@ describe('ThreadHost', () => {
     expect(workers.every((worker) => worker.terminated)).toBe(true);
   });
 
-  it('grows the memory to its maximum before it ends the workers while a thread runs, and not when none runs', async () => {
+  it('grows the memory to its maximum and ends its waits before it ends the workers while a thread runs, and not when none runs', async () => {
     // A thread that runs may be growing the memory: WebKit crashes the page when workers
     // with instances on it end then (a thread of a pool that has not returned when the
     // runtime moves to the other module, runtime.ts load).
@@ -211,6 +216,8 @@ describe('ThreadHost', () => {
     expect(running.threads.spawn(1000)).toBe(1);
     running.threads.terminate();
     expect(running.memory.grows).toEqual([{ pages: 65_533, threadWorkersEnded: [false, false], keeperEnded: [false] }]);
+    // WebKit ends a worker whose thread waits only once the waits are ended (shared-memory.ts, endWaits).
+    expect(running.endedWaits).toEqual([{ grows: 1, threadWorkersEnded: [false, false] }]);
     expect(running.workers.every((worker) => worker.terminated)).toBe(true);
     expect(running.keepers[0]!.terminated).toBe(true);
 
@@ -218,6 +225,7 @@ describe('ThreadHost', () => {
     await idle.threads.prepare(2);
     idle.threads.terminate();
     expect(idle.memory.grows).toEqual([]);
+    expect(idle.endedWaits).toEqual([]);
     expect(idle.workers.every((worker) => worker.terminated)).toBe(true);
 
     // A grow that fails does not keep the workers from ending.
@@ -315,6 +323,24 @@ describe('ThreadHost', () => {
   it('fails to prepare when a thread worker does not become ready in time', async () => {
     const { threads } = host('never-ready');
     await expect(threads.prepare(1)).rejects.toBeInstanceOf(ThreadHostError);
+    threads.terminate();
+  });
+
+  it('waits for a thread to start in slices of at most 100 ms, between which WebKit can end the worker', async () => {
+    const { threads } = host('ready-never-start', 100, 'ready', 350);
+    await threads.prepare(1);
+    const wait = vi.spyOn(Atomics, 'wait');
+    const start = performance.now();
+    let timeouts: number[];
+    try {
+      expect(threads.spawn(1000)).toBe(-1);
+      timeouts = wait.mock.calls.map((call) => call[3] as number);
+    } finally {
+      wait.mockRestore();
+    }
+    expect(performance.now() - start).toBeGreaterThanOrEqual(349);
+    expect(timeouts.length).toBeGreaterThanOrEqual(4);
+    expect(Math.max(...timeouts)).toBeLessThanOrEqual(100);
     threads.terminate();
   });
 

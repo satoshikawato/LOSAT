@@ -266,8 +266,9 @@ fn values_that_ncbi_cannot_convert_stop_where_ncbi_reads_them() {
 // NCBI reads the titles of a batch's reported sequences in its traceback (the Seq-ids of the
 // Seq-aligns; psiblast's in `Run`), before the batch's prefetch converts `PRE_FETCH_SEQS_LIMIT`:
 // with a database whose header file is missing and a query that has hits, NCBI 2.17.0 stops with
-// the header file's error (exit 2, after the outfmt 0 prolog) with `PRE_FETCH_SEQS_LIMIT=abc` as
-// without it (env parity H, probe h_probe/hdr of 2026-11-12: every program, outfmt 0, 6 and 7, an empty value too).
+// the header file's error (exit 2, after the outfmt 0 prolog) with `PRE_FETCH_SEQS_LIMIT=abc`
+// (or an empty value) as without it (env parity H, probe h_probe/hdr of 2026-11-12: every
+// program, outfmt 0, 6 and 7).
 #[test]
 fn a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch() {
     for (program, db, header, query) in [

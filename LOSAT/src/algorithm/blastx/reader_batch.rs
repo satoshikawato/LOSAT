@@ -255,17 +255,8 @@ pub(crate) fn prepare_unit(
         && !subjects.is_empty()
     {
         let mut minima = params.clone();
-        let computed = (|| {
-            subject_parameters(
-                &prepared,
-                &mut minima,
-                options,
-                subjects.total_length()?,
-                i64::try_from(subjects.len())?,
-                subjects.shortest_length(),
-                None,
-            )
-        })();
+        let computed =
+            (|| subject_parameters(&prepared, &mut minima, options, subjects.numbers()?, None))();
         match computed {
             Ok(_) => {
                 let valid = || minima.iter().filter(|p| p.valid);

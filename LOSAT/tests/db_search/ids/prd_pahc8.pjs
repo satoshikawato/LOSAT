@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "prd_pahc8",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_pahc8 (parsed Seq-ids)",
+  "number-of-letters": 250,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-11T20:06:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49791,
+  "bytes-to-cache": 372,
+  "files": [
+    "prd_pahc8.pdb",
+    "prd_pahc8.phr",
+    "prd_pahc8.pin",
+    "prd_pahc8.pnd",
+    "prd_pahc8.pni",
+    "prd_pahc8.pog",
+    "prd_pahc8.pos",
+    "prd_pahc8.pot",
+    "prd_pahc8.psq",
+    "prd_pahc8.ptf",
+    "prd_pahc8.pto"
+  ]
+}

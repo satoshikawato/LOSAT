@@ -97,9 +97,10 @@ pub(super) struct LocalStageDProfile<'a> {
 pub(super) struct DatabaseNumbers {
     pub total_length: u64,
     pub num_seqs: u64,
-    /// The scanned shortest length in nucleotides with a list (`SeqDb::min_length`,
-    /// line DI-8), `None` for a whole database.
-    pub min_length: Option<u32>,
+    /// `CSeqDB::GetMinLength` in nucleotides (`SeqDb::min_length`): the alias files'
+    /// `MIN_SEQ_LENGTH` or `BLAST_SEQSRC_MINLENGTH` without a list, the scanned shortest length
+    /// with one (line DI-8).
+    pub min_length: i32,
 }
 
 /// The numbers of the subject set behind the statistics: a database's (`database`), or,
@@ -219,14 +220,12 @@ impl SubjectSetNumbers {
     }
 
     /// The shortest subject length of the hit-saving cutoff, in residues
-    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH` (with a
-    /// list, its scanned shortest length: line DI-8), a FASTA set its shortest record raised
-    /// to it.
+    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `CSeqDB::GetMinLength`
+    /// (`SeqDb::min_length`), a FASTA set its shortest record raised to
+    /// `BLAST_SEQSRC_MINLENGTH`.
     pub(super) fn min_subject_length(&self, subjects: &SubjectLetters<'_>) -> usize {
         let shortest = match self.database {
-            Some(database) => database
-                .min_length
-                .map_or(Self::MIN_LENGTH, |shortest| shortest as usize),
+            Some(database) => usize::try_from(database.min_length).unwrap_or(0),
             None => subjects
                 .lengths()
                 .min()
@@ -1132,7 +1131,8 @@ fn run_local_search_with_pool(
     // ```
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
-    // answers 10 (`SubjectSetNumbers::min_subject_length`).
+    // answers `GetMinLength` (`SubjectSetNumbers::min_subject_length`); a quotient of 0 is
+    // NCBI's engine error of the first searched batch (`tblastn_app.rs`).
     // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
     let min_subject_length = if profile.subject_set.old_fsc {
         total_nt / num_subjects.max(1)

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use super::archive::{Align, DenseSeg};
 use super::data::{dom_acc_type, CddData, TOTALSIGS};
 use super::segset::SegSet;
+use super::sites::ResiduePos;
 use crate::utils::std_sort::std_sort;
 
 /// `TDomSeqAlignment::GAP_THRESHOLD`.
@@ -67,6 +68,9 @@ pub(crate) struct DomAlign {
     pub(crate) spec_qualified: bool,
     pub(crate) rep_class: i32,
     pub(crate) rep: bool,
+    /// `m_ClipSet`: the query ranges (as positions on the model, `ori_from` side) that a
+    /// structural-domain hit keeps for its motifs (set by `calculate`, empty otherwise).
+    pub(crate) clip_set: SegSet,
 }
 
 /// `TDomSeqAlignIndex`: the indices of the alignments in each set.
@@ -76,6 +80,8 @@ pub(crate) struct AlignIndex {
     pub(crate) concise: Vec<usize>,
     pub(crate) standard: Vec<usize>,
     pub(crate) qualified_feat: Vec<usize>,
+    /// `m_vecSDIndice`: the structural-domain hits that keep a part of the query.
+    pub(crate) structural: Vec<usize>,
 }
 
 /// `TDataModes`: `rep`, `std`, `full`.
@@ -192,6 +198,7 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
         spec_qualified: false,
         rep_class: 0,
         rep: false,
+        clip_set: SegSet::new(),
     };
     clean_alignment(seg, &mut dom);
     if let (Some(&first), Some(&last), Some(&last_len)) =
@@ -282,8 +289,7 @@ struct Facility {
 
 /// `CCdAlignProcessor::Calculate` of a protein query: the alignments' scores against their
 /// models, the regions, and the sets of `index`. Structural domains (`sd`) are set apart and
-/// take no region (their clipping, `m_vecSDIndice` and `m_ClipSet`, serves the site output of
-/// item PS16b and is not computed here).
+/// take no region (their clipping, `m_vecSDIndice` and `m_ClipSet`, serves the motif output).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:48-130
 // ```c++
 // void CCdAlignProcessor::Calculate(vector<TDomSeqAlignment> &aligns, const vector<size_t> &selIdx, TDomSeqAlignIndex &dst, vector<PssmId_t> &missed, const int * stdmax, size_t nmax) const
@@ -371,6 +377,7 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
     let mut index = AlignIndex::default();
     let mut gap_sets: Vec<SegSet> = Vec::new();
     let mut non_multi: Vec<Facility> = Vec::new();
+    let mut structural: Vec<Facility> = Vec::new();
     for (i, align) in aligns.iter_mut().enumerate() {
         if align.s_starts.is_empty() {
             continue;
@@ -403,6 +410,7 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
         };
         if domain.is_struct_dom {
             align.rep_class = 2;
+            structural.push(facility);
         } else {
             align.rep_class = 0;
             non_multi.push(facility);
@@ -599,7 +607,125 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
     if !index.sorted.is_empty() && index.standard.is_empty() {
         index.standard = index.sorted.clone();
     }
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:305-342
+    // ```c++
+    // 		// -- finally calculate SDs
+    // 		// -- SDs: models are sorted according to evalues, each model reserve their regions on the query sequence. that would need to change the from/to and the aligned segments. Features are
+    // 		// -- then mapped to the query from these regions -- to guarantee non-redundency. Proposed by Aron.
+    // 		// -- implementation: calculate a restriction segset for SD models, which will be used later to trim the sites first
+    // 		if (!vecSDs.empty())
+    // 		{
+    //
+    // 			sort(vecSDs.begin(), vecSDs.end(), sortingEV);
+    // 			//vecConcise.clear();
+    // 			dst.m_vecSDIndice.clear();
+    // 			dst.m_vecSDIndice.reserve(vecSDs.size());
+    // 			CSegSet covered_regions;
+    //
+    // 			for (vector <TDomAlignFacility>::const_iterator iter = vecSDs.begin(), iterEnd = vecSDs.end(); iterEnd != iter; ++iter)
+    // 			{
+    //
+    // 				CSegSet sdSegSet;
+    // 				sdSegSet.AddSeg(0, iter->pCdInfo->m_uiLength - 1);
+    //
+    // 				iter->pAlign->MapSegSet(sdSegSet);
+    //
+    // 				sdSegSet.Clip(covered_regions);
+    //
+    // 				if (!sdSegSet.IsEmpty())
+    // 				{
+    // 					iter->pAlign->m_ClipSet.Clear();
+    // 					const CSegSet::TSegs& sdSegs = sdSegSet.GetSegs();
+    //
+    // 					for (CSegSet::TSegs::const_iterator iterSeg = sdSegs.begin(), iterSegEnd = sdSegs.end(); iterSegEnd != iterSeg; ++iterSeg)
+    // 					{
+    // 						iter->pAlign->m_ClipSet.AddSeg(iterSeg->ori_from, sdSegSet.GetOriTo(iterSeg));
+    // 					}
+    // 					covered_regions.Merge(sdSegSet);
+    // 					dst.m_vecSDIndice.emplace_back(iter->ulIdx);
+    // 				}
+    // 			}
+    //
+    // 		}
+    // ```
+    // (`m_uiLength - 1` is `unsigned int`, converted to `SeqPos_t` by `AddSeg`: a model of length
+    // 0 gives -1, an empty range.)
+    if !structural.is_empty() {
+        std_sort(&mut structural, &mut |a: &Facility, b: &Facility| {
+            let (a, b) = (&aligns[a.align], &aligns[b.align]);
+            if a.e_value < b.e_value {
+                true
+            } else if a.e_value > b.e_value {
+                false
+            } else {
+                a.bit_score > b.bit_score
+            }
+        });
+        let mut covered = SegSet::new();
+        for facility in &structural {
+            let mut sd_segs = SegSet::new();
+            sd_segs.add(
+                0,
+                i64::from(data.domains[facility.domain].length.wrapping_sub(1) as i32),
+            );
+            map_seg_set(&mut sd_segs, &aligns[facility.align]);
+            sd_segs.clip(&covered);
+            if !sd_segs.is_empty() {
+                let mut clip = SegSet::new();
+                for seg in sd_segs.segs() {
+                    clip.add(seg.ori_from, SegSet::ori_to(seg));
+                }
+                aligns[facility.align].clip_set = clip;
+                covered.merge(&sd_segs);
+                index.structural.push(facility.align);
+            }
+        }
+    }
     index
+}
+
+/// `TSeqAlignment::MapSegSet(segset)` of a protein alignment.
+pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
+    set.map_through(&align.m_starts, &align.s_starts, &align.lens);
+}
+
+/// `TSeqAlignment::GetTranslatedPosMap` of a protein alignment: the residues of a mapped set,
+/// each with its position on the query and its original position.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1252-1294
+// ```c++
+// READINGFRAME::TFRAMEINDEX TSeqAlignment::GetTranslatedPosMap(const CSegSet &mappedAAsegs, SeqLen_t qLen, vector<TSeg_base::TResiduePos> &rMappedAAPos) const
+// {
+// 	rMappedAAPos.clear();
+//
+// 	const CSegSet::TSegs &segs = mappedAAsegs.GetSegs();
+// 	size_t ttlres = mappedAAsegs.GetTotalResidues();
+//
+// 	rMappedAAPos.reserve(ttlres);
+// 	...
+// 	// -- either protein or plus strand translation, no adjust needed.
+// 	for (CSegSet::TSegs::const_iterator iterSeg = segs.begin(), iterSegEnd = segs.end(); iterSegEnd != iterSeg; ++iterSeg)
+// 	{
+// 		for (SeqPos_t c = iterSeg->from, inc = 0; c <= iterSeg->to; ++c, ++inc)
+// 		{
+// 			rMappedAAPos.emplace_back(c, iterSeg->ori_from + inc);
+// 		}
+// 	}
+// ```
+pub(crate) fn translated_pos_map(set: &SegSet) -> Vec<ResiduePos> {
+    let mut positions = Vec::with_capacity(set.total_residues().max(0) as usize);
+    for seg in set.segs() {
+        let mut c = seg.from;
+        let mut inc = 0i64;
+        while c <= seg.to {
+            positions.push(ResiduePos {
+                curr: c as i32,
+                ori: (seg.ori_from + inc) as i32,
+            });
+            c += 1;
+            inc += 1;
+        }
+    }
+    positions
 }
 
 /// `TDomSeqAlignIndex::CreateRecordSets`, the domain records (`rDomAligns`) of `mode`.
@@ -640,7 +766,7 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
 // 	}
 // ```
 // The hierarchy roots and the site records (`rFeatAligns`, `ExtractFeatAligns`) serve the site
-// output of item PS16b.
+// output (`feature_records`).
 pub(crate) fn domain_records(
     index: &AlignIndex,
     aligns: &[DomAlign],
@@ -671,6 +797,177 @@ pub(crate) fn domain_records(
             }
         })
         .collect()
+}
+
+/// `TDomSeqAlignIndex::__TCdAlignRecord` of the site output: a hit whose model's sites are
+/// printed, with the model of its hierarchy root (`pRootCdInfo`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FeatureRecord {
+    pub(crate) align: usize,
+    pub(crate) domain: usize,
+    /// The root of the model's hierarchy, `None` when the model has none (or it is not in the
+    /// data).
+    pub(crate) root: Option<usize>,
+}
+
+/// `TDomSeqAlignIndex::CreateRecordSets`, the feature records (`rFeatAligns`) of `mode`: for
+/// each representative hit, the qualified curated hits of its region (`ExtractFeatAligns`),
+/// then the structural-domain hits.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1918-2032
+// ```c++
+// 			if (0 == alignRec.pAlign->m_iRepClass && alignRec.pAlign->m_bRep)	//non-multi
+// 			{
+// 				ExtractFeatAligns(alignRec, rAlignments, rDomInfo, rFeatAligns);
+// 				...
+// 			}
+// 	...
+// 			if (alignRec.pAlign->m_bRep)
+// 			{
+// 				alignRec.idxidx = repIdx++;
+// 				if (0 == alignRec.pAlign->m_iRepClass)	//non-multi
+// 				{
+// 					ExtractFeatAligns(alignRec, rAlignments, rDomInfo, rFeatAligns);
+// 	...
+// 	// -- added 9/9/2014 handling structure motifs -- attach to
+// 	for (size_t iidx = 0, iidxEnd = m_vecSDIndice.size(); iidx < iidxEnd; ++iidx)
+// 	{
+// 		__TCdAlignRecord rec;
+//
+// 		rec.idx = m_vecSDIndice[iidx];
+//
+// 		rec.pAlign =  &(rAlignments[rec.idx]);
+//
+// 		rec.pCdInfo = rDomInfo.FindCdInfo(rec.pAlign->m_uiPssmId);
+//
+// 		rec.pClst = nullptr;
+//
+// 		rec.pRootCdInfo = nullptr;
+//
+// 		rec.idxidx = ccsBase + amendCount++;
+//
+// 		rFeatAligns.push_back(rec);
+// 	}
+// ```
+// (The `idxidx` members only order the JSON output.)
+pub(crate) fn feature_records(
+    index: &AlignIndex,
+    aligns: &[DomAlign],
+    data: &CddData,
+    mode: DataMode,
+) -> Vec<FeatureRecord> {
+    let indices = match mode {
+        DataMode::Rep => &index.concise,
+        DataMode::Std => &index.standard,
+        DataMode::Full => &index.sorted,
+    };
+    let mut records = Vec::new();
+    for &align in indices {
+        let a = &aligns[align];
+        if a.rep && a.rep_class == 0 {
+            let domain = data
+                .find_domain(a.pssm_id)
+                .expect("a classified hit has its model");
+            extract_feat_aligns(align, domain, index, aligns, data, &mut records);
+        }
+    }
+    for &align in &index.structural {
+        let domain = data
+            .find_domain(aligns[align].pssm_id)
+            .expect("a classified hit has its model");
+        records.push(FeatureRecord {
+            align,
+            domain,
+            root: None,
+        });
+    }
+    records
+}
+
+/// `TDomSeqAlignIndex::ExtractFeatAligns`.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:2208-2272
+// ```c++
+// void TDomSeqAlignIndex :: ExtractFeatAligns(const TDomSeqAlignIndex::__TCdAlignRecord &rRepRec, const vector<TDomSeqAlignment> &rAlignments, const TDomClusterIndexIfx & rDomInfo, vector<TDomSeqAlignIndex::__TCdAlignRecord> &rResult) const
+// {
+// 	__TCdAlignRecord rec;
+// 	if (rRepRec.pCdInfo->m_iClusterId > 0)	//has cluster, do cluster match
+// 	{
+// 		for (size_t fiidx = 0, fiidxEnd = m_vecQualifiedFeatIndice.size(); fiidx < fiidxEnd; ++fiidx)
+// 		{
+// 			rec.pAlign = &(rAlignments[m_vecQualifiedFeatIndice[fiidx]]);
+// 			// -- check if duplicated, one domain may have multiple features
+// 			for (const auto & r : rResult)
+// 			{
+// 				if (r.pAlign == rec.pAlign)
+// 					goto labelSkip1;
+// 			}
+//
+// 			if (rec.pAlign->m_iRegionIdx == rRepRec.pAlign->m_iRegionIdx)	//region match
+// 			{
+// 				rec.pCdInfo = rDomInfo.FindCdInfo(rec.pAlign->m_uiPssmId);
+// 				if (rec.pCdInfo->m_iClusterId == rRepRec.pCdInfo->m_iClusterId)	//matched cluster
+// 				{
+// 					rec.pClst = rRepRec.pClst;
+// 					rec.idx = m_vecQualifiedFeatIndice[fiidx];
+// 					//rec.idxidx = FeatIdx2Iidx(rec.idx);
+// 					if (rec.pCdInfo->m_uiHierarchyRoot > 0)
+// 					{
+// 						if (rec.pCdInfo->m_uiHierarchyRoot == rec.pAlign->m_uiPssmId) rec.pRootCdInfo = rec.pCdInfo;
+// 						else rec.pRootCdInfo = rDomInfo.FindCdInfo(rec.pCdInfo->m_uiHierarchyRoot);
+// 					}
+// 					rResult.push_back(rec);
+// 				}
+// 			}
+// 		labelSkip1:
+// 			;
+// 		}
+// 	}
+// 	else	//no cluster, just match region class -- should not happen
+// 	{
+// 		... (the same, without the cluster comparison; `rec.pClst = rDomInfo.FindClusterInfo(...)`)
+// 	}
+// }
+// ```
+// `rec` is one object for the whole call: a model without a hierarchy root (`m_uiHierarchyRoot`
+// 0) keeps the `pRootCdInfo` of the record pushed before it (`root` below, set only when the
+// model has a root).
+fn extract_feat_aligns(
+    rep_align: usize,
+    rep_domain: usize,
+    index: &AlignIndex,
+    aligns: &[DomAlign],
+    data: &CddData,
+    result: &mut Vec<FeatureRecord>,
+) {
+    let rep_cluster = data.domains[rep_domain].cluster_id;
+    let mut root: Option<usize> = None;
+    for &candidate in &index.qualified_feat {
+        // One model may have several hits; each hit is listed once.
+        if result.iter().any(|record| record.align == candidate) {
+            continue;
+        }
+        if aligns[candidate].region != aligns[rep_align].region {
+            continue;
+        }
+        let domain = data
+            .find_domain(aligns[candidate].pssm_id)
+            .expect("a classified hit has its model");
+        if rep_cluster > 0 && data.domains[domain].cluster_id != rep_cluster {
+            continue;
+        }
+        let hierarchy_root = data.domains[domain].hierarchy_root;
+        if hierarchy_root > 0 {
+            root = if hierarchy_root == aligns[candidate].pssm_id {
+                Some(domain)
+            } else {
+                data.find_domain(hierarchy_root)
+            };
+        }
+        result.push(FeatureRecord {
+            align: candidate,
+            domain,
+            root,
+        });
+    }
 }
 
 #[cfg(test)]

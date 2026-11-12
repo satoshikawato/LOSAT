@@ -99,3 +99,16 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   - `refuse_nodata`: `arch/q_nodata.asn`, `mfirst.asn` without the query's `seq-data` (review oracle R19), with
     `sites/`: the site's positions are outside the (empty) residues, where NCBI reads memory outside the string
     (its two builds print different bytes).
+
+## The NCBI C++ Toolkit options (line RG, item E1c)
+
+- The rows `e1c_*` (2026-11-13): `-dryrun` (rpsbproc's own `DryRun` after its `Init`), `-logfile log.txt` and
+  `-conffile c.ini`. `oracle/<case>.{out,err,rc}` and `.outfile` / `.log` (the `out.txt` and `log.txt` the run
+  made): NCBI's rpsbproc 0.5.1, the binary of the 2025-05-13 package and bioconda's (on the BLAST+ 2.17.0 toolkit),
+  which gave the same bytes, run as the test runs LOSAT (the run directory above, no `LOSAT_` or `NCBI_` variable,
+  `NCBI_CONFIG_PATH` = the run directory, stdin from `/dev/null` or the named file).
+- `conf/`: the registry files of the setups `conf:<file>` (copied as `c.ini`) and `ini:<file>` (as `rpsbproc.ini`):
+  `blast.ini` is `[BLAST]` alone, `garbage.ini` a line that is not an entry (NCBI's report, exit 2).
+- `refused/refuse_dry_xml.*` and `refused/refuse_xml.*`: LOSAT's bytes for the XML input with a successful `Init`,
+  refused with `-dryrun` as without it (NCBI's standard error up to its warning `Warning: XML format support is
+  deprecated!`, then the refusal).

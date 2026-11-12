@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.13
+- Version: 1.14
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -21,7 +21,9 @@
   has and LOSAT lacked); 1.12 2026-11-13 (`-dryrun` runs on the command line as in NCBI, line RG
   item E1b, the same ask); 1.13 2026-11-13 (`losat blastdbcmd` and `losat dustmasker` in the
   scope, exception 10, a closed pipe; line RG, item K1, RG DECISIONS K1-8; Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07)
+  standing instruction 2026-09-29, restated 2026-10-07); 1.14 2026-11-13 (`-logfile`,
+  `-conffile` and `-dryrun` run on the command line of `losat rpsbproc` as in NCBI's rpsbproc
+  0.5.1, line RG item E1c, the ask of 2026-11-12)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -208,7 +210,7 @@ BLAST+.
   Since version 1.11 `-logfile` and `-conffile` are no longer refused on the command line of
   BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX, PSIBLAST and RPSBLAST (and `-conffile` of
   makeblastdb and blastdbcmd): they run as in NCBI (`README.md`, NCBI C++ Toolkit options).
-  rpsbproc, the library API and the Web engine still refuse them, and BLASTX refuses the other
+  The library API and the Web engine still refuse them, and BLASTX refuses the other
   words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
   the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
   and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
@@ -216,7 +218,15 @@ BLAST+.
   (exception 1), and the parser's refusals of an NCBI option that LOSAT does not run, or of a
   value form it does not read, stay (LOSAT has no definition to check them as NCBI does; line RG
   DECISIONS E1b-2), as do the refusals of registry and environment settings (some, such as
-  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). rpsbproc (its own `DryRun`), the library API and the Web engine refuse it.
+  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). The library API and
+  the Web engine refuse it. Since version 1.14 `losat rpsbproc` runs the three on the command
+  line too: `-logfile` takes rpsbproc's diagnostics (its `LOG_POST_X` messages and the reports
+  of an exception; its own `cerr` lines stay on the standard error), `-conffile` is loaded in
+  place of `rpsbproc.ini`, and `-dryrun` runs rpsbproc's own `DryRun` after its `Init`
+  (`rpsbproc_main.cpp:924-932`: the input, output and data files are opened and loaded, then
+  `Dryrun passed, ...` or `Dryrun failed, error subcode = N`, exit status N). LOSAT's refusals of
+  a run (the XML input, a registry or environment setting) stay with `-dryrun` (line RG
+  DECISIONS E1c-2).
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

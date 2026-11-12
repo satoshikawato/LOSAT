@@ -2449,15 +2449,21 @@ fn has_usage_report(program: &str) -> bool {
     !matches!(program, "rpsbproc" | "dustmasker")
 }
 
-/// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the reports of
-/// its registry files name its own toolkit build (`rpsbproc_registry_refusal`).
+/// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the posts of
+/// its system-wide file name its own toolkit build (`rpsbproc_registry_refusal`).
 fn has_own_build(program: &str) -> bool {
     program == "rpsbproc"
 }
 
-/// LOSAT's refusal of a registry file that NCBI's rpsbproc reports when it loads its
-/// configuration (`application_start`): its exception reports name the place of its own
-/// toolkit build, which LOSAT does not write.
+/// LOSAT's refusal of a system-wide file (`.ncbirc`) that NCBI's rpsbproc reports when it loads
+/// its configuration (`application_start`): the post quotes the exception's `what()`, whose
+/// place is a source file of the toolkit build of that rpsbproc (`T0 "/opt/conda/conda-bld/
+/// rpsbproc_<n>/work/ncbi_cxx/c++/src/corelib/ncbireg.cpp", line 722` in bioconda's 0.5.1, the
+/// package of 2025-05-13 another), which LOSAT does not write. The reports of its `rpsbproc.ini`
+/// and of the file of `-conffile` name no place (`NcbiException::report_default_ex`): they are
+/// NCBI's bytes, as in the BLAST programs (NCBI rpsbproc 0.5.1, both builds, line RG
+/// `E/SURVEY_E1c.md`: probes `c_ini_bad`, `c_conf_bad`, `c_conf_bad_log`, `c_conf_unread_dot`;
+/// line RG DECISIONS E1c-3).
 fn rpsbproc_registry_refusal(path: &Path) -> String {
     format!(
         "the registry file {} has an error that NCBI's rpsbproc reports when it starts; this is not supported by LOSAT's rpsbproc",
@@ -2806,10 +2812,6 @@ fn application_start(
     let mut posts = String::new();
     if let Some((path, read)) = &ini {
         start.library_note = start.library_note.take().or(library_note(path, read));
-        if (read.error.is_some() || read.stream_failed) && has_own_build(program) {
-            start.config = Err(rpsbproc_registry_refusal(path));
-            return ended(start);
-        }
         if let Some(error) = &read.error {
             let report = error.report_default_ex(106, 15, "Application's initialization failed");
             start.config = match &environment_refusal {
@@ -4204,7 +4206,9 @@ mod tests {
 
     // NCBI's rpsbproc 0.5.1 (the 2025-05-13 package and bioconda's, env parity probe of
     // 2026-11-12 on ws; quoted at `has_usage_report`): no usage report, so neither its read of
-    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a file that rpsbproc reports is LOSAT's refusal.
+    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a `.ncbirc` that rpsbproc reports is LOSAT's
+    // refusal (`rpsbproc_registry_refusal`), a malformed `rpsbproc.ini` or `-conffile` file is
+    // NCBI's report, exit status 2 (line RG probes `c_ini_bad`, `c_conf_bad`).
     #[test]
     fn rpsbproc_starts_without_the_usage_report() {
         let dir = std::env::temp_dir().join(format!(
@@ -4243,7 +4247,11 @@ mod tests {
         assert!(malformed.settings.unwrap_err().contains("LOSAT's rpsbproc"));
         std::fs::remove_file(&ncbirc).unwrap();
         std::fs::write(dir.join("rpsbproc.ini"), "garbage\n").unwrap();
-        assert!(start(&[]).config.unwrap_err().contains("LOSAT's rpsbproc"));
+        let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
+        assert_eq!(
+            start(&[]).config,
+            Ok(ConfigLoad::Failed(report.to_string()))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

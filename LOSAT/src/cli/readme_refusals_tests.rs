@@ -163,7 +163,6 @@ fn every_refused_option_is_in_the_readme_for_its_program() {
     for program in TOOLKIT_PROGRAMS {
         lists.push((program, NCBI_TOOLKIT_ARGS.to_vec()));
     }
-    lists.push(("rpsbproc", RPSBPROC_TOOLKIT_ARGS.to_vec()));
     let mut missing = Vec::new();
     for (program, names) in &lists {
         for name in names.iter().filter(|name| **name != ANSWERED_NOT_REFUSED) {
@@ -185,12 +184,7 @@ fn the_documented_toolkit_programs_refuse_the_toolkit_options() {
         let scope = command
             .find_subcommand(program)
             .unwrap_or_else(|| panic!("{program} is a subcommand"));
-        let file_args = if program == "rpsbproc" {
-            RPSBPROC_TOOLKIT_ARGS
-        } else {
-            &[]
-        };
-        for name in NCBI_TOOLKIT_ARGS.iter().chain(file_args) {
+        for name in NCBI_TOOLKIT_ARGS {
             let message = unknown_option_error(scope, name, &format!("-{name}")).to_string();
             if !message.contains("NCBI C++ Toolkit option") {
                 wrong.push(format!("{program}: -{name} gives {message:?}"));

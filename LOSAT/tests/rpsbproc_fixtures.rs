@@ -3,7 +3,8 @@
 //! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast 2.17.0
 //! `-outfmt 11` of E. coli K-12 MG1655 proteins against CDD v3.22, the data files are CDD v3.22
 //! cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
-//! error and exit status (and the `-o` file); a `refuse` case is refused by LOSAT (exit 1, the
+//! error and exit status (and the `-o` file `out.txt` and the `-logfile` file `log.txt`); a
+//! `refuse` case is refused by LOSAT (exit 1, the
 //! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
 //! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md). NCBI is not
 //! run here.
@@ -104,12 +105,29 @@ fn cases() -> Vec<[String; 5]> {
         .collect()
 }
 
-/// Makes the data directory of a case's `setup` in `dir`: `data-with:<a>+<b>`, the directory
-/// `<b>/` holding the data files with those of `data_with/<a>/` and then of `data_with/<b>/` in
-/// their place; `data-without:<file>`, `data_missing/` without that file.
+/// Makes the files of a case's `setup` in `dir`, its parts separated by `,`: `data-with:<a>+<b>`,
+/// the directory `<b>/` holding the data files with those of `data_with/<a>/` and then of
+/// `data_with/<b>/` in their place; `data-without:<file>`, `data_missing/` without that file;
+/// `conf:<file>`, `conf/<file>` as `c.ini` (for `-conffile c.ini`); `ini:<file>`, `conf/<file>`
+/// as `rpsbproc.ini`. The files that a run makes and the registry files of the case before are
+/// removed first.
 fn set_up(dir: &Path, setup: &str) {
-    let _ = fs::remove_file(dir.join("out.txt"));
+    for made in ["out.txt", "log.txt", "c.ini", "rpsbproc.ini"] {
+        let _ = fs::remove_file(dir.join(made));
+    }
     let _ = fs::remove_dir_all(dir.join("data_missing"));
+    for part in setup.split(',') {
+        set_up_part(dir, part);
+    }
+}
+
+/// One part of `set_up`.
+fn set_up_part(dir: &Path, setup: &str) {
+    for (kind, name) in [("conf:", "c.ini"), ("ini:", "rpsbproc.ini")] {
+        if let Some(file) = setup.strip_prefix(kind) {
+            fs::copy(fixtures().join("conf").join(file), dir.join(name)).unwrap();
+        }
+    }
     if let Some(with) = setup.strip_prefix("data-with:") {
         let layers: Vec<&str> = with.split('+').collect();
         let target = dir.join(layers[layers.len() - 1]);
@@ -171,17 +189,19 @@ fn rpsbproc_gives_ncbis_bytes() {
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
         assert_same(&oracle, &case, &out, &err, status);
-        let outfile = oracle.join(format!("{case}.outfile"));
-        if outfile.exists() {
+        for (suffix, made) in [("outfile", "out.txt"), ("log", "log.txt")] {
+            let expected = oracle.join(format!("{case}.{suffix}"));
+            let got = fs::read(dir.join(made)).ok();
             assert_eq!(
-                fs::read(dir.join("out.txt")).unwrap(),
-                fs::read(outfile).unwrap(),
-                "{case}: -o file"
+                got,
+                fs::read(&expected).ok(),
+                "{case}: the file {made} (expected {})",
+                expected.display()
             );
         }
         compared += 1;
     }
-    assert_eq!(compared, 132);
+    assert_eq!(compared, 167);
 }
 
 // The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and
@@ -216,14 +236,15 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 5);
+    assert_eq!(refused, 6);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
 // prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), `-help` LOSAT's help, NCBI's toolkit
-// words such as `-dryrun` are refused with the other programs' message, an unknown word is
-// named as it was given, and a file name that is not UTF-8 is refused before anything is
-// written.
+// words that LOSAT does not run (`-version-full`) are refused with the other programs'
+// message, `-dryrun=1` is an unknown word as in NCBI (`-dryrun` is not an argument), an
+// unknown word is named as it was given, and a file name that is not UTF-8 is refused before
+// anything is written.
 #[test]
 fn rpsbproc_command_line() {
     let run_dir = RunDir::new("cli");
@@ -238,12 +259,26 @@ fn rpsbproc_command_line() {
     let (out, _, status) = rpsbproc(dir, &["-help"], None);
     assert_eq!(status, 0);
     assert!(String::from_utf8(out).unwrap().contains("--infile"));
-    let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-d", "data", "-dryrun"], None);
+    let (out, err, status) = rpsbproc(
+        dir,
+        &["-i", "arch/one.asn", "-d", "data", "-version-full"],
+        None,
+    );
     assert!(out.is_empty());
     let err = String::from_utf8(err).unwrap();
     assert_eq!(status, 2, "{err}");
     assert!(
-        err.contains("the NCBI C++ Toolkit option -dryrun is not supported by LOSAT's rpsbproc"),
+        err.contains(
+            "the NCBI C++ Toolkit option -version-full is not supported by LOSAT's rpsbproc"
+        ),
+        "{err}"
+    );
+    let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-dryrun=1"], None);
+    assert!(out.is_empty());
+    let err = String::from_utf8(err).unwrap();
+    assert_eq!(status, 2, "{err}");
+    assert!(
+        err.contains("unknown option or argument '-dryrun=1'"),
         "{err}"
     );
     let (_, _, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-m", "xx"], None);

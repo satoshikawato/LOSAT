@@ -269,7 +269,7 @@ where
         .and_then(|text| command.find_subcommand(text))
         .filter(|program| TOOLKIT_PROGRAMS.contains(&program.get_name()))
     {
-        if let Some(word) = ncbi_preparsed_toolkit_word(program.get_name(), &tokens[2..]) {
+        if let Some(word) = ncbi_preparsed_toolkit_word(&tokens[2..]) {
             let name = word.trim_start_matches('-');
             let name = name.split_once('=').map_or(name, |(key, _)| key);
             return Err(unknown_option_error(program, name, word));
@@ -837,7 +837,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
         .iter()
         .copied()
         .find(|program| scope.get_name() == *program)
-        .filter(|program| is_ncbi_toolkit_arg(program, name))
+        .filter(|_| is_ncbi_toolkit_arg(name))
     {
         return toolkit_option_error(program, name);
     }
@@ -939,14 +939,11 @@ const TOOLKIT_PROGRAMS: &[&str] = &[
 // `ncbi_environment::preparse`: `-version`, the full versions and `-dryrun` are read before the
 // arguments, anywhere before `--`, also where another option expects its value, but not as the
 // value of `-logfile` or `-conffile`)
-/// The first word before the arguments that LOSAT refuses in `program`, where NCBI's application
-/// reads it (`ncbi_environment::preparse`): a full version (NCBI's build details), and in
-/// rpsbproc `-dryrun` (rpsbproc's own dry run checks its input), `-logfile` and `-conffile` (line
-/// RG item E1c). In an option's value too: `-out -dryrun` loses the value of `-out` in NCBI. The command
-/// line never brings `-version` here: `main` prints the version before parsing
-/// (`ncbi_version_request`). The Web engine, which parses its options here and has no version to
-/// print, refuses it.
-fn ncbi_preparsed_toolkit_word<'a>(program: &str, tokens: &'a [OsString]) -> Option<&'a str> {
+/// The first word before the arguments that LOSAT refuses, where NCBI's application reads it (`ncbi_environment::preparse`): a full version (NCBI's build details), in an
+/// option's value too. The command line never brings `-version` here: `main` prints the version
+/// before parsing (`ncbi_version_request`). The Web engine, which parses its options here and
+/// has no version to print, refuses it.
+fn ncbi_preparsed_toolkit_word<'a>(tokens: &'a [OsString]) -> Option<&'a str> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
     let exact = |word: &str| {
         tokens
@@ -957,8 +954,6 @@ fn ncbi_preparsed_toolkit_word<'a>(program: &str, tokens: &'a [OsString]) -> Opt
     match preparse(tokens) {
         Preparsed::Version => exact("-version"),
         Preparsed::Refused(word) => exact(word),
-        Preparsed::Words { dryrun: true, .. } if program == "rpsbproc" => exact("-dryrun"),
-        Preparsed::Words { .. } if program == "rpsbproc" => toolkit_file_word(tokens),
         Preparsed::Words { .. } => None,
     }
 }
@@ -1093,8 +1088,8 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // ```
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
-// makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b); rpsbproc refuses
-// those three (`RPSBPROC_TOOLKIT_ARGS`, item E1c).
+// makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b), the three in
+// rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`).
 const NCBI_TOOLKIT_ARGS: &[&str] = &[
     "help-full",
     "xmlhelp",
@@ -1103,13 +1098,8 @@ const NCBI_TOOLKIT_ARGS: &[&str] = &[
     "version-full-json",
 ];
 
-/// The toolkit's options that rpsbproc refuses and the other programs run (line RG item E1c):
-/// rpsbproc's own `DryRun` checks its input, and its registry is env-parity's refusal.
-const RPSBPROC_TOOLKIT_ARGS: &[&str] = &["logfile", "conffile", "dryrun"];
-
-fn is_ncbi_toolkit_arg(program: &str, name: &str) -> bool {
+fn is_ncbi_toolkit_arg(name: &str) -> bool {
     NCBI_TOOLKIT_ARGS.contains(&name)
-        || (program == "rpsbproc" && RPSBPROC_TOOLKIT_ARGS.contains(&name))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50

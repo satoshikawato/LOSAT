@@ -7,7 +7,7 @@
 // which WebKit would otherwise keep alive with the memory (endWaits).
 //
 // The main thread does not hold the memory itself. A thread that is sent a shared memory keeps
-// it until that thread collects the message. In WebKit 26.5 (Playwright's build on Linux), a
+// it until that thread collects the message. In WebKit 26.5 (build 2311 of Playwright 1.61.1, on Linux), a
 // page held at most 15 shared memories of 4 GiB, and a new memory did not make the main thread
 // collect: the memories that the main thread had been sent, one for each runtime, kept the
 // threaded engine from starting after some runtimes. The keeper ends with the thread workers

@@ -392,7 +392,7 @@ test('a runtime renewed after every search gives the same bytes and registers th
 test('threaded runtimes started one after another in one page all run threaded: an ended runtime does not keep its shared memory alive', async ({ context }) => {
   const page = await openHarness(context, isolated);
   const vbr = vbrCases()[1]!;
-  // More runtimes than one page of WebKit 26.5 (Playwright, Linux) held shared memories of the
+  // More runtimes than one page of WebKit 26.5 (build 2311 of Playwright 1.61.1, Linux) held shared memories of the
   // threaded module at once (15 of 4 GiB): a memory that an ended runtime leaves alive until a
   // thread collects it takes the place of a later one.
   const list: SearchCase[] = Array.from({ length: 32 }, (_, i) => ({ ...searchOf(vbr, 2), id: `runtime ${i + 1} n=2` }));

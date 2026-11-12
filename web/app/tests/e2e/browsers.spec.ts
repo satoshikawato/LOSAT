@@ -6,8 +6,8 @@
 // quota; here those cases are left out.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect } from '@playwright/test';
-import { test } from './support/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/profile';
 import { BLOCK_STORE_CASES } from '../contract/block-store.contract';
 import { RUN_OUTPUT_CASES } from '../contract/run-output.contract';
 import { buildHarness, openApp, type HarnessFiles } from './support/browser';
@@ -31,30 +31,28 @@ test.afterAll(async () => {
   await server?.close();
 });
 
-for (const backend of ['opfs', 'memory'] as const) {
-  test(`BlockStore contract: ${backend} store in a dedicated worker (without storage full)`, async ({ context, playwright, browserName }, testInfo) => {
-    // The OPFS store runs in a profile on disk, as users have it. Playwright's default contexts
-    // are incognito: WebKit 27 refuses OPFS there ("UnknownError" from getDirectory), while the
-    // application then keeps results in memory and says so (the last test).
-    const profile =
-      backend === 'opfs'
-        ? await playwright[browserName].launchPersistentContext(testInfo.outputPath('profile'), { ...testInfo.project.use.launchOptions })
-        : undefined;
-    try {
-      const page = await openHarness(profile ?? context, server);
-      if (backend === 'opfs') {
-        const opfs = await page.evaluate(() => typeof navigator.storage?.getDirectory === 'function');
-        test.skip(!opfs, 'this browser has no Origin Private File System');
-      }
-      await page.exposeFunction('setStorageQuota', async () => undefined);
-      const results = withoutStorageFull(await page.evaluate((kind) => window.losatHarness!.blockStore(kind), backend));
-      expect(results.filter((result) => !result.ok)).toEqual([]);
-      expect(results.map((result) => result.name)).toEqual(withoutStorageFull(BLOCK_STORE_CASES).map((c) => c.name));
-    } finally {
-      await profile?.close();
-    }
-  });
+/** Runs the BlockStore contract in a dedicated worker of the harness page, without the storage-full cases. */
+async function blockStoreContract(page: Page, backend: 'opfs' | 'memory'): Promise<void> {
+  if (backend === 'opfs') {
+    const opfs = await page.evaluate(() => typeof navigator.storage?.getDirectory === 'function');
+    test.skip(!opfs, 'this browser has no Origin Private File System');
+  }
+  await page.exposeFunction('setStorageQuota', async () => undefined);
+  const results = withoutStorageFull(await page.evaluate((kind) => window.losatHarness!.blockStore(kind), backend));
+  expect(results.filter((result) => !result.ok)).toEqual([]);
+  expect(results.map((result) => result.name)).toEqual(withoutStorageFull(BLOCK_STORE_CASES).map((c) => c.name));
 }
+
+// The OPFS store in a profile on disk, as users have it (support/profile.ts): WebKit refuses OPFS
+// in Playwright's default, incognito contexts, where the application keeps results in memory and
+// says so (the last test).
+test('BlockStore contract: opfs store in a dedicated worker (without storage full)', async ({ profile }) => {
+  await blockStoreContract(await openHarness(profile.context, server), 'opfs');
+});
+
+test('BlockStore contract: memory store in a dedicated worker (without storage full)', async ({ context }) => {
+  await blockStoreContract(await openHarness(context, server), 'memory');
+});
 
 test('run output contract: a writer in its own worker and the real Data worker (without storage full)', async ({ context }) => {
   const page = await openHarness(context, server);

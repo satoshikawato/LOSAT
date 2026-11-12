@@ -1,6 +1,6 @@
-- Tests: the Web E2E tests use Playwright 1.65.0 (Chromium 158, Firefox 159, WebKit 27.2 build 2388) instead
-  of 1.61.1. Its WebKit did not crash once in 15,000 page starts on CI's runners, where WebKit build 2311 crashed
-  44 times in the same runs: twice in JIT code on the page's main thread (seen on CI as a run stuck "Preparing" or
-  a source stuck "indexing"), the others as processes ended after their test. The OPFS BlockStore contract now runs
-  in a profile on disk in Firefox and WebKit, so WebKit runs it for the first time (WebKit refuses OPFS in
-  Playwright's incognito contexts, where the application keeps results in memory and says so).
+- Tests: the Web E2E tests use Playwright 1.64.1 (Chromium 156, Firefox 157, WebKit 27.2 build 2370) instead of
+  1.61.1, whose WebKit build 2311 crashed in a diagnostic on CI's runners (15,000 page starts with pastes): 44 core
+  dumps, 2 of them crashes in JIT code on the page's main thread, which CI saw as a page that stopped answering. The
+  OPFS BlockStore contract runs in a profile on disk, where WebKit passes it for the first time (WebKit refuses OPFS in
+  Playwright's incognito contexts; that failure had reverted 1.64.1 in #847). Not 1.65.0: its Firefox 159 crashes
+  during the axe check of `announce.spec.ts:449` (30 of 30 runs; Firefox 157, 0 of 30).

@@ -306,6 +306,7 @@ fn run_queries(
                     x_xml2_carry: None,
                     last_call: false,
                     psi_round: Some(&io),
+                    stopped_pssms: None,
                     titles_may_refuse,
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
@@ -344,7 +345,11 @@ fn run_queries(
             }
             state.advance(outcome.set);
             if state.go() || plan.save_last {
-                // The PSSM engine's error comes here, after the round's report (no epilog).
+                // The PSSM's warnings and the engine's error come here, after the round's report
+                // (no epilog).
+                outputs
+                    .diagnostics
+                    .write_all(&outcome.next_warnings.bytes())?;
                 pssm = Some(
                     outcome
                         .next
@@ -533,7 +538,7 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // `core::psi::PsiScoreBlk::set_ungapped_statistical_params`: the round's PSI blocks)
 /// Whether the PSSM takes a Seq-align of the e-value `e_value` (`GetLowestEvalue` of its scores,
 /// below `-inclusion_ethresh`, `x_ExtractAlignmentData`): the round's inclusion set and the
-/// subjects whose letters the PSSM reads (`ListedTitles::check_pssm_subjects`).
+/// subjects whose letters the PSSM reads (`ListedTitles::pssm_reads`).
 pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
     const BLAST_EXPECT_VALUE: f64 = 10.0;
     crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
@@ -615,6 +620,7 @@ pub(super) fn round_outcome(
     if makes_next {
         HandleIndex::new(&set)?;
     }
+    let mut next_warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
     let next = makes_next.then(|| {
         next_pssm(
             args,
@@ -625,6 +631,7 @@ pub(super) fn round_outcome(
             contexts,
             gapped,
             keys,
+            &mut next_warnings,
         )
     });
     // The blocks of a PSSM round's search, which NCBI writes back into the PSSM it searched
@@ -637,6 +644,7 @@ pub(super) fn round_outcome(
         has_alignments,
         set,
         next,
+        next_warnings,
         searched,
     });
     Ok(found_before)
@@ -681,9 +689,62 @@ pub(super) struct SubjectKeys<'a> {
     pub(super) listed_ordinals: Option<&'a [u32]>,
     /// The parsed Seq-ids of a database's subjects by rank (empty without them).
     pub(super) parsed: &'a [Option<Arc<ParsedSubject>>],
+    /// What the PSSM reads by those Seq-align ids where it is not the subject's own letters
+    /// (`ListedTitles::pssm_reads`; empty without parsed Seq-ids).
+    pub(super) reads: &'a super::database::PssmReads,
 }
 
 impl SubjectKeys<'_> {
+    /// The letters that the PSSM reads by the Seq-align id of subject `s_idx` (`PssmReads`), in
+    /// NCBIstdaa: its own are `shown_subjects`' (`None` for no sequence). A subject whose own
+    /// letters are missing or empty (no database or `-subject` record has none) is LOSAT's
+    /// internal error, not NCBI's warning (review 2 of line DBID pssmread, L2).
+    pub(super) fn letters(
+        &self,
+        shown_subjects: ShownSubjects<'_>,
+        s_idx: u32,
+    ) -> Result<Option<Vec<u8>>> {
+        self.reads.letters(s_idx, || {
+            let letters = match shown_subjects.letters(s_idx as usize) {
+                Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
+                Some(ShownLetters::Stored(residues)) => residues.to_vec(),
+                None => Vec::new(),
+            };
+            if letters.is_empty() {
+                bail!("internal error of LOSAT's PSIBLAST: subject {s_idx} of the PSSM has no letters");
+            }
+            Ok(letters)
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:445-449
+    // ```c++
+    //     } catch (const CException&) {
+    //         sequence_data.erase();
+    //         ERR_POST(Warning << "Failed to retrieve sequence " <<
+    //                  seqloc.GetInt().GetId().AsFastaString());
+    // ```
+    /// NCBI's warning for each Seq-align whose letters the PSSM cannot read, by subject
+    /// (`query_pssm`'s `unread`): the Seq-align id as a FASTA string, each with its subject. Only
+    /// subjects with parsed Seq-ids can fail to be read.
+    pub(super) fn unread_warnings(
+        &self,
+        program: &str,
+        unread: &[u32],
+        out: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
+    ) {
+        for &s_idx in unread {
+            if let Some(subject) = self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                let mut line = Vec::new();
+                line.extend_from_slice(b"Warning: [");
+                line.extend_from_slice(program.as_bytes());
+                line.extend_from_slice(b"] Failed to retrieve sequence ");
+                line.extend_from_slice(&subject.alignment_fasta());
+                line.push(b'\n');
+                out.push(s_idx, line);
+            }
+        }
+    }
     pub(super) fn key(&self, s_idx: u32) -> SetKey {
         match self.listed_ordinals {
             None => SetKey::Index(s_idx),
@@ -724,14 +785,9 @@ fn next_pssm(
     contexts: &[QueryContext],
     gapped: &KarlinParams,
     keys: SubjectKeys<'_>,
+    warnings: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
 ) -> Result<QueryPssm> {
-    let subject = |s_idx: u32| -> Vec<u8> {
-        match shown_subjects.letters(s_idx as usize) {
-            Some(ShownLetters::Ascii(letters)) => ncbistdaa_letters(letters),
-            Some(ShownLetters::Stored(residues)) => residues.to_vec(),
-            None => Vec::new(),
-        }
-    };
+    let subject = |s_idx: u32| keys.letters(shown_subjects, s_idx);
     let scoring = PssmScoring {
         matrix: args.scoring.matrix,
         matrix_name: &args.matrix_name,
@@ -798,7 +854,8 @@ fn next_pssm(
             }
         }
     };
-    query_pssm(
+    let mut unread = Vec::new();
+    let pssm = query_pssm(
         &io.request,
         scoring,
         table_gapped,
@@ -812,7 +869,10 @@ fn next_pssm(
         &subject,
         &|s_idx| keys.key(s_idx),
         ancillary,
-    )
+        &mut unread,
+    );
+    keys.unread_warnings(args.app.ncbi_name(), &unread, warnings);
+    pssm
 }
 
 #[cfg(test)]

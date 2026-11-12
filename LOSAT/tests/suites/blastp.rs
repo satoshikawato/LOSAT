@@ -57,6 +57,8 @@ mod blastp_subject_runs;
 mod blastp_ungap_sent;
 #[path = "../psiblast_pssm_files.rs"]
 mod psiblast_pssm_files;
+#[path = "../psiblast_pssm_read_order.rs"]
+mod psiblast_pssm_read_order;
 #[path = "../psiblast_taxdb_blocks.rs"]
 mod psiblast_taxdb_blocks;
 #[path = "../run_local_blastp.rs"]

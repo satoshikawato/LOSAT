@@ -164,7 +164,7 @@ fn row_letters(row: &[PsiMsaCell]) -> Vec<Option<u8>> {
 fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
     let query = [1, 2, 3, 4, 5, 6];
     let subjects: [&[u8]; 3] = [&[10, 11, 12, 13, 14, 15, 16], &[20, 21, 22], &[7, 8, 9, 10]];
-    let subject = |s_idx: u32| subjects[s_idx as usize].to_vec();
+    let subject = |s_idx: u32| Ok(Some(subjects[s_idx as usize].to_vec()));
     let gapped = [
         GapEditOp::Sub(2),
         GapEditOp::Ins(1),
@@ -179,7 +179,15 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
         alignment(1, 1.0, 0, 0, 3, None),
         alignment(2, 0.0, 3, 0, 3, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &SetKey::Index, 0.002).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(row_letters(&msa.rows[0]), query.map(Some).to_vec());
     // HSP 1 at query 0: 11 12, a gap in the subject at query 2, the subject's 13 14 skipped,
@@ -195,19 +203,66 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:344-354 and 440-450
+// (quoted at `input_msa`): a Seq-align whose letters cannot be read (no sequence, or a range
+// that ends beyond the letters read by its id) makes its row the query's letters, also over the
+// cells that an earlier Seq-align of the row filled, and its subject is named for the warning.
+#[test]
+fn an_unread_seq_align_makes_its_row_the_query() {
+    let query = [1, 2, 3, 4, 5, 6];
+    // Subject 0 reads its own letters; subject 1 (the same row: its key is 0's) reads another
+    // sequence one letter short of its range; subject 2 reads none; subject 3 a longer one.
+    let letters = |s_idx: u32| {
+        Ok(match s_idx {
+            0 => Some(vec![10, 11, 12, 13]),
+            1 => Some(vec![20, 21]),
+            2 => None,
+            _ => Some(vec![30, 31, 32, 33, 34, 35, 36]),
+        })
+    };
+    let key = |s_idx: u32| SetKey::Index(if s_idx == 1 { 0 } else { s_idx });
+    // Two query letters over three subject letters: the range is 0..3.
+    let gapped = [GapEditOp::Sub(1), GapEditOp::Del(1), GapEditOp::Sub(1)];
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 3, None),
+        alignment(1, 1e-9, 3, 0, 2, Some(&gapped)),
+        alignment(2, 1e-8, 0, 0, 2, None),
+        alignment(3, 1e-7, 2, 1, 3, None),
+    ];
+    let mut unread = Vec::new();
+    let msa = input_msa(&query, &alignments, &letters, &key, 0.002, &mut unread).unwrap();
+    assert_eq!(unread, vec![1, 2]);
+    assert_eq!(msa.rows.len(), 4);
+    let whole = query.map(Some).to_vec();
+    assert_eq!(row_letters(&msa.rows[1]), whole);
+    assert_eq!(row_letters(&msa.rows[2]), whole);
+    assert_eq!(
+        row_letters(&msa.rows[3]),
+        vec![None, None, Some(31), Some(32), Some(33), None]
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-323 (quoted at
 // `input_msa`): `msa_index` moves on after a subject that is not counted, and an HSP whose index
 // passes the rows NCBI allocates is written out of bounds (`_ASSERT` only). LOSAT refuses it.
 #[test]
 fn an_alignment_past_the_last_row_is_refused() {
     let query = [1, 2, 3];
-    let subject = |_: u32| vec![4, 5, 6];
+    let subject = |_: u32| Ok(Some(vec![4, 5, 6]));
     // Subject 1 is not counted but comes first: subject 0's HSP takes index 2 of 2 rows.
     let alignments = [
         alignment(1, 1.0, 0, 0, 3, None),
         alignment(0, 1e-10, 0, 0, 3, None),
     ];
-    let error = input_msa(&query, &alignments, &subject, &SetKey::Index, 0.002).unwrap_err();
+    let error = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
     assert_eq!(
         error.to_string(),
@@ -219,7 +274,15 @@ fn an_alignment_past_the_last_row_is_refused() {
         alignment(1, 1.0, 0, 0, 3, None),
         alignment(2, 1e-10, 0, 0, 3, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &SetKey::Index, 0.002).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(row_letters(&msa.rows[2]), vec![Some(4), Some(5), Some(6)]);
 }
@@ -250,7 +313,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         &[9, 10, 11, 12],
         &[13, 14, 15, 16],
     ];
-    let subject = |s_idx: u32| subjects[s_idx as usize].to_vec();
+    let subject = |s_idx: u32| Ok(Some(subjects[s_idx as usize].to_vec()));
     // Copies of one record (subjects 0 and 1): one handle, one row; the copy fills only the
     // cells that the first left unaligned.
     let key = key_of(&[
@@ -264,7 +327,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(1, 1e-9, 1, 1, 3, None),
         alignment(2, 1e-8, 0, 0, 4, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap();
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(
         row_letters(&msa.rows[1]),
@@ -280,7 +343,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(2, 1e-10, 0, 0, 2, None),
         alignment(3, 1e-9, 2, 2, 2, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap();
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(
         row_letters(&msa.rows[1]),
@@ -293,7 +356,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(0, 1e-9, 0, 0, 4, None),
         alignment(3, 1e-8, 2, 2, 2, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap();
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
     assert_eq!(msa.rows.len(), 4);
     assert_eq!(
         row_letters(&msa.rows[3]),
@@ -306,7 +369,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(2, 1e-9, 0, 0, 4, None),
         alignment(1, 1e-8, 0, 0, 4, None),
     ];
-    let error = input_msa(&query, &alignments, &subject, &key, 0.002).unwrap_err();
+    let error = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap_err();
     assert!(
         error
             .to_string()
@@ -321,7 +384,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
 #[test]
 fn an_e_value_from_10_on_counts_as_10() {
     let query = [1, 2];
-    let subject = |_: u32| vec![3, 4];
+    let subject = |_: u32| Ok(Some(vec![3, 4]));
     for (e_value, threshold, rows) in [
         (9.0, 10.0, 2),
         (9.0, 9.0, 1),
@@ -337,6 +400,7 @@ fn an_e_value_from_10_on_counts_as_10() {
             &subject,
             &SetKey::Index,
             threshold,
+            &mut Vec::new(),
         )
         .unwrap();
         assert_eq!(msa.rows.len(), rows, "{e_value} {threshold}");
@@ -465,7 +529,7 @@ fn run_query_pssm(
     inclusion_ethresh: f64,
     letters: &[u8],
     alignments: &[PssmAlignment<'_>],
-    subject: &dyn Fn(u32) -> Vec<u8>,
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
 ) -> Result<QueryPssm> {
     query_pssm(
         request,
@@ -481,6 +545,7 @@ fn run_query_pssm(
         subject,
         &SetKey::Index,
         ANCILLARY,
+        &mut Vec::new(),
     )
 }
 
@@ -498,12 +563,20 @@ fn an_o_in_the_query_prints_as_x() {
     for (position, letter) in [(4, b'A'), (14, b'I'), (24, b'S')] {
         subject_letters[position] = letter;
     }
-    let subject = |_: u32| ncbistdaa_letters(&subject_letters);
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(&subject_letters)));
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let query = crate::algorithm::blastp::encoding::encode_protein_sequence(&record);
     let query = &query.aa_seq[1..=query.aa_len];
     assert_eq!(query[29], ncbistdaa::X);
-    let msa = input_msa(query, &alignments, &subject, &SetKey::Index, 0.002).unwrap();
+    let msa = input_msa(
+        query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap();
     let sbp = score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap();
     let pssm =
         psi::create_pssm_with_diagnostics(&msa, 0, &sbp, PsiDiagnosticsRequest::new_ex(true))
@@ -539,7 +612,7 @@ fn an_o_in_the_query_prints_as_x() {
 // first, then the inclusion threshold.
 #[test]
 fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
-    let subject = |_: u32| ncbistdaa_letters(TK_1_40);
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let run = |pseudocount: i32, inclusion_ethresh: f64| {
         run_query_pssm(
@@ -939,5 +1012,61 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
                 .starts_with("an -out_ascii_pssm file that is also the standard "));
         }
     }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:302-321 and 440-450
+// (quoted at `input_msa`): each included Seq-align's subject is read in turn, the scope loading
+// its sequence (and looking its taxids up) before the letters, whose failure warns.
+#[test]
+fn a_reads_taxonomy_texts_come_before_its_warnings_and_after_those_before_it() {
+    let line = |text: &str| text.as_bytes().to_vec();
+    let mut messages = PssmReadMessages::default();
+    // Subject 3 fails (no sequence, so no load), subject 5 fails twice, subject 7 not at all.
+    messages.push(3, line("warn 3\n"));
+    messages.push(5, line("warn 5a\n"));
+    messages.push(5, line("warn 5b\n"));
+    messages.add_load_texts([
+        (2, line("text 2\n")),
+        (3, Vec::new()),
+        (5, line("text 5\n")),
+        (7, line("text 7\n")),
+    ]);
+    assert_eq!(
+        String::from_utf8(messages.bytes()).unwrap(),
+        "text 2\nwarn 3\ntext 5\nwarn 5a\nwarn 5b\ntext 7\n"
+    );
+    // Without warnings the texts are the messages.
+    let mut texts = PssmReadMessages::default();
+    texts.add_load_texts([(0, Vec::new()), (1, line("text 1\n"))]);
+    assert_eq!(texts.bytes(), line("text 1\n"));
+}
+
+#[test]
+fn a_querys_read_messages_keep_the_order_of_the_queries() {
+    let dir = scratch("read-messages");
+    let mut files = PssmFiles::new(&request(&dir.join("p.txt"), false));
+    let mut warning = PssmReadMessages::default();
+    warning.push(0, b"warn q1\n".to_vec());
+    files.add_read_warnings(1, warning);
+    files.add_read_warnings(2, PssmReadMessages::default());
+    // Texts of query 0, which has no warning, and of query 1, before its warning.
+    files
+        .read_messages(0)
+        .add_load_texts([(4, b"text q0\n".to_vec())]);
+    files
+        .read_messages(1)
+        .add_load_texts([(0, b"text q1\n".to_vec())]);
+    // An entry made for texts that are not there is not written.
+    let _ = files.read_messages(3);
+    assert_eq!(
+        files.take_read_warnings(),
+        vec![
+            (0, b"text q0\n".to_vec()),
+            (1, b"text q1\nwarn q1\n".to_vec())
+        ]
+    );
+    assert!(files.take_read_warnings().is_empty());
+    drop(files);
     std::fs::remove_dir_all(&dir).unwrap();
 }

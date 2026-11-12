@@ -28,6 +28,7 @@
 
 use anyhow::Result;
 
+use super::evalue::EvalueStats;
 use super::gapalign::{pssm_gapped_alignment_with_traceback, PssmGapScratch};
 use super::rows::QueryPssm;
 use super::traceback0::final_hsp;
@@ -49,7 +50,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, test_near_identical, BlastCompoAlignment, BlastCompoSequenceData,
     EMatrixAdjustRule, MINIMUM_LENGTH_NEAR_IDENTICAL,
 };
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::KarlinParams;
 use crate::utils::matrix::ncbistdaa;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:681-684
@@ -97,8 +98,10 @@ pub(crate) struct PssmRedo1<'a> {
     pub(crate) karlin: &'a KarlinParams,
     /// `extendParams->gap_x_dropoff_final`, the final gapped X-drop of the search (raw score).
     pub(crate) x_drop_final: i32,
-    /// `sbp->gbp`.
-    pub(crate) gumbel: &'a BlastGumbelBlk,
+    /// `sbp->gbp` (the redo's copies of the score block have it when the search has it:
+    /// blast_stat.c:921-923 and blast_kappa.c:2865-2867) and the context's effective search
+    /// space.
+    pub(crate) stats: EvalueStats<'a>,
     pub(crate) expect_value: f64,
     /// `hitParams->options->hitlist_size` (psiblast's preliminary size).
     pub(crate) hitlist_size: usize,
@@ -250,6 +253,25 @@ impl<'a> RedoRun<'a> {
             bound_check: false,
             bound_exceeded: None,
         }
+    }
+
+    /// The redo's X-drop from the search's final X-drop in bits `bits`
+    /// (`options->gap_x_dropoff_final`) in place of the protein default that `new` reads:
+    /// RPS-BLAST's `-xdrop_gap_final`. `x_drop_final` is the search's final X-drop (raw score), as
+    /// `new` takes it; the caller has checked that the conversion is defined (`x_dropoff_of`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2381-2383 (quoted at
+    /// `new`)
+    pub(crate) fn with_final_x_drop_bits(mut self, bits: f64, x_drop_final: i32) -> Self {
+        self.x_dropoff = Self::x_dropoff_of(bits, self.karlin.lambda, x_drop_final) as i32;
+        self
+    }
+
+    /// `MAX(gap_x_dropoff_final * NCBIMATH_LN2 / min_lambda, extendParams->gap_x_dropoff_final)`
+    /// before NCBI's `(Int4)` conversion (blast_kappa.c:2381-2383, quoted at `new`): `new`'s
+    /// value with the final X-drop `bits` and the redo's Lambda `lambda`.
+    pub(crate) fn x_dropoff_of(bits: f64, lambda: f64, x_drop_final: i32) -> f64 {
+        (bits * std::f64::consts::LN_2 / lambda).max(x_drop_final as f64)
     }
 
     /// Checks every matrix the composition adjustment builds: an alignment uses each row once,
@@ -463,7 +485,7 @@ impl PssmRedo1<'_> {
         let subject_read = self.subjects.read(oid)?;
         Ok(RedoMatch {
             info: self.info,
-            gumbel: self.gumbel,
+            stats: self.stats,
             expect_value: self.expect_value,
             query_length: self.context.aa_len as i32,
             rps_roles: false,
@@ -472,12 +494,13 @@ impl PssmRedo1<'_> {
     }
 }
 
-/// What the redo of one match reads besides its run: the matrix information, the Gumbel block,
-/// `-evalue`, the query's length and the roles of the lengths in the e-values (RPS-BLAST's
-/// query is the profile and its subject the user's query: `Blast_HSPListGetEvalues` swaps them).
+/// What the redo of one match reads besides its run: the matrix information, the Gumbel block
+/// and the search space (`EvalueStats`), `-evalue`, the query's length and the roles of the
+/// lengths in the e-values (RPS-BLAST's query is the profile and its subject the user's query:
+/// `Blast_HSPListGetEvalues` swaps them).
 pub(crate) struct RedoMatch<'a> {
     pub(crate) info: &'a PosMatrixInfo,
-    pub(crate) gumbel: &'a BlastGumbelBlk,
+    pub(crate) stats: EvalueStats<'a>,
     pub(crate) expect_value: f64,
     pub(crate) query_length: i32,
     pub(crate) rps_roles: bool,
@@ -567,7 +590,7 @@ impl RedoMatch<'_> {
             } else {
                 (query_length, subject_length)
             };
-            hsp.e_value = blast_spouge_stoe(hsp.align.score, &run.karlin, self.gumbel, m, n);
+            hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
             best_evalue = best_evalue.min(hsp.e_value);
         }
         redone.retain(|hsp| hsp.e_value <= self.expect_value);

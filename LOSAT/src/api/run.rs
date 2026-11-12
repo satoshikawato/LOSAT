@@ -644,7 +644,8 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // ```
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
-// change the output. A search of records reads neither.
+// change the output. A search of records reads neither, but for the directory of BLASTN's
+// `-window_masker_taxid`, which NCBI's library looks for itself.
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
     command: Commands,
@@ -694,6 +695,24 @@ pub(super) fn run_local(
             // The counts file of `-window_masker_db` is read from the file system, as on the
             // command line (LOSAT Web's host gives its own source).
             if args.window_masker_db.is_some() {
+                args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:381-388
+            // ```c++
+            //     CRef<CNcbiRegistry> reg(new CNcbiRegistry(empty_stream,
+            //                                               IRegistry::fWithNcbirc));
+            //     ...
+            //     reg->Add(*env_reg, CNcbiRegistry::ePriority_MaxUser);
+            //     retval = reg->Get(kSection, kEnvVar);
+            // ```
+            // The directory of `-window_masker_taxid` is looked for by NCBI's library itself, in
+            // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
+            // a database search of the library does.
+            if args.window_masker_taxid.is_some_and(|taxid| taxid != 0) {
+                use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
+                let settings =
+                    check_ncbi_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                args.window_masker_path = Some(settings.window_masker_path);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
             run_local_blastn(args, query, subject, outputs)

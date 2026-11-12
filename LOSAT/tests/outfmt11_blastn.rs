@@ -1,7 +1,7 @@
 //! `blastn -outfmt 11` (the BLAST archive) against the bytes that NCBI BLAST+ 2.17.0 `blastn
 //! -num_threads 1` writes, for the cases that need an environment variable or a failing run (the
 //! searches without them are the `sa.arch.bn.*` rows of `outfmt0_manifest.tsv` and the
-//! `db.sa.arch.bn.*` rows of `db_search_manifest.tsv`): `BATCH_SIZE` (one archive per query
+//! `db.sa.arch.bn.*` rows of `db_search_manifest/blastn.tsv`): `BATCH_SIZE` (one archive per query
 //! batch, `EffectiveSearchSpace` per batch), a reader error in the second batch (the archive of
 //! the first batch, then an error archive, rc 1), `ARCHIVE_FORMAT` (`bin...` in any case:
 //! ASN.1 binary; `xml` in any case: NCBI's XML archive; any other value that is not empty: nothing

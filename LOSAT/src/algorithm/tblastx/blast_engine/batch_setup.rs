@@ -425,7 +425,7 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // as units, the units' tables (one per query-context group) are built directly from the
     // query, and `lookup` becomes a stub with the full table's header and no entries
     // (x_pair_par.rs `lut_build`; lookup/x_pair_lut.rs for why the tables are the same). The
-    // inputs are the ones dispatch point 1 (in `search_query_batch`, after this call) gives
+    // inputs are the ones dispatch point 1 (`seed_tables::scan_tables`, after this call) gives
     // `prepare`, by the same expressions; `prepare` decides again and stops the run if it
     // disagrees. When the unit path will not run, the reference builder below runs.
     //

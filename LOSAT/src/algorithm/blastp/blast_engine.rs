@@ -6090,10 +6090,60 @@ fn resolve_for_formats(
 /// query (`-in_pssm`, which is never split): LOSAT rejects that too. Each batch of `batches` holds
 /// one query
 /// (`read_psiblast_query_batches`); its validity is that of the search's contexts (the query with
-/// its SEG masks, or its letters with `-soft_masking true`: `blastp_query_frames`).
+/// its SEG masks, or its letters with `-soft_masking true`: `blastp_query_frames`), and for a PSSM
+/// query also that of `kbp_psi`, which a negative ungapped value of its file makes invalid (NCBI
+/// 2.17.0: the same error, exit 3; line PS DECISIONS 30).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:183-184
+/// ```c
+///    if ((status=s_BlastFindValidKarlinBlk(sbp->kbp, query_info, &kbp)) != 0)
+///          return status;
+/// ```
+/// Before that, the setup of the first batch's search reads the length of the database's first
+/// sequence when the database has no letters: a database without sequences has none, and
+/// psiblast stops with `BLAST Database error: OID not found` (exit 2), after the prolog, whatever
+/// its query (NCBI 2.17.0 with `tk.faa` and an all-X query; probes `n.ps.empty.*` of the PS5c review;
+/// blastp's `CLocalBlast` fails earlier, `run_resolved_in_pool`; line PS DECISIONS 30).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-936
+/// ```c
+///           Int4 oid = 0;  /* Get length of first sequence. */
+///           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
+///               total_length = -1;
+///               num_seqs = -1;
+///           }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
+/// ```c++
+///     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-201
+/// ```c++
+///         else {                                                              \
+///         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+///         	exit_code = BLAST_DATABASE_ERROR;                               \
+/// ```
+/// A database whose sequence file cannot be opened fails the first read of the preliminary
+/// search of a valid query in the same way: psiblast's `CBlastPrelimSearch` runs without
+/// `CLocalBlast`, whose catch makes it `Database memory map file error` for blastp
+/// (local_blast.cpp:229-252, quoted at `seqdb::SeqDbError`), so the reader's own text reaches
+/// the application (`BLAST Database error: Error: File (<path>.psq) not found.`, exit 2, after
+/// the prolog; NCBI 2.17.0, probe `y.g.ps.tk.nopsq.0` of the PS5c review; line PS DECISIONS 31).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
+/// ```c++
+///     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
+///         //m_Atlas.Unlock(locked);
+///
+///         string msg = string("Error: File (") + m_FileName + ") not found.";
+///
+///         NCBI_THROW(CSeqDBException, eFileErr, msg);
+///     }
+/// ```
 fn psiblast_stop_at_invalid_query(
     args: &ResolvedBlastpArgs,
     searched_queries: &[FastaRecord],
+    database: Option<&database::BlastpDatabase>,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
     let frames: Vec<Vec<QueryFrame>> = batches
@@ -6105,18 +6155,65 @@ fn psiblast_stop_at_invalid_query(
         .collect();
     let (_, _, contexts) =
         prepare_blosum62_lookup_query_for_word_size(&frames, args.word_size, false);
-    let Some(batch) = contexts.iter().position(|context| !context.is_valid) else {
+    // `kbp_psi` of a PSSM query (`PsiSearch::ungapped_karlin`), valid as `s_BlastKarlinBlkIsValid`
+    // (blast_parameters.c:43-50) holds it.
+    let kbp_psi_valid = |context: &QueryContext| {
+        args.psi_search.as_deref().is_none_or(|psi| {
+            let kbp = psi.ungapped_karlin(&context.karlin_params);
+            kbp.lambda > 0.0 && kbp.k > 0.0 && kbp.h > 0.0
+        })
+    };
+    // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
+    let empty_database = database.is_some_and(|database| database.printed_num_sequences() == 0)
+        && contexts
+            .first()
+            .is_some_and(|context| args.psi_search.is_none() || context.is_valid);
+    // A sequence file that cannot be opened stops the first batch when its query is valid (the
+    // first read of the preliminary search; volumes in the order NCBI reads them).
+    let unreadable = match (database, contexts.first()) {
+        (Some(database), Some(context))
+            if !empty_database && context.is_valid && kbp_psi_valid(context) =>
+        {
+            database
+                .seqdb()
+                .volumes()
+                .iter()
+                .find_map(|volume| volume.open_sequence_file().err())
+        }
+        _ => None,
+    };
+    let first_stop = if empty_database || unreadable.is_some() {
+        Some(0)
+    } else {
+        contexts
+            .iter()
+            .position(|context| !context.is_valid || !kbp_psi_valid(context))
+    };
+    let Some(batch) = first_stop else {
         return batches;
     };
     let (input_start, searched_start) = batches.starts[batch];
     let query_length = searched_queries[searched_start].seq().len();
     let error = match protein_query_split_sizes(args.app.name(), 10000) {
+        _ if empty_database => crate::cli::NativeError {
+            exit: 2,
+            message: "BLAST Database error: OID not found\n".to_string(),
+        }
+        .into(),
+        _ if unreadable.is_some() => crate::algorithm::common::database::database_error(
+            unreadable.expect("the sequence file's error"),
+            args.app.name(),
+        ),
         // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
         // did not make (psiblast_aux_priv.cpp:89-107, blast_stat.c:2783-2799).
-        Ok(_) if args.psi_search.is_some() => anyhow::anyhow!(
+        Ok(_) if args.psi_search.is_some() && !contexts[batch].is_valid => anyhow::anyhow!(
             "a PSSM query whose letters give no Karlin-Altschul parameters (with which NCBI BLAST+'s psiblast crashes) is not supported by LOSAT's PSIBLAST"
+        ),
+        // Its letters give them, but the file's ungapped values make `kbp_psi` invalid.
+        Ok(_) if args.psi_search.is_some() => crate::blastinput::app::engine_error(
+            crate::report::query_warnings::INVALID_QUERY_MESSAGE,
         ),
         Ok(sizes)
             if crate::algorithm::blastp::protein_query_split::split_protein_batch(
@@ -6386,6 +6483,7 @@ fn search(
         BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
             &args,
             &searched_queries,
+            database,
             crate::blastinput::query_batch::read_psiblast_query_batches(
                 query_records,
                 &searched_queries,
@@ -7643,29 +7741,45 @@ fn write_reports_without_queries(
 //     	new_msg->message = strdup("Database memory map file error");
 //         new_msg->severity = eBlastSevFatal;
 // ```
-/// The error of a database search whose preliminary stage cannot read the database (a
-/// database without sequences, a sequence file that is missing or unreadable): NCBI has
-/// opened the database, written the outfmt 0 prolog and read the first query batch (its
-/// reader's messages) when the batch's search fails with `BLAST engine error: <text>`,
-/// exit status 3. LOSAT searches all batches together, so the failure is the first
-/// batch's. `first_batch_searched` is false when the first batch holds invalid queries
-/// only: NCBI does not search such a batch (local_blast.cpp:177-180), the failure would
-/// come with a later batch, after that batch's report, which is not reproduced.
+/// The error of a query batch's search that fails in its setup or preliminary stage (a database
+/// without sequences, a sequence file that is missing or unreadable, RPS-BLAST's files, the
+/// average subject length without the Gumbel block): NCBI has written the outfmt 0 prolog and
+/// read the batch (its reader's messages) when the batch's search fails with `BLAST engine error:
+/// <text>`, exit status 3. LOSAT searches all batches together, so the failure is the first
+/// searched batch's: the call's first batch, or, when that batch holds invalid queries only,
+/// which NCBI does not search (local_blast.cpp:177-180), a later one, after the reports of the
+/// batches before it (`unsearched_batches_then_engine_error`). `chunk` is a split query's chunk
+/// (its batch is searched). `database_name` is empty for a subject set.
 #[allow(clippy::too_many_arguments)]
 fn preliminary_search_error(
     args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ranges: &BlastpRanges<'_>,
     reports: &BlastpReports<'_>,
-    first_batch_searched: bool,
+    query_batches: &[seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+    chunk: bool,
     database_name: &str,
     text: &str,
 ) -> anyhow::Error {
-    if !first_batch_searched {
-        return anyhow::anyhow!(
-            "the database {database_name} cannot be searched ({text}) and the first query batch is one that NCBI BLAST+ does not search; this is not supported by LOSAT's {}",
-            args.app.name()
+    if !(chunk || query_batch_skipped.first() == Some(&false)) {
+        return unsearched_batches_then_engine_error(
+            args,
+            query_records,
+            subject_source,
+            subject_label,
+            outputs,
+            pool,
+            ranges,
+            reports,
+            query_batches,
+            query_batch_skipped,
+            database_name,
+            text,
         );
     }
     let written = (|| -> Result<()> {
@@ -7683,6 +7797,118 @@ fn preliminary_search_error(
         Ok(()) => crate::blastinput::app::engine_error(text),
         Err(error) => error,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
+/// The error `text` of a query batch's search (`BLAST engine error: <text>`, exit status 3) when
+/// the call's first batch holds invalid queries only: NCBI does not search such a batch and
+/// reports its queries, so the reports of the batches before the first searched one come first
+/// (searched again here, alone and without the epilog: none of their queries is searched), then
+/// that batch's reader messages and the error (NCBI 2.17.0 blastp `BATCH_SIZE=1`, an all-X query
+/// before tk, with `-subject` of `MK`, ``, `` and `-searchsp 1000`, or `-db` of an empty
+/// database: outfmt 0 and 7, exit 3; line PS DECISIONS 28 and 30). LOSAT refuses where this is
+/// not ported: no searched batch, another program, or a format other than 0, 6, 7 and 10.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn unsearched_batches_then_engine_error(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ranges: &BlastpRanges<'_>,
+    reports: &BlastpReports<'_>,
+    query_batches: &[seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+    database_name: &str,
+    text: &str,
+) -> anyhow::Error {
+    let first_searched = query_batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
+    let ported_formats = outputs.formats.iter().all(|format| {
+        crate::blastinput::app::parse_formatting_string(format.outfmt)
+            .is_ok_and(|choice| matches!(choice.number, 0 | 6 | 7 | 10))
+    });
+    let Some(batch) = first_searched
+        .filter(|_| ported_formats && args.app == BlastpApp::Blastp && args.archive.is_none())
+    else {
+        let searched = if database_name.is_empty() {
+            "the subjects".to_string()
+        } else {
+            format!("the database {database_name}")
+        };
+        return anyhow::anyhow!(
+            "a search of {searched} that fails with NCBI BLAST+'s error \"{text}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            args.app.name()
+        );
+    };
+    let (searched_end, input_end) = (batch.searched.start, batch.input.start);
+    let input = ranges.query_input;
+    let prefix_input = seq_range::QueryInput {
+        placements: seq_range::Placements(
+            input
+                .placements
+                .0
+                .iter()
+                .take(searched_end)
+                .copied()
+                .collect(),
+        ),
+        ordinals: input.ordinals[..searched_end].to_vec(),
+        input_lengths: input.input_lengths[..input_end].to_vec(),
+        skipped: input.skipped[..input_end].to_vec(),
+        range_length: input.range_length,
+    };
+    let prefix_ranges = BlastpRanges {
+        input_records: &ranges.input_records[..input_end],
+        query_input: &prefix_input,
+        subject_placements: ranges.subject_placements,
+        x_ordinal_base: ranges.x_ordinal_base,
+    };
+    let prefix_reports = BlastpReports {
+        reader_warnings: &reports.reader_warnings
+            [..searched_end.min(reports.reader_warnings.len())],
+        identity_warned: reports.identity_warned,
+        epilog: false,
+        x_prolog: reports.x_prolog,
+        x_queries_before: reports.x_queries_before,
+        x_xml2_carry: reports.x_xml2_carry,
+        // The engine error follows this report and ends the run: it is the run's last report
+        // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
+        last_call: true,
+        psi_round: None,
+        titles_may_refuse: reports.titles_may_refuse,
+    };
+    if let Err(error) = run_resolved_in_pool(
+        args.clone(),
+        &query_records[..searched_end],
+        subject_source,
+        "",
+        subject_label,
+        outputs,
+        pool,
+        None,
+        &prefix_ranges,
+        &prefix_reports,
+        x_lookup_ahead::XAheadBlock::none(),
+    ) {
+        return error;
+    }
+    if let Some(messages) = reports.reader_warnings.get(searched_end) {
+        if let Err(error) = outputs.diagnostics.write_all(messages) {
+            return error.into();
+        }
+    }
+    crate::blastinput::app::engine_error(text)
 }
 
 /// What the reports of the searched batches need besides the search: the reader's
@@ -7722,7 +7948,7 @@ struct BlastpReports<'a> {
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
 /// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`), `OLD_FSC` in PSIBLAST and RPSBLAST (BLASTP reads it) and query split
+/// archive (`archive`), `OLD_FSC` in RPSBLAST (BLASTP and PSIBLAST read it) and query split
 /// values that NCBI cannot convert (not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never
 /// splits). Other
 /// batch sizes change a blastp report only through the query batches
@@ -7738,8 +7964,8 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
         fasta_subjects,
         archive && app == BlastpApp::Blastp,
     )?;
-    // BLASTP reads OLD_FSC as `-searchsp` (`ResolvedBlastpArgs::old_fsc`).
-    if app != BlastpApp::Blastp {
+    // BLASTP and PSIBLAST read OLD_FSC as `-searchsp 0` (`ResolvedBlastpArgs::old_fsc`).
+    if app == BlastpApp::Rpsblast {
         app::check_old_fsc(app_name)?;
     }
     // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
@@ -8798,14 +9024,26 @@ fn run_resolved_in_pool(
     // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
     // batch and fails in that batch's preliminary search, where its reader cannot map
     // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
-    if let Some(database) = database.filter(|database| database.printed_num_sequences() == 0) {
+    // A first batch of invalid queries only is not searched: the batches up to the first one that
+    // is are reported before the error (`unsearched_batches_then_engine_error`); a call of invalid
+    // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
+    // and the empty database: exit 0).
+    if let Some(database) = database.filter(|database| {
+        database.printed_num_sequences() == 0
+            && (chunk_prelim.is_some() || query_batch_skipped.iter().any(|skipped| !skipped))
+    }) {
         return Err(preliminary_search_error(
             &args,
+            query_records,
             subject_source,
             subject_label,
             outputs,
+            blastp_parallel_pool,
+            ranges,
             reports,
-            chunk_prelim.is_some() || query_batch_skipped.first() == Some(&false),
+            &query_batches,
+            &query_batch_skipped,
+            chunk_prelim.is_some(),
             database.name(),
             "Database memory map file error",
         ));
@@ -8927,15 +9165,36 @@ fn run_resolved_in_pool(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
-    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
-    // length is too short"; LOSAT refuses the search instead.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+    // ```c
+    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+    //         new_msg->message = strdup("The average subject length is too short");
+    //         new_msg->severity = eBlastSevFatal;
+    // ```
+    // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
+    // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
+    // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
+    // batch of invalid queries only, which NCBI does not search, the error follows the reports of
+    // the batches before the first searched one (`unsearched_batches_then_engine_error`).
     if args.old_fsc
         && contexts.iter().any(|ctx| ctx.is_valid)
         && total_db_len / num_subjects.max(1) == 0
     {
-        anyhow::bail!(
-            "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTP"
-        );
+        return Err(preliminary_search_error(
+            &args,
+            query_records,
+            subject_source,
+            subject_label,
+            outputs,
+            blastp_parallel_pool,
+            ranges,
+            reports,
+            &query_batches,
+            &query_batch_skipped,
+            chunk_prelim.is_some(),
+            "",
+            "The average subject length is too short",
+        ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-945
     // ```c
@@ -10516,11 +10775,16 @@ fn run_resolved_in_pool(
                 // outfmt 0 prolog.
                 (Some(database), Ok(engine_error)) => preliminary_search_error(
                     &args,
+                    query_records,
                     subject_source,
                     subject_label,
                     outputs,
+                    blastp_parallel_pool,
+                    ranges,
                     reports,
-                    query_batch_skipped.first() == Some(&false),
+                    &query_batches,
+                    &query_batch_skipped,
+                    false,
                     database.name(),
                     &engine_error.0,
                 ),
@@ -10539,6 +10803,7 @@ fn run_resolved_in_pool(
                 contexts: &contexts,
                 gapped_params: &gapped_params,
                 gumbel: gapped_gumbel.as_ref(),
+                exact_search_spaces: &exact_search_spaces,
                 cutoff_subject_length,
                 prelim_evalue,
                 window,
@@ -10559,11 +10824,16 @@ fn run_resolved_in_pool(
             Some(database) => match error.downcast::<database::PreliminaryReadError>() {
                 Ok(read_error) => preliminary_search_error(
                     &args,
+                    query_records,
                     subject_source,
                     subject_label,
                     outputs,
+                    blastp_parallel_pool,
+                    ranges,
                     reports,
-                    chunk_prelim.is_some() || query_batch_skipped.first() == Some(&false),
+                    &query_batches,
+                    &query_batch_skipped,
+                    chunk_prelim.is_some(),
                     database.name(),
                     read_error.0,
                 ),
@@ -10571,6 +10841,17 @@ fn run_resolved_in_pool(
             },
             None => error,
         })?;
+    } else if database.is_some() && !contexts.iter().any(|ctx| ctx.is_valid) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+        // ```c++
+        //     int status = m_PrelimSearch->CheckInternalData();
+        //     if (status != 0)
+        //     {
+        //          // Search was not run, but we send back an empty CSearchResultSet.
+        // ```
+        // No query of the call has Karlin-Altschul parameters: NCBI searches none of its
+        // batches and reads no sequence of the database (a sequence file that cannot be read
+        // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30).
     } else if let Some(database) = database {
         // The preliminary stage of a database: its sequences are read in blocks and
         // searched in the order of their ordinal ids (`database::search_blocks`).
@@ -10605,11 +10886,16 @@ fn run_resolved_in_pool(
             match error.downcast::<database::PreliminaryReadError>() {
                 Ok(read_error) => preliminary_search_error(
                     &args,
+                    query_records,
                     subject_source,
                     subject_label,
                     outputs,
+                    blastp_parallel_pool,
+                    ranges,
                     reports,
-                    chunk_prelim.is_some() || query_batch_skipped.first() == Some(&false),
+                    &query_batches,
+                    &query_batch_skipped,
+                    chunk_prelim.is_some(),
                     database.name(),
                     read_error.0,
                 ),
@@ -10942,6 +11228,7 @@ fn run_resolved_in_pool(
             subjects,
             &gapped_params,
             gapped_gumbel.as_ref(),
+            &exact_search_spaces,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,
@@ -13409,8 +13696,13 @@ fn run_resolved_in_pool(
                 //       m_NumSummary(num_summary), ...
                 // ```
                 let mut writer = format.sink.open()?;
+                // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:187
+                // ```c++
+                //         formatter.SetLineLength(fmt_args->GetLineLength());
+                // ```
+                // (`args.line_length`: rpsblast's `-line_length`, else 60.)
                 let pairwise_config = PairwiseConfig {
-                    line_length: 60,
+                    line_length: args.line_length,
                     show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
@@ -13697,9 +13989,9 @@ fn run_resolved_in_pool(
                     },
                     names: names.as_ref(),
                 };
-                // The rows of the queries' HSPs when a field shows them, a window at a time
-                // (`query_rows`).
-                let mut rows = needs.rows.then(|| {
+                // The rows of the queries' HSPs when a field shows them (and rpsblast's
+                // identities, `tabular::needs_rows`), a window at a time (`query_rows`).
+                let mut rows = super::tabular::needs_rows(needs.rows, spec, args.app).then(|| {
                     query_rows::QueryRows::new(
                         query_rows::row_windows(&hit_lists, hit_lists.len(), x_rows_pool),
                         pairwise_hits.as_deref().map(Vec::as_slice),
@@ -14071,6 +14363,7 @@ mod tests {
             inclusion_ethresh: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
+            formatting: Default::default(),
             rps: None,
         }
     }

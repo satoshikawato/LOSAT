@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev 193657f3a (2026-11-06): 154 IDs cited in the tree, 99 of them in `CHANGELOG.md`, `changelog.d/`
-and `docs/`. State: 142 done, 12 in progress, 0 stopped.
+As of dev 5b9ef05cf with line PS's PS5c (2026-11-11): 195 IDs cited in the tree, 116 of them in
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 166 rows below. State: 148 done, 18 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -148,18 +148,20 @@ and `docs/`. State: 142 done, 12 in progress, 0 stopped.
 
 | ID | Meaning | State | Main pull requests | Record in this repository |
 | --- | --- | --- | --- | --- |
-| `PS` | Line PS: add psiblast and related tools (iterations, PSSM files, tblastn -in_pssm, rpsblast, rpstblastn, deltablast, makeprofiledb) to LOSAT. | in progress | #503, #874, #892, #906, #917, #936 | [README.md](../../README.md), “7. PSI-BLAST (psiblast)” |
+| `PS` | Line PS: add psiblast and related tools (iterations, PSSM files, tblastn -in_pssm, rpsblast, rpstblastn, deltablast, makeprofiledb) to LOSAT. | in progress | #503, #874, #892, #906, #917, #936, #973 | [README.md](../../README.md), “7. PSI-BLAST (psiblast)” |
 | `PS1` | PS stage 1: `losat psiblast` runs the first round (-num_iterations 1) of NCBI BLAST+ 2.17.0 psiblast with -subject or -db, for outfmt 0, 6 and 7, on the blastp engine. | done | #503 | changelog entry `feature-ps-ps1` |
 | `PS2` | PS stage 2: the PSSM engine (NCBI core/blast_psi.c and blast_psi_priv.c) and psiblast's -out_ascii_pssm after the first round (-save_pssm_after_last_round, -save_each_pssm), byte for byte as NCBI BLAST+ 2.17.0. | done | #874 | changelog entry `feature-ps-ps2` |
 | `PS3` | PS stage 3: psiblast's -out_pssm, the PSSM as NCBI's ASN.1 text `PssmWithParameters` after the first round, byte for byte as NCBI BLAST+ 2.17.0, and the reader of that text (for -in_pssm, PS4). | done | #892 | changelog entry `feature-ps-ps3` |
 | `PS4a` | PS stage 4a: psiblast -in_pssm with -comp_based_stats 0, the search with a PSSM query (lookup table, ungapped and gapped extensions, traceback from the PSSM's rows), byte for byte as NCBI BLAST+ 2.17.0. | done | #906 | changelog entry `feature-ps-ps4` |
 | `PS4b` | PS stage 4b: psiblast -in_pssm with the position-based composition-based statistics (-comp_based_stats 1, and 2 and 3 run as 1 with NCBI's warning; the default), the zero-ratio warning and PSSMs of frequency ratios only, byte for byte as NCBI BLAST+ 2.17.0. | done | #917 | changelog entry `feature-ps-ps4b` |
 | `PS5a` | PS stage 5a: psiblast's rounds of FASTA queries (-num_iterations N, convergence, the two-part description table, the PSSM files of every round) and -comp_based_stats 0, with -subject or -db, for outfmt 0, 6, 7, 10 and 20, byte for byte as NCBI BLAST+ 2.17.0. | done | #936 | changelog entry `feature-ps-ps5` |
-| `PS5b` | PS stage 5b: psiblast -in_pssm with -num_iterations other than 1 and with the PSSM files (the input PSSM written back as NCBI's object holds it, the K/A write-back, the short and long ASCII PSSM of a file), byte for byte as NCBI BLAST+ 2.17.0. | in progress | none | changelog entry `feature-ps-ps5b` |
+| `PS5b` | PS stage 5b: psiblast -in_pssm with -num_iterations other than 1 and with the PSSM files (the input PSSM written back as NCBI's object holds it, the K/A write-back, the short and long ASCII PSSM of a file), byte for byte as NCBI BLAST+ 2.17.0. | done | #973 | changelog entry `feature-ps-ps5b` |
+| `PS5c` | PS stage 5c: psiblast -searchsp and the environment variable OLD_FSC in every round (round 1, -in_pssm and the later rounds: the cutoffs and E-values without the Gumbel block), byte for byte as NCBI BLAST+ 2.17.0. | in progress | none | changelog entry `feature-ps-ps5c` |
 | `PS11` | PS stage 11 (series PR): `losat rpsblast`, NCBI BLAST+ 2.17.0 rpsblast against profile databases (makeprofiledb -dbtype rps); split into PS11a and PS11b. | in progress | none | changelog entry `feature-ps-ps11` |
 | `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #941 | changelog entry `feature-ps-ps11` |
 | `PS11b` | PS stage 11b: `losat rpsblast` with composition-based statistics 1, 2 and 3 (the default 1; `.freq` ratios, the PSSM redo), databases of several volumes (merged per query as NCBI does), `-dbsize` and the 32-bit score bound, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11b` |
-| `PS11c` | PS stage 11c: the options of `losat rpsblast` that PS11a refuses and PS11b leaves refused (-searchsp with the old Karlin-Altschul statistics and OLD_FSC, -seg, -soft_masking, -lcase_masking, -xdrop_*, -use_sw_tback, -sum_stats, -line_length, -sorthits, -sorthsps). | in progress | none | changelog entry `feature-ps-ps11b` |
+| `PS11c` | PS stage 11c: the options of `losat rpsblast` that PS11a refuses and PS11b leaves refused (-searchsp with the old Karlin-Altschul statistics and OLD_FSC, -seg, -soft_masking, -lcase_masking, -xdrop_*, -use_sw_tback, -sum_stats, -line_length, -sorthits, -sorthsps); split into PS11c-1, PS11c-2 (-searchsp, OLD_FSC) and PS11c-3 (-use_sw_tback). | in progress | none | changelog entry `feature-ps-ps11b` |
+| `PS11c-1` | PS stage 11c part 1: `losat rpsblast` -seg, -soft_masking, -lcase_masking, -xdrop_ungap, -xdrop_gap, -xdrop_gap_final, -line_length, -sorthits, -sorthsps and -sum_stats false (true refused: NCBI reads past its arrays), byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11c-1` |
 
 ### RL: the v0.2.0 release
 
@@ -180,7 +182,7 @@ and `docs/`. State: 142 done, 12 in progress, 0 stopped.
 | ID | Meaning | State | Main pull requests | Record in this repository |
 | --- | --- | --- | --- | --- |
 | `SW` | Line SW (Nov 2026): the revision of LOSAT after its SWEBOK audit, in stages SW1-SW11: CI and configuration, records and decision registries, unsafe code, lints, duplication and cycles, large functions, test adequacy, dependencies and release integrity, engine documents. | in progress | #825, #853, #857, #865, #873, #914, #960, #885, #950, #967 | [docs/decisions/OWNER_DECISIONS.md](../../docs/decisions/OWNER_DECISIONS.md) |
-| `SW SW8` | Stage SW8: test adequacy (damaged-input tests, coverage in the nightly run, orphan tests, the NCBI unit-case ledger) and the checkout prefix of frozen outputs replaced when comparing; follow-ups such as `losat blastdbcmd` reading a column's big-endian data file as NCBI does (DECISIONS 40). | in progress | #885, #886, #888, #897, #925, #931, #935, #945, #947, #953, #954 | [docs/evidence/ncbi_unit_cases/LEDGER.tsv](../../docs/evidence/ncbi_unit_cases/LEDGER.tsv) |
+| `SW SW8` | Stage SW8: test adequacy (damaged-input tests, coverage in the nightly run, orphan tests, the NCBI unit-case ledger) and the checkout prefix of frozen outputs replaced when comparing; follow-ups such as `losat blastdbcmd` reading a column's big-endian data file as NCBI does (DECISIONS 40), searches of databases with column files and LOSAT Web inflating compressed sources with the engine's decoders (D2, DECISIONS 44). | in progress | #885, #886, #888, #897, #925, #931, #934, #935, #945, #947, #953, #954, #965, #972, #975, #977, #980, #997, #1008 | [docs/evidence/ncbi_unit_cases/LEDGER.tsv](../../docs/evidence/ncbi_unit_cases/LEDGER.tsv) |
 
 ### Plan v4 (speed and memory lines)
 

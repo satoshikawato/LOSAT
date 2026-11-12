@@ -827,13 +827,11 @@ fn column_files_and_missing_files() {
     let name = dir.join("prot_v4").to_str().unwrap().to_string();
     assert!(SeqDb::open(&name, SeqType::Protein).is_ok());
 
-    // A column file (mask data): rejected.
+    // A column file (mask data), here not even a column index: not read when the database is
+    // opened (`CSeqDBVol::x_OpenAllColumns` runs for the column readers only, `mask_tests.rs`
+    // `a_search_reads_no_column_file`).
     std::fs::write(dir.join("prot_v4.paa"), b"column").unwrap();
-    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("column data")),
-        "{error}"
-    );
+    assert!(SeqDb::open(&name, SeqType::Protein).is_ok());
     std::fs::remove_file(dir.join("prot_v4.paa")).unwrap();
 
     // No sequence file: the database opens (its headers are read) and the
@@ -1288,6 +1286,7 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
         &name,
         SeqType::Protein,
         super::alias::LocalCopy::Dir(here.to_str().unwrap()),
+        &SearchPath::current_dir().unwrap(),
     )
     .unwrap();
     assert_eq!(read.volumes, [path(&here, "db.00"), path(&sub, "db.01")]);

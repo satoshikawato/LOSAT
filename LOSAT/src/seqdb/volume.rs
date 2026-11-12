@@ -67,28 +67,38 @@ impl Volume {
         Self::open_as(base, seqtype, mode)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:90
+    // ```c++
+    //       m_HaveColumns  (false),
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3311-3318
+    // ```c++
+    // void CSeqDBVol::ListColumns(set<string>    & titles,
+    //                             CSeqDBLockHold & locked)
+    // {
+    //     //m_Atlas.Lock(locked);
+    //
+    //     if (! m_HaveColumns) {
+    //         x_OpenAllColumns(locked);
+    //     }
+    // ```
+    // Opening a volume reads its index file only (seqdbvol.cpp:104-109, above `Volume::open`). Its
+    // column files (`.?Xa` index, `.?Xb` / `.?Xc` data: the masks of `makeblastdb -mask_data`,
+    // user columns) are opened by `x_OpenAllColumns`, which only `GetColumnBlob`,
+    // `GetColumnMetaData`, `ListColumns` and `GetColumnId` call (seqdbvol.cpp:3282-3283,
+    // 3300-3301, 3316-3317, 3399-3400). A search calls them only for a masking algorithm that
+    // `-db_soft_mask` or `-db_hard_mask` names (blast_args.cpp:2519-2522), or an imported search
+    // strategy (`-import_search_strategy`, blast_app_util.cpp:498-511; blast_formatter.cpp:370
+    // likewise); without one `GetFilteringAlgorithm` is -1 (uniform_search.cpp:198, 225,
+    // 303-308; seqsrc_seqdb.cpp:318-320, 727-729; seqinfosrc_seqdb.cpp:113-123;
+    // align_format_util.cpp:396-403). LOSAT refuses all three options and has no
+    // blast_formatter, so a search reads no column file, whatever the files hold, and `losat
+    // blastdbcmd` opens them on first use ([`Volume::columns`]).
     /// `open` with the index read as `mode` says.
     pub(super) fn open_as(
         base: &Path,
         seqtype: SeqType,
         mode: XDbIdxRead,
-    ) -> Result<Self, SeqDbError> {
-        Self::open_with(base, seqtype, mode, false)
-    }
-
-    /// Like [`Volume::open`], but a volume with column files (the mask data of
-    /// `makeblastdb -mask_data`) is kept instead of rejected; its columns are read by
-    /// [`Volume::columns`].
-    pub(super) fn open_keeping_columns(base: &Path, seqtype: SeqType) -> Result<Self, SeqDbError> {
-        Self::open_with(base, seqtype, super::x_dbidxread(), true)
-    }
-
-    /// `open_as`; `keep_columns` says whether column files are read (true) or rejected.
-    fn open_with(
-        base: &Path,
-        seqtype: SeqType,
-        mode: XDbIdxRead,
-        keep_columns: bool,
     ) -> Result<Self, SeqDbError> {
         let index_path = with_extension(base, seqtype, "in");
         let index_file = DbFile::open(&index_path)?;
@@ -96,18 +106,14 @@ impl Volume {
             XDbIdxRead::Off => IndexFile::parse(&index_file.read_all()?, seqtype, &index_path)?,
             XDbIdxRead::On => IndexFile::open(index_file, seqtype)?,
         };
-        let volume = Self {
+        Ok(Self {
             base: base.to_path_buf(),
             index,
             seq: OnceLock::new(),
             hdr: OnceLock::new(),
             defline_rule: None,
             columns: OnceLock::new(),
-        };
-        if !keep_columns {
-            volume.reject_column_files()?;
-        }
-        Ok(volume)
+        })
     }
 
     /// The columns of the volume, opened on first use (`CSeqDBVol::x_OpenAllColumns`); none
@@ -126,40 +132,6 @@ impl Volume {
             .columns()?
             .iter()
             .find(|column| column.title() == MASK_DATA_TITLE))
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3333-3343
-    // ```c++
-    //     string alpha("abcdefghijklmnopqrstuvwxyz");
-    //     string ei("??a"), ed("??b"), ed2("??c");
-    //
-    //     ei[0] = ed[0] = ed2[0] = (m_IsAA ? 'p' : 'n');
-    //
-    //     map<string,int> unique_titles;
-    //
-    //     for(size_t i = 0; i < alpha.size(); i++) {
-    //         ei[1] = ed[1] = ed2[1] = alpha[i];
-    //
-    //         if (CSeqDBColumn::ColumnExists(m_VolName, ei, m_Atlas)) {
-    // ```
-    // Column files hold per-sequence data such as the masks of
-    // `makeblastdb -mask_data`. LOSAT's searches do not read them, so a volume
-    // that has any is rejected instead of being searched without them.
-    fn reject_column_files(&self) -> Result<(), SeqDbError> {
-        for letter in b'a'..=b'z' {
-            let ext = [letter, b'a'];
-            let ext = std::str::from_utf8(&ext).unwrap_or("aa");
-            let path = with_extension(&self.base, self.index.seqtype, ext);
-            if path.is_file() {
-                return Err(SeqDbError::Unsupported {
-                    path,
-                    message: "the volume has column data (for example the masks of makeblastdb \
-                              -mask_data); LOSAT's searches do not read column files"
-                        .to_string(),
-                });
-            }
-        }
-        Ok(())
     }
 
     /// Path of the volume without extension.
@@ -212,6 +184,12 @@ impl Volume {
 
     fn seq_file(&self) -> Result<&DbFile, SeqDbError> {
         self.lazy_file(&self.seq, "sq")
+    }
+
+    /// Opens the sequence file, as the first read of a sequence does (`seq_file`): its error
+    /// where it cannot be opened, as NCBI's first read of the volume throws it.
+    pub fn open_sequence_file(&self) -> Result<(), SeqDbError> {
+        self.seq_file().map(|_| ())
     }
 
     fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {

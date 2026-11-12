@@ -28,25 +28,49 @@ run:
 | `.ncbirc`, `<program>.ini` | NCBI's configuration files (for example `blastn.ini`). LOSAT reads `[BLAST] BLASTDB` and `[BLAST] DATA_LOADERS` from them: the first file of each name on the search path, `<program>.ini` before `.ncbirc`. |
 | `NCBI_CONFIG__BLAST__BLASTDB` | `[BLAST] BLASTDB` set in the environment; it comes before the files. |
 | `[BLAST] DATA_LOADERS`, `NCBI_CONFIG__BLAST__DATA_LOADERS` | Which of NCBI's data loaders are on. With none on (`none`, or neither `blastdb` nor `genbank`, matched anywhere in the value in any case; or an empty `NCBI_CONFIG__BLAST__DATA_LOADERS`), a query or subject line that is a Seq-id is read as FASTA text instead of being refused. In a configuration file an empty value counts as no entry. |
-| `NCBI_CONFIG_PATH`, `NCBI`, `HOME`, `NCBI_DONT_USE_LOCAL_CONFIG` | Where the configuration files are looked for: the directories of `NCBI_CONFIG_PATH` if it is set (an empty element stands for the default path); otherwise the current directory, the home directory, `NCBI`, `/etc` (the Windows directory on Windows) and the directory of the `losat` executable. `NCBI_DONT_USE_LOCAL_CONFIG` leaves out the current directory and the home directory. |
+| `NCBI_CONFIG_PATH`, `NCBI`, `HOME`, `NCBI_DONT_USE_LOCAL_CONFIG` | Where the configuration files are looked for: the directories of `NCBI_CONFIG_PATH` if it is set (an empty element stands for the default path, and an empty `NCBI_CONFIG_PATH` means no directory); otherwise the current directory, the home directory, `NCBI`, `/etc` (the Windows directory on Windows) and the program's directories. `NCBI_DONT_USE_LOCAL_CONFIG` leaves out the current directory and the home directory. |
 | `NCBI_DONT_USE_NCBIRC`, `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` | Do not read `.ncbirc`. |
 
-Where LOSAT looks differs in three cases. The home directory: LOSAT reads `HOME`, and
-`USERPROFILE` on Windows; NCBI BLAST+ reads `APPDATA` first on Windows, and without `HOME` on Unix
-it uses the account's home directory. An empty `NCBI_CONFIG_PATH`: NCBI BLAST+ then reads no
-configuration file, LOSAT the default path. A program run through a symbolic link (such as a
-`blastn` shim): NCBI BLAST+ also looks in the directory of the link, LOSAT only in that of the
-`losat` executable.
+## WindowMasker files of `blastn -window_masker_taxid`
 
-A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_LOADERS`, and
-`[NCBI] DONT_USE_NCBIRC` (in `<program>.ini` it skips `.ncbirc`), which LOSAT reads as NCBI
-BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
+`blastn -window_masker_taxid <taxid>` masks the queries with the counts file `<directory>/<taxid>/wmasker.obinary`. LOSAT finds the directory as NCBI BLAST+ does, in this order: the first one that is set (an empty value too) wins, and an empty value or none means the current directory. With the taxid 0, no WindowMasker is used and no file is needed.
+
+| Variable or entry | Effect |
+| :--- | :--- |
+| `NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH` | The directory, before every other source. |
+| `WINDOW_MASKER_PATH` | The directory, after the variable above. |
+| `[WINDOW_MASKER] WINDOW_MASKER_PATH` in `.ncbirc` | The directory, after both variables: the first `.ncbirc` on the search path, also when `<program>.ini` sets `[NCBI] DONT_USE_NCBIRC`; `NCBI_DONT_USE_NCBIRC` and `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` skip it. `<program>.ini`'s entry is not read. |
+
+A taxid without that file, or with a file that NCBI BLAST+ cannot read, stops the search with NCBI's error at the first query batch the file cannot mask (exit status 3). LOSAT refuses, before any output:
+
+- a counts file in the ascii or optimized ascii format there (NCBI BLAST+ reads them);
+- when `<program>.ini` turns `.ncbirc` off for the program, a `.ncbirc` that LOSAT does not read as NCBI BLAST+ does: a syntax error, a value with a backslash or a quote inside in any entry, a section or entry name NCBI BLAST+ does not accept, `[NCBI] .Inherits`;
+- a directory or path that is not UTF-8, and a current directory it cannot read.
+
+LOSAT Web refuses `-window_masker_taxid` other than 0.
+
+The home directory is `HOME` (an empty `HOME` means no home directory), or without `HOME` the
+account's home directory; on Windows it is `APPDATA`, else `USERPROFILE`. Without `HOME` and without an account
+entry for the user, NCBI BLAST+ looks the account up by the login name, which LOSAT cannot do, so
+LOSAT stops instead. The program's directories are, as NCBI BLAST+ finds them, the directory of
+the `losat` executable (links resolved) on Linux and none elsewhere; with `BLAST_USAGE_REPORT` set
+to a false value (`false`, `0`, `no`, `off`, ...), or with `NCBI_DONT_USE_NCBIRC` or
+`NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` set, NCBI BLAST+ makes the search path later, and the
+directories are then the directory of the name the program was run by (looked up in the current
+directory or on `PATH` when it has no directory, so a `blastn` shim's directory), then that of
+the `losat` executable when it is another one (on Windows the directory of the `losat`
+executable).
+
+A configuration file may hold only these entries: `[BLAST]` `BLASTDB` and `DATA_LOADERS`,
+`[NCBI] DONT_USE_NCBIRC` (in `<program>.ini` it skips `.ncbirc`) and `[WINDOW_MASKER]
+WINDOW_MASKER_PATH` (see above), which LOSAT reads as NCBI BLAST+ does; `[BLAST] MAX_SEQID_LENGTH`, which `makeblastdb -parse_seqids` refuses (see below);
 and `BLASTMAT`, `BLASTDB_NUCL_DATA_LOADER`, `BLASTDB_PROT_DATA_LOADER`, `IGDATA`,
 `BLAST_USAGE_REPORT` (a Boolean) and `[NCBI] DATA`, which change no output of LOSAT's programs. A
 file with any other entry, one that LOSAT cannot read, or one that NCBI BLAST+ reports as
 malformed, stops the run, and so does an `NCBI_CONFIG__<SECTION>__<NAME>` variable for another
-entry. A value with a backslash or a quote inside stops every program for `DATA_LOADERS`, a run
-that opens a database for `BLASTDB`, and `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`.
+entry. A value with a backslash or a quote inside stops every program for `DATA_LOADERS` and
+`WINDOW_MASKER_PATH`, a run that opens a database for `BLASTDB`, and `makeblastdb -parse_seqids`
+for `MAX_SEQID_LENGTH`.
 
 ## Variables that change a search or a report
 
@@ -59,7 +83,7 @@ These change the output as they change NCBI BLAST+'s output. They are not needed
 | `ARCHIVE_FORMAT` | The encoding of `-outfmt 11`: unset or empty for text ASN.1, a value starting with `bin` (any case) for binary ASN.1, `xml` (any case) for XML; any other value writes no archive, as in NCBI BLAST+. |
 | `ADAPTIVE_CBS` | Any value, an empty one too, with composition-based statistics: `blastp`, `psiblast`, `rpsblast`, `blastx` and `tblastn` keep a larger preliminary hit list (1,500 subjects, or twice the hit list size and 50 more from a hit list size of 1,000), and with a hit list size (`-max_target_seqs`) below 1,000 all of them but `psiblast` cut that list by E-value before the final alignments, as NCBI BLAST+ does. The reported hits can grow or shrink. |
 | `CTOOLKIT_COMPATIBLE` | Any value: `-outfmt 0` writes `(bits)` in place of `(Bits)` above the hit list. |
-| `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx` and `tblastn` compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. `psiblast` and `rpsblast` refuse it (see [Variables that LOSAT refuses](#variables-that-losat-refuses)). |
+| `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx`, `tblastn` and `psiblast` (every round) compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. `rpsblast` refuses it (see [Variables that LOSAT refuses](#variables-that-losat-refuses)). |
 | `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not an integer stops the run (NCBI BLAST+ stops before its report), except when every format is `-outfmt 11`, which `psiblast` and `rpsblast` do not write. |
 
 ## makeblastdb
@@ -85,7 +109,7 @@ giving a different output.
 | Variable | Where | What it does in NCBI BLAST+ |
 | :--- | :--- | :--- |
 | `BL2SEQ_LEGACY` | a search with `-subject` | Searches each subject on its own and writes the legacy bl2seq report. |
-| `OLD_FSC` | `psiblast`, `rpsblast` | Computes E-values without the finite-size correction. |
+| `OLD_FSC` | `rpsblast` | Computes E-values without the finite-size correction. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` | the search programs, with a `-db` built with `-parse_seqids` | Changes which id of a sequence is shown. |
 | `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` (a non-empty value) | makeblastdb | Stores other titles for some FASTA definition lines (with a tab, a Ctrl-A, or white space at their ends). |
 | `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`, `[BLAST] MAX_SEQID_LENGTH` (a value other than 0 that NCBI converts) | `makeblastdb -parse_seqids` | Sets the longest Seq-id that makeblastdb parses. |
@@ -97,9 +121,15 @@ An environment prepared for NCBI BLAST+ that sets one of the variables of the la
 example `DIAG_POST_LEVEL` in a container) stops every LOSAT program before it runs; the other rows
 stop only the programs and runs named in them.
 
-Not read: `BLASTMAT`, because NCBI BLAST+ reads a matrix file from it only for a protein matrix
-that it does not have built in, and LOSAT has the same built-in matrices and no others; `IGDATA`,
-which only NCBI's igblastn and igblastp read; and `BLAST_MT_QUERY_BATCH_SIZE`, the query batches of
+Matrix files: for a `-matrix` that NCBI BLAST+ does not have built in (which only an ungapped
+`tblastx` or `blastx -ungapped -comp_based_stats 0` search takes), NCBI BLAST+ looks for a file
+of that name in upper case in the directories of `NCBI_DATA_PATH` and `[NCBI] Data`, then in
+`BLASTMAT` and its `nt` subdirectory, then in `data` under the current directory. When it finds
+one that it can open, NCBI BLAST+ 2.17.0 reads it as a matrix and then stops abnormally (or with
+another error code when the file is not a matrix), so LOSAT stops with a message before the search;
+when it finds none, or cannot open it, both stop with NCBI's "Unknown error code -1".
+
+Not read: `IGDATA`, which only NCBI's igblastn and igblastp read; and `BLAST_MT_QUERY_BATCH_SIZE`, the query batches of
 NCBI's searches split by queries (`-mt_mode 1`, or NCBI's own choice at `-num_threads` 2 or
 more), which LOSAT does not split that way (its output is NCBI's `-num_threads 1`
 output).

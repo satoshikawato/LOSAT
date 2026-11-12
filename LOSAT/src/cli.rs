@@ -208,7 +208,7 @@ pub enum Commands {
     //     arg.Reset(new CProgramDescriptionArgs(kProgram,
     //                                           "Reverse Position Specific BLAST"));
     // ```
-    /// Reverse Position Specific BLAST (rpsblast; without composition-based statistics)
+    /// Reverse Position Specific BLAST (rpsblast)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpsblast(rpsblast::RpsblastArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
@@ -517,7 +517,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "sorthits"
             | "sorthsps"
             | "version"
-            | "window_masker_taxid"
     )
 }
 
@@ -607,10 +606,9 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
 // `algorithm::rpsblast::args`)
-/// rpsblast's NCBI arguments that LOSAT does not run (its search reads the profile database's
-/// statistics and scale as NCBI's does; `-searchsp` switches NCBI's RPS search to the old
-/// Karlin-Altschul statistics, which item PS11c would port), the formats' options that LOSAT's
-/// reports do not have, and the query masks of the reversed scan.
+/// rpsblast's NCBI arguments that LOSAT does not run: `-searchsp` (it switches NCBI's RPS search
+/// to the old Karlin-Altschul statistics, item PS11c-2), `-use_sw_tback` (the Smith-Waterman
+/// redo, PS11c-3), `-html` (PS15a) and the remote and search strategy options of every program.
 fn is_unported_rpsblast_arg(name: &str) -> bool {
     matches!(
         name,
@@ -618,17 +616,9 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
             | "export_search_strategy"
             | "html"
             | "import_search_strategy"
-            | "lcase_masking"
-            | "line_length"
             | "remote"
             | "searchsp"
-            | "sorthits"
-            | "sorthsps"
-            | "sum_stats"
             | "use_sw_tback"
-            | "xdrop_gap"
-            | "xdrop_gap_final"
-            | "xdrop_ungap"
     )
 }
 

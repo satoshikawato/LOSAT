@@ -137,6 +137,21 @@ mod subject_loop;
 // so that it uses the private timer of this file).
 #[path = "batch_finish.rs"]
 mod batch_finish;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-899 and :1492-1520 (the
+// linking calls, the reap and the re-evaluation of a subject's HSP list).
+// The end of a subject's search up to its linked HSP list (a child module, so that it uses the
+// private modules of this file).
+#[path = "subject_link.rs"]
+mod subject_link;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1535-1541 (the reap and the
+// bit scores of a subject's final HSPs).
+// The report hits of a subject (a child module, so that it uses the private timer of this file).
+#[path = "subject_report.rs"]
+mod subject_report;
+// No NCBI counterpart: the diagnostics at the end of a subject's search (a child module, as
+// subject_link is).
+#[path = "subject_debug.rs"]
+mod subject_debug;
 use x_search_timing::XStage;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
 // lines after those (see tblastx/x_link_timing.rs).
@@ -4146,7 +4161,9 @@ impl Drop for XEndBatch<'_> {
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
 /// adjustments and search spaces of the contexts: `context_cutoffs.rs`), then `process_subject`
-/// for every subject (`subject_loop.rs`) and the collection of their hits (`batch_finish.rs`).
+/// for every subject (`subject_loop.rs`; the linking, the reap and the re-evaluation of its HSP
+/// list: `subject_link.rs`; its report hits: `subject_report.rs`, with the diagnostics of
+/// `subject_debug.rs`) and the collection of their hits (`batch_finish.rs`).
 /// These preliminary hit lists are the final ones: without gapped calculation NCBI's traceback
 /// stage aligns nothing, it only computes bit scores
 /// (c++/src/algo/blast/core/blast_traceback.c:1526, 1691-1696; `hit_collector.rs`).
@@ -4553,8 +4570,9 @@ fn search_query_batch<S: TbxScore>(
         // The scores of the search's matrix, an argument of the closures below.
         let sc = st.sc;
         // EXPERIMENT (LOSAT_X_TBXPIPE): this subject's part of the batch's seed-stage end, ended at
-        // dispatch point 5 below with the subject's HSPs, or with none when the closure returns
-        // before it (tblastx/x_batch_pipe.rs). Nothing without the pipe.
+        // dispatch point 5 (`subject_link::end_subject_seed_stage`) with the subject's HSPs, or
+        // with none when the closure returns before it (tblastx/x_batch_pipe.rs). Nothing
+        // without the pipe.
         let mut x_pipe_seed = x_batch_pipe::XSeedGuard::new(x_seed_end);
         // Dispatch point 2 of the seed release (per subject): the seed stage of
         // this subject holds the batch's lookup table through `x_seed_stage` and the unit path
@@ -6460,36 +6478,16 @@ fn search_query_batch<S: TbxScore>(
         } // End of subject frame loop
         x_lap.lap(XStage::FrameLoop);
 
-        // Dispatch point 5 of the seed release (per subject): the seed stage of
-        // this subject ends here; nothing below reads the batch's lookup table (`end` consumes
-        // the stage that `lookup_ref` borrows from; the unit path's stage ended at dispatch
-        // point 3) or the worker's diagonal table. The batch's last lookup
-        // stage frees the lookup table and returns true, and this worker, which gets no
-        // further subject, drops its diagonal table before the linking call below, where the
-        // heap of the search peaks.
-        //
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
-        // ```c
-        // if (hit_params->link_hsp_params) {
-        //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
-        //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
-        //               score_options->gapped_calculation);
-        // ```
-        // NCBI links with its lookup table and diagonal table still allocated (freed after the
-        // subject loop, blast_engine.c:1605); `BLAST_LinkHsps` reads neither.
-        if x_seed_stage.end() {
-            x_seed_release::drop_worker_table(&mut st.diag_array);
-        }
-        // EXPERIMENT (LOSAT_X_TBXPIPE): the seed stage of this subject has ended with the HSP list
-        // that the linking below takes; the batch's last one may start the next batch. While a
-        // later batch may run, the two linking calls below do not use the pool (`x_link_on_pool`,
-        // tblastx/x_batch_pipe.rs item 6); the lists are the same with or without it.
-        let x_link_on_pool = use_parallel && x_pipe_seed.end(combined_ungapped_hits.len());
-        // EXPERIMENT (LOSAT_X_TBXBOARD): a chain that links without the pool puts its groups and
-        // sorts on the search's board instead of running them on this thread
-        // (tblastx/x_link_slices.rs `x_helped`); the guard ends with the subject.
-        let _x_helped = crate::algorithm::tblastx::sum_stats_linking::x_link_helped(
-            use_parallel && !x_link_on_pool && x_board_batch.is_some(),
+        // Dispatch point 5 of the seed release, the batch pipe's seed-stage end and the helped
+        // mode of the linking calls (`subject_link::end_subject_seed_stage`). The guard
+        // `_x_helped` ends with the subject.
+        let (x_link_on_pool, _x_helped) = subject_link::end_subject_seed_stage(
+            x_seed_stage,
+            &mut st.diag_array,
+            &mut x_pipe_seed,
+            combined_ungapped_hits.len(),
+            use_parallel,
+            x_board_batch.is_some(),
         );
         x_lap.lap(XStage::SeedRelease);
 
@@ -6511,24 +6509,37 @@ fn search_query_batch<S: TbxScore>(
             stage_dump::dump_ungapped_hits("after_common_endpoint_purge", &combined_ungapped_hits);
         }
 
-        // Build NCBI-style subject frame base offsets for sum-statistics linking.
-        // In NCBI, HSP coords live in a concatenated translation buffer with sentinels.
-        // LOSAT uses per-frame sequences; for linking we emulate absolute offsets by
-        // concatenating frames in the same order as `generate_frames()`.
-        let mut subject_frame_bases: Vec<i32> = Vec::with_capacity(s_frames_listed.len());
-        let mut base: i32 = 0;
-        for f in s_frames_listed {
-            subject_frame_bases.push(base);
-            // NCBI concatenation shares the trailing NULLB sentinel between frames:
-            //   offset += length + 1;
-            // where `length` is the number of residues (excluding sentinels).
-            // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
-            base += f.aa_seq.len() as i32 - 1;
-        }
+        // NCBI-style subject frame base offsets for sum-statistics linking
+        // (`subject_link::subject_frame_bases`).
+        let subject_frame_bases = subject_link::subject_frame_bases(s_frames_listed);
         // Nothing below reads the preliminary frames (the seed stage has ended); they are freed
         // before the linking call, where the heap peaks.
         drop(s_frames_preliminary_owned);
 
+        // What the two linking calls and the stages between and after them read
+        // (subject_link.rs).
+        let link_args = subject_link::SubjectLinkArgs {
+            linking_params_for_cutoff: &linking_params_for_cutoff,
+            linking_params: &linking_params,
+            contexts_ref,
+            subject_frame_bases: &subject_frame_bases,
+            length_adj_per_context: &length_adj_per_context,
+            eff_searchsp_per_context: &eff_searchsp_per_context,
+            x_link_on_pool,
+        };
+        let stage_args = subject_link::SubjectStageArgs {
+            contexts_ref,
+            cutoff_scores: &cutoff_scores,
+            evalue_threshold,
+            timing_enabled,
+            reeval_ns: &reeval_ns,
+            reeval_calls: &reeval_calls,
+            linking_ns: &linking_ns,
+            linking_calls: &linking_calls,
+            diag_enabled,
+            diagnostics: &diagnostics,
+            debug_output_filter,
+        };
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
         // ```c
         // if (hit_params->link_hsp_params) {
@@ -6543,82 +6554,21 @@ fn search_query_batch<S: TbxScore>(
         // s_BlastSearchEngineCore before the outer translated-subject path
         // reevaluates ambiguities and calls BLAST_LinkHsps again.
         x_link_timer.arm(LinkCall::First);
-        let mut prelinked_ungapped_hits = if combined_ungapped_hits.is_empty() {
+        let prelinked_ungapped_hits = if combined_ungapped_hits.is_empty() {
             combined_ungapped_hits
         } else {
-            apply_sum_stats_even_gap_linking_with_parallel(
-                combined_ungapped_hits,
-                &linking_params_for_cutoff,
-                &linking_params,
-                contexts_ref,
-                &subject_frame_bases,
-                &length_adj_per_context,
-                &eff_searchsp_per_context,
-                x_link_on_pool,
-            )
+            subject_link::link_subject_hits(&link_args, combined_ungapped_hits)
         };
         x_link_timer.disarm();
         x_lap.lap(XStage::Link1);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1802-1803
-        // ```c
-        //     /* Sort the HSP array by score */
-        //     Blast_HSPListSortByScore(hsp_list);
-        // ```
-        // BLAST_LinkHsps ends by sorting the list it linked, here with the scores of the
-        // preliminary (compressed-subject) search. The re-evaluation below may change or
-        // trim those scores (random bases for ambiguous subject letters, two-hit
-        // extension tails), after which Blast_HSPListReevaluateUngapped sorts again
-        // (blast_hits.c:2733-2734): HSPs that tie after re-evaluation keep the order
-        // of this first sort, not the order of the linking chains. That order is the
-        // input order of the second BLAST_LinkHsps (blast_engine.c:1515-1520), whose
-        // `>=` chain choices (link_hsps.c:613-622, 759, 887) give the better chain to
-        // the later of two comparator-equal HSPs of different frames.
-        // (The sort at the end of the second BLAST_LinkHsps is the score sort of each
-        // subject's list in `hit_collector::QueryLists::add`.)
-        if !ungapped_hits_is_sorted_by_score_ncbi(&prelinked_ungapped_hits) {
-            sort_ungapped_hits_by_score_ncbi(&mut prelinked_ungapped_hits);
-        }
-        if stage_dump::enabled() {
-            stage_dump::dump_ungapped_hits(
-                "after_prelim_link_hsps_before_reevaluate",
-                &prelinked_ungapped_hits,
-            );
-        }
-        let prelim_linked_count = prelinked_ungapped_hits.len();
-        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1988-1996
-        // ```c
-        //    cutoff = hit_options->expect_value;
-        // ...
-        //       if (hsp->evalue > cutoff) {
-        // ```
-        // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
-        // (`-evalue -nan`) keeps every HSP.
-        #[expect(
-            clippy::neg_cmp_op_on_partial_ord,
-            reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values"
-        )]
-        prelinked_ungapped_hits.retain(|h| !(h.e_value > evalue_threshold));
-        x_lap.lap(XStage::Reap);
-        if diag_enabled && prelim_linked_count != prelinked_ungapped_hits.len() {
-            eprintln!(
-                "[DEBUG PRELIM_REAP] linked_before={} kept={} filtered_by_prelim_evalue={} threshold={}",
-                prelim_linked_count,
-                prelinked_ungapped_hits.len(),
-                prelim_linked_count - prelinked_ungapped_hits.len(),
-                evalue_threshold
-            );
-        }
-        if stage_dump::enabled() {
-            stage_dump::dump_ungapped_hits(
-                "after_prelim_evalue_reap_before_reevaluate",
-                &prelinked_ungapped_hits,
-            );
-        }
+        // The sort after the first linking call and the reap by the preliminary E-value
+        // (`subject_link::sort_and_reap_after_first_link`).
+        let prelinked_ungapped_hits = subject_link::sort_and_reap_after_first_link(
+            prelinked_ungapped_hits,
+            &stage_args,
+            &mut x_lap,
+        );
 
-        // NCBI: Blast_HSPListReevaluateUngapped equivalent
-        // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
-        // Perform batch reevaluation on all HSPs after merging all frames
-        //
         // A subject with ambiguous bases gets the frames of its letters here, after its
         // preliminary frames were freed, when HSPs are left for the re-evaluation (none are read
         // otherwise).
@@ -6642,506 +6592,53 @@ fn search_query_batch<S: TbxScore>(
         } else {
             (&s_frames, s_frames_report)
         };
-        let mut ungapped_hits = reevaluate_ungapped_hsp_list(
+        // The re-evaluation with the subject's letters (`subject_link::reevaluate_subject_hits`).
+        let ungapped_hits = subject_link::reevaluate_subject_hits(
             sc,
             prelinked_ungapped_hits,
-            contexts_ref,
-            s_frames,
-            s_frames_report,
-            &cutoff_scores,
-            timing_enabled,
-            &reeval_ns,
-            &reeval_calls,
+            (s_frames, s_frames_report),
+            &stage_args,
             collect_hsp_saving_stats,
             &mut stats_hsp_filtered_by_reeval,
+            &mut x_lap,
         );
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2733-2734
-        // ```c
-        // /* Sort the HSP array by score (scores may have changed!) */
-        // Blast_HSPListSortByScore(hsp_list);
-        // ```
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
-        // ```c
-        // if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-        //     qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-        //           ScoreCompareHSPs);
-        // }
-        // ```
-        // This sort happens before the second BLAST_LinkHsps call in
-        // blast_engine.c:1515-1520 and controls tie order for link_hsps.c
-        // comparator-equal short HSPs.
-        if !ungapped_hits_is_sorted_by_score_ncbi(&ungapped_hits) {
-            sort_ungapped_hits_by_score_ncbi(&mut ungapped_hits);
-        }
-        x_lap.lap(XStage::Reevaluate);
-        // Record the post-reevaluation list and the exact input to link_hsps.
-        if stage_dump::enabled() {
-            stage_dump::dump_ungapped_hits("after_reevaluate", &ungapped_hits);
-            stage_dump::dump_ungapped_hits("before_link_hsps", &ungapped_hits);
-        }
 
         if !ungapped_hits.is_empty() {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
-            // ```c
-            // #if _BLAST_DEBUG
-            // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-            //                  true);
-            // #endif /* _BLAST_DEBUG */
-            // ```
-            // DEBUG: Print HSP statistics for long sequences only when requested.
-            if collect_hsp_saving_stats {
-                eprintln!(
-                    "[DEBUG HSP_STATS] After reevaluation: {} HSPs",
-                    ungapped_hits.len()
-                );
-                eprintln!("[DEBUG HSP_STATS] Saved by cutoff: {}", stats_hsp_saved);
-                eprintln!(
-                    "[DEBUG HSP_STATS] Filtered by cutoff: {}",
-                    stats_hsp_filtered_by_cutoff
-                );
-                eprintln!(
-                    "[DEBUG HSP_STATS] Filtered by reeval: {}",
-                    stats_hsp_filtered_by_reeval
-                );
-                if !stats_score_distribution.is_empty() {
-                    let min_score = stats_score_distribution.iter().min().unwrap();
-                    let max_score = stats_score_distribution.iter().max().unwrap();
-                    let avg_score = stats_score_distribution.iter().sum::<i32>() as f64
-                        / stats_score_distribution.len() as f64;
-                    eprintln!(
-                        "[DEBUG HSP_STATS] Score range: {} - {} (avg: {:.2})",
-                        min_score, max_score, avg_score
-                    );
-                }
-            }
-            if diag_enabled {
-                diagnostics
-                    .base
-                    .hsps_before_chain
-                    .fetch_add(ungapped_hits.len(), AtomicOrdering::Relaxed);
-            }
-            // Output HSP saving statistics for long sequences
-            if collect_hsp_saving_stats
-                && (stats_hsp_saved > 0
-                    || stats_hsp_filtered_by_cutoff > 0
-                    || stats_hsp_filtered_by_reeval > 0
-                    || stats_hsp_filtered_by_hsp_test > 0)
-            {
-                let total_attempted = stats_hsp_saved
-                    + stats_hsp_filtered_by_cutoff
-                    + stats_hsp_filtered_by_reeval
-                    + stats_hsp_filtered_by_hsp_test;
-                eprintln!(
-                    "[DEBUG HSP_SAVING] subject_len_nucl={}, cutoff={}",
-                    subject_len_nucl, cutoff_score_min
-                );
-                eprintln!("[DEBUG HSP_SAVING] total_attempted={}, saved={}, filtered_by_cutoff={}, filtered_by_reeval={}, filtered_by_hsp_test={}", 
-                        total_attempted, stats_hsp_saved, stats_hsp_filtered_by_cutoff, stats_hsp_filtered_by_reeval, stats_hsp_filtered_by_hsp_test);
-                if !stats_score_distribution.is_empty() {
-                    stats_score_distribution.sort();
-                    let min_score = stats_score_distribution[0];
-                    let max_score = stats_score_distribution[stats_score_distribution.len() - 1];
-                    let median_score = stats_score_distribution[stats_score_distribution.len() / 2];
-                    let low_score_count =
-                        stats_score_distribution.iter().filter(|&&s| s < 30).count();
-                    eprintln!("[DEBUG HSP_SAVING] score_distribution: min={}, max={}, median={}, low_score(<30)={}/{} ({:.2}%)", 
-                            min_score, max_score, median_score, low_score_count, stats_score_distribution.len(),
-                            if !stats_score_distribution.is_empty() { (low_score_count as f64 / stats_score_distribution.len() as f64) * 100.0 } else { 0.0 });
-                }
-            }
-
-            // NCBI Parity: Pass pre-computed length_adjustment and eff_searchsp per context
-            // These values are stored in query_info->contexts[ctx] in NCBI and referenced
-            // by link_hsps.c for BLAST_SmallGapSumE/BLAST_LargeGapSumE calculations.
-            let t_linking = if timing_enabled {
-                Some(Instant::now())
-            } else {
-                None
-            };
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
-            // ```c
-            // for (frame_index=0; frame_index<num_query_frames; frame_index++)
-            // {
-            //    hp_start->next = hp_frame_start[frame_index];
-            //    number_of_hsps = hp_frame_number[frame_index];
-            // }
-            // ```
-            x_link_timer.arm(LinkCall::Second);
-            let linked = apply_sum_stats_even_gap_linking_with_parallel(
-                ungapped_hits,
-                &linking_params_for_cutoff,
-                &linking_params,
-                contexts_ref,
-                &subject_frame_bases,
-                &length_adj_per_context,
-                &eff_searchsp_per_context,
-                x_link_on_pool,
+            // DEBUG: the HSP-saving statistics of a long subject and LOSAT_DIAGNOSTICS'
+            // `hsps_before_chain` (`subject_debug::print_hsp_saving_stats`).
+            subject_debug::print_hsp_saving_stats(
+                subject_debug::HspSavingStats {
+                    collect_hsp_saving_stats,
+                    stats_hsp_saved,
+                    stats_hsp_filtered_by_cutoff,
+                    stats_hsp_filtered_by_reeval,
+                    stats_hsp_filtered_by_hsp_test,
+                    stats_score_distribution: &mut stats_score_distribution,
+                    subject_len_nucl,
+                    cutoff_score_min,
+                },
+                &ungapped_hits,
+                diag_enabled,
+                &diagnostics,
             );
-            x_link_timer.disarm();
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:959-982
-            // ```c
-            // H->hsp->evalue = (best_evalue == -1) ? H->hsp->evalue :
-            //                  MIN(H->hsp->evalue, best_evalue);
-            // H->ordering_method = ordering_method;
-            // ```
-            // Record linked_set/start_of_chain/order/e-value before output
-            // coordinate conversion can obscure frame-relative HSP identity.
-            if stage_dump::enabled() {
-                stage_dump::dump_ungapped_hits("after_link_hsps_before_output_conversion", &linked);
-            }
-            if trace_hsp_target().is_some() {
-                for h in &linked {
-                    trace_ungapped_hit_if_match("after_linking", h);
-                }
-            }
-            if let Some(t) = t_linking {
-                let elapsed = t.elapsed();
-                linking_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
-                linking_calls.fetch_add(1, AtomicOrdering::Relaxed);
-            }
-            x_lap.lap(XStage::Link2);
-            if diag_enabled {
-                diagnostics
-                    .base
-                    .hsps_after_chain
-                    .fetch_add(linked.len(), AtomicOrdering::Relaxed);
-            }
 
-            // NCBI's culling (`-culling_limit`) runs on the final HSPs of all subjects, after
-            // the e-value reap (`report::culled_hit_order`).
-
-            let total_linked = linked.len();
-            let mut stats_single_hsps = 0usize;
-            let mut stats_chain_heads = 0usize;
-            let mut stats_chain_members = 0usize;
-            if debug_output_filter {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
-                // ```c
-                // #if _BLAST_DEBUG
-                // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-                //                  true);
-                // #endif /* _BLAST_DEBUG */
-                // ```
-                // DEBUG: Collect statistics before filtering only when requested.
-                for h in &linked {
-                    if h.linked_set && !h.start_of_chain {
-                        stats_chain_members += 1;
-                    } else if !h.linked_set {
-                        stats_single_hsps += 1;
-                    } else if h.start_of_chain {
-                        stats_chain_heads += 1;
-                    }
-                }
-            }
-
-            let mut final_hits: Vec<TblastxHsp> = Vec::new();
-            let dump_output_stage = stage_dump::enabled();
-            let mut output_snapshot_hits: Vec<UngappedHit> = Vec::new();
-            let mut output_snapshot_pairs: Vec<(Hit, UngappedHit)> = Vec::new();
-            let mut filtered_by_evalue = 0usize;
-            for h in linked {
-                // NCBI reference (verbatim, link_hsps.c:1018-1020):
-                //   /* If this is not a single piece or the start of a chain, then Skip it. */
-                //   if (H->linked_set == TRUE && H->start_of_chain == FALSE)
-                //       continue;
-                // NOTE: This "continue" in NCBI is NOT a filter - NCBI then walks the link
-                // pointer from each chain head to include all chain members (lines 1047-1059).
-                // LOSAT's linking already produces a flat list of ALL HSPs (including chain
-                // members) so we output everything without this skip logic.
-
-                // NCBI reference: E-value filtering is applied during output conversion
-                // The exact timing may differ, but the threshold check is standard
-                if h.e_value > evalue_threshold {
-                    filtered_by_evalue += 1;
-                    if diag_enabled {
-                        diagnostics
-                            .ungapped_evalue_failed
-                            .fetch_add(1, AtomicOrdering::Relaxed);
-                    }
-                    continue;
-                }
-
-                if diag_enabled {
-                    diagnostics
-                        .ungapped_evalue_passed
-                        .fetch_add(1, AtomicOrdering::Relaxed);
-                }
-                if dump_output_stage {
-                    output_snapshot_hits.push(h.clone());
-                }
-
-                let ctx = &contexts_ref[h.ctx_idx as usize];
-                let s_score_frame = &s_frames[usize::from(h.s_f_idx)];
-                let s_frame = &s_frames_report[usize::from(h.s_f_idx)];
-
-                let len = (h.q_aa_end as usize).saturating_sub(h.q_aa_start as usize);
-                let q0 = h.q_aa_start as usize;
-                let s0 = h.s_aa_start as usize;
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2708-2720
-                // ```c
-                // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
-                //     subject_start, hsp, score_params->options, &align_length, sbp);
-                // delete_hsp = Blast_HSPTest(hsp, ...);
-                // ```
-                // `reevaluate_ungapped_hsp_list` already performs this NCBI step
-                // using the unmasked query and reporting subject buffers, then stores
-                // the identity count on the HSP. Reuse it here instead of rescanning
-                // every final hit.
-                let matches = h.num_ident as usize;
-                let mismatch = len.saturating_sub(matches);
-                let identity = if len > 0 {
-                    (matches as f64 / len as f64) * 100.0
-                } else {
-                    0.0
-                };
-
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1918-1928
-                // ```c
-                // kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-                // hsp->bit_score =
-                //    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
-                //    NCBIMATH_LN2;
-                // ```
-                let bit_params = &contexts_ref[h.ctx_idx as usize].karlin_params;
-                let bit = calc_bit_score(h.raw_score, bit_params);
-                let (q_start, q_end) = convert_coords(
-                    h.q_aa_start as usize,
-                    h.q_aa_end as usize,
-                    ctx.frame,
-                    ctx.orig_len,
-                );
-                let (s_start, s_end) = convert_coords(
-                    h.s_aa_start as usize,
-                    h.s_aa_end as usize,
-                    s_frame.frame,
-                    s_len,
-                );
-
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1379-1404
-                // ```c
-                // query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
-                // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
-                // Blast_MaskTheResidues(buffer, query_length, kIsNucl, ...);
-                // ```
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:699-700
-                // ```c
-                // sum += matrix[*query & kResidueMask][*subject];
-                // query++;
-                // ```
-                // Diagnostic only: compare the traced HSP's masked working-query
-                // score against the preserved unmasked query copy used for identity
-                // reporting. Normal runtime behavior is unchanged unless both
-                // LOSAT_TRACE_HSP and LOSAT_TRACE_HSP_MASKS are set.
-                if crate::utils::xdiag::var_os("LOSAT_TRACE_HSP_MASKS").is_some() {
-                    if let Some(target) = trace_hsp_target() {
-                        if trace_match_target(target, q_start, q_end, s_start, s_end) {
-                            // NCBI uses query_nomask = query_blk->sequence_nomask + query_offset,
-                            // with sequence_nomask pointing past the leading NULLB.
-                            // Reference: blast_filter.c:1381-1382, blast_util.c:112-116.
-                            let q_seq_nomask_full: &[u8] =
-                                ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
-                            let q_seq_nomask = &q_seq_nomask_full[1..q_seq_nomask_full.len() - 1];
-                            let s_seq = &s_frame.aa_seq[1..s_frame.aa_seq.len() - 1];
-                            let q_seq_masked = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
-                            let s_seq_scoring =
-                                &s_score_frame.aa_seq[1..s_score_frame.aa_seq.len() - 1];
-                            let mut masked_residues = 0usize;
-                            let mut masked_score = 0i32;
-                            let mut unmasked_score = 0i32;
-                            let mut report_unmasked_score = 0i32;
-                            let mut mask_runs = Vec::new();
-                            let mut current_mask_start: Option<usize> = None;
-                            for rel in 0..len {
-                                let q_pos = q0 + rel;
-                                let s_pos = s0 + rel;
-                                if q_pos >= q_seq_masked.len()
-                                    || q_pos >= q_seq_nomask.len()
-                                    || s_pos >= s_seq.len()
-                                    || s_pos >= s_seq_scoring.len()
-                                {
-                                    break;
-                                }
-                                let q_masked = q_seq_masked[q_pos];
-                                let q_unmasked = q_seq_nomask[q_pos];
-                                let subject_scoring = s_seq_scoring[s_pos];
-                                let subject_report = s_seq[s_pos];
-                                if q_masked != q_unmasked {
-                                    masked_residues += 1;
-                                    if current_mask_start.is_none() {
-                                        current_mask_start = Some(rel);
-                                    }
-                                } else if let Some(start) = current_mask_start.take() {
-                                    mask_runs.push(format!("{}..{}", start, rel));
-                                }
-                                masked_score += sc.score(q_masked, subject_scoring);
-                                unmasked_score += sc.score(q_unmasked, subject_scoring);
-                                report_unmasked_score += sc.score(q_unmasked, subject_report);
-                            }
-                            if let Some(start) = current_mask_start.take() {
-                                mask_runs.push(format!("{}..{}", start, len));
-                            }
-                            eprintln!(
-                                "[TRACE_HSP_MASKS] q={}-{} s={}-{} ctx_idx={} q_frame={} s_frame={} len={} raw_score={} masked_score={} unmasked_score={} report_unmasked_score={} masked_residues={} mask_runs={}",
-                                q_start,
-                                q_end,
-                                s_start,
-                                s_end,
-                                h.ctx_idx,
-                                ctx.frame,
-                                s_frame.frame,
-                                len,
-                                h.raw_score,
-                                masked_score,
-                                unmasked_score,
-                                report_unmasked_score,
-                                masked_residues,
-                                if mask_runs.is_empty() {
-                                    "none".to_string()
-                                } else {
-                                    mask_runs.join(",")
-                                }
-                            );
-                        }
-                    }
-                }
-
-                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-                // ```c
-                // typedef struct BlastHSPList {
-                //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-                //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-                //                       Set to 0 if not applicable */
-                // } BlastHSPList;
-                // ```
-                let out_hit = Hit {
-                    identity,
-                    length: len,
-                    mismatch: mismatch as i64,
-                    gapopen: 0,
-                    q_start,
-                    q_end,
-                    s_start,
-                    s_end,
-                    e_value: h.e_value,
-                    bit_score: bit,
-                    num_ident: matches,
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
-                    // ```c
-                    // if (hsp->query.frame != hsp->subject.frame) {
-                    //    *q_end = query_length - hsp->query.offset;
-                    //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-                    // }
-                    // ```
-                    query_frame: ctx.frame as i32,
-                    query_length: 0,
-                    q_idx: ctx.q_idx,
-                    s_idx: h.s_idx,
-                    raw_score: h.raw_score,
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4754-4767
-                    // ```c
-                    // s_AdjustInitialHSPOffsets(init_hsp,
-                    //                           query_info->contexts[context].query_offset);
-                    // Blast_HSPInit(ungapped_data->q_start, ...,
-                    //               ungapped_data->s_start, ...,
-                    //               context, query_info->contexts[context].frame,
-                    //               subject->frame, ungapped_data->score, NULL, &new_hsp);
-                    // ```
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:808-812
-                    // ```c
-                    // subject->sequence = translation_buffer + frame_offsets[context] + 1;
-                    // subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-                    // ```
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1353
-                    // ```c
-                    // BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)
-                    // BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)
-                    // BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset)
-                    // BLAST_CMP(hsp2->query.end, hsp1->query.end)
-                    // ```
-                    // TBLASTX ScoreCompareHSPs uses the context/frame-relative
-                    // BlastSeg offsets stored in Blast_HSPInit, not formatted
-                    // nucleotide coordinates or LOSAT's concatenated frame bases.
-                    sort_query_offset: h.q_aa_start as usize,
-                    sort_query_end: h.q_aa_end as usize,
-                    sort_subject_offset: h.s_aa_start as usize,
-                    sort_subject_end: h.s_aa_end as usize,
-                    has_sort_offsets: true,
-                    gap_info: None,
-                    num_positives: matches,
-                };
-                trace_final_hit_if_match("output_hit", &out_hit);
-                if dump_output_stage {
-                    output_snapshot_pairs.push((out_hit.clone(), h.clone()));
-                }
-                // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:4760-4767
-                // ```c
-                //       Blast_HSPInit(ungapped_data->q_start,
-                //                     ungapped_data->length+ungapped_data->q_start,
-                //     ...
-                //                     context, query_info->contexts[context].frame,
-                //                     subject->frame, ungapped_data->score, NULL, &new_hsp);
-                // ```
-                // The HSP keeps its subject frame and its linked-set size (`num`) for the
-                // pairwise report.
-                final_hits.push(TblastxHsp {
-                    hit: out_hit,
-                    subject_frame: s_frame.frame,
-                    num: h.num,
-                });
-            }
-            x_lap.lap(XStage::Convert);
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1018-1059
-            // ```c
-            // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
-            //     continue;
-            // while (H->hsp_link.link[ordering_method]) { ... }
-            // ```
-            // The converted output hits are represented here by their original
-            // internal HSP rows after e-value filtering and before common.rs
-            // applies final HSP-list sorting for the selected output format.
-            if dump_output_stage {
-                stage_dump::dump_ungapped_hits(
-                    "after_output_conversion_before_final_sort",
-                    &output_snapshot_hits,
-                );
-                stage_dump::dump_final_output_order(
-                    "after_final_output_sort",
-                    &output_snapshot_pairs,
-                );
-            }
-
-            if debug_output_filter {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
-                // ```c
-                // #if _BLAST_DEBUG
-                // arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-                //                  true);
-                // #endif /* _BLAST_DEBUG */
-                // ```
-                // DEBUG: Print output filtering statistics.
-                // NCBI reference: link_hsps.c:1018-1020 - continue is NOT an output filter
-                // Chain members are included in output via link pointer traversal.
-                eprintln!("[DEBUG OUTPUT_FILTER] Total linked HSPs: {}", total_linked);
-                eprintln!(
-                    "[DEBUG OUTPUT_FILTER] Single HSPs (linked_set=false): {}",
-                    stats_single_hsps
-                );
-                eprintln!(
-                    "[DEBUG OUTPUT_FILTER] Chain heads (linked_set=true, start_of_chain=true): {}",
-                    stats_chain_heads
-                );
-                eprintln!("[DEBUG OUTPUT_FILTER] Chain members (linked_set=true, start_of_chain=false): {} (included in output)", stats_chain_members);
-                eprintln!(
-                    "[DEBUG OUTPUT_FILTER] Filtered by E-value (threshold={}): {}",
-                    evalue_threshold, filtered_by_evalue
-                );
-                eprintln!("[DEBUG OUTPUT_FILTER] Expected after E-value filter: {} (all HSPs - E-value filtered)", total_linked - filtered_by_evalue);
-                eprintln!(
-                    "[DEBUG OUTPUT_FILTER] Final hits after filtering: {}",
-                    final_hits.len()
-                );
-            }
+            // The second linking call (`subject_link::relink_subject_hits`), then the subject's
+            // report hits (`subject_report::linked_hits_to_report`).
+            let linked = subject_link::relink_subject_hits(
+                &link_args,
+                ungapped_hits,
+                &stage_args,
+                &x_link_timer,
+                &mut x_lap,
+            );
+            let final_hits = subject_report::linked_hits_to_report(
+                sc,
+                linked,
+                (s_frames, s_frames_report),
+                s_len,
+                &stage_args,
+                &mut x_lap,
+            );
 
             if !final_hits.is_empty() {
                 if diag_enabled {

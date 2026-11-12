@@ -30,7 +30,6 @@ rpsblast	rps_search	code
 tblastn	blastn	code
 tblastn	blastp	code
 tblastn	common	code
-tblastn	psiblast	code
 tblastn	pssm_search	code
 tblastn	tblastx	code
 tblastx	blastn	code

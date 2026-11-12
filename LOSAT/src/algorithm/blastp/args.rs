@@ -1130,9 +1130,9 @@ impl BlastpArgs {
             .and_then(|pssm| pssm.in_pssm.as_deref())
         {
             Some(path) => {
-                let (mut search, file) = crate::algorithm::psiblast::in_pssm::read_in_pssm(
+                let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
                     path,
-                    crate::algorithm::psiblast::in_pssm::PssmReader::PSIBLAST,
+                    crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
                 )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(

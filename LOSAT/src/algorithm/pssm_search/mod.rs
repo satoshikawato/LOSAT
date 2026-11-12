@@ -26,6 +26,7 @@
 
 pub(crate) mod evalue;
 pub(crate) mod gapalign;
+pub(crate) mod in_pssm;
 pub(crate) mod lookup;
 pub(crate) mod prelim;
 pub(crate) mod redo1;
@@ -79,7 +80,7 @@ pub struct PsiSearch {
     /// line carries (`algorithm::psiblast::in_pssm::setup_messages`).
     pub(crate) setup_messages: Vec<String>,
     /// The title of the query's warning label when it is not the record's: a PSSM query's
-    /// (`CBlastQuerySourceBioseqSet::GetTitle`, `algorithm::psiblast::in_pssm`); `None` for a FASTA
+    /// (`CBlastQuerySourceBioseqSet::GetTitle`, `algorithm::pssm_search::in_pssm`); `None` for a FASTA
     /// query's later rounds, whose label keeps the record's title.
     pub(crate) warning_title: Option<Vec<u8>>,
 }

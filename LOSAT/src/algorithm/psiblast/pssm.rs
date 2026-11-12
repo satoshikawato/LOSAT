@@ -11,10 +11,11 @@ use std::io::Write as _;
 use anyhow::Result;
 
 use super::rounds::SetKey;
+use crate::algorithm::pssm_search::in_pssm::{score_block, NCBISTDAA_TO_AMINOACID};
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::core::psi::{
-    self, KarlinBlk, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiMsaCell, PsiPssm, PsiScoreBlk,
+    self, KarlinBlk, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiMsaCell, PsiPssm,
 };
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
@@ -662,121 +663,6 @@ fn error_code_to_string(error: PsiError) -> &'static str {
     }
 }
 
-/// The score block of `CPssmEngine::x_InitializeScoreBlock` that the engine reads.
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:525-577
-// ```c++
-//     const EBlastProgramType kProgramType = eBlastTypePsiBlast;
-//     ...
-//     BlastScoringOptionsSetMatrix(opts, matrix_name);
-//     ...
-//     status = BlastSetup_ScoreBlkInit(query_blk,
-//                                      query_info,
-//                                      opts,
-//                                      kProgramType,
-//                                      &retval,
-//                                      kScaleFactor,
-//                                      &errors,
-//                                      &BlastFindMatrixPath);
-//     ...
-//     _ASSERT(retval->kbp_ideal);
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848
-// ```c
-//    stdrfp = Blast_ResFreqNew(sbp);
-//    Blast_ResFreqStdComp(sbp, stdrfp);
-//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
-//    sbp->kbp_ideal = Blast_KarlinBlkNew();
-//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1506-1528 (the matrix's
-// `loscore` and `hiscore`: its smallest and largest scores between BLAST_SCORE_MIN and
-// BLAST_SCORE_MAX)
-// ```c
-//          if (matrix[index1][index2] <= BLAST_SCORE_MIN ||
-//              matrix[index1][index2] >= BLAST_SCORE_MAX)
-//             continue;
-//          if (sbp->loscore > matrix[index1][index2])
-//             sbp->loscore = matrix[index1][index2];
-//          if (sbp->hiscore < matrix[index1][index2])
-//             sbp->hiscore = matrix[index1][index2];
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/matrix_freq_ratios.c:1661-1736
-// ```c
-//     if ( !strcasecmp(matrix_name, "BLOSUM62") ||
-//          !strcasecmp(matrix_name, "BLOSUM62_20")) {
-//         ...
-//         retval->bit_scale_factor = 2;
-//     ...
-//     } else if ( !strcasecmp(matrix_name, "BLOSUM45") ) {
-//         ...
-//         retval->bit_scale_factor = 3;
-//     } else if ( !strcasecmp(matrix_name, "BLOSUM80") ) {
-//         ...
-//         retval->bit_scale_factor = 2;
-//     ... (BLOSUM50, BLOSUM90, PAM30, PAM70, PAM250: 2)
-//     } else {
-//         retval = _PSIMatrixFrequencyRatiosFree(retval);
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:104-120
-// ```c
-//         } else {
-//             retval =
-//                 Blast_KarlinBlkGappedCalc(sbp->kbp_gap_std[index],
-//                     scoring_options->gap_open, scoring_options->gap_extend,
-//                     sbp->name, error_return);
-//         }
-//         ...
-//         /* For right now, copy the contents from kbp_gap_std to
-//          * kbp_gap_psi (as in old code - BLASTSetUpSearchInternalByLoc) */
-//         if (program != eBlastTypeBlastn && program != eBlastTypeMapping) {
-//             sbp->kbp_gap_psi[index] = Blast_KarlinBlkNew();
-//             Blast_KarlinBlkCopy(sbp->kbp_gap_psi[index],
-//                                 sbp->kbp_gap_std[index]);
-//         }
-// ```
-// `gapped` is the gapped block of the matrix and gap costs (`Blast_KarlinBlkGappedCalc`), the
-// search's: `kbp_gap_std[0]`, copied to `kbp_gap_psi[0]`.
-pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<PsiScoreBlk> {
-    // psiblast's `Validate` refuses IDENTITY, the one matrix without frequency ratios
-    // (`stats::protein_options`, the standard matrices only).
-    let data = crate::core::composition_adjustment::adjust_scores::compo_matrix_data(matrix)
-        .ok_or_else(|| anyhow::anyhow!("no frequency ratios for {}", matrix.ncbi_name()))?;
-    let mut table = [[0i32; BLASTAA_SIZE]; BLASTAA_SIZE];
-    let (mut loscore, mut hiscore) = (i32::MAX, i32::MIN);
-    for (i, row) in table.iter_mut().enumerate() {
-        for (j, score) in row.iter_mut().enumerate() {
-            *score = crate::utils::matrix::protein_score(matrix, i as u8, j as u8);
-            if *score <= BLAST_SCORE_MIN || *score >= i16::MAX as i32 {
-                continue;
-            }
-            loscore = loscore.min(*score);
-            hiscore = hiscore.max(*score);
-        }
-    }
-    let std_comp = crate::stats::karlin_calc::compute_std_aa_composition();
-    let sfp = crate::stats::karlin_calc::compute_score_freq_profile_for_matrix(
-        &std_comp, &std_comp, loscore, hiscore, matrix,
-    );
-    let ideal = crate::stats::karlin_calc::compute_karlin_params_ungapped(&sfp)
-        .map_err(|error| crate::blastinput::app::engine_error(&error))?;
-    Ok(PsiScoreBlk {
-        matrix: table,
-        ideal_lambda: ideal.lambda,
-        ideal_k: ideal.k,
-        gap_std_k: gapped.k,
-        gap_psi: gapped,
-        freq_ratios: data.freq_ratios,
-        bit_scale_factor: if matrix == ScoringMatrix::Blosum45 {
-            3
-        } else {
-            2
-        },
-        background: data.background,
-    })
-}
-
 /// The engine's input from the query and its Seq-aligns (`CPsiBlastInputData::Process`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:122-141
 // ```c++
@@ -1075,16 +961,6 @@ pub(crate) fn ncbistdaa_letters(letters: &[u8]) -> Vec<u8> {
 pub(super) const RESIDUE_ORDER: [usize; 20] = [
     1, 16, 13, 4, 3, 15, 5, 7, 8, 9, 11, 10, 12, 6, 14, 17, 18, 20, 22, 19,
 ];
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-118
-// ```c
-// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
-// '-','A','B','C','D','E','F','G','H','I','K','L','M',
-// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'};
-// ```
-/// The letters of NCBIstdaa, the one table of the psiblast module (the ASCII PSSM, the query
-/// letters of a PSSM file, `in_pssm` and `in_pssm_files`).
-pub(super) const NCBISTDAA_TO_AMINOACID: &[u8; BLASTAA_SIZE] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 
 /// A double as the C++ stream writes it with `fixed` and `setprecision(precision)` (the C
 /// library's `%.*f`: correctly rounded, as Rust's formatting; `inf` and `nan` as glibc spells

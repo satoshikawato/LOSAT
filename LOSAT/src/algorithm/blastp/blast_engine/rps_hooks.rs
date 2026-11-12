@@ -322,7 +322,7 @@ pub(super) fn rps_search(
     let lambda = run.gapped_params.lambda;
     // BLOSUM62's score block for the matrix information of the redo.
     let sbp = if cbs > 0 {
-        Some(crate::algorithm::psiblast::pssm::score_block(
+        Some(crate::algorithm::pssm_search::in_pssm::score_block(
             args.scoring.matrix,
             crate::core::psi::KarlinBlk {
                 lambda,

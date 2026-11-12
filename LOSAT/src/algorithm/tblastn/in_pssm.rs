@@ -1,5 +1,5 @@
 //! tblastn `-in_pssm F` (PSI-TBLASTN; line PS, item PS7, DECISIONS 35): the PSSM read as psiblast
-//! reads it (`algorithm::psiblast::in_pssm`, with tblastn's program name and matrix), its query
+//! reads it (`algorithm::pssm_search::in_pssm`, with tblastn's program name and matrix), its query
 //! record, the lookup table of its rows, the program name of its reports, and LOSAT's refusals of
 //! what NCBI BLAST+ 2.17.0's tblastn cannot search with a PSSM.
 //!
@@ -20,7 +20,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 
 use super::args::{ResolvedTblastnArgs, TblastnArgs};
-use crate::algorithm::psiblast::in_pssm::{read_in_pssm, PssmReader};
+use crate::algorithm::pssm_search::in_pssm::{read_in_pssm, PssmReader};
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;

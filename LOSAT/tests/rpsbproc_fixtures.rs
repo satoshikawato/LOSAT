@@ -178,14 +178,15 @@ fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
     assert_eq!(status, rc, "{case}: exit status");
 }
 
-#[test]
-fn rpsbproc_gives_ncbis_bytes() {
-    let run_dir = RunDir::new("compare");
+/// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `oracle/`: the
+/// number of rows.
+fn compare_rows(stem: &str, usage: &str) -> usize {
+    let run_dir = RunDir::new(stem);
     let dir = &run_dir.0;
     let oracle = fixtures().join("oracle");
     let mut compared = 0;
-    for [case, usage, stdin, setup, arguments] in cases() {
-        if usage != "compare" {
+    for [case, row_usage, stdin, setup, arguments] in cases() {
+        if row_usage != usage {
             continue;
         }
         set_up(dir, &setup);
@@ -205,7 +206,22 @@ fn rpsbproc_gives_ncbis_bytes() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 182);
+    compared
+}
+
+#[test]
+fn rpsbproc_gives_ncbis_bytes() {
+    assert_eq!(compare_rows("compare", "compare"), 183);
+}
+
+// The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
+// standard output, where the report's part of a line that NCBI's `cout` keeps in glibc's buffer
+// (of `st_blksize`, 4096 for a pipe on Linux) comes after them (`rpsbproc::NcbiStream::Cout`).
+// NCBI's builds are Linux builds; the other platforms' buffers are not NCBI's.
+#[cfg(target_os = "linux")]
+#[test]
+fn rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux() {
+    assert_eq!(compare_rows("linux", "linux"), 1);
 }
 
 // The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and

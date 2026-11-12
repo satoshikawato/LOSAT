@@ -130,7 +130,9 @@ fn format_g(value: f64) -> String {
 /// in one file (`-o F -logfile F`, `-logfile /dev/stdout`, `2>&1`): NCBI rpsbproc 0.5.1 with an
 /// exception in the middle of the `SESSION` line keeps that part in its stream, writes the
 /// report of the exception at the end of the `-logfile` file and then the rest at the stream's
-/// offset, over the start of the report (line RG E1c review 1, `m_subj_same`).
+/// offset, over the start of the report (line RG E1c review 1, `m_subj_same`). The buffers are
+/// those of NCBI's builds of rpsbproc, which are Linux builds (glibc, GCC 13's libstdc++): LOSAT
+/// keeps their counts on every platform (NCBI's rpsbproc on macOS or Windows is not measured).
 ///
 /// A failed write stops LOSAT (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 9): NCBI's
 /// `ostream` sets its bad bit and the run goes on to exit 0 (a closed pipe ends it by SIGPIPE).
@@ -221,6 +223,19 @@ impl NcbiStream {
     // strings of the archive and the data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION` line
     // cut by an exception after a database name of 1,100, 5,000 and 9,000 bytes, with `-o F
     // -logfile F` and with `-logfile /dev/stdout` on a pipe: line RG `E/e1c/bufprobe`.)
+    // NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:570-576 (a `char` is put, not
+    // written with `sputn`: `held_after_put`)
+    // ```c++
+    //   template<typename _Traits>
+    //     inline basic_ostream<char, _Traits>&
+    //     operator<<(basic_ostream<char, _Traits>& __out, char __c)
+    //     {
+    //       if (__out.width() != 0)
+    // 	return __ostream_insert(__out, &__c, 1);
+    //       __out.put(__c);
+    //       return __out;
+    //     }
+    // ```
     fn held_after(self, held: usize, bytes: &[u8]) -> usize {
         if bytes.last() == Some(&b'\n') {
             return 0;
@@ -246,6 +261,24 @@ impl NcbiStream {
             }
         }
     }
+
+    /// `held_after` for an insertion of one `char` (`put`, `sputc`): the buffer takes it while
+    /// it has room; a full buffer is written with it (`basic_filebuf::overflow`). On `cout`,
+    /// glibc's `putc` gives what an `fwrite` of one byte gives. NCBI rpsbproc 0.5.1, both builds,
+    /// with 8,190 bytes held before a tab of the `SESSION` line (line RG E1c review 2,
+    /// `s_same_mat8165`, `s_same_ev8156`).
+    fn held_after_put(self, held: usize) -> usize {
+        match self {
+            NcbiStream::Cout { .. } => self.held_after(held, b"\t"),
+            NcbiStream::File => {
+                if held < BUFSIZ - 1 {
+                    held + 1
+                } else {
+                    0
+                }
+            }
+        }
+    }
 }
 
 impl Report {
@@ -262,12 +295,29 @@ impl Report {
         }
     }
 
+    /// An insertion of a string or a number (`sputn`).
     fn write(&mut self, bytes: &[u8]) {
         if self.failed.is_some() {
             return;
         }
         self.pending.extend_from_slice(bytes);
         self.held = self.stream.held_after(self.held, bytes);
+        self.write_blocks();
+    }
+
+    /// An insertion of a `char` (`<< DELIMIT`: `put`), where a line can be cut by an exception
+    /// (the `SESSION` line; in the other lines it holds what `write` would).
+    fn put(&mut self, byte: u8) {
+        if self.failed.is_some() {
+            return;
+        }
+        self.pending.push(byte);
+        self.held = self.stream.held_after_put(self.held);
+        self.write_blocks();
+    }
+
+    /// Writes the report's full blocks that NCBI's stream has written.
+    fn write_blocks(&mut self) {
         if self.pending.len() - self.held >= REPORT_BLOCK {
             self.write_out(self.pending.len() - self.held);
         }
@@ -1510,10 +1560,10 @@ fn run_sessions<R: Read>(
         let session_text = session.to_string();
         report.write(b"SESSION\t");
         report.write(session_text.as_bytes());
-        report.write(b"\t");
+        report.put(b'\t');
         report.write(&search.program);
         if let Some(ident) = &archive.ident {
-            report.write(b"\t");
+            report.put(b'\t');
             report.write(ident);
         }
         let process_failure = |report: &mut Report, error: ProcessError| -> Outcome {
@@ -1536,7 +1586,7 @@ fn run_sessions<R: Read>(
         // Each choice's tab is written before its getter, which may throw (C++17: the left
         // operand of `<<` is evaluated first; NCBI rpsbproc 0.5.1 on an archive whose subject is
         // `sequences`: `SESSION\t1\tblastp\t2.17.0+\t`, then the exception; line RG E1c review 1).
-        report.write(b"\t");
+        report.put(b'\t');
         match &search.subject {
             Subject::Database(database) => {
                 report.write(database);
@@ -1550,7 +1600,7 @@ fn run_sessions<R: Read>(
         }
         if search.has_algorithm_options {
             if search.matrix_name.is_some() {
-                report.write(b"\t");
+                report.put(b'\t');
             }
             match &search.matrix_name {
                 None => {}
@@ -1570,7 +1620,7 @@ fn run_sessions<R: Read>(
                 }
             }
             if search.evalue_threshold.is_some() {
-                report.write(b"\t");
+                report.put(b'\t');
             }
             match &search.evalue_threshold {
                 None => {}

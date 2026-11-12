@@ -36,7 +36,7 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 
 ## CASES.tsv
 
-`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `refuse`: LOSAT refuses, exit 1, with
+`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `refuse`: LOSAT refuses, exit 1, with
 the bytes of `refused/<case>.{out,err,rc}`: the XML input until the XML reader of a later item, PS16d, and the
 refusals of PS16b below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
@@ -118,7 +118,12 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   5`. NCBI writes the `SESSION` line's tab before each getter throws; with `-o log.txt -logfile log.txt` its stream
   keeps the part of that line until the program ends, and writes it over the start of the exception's report.
   `matrix_integer_longdb.asn` is `matrix_integer.asn` with a database name of 5,000 bytes, which libstdc++'s buffer of
-  8,192 bytes keeps (an insertion is written directly only when it does not fit in what is left).
+  8,192 bytes keeps (an insertion is written directly only when it does not fit in what is left);
+  `matrix_integer_db8165.asn` one of 8,165 bytes, after which the buffer holds 8,190 bytes and takes the `char` of the
+  next tab (`put`) without writing (the review 2 of item E1c).
+- `use` `linux` (`linux_cout_longdb`): run only on Linux (`rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux`):
+  `-logfile /dev/stdout` with the standard output a pipe, where glibc's buffer of `cout` (4,096 bytes) decides the
+  order of the report and the diagnostics.
 - `refused/refuse_xml.*`: LOSAT's bytes for the XML input with a successful `Init`, refused when its run would read the
   archive (NCBI's standard error up to its warning `Warning: XML format support is deprecated!`, then the refusal).
   With `-dryrun` NCBI reads no archive and passes, and LOSAT gives its bytes (`e1c_dry_xml`).

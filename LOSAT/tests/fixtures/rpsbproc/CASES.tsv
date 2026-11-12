@@ -186,3 +186,5 @@ e1c_mat_same	compare	-	-	-i arch/bad/matrix_integer.asn -d data -o log.txt -logf
 e1c_ev_same	compare	-	-	-i arch/bad/evalue_rawscore.asn -d data -o log.txt -logfile log.txt
 e1c_subj_out_log	compare	-	-	-i arch/bad/subj_sequences.asn -d data -o out.txt -logfile log.txt
 e1c_mat_longdb_same	compare	-	-	-i arch/bad/matrix_integer_longdb.asn -d data -o log.txt -logfile log.txt
+e1c_mat_db8165_same	compare	-	-	-i arch/bad/matrix_integer_db8165.asn -d data -o log.txt -logfile log.txt
+linux_cout_longdb	linux	-	-	-i arch/bad/matrix_integer_longdb.asn -d data -logfile /dev/stdout

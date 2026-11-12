@@ -173,7 +173,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
             .map_err(|_| anyhow::anyhow!("the preliminary hit list size overflows"))?;
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
     // BLASTN-specific debug mode: set LOSAT_DEBUG_BLASTN=1 to enable detailed hit loss diagnostics
     let blastn_debug = std::env::var("LOSAT_DEBUG_BLASTN").is_ok();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:350-692
@@ -194,19 +194,21 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // ```
     let verbose = args.verbose;
     let debug_window: Option<(usize, usize, usize, usize)> =
-        std::env::var("BLEMIR_DEBUG_WINDOW").ok().and_then(|s| {
-            let parts: Vec<&str> = s.split(',').collect();
-            if parts.len() == 2 {
-                let q_parts: Vec<usize> =
-                    parts[0].split('-').filter_map(|x| x.parse().ok()).collect();
-                let s_parts: Vec<usize> =
-                    parts[1].split('-').filter_map(|x| x.parse().ok()).collect();
-                if q_parts.len() == 2 && s_parts.len() == 2 {
-                    return Some((q_parts[0], q_parts[1], s_parts[0], s_parts[1]));
+        crate::utils::xdiag::var("BLEMIR_DEBUG_WINDOW")
+            .ok()
+            .and_then(|s| {
+                let parts: Vec<&str> = s.split(',').collect();
+                if parts.len() == 2 {
+                    let q_parts: Vec<usize> =
+                        parts[0].split('-').filter_map(|x| x.parse().ok()).collect();
+                    let s_parts: Vec<usize> =
+                        parts[1].split('-').filter_map(|x| x.parse().ok()).collect();
+                    if q_parts.len() == 2 && s_parts.len() == 2 {
+                        return Some((q_parts[0], q_parts[1], s_parts[0], s_parts[1]));
+                    }
                 }
-            }
-            None
-        });
+                None
+            });
 
     // NCBI BLAST does NOT use mask_array/mask_hash for diagonal suppression
     // REMOVED: disable_mask variable (no longer needed)

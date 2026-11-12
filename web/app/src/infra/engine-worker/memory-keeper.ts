@@ -30,7 +30,13 @@ export class MemoryKeeper {
     this.channel = channel;
     channel.onmessage = (event: MessageEvent<KeeperGrow>) => {
       if (event.data?.type !== 'grow') return;
-      growToMaximum(shared);
+      try {
+        growToMaximum(shared);
+      } catch {
+        // The Gateway ends the runtime during a search only on the answer (gateway.ts,
+        // retire), so it comes also then; the memory stays as it is, as when the browser
+        // cannot give its maximum.
+      }
       const grown: KeeperGrown = { type: 'grown' };
       channel.postMessage(grown);
     };

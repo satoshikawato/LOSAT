@@ -712,7 +712,7 @@ pub(super) fn run_local(
                 use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
                 let settings =
                     check_ncbi_application_settings("blastn").map_err(anyhow::Error::msg)?;
-                args.window_masker_path = Some(settings.window_masker_path);
+                args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
             run_local_blastn(args, query, subject, outputs)

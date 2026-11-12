@@ -92,10 +92,24 @@ pub(crate) fn last_value<'a>(
 /// `Critical: (110.6) ` before the text, and ends with a line feed (what() ends with one too,
 /// so an empty line follows).
 pub(crate) fn syntax_error_notice(error: &NcbiException) -> String {
+    syntax_error_post(error, "")
+}
+
+/// `syntax_error_notice` posted while `program` runs, after its application has set its
+/// diagnostics' prefix (`SetDiagPostPrefix`), which the old post format writes as `[program] `
+/// after the error code: the post of a registry that the program loads in its search, such as
+/// that of blastn's `-window_masker_taxid` (NCBI BLAST+ 2.17.0, 2026-11-12:
+/// `Critical: (110.6) [blastn] CNcbiRegistry: ...`, the rest as at the start).
+pub(crate) fn running_syntax_error_notice(error: &NcbiException, program: &str) -> String {
+    syntax_error_post(error, &format!("[{program}] "))
+}
+
+/// The post of `syntax_error_notice` with the diagnostics' `prefix`.
+fn syntax_error_post(error: &NcbiException, prefix: &str) -> String {
     let what = error.what();
     let what = what.split('\0').next().unwrap_or_default();
     format!(
-        "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: {what}\n"
+        "Critical: (110.6) {prefix}CNcbiRegistry: Syntax error in system-wide configuration file: {what}\n"
     )
 }
 
@@ -194,6 +208,13 @@ impl LineEnds {
 /// ncbidiag.cpp:5612-5700).
 pub(crate) fn error_reading_post() -> &'static str {
     "Error: (110.4) Error reading the registry after line 1: \n"
+}
+
+/// `error_reading_post` posted while `program` runs, with its diagnostics' prefix
+/// (`running_syntax_error_notice`; NCBI BLAST+ 2.17.0 on 2026-11-12:
+/// `Error: (110.4) [blastn] Error reading the registry after line 1: `).
+pub(crate) fn running_error_reading_post(program: &str) -> String {
+    error_reading_post().replacen("(110.4) ", &format!("(110.4) [{program}] "), 1)
 }
 
 /// What one `GetTextEncodingForm(is, eBOM_Discard)` leaves of the stream.

@@ -7764,7 +7764,7 @@ fn search_cli(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.resolve_dust()?;
-    args.window_masker_path = Some(settings.window_masker_path.clone());
+    args.window_masker_registry = Some(settings.window_masker_registry.clone());
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
@@ -8204,7 +8204,7 @@ fn run_local_formats(
         );
     }
     if args.window_masker_taxid.is_some_and(|taxid| taxid != 0)
-        && (args.window_masker_path.is_none() || args.window_masker_counts.is_none())
+        && (args.window_masker_registry.is_none() || args.window_masker_counts.is_none())
     {
         anyhow::bail!(
             "-window_masker_taxid (a directory of WindowMasker counts files) is not supported in the browser yet"
@@ -8331,7 +8331,7 @@ fn search_database(
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
     args.resolve_dust()?;
-    args.window_masker_path = Some(settings.window_masker_path.clone());
+    args.window_masker_registry = Some(settings.window_masker_registry.clone());
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
     process_options(&mut args, outputs)?;
@@ -9264,6 +9264,10 @@ struct QueryBatch {
     /// The preliminary hit lists of a query chunk, one per query part
     /// (`BatchStage::ChunkPrelim`).
     chunk_prelim_lists: PrelimHitLists,
+    /// What NCBI posts while it searches the chunks of a split batch, when it makes each chunk's
+    /// masks (`WindowMasker::load_posts`), in order; the batch loop writes it after the messages
+    /// of the batch's set-up.
+    chunk_posts: Vec<u8>,
     /// The batch's `LOSAT_TIMING` lines (`blastn_timing_text`; empty without it), which
     /// `run_in_pool` writes to standard error when it takes the batch, where the search wrote
     /// them before.
@@ -9562,7 +9566,7 @@ fn run_in_pool(
         // the switch acts (an error here is the file changed between the two readings).
         let mut batch_records =
             queries.batch_in(input_start..input_end, start..end, parallel_pool)?;
-        let batch_title_warnings: Vec<u8> = batch_records
+        let mut batch_title_warnings: Vec<u8> = batch_records
             .input()
             .iter()
             .flat_map(|record| record.warnings.iter().copied())
@@ -9709,6 +9713,11 @@ fn run_in_pool(
         // (`window_masker::rejection`). The masks made here are those the search uses.
         let mut window_masker_masks = None;
         if let Some(window_masker) = &args.window_masker {
+            // The batch's query source loads the registry of `-window_masker_taxid` before it
+            // makes the masks, after the reader's messages of the batch: its posts go with them
+            // (`WindowMasker::load_posts`), before every later message of the batch; once for a
+            // batch whose masks are made, once for each query when they fail (`batch_error`).
+            let first_load = input_start == 0;
             let searched = batch_records.searched();
             let masks = match window_masker.build_error() {
                 Some(error) => Err(error.clone()),
@@ -9719,7 +9728,7 @@ fn run_in_pool(
             };
             if let Err(error) = &masks {
                 let Some((masker_warnings, failure)) =
-                    super::super::window_masker::batch_error(error, searched.len())
+                    window_masker.batch_error(error, searched.len(), first_load)
                 else {
                     return Err(window_masker_rejection(&args, error));
                 };
@@ -9760,6 +9769,7 @@ fn run_in_pool(
                 outputs.diagnostics.write_all(&masker_warnings)?;
                 return Err(failure.into());
             }
+            batch_title_warnings.extend_from_slice(window_masker.load_posts(first_load));
             window_masker_masks = masks.ok();
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
@@ -9984,6 +9994,9 @@ fn run_in_pool(
                 }
             },
         };
+        // What the search of a split batch posted at its chunks' masks, after the messages of
+        // the batch's set-up and before those of its reports.
+        warnings[start].extend_from_slice(&batch.chunk_posts);
         // The batch's LOSAT_TIMING block, where its search wrote it before.
         if !batch.timing.is_empty() {
             eprint!("{}", batch.timing);
@@ -11675,7 +11688,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     //
     //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
     // ```
-    let split_prelim_lists = match stage {
+    let (split_prelim_lists, chunk_posts) = match stage {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:60-61
         // ```c
         //     if (!options->GetGappedMode()) m_NumChunks = 1;
@@ -11698,8 +11711,9 @@ fn search_query_batch<const UNGAPPED: bool>(
             batching,
             first_batch,
             x_keep,
-        )?,
-        _ => None,
+        )?
+        .map_or((None, Vec::new()), |(lists, posts)| (Some(lists), posts)),
+        _ => (None, Vec::new()),
     };
     // EXPERIMENT (LOSAT_X_BNQPACK): the encoding and the query chunks were the last readers of the
     // batch's letters; records held by the caller alone drop them here, before the lookup tables
@@ -15894,6 +15908,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                         chunk_prelim_lists: PrelimHitLists| QueryBatch {
         hit_lists,
         chunk_prelim_lists,
+        chunk_posts: chunk_posts.clone(),
         good_init_extends: good_init_extends.load(std::sync::atomic::Ordering::Relaxed),
         searched: any_valid_context,
         query_masks: seq_data.query_masks.clone(),
@@ -16504,7 +16519,7 @@ fn search_query_chunks(
     batching: QueryBatching,
     first_batch: bool,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
-) -> Result<Option<PrelimHitLists>> {
+) -> Result<Option<(PrelimHitLists, Vec<u8>)>> {
     let lengths: Vec<usize> = (0..queries.count())
         .map(|index| queries.length(index))
         .collect();
@@ -16547,6 +16562,7 @@ fn search_query_chunks(
     // No NCBI counterpart (memory placement only, `x_query_sentinels`): the chunks' query buffer,
     // kept from chunk to chunk (the batch's own buffer is in use until its traceback).
     let mut query_keep: Vec<u8> = Vec::new();
+    let mut chunk_posts = Vec::new();
     for chunk in &chunks {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
         // CBlastQueryVector"); `split_query_batch` makes none.
@@ -16573,6 +16589,11 @@ fn search_query_chunks(
                 }
             })
             .collect();
+        // The chunk's query source loads the registry of `-window_masker_taxid` before it
+        // makes the masks (`WindowMasker::load_posts`).
+        if let Some(window_masker) = &args.window_masker {
+            chunk_posts.extend_from_slice(window_masker.load_posts(false));
+        }
         let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool)
             .map_err(|error| window_masker_rejection(args, &error))?;
         let batch = search_query_batch::<false>(
@@ -16613,7 +16634,7 @@ fn search_query_chunks(
             batching.split.overlap as u32 as i32,
         )?;
     }
-    Ok(Some(merged))
+    Ok(Some((merged, chunk_posts)))
 }
 
 /// NCBI's `BlastHSPStreamMerge` of a query chunk: the HSPs of each query part's hit list

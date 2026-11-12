@@ -238,16 +238,10 @@ pub(crate) fn gapped_karlin(options: &ResolvedOptions) -> KarlinParams {
 //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
-// ```c
-//     /* FSCOLD: to switch back to original FSC, comment out the following line */
-//     use_old_fsc = getenv("OLD_FSC");
-//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-// ```
-/// The Gumbel block of a gapped search, none with `-searchsp` (at any value) or `OLD_FSC`
-/// (`ResolvedOptions::old_fsc`).
+/// The Gumbel block of a gapped search, none with `-searchsp` (at any value) or `OLD_FSC`, nor in
+/// an ungapped search (`ResolvedOptions::has_gumbel_block`).
 pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGumbelBlk> {
-    if options.old_fsc {
+    if !options.has_gumbel_block() {
         return None;
     }
     lookup_protein_gumbel_params(
@@ -621,11 +615,22 @@ pub fn subject_parameters(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+    // ```c
+    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+    //         new_msg->message = strdup("The average subject length is too short");
+    //         new_msg->severity = eBlastSevFatal;
+    // ```
     // BLASTX's subject is not translated, so the shortest length is not divided by 3. Without the
-    // Gumbel block (`-ungapped`, `-searchsp`, `OLD_FSC`) the statistics' average divides by their
-    // number of sequences, which an alias file's `NSEQ 0` makes 0: NCBI crashes there (SIGFPE),
-    // LOSAT refuses (`common::database::check_statistics_count`, DECISIONS 14 of line RG).
-    let gumbel_block_used = options.gapped && !options.old_fsc;
+    // Gumbel block (`ResolvedOptions::has_gumbel_block`: `-ungapped`, `-searchsp`, `OLD_FSC`) the
+    // statistics' average divides by their number of sequences, which an alias file's `NSEQ 0`
+    // makes 0: NCBI crashes there (SIGFPE), LOSAT refuses (`common::database::check_statistics_count`,
+    // DECISIONS 14 of line RG). A set of subjects whose average is below one letter fails the
+    // batch's setup: the engine error after the start of the outfmt 0 report, exit status 3, as
+    // every other error of this setup (`native::database_search_error`; NCBI 2.17.0 blastx
+    // `-subject` of three empty records, or of `M`, `` and ``, with `-searchsp`, `OLD_FSC` or
+    // `-ungapped -comp_based_stats 0`, env parity probe f_probe of 2026-11-12).
+    let gumbel_block_used = options.has_gumbel_block();
     if !gumbel_block_used && db_count == 0 && db_length > 0 {
         return Err(crate::algorithm::common::database::refusal(
             "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
@@ -637,12 +642,7 @@ pub fn subject_parameters(
     } else {
         i32::try_from(db_length / db_count.max(1))?
     };
-    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
-    // length is too short"; LOSAT refuses the search instead.
-    ensure!(
-        !options.old_fsc || n > 0,
-        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
-    );
+    ensure!(n > 0, "The average subject length is too short");
     effective_lengths(
         batch,
         parameters,
@@ -652,11 +652,7 @@ pub fn subject_parameters(
         fixed_spaces,
     )?;
     let gapped = gapped_karlin(options);
-    let gumbel = if options.gapped {
-        gumbel_block(options, db_length)
-    } else {
-        None
-    };
+    let gumbel = gumbel_block(options, db_length);
     let decay = if options.sum_stats
         && (!options.gapped
             || options.max_intron_length == 0

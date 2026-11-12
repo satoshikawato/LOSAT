@@ -1,6 +1,6 @@
 # Inputs of the psiblast fixtures
 
-Used by the `db.ps.*` rows of `LOSAT/tests/db_search_manifest.tsv` (against `tests/db_search/paja`) and
+Used by the `db.ps.*` rows of `LOSAT/tests/db_search_manifest/psiblast.tsv` (against `tests/db_search/paja`) and
 the `ps.subj.*` rows of `LOSAT/tests/outfmt0_manifest.tsv` (against `-subject tests/fasta/PajaWSV.faa`).
 The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
 

@@ -17,6 +17,7 @@
 // pool spawns, and they cannot return while it waits, because the engine's thread library holds a
 // lock across `thread-spawn` that an ending thread needs (S09). A search of N threads therefore
 // has one set of N-1 thread workers, all ready before the search starts (`prepare`).
+import { growToMaximum } from '../reactor/shared-memory';
 import {
   SLOT_FAILED,
   SLOT_PREPARING,
@@ -139,8 +140,23 @@ export class ThreadHost {
     return -1;
   };
 
-  /** Ends every thread worker and the keeper. */
+  /**
+   * Ends every thread worker and the keeper. A thread that still runs may be growing the
+   * memory, and WebKit crashes the page when workers with instances on it end while a
+   * thread grows it (growToMaximum). The memory is then first grown to its maximum, where
+   * no thread can grow it, as the Gateway has the keeper do before it ends a runtime during
+   * a search. A slot runs from its spawn until its thread returns, and a thread of a pool
+   * may not have returned when the search did (see above), for example when the next
+   * search of the runtime runs on the other module (runtime.ts, load).
+   */
   terminate(): void {
+    if (this.slots.some((slot) => Atomics.load(slot.state, 0) === SLOT_RUNNING)) {
+      try {
+        growToMaximum({ memory: this.options.memory, maximumPages: this.options.maximumPages });
+      } catch {
+        // The workers end all the same; the memory stays as it is (memory-keeper.ts).
+      }
+    }
     for (const slot of this.slots.splice(0)) slot.worker.terminate();
     this.keeper.terminate();
     this.faults?.close();

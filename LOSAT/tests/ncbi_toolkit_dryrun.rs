@@ -3,7 +3,7 @@
 //! `remaining-gaps-20261112/E/SURVEY_E1b.md`, run with `env -i` in a fresh directory: the E1
 //! probe's `dry*` cases and the sweep of every argument definition of NCBI's `-xmlhelp`).
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:704-706, 292-296 (quoted at
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (quoted at
 //! `cli::main_entry`) and 926-1001 (quoted at `ncbi_environment::preparse`).
 
 #![cfg(unix)]
@@ -86,10 +86,8 @@ const RUNS: [(&str, &[&str]); 9] = [
         "rpsblast",
         &["-query", "arch_bp_q.faa", "-db", "rpsdb/rps_mini"],
     ),
-    (
-        "makeblastdb",
-        &["-in", "arch_bp_s.faa", "-dbtype", "prot", "-out", "mdb"],
-    ),
+    // Its `-out` is the database's name: the cases below add one.
+    ("makeblastdb", &["-in", "arch_bp_s.faa", "-dbtype", "prot"]),
     ("blastdbcmd", &["-db", "nodb", "-entry", "all"]),
 ];
 
@@ -127,9 +125,11 @@ fn words_of<'a>(
 /// NCBI BLAST+ 2.17.0 (probes `dry`, `dry_first`, `dry_twice`, `dry_qerr`, `dry_noquery`,
 /// `dry_dbmissing`, `dry_old_out`, `dry_ncbirc`, `dry_env`, `makeblastdb.dry_noin`,
 /// `blastdbcmd.dry_nodb`, `blastdbcmd.dry_out`): after the arguments, nothing runs. No input is
-/// read (a missing `-query`, `-in` or `-db`, or none), no file is made or truncated (`-out`), the
-/// settings that LOSAT refuses in a run (a `.ncbirc` with `[BLAST] LONG_SEQID`, `BL2SEQ_LEGACY`)
-/// are not checked: nothing written, exit status 0.
+/// read (a missing `-query`, `-in` or `-db`, or none), no file is made or truncated (`-out`), a
+/// setting that NCBI reads in `Run` (`BL2SEQ_LEGACY`) is not looked at: nothing written, exit
+/// status 0. The registry and environment settings that LOSAT refuses in a run are refused with
+/// `-dryrun` too (line RG DECISIONS E1b-6: some of them, `DIAG_POST_LEVEL` and the registry's
+/// `[DEBUG]`, make NCBI write `DryRun`'s `Info` post).
 #[test]
 fn a_dry_run_reads_the_arguments_and_runs_nothing() {
     let dir = scratch("nothing");
@@ -213,15 +213,32 @@ fn a_dry_run_reads_the_arguments_and_runs_nothing() {
             "{program}"
         );
         fs::remove_file(dir.join("out.txt")).unwrap();
-        if index < SEARCHES {
-            fs::write(dir.join(".ncbirc"), "[BLAST]\nLONG_SEQID=1\n").unwrap();
-            let run = run_in(&dir, &words_of(program, words, &["-dryrun"], false), &[]);
+        for (registry, envs) in [
+            ("[BLAST]\nLONG_SEQID=1\n", &[][..]),
+            ("[DEBUG]\nDIAG_POST_LEVEL=Info\n", &[]),
+            ("", &[("DIAG_POST_LEVEL", "Info")]),
+        ] {
+            if !registry.is_empty() {
+                fs::write(dir.join(".ncbirc"), registry).unwrap();
+            }
+            let plain = run_in(&dir, &words_of(program, words, &["-out", "o"], false), envs);
+            let dry = run_in(&dir, &words_of(program, words, &["-dryrun"], false), envs);
             assert_eq!(
-                (run.status.code(), run.stdout.len(), run.stderr.len()),
-                (Some(0), 0, 0),
-                "{program} .ncbirc: {run:?}"
+                plain.status.code(),
+                Some(1),
+                "{program} {registry:?} {envs:?}: {plain:?}"
             );
-            fs::remove_file(dir.join(".ncbirc")).unwrap();
+            assert!(
+                text(&plain.stderr).contains("not supported by LOSAT"),
+                "{plain:?}"
+            );
+            assert_eq!(
+                (dry.status.code(), text(&dry.stderr), dry.stdout.len()),
+                (Some(1), text(&plain.stderr), 0),
+                "{program} {registry:?} {envs:?}"
+            );
+            let _ = fs::remove_file(dir.join(".ncbirc"));
+            let _ = fs::remove_file(dir.join("o"));
         }
     }
     let _ = fs::remove_dir_all(&dir);
@@ -410,43 +427,38 @@ fn the_configuration_help_and_version_come_as_without_dryrun() {
 #[test]
 fn a_hexadecimal_taxid_is_the_same_taxid() {
     let dir = scratch("taxid");
-    let mut files = Vec::new();
-    for (name, taxid) in [("hex", "0x10"), ("dec", "16")] {
+    // One database name in two directories: the LMDB file holds the name.
+    for (sub, taxid) in [("hex", "0x10"), ("dec", "16")] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
         let run = run_in(
-            &dir,
+            &dir.join(sub),
             &[
                 "makeblastdb",
                 "-in",
-                "arch_bp_s.faa",
+                "../arch_bp_s.faa",
                 "-dbtype",
                 "prot",
                 "-out",
-                name,
+                "mdb",
                 "-taxid",
                 taxid,
             ],
             &[],
         );
         assert_eq!(run.status.code(), Some(0), "{taxid}: {run:?}");
-        files.push(
-            names(&dir)
-                .into_iter()
-                .filter(|file| file.starts_with(&format!("{name}.")))
-                .collect::<Vec<_>>(),
-        );
     }
-    assert!(!files[0].is_empty());
-    for hex in &files[0] {
-        let dec = format!("dec.{}", hex.strip_prefix("hex.").unwrap());
-        assert!(files[1].contains(&dec), "{dec}");
+    let files = names(&dir.join("hex"));
+    assert_eq!(files, names(&dir.join("dec")));
+    assert!(files.contains("mdb.ptf"), "{files:?}");
+    for file in &files {
         // The index and metadata files hold the creation date.
-        if hex.ends_with(".pin") || hex.ends_with(".pjs") {
+        if file.ends_with(".pin") || file.ends_with(".pjs") {
             continue;
         }
         assert_eq!(
-            fs::read(dir.join(hex)).unwrap(),
-            fs::read(dir.join(&dec)).unwrap(),
-            "{hex}"
+            fs::read(dir.join("hex").join(file)).unwrap(),
+            fs::read(dir.join("dec").join(file)).unwrap(),
+            "{file}"
         );
     }
     let _ = fs::remove_dir_all(&dir);

@@ -300,7 +300,14 @@ where
             let no_start =
                 crate::blastinput::ncbi_environment::application_start_of_process().is_none();
             if no_start && (conffile.is_some() || dryrun) {
-                let word = toolkit_file_word(&tokens[2..]).unwrap_or("-conffile");
+                // The library's makeblastdb takes `-logfile` (its own argument): the word named is
+                // the one refused.
+                let name = if conffile.is_some() {
+                    "-conffile"
+                } else {
+                    "-dryrun"
+                };
+                let word = toolkit_word_as_written(&tokens[2..], name).unwrap_or(name);
                 return Err(toolkit_file_word_error("makeblastdb", word));
             }
             tokens.truncate(2);
@@ -966,28 +973,28 @@ fn toolkit_file_word(tokens: &[OsString]) -> Option<&str> {
         } => (conffile.is_some(), dryrun),
         _ => (false, false),
     };
-    let named = |name: &'static str| {
-        tokens
-            .iter()
-            .filter_map(|token| token.to_str())
-            .find(|text| {
-                text.strip_prefix(name)
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('='))
-            })
-    };
     if log_file(tokens).is_some() {
-        return named("-logfile");
+        return toolkit_word_as_written(tokens, "-logfile");
     }
     if conffile {
-        return named("-conffile");
+        return toolkit_word_as_written(tokens, "-conffile");
     }
     if dryrun {
-        return tokens
-            .iter()
-            .filter_map(|token| token.to_str())
-            .find(|text| *text == "-dryrun");
+        return toolkit_word_as_written(tokens, "-dryrun");
     }
     None
+}
+
+/// The first word of `tokens` that is the toolkit option `name` (`-conffile` also as
+/// `-conffile=FILE`), as written.
+fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a str> {
+    tokens
+        .iter()
+        .filter_map(|token| token.to_str())
+        .find(|text| match text.strip_prefix(name) {
+            Some(rest) => rest.is_empty() || (name != "-dryrun" && rest.starts_with('=')),
+            None => false,
+        })
 }
 
 // No NCBI counterpart: NCBI has no library API. The application start of the command line

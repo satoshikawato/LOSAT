@@ -223,7 +223,7 @@ fn run_main_entry() -> Result<()> {
         Ok(cli) => cli,
         Err(error) => exit_on_parse_error(&error, argv_is_rpsbproc),
     };
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:704-706, 292-296
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296
     // ```c++
     //             try {
     //                 *exit_code = m_DryRun ? DryRun() : Run();
@@ -235,12 +235,38 @@ fn run_main_entry() -> Result<()> {
     //     return 0;
     // }
     // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:424-431, 1035-1041
+    // ```c++
+    //     CDiagContext::SetupDiag(diag, m_Config, eDCM_Flush, m_LogFile);
+    //     CDiagContext::x_FinalizeSetupDiag();
+    //
+    //     // Setup the standard features from the config file.
+    //     // Don't call till after LoadConfig()
+    //     // NOTE: this will override environment variables,
+    //     // except DIAG_POST_LEVEL which is Set*Fixed*.
+    //     x_HonorStandardSettings();
+    // ...
+    //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+    //     if ( !post_level.empty() ) {
+    //         EDiagSev sev;
+    //         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
+    //             SetDiagFixedPostLevel(sev);
+    //         }
+    //     }
+    // ```
     // `-dryrun` (`ncbi_environment::preparse`): the arguments have passed their definitions (the
     // parser above), and NCBI's BLAST programs, makeblastdb and blastdbcmd keep the default
-    // `DryRun`, whose `Info` post is below the diagnostics' level: nothing else runs, nothing is
-    // written, exit status 0 (NCBI BLAST+ 2.17.0: a missing `-query` or `-db` file, no `-query`,
-    // `-out FILE` not made; line RG item E1b). rpsbproc refuses it (item E1c).
+    // `DryRun`: nothing else runs, exit status 0 (NCBI BLAST+ 2.17.0: a missing `-query` or `-db`
+    // file, no `-query`, `-out FILE` not made; line RG item E1b). Its `Info` post is written when
+    // the diagnostics' settings, applied before it (`DIAG_POST_LEVEL`, the registry's `[DEBUG]`,
+    // `[Diag]`, `[LOG]`), let it through: LOSAT refuses the settings it refuses in a run, which
+    // include those, with the same check (line RG DECISIONS E1b-6). rpsbproc refuses `-dryrun`
+    // (item E1c).
     if dryrun {
+        if let Some(name) = program_name.as_deref() {
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings(name)
+                .map_err(anyhow::Error::msg)?;
+        }
         return Ok(());
     }
     // The messages of tblastx's and rpsblast's runs go where the diagnostics go

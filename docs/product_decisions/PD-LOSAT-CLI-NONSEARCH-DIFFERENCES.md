@@ -192,10 +192,11 @@ BLAST+.
   words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
   the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
   and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
-  (`ncbiapp.cpp:704-706`, 292-296). An argument error is reported as without `-dryrun`
+  (`ncbiapp.cpp:705-707`, 292-296). An argument error is reported as without `-dryrun`
   (exception 1), and the parser's refusals of an NCBI option that LOSAT does not run, or of a
   value form it does not read, stay (LOSAT has no definition to check them as NCBI does; line RG
-  DECISIONS E1b-2). rpsbproc (its own `DryRun`), the library API and the Web engine refuse it.
+  DECISIONS E1b-2), as do the refusals of registry and environment settings (some, such as
+  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). rpsbproc (its own `DryRun`), the library API and the Web engine refuse it.
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

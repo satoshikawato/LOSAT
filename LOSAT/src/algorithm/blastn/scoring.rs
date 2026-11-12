@@ -675,9 +675,26 @@ pub(crate) fn gap_x_dropoffs(
 ///   preliminary stage runs with the smaller of the X-drop and the HSP's ungapped score
 ///   (`s_BlastDynProgNtGappedAlignment`), so no preliminary X-drop is refused;
 /// - greedy extension (`-task megablast`): an X-drop of either stage whose `xdrop_offset`
-///   (`alignment::greedy::greedy_xdrop_offset`) is 0 or less: NCBI then reads and writes before
-///   its `max_score` array or fails to allocate it (NCBI 2.17.0: `BLAST engine error: Unknown
-///   error code -1`, or a crash on a corrupted heap, line RG X1b probe).
+///   (`alignment::greedy::greedy_xdrop_offset`) is 0 or less, or above the offset of the larger
+///   X-drop, by which NCBI sizes `max_score` (`d_diff`): NCBI then reads and writes outside its
+///   `max_score` array or fails to allocate it (NCBI 2.17.0: `BLAST engine error: Unknown error
+///   code -1`, a crash on a corrupted heap, or SIGSEGV, line RG X1b probe and review 1). A
+///   batch that NCBI would search without any greedy extension (no seed) is refused too, as the
+///   protein programs refuse their kernels' X-drops before the search.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183-188, 207, 257
+/// ```c
+///    if (score_params->reward % 2 == 1) {
+///       reward = 2*score_params->reward;
+///       penalty = -2*score_params->penalty;
+///       if (!Xdrop)
+///           Xdrop = 2*MAX(ext_params->gap_x_dropoff,
+///                     ext_params->gap_x_dropoff_final);
+///    ...
+///       d_diff = (Xdrop+reward/2)/(penalty+reward)+1;
+///    ...
+///    gamp->max_score = (Int4*) malloc(sizeof(Int4) * (max_d + 1 + d_diff));
+/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3008-3010
 /// ```c
@@ -715,15 +732,29 @@ pub(crate) fn check_gapped_x_dropoffs(
         return Ok(());
     }
     use super::alignment::greedy::greedy_xdrop_offset;
-    for (option, bits, x_dropoff) in [
+    // NCBI's `max_score` holds `max_d + 1 + d_diff` cells, `d_diff` the offset of the larger raw
+    // X-drop (`s_BlastGreedyAlignMemAlloc`). With an odd reward the doubling wraps, so the smaller
+    // X-drop can have the larger offset (`-xdrop_gap -3e9`: 174306649 against 19), which NCBI
+    // zero-fills past the array (SIGSEGV, review 1 of line RG X1b).
+    // A `d_diff` of 0 or less is the offset of one of the two stages: that stage is named.
+    let d_diff = greedy_xdrop_offset(gapped.max(finale), reward, penalty, gap_open, gap_extend);
+    let stages = [
         ("-xdrop_gap", gap_bits, gapped),
         (final_option, final_bits, finale),
-    ] {
-        if greedy_xdrop_offset(x_dropoff, reward, penalty, gap_open, gap_extend) <= 0 {
-            anyhow::bail!(
-                "an {option} of {bits:?} bits, whose raw X-drop makes NCBI BLAST+'s greedy alignment (-task megablast) read and write outside its arrays or fail to allocate them, is not supported by LOSAT's BLASTN"
-            );
-        }
+    ];
+    let offset = |x_dropoff| greedy_xdrop_offset(x_dropoff, reward, penalty, gap_open, gap_extend);
+    let culprit = stages
+        .iter()
+        .find(|&&(_, _, x_dropoff)| offset(x_dropoff) <= 0)
+        .or_else(|| {
+            stages
+                .iter()
+                .find(|&&(_, _, x_dropoff)| offset(x_dropoff) > d_diff)
+        });
+    if let Some(&(option, bits, _)) = culprit {
+        anyhow::bail!(
+            "an {option} of {bits:?} bits, whose raw X-drop makes NCBI BLAST+'s greedy alignment (-task megablast) read and write outside its arrays or fail to allocate them, is not supported by LOSAT's BLASTN"
+        );
     }
     Ok(())
 }
@@ -1182,13 +1213,21 @@ mod tests {
         assert!(check(false, (13, 54), (1, -2), (0, 0)).is_ok());
         assert!(check(false, (i32::MIN, 54), (1, -2), (0, 0)).is_ok());
         assert!(check(false, (13, i32::MIN), (1, -2), (0, 0)).is_ok());
-        assert!(refusal(check(false, (-4, 54), (1, -2), (0, 0))).starts_with("an -xdrop_gap of 25.0 bits"));
+        assert!(refusal(check(false, (-4, 54), (1, -2), (0, 0)))
+            .starts_with("an -xdrop_gap of 25.0 bits"));
         assert!(refusal(check(false, (13, 1 << 30), (1, -2), (0, 0)))
             .starts_with("an -xdrop_gap_final of 100.0 bits"));
         // The final X-drop that the preliminary one set is named -xdrop_gap.
         assert!(refusal(check(false, (1 << 30, 1 << 30), (1, -2), (0, 0)))
             .starts_with("an -xdrop_gap of 25.0 bits"));
         assert!(check(false, (i32::MIN, 54), (2, -3), (0, 0)).is_err());
+        // -xdrop_gap -3e9 (raw -1624563704) doubles to 1045839888: its offset 174306649 passes
+        // the 19 cells that the final X-drop's 54 gives NCBI's array (NCBI: SIGSEGV). With a
+        // final X-drop as large in NCBI's arithmetic (-3e9 or 1e9 bits), NCBI runs it.
+        assert!(refusal(check(false, (-1_624_563_704, 54), (1, -2), (0, 0)))
+            .starts_with("an -xdrop_gap of 25.0 bits"));
+        assert!(check(false, (-1_624_563_704, -1_624_563_704), (1, -2), (0, 0)).is_ok());
+        assert!(check(false, (-1_624_563_704, 541_521_234), (1, -2), (0, 0)).is_ok());
         // Dynamic programming: only the final X-drop, against the Int4 sizes of `ALIGN_EX`; the
         // preliminary one is never past the HSP's ungapped score, INT_MIN rises to the gap costs.
         assert!(check(true, (i32::MIN, i32::MIN), (2, -3), (5, 2)).is_ok());

@@ -861,7 +861,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
     // IMPORTANT: x_drop must also be doubled to maintain consistent units
     // NCBI: if (match_score % 2 == 1) { match_score *= 2; mismatch_score *= 2; xdrop_threshold *= 2; }
     let (match_cost, mismatch_cost, scaled_xdrop) = if reward % 2 == 1 {
-        (reward * 2, (-penalty) * 2, x_drop * 2)
+        (reward * 2, (-penalty) * 2, x_drop.wrapping_mul(2))
     } else {
         (reward, -penalty, x_drop)
     };
@@ -1205,7 +1205,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             (
                 reward * 2,
                 penalty * 2,
-                x_drop * 2,
+                x_drop.wrapping_mul(2),
                 in_gap_open * 2,
                 in_gap_extend * 2,
             )
@@ -3809,8 +3809,9 @@ fn blast_greedy_align_rows(
 /// the `d_diff` of the greedy memory (`s_BlastGreedyAlignMemAlloc`), with the larger of the two
 /// X-drops of the search. An offset of 0 or less makes NCBI read and write before its `max_score`
 /// array (`aux_data->max_score[index]` for the distances below the offset) or, for the memory,
-/// fail to allocate it (`BLAST engine error: Unknown error code -1`), so the search refuses such an
-/// X-drop (`scoring::check_gapped_x_dropoffs`).
+/// fail to allocate it (`BLAST engine error: Unknown error code -1`), and an offset above the
+/// memory's makes NCBI write past the array, so the search refuses such an X-drop
+/// (`scoring::check_gapped_x_dropoffs`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:801-811
 /// ```c

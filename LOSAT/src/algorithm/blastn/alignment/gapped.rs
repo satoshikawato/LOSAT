@@ -1368,7 +1368,13 @@ fn blast_align_packed_nucl_scalar(
         }
 
         // NCBI reference: blast_gapalign.c:3176-3180
-        gap_dp_reserve_band(score_array, dp_mem_alloc, last_b_index, num_extra_cells, query_len);
+        gap_dp_reserve_band(
+            score_array,
+            dp_mem_alloc,
+            last_b_index,
+            num_extra_cells,
+            query_len,
+        );
 
         if last_b_index < b_size.saturating_sub(1) {
             b_size = last_b_index + 1;
@@ -3159,7 +3165,15 @@ mod tests {
         let run = |x_drop: i32| {
             let mut scratch = super::GapAlignScratch::new();
             let out = super::extend_gapped_one_direction_with_traceback_with_scratch(
-                &q, &s, 2, -3, &matrix, 5, 2, x_drop, &mut scratch,
+                &q,
+                &s,
+                2,
+                -3,
+                &matrix,
+                5,
+                2,
+                x_drop,
+                &mut scratch,
             );
             (out, scratch)
         };
@@ -3169,7 +3183,10 @@ mod tests {
         assert_eq!(scratch.dp_mem.len(), 1000);
         assert!(scratch.dp_mem_alloc > 500_000_000);
         assert!(scratch.trace_rows.iter().all(|row| row.len() <= n + 2));
-        assert!(scratch.trace_rows.iter().all(|row| row.capacity() <= 3 * (n + 2)));
+        assert!(scratch
+            .trace_rows
+            .iter()
+            .all(|row| row.capacity() <= 3 * (n + 2)));
     }
 
     fn blastna(bases: &str) -> Vec<u8> {

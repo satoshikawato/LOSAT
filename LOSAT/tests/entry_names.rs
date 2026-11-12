@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 9] = [
+const PROGRAMS: [&str; 10] = [
     "blastn",
     "blastp",
     "blastx",
@@ -56,6 +56,7 @@ const PROGRAMS: [&str; 9] = [
     "rpsblast",
     "makeblastdb",
     "blastdbcmd",
+    "rpsbproc",
 ];
 
 /// The program names that `losat --install-shims` listed on standard output (one path per

@@ -48,6 +48,11 @@ pub struct ParsedSubject {
     /// Another sequence that NCBI's scope can show for this one by a weak match where its
     /// formatters read the batch's sequences one by one (`weak_match`, `fetched`).
     weak_match: Option<WeakMatch>,
+    /// Another sequence, by ordinal id, that holds an id NCBI's scope takes for the Seq-align id,
+    /// besides the sequence that the lookup gives first or where it gives none
+    /// (`FoundInstead::Sequence`, `Nothing`): NCBI's scope can read it for this one where it has
+    /// read it before (`also_held`, `pssm_read`).
+    also_held: Option<u32>,
     /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
     show_gis: bool,
     /// Whether NCBI makes the subject Bioseq's title from its source with the taxonomy database
@@ -148,7 +153,7 @@ pub enum WeakMatch {
 /// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
 /// Seq-align id (`ParsedSubject::prefetched`): psiblast's traceback hit lists beyond
 /// `-max_target_seqs`, and the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`
-/// (`common::database::prefetch_reads_itself`).
+/// (`common::database::prefetch_reads`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Prefetched {
     /// The sequence itself, or the same record whose lookups of its taxids write the same texts
@@ -260,6 +265,7 @@ impl ParsedSubject {
             unfetchable,
             found_instead: None,
             weak_match: None,
+            also_held: None,
             show_gis: false,
             taxonomy_title: false,
             record: false,
@@ -306,6 +312,7 @@ impl ParsedSubject {
             unfetchable: false,
             found_instead: None,
             weak_match: None,
+            also_held: None,
             show_gis: false,
             taxonomy_title: false,
             record: true,
@@ -380,8 +387,17 @@ impl ParsedSubject {
         self
     }
 
+    /// The subject with `holder`, another sequence that holds an id NCBI's scope takes for the
+    /// Seq-align id where the lookup gives a third sequence first or none (`pssm_read`).
+    pub fn also_held(mut self, holder: Option<u32>) -> Self {
+        self.also_held = holder;
+        self
+    }
+
     /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
-    /// (see `new`), so that no lookup is needed.
+    /// (see `new`), so that no lookup is needed. Read by tests only: the engine asks
+    /// `common::database::scope_bioseq`, which looks it up first.
+    #[cfg(test)]
     pub fn unfetchable(&self) -> bool {
         self.unfetchable
     }
@@ -526,6 +542,78 @@ impl ParsedSubject {
     /// another can stand for by a weak match (`WeakMatch`), after what the lookup finds.
     pub fn fetched(&self, taxonomy: bool, one_by_one: bool) -> Result<(), String> {
         self.found_fetched(taxonomy)?;
+        self.weakly_fetched(one_by_one)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+    // `algorithm::psiblast::pssm::input_msa`)
+    /// LOSAT's refusal of what psiblast's PSSM reads by the Seq-align id of a subject that it
+    /// includes (the `CSeqVector` of each Seq-align's range in NCBI's scope), where LOSAT does not
+    /// read it as NCBI: what the scope gets is `common::database::scope_bioseq`'s, and this
+    /// refuses another sequence that also holds an id the scope takes for the Seq-align id, which
+    /// the scope reads for it where it has read it before (`FoundInstead::AlsoHeld` where the
+    /// lookup gives the subject first, `also_held` where it gives another or none), a lookup that
+    /// fails on a file (`FoundInstead::Failed`), the same record whose read writes other
+    /// taxonomy texts (`CopyApart::TaxonomyTexts`), and with `one_by_one` a weak match
+    /// (`fetched`). The reasons are what the lookup finds, also for a subject whose definition
+    /// line the formatters do not find (`unfetchable`), which the PSSM reads by the scope as any
+    /// other (review 2 of line DBID pssmread, M2).
+    pub fn pssm_read(&self, one_by_one: bool) -> Result<(), String> {
+        let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        match &self.found_instead {
+            Some(
+                found @ (FoundInstead::AlsoHeld(_)
+                | FoundInstead::Failed(_)
+                | FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)),
+            ) => return Err(self.found_reason(found, false).unwrap_or_default()),
+            Some(FoundInstead::Sequence(_) | FoundInstead::Nothing) => {
+                if let Some(holder) = self.also_held {
+                    return Err(format!(
+                        "has the Seq-align id {}, which database sequence {holder} also holds (an id that NCBI BLAST+'s scope takes for it) besides what the lookup gives: NCBI BLAST+ 2.17.0 reads that sequence for it where it has read it before, as its reads and the blobs' layout decide",
+                        id()
+                    ));
+                }
+            }
+            _ => {}
+        }
+        self.weakly_fetched(one_by_one)
+    }
+
+    /// Another sequence, by ordinal id, that holds an id NCBI's scope takes for the Seq-align id
+    /// besides what the lookup gives (`also_held`, `FoundInstead::AlsoHeld`), whose Bioseq the
+    /// scope gets for this one where it holds it from an earlier read
+    /// (`common::database::scope_bioseq`).
+    pub fn other_holder(&self) -> Option<u32> {
+        match &self.found_instead {
+            Some(FoundInstead::AlsoHeld(other)) => Some(*other),
+            Some(FoundInstead::Sequence(_) | FoundInstead::Nothing) => self.also_held,
+            _ => None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1437-1439
+    // ```c++
+    //     seqids = defline->GetSeqid();
+    //     ...
+    //     bioseq->SetId().swap(seqids);
+    // ```
+    /// Whether the Bioseq that `GetBioseqNoData` builds of this sequence for its Seq-align id
+    /// holds that id: the ids of the definition line its filter keeps (`target`,
+    /// `DeflineSet::bioseq_defline`) hold one that compares equal to it (the scope's test on the
+    /// Bioseq's ids, `common::database::scope_bioseq`). Not where that line is found by the
+    /// content of a local id alone (`lcl|777` before `gi|777`), nor for a giim id.
+    pub fn bioseq_holds_alignment_id(&self) -> bool {
+        !matches!(self.alignment_id, ParsedSeqId::Giim(_))
+            && self
+                .target()
+                .ids
+                .iter()
+                .any(|id| compare(id, &self.alignment_id) == Sic::Yes)
+    }
+
+    /// `fetched`'s refusal of a weak match where NCBI's formatters may read the subject one by
+    /// one (`one_by_one`).
+    fn weakly_fetched(&self, one_by_one: bool) -> Result<(), String> {
         let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match self.weak_match.as_ref().filter(|_| one_by_one) {
             None => Ok(()),
@@ -547,50 +635,48 @@ impl ParsedSubject {
     /// `fetched` but for the weak matches: what the lookup of the Seq-align id finds
     /// (`found_instead`), whatever the batch's prefetch.
     fn found_fetched(&self, taxonomy: bool) -> Result<(), String> {
-        let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
-        match (self.unfetchable, &self.found_instead) {
-            (false, None) => Ok(()),
-            (
-                false,
-                Some(
-                    FoundInstead::OtherTaxids(_)
-                    | FoundInstead::CopyApart(_, CopyApart::Title),
-                ),
-            ) if !taxonomy => Ok(()),
-            (
-                false,
-                Some(
-                    FoundInstead::OtherTaxids(ordinal)
-                    | FoundInstead::CopyApart(ordinal, CopyApart::Title),
-                ),
-            ) => Err(format!(
-                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)",
-                id()
-            )),
-            (false, Some(FoundInstead::CopyApart(ordinal, CopyApart::TaxonomyTexts))) => Err(format!(
-                "has the Seq-align id {}, which database sequence {ordinal} also holds with the same definition lines and letters: where NCBI BLAST+ 2.17.0 shows that sequence for it, the volume of that sequence looks its taxids up, and the taxonomy database writes a text at such a lookup",
-                id()
-            )),
-            (false, Some(FoundInstead::Sequence(ordinal))) => Err(format!(
-                "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {ordinal} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)",
-                id()
-            )),
-            (false, Some(FoundInstead::AlsoHeld(ordinal))) => Err(format!(
-                "has the Seq-align id {}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)",
-                id()
-            )),
-            (
-                false,
-                Some(FoundInstead::Failed(message) | FoundInstead::ThrowsOnId(message)),
-            ) => Err(format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)",
-                id()
-            )),
-            _ => Err(format!(
+        if self.unfetchable {
+            return Err(format!(
                 "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
-                id()
-            )),
+                String::from_utf8_lossy(&self.alignment_fasta())
+            ));
         }
+        match &self.found_instead {
+            None => Ok(()),
+            Some(found) => self.found_reason(found, taxonomy).map_or(Ok(()), Err),
+        }
+    }
+
+    /// The reason of a refusal of what the lookup of the Seq-align id finds, `found`, for a format
+    /// that reads the Bioseq (`fetched`; `taxonomy` as there), or for psiblast's PSSM
+    /// (`pssm_read`); `None` for a copy of the record that such a report shows as the subject.
+    fn found_reason(&self, found: &FoundInstead, taxonomy: bool) -> Option<String> {
+        let id = String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        Some(match found {
+            FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(_, CopyApart::Title)
+                if !taxonomy =>
+            {
+                return None
+            }
+            FoundInstead::OtherTaxids(ordinal) | FoundInstead::CopyApart(ordinal, CopyApart::Title) => format!(
+                "has the Seq-align id {id}, which database sequence {ordinal} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)"
+            ),
+            FoundInstead::CopyApart(ordinal, CopyApart::TaxonomyTexts) => format!(
+                "has the Seq-align id {id}, which database sequence {ordinal} also holds with the same definition lines and letters: where NCBI BLAST+ 2.17.0 shows that sequence for it, the volume of that sequence looks its taxids up, and the taxonomy database writes a text at such a lookup"
+            ),
+            FoundInstead::Sequence(ordinal) => format!(
+                "has the Seq-align id {id}, by which NCBI BLAST+'s lookup gives database sequence {ordinal} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)"
+            ),
+            FoundInstead::AlsoHeld(ordinal) => format!(
+                "has the Seq-align id {id}, which database sequence {ordinal} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)"
+            ),
+            FoundInstead::Failed(message) | FoundInstead::ThrowsOnId(message) => format!(
+                "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
+            ),
+            FoundInstead::Nothing => format!(
+                "has the Seq-align id {id}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)"
+            ),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:770-786
@@ -619,15 +705,19 @@ impl ParsedSubject {
     // `gnl|PIG|124`, `gnl|BL_ORD_ID|40` of no sequence); a lookup that fails (a `gnl|BL_ORD_ID|0`
     // stored with a text tag) ends the prefetch with that warning; `lcl|555` that an earlier
     // sequence holds loads that sequence, whose taxids it looks up.
+    // The loader reads by the Seq-align id what its lookup gives, also for a subject whose
+    // definition line the formatters do not find (`unfetchable`): its own blob where the lookup
+    // gives it, whose taxids it looks up (review 2 of DBID P1: `lcl|777` before `gi|777`,
+    // `bad_magic`), another sequence's where it gives that one first (review 2 of line DBID
+    // pssmread, H3: `gi|777|gb|YYY00001.1|` of taxid 99990 before `lcl|777 ^A gi|777`).
     /// What NCBI's prefetch reads for this subject where no report shows it (`Prefetched`).
     pub fn prefetched(&self) -> Prefetched {
-        let reason = || self.found_fetched(false).err().unwrap_or_default();
-        // The loader reads the blob of a subject whose definition line the formatters do not
-        // find (`unfetchable`) and looks its taxids up (review 2 of DBID P1: `lcl|777` before
-        // `gi|777`, `bad_magic`).
-        if self.unfetchable {
-            return Prefetched::Itself;
-        }
+        let reason = || {
+            self.found_instead
+                .as_ref()
+                .and_then(|found| self.found_reason(found, false))
+                .unwrap_or_default()
+        };
         match &self.found_instead {
             None
             | Some(FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(_, CopyApart::Title)) => {
@@ -668,7 +758,7 @@ impl ParsedSubject {
     /// pre-fetching sequence data` (`common::database::batch_prefetch`). A lookup that fails on a
     /// file stops NCBI (`FoundInstead::Failed`).
     pub fn prefetch_fails(&self) -> bool {
-        !self.unfetchable && matches!(self.found_instead, Some(FoundInstead::ThrowsOnId(_)))
+        matches!(self.found_instead, Some(FoundInstead::ThrowsOnId(_)))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255
@@ -788,20 +878,21 @@ impl ParsedSubject {
         !self.volume_taxids().is_empty()
     }
 
-    /// The positive taxids of the definition lines in the order in which the volume looks them
-    /// up when it fetches the subject Bioseq (`CSeqDBVol::x_GetTaxonomy`; `x_GetTaxDefline`
-    /// puts the target first), each once.
+    /// The lookups of the volume's taxonomy cache when NCBI fetches the subject Bioseq by its
+    /// Seq-align id: the positive taxids of the definition lines in the order of
+    /// `CSeqDBVol::x_GetTaxonomy` (`x_GetTaxDefline` puts the line that holds the id first,
+    /// `DeflineSet::taxonomy_lookups`), a taxid of several lines once for each.
+    pub fn volume_lookups(&self) -> Vec<i32> {
+        self.set.taxonomy_lookups(&self.alignment_id)
+    }
+
+    /// The positive taxids that the volume looks up when it fetches the subject Bioseq, each once,
+    /// in the order of their first lookup ([`ParsedSubject::volume_lookups`]).
     pub fn volume_taxids(&self) -> Vec<i32> {
         let mut taxids = Vec::new();
-        let order = std::iter::once(self.target()).chain(
-            (0..self.set.deflines.len())
-                .filter(|&i| i != self.target)
-                .map(|i| &self.set.deflines[i]),
-        );
-        for defline in order {
-            match defline.taxid {
-                Some(taxid) if taxid > 0 && !taxids.contains(&taxid) => taxids.push(taxid),
-                _ => {}
+        for taxid in self.volume_lookups() {
+            if !taxids.contains(&taxid) {
+                taxids.push(taxid);
             }
         }
         taxids
@@ -2007,6 +2098,72 @@ mod tests {
         );
     }
 
+    // Line DBID pssmread (probe `R/pssmread`, reviews 1 and 2): LOSAT's refusals of what
+    // psiblast's PSSM reads by the Seq-align id (what the scope gets is
+    // `common::database::scope_bioseq`'s).
+    #[test]
+    fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+        let read = |subject: &ParsedSubject| subject.pssm_read(false);
+        assert_eq!(read(&subject), Ok(()));
+        assert!(subject.bioseq_holds_alignment_id());
+        assert_eq!(subject.other_holder(), None);
+        let other = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Sequence(4)));
+        assert_eq!(read(&other), Ok(()));
+        for found in [
+            FoundInstead::Nothing,
+            FoundInstead::ThrowsOnId("Error: ... is not a valid ordinal id".into()),
+            FoundInstead::OtherTaxids(2),
+        ] {
+            assert_eq!(read(&subject.clone().found_instead(Some(found))), Ok(()));
+        }
+        // Refused: another holder besides what the lookup gives, a lookup failing on a file, the
+        // subject first with another holder.
+        let held = other.clone().also_held(Some(6));
+        assert_eq!(held.other_holder(), Some(6));
+        assert!(read(&held)
+            .unwrap_err()
+            .contains("which database sequence 6 also holds"));
+        let none_held = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Nothing))
+            .also_held(Some(6));
+        assert!(read(&none_held).is_err());
+        for found in [
+            FoundInstead::AlsoHeld(6),
+            FoundInstead::Failed("DB contains no accession info.".into()),
+        ] {
+            assert!(read(&subject.clone().found_instead(Some(found))).is_err());
+        }
+        // A weak match refuses where the batch reads one by one, whatever the lookup gives.
+        let weak = other.clone().weak_match(Some(WeakMatch::Held(7)));
+        assert_eq!(weak.pssm_read(false), Ok(()));
+        assert!(weak.pssm_read(true).is_err());
+        // A definition line that the formatters do not find: its Bioseq does not hold the id, and
+        // the reasons are what the lookup finds (review 2, M2).
+        let shown = lines(vec![
+            vec![ParsedSeqId::Local(ObjectId::Id(777))],
+            vec![ParsedSeqId::Gi(777)],
+        ]);
+        assert!(shown.unfetchable());
+        assert!(!shown.bioseq_holds_alignment_id());
+        assert_eq!(read(&shown), Ok(()));
+        let also = shown.clone().found_instead(Some(FoundInstead::AlsoHeld(2)));
+        assert_eq!(also.other_holder(), Some(2));
+        let error = read(&also).unwrap_err();
+        assert!(
+            error.contains("which database sequence 2 also holds"),
+            "{error}"
+        );
+        assert!(!error.contains("formatters do not find"), "{error}");
+        let failed = shown.found_instead(Some(FoundInstead::Failed("no accession info".into())));
+        assert!(read(&failed)
+            .unwrap_err()
+            .contains("whose lookup in the database fails"));
+    }
+
     // Line DBID weakbatch (probe w0): NCBI's scope matches a Seq-align id weakly only where the
     // formatters read the batch's subjects one by one, its prefetch off; the prefetch loads each
     // subject by its own id.
@@ -2090,6 +2247,24 @@ mod tests {
             prefetched(Some(FoundInstead::CopyApart(4, CopyApart::TaxonomyTexts))),
             Prefetched::Another { other: None, .. }
         ));
+        // A subject whose definition line the formatters do not find: what its lookup gives, as
+        // any other (review 2 of line DBID pssmread, H3).
+        let shown = lines(vec![
+            vec![ParsedSeqId::Local(ObjectId::Id(777))],
+            vec![ParsedSeqId::Gi(777)],
+        ]);
+        assert_eq!(shown.prefetched(), Prefetched::Itself);
+        assert!(matches!(
+            shown.clone().found_instead(Some(FoundInstead::Sequence(3))).prefetched(),
+            Prefetched::Another { other: Some(3), or_itself: false, reason }
+                if reason.contains("gives database sequence 3 first")
+        ));
+        assert_eq!(
+            shown
+                .found_instead(Some(FoundInstead::Nothing))
+                .prefetched(),
+            Prefetched::Nothing
+        );
     }
 
     // Line DBID N1b L1: a copy with other taxids from which NCBI can make the subject's title is

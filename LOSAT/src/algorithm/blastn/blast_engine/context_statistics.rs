@@ -331,7 +331,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     let check_subjects = any_valid_context && !split;
     if check_subjects {
         if let SubjectSource::Database(database) = subjects {
-            if database.metadata().db_num_seqs == 0 {
+            if database.num_oids() == 0 {
                 return Err(database_search_error(
                     database::PreliminaryReadError("Database memory map file error").into(),
                     first_batch,

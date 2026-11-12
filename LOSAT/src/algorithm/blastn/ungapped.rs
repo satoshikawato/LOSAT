@@ -262,16 +262,6 @@ pub fn average_subject_length_subject_set(total_length: u64, num_seqs: u64) -> u
     (total_length / num_seqs.max(1)) as u32 as u64
 }
 
-/// The average subject length of a database: `(Int4)(total / MAX(1, count))`.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/seqsrc_seqdb.cpp:203-209
-/// ```c
-///     return (Int4) (seqdb->GetTotalLength() / MAX(1, seqdb->GetNumSeqs()));  (s_SeqDbGetAvgLength)
-/// ```
-pub fn average_subject_length_database(total_length: u64, num_seqs: u64) -> u64 {
-    (total_length / num_seqs.max(1)) as i32 as u32 as u64
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,18 +464,12 @@ mod tests {
 
     #[test]
     fn average_subject_lengths_follow_each_source() {
+        // A database's average is `SeqDb::average_length` (seqsrc_seqdb.cpp:203-209).
         assert_eq!(average_subject_length_subject_set(1000, 3), 333);
-        assert_eq!(average_subject_length_database(1000, 0), 1000);
-        assert_eq!(average_subject_length_database(10, 3), 3);
-        // Uint4 and Int4 casts of a huge average.
+        // The Uint4 cast of a huge average.
         assert_eq!(
             average_subject_length_subject_set(5_000_000_000, 1),
             705_032_704
-        );
-        // A database average above `Int4` becomes negative and then a huge `Uint4` (3,000,000,000 here).
-        assert_eq!(
-            average_subject_length_database(3_000_000_000, 1),
-            3_000_000_000
         );
     }
 }

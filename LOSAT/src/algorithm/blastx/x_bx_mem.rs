@@ -663,7 +663,6 @@ pub(super) fn chunk_subjects_on_pool(
     options: &ResolvedOptions,
     lookup: &BxLookup,
     xdrop: i32,
-    db_length: i64,
     x_containment: bool,
 ) -> Result<Vec<(usize, SubjectComputation)>> {
     use rayon::prelude::*;
@@ -697,7 +696,6 @@ pub(super) fn chunk_subjects_on_pool(
                     table,
                     xdrop,
                     false,
-                    db_length,
                     oid,
                     x_containment,
                 )?;

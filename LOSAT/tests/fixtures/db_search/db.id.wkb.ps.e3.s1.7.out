@@ -1,0 +1,9 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qy
+# Database: tests/db_search/ids/wkb_e3_v5
+# Fields: query id, subject id, subject acc.ver, % identity, bit score, evalue, subject title
+# 3 hits found
+qy	gb|FFF00043.1|	FFF00043.1	100.000	463	2.58e-173	y_title
+qy	gb|ZZZ00001.1|	ZZZ00001.1	91.818	420	3.45e-156	z_title
+# BLAST processed 1 queries

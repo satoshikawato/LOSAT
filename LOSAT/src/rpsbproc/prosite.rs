@@ -45,27 +45,35 @@
 //! NCBI's `Match` stores one record (`size_t`) per step of a position in a vector; a step that
 //! does not advance (an anchor, a negation of anchors only) repeats at the same position up to the
 //! maximal count, and a lazy position that does not advance is revisited for ever, until the
-//! memory runs out. `Record` keeps the counts instead of the records, and one allocation of
-//! NCBI's of 1 GiB or more for them is refused (`MatchError::Exhausted`; NCBI's result depends on
-//! the host's memory). `ProSite::minimal_map` follows `GetMinimalXMap`'s string by its length and
-//! capacity, with the exceptions that its `append` throws (`MapEnd`).
+//! memory runs out. `Record` keeps the counts instead of the records. `ProSite::minimal_map`
+//! follows `GetMinimalXMap`'s string by its length and capacity, with the exceptions that its
+//! `append` throws (`MapEnd`). Where NCBI would hold 1 GiB or more at once for the motif check
+//! (the string's old and new buffers while it grows; the vector of records, the copies of it on
+//! the match's stack and the string that holds the text: `Live`), LOSAT refuses
+//! (`MapEnd::HostDependent`, `MatchError::Exhausted`): NCBI's result then depends on the host's
+//! memory.
 
-/// One allocation of NCBI's of this many bytes or more is refused: below 2^47 bytes the
-/// allocation succeeds or throws `std::bad_alloc` by the host's memory and overcommit
-/// (DECISIONS 37, Owner-delegated 2026-11-12: NCBI's rpsbproc uses about 130 MB, and a 64-bit
-/// host that processes CDD gives it 1 GiB).
+/// NCBI's live memory of the motif check of this many bytes or more is refused: below the
+/// allocation of 2^47 bytes, NCBI's allocations succeed or throw `std::bad_alloc` by the host's
+/// memory and overcommit (DECISIONS 37 and 40, Owner-delegated 2026-11-12: NCBI's rpsbproc uses
+/// about 130 MB, and a 64-bit host that processes CDD gives it 1 GiB; the bound counts what NCBI
+/// holds at once, not one allocation: review 2 oracle O3, where 1.5 GiB of records in
+/// allocations of 512 MB gave exit 0 under a 4 GiB address space and `std::bad_alloc` under
+/// 1.5 GiB).
 pub(crate) const HOST_DEPENDENT_BYTES: u64 = 1 << 30;
 
 /// The user address space of x86-64 (4-level paging): `operator new` of this many bytes or more
 /// fails on every host and throws `std::bad_alloc`.
 pub(crate) const USER_SPACE_BYTES: u64 = 1 << 47;
 
-/// How NCBI's `GetMinimalXMap` ends instead of returning.
+/// How NCBI's `GetMinimalXMap` (or the `push_back` of the text into its string) ends instead of
+/// returning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MapEnd {
     /// An exception of libstdc++, by its `what()`: `LENGTH_ERROR` or `BAD_ALLOC`.
     Throw(&'static str),
-    /// An allocation of this many bytes, from `HOST_DEPENDENT_BYTES` up to `USER_SPACE_BYTES`.
+    /// An allocation below `USER_SPACE_BYTES` while NCBI holds this many bytes for the string
+    /// (its old buffer and the new one), `HOST_DEPENDENT_BYTES` or more.
     HostDependent(u64),
 }
 
@@ -76,12 +84,14 @@ pub(crate) const LENGTH_ERROR: &str = "basic_string::_M_replace_aux";
 /// `what()` of `std::bad_alloc` (an allocation of `USER_SPACE_BYTES` or more).
 pub(crate) const BAD_ALLOC: &str = "std::bad_alloc";
 
-/// `operator new(bytes)` of NCBI's for a string.
-fn allocate_string(bytes: u64) -> Result<(), MapEnd> {
+/// `operator new(bytes)` of NCBI's for a string while `held` bytes of its old buffer live: one
+/// allocation of `USER_SPACE_BYTES` or more throws on every host (DECISIONS 37); below it, a total
+/// of `HOST_DEPENDENT_BYTES` or more is the host's (DECISIONS 40).
+fn allocate_string(held: u64, bytes: u64) -> Result<(), MapEnd> {
     if bytes >= USER_SPACE_BYTES {
         Err(MapEnd::Throw(BAD_ALLOC))
-    } else if bytes >= HOST_DEPENDENT_BYTES {
-        Err(MapEnd::HostDependent(bytes))
+    } else if held.saturating_add(bytes) >= HOST_DEPENDENT_BYTES {
+        Err(MapEnd::HostDependent(held.saturating_add(bytes)))
     } else {
         Ok(())
     }
@@ -89,8 +99,34 @@ fn allocate_string(bytes: u64) -> Result<(), MapEnd> {
 
 /// The length and capacity of a `std::string` of libstdc++ (the C++11 ABI) whose bytes LOSAT
 /// does not need: `GetMinimalXMap`'s `minMap` and the text that `MotifCheck` builds in it.
-/// `max_size()` is `(PTRDIFF_MAX - 1) / 2` = 2^62 - 1 (GCC 9 and later; NCBI's rpsbproc 0.5.1
-/// throws `length_error` for an `append` of `LONG_MAX` characters, review oracle R20).
+/// `max_size()` is 2^63 - 1: NCBI's rpsbproc 0.5.1 is C++20 code built by GCC 13 (the
+/// distributed binary 13.2.0, Bioconda's 13.4.0; review 2 oracle O1), and in C++20 libstdc++ does
+/// not declare `basic_string<char>` an extern template, so `append` and its `max_size()` are
+/// compiled into the binary from the headers below, whatever `libstdc++.so` it loads (review 2
+/// oracle O2: map lengths of 2^62 to 2^63 - 1 throw `std::bad_alloc`; R20, 2^63, throws
+/// `length_error`).
+// libstdc++ (GCC 13): bits/basic_string.tcc:962-969
+// ```c++
+//   // The explicit instantiation definitions in src/c++11/string-inst.cc and
+//   // src/c++17/string-inst.cc only instantiate the members required for C++17
+//   // and earlier standards (so not C++20's starts_with and ends_with).
+//   // Suppress the explicit instantiation declarations for C++20, so C++20
+//   // code will implicitly instantiate std::string and std::wstring as needed.
+// # if __cplusplus <= 201703L && _GLIBCXX_EXTERN_TEMPLATE > 0
+//   extern template class basic_string<char>;
+// ```
+// libstdc++ (GCC 13): bits/alloc_traits.h:571-578
+// ```c++
+//       max_size(const allocator_type& __a __attribute__((__unused__))) noexcept
+//       {
+// #if __cplusplus <= 201703L
+// 	return __a.max_size();
+// #else
+// 	return size_t(-1) / sizeof(value_type);
+// #endif
+//       }
+// ```
+// (`basic_string::max_size()` is `(_Alloc_traits::max_size(...) - 1) / 2`, below: (2^64 - 2) / 2.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CxxString {
     pub(crate) len: u64,
@@ -101,7 +137,7 @@ pub(crate) struct CxxString {
 
 impl CxxString {
     const LOCAL_CAPACITY: u64 = 15;
-    const MAX_SIZE: u64 = (1 << 62) - 1;
+    const MAX_SIZE: u64 = (1 << 63) - 1;
 
     /// An empty string (`string minMap(k_strEmptyString)`).
     pub(crate) fn new() -> Self {
@@ -136,14 +172,25 @@ impl CxxString {
     //     return _S_allocate(_M_get_allocator(), __capacity + 1);
     //   }
     // ```
-    // (The callers never ask for more than `max_size()`: `append` checks the length first.)
+    // (The callers never ask for more than `max_size()`: `append` checks the length first.) The
+    // callers (`reserve`, `_M_mutate`) free the old buffer after the copy into the new one, so
+    // both live at the allocation.
     fn create(&mut self, mut capacity: u64) -> Result<(), MapEnd> {
         if capacity > self.capacity && capacity < 2 * self.capacity {
             capacity = (2 * self.capacity).min(Self::MAX_SIZE);
         }
-        allocate_string(capacity + 1)?;
+        allocate_string(self.heap_bytes(), capacity + 1)?;
         self.capacity = capacity;
         Ok(())
+    }
+
+    /// The bytes of the string's buffer on the heap: none while it is the local buffer.
+    pub(crate) fn heap_bytes(&self) -> u64 {
+        if self.capacity > Self::LOCAL_CAPACITY {
+            self.capacity + 1
+        } else {
+            0
+        }
     }
 
     // libstdc++ (GCC 13): bits/basic_string.tcc:305-320
@@ -205,7 +252,7 @@ impl CxxString {
     //       append(size_type __n, _CharT __c)
     //       { return _M_replace_aux(this->size(), size_type(0), __n, __c); }
     // ```
-    // libstdc++ (GCC 13): bits/basic_string.tcc:326-332
+    // libstdc++ (GCC 13): bits/basic_string.tcc:326-345
     // ```c++
     //     _M_mutate(size_type __pos, size_type __len1, const _CharT* __s,
     // 	      size_type __len2)
@@ -214,6 +261,11 @@ impl CxxString {
     //
     //       size_type __new_capacity = length() + __len2 - __len1;
     //       pointer __r = _M_create(__new_capacity, capacity());
+    //       ...
+    //       _M_dispose();
+    //       _M_data(__r);
+    //       _M_capacity(__new_capacity);
+    //     }
     // ```
     /// `append(n, c)`.
     pub(crate) fn append(&mut self, n: u64) -> Result<(), MapEnd> {
@@ -369,9 +421,10 @@ impl PatternPos {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MatchError {
     /// NCBI's answer depends on the bytes it reads beyond the text's terminating 0, or the
-    /// match may read beyond NCBI's buffer of the text (see the module comment).
+    /// match may read beyond NCBI's buffer of the text, or may hold `HOST_DEPENDENT_BYTES` for
+    /// other bytes there (see the module comment).
     ReadPast,
-    /// One allocation of NCBI's match records reaches `HOST_DEPENDENT_BYTES`.
+    /// NCBI's live memory of the match (`Live`) reaches `HOST_DEPENDENT_BYTES`.
     Exhausted,
 }
 
@@ -410,53 +463,210 @@ impl Matcher<'_> {
 /// The bytes of `sizeof(size_t)`, one match record.
 const RECORD_BYTES: u64 = 8;
 
-/// One allocation of `records` match records (`vector<size_t>`) of NCBI's.
-fn allocate_records(records: u64) -> Result<(), MatchError> {
-    if u128::from(records) * u128::from(RECORD_BYTES) >= u128::from(HOST_DEPENDENT_BYTES) {
-        Err(MatchError::Exhausted)
-    } else {
-        Ok(())
-    }
+/// What NCBI holds at once while its `Match` runs: the capacity of `curr.flex` (the one vector
+/// that every position's `rMatchRec` uses), the records of the copies of it on `stkFlexStack`,
+/// and the heap buffer of `minMap`, the string that holds the text (DECISIONS 40). Each
+/// allocation for the records is checked with what lives during it; NCBI's live memory of
+/// `HOST_DEPENDENT_BYTES` or more is `MatchError::Exhausted`.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:471-492
+// ```c++
+// 	stack<x_TMatchRec> stkFlexStack;
+//
+// 	x_TMatchRec curr(m_vecCompiledPattern.begin());
+// 	...
+// 		int matched = curr.iterPos->Match(text, tlen, curr.flex, start_pos);
+// 		if (matched < 0)	//match failed
+// 		{
+// 			if (stkFlexStack.empty()) return string::npos;
+// 			curr = stkFlexStack.top();
+// 			stkFlexStack.pop();
+// 		}
+// 		else	//match success
+// 		{
+// 			if (matched > 0) stkFlexStack.push(curr);
+// 			start_pos = curr.flex.back();
+// 			++curr.iterPos;
+// 			curr.flex.clear();
+// 		}
+// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:723-731
+// ```c++
+// 			minMap.clear();	//borrow this for other use
+//
+// 			for (size_t i = 0; i < mappedLen; ++i)
+// 				if ((size_t)rMappedRes[i].curr < seqLen)
+// 				{
+// 					minMap.push_back(aaSeq[rMappedRes[i].curr]);
+// 				}
+//
+// 			size_t endPos = ps.Match(minMap, seqLen, 0);
+// ```
+// (`x_TMatchRec` is the vector `flex` and the iterator, prosite.hpp:54-60. The stack's deque of
+// 32-byte entries, at most one per position of the pattern, and the compiled pattern are not
+// counted.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Live {
+    /// `curr.flex.capacity()`.
+    capacity: u64,
+    /// The records of the copies on the stack (a copy's capacity is its size).
+    stacked: u64,
+    /// `minMap`'s bytes on the heap.
+    text: u64,
+    /// The most records that the stack held in the revisits that LOSAT skipped (`retry`) since
+    /// `ProSite::run` last took them: the copies of a revisited position and of the rest of the
+    /// pattern above it, which an earlier position's revisits hold again.
+    skipped: u64,
 }
 
-/// `push_back` of records into the vector of `capacity` until it holds `len`: libstdc++ makes
-/// room for twice the records it holds when it is full (one when it is empty).
-// libstdc++ (GCC 13): bits/stl_vector.h:1281-1293,1896-1903
-// ```c++
-//       push_back(const value_type& __x)
-//       {
-// 	if (this->_M_impl._M_finish != this->_M_impl._M_end_of_storage)
-// 	  {
-// 	    ...
-// 	  }
-// 	else
-// 	  _M_realloc_insert(end(), __x);
-//       }
-//       ...
-//       _M_check_len(size_type __n, const char* __s) const
-//       {
-// 	if (max_size() - size() < __n)
-// 	  __throw_length_error(__N(__s));
-//
-// 	const size_type __len = size() + (std::max)(size(), __n);
-// 	return (__len < size() || __len > max_size()) ? max_size() : __len;
-//       }
-// ```
-// libstdc++ (GCC 13): bits/vector.tcc:446,453-455
-// ```c++
-//       _M_realloc_insert(iterator __position, _Args&&... __args)
-//     ...
-//     {
-//       const size_type __len =
-// 	_M_check_len(size_type(1), "vector::_M_realloc_insert");
-// ```
-// (`max_size()` is 2^60 - 1 records; the allocation of 1 GiB stops the growth long before.)
-fn grow_records(capacity: &mut u64, len: u64) -> Result<(), MatchError> {
-    while *capacity < len {
-        *capacity = if *capacity == 0 { 1 } else { 2 * *capacity };
-        allocate_records(*capacity)?;
+impl Live {
+    fn new(text: u64) -> Self {
+        Live {
+            capacity: 0,
+            stacked: 0,
+            text,
+            skipped: 0,
+        }
     }
-    Ok(())
+
+    /// NCBI holds `records` match records and the text.
+    fn hold(&self, records: u64) -> Result<(), MatchError> {
+        let bytes = u128::from(records) * u128::from(RECORD_BYTES) + u128::from(self.text);
+        if bytes >= u128::from(HOST_DEPENDENT_BYTES) {
+            Err(MatchError::Exhausted)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// `push_back` of records into `curr.flex` until it holds `len`: libstdc++ makes room for
+    /// twice the records it holds when it is full (one when it is empty), and frees the old
+    /// buffer after the move into the new one.
+    // libstdc++ (GCC 13): bits/stl_vector.h:1281-1293,1896-1903
+    // ```c++
+    //       push_back(const value_type& __x)
+    //       {
+    // 	if (this->_M_impl._M_finish != this->_M_impl._M_end_of_storage)
+    // 	  {
+    // 	    ...
+    // 	  }
+    // 	else
+    // 	  _M_realloc_insert(end(), __x);
+    //       }
+    //       ...
+    //       _M_check_len(size_type __n, const char* __s) const
+    //       {
+    // 	if (max_size() - size() < __n)
+    // 	  __throw_length_error(__N(__s));
+    //
+    // 	const size_type __len = size() + (std::max)(size(), __n);
+    // 	return (__len < size() || __len > max_size()) ? max_size() : __len;
+    //       }
+    // ```
+    // libstdc++ (GCC 13): bits/vector.tcc:453-459,517-518
+    // ```c++
+    //     {
+    //       const size_type __len =
+    // 	_M_check_len(size_type(1), "vector::_M_realloc_insert");
+    //       pointer __old_start = this->_M_impl._M_start;
+    //       pointer __old_finish = this->_M_impl._M_finish;
+    //       const size_type __elems_before = __position - begin();
+    //       pointer __new_start(this->_M_allocate(__len));
+    //       ...
+    //       _M_deallocate(__old_start,
+    // 		    this->_M_impl._M_end_of_storage - __old_start);
+    // ```
+    // (`max_size()` is 2^60 - 1 records; 1 GiB stops the growth long before.)
+    fn grow(&mut self, len: u64) -> Result<(), MatchError> {
+        while self.capacity < len {
+            let new = if self.capacity == 0 {
+                1
+            } else {
+                2 * self.capacity
+            };
+            self.hold(self.capacity + new + self.stacked)?;
+            self.capacity = new;
+        }
+        Ok(())
+    }
+
+    /// `stkFlexStack.push(curr)`: the copy constructor allocates the `len` records it copies.
+    // libstdc++ (GCC 13): bits/stl_vector.h:601-609
+    // ```c++
+    //       vector(const vector& __x)
+    //       : _Base(__x.size(),
+    // 	_Alloc_traits::_S_select_on_copy(__x._M_get_Tp_allocator()))
+    //       {
+    // 	this->_M_impl._M_finish =
+    // 	  std::__uninitialized_copy_a(__x.begin(), __x.end(),
+    // 				      this->_M_impl._M_start,
+    // 				      _M_get_Tp_allocator());
+    //       }
+    // ```
+    fn push(&mut self, len: u64) -> Result<(), MatchError> {
+        self.hold(self.capacity + self.stacked + len)?;
+        self.stacked += len;
+        Ok(())
+    }
+
+    /// `curr = stkFlexStack.top(); stkFlexStack.pop();` of a copy of `len` records: the
+    /// assignment allocates only when they do not fit, while the old buffer and the copy on the
+    /// stack live. (NCBI's `curr.flex` never shrinks and each copy was made from it, so its
+    /// copies always fit; this follows libstdc++ all the same.)
+    // libstdc++ (GCC 13): bits/vector.tcc:235-246
+    // ```c++
+    // 	  const size_type __xlen = __x.size();
+    // 	  if (__xlen > capacity())
+    // 	    {
+    // 	      pointer __tmp = _M_allocate_and_copy(__xlen, __x.begin(),
+    // 						   __x.end());
+    // 	      std::_Destroy(this->_M_impl._M_start, this->_M_impl._M_finish,
+    // 			    _M_get_Tp_allocator());
+    // 	      _M_deallocate(this->_M_impl._M_start,
+    // 			    this->_M_impl._M_end_of_storage
+    // 			    - this->_M_impl._M_start);
+    // 	      this->_M_impl._M_start = __tmp;
+    // 	      this->_M_impl._M_end_of_storage = this->_M_impl._M_start + __xlen;
+    // 	    }
+    // ```
+    fn pop(&mut self, len: u64) -> Result<(), MatchError> {
+        if len > self.capacity {
+            self.hold(self.capacity + len + self.stacked)?;
+            self.capacity = len;
+        }
+        self.stacked -= len;
+        Ok(())
+    }
+
+    /// A revisit of NCBI's that LOSAT does not make (`PatternPos::match_at`): the rest of the
+    /// pattern runs again from the same position, as it has just run and failed, with a copy of
+    /// `copy` records of the revisited position on the stack (0: none) and, at its most, `rest`
+    /// records of its own copies above it. Its growths happened in the run before (the capacity
+    /// never shrinks), so it holds the capacity, the stack and those copies at once. The stack
+    /// it holds stays in `skipped`: a revisit of a position below runs these revisits again.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:480-492 (the
+    // revisit that does not advance pushes its copy when counts are left, and the rest of the
+    // pattern starts again from `curr.flex.back()`)
+    // ```c++
+    // 		int matched = curr.iterPos->Match(text, tlen, curr.flex, start_pos);
+    // 		if (matched < 0)	//match failed
+    // 		{
+    // 			if (stkFlexStack.empty()) return string::npos;
+    // 			curr = stkFlexStack.top();
+    // 			stkFlexStack.pop();
+    // 		}
+    // 		else	//match success
+    // 		{
+    // 			if (matched > 0) stkFlexStack.push(curr);
+    // 			start_pos = curr.flex.back();
+    // 			++curr.iterPos;
+    // 			curr.flex.clear();
+    // 		}
+    // ```
+    fn retry(&mut self, copy: u64, rest: u64) -> Result<(), MatchError> {
+        let stacked = self.stacked.saturating_add(copy).saturating_add(rest);
+        self.skipped = self.skipped.max(stacked);
+        self.hold(self.capacity.saturating_add(stacked))
+    }
 }
 
 /// `rMatchRec` of one position, by its counts: the records are `start`, then one per step,
@@ -751,41 +961,44 @@ impl PatternPos {
     // }
     // ```
     // (A lazy position whose `matched` is above `m_ulMaxCount` on a revisit leaves `retVal` 0
-    // and the record as it is.) `capacity` is the capacity of NCBI's `curr.flex`, the vector
-    // that holds `rMatchRec`.
+    // and the record as it is.) `live` follows NCBI's memory (`Live`): `rMatchRec` is
+    // `curr.flex`.
     //
     // A step that does not advance gives the same at every later step (it depends only on the
     // position): NCBI's loops repeat it up to the count they stop at, which `Record::stay_until`
     // counts at once. A revisit starts where the rest of the pattern has just failed: one that
     // does not advance (a lazy step, or the pop of a record of a step that did not advance)
     // leaves the rest to fail again from the same position, so NCBI revisits until the count
-    // runs out (a lazy `{X}*` for ever) and then fails; LOSAT goes there at once.
+    // runs out (a lazy `{X}*` for ever) and then fails; LOSAT goes there at once, and checks the
+    // memory of the revisits it skips (`Live::retry`; `rest` is the most records that the rest
+    // of the pattern's copies held at once in the run that failed).
     fn match_at(
         &self,
         m: &Matcher,
         record: &mut Record,
-        capacity: &mut u64,
+        live: &mut Live,
         mut start_pos: usize,
+        rest: u64,
     ) -> Result<i32, MatchError> {
         let matched = record.len;
         let ret;
         if self.flags & LAZY_MATCH != 0 {
             if matched == 0 {
                 record.begin(start_pos);
-                grow_records(capacity, 1)?;
+                live.grow(1)?;
                 while record.len <= self.min_count {
                     let Some(adv) = self.step(m, start_pos) else {
                         return Ok(-1);
                     };
                     if adv == 0 {
                         let len = self.min_count.saturating_add(1);
-                        grow_records(capacity, len)?;
+                        live.grow(len)?;
                         record.stay_until(len);
                         break;
                     }
                     start_pos += adv;
                     record.advance();
-                    grow_records(capacity, record.len)?;
+                    live.grow(record.len)?;
                 }
                 ret = i32::from(self.max_count > self.min_count);
             } else if matched <= self.max_count {
@@ -793,13 +1006,21 @@ impl PatternPos {
                 match self.step(m, start_pos) {
                     None => ret = -1,
                     Some(0) => {
-                        grow_records(capacity, self.max_count.saturating_add(1))?;
+                        // NCBI's revisits add a record each up to `m_ulMaxCount` + 1; while
+                        // counts are left they copy the records onto the stack, the most at
+                        // `m_ulMaxCount` records, and the rest of the pattern fails again.
+                        if matched < self.max_count {
+                            live.grow(self.max_count)?;
+                            live.retry(self.max_count, rest)?;
+                        }
+                        live.grow(self.max_count.saturating_add(1))?;
+                        live.retry(0, rest)?;
                         ret = -1;
                     }
                     Some(adv) => {
                         debug_assert_eq!(adv, 1);
                         record.advance();
-                        grow_records(capacity, record.len)?;
+                        live.grow(record.len)?;
                         ret = i32::from(self.max_count > matched);
                     }
                 }
@@ -810,25 +1031,29 @@ impl PatternPos {
             let need = self.min_count.wrapping_add(1);
             if matched == 0 {
                 record.begin(start_pos);
-                grow_records(capacity, 1)?;
+                live.grow(1)?;
                 while record.len <= self.max_count {
                     let Some(adv) = self.step(m, start_pos) else {
                         break;
                     };
                     if adv == 0 {
                         let len = self.max_count.saturating_add(1);
-                        grow_records(capacity, len)?;
+                        live.grow(len)?;
                         record.stay_until(len);
                         break;
                     }
                     start_pos += adv;
                     record.advance();
-                    grow_records(capacity, record.len)?;
+                    live.grow(record.len)?;
                 }
             } else {
                 if record.still > 0 {
                     // The pops down to the advanced records keep `rMatchRec.back()`; they end
                     // the position (`retVal` 0 or -1 at `need`) or reach the advanced records.
+                    // The first of them holds the most: a copy of the records left while they
+                    // are more than `need` (`retVal` 1).
+                    let first = record.len - 1;
+                    live.retry(if first > need { first } else { 0 }, rest)?;
                     let advanced = record.len - record.still;
                     if need >= advanced {
                         return Ok(-1);
@@ -852,6 +1077,28 @@ impl PatternPos {
 
     /// Whether a step can succeed without advancing: a positive position with an anchor (`<` at
     /// 0, `>` at `tlen`), or a negation of anchors and `X` only.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:558-591,
+    // 602-608 (`x_NegMatch`: `adv` becomes 1 only in `default`; `x_PosMatch`: an anchor
+    // returns 0)
+    // ```c++
+    // 	size_t adv = 0;
+    // 	...
+    // 		default:
+    // 			if (pos < tlen)
+    // 			{
+    // 				char c = text[pos];
+    // 				adv = 1;
+    // 	...
+    // 	return adv;	//nothing matched, successful
+    // ...
+    // 		case '<':	//start anchor
+    // 			if (0 == pos)	//matched
+    // 				return 0;
+    // 			break;
+    // 		case '>':	//end anchor
+    // 			if (pos == tlen)	//matched
+    // 				return 0;
+    // ```
     fn may_stay(&self) -> bool {
         if self.negative() {
             !self.reads()
@@ -861,6 +1108,14 @@ impl PatternPos {
     }
 
     /// Whether a step reads `text` (an alternative that is not an anchor or `X`).
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:576-579,
+    // 614-617 (only the `default` alternatives of `x_NegMatch` and `x_PosMatch` read `text`)
+    // ```c++
+    // 		default:
+    // 			if (pos < tlen)
+    // 			{
+    // 				char c = text[pos];
+    // ```
     fn reads(&self) -> bool {
         self.alt_chars
             .iter()
@@ -869,6 +1124,28 @@ impl PatternPos {
 
     /// Whether a step can advance: a positive position with an alternative that is not an
     /// anchor, or a negation that reads.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:576-580,
+    // 610-620 (`x_NegMatch` returns `adv` = 1 only after a `default` alternative; `x_PosMatch`
+    // returns 1 for `X` and the `default` letters)
+    // ```c++
+    // 		default:
+    // 			if (pos < tlen)
+    // 			{
+    // 				char c = text[pos];
+    // 				adv = 1;
+    // ...
+    // 		case 'X':	//match any
+    // 			if (pos < tlen)	//last,
+    // 				return 1;
+    // 			break;
+    // 		default:
+    // 			if (pos < tlen)
+    // 			{
+    // 				char c = text[pos];
+    // 				if ('a' <= c && 'z' >= c) c -= 0x20;
+    // 				if (*iterChar == c)	//matched
+    // 					return 1;
+    // ```
     fn may_advance(&self) -> bool {
         if self.negative() {
             self.reads()
@@ -1303,15 +1580,15 @@ impl ProSite {
     // ```
     // `Ok(None)` is `string::npos`. A pattern without a position (only `-`) matches at
     // `start_pos`. The second value says whether the match read `text` beyond its terminating 0
-    // (answered by `past`). `capacity` follows `curr.flex`: a copy onto the stack allocates the
-    // records it holds, a copy back allocates when they do not fit (libstdc++'s `vector` copy
-    // constructor and assignment, bits/stl_vector.h:601-609, bits/vector.tcc:235-246).
+    // (answered by `past`). `text_heap` is the heap bytes of NCBI's string of the text; `Live`
+    // follows `curr.flex` and the copies of it on the stack.
     fn run(
         &self,
         text: &[u8],
         tlen: usize,
         mut start_pos: usize,
         past: Past,
+        text_heap: u64,
     ) -> (Result<Option<usize>, MatchError>, bool) {
         if start_pos >= tlen {
             return (Ok(None), false);
@@ -1322,37 +1599,49 @@ impl ProSite {
             past,
             read_past: std::cell::Cell::new(false),
         };
-        let mut stack: Vec<(usize, Record)> = Vec::new();
+        // Each entry keeps the most records that the stack held while it was on it (in NCBI's
+        // revisits that LOSAT skipped too).
+        let mut stack: Vec<(usize, Record, u64)> = Vec::new();
         let mut pos = 0usize;
         let mut flex = Record::default();
-        let mut capacity = 0u64;
+        let mut live = Live::new(text_heap);
+        let mut rest = 0u64;
         let result = loop {
             if pos == self.pattern.len() {
                 break Ok(Some(start_pos));
             }
             let matched =
-                match self.pattern[pos].match_at(&matcher, &mut flex, &mut capacity, start_pos) {
+                match self.pattern[pos].match_at(&matcher, &mut flex, &mut live, start_pos, rest) {
                     Ok(matched) => matched,
                     Err(error) => break Err(error),
                 };
+            // The revisits that LOSAT skipped happen while the positions below stay on the
+            // stack: their own revisits hold these copies again.
+            let skipped = std::mem::take(&mut live.skipped);
+            if let Some(below) = stack.last_mut() {
+                below.2 = below.2.max(skipped);
+            }
             if matched < 0 {
-                let Some((top_pos, top_flex)) = stack.pop() else {
+                let Some((top_pos, top_flex, top_most)) = stack.pop() else {
                     break Ok(None);
                 };
-                if top_flex.len > capacity {
-                    if let Err(error) = allocate_records(top_flex.len) {
-                        break Err(error);
-                    }
-                    capacity = top_flex.len;
+                // The copies above it in the run of the rest of the pattern that failed.
+                rest = top_most - live.stacked;
+                if let Some(below) = stack.last_mut() {
+                    below.2 = below.2.max(top_most);
+                }
+                if let Err(error) = live.pop(top_flex.len) {
+                    break Err(error);
                 }
                 pos = top_pos;
                 flex = top_flex;
             } else {
+                rest = 0;
                 if matched > 0 {
-                    if let Err(error) = allocate_records(flex.len) {
+                    if let Err(error) = live.push(flex.len) {
                         break Err(error);
                     }
-                    stack.push((pos, flex));
+                    stack.push((pos, flex, live.stacked));
                 }
                 start_pos = flex.last();
                 pos += 1;
@@ -1364,29 +1653,62 @@ impl ProSite {
 
     /// Whether NCBI's `Match` finds a match (`MotifCheck` asks no more), also where it reads
     /// bytes beyond the text's terminating 0 when its answer does not depend on them (the module
-    /// comment; DECISIONS 37). `buffer` is the capacity of NCBI's string that holds the text: its
-    /// bytes `0..=buffer` are NCBI's own, a read beyond them may fault.
+    /// comment; DECISIONS 37). `buffer` is NCBI's string that holds the text: its bytes
+    /// `0..=capacity` are NCBI's own, a read beyond them may fault (refused even where both
+    /// runs agree, DECISIONS 40), and its heap bytes count in NCBI's live memory.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:723-731
+    // ```c++
+    // 			minMap.clear();	//borrow this for other use
+    //
+    // 			for (size_t i = 0; i < mappedLen; ++i)
+    // 				if ((size_t)rMappedRes[i].curr < seqLen)
+    // 				{
+    // 					minMap.push_back(aaSeq[rMappedRes[i].curr]);
+    // 				}
+    //
+    // 			size_t endPos = ps.Match(minMap, seqLen, 0);
+    // ```
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:468-470,
+    // 480-489 (every position is tried with every count before the match fails: a failure
+    // pops the stack and revisits the last position that has counts left)
+    // ```c++
+    // size_t CProSite::Match(const string &text, size_t tlen, size_t start_pos) const
+    // {
+    // 	if (start_pos >= tlen) return string::npos;
+    // 	...
+    // 		int matched = curr.iterPos->Match(text, tlen, curr.flex, start_pos);
+    // 		if (matched < 0)	//match failed
+    // 		{
+    // 			if (stkFlexStack.empty()) return string::npos;
+    // 			curr = stkFlexStack.top();
+    // 			stkFlexStack.pop();
+    // 		}
+    // 		else	//match success
+    // 		{
+    // 			if (matched > 0) stkFlexStack.push(curr);
+    // ```
     pub(crate) fn matches(
         &self,
         text: &[u8],
         tlen: usize,
         start_pos: usize,
-        buffer: u64,
+        buffer: CxxString,
     ) -> Result<bool, MatchError> {
-        let (result, read_past) = self.run(text, tlen, start_pos, Past::Fail);
+        let text_heap = buffer.heap_bytes();
+        let (result, read_past) = self.run(text, tlen, start_pos, Past::Fail, text_heap);
         if !read_past {
             return result.map(|end| end.is_some());
         }
         // The runs that NCBI makes for other bytes go through other positions and counts:
-        // every read must stay in NCBI's buffer, and no record may reach the allocation that
+        // every read must stay in NCBI's buffer, and no run may hold the memory that
         // `Exhausted` refuses.
-        if self.may_exhaust(tlen) || self.max_read(tlen, start_pos) > buffer {
+        if self.may_exhaust(tlen, text_heap) || self.max_read(tlen, start_pos) > buffer.capacity {
             return Err(MatchError::ReadPast);
         }
         if let Ok(Some(_)) = result {
             return Ok(true);
         }
-        match self.run(text, tlen, start_pos, Past::Pass).0 {
+        match self.run(text, tlen, start_pos, Past::Pass, text_heap).0 {
             Ok(None) => Ok(false),
             _ => Err(MatchError::ReadPast),
         }
@@ -1395,6 +1717,35 @@ impl ProSite {
     /// The highest position that a step that reads can be at, for any bytes of the text: each
     /// step advances by one at most, each position up to its maximal count, a step that reads
     /// advances, and reads stop before `tlen`.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:576-580,
+    // 610-620 (a step returns 0, 1 or `npos`; `text[pos]` is read only below `tlen`)
+    // ```c++
+    // 		default:
+    // 			if (pos < tlen)
+    // 			{
+    // 				char c = text[pos];
+    // 				adv = 1;
+    // ...
+    // 		case 'X':	//match any
+    // 			if (pos < tlen)	//last,
+    // 				return 1;
+    // 			break;
+    // 		default:
+    // 			if (pos < tlen)
+    // 			{
+    // 				char c = text[pos];
+    // ```
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:678-683 (an
+    // aggressive position steps up to `m_ulMaxCount` times; a lazy one adds a step per revisit
+    // while `matched <= m_ulMaxCount`, :659)
+    // ```c++
+    // 			rMatchRec.push_back(start_pos);
+    // 			while ((matched = rMatchRec.size()) <= m_ulMaxCount)
+    // 			{
+    // 				size_t adv = (this->*m_pfnMatch)(text, tlen, start_pos);
+    // 				if (string::npos == adv)	//fail
+    // 					break;
+    // ```
     fn max_read(&self, tlen: usize, start_pos: usize) -> u64 {
         let advance = self
             .pattern
@@ -1407,23 +1758,61 @@ impl ProSite {
             .min((tlen as u64).saturating_sub(1))
     }
 
-    /// Whether the records of a position can reach `2^26 + 1`, the fewest whose growth
-    /// allocates 1 GiB (twice 2^26 records of 8 bytes): a position that may not advance
-    /// repeats up to its maximal count (a lazy one for ever), one that advances up to `tlen`.
-    fn may_exhaust(&self, tlen: usize) -> bool {
-        const FEWEST: u64 = (1 << 26) + 1;
-        self.pattern.iter().any(|pos| {
+    /// Whether NCBI's live memory of the match (`Live`) can reach `HOST_DEPENDENT_BYTES` for some
+    /// bytes of the text. A position holds at most `R` records: one that may not advance up to
+    /// its maximal count + 1 (a lazy one for ever), one that advances up to `tlen` + 1. Its last
+    /// growth holds the old buffer and the new one (3/2 of the power of two that holds `R`), with
+    /// the stack's copies of the earlier positions (the stack holds positions in their order, at
+    /// most one copy each, and only a position with counts left is copied: a maximal count above
+    /// the minimal). A copy onto the stack adds to `curr.flex`'s capacity, the power of two that
+    /// holds the largest `R`.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:656-669,
+    // 679, 693-695 (`retVal` is 1, a copy onto the stack, only with counts left)
+    // ```c++
+    // 			if (m_ulMaxCount > m_ulMinCount) retVal = 1;
+    // 			else retVal = 0;
+    // 		}
+    // 		else if (matched <= m_ulMaxCount)	//still flex	//revisit
+    // 		...
+    // 				if (m_ulMaxCount > matched) retVal = 1;
+    // 	...
+    // 			while ((matched = rMatchRec.size()) <= m_ulMaxCount)
+    // 	...
+    // 		if (matched < m_ulMinCount + 1) retVal = -1;	// minimal match not reached
+    // 		else if (matched > m_ulMinCount + 1) retVal = 1;	//with flex
+    // 		else retVal = 0;
+    // ```
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:489-492
+    // ```c++
+    // 			if (matched > 0) stkFlexStack.push(curr);
+    // 			start_pos = curr.flex.back();
+    // 			++curr.iterPos;
+    // 			curr.flex.clear();
+    // ```
+    fn may_exhaust(&self, tlen: usize, text_heap: u64) -> bool {
+        let (mut stacked, mut largest, mut peak) = (0u128, 0u128, 0u128);
+        for pos in &self.pattern {
             let records = if pos.may_stay() {
                 if pos.flags & LAZY_MATCH != 0 {
-                    u64::MAX
-                } else {
-                    pos.max_count.saturating_add(1)
+                    return true;
                 }
+                u128::from(pos.max_count) + 1
             } else {
-                pos.max_count.min(tlen as u64).saturating_add(1)
+                u128::from(pos.max_count.min(tlen as u64)) + 1
             };
-            records >= FEWEST
-        })
+            let growth = if records <= 1 {
+                records
+            } else {
+                3 * (records.next_power_of_two() / 2)
+            };
+            peak = peak.max(growth + stacked);
+            largest = largest.max(records);
+            if pos.max_count > pos.min_count {
+                stacked += records;
+            }
+        }
+        peak = peak.max(largest.next_power_of_two() + stacked);
+        peak * u128::from(RECORD_BYTES) + u128::from(text_heap) >= u128::from(HOST_DEPENDENT_BYTES)
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:700-742

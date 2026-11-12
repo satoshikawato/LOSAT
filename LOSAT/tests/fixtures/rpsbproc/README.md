@@ -36,8 +36,9 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 
 ## CASES.tsv
 
-`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `refuse`: LOSAT refuses until a later
-item: XML input needs the XML reader, PS16d), `stdin` (`-` = empty), `setup`
+`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `refuse`: LOSAT refuses, exit 1, with
+the bytes of `refused/<case>.{out,err,rc}`: the XML input until the XML reader of a later item, PS16d, and the
+refusals of PS16b below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
 directory `<dir>/` holding the data files with those of `data_with/<dir>/` in their place; `data-with:<a>+<dir>`: the
 same with those of `data_with/<a>/` first, then those of `data_with/<dir>/`), `arguments` (split on
@@ -81,3 +82,20 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
     the report cut as for a parse error (NCBI run under `prlimit --as=4294967296`).
   - `arch/mfirst_delta.asn`: `mfirst.asn` with its query as `repr delta`, the residues in two `ext delta` literals
     (NCBIeaa, 100 and 85 residues); case `both.mfirst_delta` with `sites/`.
+- The cases of the second PS16b review (2026-11-12, oracle O2 on ws: NCBI's binary and Bioconda's 0.5.1, the same
+  bytes), as above: `rd15` `Hx(4611686018427387903)K` and `rd18` `Hx(9223372036854775806)K`, minimal maps of 2^62 and
+  2^63 - 1 letters, which NCBI's C++20 builds allocate (`max_size()` is 2^63 - 1) and fail with `std::bad_alloc`
+  (exit 3, the report cut as for a parse error).
+- `refused/<case>.{out,err,rc}`: LOSAT's own bytes (written from LOSAT's output and checked by hand: standard output is
+  NCBI's up to the line before the refused site or query, standard error ends with the refusal). The refusals of
+  PS16b (PD-LOSAT-NCBI-DEFECTS 1.15, explicit rejections):
+  - `refuse_rd2.mfirst`: `data_with/rd2/` `Hx(0,10)W` (review oracle R4): NCBI's match reads beyond the residues
+    `HKY` and its answer depends on the bytes there (NCBI's stack: the review's runs dropped the site, but no line of
+    NCBI's code decides it).
+  - `refuse_rd19.mfirst`: `data_with/rd19/` `H-{<}(0,67108863)-{<}(0,67108863)-K` (review 2 oracle O3): NCBI holds
+    1.5 GiB of match records at once (exit 0 under a 4 GiB address space, `std::bad_alloc` under 1.5 GiB).
+  - `refuse_rd20.mfirst`: `data_with/rd20/` `Hx(536870910)K` (O3): the minimal map's string of 512 MB grows to
+    1 GiB while the old buffer lives (as rd19 on NCBI).
+  - `refuse_nodata`: `arch/q_nodata.asn`, `mfirst.asn` without the query's `seq-data` (review oracle R19), with
+    `sites/`: the site's positions are outside the (empty) residues, where NCBI reads memory outside the string
+    (its two builds print different bytes).

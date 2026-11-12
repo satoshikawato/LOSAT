@@ -153,10 +153,12 @@ fn a_motif_that_does_not_parse_is_an_error_with_its_position() {
     assert_eq!(state.positions, [10, 11, 12]);
 }
 
-// Review oracles R1, R4, R20, R21 (`mfirst.asn`'s catalytic site, its positions mapped to the
-// residues `HKY` of a query of 185): the read past the residues that does not decide NCBI's
-// answer passes, the one that does is refused; the minimal maps that NCBI's string cannot hold
-// end as NCBI's exceptions, and one that NCBI may or may not allocate is refused.
+// Review oracles R1, R4, R20, R21 and review 2 oracles O2 (rd15), O3 (rd19, rd20)
+// (`mfirst.asn`'s catalytic site, its positions mapped to the residues `HKY` of a query of 185):
+// the read past the residues that does not decide NCBI's answer passes, the one that does is
+// refused; the minimal maps that NCBI's string cannot hold end as NCBI's exceptions, and where
+// NCBI holds 1 GiB or more at once (one allocation, the string's old and new buffers, or the
+// match's records and their copies) the check is refused.
 #[test]
 fn the_motif_check_of_the_review_oracles() {
     let data = load(&[
@@ -165,6 +167,9 @@ fn the_motif_check_of_the_review_oracles() {
         ("C", "Hx(99999999999999999999)K", "10,11,12"),
         ("D", "Hx(200000000000000)K", "10,11,12"),
         ("E", "Hx(1073741823)K", "10,11,12"),
+        ("F", "Hx(4611686018427387903)K", "10,11,12"),
+        ("G", "Hx(536870910)K", "10,11,12"),
+        ("H", "H-{<}(0,67108863)-{<}(0,67108863)-K", "10,11,12"),
     ]);
     let mut residues = vec![b'A'; 185];
     residues[61..64].copy_from_slice(b"HKY");
@@ -190,4 +195,15 @@ fn the_motif_check_of_the_review_oracles() {
         check(4),
         Err(MotifError::Map(MapEnd::HostDependent((1 << 30) + 1)))
     );
+    assert_eq!(
+        check(5),
+        Err(MotifError::Map(MapEnd::Throw(
+            super::super::prosite::BAD_ALLOC
+        )))
+    );
+    assert_eq!(
+        check(6),
+        Err(MotifError::Map(MapEnd::HostDependent(1610612735)))
+    );
+    assert_eq!(check(7), Err(MotifError::Match(MatchError::Exhausted)));
 }

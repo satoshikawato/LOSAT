@@ -362,12 +362,16 @@ pub fn main_entry() -> Result<()> {
         // ```
         // rpsbproc ends with its own status (`Run`'s `m_app_status`, or the application layer's
         // for an exception); LOSAT's refusals are errors (exit 1), written as `main` writes an
-        // error, through `rpsbproc::write_stderr` (a closed standard error: exit 4).
+        // error, through `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the
+        // message may quote data bytes).
         Commands::Rpsbproc(args) => match crate::rpsbproc::run(args) {
             crate::rpsbproc::Outcome::Exit(0) => {}
             crate::rpsbproc::Outcome::Exit(code) => std::process::exit(code),
             crate::rpsbproc::Outcome::Refused(message) => {
-                crate::rpsbproc::write_stderr(&format!("Error: {message}\n"));
+                let mut line = b"Error: ".to_vec();
+                line.extend_from_slice(&message);
+                line.push(b'\n');
+                crate::rpsbproc::write_stderr_bytes(&line);
                 std::process::exit(1);
             }
         },

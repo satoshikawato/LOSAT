@@ -44,7 +44,8 @@ pub(crate) struct MotifState {
 pub(crate) enum MotifError {
     /// `THROW_SIMPLE("Motif string parse error -- Motif = " << m_strMotif << ", error position: " << errPos)`.
     Parse { motif: Vec<u8>, position: usize },
-    /// `GetMinimalXMap` throws, or allocates what the host decides (`ProSite::minimal_map`).
+    /// `GetMinimalXMap` (or the `push_back` of the text) throws, or holds what the host decides
+    /// (`ProSite::minimal_map`).
     Map(MapEnd),
     /// The match of the residues (`ProSite::matches`).
     Match(MatchError),
@@ -176,7 +177,7 @@ impl MotifState {
         }
         if !residues.is_empty() {
             // `minMap` holds the residues now: its capacity bounds the bytes beyond them that
-            // are NCBI's own (`ProSite::matches`).
+            // are NCBI's own, and its heap buffer lives during the match (`ProSite::matches`).
             let mut buffer = map;
             buffer.clear();
             let mut text = Vec::new();
@@ -186,7 +187,7 @@ impl MotifState {
                     buffer.push_back().map_err(MotifError::Map)?;
                 }
             }
-            return match pattern.matches(&text, residues.len(), 0, buffer.capacity) {
+            return match pattern.matches(&text, residues.len(), 0, buffer) {
                 Ok(false) => Ok(2),
                 Ok(true) => Ok(0),
                 Err(error) => Err(MotifError::Match(error)),

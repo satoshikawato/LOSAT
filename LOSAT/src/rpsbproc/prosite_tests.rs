@@ -18,7 +18,7 @@ impl ProSite {
         tlen: usize,
         start_pos: usize,
     ) -> Result<Option<usize>, MatchError> {
-        match self.run(text, tlen, start_pos, Past::Fail) {
+        match self.run(text, tlen, start_pos, Past::Fail, 0) {
             (_, true) => Err(MatchError::ReadPast),
             (result, false) => result,
         }
@@ -26,6 +26,21 @@ impl ProSite {
 
     fn minimal_map_len(&self) -> u64 {
         self.minimal_map().unwrap().len
+    }
+}
+
+/// NCBI's string of `len` letters with this `capacity`.
+fn string(len: u64, capacity: u64) -> CxxString {
+    CxxString { len, capacity }
+}
+
+/// NCBI's live memory of a match with this capacity of `curr.flex` and these records on the
+/// stack (the text in the string's local buffer).
+fn held(capacity: u64, stacked: u64) -> Live {
+    Live {
+        capacity,
+        stacked,
+        ..Live::new(0)
     }
 }
 
@@ -167,7 +182,12 @@ fn the_two_runs_give_ncbis_answer_for_every_byte_past_the_text() {
         assert_eq!(fields[4], "0", "{line}");
         let result = fields[7];
         // NCBI's buffer holds `tlen + 64` bytes: no read leaves it.
-        let answer = site.matches(text, tlen, start, tlen as u64 + 63);
+        let answer = site.matches(
+            text,
+            tlen,
+            start,
+            string(text.len() as u64, tlen as u64 + 63),
+        );
         if result == "exhausted" {
             assert_eq!(answer, Err(MatchError::Exhausted), "{line}");
             exhausted += 1;
@@ -212,7 +232,7 @@ fn review_oracles_r1_to_r4() {
     let matches = |pattern: &str, buffer: u64| {
         ProSite::parse(pattern.as_bytes())
             .unwrap()
-            .matches(b"HKY", 185, 0, buffer)
+            .matches(b"HKY", 185, 0, string(3, buffer))
     };
     assert_eq!(matches("Hx(0,10)K", 15), Ok(true));
     assert_eq!(matches("H{P}(0,10)K", 15), Ok(true));
@@ -221,95 +241,208 @@ fn review_oracles_r1_to_r4() {
     // The aggressive `x(0,10)` reaches 11 first: a buffer that ends before it is refused.
     assert_eq!(matches("Hx(0,10)K", 10), Err(MatchError::ReadPast));
     assert_eq!(matches("Hx(0,9)K", 10), Ok(true));
-    // A repeat that may not advance and could reach 2^26 + 1 records is refused past the text.
+    // Past the text, a match that may hold 1 GiB for other bytes is refused (DECISIONS 40): a
+    // repeat that may not advance, whose growth to 2^26 + 1 records holds 1.5 GiB...
     assert_eq!(
         matches("Hx(0,10)K-{<}(67108864)", 15),
         Err(MatchError::ReadPast)
     );
     assert_eq!(matches("Hx(0,10)K-{<}(67108863)", 15), Ok(true));
+    // ... or whose copy onto the stack, with the capacity of 2^26 records and the copy of
+    // `x(0,10)` that `K` past the text keeps there for other bytes, reaches 2^27 records.
+    assert_eq!(
+        matches("Hx(0,10)K-{<}(0,67108852)", 15),
+        Err(MatchError::ReadPast)
+    );
+    assert_eq!(matches("Hx(0,10)K-{<}(0,67108851)", 15), Ok(true));
 }
 
 // `GetMinimalXMap`'s string (libstdc++): `reserve(ttl + ttl)`, then one `append` per position;
-// `max_size()` is 2^62 - 1, an allocation is the capacity + 1 bytes, doubled when it grows by
-// less than twice. Review oracles R20 (`Hx(99999999999999999999)K`, `atol` saturates:
-// `length_error`) and R21 (`Hx(200000000000000)K`: `bad_alloc`).
+// `max_size()` is 2^63 - 1 (C++20, GCC 13), an allocation is the capacity + 1 bytes, doubled when
+// it grows by less than twice, and the old buffer lives during the allocation of the new one.
+// Review oracles R20 (`Hx(99999999999999999999)K`, `atol` saturates: `length_error`), R21
+// (`Hx(200000000000000)K`: `bad_alloc`), review 2 oracles O2 (map lengths of 2^62 - 1 to 2^63 - 1:
+// `bad_alloc` in both NCBI builds) and O3 (`Hx(536870910)K`: 512 MB, then 1 GiB while the 512 MB
+// live: exit 0 under a 4 GiB address space, `bad_alloc` under 1.5 GiB).
 #[test]
 fn the_minimal_map_follows_ncbis_string() {
     let map = |pattern: &str| ProSite::parse(pattern.as_bytes()).unwrap().minimal_map();
-    let string = |len, capacity| Ok(CxxString { len, capacity });
     // In the local buffer; `reserve(16)` of eight positions doubles 15 to 30; 16 doubles too.
-    assert_eq!(map("HKY"), string(3, 15));
-    assert_eq!(map("ACDEFGHI"), string(8, 30));
-    assert_eq!(map("x(16)"), string(16, 30));
-    assert_eq!(map("x(31)-x(2)"), string(33, 62));
-    assert_eq!(map("<-x(0,5)"), string(1, 15));
-    // The band of the host's memory starts at an allocation of 2^30 bytes.
-    assert_eq!(map("x(1073741822)"), string(1073741822, 1073741822));
-    // `H`, then `x(n)` in an allocation of `n + 2` bytes, then `K` doubles it.
-    assert_eq!(map("Hx(536870910)K"), string(536870912, 1073741822));
+    assert_eq!(map("HKY"), Ok(string(3, 15)));
+    assert_eq!(map("ACDEFGHI"), Ok(string(8, 30)));
+    assert_eq!(map("x(16)"), Ok(string(16, 30)));
+    assert_eq!(map("x(31)-x(2)"), Ok(string(33, 62)));
+    assert_eq!(map("<-x(0,5)"), Ok(string(1, 15)));
+    assert_eq!(string(3, 15).heap_bytes(), 0);
+    assert_eq!(string(16, 30).heap_bytes(), 31);
+    // The band of the host's memory starts at 2^30 bytes held at once.
+    assert_eq!(map("x(1073741822)"), Ok(string(1073741822, 1073741822)));
+    assert_eq!(map("x(1073741823)"), Err(MapEnd::HostDependent(1 << 30)));
+    // `H`, then `x(n)` in an allocation of `n + 2` bytes, then `K` doubles it while the old one
+    // lives: `3n + 5` bytes.
+    assert_eq!(map("Hx(357913939)K"), Ok(string(357913941, 715827880)));
     assert_eq!(
-        map("Hx(536870911)K"),
+        map("Hx(357913940)K"),
         Err(MapEnd::HostDependent((1 << 30) + 1))
     );
-    assert_eq!(map("x(1073741823)"), Err(MapEnd::HostDependent(1 << 30)));
+    assert_eq!(
+        map("Hx(536870910)K"),
+        Err(MapEnd::HostDependent(1610612735))
+    );
     assert_eq!(
         map("x(536870912)-x(536870912)"),
-        Err(MapEnd::HostDependent((1 << 30) + 1))
+        Err(MapEnd::HostDependent((1 << 29) + (1 << 30) + 2))
     );
-    // `bad_alloc` from 2^47 bytes on.
+    // `bad_alloc` from one allocation of 2^47 bytes on.
     assert_eq!(
         map("x(140737488355326)"),
         Err(MapEnd::HostDependent((1 << 47) - 1))
     );
     assert_eq!(map("x(140737488355327)"), Err(MapEnd::Throw(BAD_ALLOC)));
     assert_eq!(map("Hx(200000000000000)K"), Err(MapEnd::Throw(BAD_ALLOC)));
-    // `length_error` past `max_size()`, before any allocation.
-    assert_eq!(map("x(4611686018427387903)"), Err(MapEnd::Throw(BAD_ALLOC)));
+    // Lengths up to `max_size()` allocate: O2's four, and `x(LONG_MAX)` first.
+    for count in [
+        "4611686018427387902",
+        "4611686018427387903",
+        "9223372036854775805",
+        "9223372036854775806",
+    ] {
+        assert_eq!(
+            map(&format!("Hx({count})K")),
+            Err(MapEnd::Throw(BAD_ALLOC)),
+            "{count}"
+        );
+    }
+    assert_eq!(map("x(4611686018427387904)"), Err(MapEnd::Throw(BAD_ALLOC)));
     assert_eq!(
-        map("x(4611686018427387904)"),
-        Err(MapEnd::Throw(LENGTH_ERROR))
+        map("x(99999999999999999999)"),
+        Err(MapEnd::Throw(BAD_ALLOC))
     );
+    // `length_error` past `max_size()`, before any allocation: `LONG_MAX` after a letter.
     assert_eq!(
         map("Hx(99999999999999999999)K"),
         Err(MapEnd::Throw(LENGTH_ERROR))
     );
+    assert_eq!(
+        map("Hx(9223372036854775807)K"),
+        Err(MapEnd::Throw(LENGTH_ERROR))
+    );
 }
 
-// The records of a repeat that does not advance: `vector<size_t>` doubles from empty, and one
-// allocation of 2^30 bytes or more (2^26 + 1 records) is refused; below, the match goes on.
+// NCBI's live memory of the match (DECISIONS 40): the records of `curr.flex` (`vector<size_t>`
+// doubles from empty, the old buffer lives during the growth), the copies on the stack and the
+// text's string; 2^30 bytes or more at once are refused, below the match goes on. Review 2
+// oracle O3: `H-{<}(0,67108863)-{<}(0,67108863)-K` (1.5 GiB of records in allocations of 512 MB)
+// gave exit 0 under a 4 GiB address space and `bad_alloc` under 1.5 GiB in both NCBI builds.
 #[test]
-fn repeats_that_do_not_advance_refuse_one_gib_of_records() {
-    let end = |pattern: &str| {
+fn repeats_that_do_not_advance_refuse_one_gib_held_at_once() {
+    let end_with = |pattern: &str, buffer: u64| {
         ProSite::parse(pattern.as_bytes())
             .unwrap()
-            .matches(b"HKY", 3, 0, 15)
+            .matches(b"HKY", 3, 0, string(3, buffer))
     };
+    let end = |pattern: &str| end_with(pattern, 15);
+    // 2^26 records: the growth from 2^25 holds 768 MB, and no copy (no counts left).
     assert_eq!(end("<(67108863)-H"), Ok(true));
     assert_eq!(end("<(67108864)-H"), Err(MatchError::Exhausted));
     assert_eq!(end("<*-H"), Err(MatchError::Exhausted));
     assert_eq!(end("H-{<}(67108863)-K"), Ok(true));
     assert_eq!(end("H-{<}(67108864)-K"), Err(MatchError::Exhausted));
+    // The text's string on the heap counts: 768 MB + 256 MB.
+    assert_eq!(end_with("H-{<}(67108863)-K", 268435454), Ok(true));
+    assert_eq!(
+        end_with("H-{<}(67108863)-K", 268435455),
+        Err(MatchError::Exhausted)
+    );
     // A lazy `{X}*` at `tlen` is revisited for ever.
     assert_eq!(end("x(3)-{X}*-Q"), Err(MatchError::Exhausted));
-    // The revisits of 2^26 - 1 records that did not advance end at once (NCBI pops them one by
-    // one, and the rest of the pattern fails from the same position each time).
-    assert_eq!(end("<(0,67108863)-Q"), Ok(false));
-    assert_eq!(end("<(0,67108863)-H"), Ok(true));
-    // Two of them (`<` only begins a pattern; `{<}` stays after its first position).
-    assert_eq!(end("H-{<}(0,67108863)-{<}(0,67108863)-Y"), Ok(false));
-    assert_eq!(end("H-{<}(0,67108863)-{<}(0,67108863)-K"), Ok(true));
-    // The capacity that a copy back sets: growth from 3 is 3 * 2^k.
-    let mut capacity = 3;
-    assert_eq!(grow_records(&mut capacity, 100_663_296), Ok(()));
-    assert_eq!(capacity, 100_663_296);
+    // With counts left the records are copied onto the stack: 2^26 - 1 records and their copy
+    // hold 2^27 - 1 records, 2^26 hold 1 GiB.
+    assert_eq!(end("<(0,67108862)-H"), Ok(true));
+    assert_eq!(end("<(0,67108862)-Q"), Ok(false));
+    assert_eq!(end("<(0,67108863)-H"), Err(MatchError::Exhausted));
+    assert_eq!(end("<(0,67108863)-Q"), Err(MatchError::Exhausted));
+    // Two repeats (`<` only begins a pattern; `{<}` stays after its first position): two copies
+    // of 2^25 records with a capacity of 2^25 hold 768 MB; of 2^25 + 1 records, with a capacity
+    // of 2^26, 1 GiB + 16 bytes. O3's pattern stops at its first copy (1 GiB).
+    assert_eq!(end("H-{<}(0,33554431)-{<}(0,33554431)-K"), Ok(true));
+    // The revisits of the first repeat that LOSAT skips hold 2^25 - 1 records of its copy and
+    // the copy of 2^25 that the second one made in the run that failed.
+    assert_eq!(end("H-{<}(0,33554431)-{<}(0,33554431)-Y"), Ok(false));
     assert_eq!(
-        grow_records(&mut capacity, 100_663_297),
+        end("H-{<}(0,33554432)-{<}(0,33554432)-K"),
         Err(MatchError::Exhausted)
     );
-    let mut capacity = 0;
-    assert_eq!(grow_records(&mut capacity, 1 << 26), Ok(()));
     assert_eq!(
-        grow_records(&mut capacity, (1 << 26) + 1),
+        end("H-{<}(0,67108863)-{<}(0,67108863)-K"),
         Err(MatchError::Exhausted)
     );
+    assert_eq!(
+        end("H-{<}(0,67108863)-{<}(0,67108863)-Y"),
+        Err(MatchError::Exhausted)
+    );
+}
+
+// The revisits that LOSAT skips (`Live::retry`): a lazy `{X}` with a finite count (`*`, then
+// `(0,n)`) at `tlen` is revisited up to `n` + 1 records; while counts are left, NCBI copies its
+// records onto the stack, `n` at the most, with the capacity of 2^26 records, and runs the rest
+// again, whose `>(0,1)` copies 2 records above them. With `n` = 2^26 - 3 that is 2^27 - 1
+// records at once; with 2^26 - 2, 1 GiB.
+#[test]
+fn the_revisits_that_losat_skips_count_what_ncbi_holds() {
+    let end = |pattern: &str| {
+        ProSite::parse(pattern.as_bytes())
+            .unwrap()
+            .matches(b"HKY", 3, 0, string(3, 15))
+    };
+    assert_eq!(end("x(3)-{X}*(0,67108861)->(0,1)-Q"), Ok(false));
+    assert_eq!(
+        end("x(3)-{X}*(0,67108862)->(0,1)-Q"),
+        Err(MatchError::Exhausted)
+    );
+    // Without the copies of the rest, the revisits hold 2^26 + 2^26 - 2 records.
+    assert_eq!(end("x(3)-{X}*(0,67108862)-Q"), Ok(false));
+    // Two lazy repeats: each revisit of the first runs the second again, and the second's own
+    // revisits (which LOSAT skips too) copy up to its maximal count above the first's copy. With
+    // the capacity of 2^26 records (the second's 2^25 + 1), copies of 2^25 - 1 and 2^25 records
+    // hold 2^27 - 1 records at once; of 2^25 and 2^25, 1 GiB.
+    assert_eq!(end("x(3)-{X}*(0,33554431)-{X}*(0,33554432)-Q"), Ok(false));
+    assert_eq!(
+        end("x(3)-{X}*(0,33554432)-{X}*(0,33554432)-Q"),
+        Err(MatchError::Exhausted)
+    );
+    let mut live = held(1 << 26, 0);
+    assert_eq!(live.retry((1 << 26) - 3, 2), Ok(()));
+    assert_eq!(live.retry((1 << 26) - 2, 2), Err(MatchError::Exhausted));
+}
+
+// `Live` at its edges: the growth holds the old and the new buffer and the copies, a copy onto
+// the stack adds to the capacity, a copy back that does not fit holds the old buffer, the new one
+// and the copy still on the stack, and the text counts in bytes.
+#[test]
+fn live_memory_at_its_edges() {
+    let mut live = Live::new(0);
+    assert_eq!(live.grow(1 << 25), Ok(()));
+    assert_eq!(live.capacity, 1 << 25);
+    assert_eq!(live.grow((1 << 26) + 1), Err(MatchError::Exhausted));
+    let mut live = held(1 << 25, (1 << 25) - 1);
+    assert_eq!(live.grow((1 << 25) + 1), Ok(()));
+    assert_eq!(live.capacity, 1 << 26);
+    let mut live = held(1 << 25, 1 << 25);
+    assert_eq!(live.grow((1 << 25) + 1), Err(MatchError::Exhausted));
+    let mut live = held(1 << 26, 0);
+    assert_eq!(live.push((1 << 26) - 1), Ok(()));
+    assert_eq!(live.push(1), Err(MatchError::Exhausted));
+    let mut live = held(0, (1 << 26) - 1);
+    assert_eq!(live.pop((1 << 26) - 1), Ok(()));
+    assert_eq!((live.capacity, live.stacked), ((1 << 26) - 1, 0));
+    let mut live = held(0, 1 << 26);
+    assert_eq!(live.pop(1 << 26), Err(MatchError::Exhausted));
+    // A copy that fits allocates nothing.
+    let mut live = held(1 << 26, 1 << 25);
+    assert_eq!(live.pop(1 << 25), Ok(()));
+    assert_eq!((live.capacity, live.stacked), (1 << 26, 0));
+    let mut live = Live::new((1 << 30) - 8);
+    assert_eq!(live.hold(0), Ok(()));
+    assert_eq!(live.grow(1), Err(MatchError::Exhausted));
 }

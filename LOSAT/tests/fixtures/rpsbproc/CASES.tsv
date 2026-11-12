@@ -130,3 +130,9 @@ both.mfirst_delta	compare	-	data-with:sites	-i arch/mfirst_delta.asn -d sites
 rd4.mfirst	compare	-	data-with:sites+rd4	-i arch/mfirst.asn -d rd4
 rd13.mfirst	compare	-	data-with:sites+rd13	-i arch/mfirst.asn -d rd13
 rd14.mfirst	compare	-	data-with:sites+rd14	-i arch/mfirst.asn -d rd14
+rd15.mfirst	compare	-	data-with:sites+rd15	-i arch/mfirst.asn -d rd15
+rd18.mfirst	compare	-	data-with:sites+rd18	-i arch/mfirst.asn -d rd18
+refuse_rd2.mfirst	refuse	-	data-with:sites+rd2	-i arch/mfirst.asn -d rd2
+refuse_rd19.mfirst	refuse	-	data-with:sites+rd19	-i arch/mfirst.asn -d rd19
+refuse_rd20.mfirst	refuse	-	data-with:sites+rd20	-i arch/mfirst.asn -d rd20
+refuse_nodata	refuse	-	data-with:sites	-i arch/q_nodata.asn -d sites

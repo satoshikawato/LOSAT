@@ -100,10 +100,17 @@ const E_INPUT_DATA_ERROR: i32 = 5;
 // ```
 const OVERLAPLEADING: u32 = (10_000_000_000u64 % (1u64 << 32)) as u32;
 
-/// How `losat rpsbproc` ends: an exit status, or a refusal (its message; exit 1).
+/// How `losat rpsbproc` ends: an exit status, or a refusal (its message, which may quote data
+/// bytes; exit 1).
 pub enum Outcome {
     Exit(i32),
-    Refused(String),
+    Refused(Vec<u8>),
+}
+
+impl Outcome {
+    fn refused(message: impl Into<Vec<u8>>) -> Self {
+        Outcome::Refused(message.into())
+    }
 }
 
 /// glibc's `%g` (an `ostream`'s default output of a double), `-0` for negative zero.
@@ -184,7 +191,7 @@ pub(crate) fn write_stderr(text: &str) {
 }
 
 /// `write_stderr` of bytes (a message that quotes data bytes as NCBI writes them).
-fn write_stderr_bytes(bytes: &[u8]) {
+pub(crate) fn write_stderr_bytes(bytes: &[u8]) {
     let mut stderr = std::io::stderr().lock();
     if stderr.write_all(bytes).is_err() {
         std::process::exit(E_OUTPUT_FILE_OPEN_ERROR);
@@ -674,7 +681,7 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
                 role,
                 "rpsbproc",
             ) {
-                return Outcome::Refused(error.to_string());
+                return Outcome::refused(error.to_string());
             }
         }
     }
@@ -684,10 +691,10 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
     let settings =
         match crate::blastinput::ncbi_environment::check_ncbi_application_settings("rpsbproc") {
             Ok(settings) => settings,
-            Err(reason) => return Outcome::Refused(reason),
+            Err(reason) => return Outcome::refused(reason),
         };
     if let Some(reason) = reader_variable(std::env::vars_os()) {
-        return Outcome::Refused(reason);
+        return Outcome::refused(reason);
     }
     banner();
     let mut status = E_OK;
@@ -841,7 +848,7 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
     // its warning, loads the data and ends with the status (PS16a review oracle M4).
     if first == b'<' {
         if status == E_OK {
-            return Outcome::Refused(
+            return Outcome::refused(
                 "the XML input of rpsblast -outfmt 5 (which NCBI's rpsbproc reads as deprecated) is not supported by LOSAT's rpsbproc, which reads the ASN.1 text archives of -outfmt 11".to_string(),
             );
         }
@@ -891,7 +898,7 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
                 famlinks: file("family_superfamily_links"),
             };
             if path.to_str().is_none() {
-                return Outcome::Refused(
+                return Outcome::refused(
                     "a data path that is not UTF-8 is not supported by LOSAT's rpsbproc"
                         .to_string(),
                 );
@@ -926,7 +933,7 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
                     ));
                     return Outcome::Exit(2);
                 }
-                Err(DataError::Unsupported(message)) => return Outcome::Refused(message),
+                Err(DataError::Unsupported(message)) => return Outcome::refused(message),
             }
         }
         None => {
@@ -1124,11 +1131,11 @@ fn run_sessions<R: Read>(
         let archive = match stream.next_archive() {
             Ok(Some(archive)) => archive,
             Ok(None) => break,
-            Err(refusal) => return Outcome::Refused(refusal.message),
+            Err(refusal) => return Outcome::refused(refusal.message),
         };
         if let RequestBody::QueueSearch(search) = &archive.body {
             if search.program == b"tblastn" {
-                return Outcome::Refused(
+                return Outcome::refused(
                     "an archive of rpstblastn (program tblastn, nucleotide queries) is not supported by LOSAT's rpsbproc (item PS16c)".to_string(),
                 );
             }
@@ -1137,7 +1144,7 @@ fn run_sessions<R: Read>(
                     .iter()
                     .any(|entry| matches!(entry, SeqEntry::Seq(query) if query.mol != 3))
                 {
-                    return Outcome::Refused(
+                    return Outcome::refused(
                         "a nucleotide query is not supported by LOSAT's rpsbproc (item PS16c)"
                             .to_string(),
                     );
@@ -1149,7 +1156,7 @@ fn run_sessions<R: Read>(
                     if entries.iter().any(|entry| {
                         matches!(entry, SeqEntry::Seq(query) if query.ids.iter().any(|id| matches!(id, crate::seqid::model::ParsedSeqId::Gi(_))))
                     }) {
-                        return Outcome::Refused(format!(
+                        return Outcome::refused(format!(
                             "the environment variable {name}, which changes the Seq-id that NCBI's rpsbproc prints for a query with a gi, is not supported by LOSAT's rpsbproc"
                         ));
                     }
@@ -1179,7 +1186,7 @@ fn run_sessions<R: Read>(
                 ProcessError::Exception(exception) => {
                     Outcome::Exit(report_exception(&exception, false))
                 }
-                ProcessError::Unsupported(message) => Outcome::Refused(message),
+                ProcessError::Unsupported(message) => Outcome::refused(message),
             }
         };
         match &search.subject {
@@ -1291,7 +1298,7 @@ fn run_sessions<R: Read>(
                                 write_stderr_bytes(&err_post_x_bytes(CORELIB_APP, 7, &message));
                                 Outcome::Exit(3)
                             }
-                            PrintError::Unsupported(message) => Outcome::Refused(message),
+                            PrintError::Unsupported(message) => Outcome::refused(message),
                         };
                     }
                     queries_done += 1;
@@ -1499,31 +1506,40 @@ enum PrintError {
     /// The `what()` of a `std::exception` that ends NCBI's rpsbproc: a motif that its parser
     /// refuses (`THROW_SIMPLE`), or a minimal map that its string cannot hold.
     Exception(Vec<u8>),
-    /// A case LOSAT does not reproduce.
-    Unsupported(String),
+    /// A case LOSAT does not reproduce (the message may quote data bytes).
+    Unsupported(Vec<u8>),
 }
 
-impl From<MotifError> for PrintError {
-    fn from(error: MotifError) -> Self {
-        match error {
-            MotifError::Parse { motif, position } => {
-                // `CSimpleException`'s text: the motif's bytes as the data file has them.
-                let mut what = b"Motif string parse error -- Motif = ".to_vec();
-                what.extend_from_slice(&motif);
-                what.extend_from_slice(format!(", error position: {position}").as_bytes());
-                PrintError::Exception(what)
-            }
-            MotifError::Map(MapEnd::Throw(what)) => PrintError::Exception(what.as_bytes().to_vec()),
-            MotifError::Map(MapEnd::HostDependent(bytes)) => PrintError::Unsupported(format!(
-                "a motif whose minimal map makes NCBI's rpsbproc allocate {bytes} bytes at once (from 1 GiB to below 2^47 bytes, where NCBI's result depends on the host's memory) is not supported by LOSAT's rpsbproc"
-            )),
-            MotifError::Match(MatchError::ReadPast) => PrintError::Unsupported(
-                "a motif match whose result depends on the memory that NCBI's rpsbproc reads beyond the residues of a site, or that may read beyond its buffer of them (undefined), is not supported by LOSAT's rpsbproc".to_string(),
-            ),
-            MotifError::Match(MatchError::Exhausted) => PrintError::Unsupported(
-                "a motif match whose records make NCBI's rpsbproc allocate 1 GiB or more at once (a repeat that does not advance; NCBI's result depends on the host's memory) is not supported by LOSAT's rpsbproc".to_string(),
-            ),
+/// How the motif check of `site` stops the report. The refusals name the site and quote its
+/// motif's bytes as the data file has them, as NCBI's parse error quotes the motif.
+fn motif_error(error: MotifError, data: &CddData, site: &data::Site) -> PrintError {
+    let refusal = |what: &str| {
+        let mut message = what.as_bytes().to_vec();
+        message.extend_from_slice(b" is not supported by LOSAT's rpsbproc: site '");
+        message.extend_from_slice(data.text(site.title));
+        message.extend_from_slice(b"', motif '");
+        message.extend_from_slice(data.text(site.motif));
+        message.push(b'\'');
+        PrintError::Unsupported(message)
+    };
+    match error {
+        MotifError::Parse { motif, position } => {
+            // `CSimpleException`'s text: the motif's bytes as the data file has them.
+            let mut what = b"Motif string parse error -- Motif = ".to_vec();
+            what.extend_from_slice(&motif);
+            what.extend_from_slice(format!(", error position: {position}").as_bytes());
+            PrintError::Exception(what)
         }
+        MotifError::Map(MapEnd::Throw(what)) => PrintError::Exception(what.as_bytes().to_vec()),
+        MotifError::Map(MapEnd::HostDependent(bytes)) => refusal(&format!(
+            "a motif whose minimal map makes NCBI's rpsbproc hold {bytes} bytes at once (1 GiB or more in allocations below 2^47 bytes, where NCBI's result depends on the host's memory)"
+        )),
+        MotifError::Match(MatchError::ReadPast) => refusal(
+            "a motif match that reads beyond the residues of a site where NCBI's result depends on the bytes it reads there (or on its memory for some of them), or that may read beyond NCBI's buffer of them (undefined),",
+        ),
+        MotifError::Match(MatchError::Exhausted) => refusal(
+            "a motif match for which NCBI's rpsbproc holds 1 GiB or more at once (its match records with their copies on its stack and the string of the residues; a repeat that does not advance, such as `<*`, grows the records until the memory runs out; NCBI's result depends on the host's memory)",
+        ),
     }
 }
 
@@ -1537,10 +1553,13 @@ fn upper_residue(query: &DomQuery, res: i64) -> Result<u8, PrintError> {
     } else if res == len {
         Ok(0)
     } else {
-        Err(PrintError::Unsupported(format!(
-            "a site or motif at position {} of a query with {len} residues (NCBI reads outside the sequence) is not supported by LOSAT's rpsbproc",
-            res + 1
-        )))
+        Err(PrintError::Unsupported(
+            format!(
+                "a site or motif at position {} of a query with {len} residues (NCBI reads outside the sequence) is not supported by LOSAT's rpsbproc",
+                res + 1
+            )
+            .into_bytes(),
+        ))
     }
 }
 
@@ -1877,7 +1896,11 @@ fn print_site(
         return Ok(());
     }
     let mapped_positions = translated_pos_map(&featsegs);
-    if motif_state.motif_check(data, site, &mapped_positions, &query.residues)? > 0 {
+    if motif_state
+        .motif_check(data, site, &mapped_positions, &query.residues)
+        .map_err(|error| motif_error(error, data, site))?
+        > 0
+    {
         return Ok(());
     }
     // The residues first: a refusal leaves no part of the line.

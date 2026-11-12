@@ -107,44 +107,6 @@ mod x_bn_csr;
 // ```
 const BLAST2NA_MASK: u8 = 0xFC;
 
-/// 2-bit encoding for compact storage and hashing from BLASTNA-encoded sequence.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:96-105
-/// ```c
-/// for(i = 0; i < wordsize; i++) {
-///   index = (index << charsize) | word[i];
-/// }
-/// ```
-/// `None` when the word `start..start + k` does not fit in `seq` (for any `start` and `k`) or
-/// holds a base that is not A, C, G or T.
-pub fn encode_kmer(seq: &[u8], start: usize, k: usize) -> Option<u64> {
-    // No NCBI counterpart: NCBI's callers pass words that fit; this form cannot wrap.
-    if k > seq.len() || start > seq.len() - k {
-        return None;
-    }
-    encode_kmer_fitting(seq, start, k)
-}
-
-/// `encode_kmer` for the table builders below, whose words fit (`start <= seq.len() - k`), so
-/// `start + k` does not wrap.
-#[inline(always)]
-fn encode_kmer_fitting(seq: &[u8], start: usize, k: usize) -> Option<u64> {
-    if start + k > seq.len() {
-        return None;
-    }
-    let mut encoded: u64 = 0;
-    for i in 0..k {
-        // SAFETY: `start + i < start + k <= seq.len()` (the test above); `start + k` does not
-        // wrap: `encode_kmer` tests that the word fits, and the two builders pass
-        // `start <= seq.len() - k`.
-        let base = unsafe { *seq.get_unchecked(start + i) };
-        if (base & BLAST2NA_MASK) != 0 {
-            return None;
-        }
-        encoded = (encoded << 2) | base as u64;
-    }
-    Some(encoded)
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:80-103
 // ```c
 // const char NCBI4NA_TO_IUPACNA[BLASTNA_SIZE] = {
@@ -1337,12 +1299,6 @@ impl TwoStageLookup {
         }
     }
 
-    /// Calculate optimal scan step
-    #[inline(always)]
-    pub fn scan_step(&self) -> usize {
-        (self.word_length as isize - self.lut_word_length as isize + 1).max(1) as usize
-    }
-
     /// Get the longest chain length for sizing offset buffers.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
     // ```c
@@ -1358,31 +1314,6 @@ impl TwoStageLookup {
     pub fn longest_chain(&self) -> usize {
         self.mb_lookup.longest_chain()
     }
-}
-
-/// Check if a k-mer starting at position overlaps with any masked interval
-/// Uses binary search for O(log n) performance instead of O(n) linear scan.
-/// IMPORTANT: Intervals must be sorted by start position for binary search to work correctly.
-#[inline]
-pub fn is_kmer_masked(intervals: &[MaskedInterval], start: usize, kmer_len: usize) -> bool {
-    if intervals.is_empty() {
-        return false;
-    }
-
-    let end = start + kmer_len;
-
-    // Binary search to find the first interval whose end > start
-    // (i.e., the first interval that could potentially overlap)
-    let idx = intervals.partition_point(|interval| interval.end <= start);
-
-    // Check if this interval actually overlaps
-    // An interval overlaps if: interval.start < end AND interval.end > start
-    // We already know interval.end > start (from binary search), so just check start
-    if idx < intervals.len() && intervals[idx].start < end {
-        return true;
-    }
-
-    false
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:91-132
@@ -2998,170 +2929,6 @@ pub(crate) fn build_disc_mb_lookup_kept(
     }
 }
 
-/// Build direct address table for k-mer lookup (O(1) access)
-/// This is much faster than HashMap for small word sizes
-pub fn build_direct_lookup(
-    queries_blastna: &[&[u8]],
-    query_offsets: &[i32],
-    word_size: usize,
-    query_masks: &[Vec<MaskedInterval>],
-) -> DirectKmerLookup {
-    let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
-    let table_size = 1usize << (2 * safe_word_size); // 4^word_size
-    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
-
-    if debug_mode {
-        let offsets_bytes = (table_size + 1) * std::mem::size_of::<u32>();
-        eprintln!(
-            "[DEBUG] build_direct_lookup: word_size={}, table_size={} ({:.1}MB offsets)",
-            safe_word_size,
-            table_size,
-            offsets_bytes as f64 / 1_000_000.0
-        );
-    }
-
-    let mut counts: Vec<u32> = vec![0; table_size];
-
-    let mut total_positions = 0usize;
-    let mut ambiguous_skipped = 0usize;
-    let mut dust_skipped = 0usize;
-
-    debug_assert_eq!(queries_blastna.len(), query_offsets.len());
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:979-1091
-    // ```c
-    // mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
-    // ...
-    // if (mb_lt->hashtable[ecode] == 0) {
-    //     PV_SET(pv_array, ecode, pv_array_bts);
-    // }
-    // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-    // mb_lt->hashtable[ecode] = index;
-    // ```
-    // NCBI reference: blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
-    // NCBI processes only unmasked regions (locations parameter)
-    // Reference: blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
-    //
-    // LOSAT processes entire sequence and filters masked regions (equivalent behavior)
-    for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna;
-        // NCBI reference: blast_lookup.c:99-100
-        // if (word_length > to - from + 1) continue;
-        if seq.len() < safe_word_size {
-            continue;
-        }
-
-        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
-
-        // NCBI reference: blast_lookup.c:108-121
-        // for (offset = from; offset <= to; offset++, seq++) {
-        //     if (seq >= word_target) { BlastLookupAddWordHit(...); }
-        //     if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-        // }
-        for i in 0..=(seq.len() - safe_word_size) {
-            total_positions += 1;
-
-            // NCBI reference: blast_nalookup.c:402-406
-            // BlastLookupIndexQueryExactMatches processes only unmasked regions (locations)
-            // LOSAT processes entire sequence and filters masked regions (equivalent)
-            // Skip k-mers that overlap with DUST-masked regions
-            if !masks.is_empty() && is_kmer_masked(masks, i, safe_word_size) {
-                dust_skipped += 1;
-                continue;
-            }
-
-            // NCBI reference: blast_lookup.c:119-120
-            // if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
-            if let Some(kmer) = encode_kmer_fitting(seq, i, safe_word_size) {
-                // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-                // Adds ALL hits without any frequency limit - no query-side filtering
-                let idx = kmer as usize;
-                if idx < table_size {
-                    counts[idx] = counts[idx].saturating_add(1);
-                }
-            } else {
-                ambiguous_skipped += 1;
-            }
-        }
-    }
-
-    let mut offsets: Vec<u32> = vec![0; table_size + 1];
-    let mut total_hits: u32 = 0;
-    for idx in 0..table_size {
-        offsets[idx] = total_hits;
-        total_hits = total_hits.saturating_add(counts[idx]);
-    }
-    offsets[table_size] = total_hits;
-
-    let mut hits: Vec<u32> = vec![0u32; total_hits as usize];
-    let mut write_pos: Vec<u32> = offsets[..table_size].to_vec();
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:33-77
-    // ```c
-    // if (backbone[index] == NULL) { ... }
-    // ...
-    // chain[chain[1] + 2] = query_offset;
-    // chain[1]++;
-    // ```
-    for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna;
-        if seq.len() < safe_word_size {
-            continue;
-        }
-
-        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
-        let query_offset = query_offsets[q_idx] as usize;
-        for i in 0..=(seq.len() - safe_word_size) {
-            if !masks.is_empty() && is_kmer_masked(masks, i, safe_word_size) {
-                continue;
-            }
-
-            if let Some(kmer) = encode_kmer_fitting(seq, i, safe_word_size) {
-                let idx = kmer as usize;
-                if idx < table_size {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
-                    // ```c
-                    // /* Also add 1 to all indices, because lookup table indices count
-                    //    from 1. */
-                    // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-                    // mb_lt->hashtable[ecode] = index;
-                    // ```
-                    let q_off_1 = (query_offset + i + 1) as u32;
-                    let pos_idx = write_pos[idx] as usize;
-                    hits[pos_idx] = q_off_1;
-                    write_pos[idx] = write_pos[idx].saturating_add(1);
-                }
-            }
-        }
-    }
-
-    if debug_mode {
-        let non_empty = offsets.windows(2).filter(|w| w[0] != w[1]).count();
-        let hits_bytes = hits.len() * std::mem::size_of::<u32>();
-        eprintln!(
-            "[DEBUG] build_direct_lookup: total_positions={}, ambiguous_skipped={} ({:.1}%), dust_skipped={} ({:.1}%), non_empty_buckets={}, hits_bytes={:.1}MB",
-            total_positions,
-            ambiguous_skipped,
-            100.0 * ambiguous_skipped as f64 / total_positions.max(1) as f64,
-            dust_skipped,
-            100.0 * dust_skipped as f64 / total_positions.max(1) as f64,
-            non_empty,
-            hits_bytes as f64 / 1_000_000.0
-        );
-    }
-
-    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-    // NCBI BLAST does NOT filter over-represented k-mers in the query
-    // All k-mers are added to the lookup table regardless of frequency
-    // Database word count filtering (kDbFilter) exists but is different:
-    // it filters based on database counts, not query counts
-    // Reference: blast_nalookup.c:1047-1060 (database word count filtering)
-    //
-    // REMOVED: Over-represented k-mer filtering (MAX_HITS_PER_KMER) - does not exist in NCBI BLAST
-
-    DirectKmerLookup { offsets, hits }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
 // ```c
 //          if (mb_lt->hashtable[ecode] == 0) {
@@ -3596,21 +3363,6 @@ mod disc_lookup_tests {
         assert_eq!(chain(&masked, coding, false), vec![42]);
         assert!(masked.disc().is_some_and(|d| !d.two_templates));
         assert!(chain(&masked, optimal, true).is_empty());
-    }
-}
-
-// No NCBI counterpart: the checked public form refuses words that do not fit (line LIB, P-S1).
-#[cfg(test)]
-mod encode_kmer_bounds_tests {
-    use super::encode_kmer;
-
-    #[test]
-    fn a_word_that_does_not_fit_is_refused_for_any_start() {
-        // `start + k` wraps to 1 here; the unchecked read was `seq[usize::MAX]`.
-        assert_eq!(encode_kmer(&[0u8], usize::MAX, 2), None);
-        assert_eq!(encode_kmer(&[0u8], 1, usize::MAX), None);
-        assert_eq!(encode_kmer(&[0u8, 1], 1, 2), None);
-        assert_eq!(encode_kmer(&[0u8, 1], 0, 2), Some(1));
     }
 }
 

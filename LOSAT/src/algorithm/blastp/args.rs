@@ -141,7 +141,7 @@ impl BlastpCompBasedStats {
     //     opt.SetUnifiedP(1);
     // }
     // ```
-    pub fn to_ncbi_cli_string(&self) -> String {
+    pub fn to_ncbi_cli_string(self) -> String {
         let mode = match self.mode {
             BlastpCompositionMode::NoCompositionBasedStats => '0',
             BlastpCompositionMode::CompositionBasedStats => '1',
@@ -168,6 +168,7 @@ impl BlastpCompBasedStats {
 //     opt.SetUnifiedP(1);
 // }
 // ```
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {

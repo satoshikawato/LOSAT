@@ -244,6 +244,24 @@ pub struct TblastxArgs {
     #[arg(long)]
     pub lcase_masking: bool,
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214, 276-278
+    // ```c++
+    //         arg_desc.SetCurrentGroup("Extension options");
+    //         // ungapped X-drop
+    //         // Default values: blastn=20, megablast=10, others=7
+    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
+    //                             "X-dropoff value (in bits) for ungapped extensions",
+    //                             CArgDescriptions::eDouble);
+    //     ...
+    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
+    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    //     }
+    // ```
+    // TBLASTX has no gapped X-drops (blast_args.cpp:216-229, `!m_IsTblastx`). Read by
+    // `x_drop_ungapped_bits`.
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = tblastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
+
     /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
     /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.
     /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
@@ -428,6 +446,23 @@ impl TblastxArgs {
         self.window_size.unwrap_or_else(|| {
             crate::stats::protein_options::suggested_window_size(self.matrix_name())
         })
+    }
+
+    /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap`, else TBLASTX's
+    /// default.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:100-104 (the
+    /// base handle of `CTBlastxOptionsHandle`, tblastx_options.cpp:47-49)
+    /// ```c++
+    /// CBlastProteinOptionsHandle::SetInitialWordOptionsDefaults()
+    /// {
+    ///     SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_PROT);
+    ///     SetWindowSize(BLAST_WINDOW_SIZE_PROT);
+    /// }
+    /// ```
+    pub fn x_drop_ungapped_bits(&self) -> f64 {
+        self.xdrop_ungap
+            .unwrap_or(super::constants::X_DROP_UNGAPPED_BITS)
     }
 
     /// The word size the search uses: the argument, else TBLASTX's default (3).

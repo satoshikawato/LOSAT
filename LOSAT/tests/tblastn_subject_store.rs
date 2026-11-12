@@ -32,9 +32,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use LOSAT::api::local_blast::run_local_tblastn;
-use LOSAT::blastinput::fasta_reader::ReaderConfig;
-use LOSAT::cli::{try_parse_from, Cli, Commands};
+use LOSAT::api::Program;
 
 const PIECE: usize = 6_000;
 
@@ -200,35 +198,15 @@ fn run(
         .expect("run LOSAT")
 }
 
-/// One `run_local` search (LOSAT Web's and the library's entry) in this process: the records as
-/// the CLI's reader reads them, `options` as on the command line with `-outfmt <n>` first.
-/// Returns the report and the messages.
+/// One `run_local` search (LOSAT Web's and the library's entry, which `LOSAT::api` calls) in this
+/// process: the records as the CLI's reader reads them, `options` as on the command line with
+/// `-outfmt <n>` first. Returns the report and the messages.
 fn run_local(query: &Path, subjects: &Path, options: &[&str]) -> (Vec<u8>, String) {
     assert_eq!(options[0], "-outfmt", "{options:?}");
-    let (query_name, subject_name) = (query.display().to_string(), subjects.display().to_string());
-    let mut argv = vec![
-        "losat",
-        "tblastn",
-        "-query",
-        &query_name,
-        "-subject",
-        &subject_name,
-    ];
-    argv.extend_from_slice(&options[2..]);
-    let cli: Cli = try_parse_from(argv).expect("tblastn argv");
-    let args = match cli.command {
-        Commands::Tblastn(args) => args,
-        _ => unreachable!("tblastn subcommand"),
-    };
-    let queries =
-        run_local_support::reader_records(query, ReaderConfig::query("TBLASTN", true, true));
-    let records =
-        run_local_support::reader_records(subjects, ReaderConfig::subject("TBLASTN", false, true));
-    let mut run = run_local_support::run_formats(&[options[1]], false, |outputs| {
-        run_local_tblastn(args, &queries, &records, outputs)
-    });
+    let mut run = run_local_support::Files::new(Program::Tblastn, query, subjects)
+        .collect(&[options[1]], &options[2..]);
     (
-        run.outputs.remove(0),
+        run.reports.remove(0).bytes,
         String::from_utf8_lossy(&run.diagnostics).into_owned(),
     )
 }

@@ -104,6 +104,7 @@ impl Posts {
     }
 
     /// What standard error shows of the posts.
+    #[cfg(test)]
     pub fn text(&self) -> Vec<u8> {
         let mut text = Vec::new();
         for post in &self.0 {

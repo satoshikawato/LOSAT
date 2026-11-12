@@ -1,7 +1,15 @@
 name: Web
 
+# Push runs only on main and dev. A push to another branch ran the whole set before the branch
+# had a pull request, whose own run then tested the branch again: on 2026-11-11..12, 79 such runs
+# took 6,628 of the repository's 15,684 job-minutes (42 %), and 39 % of the running jobs in the
+# minutes when 35 or more ran, when jobs queued for a runner (the account's limit on concurrent
+# jobs, shared with the owner's other repositories). Draft pull requests run the whole set;
+# a branch without one runs it with `gh workflow run web.yml --ref <branch>` (the branch's own
+# copy of this file runs, so the branch must contain this trigger). Tags start no run.
 on:
   push:
+    branches: [main, dev]
     paths:
       - 'web/**'
       - 'LOSAT/src/**'
@@ -14,6 +22,7 @@ on:
       - 'docs/assets/losat-logo*.svg'
       - '.github/workflows/web.yml'
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,10 +30,11 @@ permissions:
 jobs:
   # One always-present gate for the required check: the `on.pull_request` trigger has no `paths:`
   # filter (a required check of a workflow that did not run would block the pull request forever),
-  # so this job decides whether the pull request touches relevant files. For a push to a branch
-  # other than main it also checks whether an open pull request covers the branch: that pull
-  # request's run checks the same commit, so the push run would build it a second time
-  # (2026-10-16: 86 of 135 push runs on pull-request branches in 72 hours, 2,447 runner-minutes).
+  # so this job decides whether the pull request touches relevant files. For a push to dev it
+  # also checks whether an open pull request covers the branch (the promotion pull request into
+  # main): that pull request's run checks the same commit, so the push run would build it a second
+  # time (2026-10-16, when every branch had push runs: 86 of 135 push runs on pull-request
+  # branches in 72 hours, 2,447 runner-minutes). A workflow_dispatch run runs every job.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -80,13 +90,31 @@ jobs:
             echo "relevant=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # The application built with the FakeEngine: its unit tests, lint and build (`npm run check`,
+  # in the Chromium job), and the E2E tests in one job per browser. Until 2026-11-12 one job ran
+  # the three browsers (13.1 min, p50 of 7 runs), which became the longest path once the
+  # reactors, native and browser-engine jobs were cut; `--project` selects the tests that the
+  # browser ran there. Each job installs Chromium as well, for the storage tests' Chromium
+  # profile (tests/e2e/support/profile.ts).
   app:
+    name: app (${{ matrix.project }})
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
-    # About three times the longest of 60 passing runs (13.6 min, 2026-11-11), as for the other
-    # jobs here: a job that hangs (2026-11-11, below) gives its runner back.
+    # About three times the longest of 60 passing runs of the single job (13.6 min,
+    # 2026-11-11), as for the other jobs here: a job that hangs (2026-11-11, below) gives its
+    # runner back.
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browsers: chromium
+          - project: firefox
+            browsers: chromium firefox
+          - project: webkit
+            browsers: chromium webkit
     defaults:
       run:
         working-directory: web/app
@@ -99,15 +127,16 @@ jobs:
           cache-dependency-path: web/app/package-lock.json
       - run: npm ci
       - run: npm run check
+        if: matrix.project == 'chromium'
       # Usually 40 to 100 s. On 2026-11-11 the runners could not resolve the Ubuntu archive and apt
       # waited on every package, holding the job for hours; this step stops it instead.
-      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npx playwright install --with-deps ${{ matrix.browsers }}
         timeout-minutes: 10
-      - run: npm run e2e
+      - run: npm run e2e -- --project=${{ matrix.project }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: playwright-results
+          name: playwright-results-${{ matrix.project }}
           path: web/app/test-results/
           retention-days: 7
 
@@ -199,8 +228,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
+      # This binary is only the expectation: V-ABI and V-BR compare the reactors' outputs with
+      # its outputs, and V-ABI compares those with NCBI's frozen hashes as well. It is built with
+      # Cargo's default release optimisation (no fat LTO, 16 codegen units): 2.7 min against 6.7
+      # with the release profile's fat LTO on 4 CPUs (2026-11-12, dev 2d9093089), which links the
+      # whole crate on one CPU. Link-time optimisation and codegen units change how the code is
+      # compiled, not what it computes. ci.yml's `fast output regressions` tests the release
+      # profile's binary itself (output hashes, frozen hashes, the floating-point contract).
       - name: Native LOSAT, the V-ABI and V-BR expectation
         working-directory: LOSAT
+        env:
+          CARGO_PROFILE_RELEASE_LTO: 'false'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
         run: cargo build --release --locked
       - name: Keep the native CLI for the V-ABI and browser jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -243,9 +282,11 @@ jobs:
   # contract on the serial reactor, responses of more than 1 MiB, and the inflation of
   # compressed sources and Example sets with the engine's decoders: bytes, sentences, limit).
   # One job per browser and shard (until 2026-11 one job ran the three, 31 min): `--project`
-  # selects the same tests that the browser ran there and `--shard` half of them for Firefox and
-  # WebKit (14.5 and 15.1 min a job for the whole browser, Chromium 10.4), with the same two
-  # workers. Each job installs Chromium as well, for the storage tests' Chromium profile
+  # selects the same tests that the browser ran there and `--shard` a part of them, with the same
+  # two workers. Playwright splits a project's tests by count, in order, not by duration: in two
+  # shards (2026-11-12, p50 of 7 runs) the tests took Chromium 8.4 min in one shard, Firefox
+  # 6.4 + 6.2, WebKit 4.0 + 7.6; now Chromium and Firefox run in two shards, WebKit in three.
+  # Each job installs Chromium as well, for the storage tests' Chromium profile
   # (tests/e2e/support/profile.ts).
   browser-engine:
     name: browser-engine (${{ matrix.project }} ${{ matrix.shard }})
@@ -258,7 +299,10 @@ jobs:
       matrix:
         include:
           - project: chromium
-            shard: 1/1
+            shard: 1/2
+            browsers: chromium
+          - project: chromium
+            shard: 2/2
             browsers: chromium
           - project: firefox
             shard: 1/2
@@ -267,10 +311,13 @@ jobs:
             shard: 2/2
             browsers: chromium firefox
           - project: webkit
-            shard: 1/2
+            shard: 1/3
             browsers: chromium webkit
           - project: webkit
-            shard: 2/2
+            shard: 2/3
+            browsers: chromium webkit
+          - project: webkit
+            shard: 3/3
             browsers: chromium webkit
     defaults:
       run:
@@ -297,7 +344,7 @@ jobs:
       - run: npx playwright install --with-deps ${{ matrix.browsers }}
         timeout-minutes: 10
       - name: RecordScanner contract and inflation on the serial reactor (Node)
-        if: matrix.project == 'chromium'
+        if: matrix.project == 'chromium' && matrix.shard == '1/2'
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
         run: npx vitest run tests/unit/engine-runtime.test.ts
@@ -315,13 +362,15 @@ jobs:
 
   # The check to require in the ruleset: it always runs and fails only if a job failed or was
   # cancelled (jobs skipped because no relevant file changed count as passed).
-  # Only the pull_request run carries that name. A push run of a branch that an open pull request
-  # covers skips every job (`changes`), so its gate passes within seconds, on the same commit, while
-  # the pull request's own gate has no check run until the jobs it needs end; the rulesets took the
-  # push run's for the pull request's. Auto-merge merged #843 at 03:16Z (2026-11-05) on the push
-  # run's pass of 02:49Z, though its `app` had failed at 02:59Z; its own gate failed at 03:37Z.
+  # Only the pull_request run carries that name; a push or workflow_dispatch run reports
+  # `web result (push)` or `web result (workflow_dispatch)`. A push run of a branch that an open
+  # pull request covers skips every job (`changes`), so its gate passes within seconds, on the same
+  # commit, while the pull request's own gate has no check run until the jobs it needs end; the
+  # rulesets took the push run's for the pull request's. Auto-merge merged #843 at 03:16Z
+  # (2026-11-05) on the push run's pass of 02:49Z, though its `app` had failed at 02:59Z; its own
+  # gate failed at 03:37Z.
   result:
-    name: ${{ github.event_name == 'pull_request' && 'web result' || 'web result (push)' }}
+    name: ${{ github.event_name == 'pull_request' && 'web result' || format('web result ({0})', github.event_name) }}
     if: always()
     needs: [changes, app, engine-web-api, adapter, reactors, native, v-abi, browser-engine]
     runs-on: ubuntu-latest

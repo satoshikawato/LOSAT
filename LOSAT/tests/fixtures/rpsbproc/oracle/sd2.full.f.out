@@ -1,0 +1,46 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/sd2.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	678	NP_417616.1 outer membrane lipoprotein - activator of MrcA activity [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	442341	1	678	0	656.652	COG3107	LpoA	-	-
+1	Query_1	Non-specific	516188	42	670	2.87173e-124	380.415	pfam04348	LppC	-	-
+1	Query_1	Specific	380562	258	667	7.97852e-75	244.102	cd06339	PBP1_YraM_LppC_lipoprotein-like	-	530412
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	258	667	7.97852e-75	244.102	cl10011	Periplasmic_Binding_Protein_type1	-	-
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_2	Peptide	153	NP_418053.1 tetratricopeptide-like domain-containing protein YibG [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_2	Non-specific	440553	53	135	3.37817e-07	48.0007	COG0790	TPR	NC	-
+1	Query_2	Non-specific	440553	53	138	3.91203e-07	48.0007	COG0790	TPR	N	-
+1	Query_2	Non-specific	440553	55	135	2.54208e-05	42.6079	COG0790	TPR	NC	-
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

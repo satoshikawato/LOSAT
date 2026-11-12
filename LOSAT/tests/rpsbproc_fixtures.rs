@@ -109,10 +109,10 @@ fn cases() -> Vec<[String; 5]> {
 /// the directory `<b>/` holding the data files with those of `data_with/<a>/` and then of
 /// `data_with/<b>/` in their place; `data-without:<file>`, `data_missing/` without that file;
 /// `conf:<file>`, `conf/<file>` as `c.ini` (for `-conffile c.ini`); `ini:<file>`, `conf/<file>`
-/// as `rpsbproc.ini`. The files that a run makes and the registry files of the case before are
-/// removed first.
+/// as `rpsbproc.ini`; `ncbirc:<file>`, `conf/<file>` as `.ncbirc`. The files that a run makes
+/// and the registry files of the case before are removed first.
 fn set_up(dir: &Path, setup: &str) {
-    for made in ["out.txt", "log.txt", "c.ini", "rpsbproc.ini"] {
+    for made in ["out.txt", "log.txt", "c.ini", "rpsbproc.ini", ".ncbirc"] {
         let _ = fs::remove_file(dir.join(made));
     }
     let _ = fs::remove_dir_all(dir.join("data_missing"));
@@ -123,7 +123,11 @@ fn set_up(dir: &Path, setup: &str) {
 
 /// One part of `set_up`.
 fn set_up_part(dir: &Path, setup: &str) {
-    for (kind, name) in [("conf:", "c.ini"), ("ini:", "rpsbproc.ini")] {
+    for (kind, name) in [
+        ("conf:", "c.ini"),
+        ("ini:", "rpsbproc.ini"),
+        ("ncbirc:", ".ncbirc"),
+    ] {
         if let Some(file) = setup.strip_prefix(kind) {
             fs::copy(fixtures().join("conf").join(file), dir.join(name)).unwrap();
         }
@@ -201,7 +205,7 @@ fn rpsbproc_gives_ncbis_bytes() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 167);
+    assert_eq!(compared, 182);
 }
 
 // The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and
@@ -236,7 +240,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 6);
+    assert_eq!(refused, 5);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
@@ -360,6 +364,20 @@ fn rpsbproc_refuses_reader_variables() {
         let (status, err) = run(name, value, input);
         assert_eq!(status, 0, "{name}={value}: {err}");
     }
+    // A dry run reads no archive (NCBI rpsbproc 0.5.1 passes with these variables: line RG E1c
+    // review 1, `r_dry_serial`).
+    let output = command(dir)
+        .env("SERIAL_VERIFY_DATA_READ", "no")
+        .args(["-i", "arch/one.asn", "-d", "data", "-dryrun"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{err}");
+    assert!(
+        err.ends_with("Dryrun passed, all resources are present and loaded successfully.\n"),
+        "{err}"
+    );
 }
 
 // `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 9: a failed write of the report stops LOSAT with

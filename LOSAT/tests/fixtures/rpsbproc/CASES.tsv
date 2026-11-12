@@ -171,4 +171,18 @@ e1c_conf_ini_bad	compare	-	conf:blast.ini,ini:garbage.ini	-i arch/one.asn -d dat
 e1c_ini_bad	compare	-	ini:garbage.ini	-i arch/one.asn -d data
 e1c_conf_dry	compare	-	conf:blast.ini	-i arch/one.asn -d data -conffile c.ini -dryrun
 e1c_conf_missing_log	compare	-	-	-i arch/one.asn -d data -conffile missing.ini -logfile log.txt
-refuse_dry_xml	refuse	-	-	-i arch/one.xml -d data -dryrun
+e1c_dry_xml	compare	-	-	-i arch/one.xml -d data -dryrun
+e1c_ini_sec	compare	-	ini:sec.ini	-i arch/one.asn -d data
+e1c_ini_quote	compare	-	ini:quote.ini	-i arch/one.asn -d data
+e1c_ini_cont	compare	-	ini:cont.ini	-i arch/one.asn -d data
+e1c_conf_bom2_log	compare	-	conf:bom2.ini	-i arch/one.asn -d data -conffile c.ini -logfile log.txt
+e1c_ncbirc_bom1	compare	-	ncbirc:bom1.ini	-i arch/one.asn -d data
+e1c_ncbirc_bom1_dry	compare	-	ncbirc:bom1.ini	-i arch/one.asn -d data -dryrun
+e1c_subj	compare	-	-	-i arch/bad/subj_sequences.asn -d data
+e1c_mat	compare	-	-	-i arch/bad/matrix_integer.asn -d data
+e1c_ev	compare	-	-	-i arch/bad/evalue_rawscore.asn -d data
+e1c_subj_same	compare	-	-	-i arch/bad/subj_sequences.asn -d data -o log.txt -logfile log.txt
+e1c_mat_same	compare	-	-	-i arch/bad/matrix_integer.asn -d data -o log.txt -logfile log.txt
+e1c_ev_same	compare	-	-	-i arch/bad/evalue_rawscore.asn -d data -o log.txt -logfile log.txt
+e1c_subj_out_log	compare	-	-	-i arch/bad/subj_sequences.asn -d data -o out.txt -logfile log.txt
+e1c_mat_longdb_same	compare	-	-	-i arch/bad/matrix_integer_longdb.asn -d data -o log.txt -logfile log.txt

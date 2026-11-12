@@ -578,8 +578,6 @@ fn run_main_entry() -> Result<()> {
     Ok(())
 }
 
-/// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
-/// refusals (`cli::ncbi_toolkit_word_error`), written as clap writes it, and its exit status.
 /// Ends `losat rpsbproc` as its `outcome` says: its own status (`Run`'s or `DryRun`'s
 /// `m_app_status`, or the application layer's for an exception; exit status 0 returns), or
 /// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
@@ -599,6 +597,8 @@ fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
     }
 }
 
+/// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
+/// refusals (`cli::ncbi_toolkit_word_error`), written as clap writes it, and its exit status.
 fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
     // rpsbproc's arguments are not the single-dash words of the BLAST programs.
     let message = if argv_is_rpsbproc {

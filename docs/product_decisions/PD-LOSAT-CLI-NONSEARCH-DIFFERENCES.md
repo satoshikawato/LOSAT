@@ -224,9 +224,10 @@ BLAST+.
   of an exception; its own `cerr` lines stay on the standard error), `-conffile` is loaded in
   place of `rpsbproc.ini`, and `-dryrun` runs rpsbproc's own `DryRun` after its `Init`
   (`rpsbproc_main.cpp:924-932`: the input, output and data files are opened and loaded, then
-  `Dryrun passed, ...` or `Dryrun failed, error subcode = N`, exit status N). LOSAT's refusals of
-  a run (the XML input, a registry or environment setting) stay with `-dryrun` (line RG
-  DECISIONS E1c-2).
+  `Dryrun passed, ...` or `Dryrun failed, error subcode = N`, exit status N). LOSAT's refusals in
+  that start (a file name, a registry or environment setting) stay with `-dryrun`; those of what
+  only the run reads (the XML input, the archive) do not apply, as NCBI's `DryRun` reads no
+  archive (line RG DECISIONS E1c-2).
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

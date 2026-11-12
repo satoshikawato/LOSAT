@@ -1,0 +1,4 @@
+Error: (CRegistryException::eEntry) Invalid registry entry format: 'e' (m_Pos = 4)
+Error: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'e' (m_Pos = 4)
+Error: (CRegistryException::eEntry) Invalid registry entry format: 'e' (m_Pos = 4)
+Error: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'e' (m_Pos = 4)

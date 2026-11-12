@@ -368,7 +368,7 @@ fn a_parsed_seqid_refusal_of_a_later_batch_follows_no_byte_of_the_library() {
 
 /// A held run that one of NCBI's own errors stops writes what NCBI wrote before it: the reports
 /// of the batches before (a last batch without letters fails NCBI's set-up), and with
-/// `BATCH_SIZE=0` the start of the document before `Empty CBlastQueryVector`. The database has
+/// `BATCH_SIZE=0` the prolog's bytes before `Empty CBlastQueryVector`. The database has
 /// parsed Seq-ids (`ids/prot_v5`), so every such run is held.
 #[test]
 fn a_held_library_run_that_ncbis_error_stops_writes_the_batches_before() {
@@ -406,12 +406,13 @@ fn a_held_library_run_that_ncbis_error_stops_writes_the_batches_before() {
         let cli = search(&dir, false, db, &query, outfmt, &zero, &[]);
         assert_eq!(cli.status, Some(3), "{what}: {}", cli.stderr);
         same_as_command_line(&what, &library, &cli);
-        if matches!(outfmt, "5" | "15" | "16") {
-            assert!(
-                !library.stdout.is_empty(),
-                "{what}: the start of the document"
-            );
-        }
+        // NCBI writes the start of an XML2 or JSON document in its prolog, and that of BLAST XML
+        // with the first query's report, which this run never reaches.
+        assert_eq!(
+            !library.stdout.is_empty(),
+            matches!(outfmt, "15" | "16"),
+            "{what}: the start of the document"
+        );
     }
 }
 

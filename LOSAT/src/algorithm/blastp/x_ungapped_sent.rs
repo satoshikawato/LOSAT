@@ -143,8 +143,9 @@ const MAX_DROPOFF: i32 = 127;
 const MAX_BLOCK_LEN: usize = (i32::MAX / 16) as usize;
 const _: () = assert!(11 * (MAX_BLOCK_LEN as i64 + 3) < i32::MAX as i64);
 /// Longest query block on the path for a matrix other than BLOSUM62, whose largest score is at
-/// most 31 (`MatrixTable::sent_table`): no score of a walk wraps.
-const MAX_BLOCK_LEN_OF: usize = (i32::MAX / 32) as usize;
+/// most 31 (`MatrixTable::sent_table`): no score of a walk wraps. BLASTX's query batches of
+/// another matrix take the same bound (`blastx/x_ungap_sent.rs`, item SC6b).
+pub(crate) const MAX_BLOCK_LEN_OF: usize = (i32::MAX / 32) as usize;
 const _: () = assert!(31 * (MAX_BLOCK_LEN_OF as i64 + 3) < i32::MAX as i64);
 
 struct State {
@@ -243,9 +244,10 @@ impl XSentQuery {
 }
 
 /// The keys of another matrix's table for the walks (`MatrixTable::sent_table`), built at the first
-/// call for the matrix; `None` where that table is not on the path.
+/// call for the matrix; `None` where that table is not on the path. BLASTX's walks take them too
+/// (`blastx/x_ungap_sent.rs` `XSent::new_of`, item SC6b).
 // No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-fn keys_of(matrix: crate::config::ScoringMatrix) -> Option<&'static KeyTable> {
+pub(crate) fn keys_of(matrix: crate::config::ScoringMatrix) -> Option<&'static KeyTable> {
     static KEYS: [OnceLock<Option<Box<KeyTable>>>; crate::config::ScoringMatrix::ALL.len()] =
         [const { OnceLock::new() }; crate::config::ScoringMatrix::ALL.len()];
     KEYS[matrix as usize]

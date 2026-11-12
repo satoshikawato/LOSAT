@@ -703,21 +703,25 @@ pub(super) mod tests {
     /// cells), and one letter repeated so that its cell gets exactly 255 (T) or 256 (G) words of a
     /// table of `lut` letters.
     pub(crate) fn x_with_repeats(case: &mut Case, lut: usize) {
-        let mut at = match (case.offsets.last(), case.queries.last()) {
-            (Some(&o), Some(q)) => o + q.len() as i32 + 1,
-            _ => 0,
-        };
         for seq in [
             vec![0u8; 1200],
             (0..800).map(|i| (i % 2) as u8).collect(),
             vec![3u8; 255 + lut - 1],
             vec![2u8; 256 + lut - 1],
         ] {
-            case.offsets.push(at);
-            at += seq.len() as i32 + 1;
-            case.queries.push(seq);
-            case.masks.push(Vec::new());
+            x_push_query(case, seq);
         }
+    }
+
+    /// `case` with `seq` as one more query, unmasked, after the last query and its separator.
+    pub(crate) fn x_push_query(case: &mut Case, seq: Vec<u8>) {
+        let at = match (case.offsets.last(), case.queries.last()) {
+            (Some(&o), Some(q)) => o + q.len() as i32 + 1,
+            _ => 0,
+        };
+        case.offsets.push(at);
+        case.queries.push(seq);
+        case.masks.push(Vec::new());
     }
 
     /// `n` random queries of about `len` letters: few distinct letters in half of them (so cells

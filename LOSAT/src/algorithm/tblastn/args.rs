@@ -653,6 +653,7 @@ impl TblastnArgs {
             hitlist_size: counts.hitlist_size,
             evalue,
             psiblast: false,
+            x_dropoff: None,
         })?;
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),

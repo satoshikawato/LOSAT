@@ -10820,8 +10820,10 @@ fn run_resolved_in_pool(
     // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
     // A database of several volumes: its merged lists are not sorted or cut below, and it prints
-    // no query warnings.
-    let mut rps_multi_volume = false;
+    // no query warnings; so even when no batch is searched (every query invalid), as NCBI merges
+    // the volumes' empty results (review A of PS12a, S2's rpsblast half).
+    let mut rps_multi_volume = args.rps_search.is_some()
+        && database.is_some_and(|database| rps_hooks::volume_count(database) > 1);
     if let Some(rps) = args.rps_search.as_deref() {
         let run = rps_hooks::RpsSearchRun {
             contexts: &contexts,
@@ -11121,6 +11123,21 @@ fn run_resolved_in_pool(
             }
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
+    // ```c++
+    // 		CRef<CSeq_align_set>  align_set(new CSeq_align_set);
+    //         ...
+    // 		CRef<CSearchResults> aggregate_search_results (new CSearchResults(thread_results[0]->GetSeqId(),
+    // 														   	   	   	   	  align_set,
+    // ```
+    // The merge of several volumes gives each query an alignment set, empty for a batch
+    // that was not searched, so outfmt 7 counts `# 0 hits found` there (review A of
+    // PS12a, S2's rpsblast half).
+    let tabular_unsearched: Vec<bool> = if rps_multi_volume {
+        vec![false; query_batch_skipped.len()]
+    } else {
+        query_batch_skipped.clone()
+    };
 
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
@@ -14099,21 +14116,6 @@ fn run_resolved_in_pool(
                     args.app.ncbi_name().to_uppercase(),
                     crate::NCBI_BLAST_VERSION
                 );
-                // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
-                // ```c++
-                // 		CRef<CSeq_align_set>  align_set(new CSeq_align_set);
-                //         ...
-                // 		CRef<CSearchResults> aggregate_search_results (new CSearchResults(thread_results[0]->GetSeqId(),
-                // 														   	   	   	   	  align_set,
-                // ```
-                // The merge of several volumes gives each query an alignment set, empty for a batch
-                // that was not searched, so outfmt 7 counts `# 0 hits found` there (review A of
-                // PS12a, S2's rpsblast half).
-                let tabular_unsearched: Vec<bool> = if rps_multi_volume {
-                    vec![false; query_batch_skipped.len()]
-                } else {
-                    query_batch_skipped.clone()
-                };
                 let tab = super::tabular::BlastpTabular {
                     spec,
                     app: args.app,
@@ -14193,7 +14195,7 @@ fn run_resolved_in_pool(
                     &query_titles,
                     &subject_ids,
                     &subject_accessions,
-                    &query_batch_skipped,
+                    &tabular_unsearched,
                     psiblast_hits_found.as_deref(),
                     &context,
                     probe.as_mut(),

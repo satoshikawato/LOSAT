@@ -12,8 +12,7 @@
 //! `fConvErr_NoThrow` takes NCBI's 0 for an error itself), the bases other than 10, and the flags
 //! no caller passes (`fMandatorySign`, `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
 //! Also here: `NStr::StringToNonNegativeInt`. Copies of some of these functions remain elsewhere
-//! (`blastinput::query_batch`, `blastinput::value_parsers`, `seqdb::isam`, `blastdbcmd::args`,
-//! `report::archive::bioseq`, `writedb`), not yet folded here.
+//! (`blastinput::value_parsers`, `writedb`, `report::outfmt6`), not yet folded here.
 
 mod data_size;
 mod double;

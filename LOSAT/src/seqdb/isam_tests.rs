@@ -912,6 +912,17 @@ fn user_ids_that_are_numbers() {
         ti_error(b"gnl|ti|12x"),
         "Cannot convert string '12x' to Int8"
     );
+    // The digits end at a NUL (`while (char ch = str[pos])`, ncbistr.cpp:841) and the end check
+    // reads the NUL: the tag `5\0x` is the trace id 5.
+    let simplified = seqdb_simplify_accession(b"gnl|ti|5\0x").unwrap();
+    assert_eq!(
+        (simplified.id_type, simplified.num_id),
+        (SeqDbIdType::Ti, 5)
+    );
+    assert_eq!(
+        ti_error(b"gnl|ti|99999999999999999999\0"),
+        "Cannot convert string '99999999999999999999\\0' to Int8, overflow"
+    );
     assert_eq!(
         seqdb_simplify_accession(b"gnl|ti|-9223372036854775808")
             .unwrap()
@@ -989,6 +1000,9 @@ fn simplified_keys_of_the_id_forms() {
     assert_eq!(simplify("lcl|MyProt"), "myprot");
     assert_eq!(simplify("lcl|123"), "lcl|123");
     assert_eq!(simplify("123"), "lcl|123");
+    // `StringToNumeric<Int8>` reads up to a NUL (ncbistr.cpp:841), so the bare number before
+    // it makes the key local (seqdbcommon.cpp:2592).
+    assert_eq!(simplify("12\u{0}x"), "lcl|12\u{0}x");
     assert_eq!(simplify("myprot_13"), "myprot_13");
     // pdb
     assert_eq!(simplify("1ABC_A"), "pdb|1abc|a");

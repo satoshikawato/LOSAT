@@ -204,6 +204,25 @@ pub struct Batches<'a> {
 /// per run about a taxonomy database comes with every batch that reads one.
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
     check_inputs(search, inputs)?;
+    // Under `-parse_deflines` with `-subject`, NCBI's scope keeps every batch's queries
+    // (`query_batch::QueryScopes`): two queries of the run with one id are refused before the
+    // first batch, as the command line refuses them; each batch's call holds its own records alone.
+    if search.parse_deflines() && !inputs.database {
+        let program = match search.program() {
+            crate::api::Program::Blastn => "BLASTN",
+            crate::api::Program::Blastp => "BLASTP",
+            crate::api::Program::Blastx => "BLASTX",
+            crate::api::Program::Tblastn => "TBLASTN",
+            crate::api::Program::Tblastx => "TBLASTX",
+            crate::api::Program::Psiblast => "PSIBLAST",
+        };
+        crate::blastinput::query_batch::QueryScopes::of_records(
+            crate::blastinput::query_batch::QueryScopeSpan::Run,
+            program,
+            inputs.query,
+        )
+        .map_err(|error| Error::search(&error))?;
+    }
     let command = search.command(inputs)?;
     let sizes = batch_sizes(&command, inputs).map_err(|error| Error::search(&error))?;
     let query_range = query_range_of(&command);

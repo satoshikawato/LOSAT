@@ -2034,8 +2034,8 @@ pub enum Preparsed<S> {
     Version,
     /// The words left for the argument reader, the registry file of the last `-conffile FILE`
     /// or `-conffile=FILE` (`conf_arg`, which NCBI loads in place of `<program>.ini`), and
-    /// whether there was `-dryrun` (NCBI reads the arguments, then runs nothing; LOSAT refuses
-    /// it).
+    /// whether there was `-dryrun` (NCBI reads the arguments, then runs nothing: the command
+    /// line's entry, `cli::main_entry`; rpsbproc, the library API and the Web engine refuse it).
     Words {
         words: Vec<S>,
         conffile: Option<OsString>,
@@ -2106,8 +2106,9 @@ pub enum Preparsed<S> {
 // ```
 /// The words NCBI's application takes before its argument reader: `-version` anywhere before
 /// `--` (but not as the value of `-logfile` or `-conffile`), the full versions, `-dryrun` and
-/// `-conffile`. A `-logfile` or `-conffile` without a value is dropped. LOSAT refuses `-dryrun`
-/// (NCBI then runs nothing) and the full versions (NCBI's build details); the file of the last
+/// `-conffile`. A `-logfile` or `-conffile` without a value is dropped. `-dryrun` ends the run
+/// after the arguments (`cli::main_entry`), LOSAT refuses the full versions (NCBI's build
+/// details); the file of the last
 /// `-conffile` is the application start's configuration (`start_application`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
 /// the command line's entry (`-version`, the full versions before the configuration load, and

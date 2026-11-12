@@ -806,28 +806,30 @@ fn a_new_database_that_cannot_be_opened_is_an_error() {
     );
 }
 
-/// A file of a volume that cannot be created ends the build (LOSAT's own
-/// error: makeblastdb does not test its output files), and the files of that
-/// volume that were created before it are removed.
+/// A file of a volume that cannot be created (a directory of its numbered name) is written to
+/// nowhere, as makeblastdb writes it (it does not test its output files): the build goes on, the
+/// directory is renamed to the file's final name, and the metadata lists the files there are
+/// (makeblastdb 2.17.0, `-blastdb_version 4 -title t`, prot.faa: exit status 0, `db.phr/`,
+/// `db.pin`, `db.pjs`, `db.psq`).
 #[test]
-fn a_volume_that_cannot_be_created_leaves_no_file() {
+fn a_volume_file_that_cannot_be_created_is_left_out() {
     let fasta = prot_fasta();
     let tmp = TempDir::new("planted");
     let base = tmp.base("db");
     std::fs::create_dir(tmp.0.join("db.00.phr")).unwrap();
     let (status, log, messages) = makedb(&fasta, &base, "3GB", b"");
-    assert_eq!(status, 255);
-    assert!(
-        messages.starts_with("Error: ") && messages.contains("db.00.phr: "),
-        "{messages:?}"
+    assert_eq!((status, messages.as_str()), (0, ""));
+    assert!(log.ends_with(" seconds.\n\n\n"), "{log:?}");
+    assert_eq!(
+        files_named(&tmp.0, "db."),
+        ["db.phr", "db.pin", "db.pjs", "db.psq"]
     );
-    assert_eq!(messages.lines().count(), 1, "{messages:?}");
+    assert!(tmp.0.join("db.phr").is_dir());
+    let metadata = std::fs::read_to_string(tmp.0.join("db.pjs")).unwrap();
     assert!(
-        log.ends_with("\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n"),
-        "{log:?}"
+        metadata.ends_with("  \"files\": [\n    \"db.pin\",\n    \"db.psq\"\n  ]\n}\n"),
+        "{metadata}"
     );
-    assert_eq!(files_named(&tmp.0, "db."), ["db.00.phr"]);
-    assert!(tmp.0.join("db.00.phr").is_dir());
 }
 
 /// `-in -` reads the standard input: the same database as from the file.

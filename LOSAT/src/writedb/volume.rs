@@ -164,12 +164,9 @@ impl Volume {
         indices: Indices,
         scratch: IndexScratch,
     ) -> Result<Self, WriteDbError> {
-        // NCBI does not test whether the three files opened
-        // (`WriteDbFile::create`). LOSAT stops at the first that cannot be
-        // created, and this volume is then not one of the build's volumes,
-        // whose files the failed build removes; so the files created here
-        // before the failure are removed here.
-        let mut idx = IndexFile::create(
+        // NCBI does not test whether the three files opened: a file that cannot be opened is
+        // written to nowhere (`super::ofstream`) and the build goes on.
+        let idx = IndexFile::create(
             dbname,
             protein,
             title,
@@ -179,22 +176,9 @@ impl Volume {
             version,
             sizeof_long,
             arrays,
-        )?;
-        let mut hdr = match HeaderFile::create(dbname, protein, index, max_file_size) {
-            Ok(hdr) => hdr,
-            Err(error) => {
-                idx.file_mut().discard();
-                return Err(error);
-            }
-        };
-        let seq = match SequenceFile::create(dbname, protein, index, max_file_size) {
-            Ok(seq) => seq,
-            Err(error) => {
-                idx.file_mut().discard();
-                hdr.file_mut().discard();
-                return Err(error);
-            }
-        };
+        );
+        let hdr = HeaderFile::create(dbname, protein, index, max_file_size);
+        let seq = SequenceFile::create(dbname, protein, index, max_file_size)?;
         let indices = indices.any().then(|| {
             let IndexScratch {
                 mut id_set,
@@ -493,8 +477,8 @@ impl Volume {
         if self.open {
             self.open = false;
             self.idx.close()?;
-            self.hdr.close()?;
-            self.seq.close()?;
+            self.hdr.close();
+            self.seq.close();
             if let Some(indices) = &mut self.indices {
                 indices.gi.close()?;
                 if let Some(acc) = &mut indices.acc {
@@ -693,25 +677,6 @@ impl Volume {
                 hash.list_files(files);
             }
             files.push(indices.gi_index.filename().to_string());
-        }
-    }
-
-    /// Drops the open files without writing what is still buffered, so that
-    /// a failed build can remove them on every platform.
-    pub(crate) fn abandon(&mut self) {
-        self.open = false;
-        self.idx.file_mut().abandon();
-        self.hdr.file_mut().abandon();
-        self.seq.file_mut().abandon();
-        if let Some(indices) = &mut self.indices {
-            indices.gi.abandon();
-            if let Some(acc) = &mut indices.acc {
-                acc.abandon();
-            }
-            indices.gi_index.file_mut().abandon();
-            if let Some(hash) = &mut indices.hash {
-                hash.abandon();
-            }
         }
     }
 }

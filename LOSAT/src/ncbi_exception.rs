@@ -230,7 +230,7 @@ impl NcbiException {
     // }
     // ```
     /// `s_GetExceptionText`: the message and the extra text of the class.
-    fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         match &self.extra {
             Some(extra) => format!("{} ({extra})", self.message),
             None => self.message.clone(),

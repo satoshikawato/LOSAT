@@ -1573,11 +1573,6 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-xmlhelp"]),
         ("tblastn", &["-version-full"]),
         ("tblastx", &["-help-full"]),
-        // NCBI ncbiargs.cpp:88: -dryrun, which NCBI accepts without searching.
-        ("blastp", &["-dryrun"]),
-        ("tblastn", &["-dryrun"]),
-        ("tblastx", &["-dryrun"]),
-        ("blastn", &["-dryrun"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
@@ -1910,8 +1905,8 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
 fn toolkit_words_in_an_option_value_are_rejected_as_options() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
-    // in an option's value (`-out -version` prints the version). LOSAT rejects them (D9)
-    // in that place too, instead of writing a file named "-version". The parser refuses
+    // in an option's value (`-out -version` prints the version). LOSAT rejects the full
+    // versions (D9) in that place too, instead of writing a file named "-version". The parser refuses
     // `-version` (the Web engine's); the command line prints it before parsing
     // (`ncbi_version_request_reads_the_word_before_the_arguments`).
     for (program, upper) in [
@@ -1920,11 +1915,7 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
         ("tblastn", "TBLASTN"),
         ("tblastx", "TBLASTX"),
     ] {
-        for words in [
-            &["-out", "-version"][..],
-            &["-out", "-dryrun"],
-            &["-evalue", "-version-full"],
-        ] {
+        for words in [&["-out", "-version"][..], &["-evalue", "-version-full"]] {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
                 error.contains(&format!("is not supported by LOSAT's {upper}")),
@@ -1957,6 +1948,11 @@ fn toolkit_file_options_need_the_command_lines_application_start() {
             &["-conffile=x.ini"],
             &["-out", "-conffile=x.ini"],
             &["-logfile", "-dryrun"],
+            // `-dryrun` (line RG item E1b): the command line's entry ends the run after the
+            // arguments; in an option's value too, as NCBI reads it there.
+            &["-dryrun"],
+            &["-evalue", "1", "-dryrun"],
+            &["-out", "-dryrun"],
         ] {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(

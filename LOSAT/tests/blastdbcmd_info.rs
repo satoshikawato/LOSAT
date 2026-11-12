@@ -316,10 +316,10 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
     );
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the toolkit words LOSAT refuses.
+/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the toolkit words LOSAT refuses
+/// (`-dryrun`, probe B22, runs since line RG item E1b: `tests/ncbi_toolkit_dryrun.rs`).
 const REFUSALS: &[(&str, &[&str])] = &[
     ("B20", &["-db", "db/p5", "-info", "-version-full"]),
-    ("B22", &["-db", "db/p5", "-info", "-dryrun"]),
     ("C06", &["-db", "db/p5", "-info", "-xmlhelp"]),
 ];
 

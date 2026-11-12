@@ -116,15 +116,6 @@ impl BlastpDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors, which name `program`.
     #[cfg(test)]
@@ -1119,6 +1110,38 @@ pub(super) enum ListedShown {
 }
 
 impl ListedTitles<'_> {
+    /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each subject with
+    /// parsed Seq-ids of the final hit lists `hit_lists`, with the scope of the query whose list
+    /// reaches it (`scopes`): the reports of each query batch ask for the batch's own, also of a
+    /// subject that a list of another batch reached first.
+    pub(super) fn refuse_ids_of_queries(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            for hsp_list in &hit_list.hsplist_array[..count] {
+                let rank = hsp_list.oid as usize;
+                if let Some(subject) = &self.parsed[rank] {
+                    shared::refuse_id_of_a_query(
+                        subject,
+                        self.listed.ordinals[rank],
+                        scopes.of_query(query),
+                        self.program,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
     /// list).
     fn title(&self, rank: usize) -> &[u8] {

@@ -1,7 +1,8 @@
 //! The Seq-ids of the queries and subjects of one search under `-parse_deflines`, which NCBI keeps
 //! in one scope: it finds a sequence again by its id, so a query and a subject with one id show as
-//! one sequence, and a database sequence with the id of a query shows as that query
-//! (`dropin-survey-20261029/DI7/DECISIONS.md` 8, 12).
+//! one sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8, 12). A database sequence with the id
+//! of a query, which shows as that query, is the query batches' (`query_batch::QueryScopes`):
+//! against a database NCBI empties the scope after each batch.
 //!
 //! A record given as both query and subject (its defline and letters: `RecordMark`) is one
 //! sequence to the scope too, and the reports are those of two records, except where outfmt 0
@@ -149,17 +150,6 @@ impl IdScope {
             own.extend(names.map(|(kind, _)| (kind, mark)));
         }
         Ok(shared)
-    }
-
-    /// Whether a query read so far has an id with one of the keys `keys`. NCBI would show a database
-    /// sequence with such an id as the query (`report::db_subject::ParsedSubject`). A query of
-    /// another batch counts too, though NCBI's scope holds one batch: a refusal, not another report.
-    pub fn query_has_key(&self, keys: &[u64]) -> bool {
-        let records = self
-            .records
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        keys.iter().any(|key| records[0].contains_key(key))
     }
 }
 

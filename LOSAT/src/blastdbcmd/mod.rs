@@ -199,6 +199,10 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         } if start.is_none() => {
             return diag.refuse(&crate::cli::toolkit_file_word_refusal(PROGRAM, "-conffile"))
         }
+        // So is `-dryrun`, which the command line's entry ends after the arguments.
+        Preparsed::Words { dryrun: true, .. } if start.is_none() => {
+            return diag.refuse(&crate::cli::toolkit_file_word_refusal(PROGRAM, "-dryrun"))
+        }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit` loads the
@@ -253,14 +257,18 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         }
         Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
     };
-    if dryrun {
-        return diag.refuse(&unsupported_option("-dryrun"));
-    }
     let settings =
         match crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastdbcmd") {
             Ok(settings) => settings,
             Err(reason) => return diag.refuse(&reason),
         };
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
+    // `cli::main_entry`: blastdbcmd keeps the default `DryRun`, which returns 0 after the
+    // arguments have passed their definitions; LOSAT refuses the settings it refuses in a run
+    // first, as the diagnostics' settings let its `Info` post through).
+    if dryrun {
+        return 0;
+    }
     let registry = match &settings.blastdb {
         Ok(value) => value.as_deref(),
         Err(reason) => return diag.refuse(&refusal(reason)),

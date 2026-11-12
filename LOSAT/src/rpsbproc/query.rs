@@ -183,6 +183,9 @@ pub(crate) struct DomQuery {
     pub(crate) title: Vec<u8>,
     /// `m_uiSeqLen`.
     pub(crate) length: u32,
+    /// `m_strSeqData`: the residues as one-letter codes (`Get1LetterSeqData`); empty when the
+    /// query has no `seq-data`.
+    pub(crate) residues: Vec<u8>,
     pub(crate) aligns: Vec<DomAlign>,
     pub(crate) index: AlignIndex,
 }
@@ -395,7 +398,7 @@ fn query_accession(query: &Query) -> Vec<u8> {
 // and a `CFastaReader` DefLine that is not a string is refused (`Query::unread_descriptor`).
 // `GetTaxId` (biodata_core.cpp:977) reads the `org` and `source` descriptors but never throws,
 // and the taxid is not printed, so those descriptors are only read past.
-fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32), ProcessError> {
+fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), ProcessError> {
     // `SeqDataTo1LtrSeq` (biodata_core.cpp:149-197) converts the protein encodings with
     // `CSeqportUtil::Convert`; LOSAT reads the one-letter ones and NCBIstdaa's 28 codes and
     // refuses the others (before the length, as the conversion comes first).
@@ -433,7 +436,69 @@ fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32), ProcessError>
         }
         None => Vec::new(),
     };
-    Ok((query_accession(query), title, length))
+    Ok((
+        query_accession(query),
+        title,
+        length,
+        one_letter_residues(query, length),
+    ))
+}
+
+/// `SeqDataTo1LtrSeq` and the cut of `Get1LetterSeqData` for the protein encodings `fill_sequence`
+/// accepts.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:149-197,248-253
+// ```c++
+// 	case CSeq_data::e_Ncbieaa:
+// 		dst = rSeqData.GetNcbieaa().Get();
+// 		iDataType = 0;
+// 		break;
+// 	case CSeq_data::e_Ncbi8aa:
+// 	case CSeq_data::e_Ncbipaa:
+// 	case CSeq_data::e_Iupacaa:
+// 	case CSeq_data::e_Ncbistdaa:	//all other aa format
+// 		{
+// 			CSeq_data objEaaData;
+// 			CSeqportUtil::Convert(rSeqData, &objEaaData, CSeq_data::e_Ncbieaa);
+// 			dst = objEaaData.GetNcbieaa().Get();
+// 		}
+// 	...
+// 	SeqLen_t ori_len = rSeqInst.GetLength(), end_len = dst.size();
+// 	if (ori_len < end_len)
+// 	{
+// 		dst.erase(ori_len);
+// 	}
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:886-893,950-958
+// ```c++
+// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacaaToEaa(...)
+// {
+//     return Subseq(src, CSeqUtil::e_Iupacaa, pos, length, dst);
+// }
+// ...
+//     return convert_1_to_1(src, pos, length, dst, CStdaaToEaa::GetTable());
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1826
+// ```c++
+// const Uint1 CStdaaToEaa::scm_Table[256] = {
+//     0x2d, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+//     0x48, 0x49, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
+//     0x52, 0x53, 0x54, 0x56, 0x57, 0x58, 0x59, 0x5a,
+//     0x55, 0x2a, 0x4f, 0x4a, 0xff, 0xff, 0xff, 0xff,
+// ```
+// (iupacaa to ncbieaa copies the letters; ncbistdaa codes 0 to 27 are the characters
+// `-ABCDEFGHIKLMNPQRSTVWXYZU*OJ`; the other codes, 0xff, are refused by `fill_sequence`.)
+fn one_letter_residues(query: &Query, length: u32) -> Vec<u8> {
+    const STDAA_TO_EAA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+    let mut residues = match &query.seq_data {
+        None => Vec::new(),
+        Some(("ncbistdaa", codes)) => codes
+            .iter()
+            .map(|&code| STDAA_TO_EAA[code as usize])
+            .collect(),
+        Some((_, letters)) => letters.clone(),
+    };
+    residues.truncate(length as usize);
+    residues
 }
 
 /// `x_GetPssmId`: the PSSM-ID of a subject id (`ProcessCDAlign` keeps the hits whose PSSM-ID
@@ -615,11 +680,12 @@ pub(crate) fn process_blast_results(
         let SeqEntry::Seq(query) = entry else {
             return Err(choice_selection("NCBI-Seqset", "Seq-entry", "seq", "set"));
         };
-        let (accession, title, length) = fill_sequence(query)?;
+        let (accession, title, length, residues) = fill_sequence(query)?;
         let mut dom_query = DomQuery {
             accession,
             title,
             length,
+            residues,
             aligns: Vec::new(),
             index: AlignIndex::default(),
         };

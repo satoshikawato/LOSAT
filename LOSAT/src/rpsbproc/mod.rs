@@ -1,10 +1,10 @@
 //! `losat rpsbproc`: NCBI's post-RPSBLAST processing utility rpsbproc 0.5.1 (the package of
 //! 2025-05-13 on `ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/rpsbproc/`), which reads the ASN.1 text
 //! archives of `rpsblast -outfmt 11` and the CDD annotation data and writes the conserved domain
-//! hits of each query. LOSAT gives the domain hits of protein queries (`-t doms`, with `-m rep`,
-//! `std` or `full` and `-f`); the sites and motifs (`-t feats`, `-t both`, the default; item
-//! PS16b), nucleotide queries (rpstblastn's archives; item PS16c) and the deprecated XML input
-//! (item PS16d) are refused explicitly.
+//! hits of each query. LOSAT gives the domain hits (`-t doms`, with `-m rep`, `std` or `full`
+//! and `-f`) and the sites and motifs (`-t feats`, `-t both`, the default) of protein queries;
+//! nucleotide queries (rpstblastn's archives; item PS16c) and the deprecated XML input (item
+//! PS16d) are refused explicitly.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1853-1871
 //! ```c++
@@ -27,8 +27,10 @@ mod archive;
 mod args;
 mod data;
 mod domains;
+mod prosite;
 mod query;
 mod segset;
+mod sites;
 
 pub(crate) use args::alias_word;
 pub use args::RpsbprocArgs;
@@ -41,8 +43,13 @@ use crate::ncbi_exception::{err_post_x, NcbiException};
 use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
 use args::TargetData;
 use data::{CddData, DataError, DataFiles};
-use domains::{domain_records, DataMode, Record};
+use domains::{
+    domain_records, feature_records, map_seg_set, translated_pos_map, DataMode, FeatureRecord,
+    Record,
+};
 use query::{check_masks, choice_selection, process_blast_results, DomQuery, ProcessError};
+use segset::SegSet;
+use sites::{MotifError, MotifState};
 
 /// rpsbproc's version (`VERDEF`).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:74-87
@@ -495,36 +502,72 @@ fn banner() {
 // 		m_init_msg << "#=====================================================================" << endl;
 // 	}
 // ```
-// (The sites part, `TTargetData::e_doms != m_tdata`, belongs to `-t feats` and `both`, item
-// PS16b.)
-fn header_tail(evalue: f64, mode: DataMode, show_families: bool) -> String {
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:699-711
+// ```c++
+// 		if (TTargetData::e_doms != m_tdata)
+// 		{
+// 			m_init_msg << '#' << FEATSTART << endl;
+// 			m_init_msg << '#' << "<session-ordinal>" << DELIMIT << "<query-id[readingframe]>" << DELIMIT << "<annot-type>" << DELIMIT << "<title>" << DELIMIT << "<residue(coordinates)>" << DELIMIT << "<complete-size>" << DELIMIT << "<mapped-size>" << DELIMIT << "<source-domain>" << endl;
+// 			m_init_msg << "#more such lines......" << endl;
+// 			m_init_msg << '#' << FEATEND << endl;
+// 			m_init_msg << '#' << MOTIFSTART << endl;
+// 			m_init_msg << '#' << "<session-ordinal>" << DELIMIT << "<query-id[readingframe]>" << DELIMIT << "<title>" << DELIMIT << "<from>" << DELIMIT << "<to>" << DELIMIT << "<source-domain>" << endl;
+// 			m_init_msg << "#more such lines......" << endl;
+// 			m_init_msg << '#' << MOTIFEND << endl;
+// 		}
+// ```
+fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetData) -> String {
     let mode = match mode {
         DataMode::Rep => "Concise",
         DataMode::Std => "Standard",
         DataMode::Full => "Full",
     };
-    format!(
+    let (requested, domains, sites) = match target {
+        TargetData::Doms => ("Domain hits", true, false),
+        TargetData::Feats => ("Site annotations", false, true),
+        TargetData::Both => ("Domain hits and site annotations", true, true),
+    };
+    let mut text = format!(
         "#E-Value cutoff:\t{}\n\
          #Redundancy:\t{mode}\n\
-         #Data requested:\tDomain hits\n\
+         #Data requested:\t{requested}\n\
          #Output format -- tab-delimited table\n\
          #Show superfamilies: {}\n\
          #DATA\n\
          #SESSION\t<session-ordinal>\t<program>\t<database>\t<score-matrix>\t<evalue-threshold>\n\
-         #QUERY\t<query-id>\t<seq-type>\t<seq-length>\t<definition-line>\n\
-         #DOMAINS\n\
-         #<session-ordinal>\t<query-id[readingframe]>\t<hit-type>\t<PSSM-ID>\t<from>\t<to>\t<E-Value>\t<bitscore>\t<accession>\t<short-name>\t<incomplete>\t<superfamily PSSM-ID>\n\
-         #more such lines......\n\
-         #ENDDOMAINS\n\
-         #ENDQUERY\t<query-id>\n\
+         #QUERY\t<query-id>\t<seq-type>\t<seq-length>\t<definition-line>\n",
+        format_g(evalue),
+        if show_families { "YES" } else { "NO" }
+    );
+    if domains {
+        text.push_str(
+            "#DOMAINS\n\
+             #<session-ordinal>\t<query-id[readingframe]>\t<hit-type>\t<PSSM-ID>\t<from>\t<to>\t<E-Value>\t<bitscore>\t<accession>\t<short-name>\t<incomplete>\t<superfamily PSSM-ID>\n\
+             #more such lines......\n\
+             #ENDDOMAINS\n",
+        );
+    }
+    if sites {
+        text.push_str(
+            "#SITES\n\
+             #<session-ordinal>\t<query-id[readingframe]>\t<annot-type>\t<title>\t<residue(coordinates)>\t<complete-size>\t<mapped-size>\t<source-domain>\n\
+             #more such lines......\n\
+             #ENDSITES\n\
+             #MOTIFS\n\
+             #<session-ordinal>\t<query-id[readingframe]>\t<title>\t<from>\t<to>\t<source-domain>\n\
+             #more such lines......\n\
+             #ENDMOTIFS\n",
+        );
+    }
+    text.push_str(
+        "#ENDQUERY\t<query-id>\n\
          #more query sections..\n\
          #ENDSESSION\t<session-ordinal>\n\
          #more session sections..\n\
          #ENDDATA\n\
          #=====================================================================\n",
-        format_g(evalue),
-        if show_families { "YES" } else { "NO" }
-    )
+    );
+    text
 }
 
 /// The first variable of `variables` that changes how NCBI's object stream reads an archive or
@@ -612,13 +655,6 @@ fn reader_variable(variables: impl Iterator<Item = (OsString, OsString)>) -> Opt
 
 /// Runs `losat rpsbproc` with `args` (NCBI's `Init` and `Run`).
 pub fn run(args: RpsbprocArgs) -> Outcome {
-    // Refused before anything is read or written: the sites and motifs (item PS16b).
-    if args.target() != TargetData::Doms {
-        return Outcome::Refused(format!(
-            "-t {} (sites and motifs; -t both is the default) is not supported by LOSAT's rpsbproc, which gives the domain hits of -t doms",
-            args.target_data
-        ));
-    }
     // File names that are not UTF-8 are refused as the other programs refuse them (NCBI writes
     // their bytes in its messages and the report's header).
     for (role, name) in [
@@ -896,7 +932,9 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
     if status != E_OK {
         return Outcome::Exit(status);
     }
-    header.extend_from_slice(header_tail(args.evalue, args.mode(), args.show_families).as_bytes());
+    header.extend_from_slice(
+        header_tail(args.evalue, args.mode(), args.show_families, args.target()).as_bytes(),
+    );
     let mut report = Report {
         out: Box::new(std::io::BufWriter::with_capacity(1 << 16, out)),
         quiet: args.quiet,
@@ -909,6 +947,7 @@ pub fn run(args: RpsbprocArgs) -> Outcome {
         &data,
         args.mode(),
         args.show_families,
+        args.target(),
         settings.seq_id_rank_variable,
     );
     // PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9 (version 1.10): the first failed write of
@@ -1063,8 +1102,11 @@ fn run_sessions<R: Read>(
     data: &CddData,
     mode: DataMode,
     show_families: bool,
+    target: TargetData,
     seq_id_rank_variable: Option<&'static str>,
 ) -> Outcome {
+    // NCBI's function-static motif positions (`MotifCheck`): one list for the whole run.
+    let mut motif_state = MotifState::default();
     report.write(header);
     report.line(&[b"DATA"]);
     let mut session = 0usize;
@@ -1219,7 +1261,37 @@ fn run_sessions<R: Read>(
                     Err(error) => return process_failure(report, error),
                 };
                 for query in &queries {
-                    print_dom_query(report, query, &session_text, data, mode, show_families);
+                    if let Err(error) = print_dom_query(
+                        report,
+                        query,
+                        &session_text,
+                        data,
+                        mode,
+                        show_families,
+                        target,
+                        &mut motif_state,
+                    ) {
+                        if report.stopped() {
+                            return Outcome::Exit(E_OK);
+                        }
+                        return match error {
+                            // `THROW_SIMPLE` leaves `Run`: `CNcbiApplication` reports a
+                            // `std::exception` of the execution (probe 3 of PS16b: the line
+                            // below, exit 3, the report ends before the site's line).
+                            PrintError::MotifParse { motif, position } => {
+                                write_stderr(&err_post_x(
+                                    CORELIB_APP,
+                                    7,
+                                    &format!(
+                                        "Application's execution failed: Motif string parse error -- Motif = {}, error position: {position}",
+                                        String::from_utf8_lossy(&motif)
+                                    ),
+                                ));
+                                Outcome::Exit(3)
+                            }
+                            PrintError::Unsupported(message) => Outcome::Refused(message),
+                        };
+                    }
                     queries_done += 1;
                     if report.stopped() {
                         return Outcome::Exit(E_OK);
@@ -1330,6 +1402,7 @@ fn run_sessions<R: Read>(
 // superfamily is its region times `OVERLAPLEADING`, an `unsigned int` product that wraps, and
 // `emplace` keeps the first record of a key. `Multidom` (`m_iRepClass` 1) is never made
 // (`domains::calculate`), so it is never printed.
+#[allow(clippy::too_many_arguments)]
 fn print_dom_query(
     report: &mut Report,
     query: &DomQuery,
@@ -1337,7 +1410,9 @@ fn print_dom_query(
     data: &CddData,
     mode: DataMode,
     show_families: bool,
-) {
+    target: TargetData,
+    motif_state: &mut MotifState,
+) -> Result<(), PrintError> {
     let length = query.length.to_string();
     report.line(&[
         b"QUERY\t",
@@ -1347,7 +1422,11 @@ fn print_dom_query(
         b"\t",
         &query.title,
     ]);
-    let records = domain_records(&query.index, &query.aligns, data, mode);
+    let records = if target == TargetData::Feats {
+        Vec::new()
+    } else {
+        domain_records(&query.index, &query.aligns, data, mode)
+    };
     if !records.is_empty() {
         let mut families: std::collections::BTreeMap<u32, Record> = Default::default();
         report.line(&[b"DOMAINS"]);
@@ -1399,14 +1478,421 @@ fn print_dom_query(
             report.line(&[b"ENDSUPERFAMILIES"]);
         }
     }
+    if target != TargetData::Doms {
+        print_features(report, query, session, data, mode, motif_state)?;
+    }
     report.line(&[b"ENDQUERY"]);
     if report.quiet || report.stopped() {
-        return;
+        return Ok(());
     }
     let mut stderr = std::io::stderr().lock();
     let _ = stderr.write_all(b"End processing Query ");
     let _ = stderr.write_all(&query.title);
     let _ = stderr.write_all(b"\n");
+    Ok(())
+}
+
+/// Why the report of a query stops.
+enum PrintError {
+    /// A motif that NCBI's parser refuses (`THROW_SIMPLE`).
+    MotifParse { motif: Vec<u8>, position: usize },
+    /// A case LOSAT does not reproduce.
+    Unsupported(String),
+}
+
+impl From<MotifError> for PrintError {
+    fn from(error: MotifError) -> Self {
+        match error {
+            MotifError::Parse { motif, position } => PrintError::MotifParse { motif, position },
+            MotifError::ReadPast => PrintError::Unsupported(
+                "a motif match that reads the residues of a site beyond their end (undefined in NCBI's rpsbproc) is not supported by LOSAT's rpsbproc".to_string(),
+            ),
+        }
+    }
+}
+
+/// `(char)toupper(q.m_strSeqData[res])`: the residue at `res`. `std::string::operator[]` gives
+/// the terminating 0 at its size; beyond that, and before 0, NCBI reads bytes outside the
+/// string (undefined), which LOSAT refuses.
+fn upper_residue(query: &DomQuery, res: i64) -> Result<u8, PrintError> {
+    let len = query.residues.len() as i64;
+    if (0..len).contains(&res) {
+        Ok(query.residues[res as usize].to_ascii_uppercase())
+    } else if res == len {
+        Ok(0)
+    } else {
+        Err(PrintError::Unsupported(format!(
+            "a site or motif at position {} of a query with {len} residues (NCBI reads outside the sequence) is not supported by LOSAT's rpsbproc",
+            res + 1
+        )))
+    }
+}
+
+/// A site of a structural motif type, collected for the MOTIFS part
+/// (`__MotifType_base`: the site, the record, the source PSSM-ID).
+struct MotifRecord<'a> {
+    site: &'a data::Site,
+    record: usize,
+    source: u32,
+}
+
+/// The source column: the PSSM-ID, or the accession of a model with a PSSM-ID of
+/// `INVALIDPSSMID` or more that the data has.
+fn write_source(report: &mut Report, data: &CddData, source: u32) {
+    if source < data::INVALID_PSSM_ID {
+        report.write(source.to_string().as_bytes());
+    } else if let Some(domain) = data.find_domain(source) {
+        report.write(data.text(data.domains[domain].accession));
+    } else {
+        report.write(source.to_string().as_bytes());
+    }
+}
+
+/// A site's positions as a set (`CSegSet featsegs(*iterFeat)`: `ori_from` is `from`).
+fn site_segset(data: &CddData, site: &data::Site) -> SegSet {
+    let mut set = SegSet::new();
+    for seg in data.site_segs(site) {
+        set.add(i64::from(seg[0]), i64::from(seg[1]));
+    }
+    set
+}
+
+/// `featsegs.GetTotalResidues() / (double)GetCompleteSize() > 0.8` of a mapped site.
+fn mostly_mapped(featsegs: &SegSet, site: &data::Site) -> bool {
+    !featsegs.is_empty() && (featsegs.total_residues() as f64 / f64::from(site.complete_size)) > 0.8
+}
+
+/// The SITES and MOTIFS parts of a protein query (`PrintDomQuery`, `-t feats` and `both`).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1033-1266
+// ```c++
+// 		if (TTargetData::e_doms != m_tdata)
+// 		{
+// 			vector<TDomSeqAlignIndex::__MotifType_base> vecMotifRecs;
+//
+// 			vector<TDomSeqAlignIndex::__TCdAlignRecord> :: const_iterator iterFeatAlign = vecFeatAligns.begin(), iterFeatAlignEnd = vecFeatAligns.end();
+//
+// 			if (iterFeatAlignEnd != iterFeatAlign)	//not empty())
+// 			{
+// 				if (!iterFeatAlign->pCdInfo->m_bIsStructDom)	//has regular domains
+// 				{
+// 					(*m_ostream) << FEATSTART << endl;
+// 					for ( ; iterFeatAlignEnd != iterFeatAlign; ++iterFeatAlign)
+// 					{
+// 						if (iterFeatAlign->pCdInfo->m_bIsStructDom) break;
+//
+// 						bool bIsSpecific = iterFeatAlign->pAlign->m_bRep && iterFeatAlign->pAlign->m_bSpecQualified;
+// 						const char * pType = ANNOTTYPE_SPECIFIC;
+// 						const list <TDomSite> * pFeats = &(iterFeatAlign->pCdInfo->m_lstSpecificFeatures);
+// 						unsigned int uiSrcPssmId = iterFeatAlign->pAlign->m_uiPssmId;
+//
+// 						if (!bIsSpecific && NULL != iterFeatAlign->pRootCdInfo)
+// 						{
+// 							pType = ANNOTTYPE_GENERIC;
+// 							pFeats = &(iterFeatAlign->pCdInfo->m_lstGenericFeatures);
+// 							uiSrcPssmId = iterFeatAlign->pCdInfo->m_uiHierarchyRoot;
+// 						}
+//
+// 						for (list<TDomSite> :: const_iterator iterFeat = pFeats->begin(); iterFeat != pFeats->end(); ++iterFeat)
+// 						{
+// 							if (TDomSite::eType_StructMotif == iterFeat->m_iType)
+// 							{
+// 								vecMotifRecs.emplace_back(iterFeat, iterFeatAlign, bIsSpecific, uiSrcPssmId);
+// 								continue;
+// 							}
+//
+// 							CSegSet featsegs(*iterFeat);
+// 							iterFeatAlign->pAlign->MapSegSet(featsegs, false);
+// 							if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterFeat->GetCompleteSize() > 0.8))
+// 							{
+// 								vector<TSeg_base::TResiduePos> vecMappedPos;
+// 								iterFeatAlign->pAlign->GetTranslatedPosMap(featsegs, q.m_uiSeqLen, vecMappedPos);
+//
+// 								if (iterFeat->MotifCheck(vecMappedPos, q.m_strSeqData) > 0) continue;	//failed motif check
+//
+// 								(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT << pType << DELIMIT << iterFeat->m_strTitle << DELIMIT;
+//
+// 								const CSegSet::TSegs& segs = featsegs.GetSegs();
+//
+// 								size_t mapped = 0;
+//
+// 								char dimDelimit[2] = {0, 0};
+// 								for (CSegSet::TSegs::const_iterator iterSeg = segs.begin(); iterSeg != segs.end(); ++iterSeg)
+// 								{
+// 									for (int res = iterSeg->from; res <= iterSeg->to; ++res)
+// 									{
+// 										(*m_ostream) << dimDelimit << (char)toupper(q.m_strSeqData[res]) << (res + COORDSBASE);
+// 										dimDelimit[0] = COORDELIMIT;
+// 										++mapped;
+// 									}
+// 								}
+// 								(*m_ostream) << DELIMIT << iterFeat->GetTotalResidues() << DELIMIT << mapped << DELIMIT;
+// 								if (uiSrcPssmId < INVALIDPSSMID)
+// 									(*m_ostream) << uiSrcPssmId;
+// 								else
+// 								{
+// 									const TDomain * pSrcCd = m_dom_cluster_src.FindCdInfo(uiSrcPssmId);
+// 									if (nullptr != pSrcCd)
+// 										(*m_ostream) << pSrcCd->m_strAccession;
+// 									else
+// 										(*m_ostream) << uiSrcPssmId;
+// 								}
+// 								(*m_ostream) << endl;
+// 							}
+// 						}
+// 					}
+//
+// 					// -- non-motif features from SD
+//
+// 					for ( ; iterFeatAlignEnd != iterFeatAlign; ++iterFeatAlign)
+// 					{
+// 						for (list<TDomSite> :: const_iterator iterFeat = iterFeatAlign->pCdInfo->m_lstSpecificFeatures.begin(); iterFeat != iterFeatAlign->pCdInfo->m_lstSpecificFeatures.end(); ++iterFeat)
+// 						{
+// 							if (TDomSite::eType_StructMotif == iterFeat->m_iType)
+// 							{
+// 								vecMotifRecs.emplace_back(iterFeat, iterFeatAlign, true, 0);
+// 								continue;
+// 							}
+//
+// 							CSegSet featsegs(*iterFeat);
+// 							iterFeatAlign->pAlign->MapSegSet(featsegs, false);
+//
+// 							if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterFeat->GetCompleteSize() > 0.8))
+// 							{
+// 								... (the MotifCheck and the line as above, with ANNOTTYPE_SPECIFIC)
+// 								(*m_ostream) << DELIMIT << iterFeat->GetTotalResidues() << DELIMIT << mapped << DELIMIT << 0/*iterFeatAlign->pAlign->m_uiPssmId*/ << endl;
+// 							}
+// 						}
+// 					}
+//
+// 					(*m_ostream) << FEATEND << endl;
+// 				}
+//
+// 				// -- Motif part
+// 				if (!vecMotifRecs.empty())
+// 				{
+// 					// -- start SD
+// 					// -- features
+// 					(*m_ostream) << MOTIFSTART << endl;
+// 					vector<TDomSeqAlignIndex::__MotifType_base> :: const_iterator iterM = vecMotifRecs.begin(), iterMEnd = vecMotifRecs.end();
+// 					for ( ; iterMEnd != iterM; ++iterM)
+// 					{
+// 						if (iterM->iterAlignRec->pCdInfo->m_bIsStructDom) break;
+//
+// 						CSegSet featsegs(*iterM->iterMotifFeat);
+// 						iterM->iterAlignRec->pAlign->MapSegSet(featsegs);
+//
+// 						if (!featsegs.IsEmpty() && ((double)featsegs.GetTotalResidues() / (double)iterM->iterMotifFeat->GetCompleteSize() > 0.8))
+// 						{
+// 							(*m_ostream) << idxBlObj << DELIMIT << q.m_strAccession << DELIMIT << iterM->iterMotifFeat->m_strTitle << DELIMIT;
+// 							int res0 = featsegs.GetLeft(), res1 = featsegs.GetRight();
+// 							(*m_ostream) << (char)toupper(q.m_strSeqData[res0]) << res0 + COORDSBASE << DELIMIT << res1 + COORDSBASE << (char)toupper(q.m_strSeqData[res1]) << DELIMIT;
+//
+// 							if (iterM->uiSrcPssmId < INVALIDPSSMID)
+// 								(*m_ostream) << iterM->uiSrcPssmId;
+// 							else
+// 							{
+// 								const TDomain *pSrcDom = m_dom_cluster_src.FindCdInfo(iterM->uiSrcPssmId);
+// 								if (nullptr != pSrcDom)
+// 									(*m_ostream) << pSrcDom->m_strAccession;
+// 								else
+// 									(*m_ostream) << iterM->uiSrcPssmId;
+// 							}
+//
+// 							(*m_ostream) << endl;
+// 						}
+// 					}
+//
+// 					// Motif from SD
+// 					for ( ; iterMEnd != iterM; ++iterM)
+// 					{
+// 						CSegSet featsegs(*iterM->iterMotifFeat);
+// 						if (!iterM->iterAlignRec->pAlign->m_ClipSet.IsEmpty())
+// 							featsegs.Cross(iterM->iterAlignRec->pAlign->m_ClipSet);
+//
+// 						iterM->iterAlignRec->pAlign->MapSegSet(featsegs);
+// 						... (the same line)
+// 					}
+// 					(*m_ostream) << MOTIFEND << endl;
+// 				}
+// 			}
+// 		}
+// ```
+// (An `sd` record first in the list prints no SITES part and no motif is collected then.)
+fn print_features(
+    report: &mut Report,
+    query: &DomQuery,
+    session: &str,
+    data: &CddData,
+    mode: DataMode,
+    motif_state: &mut MotifState,
+) -> Result<(), PrintError> {
+    let records: Vec<FeatureRecord> = feature_records(&query.index, &query.aligns, data, mode);
+    let Some(first) = records.first() else {
+        return Ok(());
+    };
+    let mut motifs: Vec<MotifRecord> = Vec::new();
+    if !data.domains[first.domain].is_struct_dom {
+        report.line(&[b"SITES"]);
+        let mut at = 0usize;
+        while at < records.len() {
+            let record = &records[at];
+            if data.domains[record.domain].is_struct_dom {
+                break;
+            }
+            let align = &query.aligns[record.align];
+            let is_specific = align.rep && align.spec_qualified;
+            let (kind, specific, source): (&[u8], bool, u32) =
+                if !is_specific && record.root.is_some() {
+                    (
+                        b"Generic",
+                        false,
+                        data.domains[record.domain].hierarchy_root,
+                    )
+                } else {
+                    (b"Specific", true, align.pssm_id)
+                };
+            for site in data.sites(record.domain, specific) {
+                if site.site_type == data::TYPE_STRUCT_MOTIF {
+                    motifs.push(MotifRecord {
+                        site,
+                        record: at,
+                        source,
+                    });
+                    continue;
+                }
+                print_site(
+                    report,
+                    query,
+                    session,
+                    data,
+                    align,
+                    site,
+                    kind,
+                    Some(source),
+                    motif_state,
+                )?;
+            }
+            at += 1;
+        }
+        // Sites of the structural domains: source 0.
+        while at < records.len() {
+            let record = &records[at];
+            let align = &query.aligns[record.align];
+            for site in data.sites(record.domain, true) {
+                if site.site_type == data::TYPE_STRUCT_MOTIF {
+                    motifs.push(MotifRecord {
+                        site,
+                        record: at,
+                        source: 0,
+                    });
+                    continue;
+                }
+                print_site(
+                    report,
+                    query,
+                    session,
+                    data,
+                    align,
+                    site,
+                    b"Specific",
+                    None,
+                    motif_state,
+                )?;
+            }
+            at += 1;
+        }
+        report.line(&[b"ENDSITES"]);
+    }
+    if !motifs.is_empty() {
+        report.line(&[b"MOTIFS"]);
+        // The first loop stops at the first `sd` record; the second takes the rest.
+        let mut structural = false;
+        for motif in &motifs {
+            let record = &records[motif.record];
+            structural = structural || data.domains[record.domain].is_struct_dom;
+            let align = &query.aligns[record.align];
+            let mut featsegs = site_segset(data, motif.site);
+            if structural && !align.clip_set.is_empty() {
+                featsegs.cross(&align.clip_set);
+            }
+            map_seg_set(&mut featsegs, align);
+            if mostly_mapped(&featsegs, motif.site) {
+                let (res0, res1) = (featsegs.left(), featsegs.right());
+                report.write(session.as_bytes());
+                report.write(b"\t");
+                report.write(&query.accession);
+                report.write(b"\t");
+                report.write(data.text(motif.site.title));
+                report.write(b"\t");
+                report.write(&[upper_residue(query, res0)?]);
+                report.write((res0 + 1).to_string().as_bytes());
+                report.write(b"\t");
+                report.write((res1 + 1).to_string().as_bytes());
+                report.write(&[upper_residue(query, res1)?]);
+                report.write(b"\t");
+                write_source(report, data, motif.source);
+                report.write(b"\n");
+            }
+        }
+        report.line(&[b"ENDMOTIFS"]);
+    }
+    Ok(())
+}
+
+/// One site line of the SITES part. `source`: the PSSM-ID column (`None`: the structural
+/// domains' `0`).
+#[allow(clippy::too_many_arguments)]
+fn print_site(
+    report: &mut Report,
+    query: &DomQuery,
+    session: &str,
+    data: &CddData,
+    align: &domains::DomAlign,
+    site: &data::Site,
+    kind: &[u8],
+    source: Option<u32>,
+    motif_state: &mut MotifState,
+) -> Result<(), PrintError> {
+    let mut featsegs = site_segset(data, site);
+    map_seg_set(&mut featsegs, align);
+    if !mostly_mapped(&featsegs, site) {
+        return Ok(());
+    }
+    let mapped_positions = translated_pos_map(&featsegs);
+    if motif_state.motif_check(data, site, &mapped_positions, &query.residues)? > 0 {
+        return Ok(());
+    }
+    report.write(session.as_bytes());
+    report.write(b"\t");
+    report.write(&query.accession);
+    report.write(b"\t");
+    report.write(kind);
+    report.write(b"\t");
+    report.write(data.text(site.title));
+    report.write(b"\t");
+    let mut mapped = 0usize;
+    let mut delimit: &[u8] = b"";
+    for seg in featsegs.segs() {
+        for res in seg.from..=seg.to {
+            report.write(delimit);
+            report.write(&[upper_residue(query, res)?]);
+            report.write((res + 1).to_string().as_bytes());
+            delimit = b",";
+            mapped += 1;
+        }
+    }
+    let complete: i64 = data
+        .site_segs(site)
+        .iter()
+        .map(|seg| i64::from(seg[1]) - i64::from(seg[0]) + 1)
+        .sum();
+    report.write(format!("\t{complete}\t{mapped}\t").as_bytes());
+    match source {
+        Some(source) => write_source(report, data, source),
+        None => report.write(b"0"),
+    }
+    report.write(b"\n");
+    Ok(())
 }
 
 /// `N`, `C`, both or `-`: more than 20 % of the model missing at that end.

@@ -16,11 +16,11 @@
 //! ```
 //!
 //! NCBI keeps a `TDomain` (or `TCluster`) per row with every column as a `std::string`; LOSAT
-//! keeps the columns that `-t doms` prints or decides by (the PSSM-ID, accession, short name,
-//! length, curated and structural flags, cluster and bit score threshold) with the texts in one
-//! buffer. The definition lines, the hierarchy (`cdtrack.txt`) and the sites (`cddannot*.dat`)
-//! are read as NCBI reads them, for their errors, but not kept: no byte of `-t doms` depends on
-//! them (item PS16b keeps what its outputs read).
+//! keeps the columns that the outputs print or decide by (the PSSM-ID, accession, short name,
+//! length, curated and structural flags, cluster, bit score threshold, hierarchy parent and
+//! root, and the sites of `cddannot*.dat`: title, motif, positions, type, size) with the texts
+//! in one buffer. The definition lines and the site columns no output reads (index, evidence
+//! flags) are read as NCBI reads them, for their errors, but not kept.
 //! The lookups are NCBI's `CPtrMap`: the rows sorted by libstdc++'s `std::sort` with NCBI's
 //! comparison and searched by NCBI's binary search, so that a key held by two rows finds the row
 //! that NCBI finds.
@@ -68,7 +68,43 @@ pub(crate) struct Domain {
     pub(crate) curated: bool,
     /// `m_bIsStructDom`: an `sd` accession.
     pub(crate) is_struct_dom: bool,
+    /// `m_uiHierarchyParent` (from `cdtrack.txt`, 0 when not set).
+    pub(crate) hierarchy_parent: u32,
+    /// `m_uiHierarchyRoot` (from `cdtrack.txt`, 0 when not set).
+    pub(crate) hierarchy_root: u32,
+    /// `m_lstSpecificFeatures`: the range in `CddData::specific_sites`.
+    specific: SiteRange,
+    /// `m_lstGenericFeatures`: the range in `CddData::generic_sites`.
+    generic: SiteRange,
 }
+
+/// A run of sites of one domain in a site table (`start`, `len`).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SiteRange {
+    start: u32,
+    len: u32,
+}
+
+/// `TDomSite`, with the members the site and motif output reads. Its positions
+/// (`CSegSet`, after `SetData`: sorted, merged ranges) are `CddData::site_segs[segs]`.
+#[derive(Clone, Debug)]
+pub(crate) struct Site {
+    /// `m_strTitle`.
+    pub(crate) title: Span,
+    /// `m_strMotif` (empty: no motif).
+    pub(crate) motif: Span,
+    /// `m_iType`.
+    pub(crate) site_type: i32,
+    /// `m_iCompleteSize`: the number of positions of the line for a specific site (duplicates
+    /// included), 0 for a generic site (`LoadData_real` sets it for the specific ones only).
+    pub(crate) complete_size: i32,
+    segs: SiteRange,
+    /// The domain of the line (until the sites are grouped by domain).
+    domain: u32,
+}
+
+/// `TDomSite::eType_StructMotif`.
+pub(crate) const TYPE_STRUCT_MOTIF: i32 = 7;
 
 /// `TCluster`: a superfamily row of `cddid.tbl` (a `cl` accession).
 #[derive(Clone, Debug)]
@@ -90,6 +126,11 @@ pub(crate) struct CddData {
     domain_by_pssm_id: Vec<u32>,
     domain_by_accession: Vec<u32>,
     cluster_by_id: Vec<u32>,
+    /// The specific and generic sites, grouped by domain in file order (`Domain::specific`,
+    /// `Domain::generic`), and the ranges of their positions.
+    specific_sites: Vec<Site>,
+    generic_sites: Vec<Site>,
+    site_segs: Vec<[i32; 2]>,
 }
 
 /// Why the data does not load.
@@ -717,6 +758,10 @@ impl CddData {
                 min_bit_score: 0.0,
                 curated,
                 is_struct_dom,
+                hierarchy_parent: 0,
+                hierarchy_root: 0,
+                specific: SiteRange::default(),
+                generic: SiteRange::default(),
             });
             Ok(())
         })?;
@@ -857,10 +902,10 @@ impl CddData {
     // 				}
     // 			}	//dfstream
     // ```
-    // The parent and the root set only `m_uiHierarchyParent` and `m_uiHierarchyRoot`, which no
-    // output of `-t doms` reads (the doms path reads the length, threshold, flags, cluster,
-    // accession and short name of a domain), so LOSAT does not keep them; what this loader does
-    // for `-t doms` is what its `std::string` operations do on each line. A `find` that fails
+    // The parent and the root set `m_uiHierarchyParent` and `m_uiHierarchyRoot`, which the site
+    // output reads (`pRootCdInfo`; the `-t doms` output does not). The root column that is
+    // neither the parent nor the domain itself sets the *parent* (NCBI's quirk, survey 8.4), and
+    // the root stays 0. A `find` that fails
     // gives `npos`; the loops `while(buf[pos1] <= ' ')` (a signed `char`) then read `buf[npos]`,
     // the byte before the string's data, which is undefined but 0 in NCBI's build (`Line::at`),
     // and go on from position 0, and a `substr` from `npos` throws `std::out_of_range` (oracle
@@ -889,9 +934,9 @@ impl CddData {
             };
             let mut pos1 = line.find(b' ', 0);
             let current = trim(line.substr(0, pos1)?);
-            if self.find_domain_by_accession(current).is_none() {
+            let Some(dom) = self.find_domain_by_accession(current) else {
                 return Ok(());
-            }
+            };
             pos1 = skip_le_space(pos1)?;
             let mut pos0 = pos1;
             pos1 = line.find(b' ', pos0);
@@ -905,13 +950,28 @@ impl CddData {
             }
             pos0 = pos1;
             pos1 = line.find(b' ', pos0);
-            // `parentAcc`
-            line.substr(pos0, pos1.wrapping_sub(pos0))?;
+            let parent_acc = trim(line.substr(pos0, pos1.wrapping_sub(pos0))?);
+            let own_acc = self.text(self.domains[dom].accession);
+            let own_pssm_id = self.domains[dom].pssm_id;
+            if parent_acc != b"N/A" {
+                if parent_acc == own_acc {
+                    self.domains[dom].hierarchy_parent = own_pssm_id;
+                } else if let Some(parent) = self.find_domain_by_accession(parent_acc) {
+                    self.domains[dom].hierarchy_parent = self.domains[parent].pssm_id;
+                }
+            }
             pos1 = skip_le_space(pos1)?;
             pos0 = pos1;
             pos1 = line.find(b' ', pos0);
-            // `rootAcc`
-            line.substr(pos0, pos1.wrapping_sub(pos0))?;
+            let root_acc = trim(line.substr(pos0, pos1.wrapping_sub(pos0))?);
+            let own_acc = self.text(self.domains[dom].accession);
+            if root_acc == parent_acc {
+                self.domains[dom].hierarchy_root = self.domains[dom].hierarchy_parent;
+            } else if root_acc == own_acc {
+                self.domains[dom].hierarchy_root = own_pssm_id;
+            } else if let Some(root) = self.find_domain_by_accession(root_acc) {
+                self.domains[dom].hierarchy_parent = self.domains[root].pssm_id;
+            }
             if line.read_before.get() {
                 return Err(line.unsupported("a read of the byte before the line (buf[npos])"));
             }
@@ -1152,6 +1212,9 @@ impl CddData {
         } else {
             "cddannot_generic.dat"
         };
+        let mut sites: Vec<Site> = Vec::new();
+        let mut site_segs = std::mem::take(&mut self.site_segs);
+        let mut residues: Vec<i32> = Vec::new();
         for_each_line(path, |raw| {
             let bytes = if specific { ltrim(raw) } else { raw };
             if bytes.is_empty() || bytes[0] == b'#' {
@@ -1164,9 +1227,9 @@ impl CddData {
             pos1 = line.find(b'\t', pos0);
             let accession = line.substr(pos0, pos1.wrapping_sub(pos0))?;
             let accession = if specific { trim(accession) } else { accession };
-            if self.find_domain_by_accession(accession).is_none() {
+            let Some(domain) = self.find_domain_by_accession(accession) else {
                 return Ok(());
-            }
+            };
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
             pos0 = pos1.wrapping_add(1);
@@ -1180,11 +1243,13 @@ impl CddData {
             string_to_int(index_text, 0).map_err(DataError::Conversion)?;
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
-            line.substr(pos0, pos1.wrapping_sub(pos0))?;
+            let title = line.substr(pos0, pos1.wrapping_sub(pos0))?;
+            let title = if specific { trim(title) } else { title };
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
+            let mut motif: &[u8] = b"";
             if line.at(pos0)? != b'0' {
-                line.substr(pos0, pos1.wrapping_sub(pos0))?;
+                motif = trim(line.substr(pos0, pos1.wrapping_sub(pos0))?);
             }
             for _evidence_flag in 0..3 {
                 pos0 = pos1.wrapping_add(1);
@@ -1196,15 +1261,20 @@ impl CddData {
             if pos1 == NPOS {
                 return Err(DataError::Std("vector::reserve".to_string()));
             }
+            residues.clear();
             let mut pos_c = line.find(b',', pos0);
             while pos_c < pos1 {
-                string_to_int(line.substr(pos0, pos_c - pos0)?, 0)
-                    .map_err(DataError::Conversion)?;
+                residues.push(
+                    string_to_int(line.substr(pos0, pos_c - pos0)?, 0)
+                        .map_err(DataError::Conversion)?,
+                );
                 pos0 = pos_c + 1;
                 pos_c = line.find(b',', pos0);
             }
-            string_to_int(line.substr(pos0, pos1.wrapping_sub(pos0))?, 0)
-                .map_err(DataError::Conversion)?;
+            residues.push(
+                string_to_int(line.substr(pos0, pos1.wrapping_sub(pos0))?, 0)
+                    .map_err(DataError::Conversion)?,
+            );
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
             let type_text = if pos1 == NPOS {
@@ -1212,9 +1282,74 @@ impl CddData {
             } else {
                 line.substr(pos0, pos1.wrapping_sub(pos0))?
             };
-            string_to_int(type_text, 0).map_err(DataError::Conversion)?;
+            let site_type = string_to_int(type_text, 0).map_err(DataError::Conversion)?;
+            // `SetData(vecSitePos)` and `m_iCompleteSize = (int)vecSitePos.size()`.
+            let segs_start = site_segs.len() as u32;
+            let complete_size = if specific { residues.len() as i32 } else { 0 };
+            for seg in site_data_segs(&mut residues) {
+                site_segs.push(seg);
+            }
+            let segs = SiteRange {
+                start: segs_start,
+                len: site_segs.len() as u32 - segs_start,
+            };
+            let title = self.push_text(title);
+            let motif = self.push_text(motif);
+            sites.push(Site {
+                title,
+                motif,
+                site_type,
+                complete_size,
+                segs,
+                domain: domain as u32,
+            });
             Ok(())
-        })
+        })?;
+        self.site_segs = site_segs;
+        // Group the sites by domain, keeping the file order inside a domain (the order of
+        // `m_lstSpecificFeatures`).
+        sites.sort_by_key(|site| site.domain);
+        let mut first = 0usize;
+        while first < sites.len() {
+            let domain = sites[first].domain;
+            let mut end = first;
+            while end < sites.len() && sites[end].domain == domain {
+                end += 1;
+            }
+            let range = SiteRange {
+                start: first as u32,
+                len: (end - first) as u32,
+            };
+            if specific {
+                self.domains[domain as usize].specific = range;
+            } else {
+                self.domains[domain as usize].generic = range;
+            }
+            first = end;
+        }
+        sites.shrink_to_fit();
+        if specific {
+            self.specific_sites = sites;
+        } else {
+            self.generic_sites = sites;
+        }
+        Ok(())
+    }
+
+    /// `m_lstSpecificFeatures` (`specific`) or `m_lstGenericFeatures` of a domain.
+    pub(crate) fn sites(&self, domain: usize, specific: bool) -> &[Site] {
+        let (range, table) = if specific {
+            (self.domains[domain].specific, &self.specific_sites)
+        } else {
+            (self.domains[domain].generic, &self.generic_sites)
+        };
+        &table[range.start as usize..(range.start + range.len) as usize]
+    }
+
+    /// The ranges `from..=to` of a site's positions (`CSegSet` of the `TDomSite`, `ori_from`
+    /// equal to `from`).
+    pub(crate) fn site_segs(&self, site: &Site) -> &[[i32; 2]] {
+        &self.site_segs[site.segs.start as usize..(site.segs.start + site.segs.len) as usize]
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:617-657
@@ -1286,6 +1421,63 @@ impl CddData {
             Ok(())
         })
     }
+}
+
+/// `CSegSetTmpl::SetData(residues)`: the sorted, merged ranges of a list of positions.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:25-55
+// ```c++
+// void CSegSetTmpl<SEGTYPE>::SetData(const std::vector<SeqPos_t> &residues)
+// {
+// 	m_lstContainer.clear();
+//
+// 	if (residues.empty()) return;
+//
+// 	std::vector<SeqPos_t> sorted(residues);
+// 	std::sort(sorted.begin(), sorted.end());
+//
+// 	SEGTYPE seg;
+//
+// 	seg.from = seg.to = seg.ori_from = sorted[0];
+//
+// 	size_t i = 0, iEnd = sorted.size();
+//
+// 	while (i < iEnd)
+// 	{
+// 		if (sorted[i] > seg.to + 1)
+// 		{
+// 			AddSeg(seg);
+// 			seg.from = seg.to = seg.ori_from = sorted[i];
+// 		}
+// 		else if (sorted[i] > seg.to)
+// 		{
+// 			seg.to = sorted[i];
+// 		}
+//
+// 		++i;
+// 	}
+// 	AddSeg(seg);
+// }
+// ```
+// (`AddSeg` of a range that is more than one position from the last one appends it: the
+// ranges come in order.)
+fn site_data_segs(residues: &mut [i32]) -> Vec<[i32; 2]> {
+    let mut segs: Vec<[i32; 2]> = Vec::new();
+    if residues.is_empty() {
+        return segs;
+    }
+    residues.sort_unstable();
+    let (mut from, mut to) = (residues[0], residues[0]);
+    for &residue in residues.iter() {
+        if i64::from(residue) > i64::from(to) + 1 {
+            segs.push([from, to]);
+            from = residue;
+            to = residue;
+        } else if residue > to {
+            to = residue;
+        }
+    }
+    segs.push([from, to]);
+    segs
 }
 
 /// The sign of NCBI's `int` difference `a - b` of two ids (`TSortByPssmId`, `TSortByClusterId`),

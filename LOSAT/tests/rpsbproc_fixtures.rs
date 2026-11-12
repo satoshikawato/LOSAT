@@ -3,9 +3,8 @@
 //! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast 2.17.0
 //! `-outfmt 11` of E. coli K-12 MG1655 proteins against CDD v3.22, the data files are CDD v3.22
 //! cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
-//! error and exit status (and the `-o` file); a `refuse` case is refused by LOSAT (the sites and
-//! motifs of `-t feats` and `-t both`, item PS16b; the XML input, item PS16d) before any byte of
-//! output. NCBI is not run here.
+//! error and exit status (and the `-o` file); a `refuse` case is refused by LOSAT (the XML input,
+//! item PS16d) before any byte of output. NCBI is not run here.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -162,7 +161,7 @@ fn rpsbproc_gives_ncbis_bytes() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 96);
+    assert_eq!(compared, 124);
 }
 
 #[test]
@@ -189,7 +188,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         );
         refused += 1;
     }
-    assert_eq!(refused, 4);
+    assert_eq!(refused, 1);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`

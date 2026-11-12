@@ -1785,6 +1785,16 @@ pub(super) fn pairwise_hits(
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
                         subject_stored_gaps: a.subject_stored_gaps,
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:530-531
+                        // ```c
+                        //         else
+                        //             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
+                        // ```
+                        // The Seq-align's `num_ident` (`seqalign::query_records`): the engine's
+                        // identities on the unmasked query frame (`statistics::identity_and_positive`),
+                        // not those of the rows (`a.identity`), which the display's translation
+                        // and the subject's stored gap characters make.
+                        seqalign_num_ident: hsp.identity,
                     });
                 }
             }

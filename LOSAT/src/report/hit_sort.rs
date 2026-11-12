@@ -97,8 +97,9 @@ impl ReportSort {
 // ```
 /// The values of one HSP that the sorts and the description table's columns read: its scores
 /// (`GetAlnScores`: the bit score, the E-value, `e_value` or the linked set's `sum_e`, which the
-/// report shows, and the identities, which every HSP's Seq-align carries,
-/// `blast_seqalign.cpp:1199-1203`), its alignment length in columns of letters (TBLASTX's in
+/// report shows, and the Seq-align's `num_ident`, the engine's identities, which every HSP's
+/// Seq-align carries, `blast_seqalign.cpp:1199-1203`, `PairwiseHit::seqalign_num_ident`, not the
+/// identities of the displayed rows), its alignment length in columns of letters (TBLASTX's in
 /// amino acids) and the 0-based ranges of the query (`from..=to`) and the subject (`from`) that
 /// `GetSeqRange` gives (BLASTX's and TBLASTX's query and TBLASTN's subject in nucleotides).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -121,7 +122,7 @@ impl HspScores {
         Self {
             bits: h.bit_score,
             evalue: h.e_value,
-            num_ident: h.num_ident as i64,
+            num_ident: hit.seqalign_num_ident as i64,
             length: h.length as i64,
             query_from: zero_based(h.q_start.min(h.q_end)),
             query_to: zero_based(h.q_start.max(h.q_end)),
@@ -446,7 +447,12 @@ pub(crate) fn percent_identity(numerator: i64, denominator: i64) -> f64 {
 // }
 // ```
 /// `GetSeqAlignSetCalcPercentIdent` of the HSPs `order` of `hsps`.
-fn set_percent_identity(hsps: &[HspScores], order: &[usize], tblastx: bool, translation: bool) -> f64 {
+fn set_percent_identity(
+    hsps: &[HspScores],
+    order: &[usize],
+    tblastx: bool,
+    translation: bool,
+) -> f64 {
     if order.is_empty() {
         return -1.0;
     }

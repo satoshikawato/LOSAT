@@ -243,7 +243,14 @@ fn small_lists_sort_with_libstdcxx_s_calls() {
     assert_eq!(port_sort(&[3, 1, 2], |a, b| a < b).0, vec![1, 2, 0]);
 }
 
-fn hsp(bits: f64, evalue: f64, num_ident: i64, length: i64, query: (u64, u64), subject: u64) -> HspScores {
+fn hsp(
+    bits: f64,
+    evalue: f64,
+    num_ident: i64,
+    length: i64,
+    query: (u64, u64),
+    subject: u64,
+) -> HspScores {
     HspScores {
         bits,
         evalue,
@@ -253,6 +260,46 @@ fn hsp(bits: f64, evalue: f64, num_ident: i64, length: i64, query: (u64, u64), s
         query_to: query.1,
         subject_from: subject,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:828-830 (quoted
+// at `PairwiseHit::seqalign_num_ident`): `GetAlnScores` reads the Seq-align's `num_ident`, the
+// engine's identities (here 270, as TBLASTN's engine counts SEG-masked letters as mismatches),
+// not the 284 identities of the displayed rows; the coordinates are 0-based, from <= to.
+#[test]
+fn hsp_scores_read_the_seqalign_identities() {
+    let mut hit = PairwiseHit::from(crate::common::Hit {
+        identity: 99.3,
+        length: 286,
+        mismatch: 2,
+        gapopen: 0,
+        q_start: 1,
+        q_end: 286,
+        s_start: 1858,
+        s_end: 1001,
+        e_value: 0.0,
+        bit_score: 557.0,
+        num_ident: 284,
+        query_frame: 0,
+        query_length: 286,
+        q_idx: 0,
+        s_idx: 0,
+        raw_score: 1435,
+        sort_query_offset: 0,
+        sort_query_end: 286,
+        sort_subject_offset: 0,
+        sort_subject_end: 286,
+        has_sort_offsets: true,
+        gap_info: None,
+        num_positives: 285,
+    });
+    // `From<Hit>` takes the hit's identities (BLASTN's rows are not counted again).
+    assert_eq!(HspScores::of(&hit).num_ident, 284);
+    hit.seqalign_num_ident = 270;
+    assert_eq!(
+        HspScores::of(&hit),
+        hsp(557.0, 0.0, 270, 286, (0, 285), 1000)
+    );
 }
 
 #[test]
@@ -292,7 +339,10 @@ fn tblastx_lengths_are_nucleotides_unless_translated() {
     assert_eq!(a.alignment_length(true, false), 90);
     assert_eq!(a.alignment_length(true, true), 30);
     // The identity of the description table (no translation) is a third of the shown one.
-    assert_eq!(percent_identity(30, a.alignment_length(true, false)) as i64, 33);
+    assert_eq!(
+        percent_identity(30, a.alignment_length(true, false)) as i64,
+        33
+    );
     assert_eq!(percent_identity(30, a.alignment_length(true, true)), 100.0);
     assert_eq!(percent_identity(7, 7), 100.0);
     assert_eq!(percent_identity(0, 1), 0.0);
@@ -306,7 +356,10 @@ fn query_coverage_is_the_union_of_the_query_ranges() {
     assert_eq!(query_coverage(&hsps), 30);
     assert_eq!(query_coverage(&hsps[..1]), 10);
     assert_eq!(query_coverage(&[]), 0);
-    let contained = [hsp(1.0, 1.0, 1, 1, (0, 99), 0), hsp(1.0, 1.0, 1, 1, (10, 20), 0)];
+    let contained = [
+        hsp(1.0, 1.0, 1, 1, (0, 99), 0),
+        hsp(1.0, 1.0, 1, 1, (10, 20), 0),
+    ];
     assert_eq!(query_coverage(&contained), 100);
 }
 
@@ -321,7 +374,12 @@ fn by(hits: Option<u8>, hsps: Option<u8>) -> ReportSort {
 #[test]
 fn nothing_is_sorted_without_a_positive_option() {
     let hits = vec![vec![hsp(1.0, 1.0, 1, 1, (0, 0), 0)]; 3];
-    for sort in [by(None, None), by(Some(0), None), by(None, Some(0)), by(Some(0), Some(0))] {
+    for sort in [
+        by(None, None),
+        by(Some(0), None),
+        by(None, Some(0)),
+        by(Some(0), Some(0)),
+    ] {
         assert!(sort_query_hits(sort, false, &hits).is_none(), "{sort:?}");
         assert!(!sort.sorts());
     }
@@ -332,23 +390,38 @@ fn nothing_is_sorted_without_a_positive_option() {
 #[test]
 fn equal_total_scores_come_in_reverse() {
     // Three copies of one subject (dup9, dup1, msA in the search's order) and a lower one.
-    let copy = vec![hsp(30.0, 1e-3, 20, 25, (0, 24), 0), hsp(10.0, 1.0, 5, 8, (30, 37), 0)];
+    let copy = vec![
+        hsp(30.0, 1e-3, 20, 25, (0, 24), 0),
+        hsp(10.0, 1.0, 5, 8, (30, 37), 0),
+    ];
     let low = vec![hsp(35.0, 1e-4, 20, 25, (0, 24), 0)];
     let hits = vec![copy.clone(), copy.clone(), low, copy];
     let order = sorted(by(Some(2), None), false, &hits);
     // Totals 40, 40, 35, 40: `>=` puts each later 40 before the earlier ones.
     assert_eq!(order.hits, vec![3, 1, 0, 2]);
     // The HSPs keep their order.
-    assert_eq!(order.hsps, vec![vec![0, 1], vec![0, 1], vec![0], vec![0, 1]]);
+    assert_eq!(
+        order.hsps,
+        vec![vec![0, 1], vec![0, 1], vec![0], vec![0, 1]]
+    );
 }
 
 #[test]
 fn the_score_sort_orders_the_hsps_of_compared_hits_only() {
     // The second HSP has the higher score.
-    let two = vec![hsp(20.0, 1e-3, 10, 12, (0, 11), 0), hsp(25.0, 1e-2, 10, 12, (20, 31), 5)];
+    let two = vec![
+        hsp(20.0, 1e-3, 10, 12, (0, 11), 0),
+        hsp(25.0, 1e-2, 10, 12, (20, 31), 5),
+    ];
     // One hit: no comparison, the HSPs stay in their order.
     let order = sorted(by(Some(1), None), false, std::slice::from_ref(&two));
-    assert_eq!(order, SortedHits { hits: vec![0], hsps: vec![vec![0, 1]] });
+    assert_eq!(
+        order,
+        SortedHits {
+            hits: vec![0],
+            hsps: vec![vec![0, 1]]
+        }
+    );
     // Two hits: the comparison sorts both hits' HSPs by score.
     let other = vec![hsp(22.0, 1e-4, 10, 12, (0, 11), 0)];
     let order = sorted(by(Some(1), None), false, &[other.clone(), two.clone()]);
@@ -363,7 +436,10 @@ fn the_score_sort_orders_the_hsps_of_compared_hits_only() {
 fn the_percent_identity_sort_reads_the_best_scoring_hsp() {
     // Hit 0: best HSP 18/20 (90 %); hit 1: best HSP 30/40 (75 %) despite an HSP of 100 %.
     let hit0 = vec![hsp(30.0, 1e-5, 18, 20, (0, 19), 0)];
-    let hit1 = vec![hsp(40.0, 1e-8, 30, 40, (10, 49), 0), hsp(5.0, 1.0, 4, 4, (0, 3), 0)];
+    let hit1 = vec![
+        hsp(40.0, 1e-8, 30, 40, (10, 49), 0),
+        hsp(5.0, 1.0, 4, 4, (0, 3), 0),
+    ];
     let order = sorted(by(Some(3), None), false, &[hit1.clone(), hit0.clone()]);
     assert_eq!(order.hits, vec![1, 0]);
     // The comparison sorted hit 1's HSPs by percent identity (100 % first).
@@ -390,7 +466,10 @@ fn tblastx_s_identity_sort_takes_amino_acid_lengths() {
     // differ by the factor three (GetPercentIdentity of 9 and 30 is 30 %).
     let a = vec![hsp(30.0, 1e-5, 9, 10, (0, 29), 0)];
     let b = vec![hsp(40.0, 1e-7, 25, 30, (0, 89), 0)];
-    assert_eq!(sorted(by(Some(3), None), true, &[b.clone(), a.clone()]).hits, vec![1, 0]);
+    assert_eq!(
+        sorted(by(Some(3), None), true, &[b.clone(), a.clone()]).hits,
+        vec![1, 0]
+    );
     assert_eq!(set_percent_identity(&a, &[0], true, true), 90.0);
     assert_eq!(set_percent_identity(&a, &[0], true, false), 30.0);
     // An HSP whose identities equal its amino-acid length is 100 % only with the translation.
@@ -417,11 +496,23 @@ fn hsp_sorts_apply_to_every_hit() {
         hsp(20.0, 1e-3, 8, 10, (5, 14), 3),
     ];
     let hits = vec![hit.clone(), hit];
-    assert_eq!(sorted(by(None, Some(1)), false, &hits).hsps, vec![vec![1, 2, 0]; 2]);
+    assert_eq!(
+        sorted(by(None, Some(1)), false, &hits).hsps,
+        vec![vec![1, 2, 0]; 2]
+    );
     // Equal query starts: the lower E-value.
-    assert_eq!(sorted(by(None, Some(2)), false, &hits).hsps, vec![vec![1, 2, 0]; 2]);
-    assert_eq!(sorted(by(None, Some(3)), false, &hits).hsps, vec![vec![1, 2, 0]; 2]);
-    assert_eq!(sorted(by(Some(0), Some(4)), false, &hits).hsps, vec![vec![2, 0, 1]; 2]);
+    assert_eq!(
+        sorted(by(None, Some(2)), false, &hits).hsps,
+        vec![vec![1, 2, 0]; 2]
+    );
+    assert_eq!(
+        sorted(by(None, Some(3)), false, &hits).hsps,
+        vec![vec![1, 2, 0]; 2]
+    );
+    assert_eq!(
+        sorted(by(Some(0), Some(4)), false, &hits).hsps,
+        vec![vec![2, 0, 1]; 2]
+    );
     // The hits keep their order.
     assert_eq!(sorted(by(None, Some(4)), false, &hits).hits, vec![0, 1]);
 }

@@ -1090,10 +1090,12 @@ fn lowercase_query_row(row: &mut [u8], frame: i8, low: i32, high: i32, masks: &[
 /// With `-query_loc` and `-subject_loc` the rows are read from the searched letters, and
 /// the hits move into the records (`shift_to_records`) with the records' frames and
 /// lengths. The subjects' titles come from `subjects`, their letters and lengths from
-/// `subject_letters`.
+/// `subject_letters`. `seqalign_identities` holds the Seq-align's `num_ident` of each HSP of
+/// `hits` (`seqalign_identities`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
+    seqalign_identities: &[u32],
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
@@ -1113,8 +1115,29 @@ pub(crate) fn pairwise_hits(
         query_placements,
         subject_placements,
     );
+    debug_assert_eq!(hits.len(), seqalign_identities.len());
     let mut window = Vec::new();
-    hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
+    hits.iter()
+        .zip(seqalign_identities)
+        .map(|(hsp, &seqalign_num_ident)| rows.hit(hsp, seqalign_num_ident, &mut window))
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
+// ```c++
+//     // Set the identity score
+//     if (hsp->num_ident >= 0) {
+//         static const string kNumIdent("num_ident");
+//         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
+//     }
+// ```
+/// The Seq-align's `num_ident` of each HSP of `hits`, by HSP index (`PairwiseHit::seqalign_num_ident`,
+/// which the outfmt 0 report reads with `-sorthits` and `-sorthsps`): the engine's identities,
+/// which `hits` hold until `set_displayed_identities` replaces them by the display counts (the
+/// first value of `engine_counts`, without counting again). Made before that, when outfmt 0's
+/// rows or the hit records are made.
+pub(crate) fn seqalign_identities(hits: &[TblastxHsp]) -> Vec<u32> {
+    hits.iter().map(|hsp| hsp.hit.num_ident as u32).collect()
 }
 
 /// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
@@ -1248,9 +1271,15 @@ impl<'a> PairwiseRows<'a> {
     // one); inlined into the map, the rows of a whole list (or of a pool task's part of it) were
     // one call in V8's baseline code. Other targets keep the compiler's choice.
     /// The outfmt 0 row of `hsp` (its displayed rows, frames, counts, linked-set size and
-    /// subject); `window` is the buffer of a stored subject's letters.
+    /// subject), whose Seq-align's `num_ident` is `seqalign_num_ident` (`seqalign_identities`);
+    /// `window` is the buffer of a stored subject's letters.
     #[cfg_attr(target_arch = "wasm32", inline(never))]
-    pub(crate) fn hit(&self, hsp: &TblastxHsp, window: &mut Vec<u8>) -> PairwiseHit {
+    pub(crate) fn hit(
+        &self,
+        hsp: &TblastxHsp,
+        seqalign_num_ident: u32,
+        window: &mut Vec<u8>,
+    ) -> PairwiseHit {
         let (queries, subjects, subject_letters) =
             (self.queries, self.subjects, self.subject_letters);
         let (query_code, db_code) = (self.query_code, self.db_code);
@@ -1317,6 +1346,7 @@ impl<'a> PairwiseRows<'a> {
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
             subject_stored_gaps: Vec::new(),
+            seqalign_num_ident: seqalign_num_ident as usize,
         }
     }
 }
@@ -2039,6 +2069,40 @@ mod tests {
             subject_frame: 1,
             num: 1,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203 (quoted at
+    // `seqalign_identities`): each row keeps its HSP's Seq-align `num_ident`, the engine's
+    // identities that the HSP holds before `set_displayed_identities` replaces them, while
+    // `hit.num_ident` is the count of the displayed rows (here 10 of 10 equal residues).
+    #[test]
+    fn rows_keep_the_seqalign_identities_of_their_hsps() {
+        let code = GeneticCode::from_id(1);
+        let letters = b"ATGGCTAAACTGGAAGGTCCATTTAGCCGA";
+        let queries = [FastaRecord::new("q", b"q", letters)];
+        let subjects = [FastaRecord::new("s", b"s", letters)];
+        let mut hits = [hsp(0, 0, 50, 1e-5, 0), hsp(0, 0, 40, 1e-4, 0)];
+        (hits[0].hit.num_ident, hits[1].hit.num_ident) = (7, 9);
+        let identities = seqalign_identities(&hits);
+        assert_eq!(identities, [7, 9]);
+        let placements = Placements::default();
+        let rows = pairwise_hits(
+            &hits,
+            &identities,
+            &queries,
+            &subjects,
+            SubjectLetters::Records(&subjects),
+            &[TblastxQueryStats::default()],
+            &code,
+            &code,
+            &placements,
+            &placements,
+        );
+        let counts: Vec<(usize, usize)> = rows
+            .iter()
+            .map(|row| (row.hit.num_ident, row.seqalign_num_ident))
+            .collect();
+        assert_eq!(counts, [(10, 7), (10, 9)]);
     }
 
     // NCBI c++/src/objects/seqfeat/Genetic_code_table.cpp:94-112: the display reads the

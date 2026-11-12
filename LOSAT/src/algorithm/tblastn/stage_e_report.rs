@@ -1038,6 +1038,27 @@ fn pairwise_hits(
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
                     subject_stored_gaps: Vec::new(),
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:519-531
+                    // ```c
+                    //             query = query_blk->sequence +
+                    //                 query_info->contexts[hsp->context].query_offset;
+                    //             query_nomask = query_blk->sequence_nomask +
+                    //                 query_info->contexts[hsp->context].query_offset;
+                    //         }
+                    //
+                    //         /* Translate subject if needed. */
+                    //         if (program_number == eBlastTypeTblastn) {
+                    //             const Uint1* target_sequence = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+                    //             status = Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp, scoring_options, 0, sbp);
+                    //         }
+                    //         else
+                    //             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
+                    // ```
+                    // The Seq-align's `num_ident` (`tabular.rs`, the outfmt 8 / 11 / 12
+                    // writers): the engine's identities, counted on the masked query, so that a
+                    // SEG-masked letter is a mismatch there and an identity in the rows
+                    // (`report_num_ident`).
+                    seqalign_num_ident: usize::try_from(payload.num_ident)?,
                 });
             }
         }

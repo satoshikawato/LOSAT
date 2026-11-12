@@ -152,12 +152,36 @@ pub struct PairwiseHit {
     /// NCBI counts the coordinates of the rows by the Dense-seg, where these columns are
     /// residues (`write_sequence_row`).
     pub subject_stored_gaps: Vec<u32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
+    // ```c++
+    //     // Set the identity score
+    //     if (hsp->num_ident >= 0) {
+    //         static const string kNumIdent("num_ident");
+    //         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:828-830
+    // ```c++
+    //     //look for scores at seqalign level first
+    //     hasScore = s_GetBlastScore(aln.GetScore(), score, bits, evalue,
+    //                                sum_n, num_ident, use_this_gi, comp_adj_method);
+    // ```
+    /// The Seq-align's `num_ident` score of the HSP: the engine's identities (`BlastHSP::num_ident`),
+    /// the value that the program's Seq-align writer (outfmt 8, 11, 12) writes, which the report
+    /// reads back with `GetAlnScores` for the sorts of `-sorthits` and `-sorthsps` and the
+    /// description table's "Max ident" (`hit_sort::HspScores`). It can differ from `hit.num_ident`,
+    /// the identities of the displayed rows: TBLASTN's engine counts a SEG-masked query letter
+    /// as a mismatch; BLASTP's display recount (pyrrolysine, stored gap characters), BLASTX's and
+    /// TBLASTX's rows translated by the display's tables count others. Every count is at least
+    /// 0, so every Seq-align carries it.
+    pub(crate) seqalign_num_ident: usize,
 }
 
 impl From<Hit> for PairwiseHit {
     fn from(hit: Hit) -> Self {
         let positives = hit.num_positives;
         let gaps = hit.gap_letters();
+        let seqalign_num_ident = hit.num_ident;
         Self {
             hit,
             query_seq: None,
@@ -171,6 +195,7 @@ impl From<Hit> for PairwiseHit {
             comp_adjust_method: None,
             sum_n: None,
             subject_stored_gaps: Vec::new(),
+            seqalign_num_ident,
         }
     }
 }
@@ -1028,8 +1053,8 @@ fn write_alignment_with_sequences<W: Write>(
     // on its plus strand, showalign.cpp:1852-1858).
     let subject_step: isize = if hit.s_start > hit.s_end { -1 } else { 1 };
 
-    let mut q_next = hit.q_start as isize;
-    let mut s_next = hit.s_start as isize;
+    let mut query_row = RowCursor::new(hit.q_start as isize, 1, 1);
+    let mut subject_row = RowCursor::new(hit.s_start as isize, subject_step, 1);
     let mut offset = 0;
 
     while offset < q_chars.len() {
@@ -1075,24 +1100,25 @@ fn write_alignment_with_sequences<W: Write>(
         write_sequence_row(
             writer,
             "Query",
-            &q_chars[offset..end],
-            0,
-            &mut q_next,
-            1,
+            &mut query_row,
+            residue_count(&q_chars[offset..end], 0),
             max_start_len,
             first_chunk,
+            |writer| write_chars(writer, &q_chars[offset..end]),
         )?;
         write_spaces(writer, max_id_len + 2 + max_start_len + 2)?;
         writeln!(writer, "{}", middle)?;
         write_sequence_row(
             writer,
             "Sbjct",
-            &s_chars[offset..end],
-            stored_gaps_between(subject_stored_gaps, offset, end),
-            &mut s_next,
-            subject_step,
+            &mut subject_row,
+            residue_count(
+                &s_chars[offset..end],
+                stored_gaps_between(subject_stored_gaps, offset, end),
+            ),
             max_start_len,
             first_chunk,
+            |writer| write_chars(writer, &s_chars[offset..end]),
         )?;
         writeln!(writer)?;
 
@@ -1133,23 +1159,25 @@ fn write_alignment_with_sequences<W: Write>(
 /// ```
 /// A later chunk without residues ends where the previous chunk ended
 /// (`end == prev_stop`). `AddSpace` takes a `size_t`, so an omitted start gives
-/// `maxStartLen + 2` spaces. The residues of the chunk are its letters other than `-` and
-/// its `stored_gaps` columns whose `-` is a stored gap character (a residue of the
-/// Dense-seg).
-#[allow(clippy::too_many_arguments)]
+/// `maxStartLen + 2` spaces. Every program's rows are written here (`write_letters` writes the
+/// chunk's letters): the rows of letters (BLASTN, BLASTP, RPSBLAST, PSIBLAST, and the protein
+/// rows of BLASTX and TBLASTN) and the rows translated from nucleotides (BLASTX's query,
+/// TBLASTN's subject, both rows of TBLASTX), whose chunk of `count` residues runs over
+/// `3 * count` nucleotides (`RowCursor`). A translated row's first chunk spans a codon, so its
+/// start and end differ and it always shows them; a first chunk of one residue at 1 of a row of
+/// letters shows none (the `-line_length 1` rows of an HSP from a sequence's first letter).
 fn write_sequence_row<W: Write>(
     writer: &mut W,
     label: &str,
-    residues: &[char],
-    stored_gaps: usize,
-    next: &mut isize,
-    step: isize,
+    row: &mut RowCursor,
+    count: usize,
     width: usize,
     first_chunk: bool,
+    write_letters: impl FnOnce(&mut W) -> io::Result<()>,
 ) -> io::Result<()> {
-    let count = (residues.iter().filter(|&&c| c != '-').count() + stored_gaps) as isize;
-    let start = *next;
-    let end = start + step * (count - 1);
+    let count = count as isize;
+    let start = row.next;
+    let end = start + row.step * (row.letters * count - 1);
     let shown = !(!first_chunk && count == 0 || first_chunk && start == 1 && end == 1);
     write!(writer, "{label}")?;
     write_spaces(writer, 2)?;
@@ -1159,15 +1187,73 @@ fn write_sequence_row<W: Write>(
     } else {
         write_spaces(writer, width + 2)?;
     }
-    for &residue in residues {
-        write!(writer, "{residue}")?;
-    }
+    write_letters(writer)?;
     write_spaces(writer, 2)?;
     if shown {
         write!(writer, "{end}")?;
     }
     writeln!(writer)?;
-    *next += step * count;
+    row.next += row.step * row.letters * count;
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:227-230,305,358
+// ```c++
+//     bool plus     = IsPositiveStrand(row);
+//     int  width    = GetWidth(row);
+//
+//     scrn_width *= width;
+//     ...
+//                         scrn_lft_seq_pos = plus ? start : stop;
+//     ...
+//                     scrn_rgt_seq_pos = plus ? stop : start;
+// ```
+/// Where one row of an alignment is (`write_sequence_row`): the coordinate of its next residue,
+/// the direction of its coordinates (1, or -1 on a minus strand or frame) and the letters of its
+/// sequence per residue (`GetWidth`: 1, or 3 for a row translated from nucleotides, whose
+/// screen of `m_LineLen` residues spans three times as many nucleotides).
+struct RowCursor {
+    next: isize,
+    step: isize,
+    letters: isize,
+}
+
+impl RowCursor {
+    fn new(next: isize, step: isize, letters: isize) -> Self {
+        Self {
+            next,
+            step,
+            letters,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:302-305
+// ```c++
+//                 // take care of coords if necessary
+//                 if (record_coords) {
+//                     if (scrn_lft_seq_pos < 0) {
+//                         scrn_lft_seq_pos = plus ? start : stop;
+// ```
+/// The residues of a chunk of a row, the segments of the Dense-seg that its coordinates count
+/// (a gap segment has none): its letters other than `-` and its `stored_gaps` columns whose `-`
+/// is a stored gap character (a residue of the Dense-seg).
+fn residue_count<T: Copy + PartialEq + From<u8>>(letters: &[T], stored_gaps: usize) -> usize {
+    let gap = T::from(b'-');
+    letters.iter().filter(|&&letter| letter != gap).count() + stored_gaps
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2491-2493
+// ```c++
+//     _ASSERT((int)sequence.size() > start);
+//     list<CRange<int> > actualSeqloc;
+//     string actualSeq = sequence.substr(start, len);
+// ```
+/// Writes the letters of a chunk of a row kept as `char`s (`write_alignment_with_sequences`).
+fn write_chars<W: Write>(writer: &mut W, letters: &[char]) -> io::Result<()> {
+    for &letter in letters {
+        write!(writer, "{letter}")?;
+    }
     Ok(())
 }
 
@@ -3877,20 +3963,23 @@ fn write_tblastx_alignment<W: Write>(
             1
         }
     };
-    let q_direction = direction(hit.query_frame);
-    let s_direction = direction(hit.subject_frame);
-    let mut q_pos = hit.hit.q_start as isize;
-    let mut s_pos = hit.hit.s_start as isize;
-    for (qpart, spart) in q
+    // Both rows are translated: three nucleotides per residue; no row has a gap.
+    let mut query_row = RowCursor::new(hit.hit.q_start as isize, direction(hit.query_frame), 3);
+    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, direction(hit.subject_frame), 3);
+    for (chunk, (qpart, spart)) in q
         .chunks(config.line_length)
         .zip(s.chunks(config.line_length))
+        .enumerate()
     {
-        let q_end = q_pos + q_direction * (3 * qpart.len() as isize - 1);
-        let s_end = s_pos + s_direction * (3 * spart.len() as isize - 1);
-        write!(writer, "Query  {q_pos}")?;
-        write_spaces(writer, width + 2 - digit_count(q_pos.unsigned_abs()))?;
-        writer.write_all(qpart)?;
-        writeln!(writer, "  {q_end}")?;
+        write_sequence_row(
+            writer,
+            "Query",
+            &mut query_row,
+            qpart.len(),
+            width,
+            chunk == 0,
+            |writer| writer.write_all(qpart),
+        )?;
         write_spaces(writer, 7 + width + 2)?;
         for (&qc, &sc) in qpart.iter().zip(spart) {
             let query_residue = qc.to_ascii_uppercase();
@@ -3904,13 +3993,16 @@ fn write_tblastx_alignment<W: Write>(
             writer.write_all(&[mid])?;
         }
         writeln!(writer)?;
-        write!(writer, "Sbjct  {s_pos}")?;
-        write_spaces(writer, width + 2 - digit_count(s_pos.unsigned_abs()))?;
-        writer.write_all(spart)?;
-        writeln!(writer, "  {s_end}")?;
+        write_sequence_row(
+            writer,
+            "Sbjct",
+            &mut subject_row,
+            spart.len(),
+            width,
+            chunk == 0,
+            |writer| writer.write_all(spart),
+        )?;
         writeln!(writer)?;
-        q_pos = q_end + q_direction;
-        s_pos = s_end + s_direction;
     }
     Ok(())
 }
@@ -4808,6 +4900,67 @@ mod tests {
         );
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1598-1626 (quoted at
+    // `write_sequence_row`): the rule `j == 0 && start == 1 && end == 1` hides the coordinates of
+    // a first row of one residue at 1 in BLASTX's subject and TBLASTN's query, the rows of letters
+    // (NCBI 2.17.0 `-line_length 1`: "Sbjct       M  ", "Query        M  "); a translated row's
+    // first residue spans the nucleotides 1 to 3, so it keeps them, in TBLASTX's rows too
+    // ("Query  1    F  3").
+    #[test]
+    fn translated_alignment_rows_of_one_column_hide_only_a_letter_row_at_1() {
+        let config = PairwiseConfig {
+            line_length: 1,
+            ..PairwiseConfig::default()
+        };
+        let hit = |q_end: usize, s_end: usize, query_frame, subject_frame| {
+            let mut hit = PairwiseHit::from(Hit {
+                length: 2,
+                q_start: 1,
+                q_end,
+                s_start: 1,
+                s_end,
+                gap_info: None,
+                ..make_hit()
+            });
+            hit.query_seq = Some("MR".to_string());
+            hit.subject_seq = Some("MR".to_string());
+            hit.query_frame = query_frame;
+            hit.subject_frame = subject_frame;
+            hit
+        };
+        let text = |write: &dyn Fn(&mut Vec<u8>) -> io::Result<()>| {
+            let mut output = Vec::new();
+            write(&mut output).unwrap();
+            String::from_utf8(output).unwrap()
+        };
+        let blastx = hit(6, 2, Some(1), None);
+        assert_eq!(
+            text(&|out| write_blastx_alignment(out, &blastx, &config)),
+            "Query  1  M  3\n          M\nSbjct     M  \n\n\
+             Query  4  R  6\n          R\nSbjct  2  R  2\n\n"
+        );
+        let tblastn = hit(2, 6, None, Some(1));
+        assert_eq!(
+            text(&|out| write_tblastn_alignment(out, &tblastn, &config)),
+            "Query     M  \n          M\nSbjct  1  M  3\n\n\
+             Query  2  R  2\n          R\nSbjct  4  R  6\n\n"
+        );
+        let tblastx = hit(6, 6, Some(1), Some(1));
+        assert_eq!(
+            text(&|out| write_tblastx_alignment(out, &tblastx, &config)),
+            "Query  1  M  3\n          M\nSbjct  1  M  3\n\n\
+             Query  4  R  6\n          R\nSbjct  4  R  6\n\n"
+        );
+        // On a minus frame the first residue of a translated row at 1 to 3 runs from 3 to 1.
+        let mut minus = hit(1, 2, Some(-1), None);
+        minus.hit.q_start = 6;
+        assert_eq!(
+            text(&|out| write_blastx_alignment(out, &minus, &config)),
+            "Query  6  M  4\n          M\nSbjct     M  \n\n\
+             Query  3  R  1\n          R\nSbjct  2  R  2\n\n"
+        );
+    }
+
     #[test]
     fn test_write_hsp_info() {
         let hit = PairwiseHit::from(make_hit());
@@ -5332,16 +5485,15 @@ fn write_tblastn_alignment<W: Write>(
     } else {
         1
     };
-    let mut q_pos = hit.hit.q_start;
-    let mut s_pos = hit.hit.s_start as isize;
-    for (qpart, spart) in q
+    // The query's row of letters, and the subject's translated row: three nucleotides per
+    // residue, in the direction of its frame.
+    let mut query_row = RowCursor::new(hit.hit.q_start as isize, 1, 1);
+    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, direction, 3);
+    for (chunk, (qpart, spart)) in q
         .chunks(config.line_length)
         .zip(s.chunks(config.line_length))
+        .enumerate()
     {
-        let q_count = qpart.iter().filter(|&&c| c != b'-').count();
-        let s_count = spart.iter().filter(|&&c| c != b'-').count();
-        let q_end = q_pos + q_count.saturating_sub(1);
-        let s_end = s_pos + direction * (3 * s_count as isize - 1);
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1605-1627
         // ```c++
         //     //not to display start and stop number for empty row
@@ -5354,20 +5506,17 @@ fn write_tblastn_alignment<W: Write>(
         //      //not to display stop number for empty row in the middle
         //     if (!(j > 0 && end == prev_stop)
         // ```
-        // A row of gaps only shows no coordinates (as `write_blastx_alignment`).
-        write!(writer, "Query  ")?;
-        if q_count > 0 {
-            write!(writer, "{q_pos}")?;
-            write_spaces(writer, width + 2 - digit_count(q_pos))?;
-        } else {
-            write_spaces(writer, width + 2)?;
-        }
-        writer.write_all(qpart)?;
-        write!(writer, "  ")?;
-        if q_count > 0 {
-            write!(writer, "{q_end}")?;
-        }
-        writeln!(writer)?;
+        // A row of gaps only shows no coordinates, nor a first row of one residue at 1
+        // (`write_sequence_row`).
+        write_sequence_row(
+            writer,
+            "Query",
+            &mut query_row,
+            residue_count(qpart, 0),
+            width,
+            chunk == 0,
+            |writer| writer.write_all(qpart),
+        )?;
         write_spaces(writer, 7 + width + 2)?;
         for (&qc, &sc) in qpart.iter().zip(spart) {
             // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
@@ -5384,22 +5533,16 @@ fn write_tblastn_alignment<W: Write>(
             writer.write_all(&[mid])?;
         }
         writeln!(writer)?;
-        write!(writer, "Sbjct  ")?;
-        if s_count > 0 {
-            write!(writer, "{s_pos}")?;
-            write_spaces(writer, width + 2 - digit_count(s_pos.unsigned_abs()))?;
-        } else {
-            write_spaces(writer, width + 2)?;
-        }
-        writer.write_all(spart)?;
-        write!(writer, "  ")?;
-        if s_count > 0 {
-            write!(writer, "{s_end}")?;
-        }
+        write_sequence_row(
+            writer,
+            "Sbjct",
+            &mut subject_row,
+            residue_count(spart, 0),
+            width,
+            chunk == 0,
+            |writer| writer.write_all(spart),
+        )?;
         writeln!(writer)?;
-        writeln!(writer)?;
-        q_pos += q_count;
-        s_pos += direction * 3 * s_count as isize;
     }
     Ok(())
 }
@@ -6070,33 +6213,25 @@ fn write_blastx_alignment(
     } else {
         1
     };
-    let mut qp = hit.hit.q_start as isize;
-    let mut sp = hit.hit.s_start;
+    // The query's translated row (three nucleotides per residue, in the direction of its frame)
+    // and the subject's row of letters.
+    let mut query_row = RowCursor::new(hit.hit.q_start as isize, direction, 3);
+    let mut subject_row = RowCursor::new(hit.hit.s_start as isize, 1, 1);
     for (chunk, (qpart, spart)) in q
         .chunks(config.line_length)
         .zip(s.chunks(config.line_length))
         .enumerate()
     {
         let first = chunk * config.line_length;
-        let qn = qpart.iter().filter(|&&c| c != b'-').count();
-        // The stored gap characters of the subject are residues (`write_sequence_row`).
-        let sn = spart.iter().filter(|&&c| c != b'-').count()
-            + stored_gaps_between(&hit.subject_stored_gaps, first, first + spart.len());
-        let qe = qp + direction * (3 * qn as isize - 1);
-        let se = sp + sn.saturating_sub(1);
-        write!(writer, "Query  ")?;
-        if qn > 0 {
-            write!(writer, "{qp}")?;
-            write_spaces(writer, width + 2 - digit_count(qp.unsigned_abs()))?;
-        } else {
-            write_spaces(writer, width + 2)?;
-        }
-        writer.write_all(qpart)?;
-        write!(writer, "  ")?;
-        if qn > 0 {
-            write!(writer, "{qe}")?;
-        }
-        writeln!(writer)?;
+        write_sequence_row(
+            writer,
+            "Query",
+            &mut query_row,
+            residue_count(qpart, 0),
+            width,
+            chunk == 0,
+            |writer| writer.write_all(qpart),
+        )?;
         write_spaces(writer, 7 + width + 2)?;
         // Both rows may carry lower case (the query's and, with `-lcase_masking`, a `-subject`'s,
         // `blastx/x_soft_subject.rs`), which NCBI applies only when it prints a row
@@ -6113,22 +6248,20 @@ fn write_blastx_alignment(
             writer.write_all(&[middle])?;
         }
         writeln!(writer)?;
-        write!(writer, "Sbjct  ")?;
-        if sn > 0 {
-            write!(writer, "{sp}")?;
-            write_spaces(writer, width + 2 - digit_count(sp))?;
-        } else {
-            write_spaces(writer, width + 2)?;
-        }
-        writer.write_all(spart)?;
-        write!(writer, "  ")?;
-        if sn > 0 {
-            write!(writer, "{se}")?;
-        }
+        // The stored gap characters of the subject are residues (`residue_count`).
+        write_sequence_row(
+            writer,
+            "Sbjct",
+            &mut subject_row,
+            residue_count(
+                spart,
+                stored_gaps_between(&hit.subject_stored_gaps, first, first + spart.len()),
+            ),
+            width,
+            chunk == 0,
+            |writer| writer.write_all(spart),
+        )?;
         writeln!(writer)?;
-        writeln!(writer)?;
-        qp += direction * 3 * qn as isize;
-        sp += sn;
     }
     Ok(())
 }
@@ -6224,6 +6357,7 @@ mod tblastx_tests {
             comp_adjust_method: None,
             sum_n: Some(sum_n),
             subject_stored_gaps: Vec::new(),
+            seqalign_num_ident: 60,
         }
     }
 
@@ -6407,8 +6541,18 @@ mod tblastx_tests {
                 .into_iter()
                 .collect();
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, &[], true, false, None)
-            .unwrap();
+        write_blastn_description_table(
+            &mut out,
+            &[0, 1],
+            true,
+            &hits,
+            &titles,
+            &[],
+            true,
+            false,
+            None,
+        )
+        .unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].ends_with("Score     E"), "{text}");
@@ -6420,34 +6564,65 @@ mod tblastx_tests {
     // NCBI c++/src/objtools/align_format/showdefline.cpp:771-840,930-975 (`-sorthits`): the
     // Total score, Query cover and Max ident columns, as NCBI BLAST+ 2.17.0 `blastp -sorthits 0`
     // writes them (probe t1 `blastp.s.h0kx`): the total in the HSPs' order, the cover of the
-    // union of the query ranges, the identity of the best HSP, and the trailing spaces of the
-    // nine letters of "Max ident".
+    // union of the query ranges, the identity of the best HSP (its Seq-align's `num_ident`,
+    // `PairwiseHit::seqalign_num_ident`), and the trailing spaces of the nine letters of
+    // "Max ident".
     #[test]
     fn sorthits_adds_the_total_cover_and_identity_columns() {
         let mut a = tblastx_hit(1);
-        (a.hit.bit_score, a.hit.e_value, a.hit.num_ident, a.hit.length) = (28.1, 0.18, 27, 99);
+        (
+            a.hit.bit_score,
+            a.hit.e_value,
+            a.seqalign_num_ident,
+            a.hit.length,
+        ) = (28.1, 0.18, 27, 99);
         (a.hit.q_start, a.hit.q_end) = (1, 99);
         let mut b1 = a.clone();
         b1.hit.s_idx = 1;
-        (b1.hit.bit_score, b1.hit.e_value, b1.hit.num_ident, b1.hit.length) = (24.6, 2.3, 16, 25);
+        (
+            b1.hit.bit_score,
+            b1.hit.e_value,
+            b1.seqalign_num_ident,
+            b1.hit.length,
+        ) = (24.6, 2.3, 16, 25);
         (b1.hit.q_start, b1.hit.q_end) = (10, 34);
         let mut b2 = b1.clone();
-        (b2.hit.bit_score, b2.hit.e_value, b2.hit.num_ident, b2.hit.length) = (24.6, 2.4, 10, 20);
+        (
+            b2.hit.bit_score,
+            b2.hit.e_value,
+            b2.seqalign_num_ident,
+            b2.hit.length,
+        ) = (24.6, 2.4, 10, 20);
         (b2.hit.q_start, b2.hit.q_end) = (49, 30);
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&a]), (1, vec![&b1, &b2])].into_iter().collect();
         let titles: std::collections::HashMap<u32, Vec<u8>> =
-            [(0, b"s0".to_vec()), (1, b"s1".to_vec())].into_iter().collect();
+            [(0, b"s0".to_vec()), (1, b"s1".to_vec())]
+                .into_iter()
+                .collect();
         let columns = Some(SortColumns {
             query_length: 897,
             tblastx: false,
         });
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, &[], false, true, columns)
-            .unwrap();
+        write_blastn_description_table(
+            &mut out,
+            &[0, 1],
+            true,
+            &hits,
+            &titles,
+            &[],
+            false,
+            true,
+            columns,
+        )
+        .unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[0], format!("{}Score   Total  Query    E     Max", " ".repeat(70)));
+        assert_eq!(
+            lines[0],
+            format!("{}Score   Total  Query    E     Max", " ".repeat(70))
+        );
         assert_eq!(
             lines[1],
             "Sequences producing significant alignments:                          (Bits)   Score  cover   Value  Ident"
@@ -6455,27 +6630,88 @@ mod tblastx_tests {
         assert_eq!(lines[2], "");
         let label = |name: &str| format!("{name:<68}");
         // 99 of 897 letters (11 %), 27 of 99 identities (27 %).
-        assert_eq!(lines[3], format!("{}  28.1     28.1   11%    0.18   27%       ", label("s0")));
+        assert_eq!(
+            lines[3],
+            format!("{}  28.1     28.1   11%    0.18   27%       ", label("s0"))
+        );
         // 24.6 + 24.6; positions 10-49 (40 of 897: 4 %); the first of the equal best HSPs.
-        assert_eq!(lines[4], format!("{}  24.6     49.2   4%     2.3    64%       ", label("s1")));
+        assert_eq!(
+            lines[4],
+            format!("{}  24.6     49.2   4%     2.3    64%       ", label("s1"))
+        );
         // TBLASTX: the identity over three nucleotides per amino acid (60 of 183: 33 %), after
         // the N column ("NIdent").
         let t = tblastx_hit(2);
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&t])].into_iter().collect();
-        let titles: std::collections::HashMap<u32, Vec<u8>> = [(0, b"t".to_vec())].into_iter().collect();
+        let titles: std::collections::HashMap<u32, Vec<u8>> =
+            [(0, b"t".to_vec())].into_iter().collect();
         let columns = Some(SortColumns {
             query_length: 300,
             tblastx: true,
         });
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0], true, &hits, &titles, &[], true, false, columns)
-            .unwrap();
+        write_blastn_description_table(
+            &mut out,
+            &[0],
+            true,
+            &hits,
+            &titles,
+            &[],
+            true,
+            false,
+            columns,
+        )
+        .unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[1].ends_with("(Bits)   Score  cover   Value  NIdent"), "{text}");
+        assert!(
+            lines[1].ends_with("(Bits)   Score  cover   Value  NIdent"),
+            "{text}"
+        );
         // Positions 18-200: 183 of 300 (61 %).
-        assert!(lines[3].ends_with("  120      120    61%    2e-30  2  33%       "), "{text}");
+        assert!(
+            lines[3].ends_with("  120      120    61%    2e-30  2  33%       "),
+            "{text}"
+        );
+        // The identity is the Seq-align's, not that of the rows: NCBI BLAST+ 2.17.0 `tblastn
+        // -query` (the first record of t1 `tn_q.faa`) `-subject tn_s.fna -sorthits 0` shows
+        // "94%" for an HSP of "Identities = 284/286" whose engine counted the query's SEG-masked
+        // letters as mismatches, and "99%" with `-seg no`; here 270 engine identities of 286.
+        let mut masked = tblastx_hit(1);
+        (
+            masked.hit.num_ident,
+            masked.seqalign_num_ident,
+            masked.hit.length,
+        ) = (284, 270, 286);
+        (masked.hit.q_start, masked.hit.q_end) = (1, 286);
+        let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            [(0, vec![&masked])].into_iter().collect();
+        let columns = Some(SortColumns {
+            query_length: 286,
+            tblastx: false,
+        });
+        let mut out = Vec::new();
+        write_blastn_description_table(
+            &mut out,
+            &[0],
+            true,
+            &hits,
+            &titles,
+            &[],
+            false,
+            true,
+            columns,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.lines()
+                .nth(3)
+                .unwrap()
+                .ends_with("  100%   2e-30  94%       "),
+            "{text}"
+        );
     }
 
     // NCBI c++/src/objtools/align_format/showdefline.cpp:1133-1138,940-944 and
@@ -6493,15 +6729,27 @@ mod tblastx_tests {
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&a]), (1, vec![&b, &c])].into_iter().collect();
         let titles: std::collections::HashMap<u32, Vec<u8>> =
-            [(0, b"s0".to_vec()), (1, b"s1".to_vec())].into_iter().collect();
+            [(0, b"s0".to_vec()), (1, b"s1".to_vec())]
+                .into_iter()
+                .collect();
         let columns = Some(SortColumns {
             query_length: 300,
             tblastx: false,
         });
         let table = |order: &[u32], last_row_counted: bool, columns: Option<SortColumns>| {
             let mut out = Vec::new();
-            write_blastn_description_table(&mut out, order, last_row_counted, &hits, &titles, &[], false, true, columns)
-                .map(|()| out)
+            write_blastn_description_table(
+                &mut out,
+                order,
+                last_row_counted,
+                &hits,
+                &titles,
+                &[],
+                false,
+                true,
+                columns,
+            )
+            .map(|()| out)
         };
         let error = table(&[0, 1], true, columns).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
@@ -6535,8 +6783,16 @@ mod tblastx_tests {
         let ids = [Arc::<str>::from("YOL075C")];
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
-            write_subject_summary_table_with_sum_n(&mut out, &[0], true, &hits, &ids, show_sum_n, None)
-                .unwrap();
+            write_subject_summary_table_with_sum_n(
+                &mut out,
+                &[0],
+                true,
+                &hits,
+                &ids,
+                show_sum_n,
+                None,
+            )
+            .unwrap();
             let text = String::from_utf8(out).unwrap();
             let lines: Vec<&str> = text.lines().collect();
             assert_eq!(
@@ -6672,8 +6928,18 @@ mod tblastx_tests {
         let titles: std::collections::HashMap<u32, Vec<u8>> =
             [(0, b"id \x81 x".to_vec())].into_iter().collect();
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0], true, &hits, &titles, &[], false, false, None)
-            .unwrap();
+        write_blastn_description_table(
+            &mut out,
+            &[0],
+            true,
+            &hits,
+            &titles,
+            &[],
+            false,
+            false,
+            None,
+        )
+        .unwrap();
         let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
         assert!(row.starts_with(&[&b"Unknown"[..], &[b' '; 61], b"  120"].concat()));
         let mut out = Vec::new();

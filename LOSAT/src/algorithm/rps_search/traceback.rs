@@ -11,11 +11,12 @@ use super::rescale::{residue_probabilities, rps_rescale_pssm};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHsp, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
+use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::traceback0::{trace_hsps, TraceHsps};
 use crate::common::GapEditOp;
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::KarlinParams;
 
 /// What the traceback of every query of a volume reads besides the query.
 pub(crate) struct RpsTraceback<'a> {
@@ -37,7 +38,6 @@ pub(crate) struct RpsTraceback<'a> {
     pub(crate) x_drop_final: i32,
     /// `kbp_gap_std` (BLOSUM62 11/1's table values), whose K each list replaces.
     pub(crate) gapped: KarlinParams,
-    pub(crate) gumbel: &'a BlastGumbelBlk,
     /// `hit_options->expect_value`.
     pub(crate) expect_value: f64,
     /// `hit_options->hitlist_size`.
@@ -264,10 +264,11 @@ impl RpsTraceback<'_> {
         query: &[u8],
         q_idx: u32,
         batch_kbp: &KarlinParams,
+        stats: EvalueStats<'_>,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
-        if let Some(redo) = &self.redo {
-            return self.trace_query_redo(redo, prelim, query, q_idx, batch_kbp, scratch);
+        if self.redo.is_some() {
+            return self.trace_query_redo(prelim, query, q_idx, batch_kbp, stats, scratch);
         }
         let probabilities = residue_probabilities(query);
         let mut lists: Vec<BlastpHspList<XPrelimHsp>> = prelim
@@ -319,7 +320,7 @@ impl RpsTraceback<'_> {
                 hsps,
                 best_evalue: f64::MAX,
             };
-            self.post_update(&mut hsp_list, &karlin, query.len(), length);
+            self.post_update(&mut hsp_list, &karlin, stats, query.len(), length);
             if hsp_list.hsps.is_empty() {
                 continue;
             }
@@ -407,11 +408,14 @@ impl RpsTraceback<'_> {
     /// of the query information the profile's offsets, and the copy shares its context array
     /// with the caller's (`BlastMemDup` of the structure, blast_traceback.c:346-356); NCBI's
     /// calls show it (`BLAST_SpougeStoE` with `n` the profile's length, LD_PRELOAD shim of the
-    /// design, `PR/DESIGN_ps11.md` §2.4).
+    /// design, `PR/DESIGN_ps11.md` §2.4). Without the Gumbel block (`-searchsp`, `OLD_FSC`) the
+    /// e-value is `BLAST_KarlinStoE_simple` on the query's search space and the same scaled
+    /// block (`EvalueStats::e_value`, blast_hits.c:1885-1889).
     fn post_update(
         &self,
         hsp_list: &mut BlastpHspList,
         karlin: &KarlinParams,
+        stats: EvalueStats<'_>,
         query_length: usize,
         profile_length: usize,
     ) {
@@ -422,10 +426,9 @@ impl RpsTraceback<'_> {
             ..*karlin
         };
         for hsp in &mut hsp_list.hsps {
-            hsp.e_value = blast_spouge_stoe(
+            hsp.e_value = stats.e_value(
                 hsp.raw_score,
                 &scaled,
-                self.gumbel,
                 query_length as i32,
                 profile_length as i32,
             );

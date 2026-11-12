@@ -98,7 +98,8 @@ impl Search {
             Commands::Psiblast(_)
             | Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
-            | Commands::Makedb(_) => false,
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => false,
         }
     }
 

@@ -15,6 +15,7 @@ pub const ENTRY_NAMES: [&str; 10] = [
     "rpstblastn",
     "makeblastdb",
     "blastdbcmd",
+    "rpsbproc",
 ];
 
 /// The program of an executable called `argv0`: its file name without `.exe`, when that is one
@@ -49,3 +50,7 @@ where
     }
     words
 }
+
+#[cfg(test)]
+#[path = "entry_names_tests.rs"]
+mod entry_names_tests;

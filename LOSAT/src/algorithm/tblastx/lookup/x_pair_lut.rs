@@ -847,7 +847,6 @@ pub(crate) fn x_assert_same_contexts_as(
     for (c, (a, b)) in direct.iter().zip(reference).enumerate() {
         let QueryContext {
             q_idx,
-            f_idx,
             frame,
             aa_seq,
             aa_seq_nomask,
@@ -868,7 +867,6 @@ pub(crate) fn x_assert_same_contexts_as(
         };
         assert!(
             *q_idx == b.q_idx
-                && *f_idx == b.f_idx
                 && *frame == b.frame
                 && *aa_seq == b.aa_seq
                 && *aa_seq_nomask == b.aa_seq_nomask

@@ -591,6 +591,26 @@ mod tests {
             expected.extend_from_slice(error.as_bytes());
             assert_eq!(*merged.0.borrow(), expected, "{words:?}");
         }
+        // A bad mask algorithm id of a batch line, between the outputs of its neighbours
+        // (NCBI 2.17.0 `-ipg_batch - -outfmt "%a %g" 2>&1`, review of K1b, R3-F1).
+        let db = fixture_db("blastdbcmd/db/m/pmg");
+        let words: Vec<OsString> = ["-db", db.as_str(), "-ipg_batch", "-", "-outfmt", "%a %g"]
+            .iter()
+            .map(OsString::from)
+            .collect();
+        let merged = Merged(Default::default());
+        let status = run_with(
+            &words,
+            &mut &b"1001 21\n1002 99\n1003 21\n"[..],
+            &mut merged.clone(),
+            &mut merged.clone(),
+        );
+        assert_eq!(status, 1);
+        assert_eq!(
+            String::from_utf8(merged.0.borrow().clone()).unwrap(),
+            "XP_1001.1 1001\nError: [blastdbcmd] Invalid filtering algorithm ID: 99\nError: \
+             [blastdbcmd] Skipped IPG : 1002\nXP_1003.1 1003\n"
+        );
     }
 
     // NCBI 2.17.0 with `-out /dev/full` (F2): the serial stream of `-metadata` reports the

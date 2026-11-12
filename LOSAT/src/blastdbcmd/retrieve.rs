@@ -585,14 +585,26 @@ enum OutputKind {
 // 	return true;
 // }
 // ```
-/// `s_IsMaskAlgoIdValid`: whether the database has the algorithm `id` (a negative id is not
-/// looked up), with NCBI's error line for one it does not have.
+/// `s_IsMaskAlgoIdValid` before the retrieval writes anything: whether the database has the
+/// algorithm `id` (a negative id is not looked up), with NCBI's error line for one it does not
+/// have.
 fn is_mask_algo_id_valid(source: &Source, id: i32, diag: &mut Diag) -> Result<bool, Stop> {
-    if id < 0 || source.db.mask_algorithms()?.ids().contains(&id) {
-        return Ok(true);
+    match invalid_mask_algo_id(source, id)? {
+        Some(line) => {
+            diag.err_post(&line);
+            Ok(false)
+        }
+        None => Ok(true),
     }
-    diag.err_post(&format!("Invalid filtering algorithm ID: {id}"));
-    Ok(false)
+}
+
+/// NCBI's error line of `s_IsMaskAlgoIdValid` for the algorithm `id`, or `None` when the
+/// database has it (or `id` is negative).
+fn invalid_mask_algo_id(source: &Source, id: i32) -> Result<Option<String>, Stop> {
+    if id < 0 || source.db.mask_algorithms()?.ids().contains(&id) {
+        return Ok(None);
+    }
+    Ok(Some(format!("Invalid filtering algorithm ID: {id}")))
 }
 
 /// The number of the digits at `at` of `outfmt` (`None` without a digit), which it removes.
@@ -1543,7 +1555,10 @@ impl Run<'_, '_, '_> {
                 config.strand_minus = true;
             } else {
                 config.filt_algo = string_to_non_negative_int(token.as_bytes());
-                if !is_mask_algo_id_valid(self.source, config.filt_algo, self.diag)? {
+                // A batch line comes after the output of the lines before it: the line goes
+                // through `post` (`cerr`'s tie).
+                if let Some(line) = invalid_mask_algo_id(self.source, config.filt_algo)? {
+                    self.post(&line)?;
                     status = 1;
                 }
             }

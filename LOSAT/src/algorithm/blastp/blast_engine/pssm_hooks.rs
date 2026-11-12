@@ -147,7 +147,8 @@ fn psi_stats<'a>(
 }
 
 /// `kbp_psi[0]` from the query's `kbp_std[0]` and `kbp_gap_psi[0]` from `kbp_gap_std[0]` (the
-/// table's BLOSUM62 values, `gapped_params`), as `PsiBlastSetupScoreBlock` sets them.
+/// table's values of the matrix and gap costs, `gapped_params`), as `PsiBlastSetupScoreBlock`
+/// sets them.
 pub(super) fn psi_karlin(
     psi: &PsiSearch,
     contexts: &[QueryContext],
@@ -467,7 +468,7 @@ pub(super) fn pssm_traceback(
 ///         );
 /// ```
 /// The copy's matrix information reads its frequency ratios (zero where the PSSM has none: then
-/// every column takes BLOSUM62's), its ideal block and `kbp_gap_std[0]`'s K.
+/// every column takes the matrix's), its ideal block and `kbp_gap_std[0]`'s K.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]

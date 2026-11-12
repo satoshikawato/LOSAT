@@ -2,8 +2,8 @@
 //! NCBI's `Blast_TracebackFromHSPList` on each preliminary HSP list with `gap_align->positionBased`,
 //! a PSSM copy of BLASTP's ordinary traceback (`blastp/blast_engine/traceback.rs`), whose kernels
 //! read the 28×28 matrix. The starts and the alignments read the PSSM rows (`gapalign.rs`); the
-//! identities and positives read BLOSUM62 (`sbp->matrix`, blast_hits.c:770-772); the e-values and
-//! bit scores read `kbp_gap_psi` (`sbp->kbp_gap`, `Blast_QueryIsPssm`).
+//! identities and positives read the search's matrix (`sbp->matrix`, blast_hits.c:770-772); the
+//! e-values and bit scores read `kbp_gap_psi` (`sbp->kbp_gap`, `Blast_QueryIsPssm`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1500
 //! ```c
@@ -496,8 +496,8 @@ pub(super) fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
 }
 
 /// The final HSP of a traced one: 1-based starts, no composition adjustment, and the counts of
-/// `Blast_HSPGetNumIdentitiesAndPositives` on the unmasked query with BLOSUM62 (`sbp->matrix`),
-/// with the gaps and mismatches that the reports read.
+/// `Blast_HSPGetNumIdentitiesAndPositives` on the unmasked query with the search's matrix
+/// (`sbp->matrix`; rpsblast's is BLOSUM62), with the gaps and mismatches that the reports read.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:806-833
 /// ```c

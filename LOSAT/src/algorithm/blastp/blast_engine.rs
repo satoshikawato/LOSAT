@@ -15515,8 +15515,8 @@ mod tests {
                         .unwrap_or_else(|err| panic!("{name} {gap_open}/{gap_extend}: {err}"));
                 }
             }
-            // psiblast keeps BLOSUM62 11/1 (its later rounds are not ported); IDENTITY is NCBI's
-            // error there (psiblast takes the standard matrices only, blast_options.c:913-917).
+            // psiblast takes them too, in all its rounds (line RG, Q2); IDENTITY is NCBI's error
+            // there (psiblast takes the standard matrices only, blast_options.c:913-917).
             let mut args = make_blastp_args();
             args.app = BlastpApp::Psiblast;
             args.matrix = Some(matrix.ncbi_name().to_string());
@@ -15527,15 +15527,18 @@ mod tests {
                     .contains("IDENTITY is not a supported matrix"));
                 continue;
             }
-            let resolved = args.resolve().expect("resolved psiblast args");
-            let result = validate_requested_blastp_support(&resolved);
-            if matrix == ScoringMatrix::Blosum62 {
-                result.expect("psiblast BLOSUM62 11/1");
-            } else {
-                let err = result.expect_err("psiblast with another matrix");
-                assert!(err
-                    .to_string()
-                    .contains("not supported by LOSAT's PSIBLAST"));
+            for row in table.values {
+                let (gap_open, gap_extend) = (row.0[0] as i32, row.0[1] as i32);
+                let mut args = args.clone();
+                args.gap_open = Some(gap_open);
+                args.gap_extend = Some(gap_extend);
+                let resolved = args.resolve().expect("resolved psiblast args");
+                validate_requested_blastp_support(&resolved).unwrap_or_else(|err| {
+                    panic!(
+                        "psiblast {} {gap_open}/{gap_extend}: {err}",
+                        matrix.ncbi_name()
+                    )
+                });
             }
         }
         // IDENTITY with the compressed lookup table (word size 5, blastp-fast's default), with

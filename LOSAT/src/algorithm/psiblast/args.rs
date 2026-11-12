@@ -130,9 +130,11 @@ pub struct PsiblastArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1961-1962
+    // (`CQueryOptionsArgs`, psiblast_args.cpp:86)
     // ```c++
-    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    //     arg_desc.AddFlag(kArgParseDeflines,
+    //                  "Should the query and subject defline(s) be parsed?", true);
     // ```
     #[arg(
         long = "parse_deflines",
@@ -226,9 +228,12 @@ pub struct PsiblastArgs {
     // psiblast's filtering handler is blastp's (`CFilteringArgs`, psiblast_args.cpp:70).
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
-    // arg_desc.AddFlag(kArgUseLCaseMasking,
-    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1940-1942
+    // ```c++
+    //     // lowercase masking
+    //     arg_desc.AddFlag(kArgUseLCaseMasking,
+    //          "Use lower case filtering in query and subject sequence(s)?", true);
+    // ```
     #[arg(long)]
     pub lcase_masking: bool,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
@@ -457,14 +462,13 @@ impl PsiblastArgs {
             query: self.query,
             subject: self.subject,
             db: self.db,
-            // PSIBLAST's parser refuses the taxid options (line DI-8 ported them to BLASTP).
+            // blastp's database filters (line DI-8), which every round searches with.
             db_filter: self.db_filter,
             dbsize: self.dbsize,
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,
-            // PSIBLAST's parser refuses `-lcase_masking` (line NP ported it to BLASTP).
             lcase_masking: self.lcase_masking,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
             // ```c++

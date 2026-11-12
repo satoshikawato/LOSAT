@@ -1221,3 +1221,5 @@ developer machine.
 - `tests/fixtures/pssm/q1_tfp.asn.gz`: NCBI BLAST+ 2.17.0 `psiblast -query tests/db_search/taxfilter/q.faa -db
   tests/db_search/taxfilter/tfp -save_pssm_after_last_round -out_pssm` (gzip -n -9), the `-in_pssm` of the rows
   `db.ps.q1.in.*`.
+- `tests/fixtures/pssm/q1_tfp_id5.asn.gz`: the same PSSM with its query's `local str "Query_1"` replaced by `local id 5`
+  by hand (rows `db.ps.q1.in.id5.*`).

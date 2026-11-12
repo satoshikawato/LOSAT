@@ -1034,6 +1034,7 @@ fn parsed_ids_show_as_on_the_command_line() {
         Program::Blastx,
         Program::Tblastn,
         Program::Tblastx,
+        Program::Psiblast,
     ] {
         let query = format!(
             ">gb|AB000001.1| a query\n{0}\n>lcl|mine a second query\n{0}\n",

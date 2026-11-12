@@ -553,14 +553,14 @@ mod tests {
             "pssm/ps4_tk_paja.asn.gz",
         ))
         .unwrap();
-        let search = crate::algorithm::psiblast::in_pssm::psi_search_of(pssm).unwrap();
+        let search = crate::algorithm::pssm_search::in_pssm::psi_search_of(pssm).unwrap();
         let query: Vec<u8> = search
             .query
             .seq()
             .iter()
             .map(|&c| crate::utils::matrix::aa_char_to_ncbistdaa(c))
             .collect();
-        let sbp = crate::algorithm::psiblast::pssm::score_block(
+        let sbp = crate::algorithm::pssm_search::in_pssm::score_block(
             crate::config::ScoringMatrix::Blosum62,
             crate::core::psi::KarlinBlk {
                 lambda: 0.267,
@@ -606,14 +606,14 @@ mod tests {
             "pssm/ps4_tk_eps.asn.gz",
         ))
         .unwrap();
-        let search = crate::algorithm::psiblast::in_pssm::psi_search_of(pssm).unwrap();
+        let search = crate::algorithm::pssm_search::in_pssm::psi_search_of(pssm).unwrap();
         let query: Vec<u8> = search
             .query
             .seq()
             .iter()
             .map(|&c| crate::utils::matrix::aa_char_to_ncbistdaa(c))
             .collect();
-        let sbp = crate::algorithm::psiblast::pssm::score_block(
+        let sbp = crate::algorithm::pssm_search::in_pssm::score_block(
             crate::config::ScoringMatrix::Blosum62,
             crate::core::psi::KarlinBlk {
                 lambda: 0.267,

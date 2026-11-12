@@ -2193,7 +2193,8 @@ test('the Outputs view lays out blocks of lines near the view, and shows, finds 
 
 // The browser can remove the stored results under an open tab (clearing the site's data, or some of the files). The
 // Outputs then show no text of another format: reading an output, Export and "Download All" say why, as the Results do
-// when they are opened again (WA2-BR-01). WebKit's build of Playwright has no OPFS, and keeps results in memory.
+// when they are opened again (WA2-BR-01). Playwright's WebKit refuses OPFS in its default (incognito) contexts, and the
+// application keeps results in memory there.
 test('after the browser removed the stored results, the Outputs, Export and Download All say why, and show no other format', async ({ page }) => {
   // A failure that reaches no message reaches the page as an uncaught error.
   const uncaught: string[] = [];

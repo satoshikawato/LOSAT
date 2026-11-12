@@ -23,6 +23,9 @@ pub struct ProteinOptionsCheck<'a> {
     pub evalue: f64,
     /// The program is psiblast (`eBlastTypePsiBlast`) rather than blastp or tblastn.
     pub psiblast: bool,
+    /// The program is tblastn with `-in_pssm` (PSI-TBLASTN, `eBlastTypePsiTblastn`): neither blastp
+    /// nor tblastn nor psiblast.
+    pub psi_tblastn: bool,
     /// The ungapped X-drop in bits (`word_options->x_dropoff`) where the command line gives it
     /// (`-xdrop_ungap` of blastp, tblastn and rpsblast); `None`: the program's default, which is
     /// above 0.
@@ -79,9 +82,9 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     // 				buffer = BLAST_PrintAllowedValues(options->matrix,
     //                         options->gap_open, options->gap_extend);
     // ```
-    // psiblast is neither blastp nor tblastn: its matrices are the standard ones
-    // (`std_matrix_only`).
-    let std_matrix_only = check.psiblast;
+    // psiblast and PSI-TBLASTN are neither blastp nor tblastn: their matrices are the standard
+    // ones (`std_matrix_only`).
+    let std_matrix_only = check.psiblast || check.psi_tblastn;
     if check.gapped {
         match karlin_blk_gapped_load_from_tables(
             check.gap_open,
@@ -156,23 +159,40 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     //                 return BLASTERR_OPTION_VALUE_INVALID;
     //         }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1358-1363
+    // ```c
+    //         else {
+    //             Blast_MessageWrite(blast_msg, eBlastSevError,
+    //                                kBlastMessageNoContext,
+    //                                "Word-size must be less "
+    //                                "than 6 for protein comparison");
+    //             return BLASTERR_OPTION_VALUE_INVALID;
+    //         }
+    // ```
     // The checks of the compressed lookup table below are blastp's, tblastn's and blastx's
-    // only (blast_options.c:1376-1378).
+    // only (blast_options.c:1376-1378); PSI-TBLASTN takes the `else` branch.
     if check.psiblast {
         if check.word_size > 4 {
             return Err(options_error("Word-size must be less than 5 for psiblast"));
+        }
+    } else if check.psi_tblastn {
+        if check.word_size > 4 {
+            return Err(options_error(
+                "Word-size must be less than 6 for protein comparison",
+            ));
         }
     } else if check.word_size > 7 {
         return Err(options_error(
             "Word-size must be less than 8 for a tblastn, blastp or blastx search",
         ));
     }
-    if !check.psiblast && check.word_size > 5 && !check.compressed_lookup {
+    let blastp_tblastn = !check.psiblast && !check.psi_tblastn;
+    if blastp_tblastn && check.word_size > 5 && !check.compressed_lookup {
         return Err(options_error(
             "Blastp, Blastx or Tblastn with word size > 5 requires a compressed alphabet lookup table",
         ));
     }
-    if !check.psiblast && check.compressed_lookup && !(5..=7).contains(&check.word_size) {
+    if blastp_tblastn && check.compressed_lookup && !(5..=7).contains(&check.word_size) {
         return Err(options_error(
             "Compressed alphabet lookup table requires word size 5, 6 or 7",
         ));
@@ -294,6 +314,7 @@ mod tests {
                 hitlist_size: 500,
                 evalue: 10.0,
                 psiblast,
+                psi_tblastn: false,
                 x_dropoff: None,
             })
             .map_err(|error| error.to_string())

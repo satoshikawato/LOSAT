@@ -5365,15 +5365,18 @@ mod tests {
 // This uses the local-subject database header and TBLASTN translated alignment.
 /// The outfmt 0 prolog of tblastn (the version, the references and the database), which
 /// NCBI writes before it reads the first query batch (as `write_tblastx_pairwise_prolog`).
+/// `program` is the program line's name: `TBLASTN`, or `PSITBLASTN` with `-in_pssm`
+/// (`Blast_ProgramNameFromType`, blast_format.cpp:94).
 pub fn write_tblastn_pairwise_prolog<W: Write>(
     writer: &mut W,
+    program: &str,
     version: &str,
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, "TBLASTN", version)?;
+    write_translated_pairwise_intro(writer, program, version)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -5388,8 +5391,10 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
 
 /// `query_titles` and `subject_titles` are the title bytes of the records by query and
 /// subject index (`Query=`, the description table and the alignment headings); the
-/// `query_name` of `queries` is not read.
+/// `query_name` of `queries` is not read. `program` is the program line's name (`TBLASTN`, or
+/// `PSITBLASTN` with `-in_pssm`).
 pub fn write_tblastn_pairwise_report<W: Write>(
+    program: &str,
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -5420,7 +5425,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     let mut writer = io::BufWriter::new(writer);
     // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
     // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
-    write_translated_pairwise_intro(&mut writer, "TBLASTN", &report.version)?;
+    write_translated_pairwise_intro(&mut writer, program, &report.version)?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
     match database {

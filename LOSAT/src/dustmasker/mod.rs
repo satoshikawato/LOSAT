@@ -9,7 +9,7 @@ mod masker;
 mod work;
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 
 use crate::ncbi_app::args::{flag, key, Constraint, Desc, Kind};
 use crate::ncbi_app::{no_dependencies, Tool};
@@ -149,14 +149,16 @@ pub(crate) fn run(words: &[OsString]) -> i32 {
     crate::ncbi_app::run(&TOOL, words, app::run)
 }
 
-/// The run of one command line, its output on `out` and its errors on `err`; the exit status
-/// (NCBI's application around dustmasker's `Run`: `ncbi_app::run_with`).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the library API does not run dustmasker yet")
-)]
-pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    crate::ncbi_app::run_with(&TOOL, words, out, err, app::run)
+/// The run of one command line with `input` as its standard input, its output on `out` and its
+/// errors on `err`; the exit status (NCBI's application around dustmasker's `Run`:
+/// `ncbi_app::run_with`). The library API's `run_dustmasker`.
+pub(crate) fn run_with(
+    words: &[OsString],
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_with(&TOOL, words, input, out, err, app::run)
 }
 
 #[cfg(test)]
@@ -167,7 +169,7 @@ mod tests {
         let words: Vec<OsString> = line.iter().map(OsString::from).collect();
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let status = run_with(&words, &mut out, &mut err);
+        let status = run_with(&words, &mut std::io::empty(), &mut out, &mut err);
         (
             status,
             String::from_utf8(out).unwrap(),
@@ -238,6 +240,41 @@ mod tests {
         }
     }
 
+    /// A pipe whose reader has closed.
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // A closed pipe ends NCBI's process by SIGPIPE outside Windows (exit status 141, no
+    // message), whatever the format: the run ends at once, silently (PD-LOSAT-CLI-NONSEARCH-
+    // DIFFERENCES exception 10; review of line RG item K1b, F2).
+    #[test]
+    #[cfg(not(windows))]
+    fn a_closed_pipe_ends_the_run_silently() {
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/dustmasker/in/basic.fa")
+            .into_os_string();
+        for outfmt in ["interval", "fasta", "seqloc_asn1_text", "maskinfo_asn1_bin"] {
+            let words = [
+                OsString::from("-in"),
+                input.clone(),
+                OsString::from("-outfmt"),
+                OsString::from(outfmt),
+            ];
+            let mut err = Vec::new();
+            let status = run_with(&words, &mut std::io::empty(), &mut ClosedPipe, &mut err);
+            assert_eq!((status, err), (0, Vec::new()), "{outfmt}");
+        }
+    }
+
     // NCBI 2.17.0 with `-out /dev/full` (review 2 of K1, F1): `interval`, `acclist` and `fasta`
     // write nothing more, silently, exit status 0; the serial writers' `CObjectOStream` reports
     // the failure (exit status 3, 0 or 134 by the case), which LOSAT refuses.
@@ -265,7 +302,7 @@ mod tests {
             ];
             let mut err = Vec::new();
             assert_eq!(
-                run_with(&words, &mut FullDisk, &mut err),
+                run_with(&words, &mut std::io::empty(), &mut FullDisk, &mut err),
                 status,
                 "{outfmt}"
             );

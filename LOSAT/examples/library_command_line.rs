@@ -7,16 +7,18 @@
 //! Reads the query and subject files into memory, searches with `LOSAT::api::run`, or
 //! `run_to_file` with `-out`, and writes the search's warnings and a failure's message to
 //! standard error, so that a run compares with `losat <program>` with the same arguments
-//! (`tests/db_search_fixtures.py check --library`). `makeblastdb` and `blastdbcmd` go to their
-//! functions. A failure ends with status 1, whatever the command line's status for it.
+//! (`tests/db_search_fixtures.py check --library`). `makeblastdb`, `blastdbcmd` and
+//! `dustmasker` go to their functions, with the standard streams of this process
+//! (`tests/dustmasker_fixtures.rs`). A failure ends with status 1, whatever the command line's
+//! status for it.
 
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
 use LOSAT::api::{
-    read_input_file, read_inputs, run, run_blastdbcmd, run_makeblastdb, run_to_file, validate,
-    Error, Inputs, Program, Role,
+    read_input_file, read_inputs, run, run_blastdbcmd, run_dustmasker, run_makeblastdb,
+    run_to_file, validate, Error, Inputs, Program, Role,
 };
 
 fn main() -> ExitCode {
@@ -49,25 +51,23 @@ fn search() -> Result<(), Error> {
             "usage: library_command_line <program> -query <file> -db <db> [options...]".to_string(),
         ));
     };
-    // The two database programs take the command line's words as they are.
+    // The tools take the command line's words as they are.
     let words_of_tool: Vec<&str> = words.iter().map(String::as_str).collect();
-    match program.as_str() {
-        "blastdbcmd" => {
-            let (mut stdout, mut stderr) = (std::io::stdout(), std::io::stderr());
-            return reported(run_blastdbcmd(&words_of_tool, &mut stdout, &mut stderr));
-        }
-        "makeblastdb" => {
-            let (mut stdin, mut stdout, mut stderr) =
-                (std::io::stdin(), std::io::stdout(), std::io::stderr());
-            return reported(run_makeblastdb(
-                &words_of_tool,
-                &mut stdin,
-                &mut stdout,
-                &mut stderr,
-            ));
-        }
-        _ => {}
-    }
+    let tool = match program.as_str() {
+        "blastdbcmd" => run_blastdbcmd,
+        "makeblastdb" => run_makeblastdb,
+        "dustmasker" => run_dustmasker,
+        _ => return search_program(program, words),
+    };
+    let (mut stdin, mut stdout, mut stderr) =
+        (std::io::stdin(), std::io::stdout(), std::io::stderr());
+    let result = tool(&words_of_tool, &mut stdin, &mut stdout, &mut stderr);
+    let _ = stdout.flush();
+    reported(result)
+}
+
+/// A search of `program` with the command line's words.
+fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
     let program: Program = program.parse()?;
     let (mut db, mut subject, mut query, mut out, mut outfmt) = (None, None, None, None, "0");
     let mut options: Vec<&str> = Vec::new();

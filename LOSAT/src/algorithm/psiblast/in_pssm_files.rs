@@ -46,22 +46,12 @@ use anyhow::{bail, Result};
 
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::KarlinBlk;
-use crate::report::serial::pssm::{
-    ObjectId, PssmFinalData, PssmSeqId, PssmWithParameters, SeqData,
-};
+use crate::report::serial::pssm::{ObjectId, PssmSeqId, PssmWithParameters, SeqData};
 
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
-
-/// The PSSM file of `-in_pssm` as `algorithm::psiblast::in_pssm::read_in_pssm` reads it: the
-/// object after `CPsiBlastImpl`'s constructor, the members the reader skipped, whether the scores
-/// were computed from the frequency ratios, and whether NCBI's checks of the PSSM pass
-/// (`CPsiBlastValidate::Pssm`; NCBI's constructor throws before any file is written otherwise).
-pub(crate) struct InPssmFile {
-    pub(crate) object: PssmWithParameters,
-    pub(crate) skipped: Vec<&'static str>,
-    pub(crate) computed: bool,
-    pub(crate) valid: bool,
-}
+#[cfg(test)]
+use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
+use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): the
 /// Seq-id of its query, which the PSSM of each later round keeps (the first Seq-align's query id),
@@ -70,116 +60,6 @@ pub(crate) struct InPssmFile {
 pub(crate) struct InPssmRounds {
     pub(crate) id: ObjectId,
     object: Option<PssmWithParameters>,
-}
-
-/// The scores and gapped values that `CPsiBlastImpl`'s constructor sets in a PSSM of frequency
-/// ratios only (`rows[position][residue]` and `gapped`, the PSSM engine's), with the frequency
-/// ratios padded to 28 rows when the file has fewer, and the gap costs of the search (BLOSUM62's
-/// 11 and 1: LOSAT's psiblast runs no other, `in_pssm::scores_from_freq_ratios`) in its
-/// parameters.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:486-502
-/// ```c++
-///     if (pssm->GetPssm().GetNumRows() !=
-///         pssm_with_scores->GetPssm().GetNumRows()) {
-///         _ASSERT(pssm_with_scores->GetPssm().GetNumRows() == BLASTAA_SIZE);
-///         s_AdjustFrequencyRatiosMatrixToMatchScoreMatrix(*pssm);
-///     }
-///     pssm->SetPssm().SetFinalData().SetScores() =
-///         pssm_with_scores->GetPssm().GetFinalData().GetScores();
-///     pssm->SetPssm().SetFinalData().SetLambda() =
-///         pssm_with_scores->GetPssm().GetFinalData().GetLambda();
-///     pssm->SetPssm().SetFinalData().SetKappa() =
-///         pssm_with_scores->GetPssm().GetFinalData().GetKappa();
-///     pssm->SetPssm().SetFinalData().SetH() =
-///         pssm_with_scores->GetPssm().GetFinalData().GetH();
-///
-///     PsiBlastAddAncillaryPssmData(*pssm,
-///                                   opts.GetGapOpeningCost(),
-///                                   opts.GetGapExtensionCost());
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:440-462
-/// ```c++
-///     const size_t diff = (size_t)BLASTAA_SIZE - pssm.GetPssm().GetNumRows();
-///     CPssmIntermediateData::TFreqRatios& freq_ratios =
-///         pssm.SetPssm().SetIntermediateData().SetFreqRatios();
-///
-///     if (pssm.GetPssm().GetByRow() == true) {
-///         freq_ratios.resize(pssm.GetPssm().GetNumColumns() * BLASTAA_SIZE, 0.0);
-///     } else {
-///         CPssmIntermediateData::TFreqRatios::iterator itr = freq_ratios.begin();
-///         for (int c = 0; c < pssm.GetPssm().GetNumColumns(); c++) {
-///             advance(itr, pssm.GetPssm().GetNumRows());
-///             freq_ratios.insert(itr, diff, 0.0);
-///         }
-///     }
-///
-///     pssm.SetPssm().SetNumRows() = BLASTAA_SIZE;
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:426-433
-/// ```c++
-/// PsiBlastAddAncillaryPssmData(objects::CPssmWithParameters& pssm,
-///                          int gap_open,
-///                          int gap_extend)
-/// {
-///     _ASSERT(pssm.GetParams().GetRpsdbparams().IsSetMatrixName());
-///     pssm.SetParams().SetRpsdbparams().SetGapOpen(gap_open);
-///     pssm.SetParams().SetRpsdbparams().SetGapExtend(gap_extend);
-/// }
-/// ```
-/// The engine's scores are column by column (`x_PSIMatrix2Asn1`, quoted at
-/// `in_pssm::psi_search_and_object`). A PSSM of frequency ratios written by row is LOSAT's refusal
-/// (`in_pssm`), so the ratios are padded column by column. A file without `rpsdbparams` gets
-/// parameters without a matrix name, which NCBI cannot write: refused with `-out_pssm`
-/// (`rounds_input`), and the object is left without them.
-pub(crate) fn with_computed_scores(
-    pssm: &mut PssmWithParameters,
-    rows: &[[i32; BLASTAA_SIZE]],
-    gapped: KarlinBlk,
-) {
-    let matrix = &mut pssm.pssm;
-    let rows_n = usize::try_from(matrix.num_rows).unwrap_or(0);
-    if rows_n < BLASTAA_SIZE {
-        if let Some(data) = matrix.intermediate_data.as_mut() {
-            let mut padded = Vec::with_capacity(rows.len() * BLASTAA_SIZE);
-            for column in data.freq_ratios.chunks(rows_n.max(1)) {
-                padded.extend_from_slice(column);
-                padded.resize(padded.len() + BLASTAA_SIZE - rows_n, 0.0);
-            }
-            data.freq_ratios = padded;
-        }
-        matrix.num_rows = BLASTAA_SIZE as i32;
-    }
-    let scores: Vec<i32> = rows.iter().flatten().copied().collect();
-    match matrix.final_data.as_mut() {
-        Some(data) => {
-            data.scores = scores;
-            data.lambda = gapped.lambda;
-            data.kappa = gapped.k;
-            data.h = gapped.h;
-        }
-        None => {
-            matrix.final_data = Some(PssmFinalData {
-                scores,
-                lambda: gapped.lambda,
-                kappa: gapped.k,
-                h: gapped.h,
-                scaling_factor: None,
-                lambda_ungapped: None,
-                kappa_ungapped: None,
-                h_ungapped: None,
-                word_score_threshold: None,
-            })
-        }
-    }
-    if let Some(rps) = pssm
-        .params
-        .as_mut()
-        .and_then(|params| params.rpsdbparams.as_mut())
-    {
-        rps.gap_open = Some(11);
-        rps.gap_extend = Some(1);
-    }
 }
 
 /// The input PSSM of a run of psiblast's rounds or PSSM files with `-in_pssm` (`request`: the
@@ -288,7 +168,7 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
     // behaviour in that conversion (x86-64 prints -2147483648): LOSAT's refusal, for the cells
     // NCBI prints (the engine's frequencies lie in [0, 1]; only a file reaches this).
     let by_row = pssm.by_row == Some(true);
-    let scores = super::in_pssm::convert_2_matrix(
+    let scores = crate::algorithm::pssm_search::in_pssm::convert_2_matrix(
         pssm.final_data
             .as_ref()
             .map_or(&[][..], |data| data.scores.as_slice()),
@@ -297,7 +177,9 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
         by_row,
         BLAST_SCORE_MIN,
     );
-    let weighted = super::in_pssm::convert_2_matrix(weighted, rows_n, columns, by_row, 0.0);
+    let weighted = crate::algorithm::pssm_search::in_pssm::convert_2_matrix(
+        weighted, rows_n, columns, by_row, 0.0,
+    );
     let outside_int = scores.iter().zip(&weighted).any(|(scores, weighted)| {
         super::pssm::RESIDUE_ORDER.iter().any(|&r| {
             let value = 100.0 * weighted[r];
@@ -317,7 +199,8 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
 /// The query's letters as NCBIstdaa codes (`CPssm::GetQuerySequenceData`, which converts an
 /// IUPACaa or NCBIeaa `Seq-data`; `in_pssm` admits only letters of NCBIstdaa).
 fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
-    const LETTERS: &[u8; BLASTAA_SIZE] = super::pssm::NCBISTDAA_TO_AMINOACID;
+    const LETTERS: &[u8; BLASTAA_SIZE] =
+        crate::algorithm::pssm_search::in_pssm::NCBISTDAA_TO_AMINOACID;
     match object
         .pssm
         .query
@@ -468,7 +351,7 @@ fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
     let columns = usize::try_from(pssm.num_columns).unwrap_or(0);
     let by_row = pssm.by_row == Some(true);
     let final_data = pssm.final_data.as_ref();
-    let scores = super::in_pssm::convert_2_matrix(
+    let scores = crate::algorithm::pssm_search::in_pssm::convert_2_matrix(
         final_data.map_or(&[][..], |data| data.scores.as_slice()),
         rows_n,
         columns,
@@ -481,7 +364,7 @@ fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
     let weighted;
     let long = match (data, info) {
         (Some(data), Some(info)) if !info.is_empty() => {
-            weighted = super::in_pssm::convert_2_matrix(
+            weighted = crate::algorithm::pssm_search::in_pssm::convert_2_matrix(
                 data.weighted_res_freqs_per_pos.as_deref().unwrap_or(&[]),
                 rows_n,
                 columns,

@@ -58,10 +58,11 @@ use std::io::Write as _;
 
 use anyhow::Result;
 
-use super::in_pssm_files::{InPssmFile, InPssmRounds};
+use super::in_pssm_files::InPssmRounds;
 use super::pssm::{
     is_regular_file, OutputFileReset, PsiblastPssmOptions, PssmFileCheck, PssmRequest,
 };
+use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 use crate::report::serial::pssm::ObjectId;
 
 /// The rounds of a psiblast run of FASTA queries or of a PSSM query: `-num_iterations` (0: until

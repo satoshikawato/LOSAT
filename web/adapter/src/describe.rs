@@ -33,6 +33,21 @@ const ADAPTER_OWNED: [&str; 6] = [
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;
 
+/// The options of `program` that a search of records takes none of (the PSSM files: tblastn's
+/// `-in_pssm`, which the browser refuses until line PS's PSW1): the library API's list
+/// (`LOSAT::web_adapter::records_refused_options`), so that both `describe`s leave out the same
+/// options.
+fn records_refused(program: Program) -> &'static [&'static str] {
+    let program = match program {
+        Program::Blastp => LOSAT::api::Program::Blastp,
+        Program::Tblastn => LOSAT::api::Program::Tblastn,
+        Program::Blastn => LOSAT::api::Program::Blastn,
+        Program::Tblastx => LOSAT::api::Program::Tblastx,
+        Program::Blastx => LOSAT::api::Program::Blastx,
+    };
+    LOSAT::web_adapter::records_refused_options(program)
+}
+
 /// Each program's response after its first `describe`: the response is pure, and its
 /// `defaults` resolve some hundred probe argvs (`defaults::defaults`), while the application
 /// asks again each time it opens a result.
@@ -65,9 +80,13 @@ fn describe_program(program: Program) -> Result<String, String> {
     }
     out.push_str("],\"parameters\":[");
     let mut first = true;
+    let refused = records_refused(program);
     for arg in command.get_arguments() {
         let Some(long) = arg.get_long() else { continue };
-        if matches!(long, "help" | "version") || ADAPTER_OWNED.contains(&long) {
+        if matches!(long, "help" | "version")
+            || ADAPTER_OWNED.contains(&long)
+            || refused.contains(&long)
+        {
             continue;
         }
         if !first {
@@ -171,6 +190,22 @@ mod tests {
                 assert!(entry.contains("\"takes_value\":true"), "{program} -{flag}");
             }
             assert!(described.contains("\"-max_target_seqs\""), "{program}");
+        }
+    }
+
+    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1, and
+    // neither `describe` lists it (the library API's list, `records_refused`).
+    #[test]
+    fn options_a_search_of_records_does_not_take_are_not_described() {
+        assert_eq!(records_refused(Program::Tblastn), ["in_pssm"]);
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+            let described = describe(program).unwrap();
+            for flag in records_refused(Program::parse(program).unwrap()) {
+                assert!(
+                    !described.contains(&format!("\"-{flag}\"")),
+                    "{program} lists -{flag}"
+                );
+            }
         }
     }
 }

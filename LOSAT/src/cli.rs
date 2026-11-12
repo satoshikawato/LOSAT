@@ -607,8 +607,7 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
 // `algorithm::rpsblast::args`)
-/// rpsblast's NCBI arguments that LOSAT does not run: `-searchsp` (it switches NCBI's RPS search
-/// to the old Karlin-Altschul statistics, item PS11c-2), `-use_sw_tback` (the Smith-Waterman
+/// rpsblast's NCBI arguments that LOSAT does not run: `-use_sw_tback` (the Smith-Waterman
 /// redo, PS11c-3), `-html` (PS15a) and the remote and search strategy options of every program.
 fn is_unported_rpsblast_arg(name: &str) -> bool {
     matches!(
@@ -618,7 +617,6 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
             | "html"
             | "import_search_strategy"
             | "remote"
-            | "searchsp"
             | "use_sw_tback"
     )
 }

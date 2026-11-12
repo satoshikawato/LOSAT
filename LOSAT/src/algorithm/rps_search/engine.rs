@@ -44,9 +44,10 @@ use super::traceback::{
 };
 use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
 use super::{RpsRows, RPS_K_MULT};
+use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
 use crate::seqdb::rps::RpsVolumeFiles;
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 /// The options of an RPS-BLAST search that blastp's driver does not apply itself: `-max_hsps`
 /// and `-qcov_hsp_perc` (the RPS traceback filters with the length of the first query of a
@@ -88,6 +89,10 @@ pub(crate) struct RpsQuery<'a> {
     /// lower-case masks, `Blast_MaskUnsupportedAA`): the reports' identities count on them
     /// (`traceback::formatter_identities`).
     pub(crate) aa_seq_nomask: Option<&'a [u8]>,
+    /// `query_info->contexts[0].eff_searchsp` of the query in this volume (NCBI's `Int8`): what
+    /// the e-values and the hit cutoff read without the Gumbel block (`EvalueStats`), and the
+    /// Smith-Waterman redo with it (series PR, item PS11c-3). 0 for an invalid query.
+    pub(crate) search_space: i64,
 }
 
 /// What the search of every query of a volume reads besides the volume.
@@ -95,13 +100,15 @@ pub(crate) struct RpsRun<'a> {
     pub(crate) queries: Vec<RpsQuery<'a>>,
     /// `kbp_gap_std`: BLOSUM62 11/1's table values.
     pub(crate) gapped: KarlinParams,
-    pub(crate) gumbel: &'a BlastGumbelBlk,
+    /// `sbp->gbp`: none with `-searchsp` (at any value) or `OLD_FSC`.
+    pub(crate) gumbel: Option<&'a BlastGumbelBlk>,
     /// `avg_subject_length` of the hit cutoff (`BLAST_SEQSRC_MINLENGTH`).
     pub(crate) cutoff_subject_length: i32,
     /// `-evalue`.
     pub(crate) evalue: f64,
     /// `hit_params->prelim_evalue` and the e-value of the hit cutoff: `-evalue`, five times it
-    /// with composition-based statistics 2 and 3 (`cbs_stretch`, blast_parameters.c:937).
+    /// with composition-based statistics 2 and 3 and the Gumbel block (`cbs_stretch`,
+    /// blast_parameters.c:937).
     pub(crate) prelim_evalue: f64,
     /// The composition-based statistics mode the search runs (0 to 3).
     pub(crate) cbs: u8,
@@ -251,71 +258,13 @@ struct RpsCutoffs {
     hit_cutoff: i32,
 }
 
-/// `BLAST_SpougeEtoS` (the hit cutoff of an e-value), the RPS engine's own copy of
-/// `stats::blast_spouge_etos` (blastp's default path inlines that one; this search adds no caller
-/// to it).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5268
-/// ```c
-///     Int4 a=0, b, c;
-///     double e;
-///     double db_scale_factor = (gbp->db_length) ?
-///             (double)gbp->db_length : 1.0;
-///
-///     b = MAX((int)(log(db_scale_factor/e0) / kbp->Lambda), 2);
-///
-///     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-///
-///     if (e > e0) {
-///         while (e> e0) {
-///             a = b;
-///             b *= 2;
-///             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
-///         }
-///     } else {
-///         a = 0;
-///     }
-///     while(b-a > 1) {
-///         c = (a+b)/2;
-///         e = BLAST_SpougeStoE(c, kbp, gbp, m, n);
-///         if (e> e0) {
-///             a = c;
-///         } else {
-///             b = c;
-///         }
-///     }
-///     return a;
-/// ```
-fn spouge_etos(evalue: f64, kbp: &KarlinParams, gbp: &BlastGumbelBlk, m: i32, n: i32) -> i32 {
-    let db_scale_factor = if gbp.db_length != 0 {
-        gbp.db_length as f64
-    } else {
-        1.0
-    };
-    let e0 = evalue.max(f64::MIN_POSITIVE);
-    let mut b = (((db_scale_factor / e0).ln() / kbp.lambda) as i32).max(2);
-    let mut a = 0i32;
-    let mut e = blast_spouge_stoe(b, kbp, gbp, m, n);
-    if e > e0 {
-        while e > e0 {
-            a = b;
-            b *= 2;
-            e = blast_spouge_stoe(b, kbp, gbp, m, n);
-        }
-    }
-    while b - a > 1 {
-        let c = (a + b) / 2;
-        e = blast_spouge_stoe(c, kbp, gbp, m, n);
-        if e > e0 {
-            a = c;
-        } else {
-            b = c;
-        }
-    }
-    a
-}
-
 impl RpsRun<'_> {
+    /// What the query's e-values and hit cutoff read in this volume: the Gumbel block, if any,
+    /// and the query's effective search space.
+    fn stats(&self, query: &RpsQuery<'_>) -> EvalueStats<'_> {
+        EvalueStats::new(self.gumbel, query.search_space)
+    }
+
     /// The query's cutoffs; the refusal where the ungapped X-drop (`-xdrop_ungap`) or a scaled
     /// cutoff leaves `i32`.
     fn cutoffs(&self, query: &RpsQuery<'_>, scale: f64) -> Result<RpsCutoffs> {
@@ -329,14 +278,15 @@ impl RpsRun<'_> {
                     scale,
                 )
             })?;
-        let hit_cutoff = spouge_etos(
-            self.prelim_evalue,
-            &self.gapped,
-            self.gumbel,
-            (query.aa_seq.len() - 2) as i32,
-            self.cutoff_subject_length,
-        )
-        .checked_mul(int_scale)
+        let hit_cutoff = self
+            .stats(query)
+            .hit_cutoff(
+                self.prelim_evalue,
+                &self.gapped,
+                (query.aa_seq.len() - 2) as i32,
+                self.cutoff_subject_length,
+            )
+            .checked_mul(int_scale)
         .ok_or_else(|| scale_overflow(scale))?;
         let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
             / query.kbp_std.lambda) as i32;
@@ -521,7 +471,6 @@ impl RpsRun<'_> {
             gap_extend,
             x_drop_final,
             gapped: self.gapped,
-            gumbel: self.gumbel,
             expect_value: self.evalue,
             hitlist_size: self.hitlist_size,
             redo: self.sbp.filter(|_| self.cbs > 0).map(|sbp| RpsRedoParams {
@@ -578,7 +527,7 @@ impl RpsRun<'_> {
                 x_drop_gapped,
                 hit_cutoff: cutoffs.hit_cutoff,
                 karlin: prelim_karlin,
-                gumbel: self.gumbel,
+                stats: self.stats(query),
                 prelim_evalue: self.prelim_evalue,
                 prelim_hitlist_size: self.prelim_hitlist_size,
                 query_index: q_idx as u32,
@@ -596,6 +545,7 @@ impl RpsRun<'_> {
                 letters,
                 q_idx as u32,
                 &query.batch_kbp,
+                self.stats(query),
                 &mut scratch.1,
             )?;
             if let (Some(hit_list), Some(nomask)) = (traced.hit_list.as_mut(), query.aa_seq_nomask)
@@ -780,7 +730,7 @@ mod tests {
                 alpha: 1.9,
                 beta: -30.0,
             },
-            gumbel,
+            gumbel: Some(gumbel),
             cutoff_subject_length: 0,
             evalue: 10.0,
             prelim_evalue: 10.0,

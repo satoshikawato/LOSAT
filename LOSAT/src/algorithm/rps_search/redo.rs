@@ -82,13 +82,17 @@ impl RpsTraceback<'_> {
     /// (`kbp_psi[0]`).
     pub(super) fn trace_query_redo(
         &self,
-        redo: &RpsRedoParams<'_>,
         mut prelim: BlastpHitList<XPrelimHsp>,
         query: &[u8],
         q_idx: u32,
         batch_kbp: &KarlinParams,
+        stats: EvalueStats<'_>,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
+        let redo = self
+            .redo
+            .as_ref()
+            .expect("the redo runs with the redo's parameters");
         prelim.sort_by_evalue();
         let count = prelim.hsplist_count;
         let mut hit_list: Option<BlastpHitList> = None;
@@ -169,9 +173,10 @@ impl RpsTraceback<'_> {
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
             let redone = RedoMatch {
                 info: &info,
-                // RPS-BLAST's search has the Gumbel block (its parser refuses `-searchsp` and
-                // `check_blastp_environment` `OLD_FSC`, item PS11c).
-                stats: EvalueStats::spouge(self.gumbel),
+                // The query's statistics in this volume: the Gumbel block, or without it
+                // (`-searchsp`, `OLD_FSC`) the search space the redo copy of the score block
+                // keeps (the user query's, blast_traceback.c:1238-1255).
+                stats,
                 expect_value: self.expect_value,
                 query_length: length as i32,
                 rps_roles: true,

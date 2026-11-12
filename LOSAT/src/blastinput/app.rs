@@ -1020,8 +1020,8 @@ pub fn query_batch_size(program: &str, default: u32) -> anyhow::Result<u32> {
 
 /// Whether the environment variable `OLD_FSC` is set (to any value, the empty one too), with
 /// which NCBI's protein programs compute without the Gumbel block (finite-size correction).
-/// NCBI sets it itself for `-searchsp` (blast_args.cpp:303-307), so BLASTP, PSIBLAST, BLASTX and
-/// TBLASTN read it as they read `-searchsp`: their `old_fsc`.
+/// NCBI sets it itself for `-searchsp` (blast_args.cpp:303-307), so BLASTP, PSIBLAST, RPSBLAST, BLASTX
+/// and TBLASTN read it as they read `-searchsp`: their `old_fsc`.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:922-923
 /// ```c
@@ -1030,17 +1030,6 @@ pub fn query_batch_size(program: &str, default: u32) -> anyhow::Result<u32> {
 /// ```
 pub fn old_fsc_environment() -> bool {
     std::env::var_os("OLD_FSC").is_some()
-}
-
-/// LOSAT's refusal of `OLD_FSC` (`old_fsc_environment`) in RPSBLAST, whose search without the
-/// Gumbel block is not ported (its parser refuses `-searchsp`, item PS11c).
-pub fn check_old_fsc(program: &str) -> anyhow::Result<()> {
-    if old_fsc_environment() {
-        anyhow::bail!(
-            "the environment variable OLD_FSC, which makes NCBI BLAST+ compute without its finite-size correction (the Gumbel block), is not supported by LOSAT's {program}"
-        );
-    }
-    Ok(())
 }
 
 /// The window of the two-hit word finder where NCBI's diagonal table never gets a length.

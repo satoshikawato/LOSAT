@@ -16,7 +16,8 @@ use crate::algorithm::pssm_search::gapalign::{
     pssm_get_start_for_gapped_alignment, pssm_score_only_gapped_alignment, PssmGapScratch,
 };
 use crate::algorithm::pssm_search::prelim::{purge_hsps_with_common_endpoints, score_compare};
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::algorithm::pssm_search::evalue::EvalueStats;
+use crate::stats::KarlinParams;
 
 /// What the preliminary stage of every query of a volume reads besides the query.
 pub(crate) struct RpsPrelim<'a> {
@@ -35,7 +36,9 @@ pub(crate) struct RpsPrelim<'a> {
     /// The first gapped Karlin block of the batch (`kbp_gap_std`, BLOSUM62 11/1's table values)
     /// with its Lambda divided by the scale, as `Blast_HSPListGetEvalues` divides it.
     pub(crate) karlin: KarlinParams,
-    pub(crate) gumbel: &'a BlastGumbelBlk,
+    /// The Gumbel block, if any, and the query's search space (`EvalueStats`): the e-values and
+    /// the reap by `prelim_evalue` run with the block only.
+    pub(crate) stats: EvalueStats<'a>,
     /// `hit_params->prelim_evalue`.
     pub(crate) prelim_evalue: f64,
     /// `prelim_hitlist_size` of the collector.
@@ -212,15 +215,33 @@ impl RpsPrelim<'_> {
         // ```
         // `subject_length` is the user query's length (`stat_length`), the context's length the
         // profile's.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:874-880
+        // ```c
+        //     } else if (!Blast_ProgramIsPhiBlast(program_number)
+        //            && !(isRPS && !sbp->gbp)
+        //            /* do not calculate E-values for mapping */
+        //            && program_number != eBlastTypeMapping ) {
+        //         /* Calculate e-values for all HSPs. Skip this step
+        //            for PHI or RPS with old FSC, since calculating the E values
+        //            requires precomputation that has not been done yet */
+        // ```
+        // Without the Gumbel block (`-searchsp` at any value, `OLD_FSC`) the HSPs keep their
+        // e-value of 0; the reap by `prelim_evalue` (blast_engine.c:896-899, outside that branch)
+        // then keeps every one, and the hit list orders its lists by score, then ordinal id
+        // (every best e-value is equal).
         let mut evalued: Vec<XPrelimHsp> = Vec::with_capacity(hsps.len());
         for hsp in hsps.iter() {
-            let e_value = blast_spouge_stoe(
-                hsp.raw_score,
-                &self.karlin,
-                self.gumbel,
-                subject_len as i32,
-                hsp.query_length as i32,
-            );
+            let e_value = if self.stats.gumbel.is_some() {
+                self.stats.e_value(
+                    hsp.raw_score,
+                    &self.karlin,
+                    subject_len as i32,
+                    hsp.query_length as i32,
+                )
+            } else {
+                0.0
+            };
             if e_value <= self.prelim_evalue {
                 evalued.push(XPrelimHsp { hsp: *hsp, e_value });
             }

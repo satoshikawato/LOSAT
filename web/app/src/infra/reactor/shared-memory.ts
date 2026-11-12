@@ -59,6 +59,52 @@ function formatGib(value: number): string {
 }
 
 /**
+ * The cells of the waits of the threaded module (the shared-memory guard,
+ * LOSAT/tests/wasi_shared_memory.js: WAITS_ENDING, WAIT_TABLE, WAIT_SLOTS). A wait records its
+ * address plus 1 in the table while it waits (0 is a free cell); once WAITS_ENDING is set, waits wait in slices with a
+ * call of the host between them. WebKit (JavaScriptCore, webkit-2311) never ends a worker
+ * whose thread waits without a timeout, and keeps its instance and the shared memory until
+ * the page closes: a page can reserve about 15 memories of 4 GiB, so the cancels of threaded
+ * searches used them up (losat-baselines/web-flaky-20261103/cancel-timeout/ct3).
+ */
+export const WAITS_ENDING_ADDRESS = 20;
+export const WAIT_TABLE_ADDRESS = 64;
+export const WAIT_TABLE_SLOTS = 64;
+/** How long endWaits wakes the waits of the table at most. */
+const END_WAITS_MS = 1_000;
+
+/**
+ * Lets the workers of a shared memory end: the memory keeper (and ThreadHost.terminate) call it
+ * before the workers whose threads may be in the threaded module end. It sets WAITS_ENDING, then
+ * wakes every wait recorded in the table, again each millisecond, until the table is empty or
+ * `deadlineMs` passed: a woken thread waits again, now in slices, and its worker ends in the
+ * host call between two of them. A memory whose buffer is not shared or too small to hold the
+ * cells (a module without the guard's waits) is left as it is.
+ */
+export function endWaits(memory: WebAssembly.Memory, deadlineMs = END_WAITS_MS): void {
+  const until = performance.now() + deadlineMs;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    const buffer = memory.buffer as ArrayBufferLike;
+    if (!(buffer instanceof SharedArrayBuffer) || buffer.byteLength < WAIT_TABLE_ADDRESS + 4 * WAIT_TABLE_SLOTS) return;
+    // A view of the current size: the memory may have grown since the last round.
+    const view = new Int32Array(buffer);
+    Atomics.store(view, WAITS_ENDING_ADDRESS / 4, 1);
+    let recorded = 0;
+    for (let slot = 0; slot < WAIT_TABLE_SLOTS; slot++) {
+      // The address of the wait, plus 1 (0 is a free cell).
+      const cell = Atomics.load(view, WAIT_TABLE_ADDRESS / 4 + slot);
+      if (cell === 0) continue;
+      recorded++;
+      const index = ((cell >>> 0) - 1) >>> 2;
+      if (index < view.length) Atomics.notify(view, index);
+    }
+    if (recorded === 0 || performance.now() >= until) return;
+    Atomics.wait(pause, 0, 0, 1);
+  }
+}
+
+/**
  * Grows a shared memory to its maximum, so that no thread can grow it any more: the keeper
  * of the memory does so when the Gateway asks, before the Gateway ends the Engine worker and
  * its thread workers while the threaded instance is in use (memory-keeper.ts,

@@ -17,7 +17,7 @@
 // pool spawns, and they cannot return while it waits, because the engine's thread library holds a
 // lock across `thread-spawn` that an ending thread needs (S09). A search of N threads therefore
 // has one set of N-1 thread workers, all ready before the search starts (`prepare`).
-import { growToMaximum } from '../reactor/shared-memory';
+import { endWaits, growToMaximum } from '../reactor/shared-memory';
 import type { InstanceUse } from './instance-use';
 import {
   SLOT_ENDED,
@@ -51,6 +51,8 @@ export interface ThreadHostOptions {
   readonly createWorker?: () => Worker;
   /** Starts the keeper of the memory (tests may start a fake one). */
   readonly createKeeper?: () => Worker;
+  /** Ends the waits on the memory before running threads end (shared-memory.ts; tests replace it). */
+  readonly endWaits?: (memory: WebAssembly.Memory) => void;
   /** How long a thread worker may take to become ready; 30 s by default. */
   readonly readyTimeoutMs?: number;
   /** How long a prepared thread worker may take to start a thread; 30 s by default. */
@@ -141,8 +143,8 @@ export class ThreadHost {
     const started = new Int32Array(new SharedArrayBuffer(4));
     const command: ThreadCommand = { type: 'start', tid, startArg, started: started.buffer as SharedArrayBuffer };
     slot.worker.postMessage(command);
-    // In slices: WebKit never ends a worker whose thread waits without returning, and keeps the
-    // shared memory with it (LOSAT/tests/wasi_shared_memory.js, the module's waits).
+    // In slices: in WebKit a worker whose thread waits ends only when the wait returns, and keeps
+    // the shared memory until then (shared-memory.ts, endWaits).
     const deadline = performance.now() + (this.options.startTimeoutMs ?? DEFAULT_TIMEOUT_MS);
     for (let left = deadline - performance.now(); left > 0; left = deadline - performance.now()) {
       if (Atomics.wait(started, 0, START_PENDING, Math.min(left, WAIT_SLICE_MS)) !== 'timed-out') break;
@@ -164,8 +166,9 @@ export class ThreadHost {
    * Gateway ends the runtime, which may be waiting for the keeper's answer (instance-use.ts).
    * A thread that still runs may be growing the memory, and WebKit crashes the page when
    * workers with instances on it end while a thread grows it (growToMaximum). The memory is
-   * then first grown to its maximum, where no thread can grow it, as the Gateway has the
-   * keeper do before it ends a runtime whose threaded instance is in use. A slot runs from its
+   * then first grown to its maximum, where no thread can grow it, and the waits on it are ended
+   * (endWaits: WebKit never ends a worker whose thread waits without a timeout), as the Gateway
+   * has the keeper do before it ends a runtime whose threaded instance is in use. A slot runs from its
    * spawn until its thread returns, and a thread of a pool may not have returned when the
    * search did (see above), for example when the next search of the runtime runs on the other
    * module (runtime.ts, load). Such a thread cannot count itself off once its worker ends, so
@@ -185,6 +188,12 @@ export class ThreadHost {
           growToMaximum({ memory: this.options.memory, maximumPages: this.options.maximumPages });
         } catch {
           // The workers end all the same; the memory stays as it is (memory-keeper.ts).
+        }
+        try {
+          // Their threads that wait wait in slices from now on, so that the browser can end them.
+          (this.options.endWaits ?? endWaits)(this.options.memory);
+        } catch {
+          // As for the grow.
         }
       }
       for (const slot of this.slots) use.endThread(slot.state, SLOT_ENDED);

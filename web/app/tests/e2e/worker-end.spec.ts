@@ -2,11 +2,13 @@
 // back. WebKit (Playwright's 2311) never ended such a worker when the wait had no timeout: it
 // kept the worker's instance and its shared memory until the page closed, and a page can reserve
 // a memory of 4 GiB about 15 times, so each cancel of a threaded search whose threads were
-// waiting left one, until no threaded search could start. The shared-memory guard makes every
-// wait of the threaded module wait in slices with a call of its import sched_yield between them
-// (LOSAT/tests/wasi_shared_memory.js), where the browser ends the worker. This test ends more
-// workers than WebKit could keep memories for, each waiting in a module that has the guard, as
-// the threaded module does; without the guard WebKit cannot give the 16th its memory.
+// waiting left one, until no threaded search could start. The shared-memory guard records each
+// wait of the threaded module, and the keeper of the memory ends those waits before the Gateway
+// ends the runtime: they then wait in slices with a call of the module's import sched_yield
+// between them, where the browser ends the worker (LOSAT/tests/wasi_shared_memory.js,
+// shared-memory.ts endWaits). This test ends more workers than WebKit could keep memories for,
+// each with its keeper and waiting in a module that has the guard, as the Engine worker does;
+// without the guard's waits or without the keeper's endWaits, WebKit cannot give the 16th its memory.
 import { createRequire } from 'node:module';
 import { expect } from '@playwright/test';
 import { test } from './support/test';

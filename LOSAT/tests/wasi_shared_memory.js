@@ -50,15 +50,24 @@
 // !vm.hasTerminationRequest(); VM::notifyNeedTermination only fires the trap). The worker, its
 // instance and the shared memory then live until the page closes. A page can reserve a memory of
 // 4 GiB about 15 times, and each cancel of a threaded search whose threads were waiting kept one, until
-// no threaded search could start (web/app/tests/e2e/worker-end.spec.ts). So the helper of a wait waits
-// in slices of at most WAIT_SLICE_NS and calls the module's import wasi_snapshot_preview1.sched_yield
-// between them: a worker that the page ends is in that host function within one slice, and the browser
-// ends it there. The helper returns what the instruction returns (0 woken, 1 not equal, 2 timed out), a
-// notify wakes it at once, and it waits at least a finite timeout in full. Chromium and Firefox end such
-// a worker anyway; for them the slices change nothing but a wake-up of a waiting thread per slice. A
-// module that does not import sched_yield (the hosts' test fixtures) has no host function to call, and
-// its wait helpers wait once, as before; the web build refuses a threaded module without it
-// (web/app/build/reactors.ts), so the browsers always get the slices.
+// no threaded search could start (web/app/tests/e2e/worker-end.spec.ts). A wait that has a timeout
+// ends, and a thread that calls a host function is ended there; but a finite timeout costs each wait
+// a kernel timer (about 1 us in all three browsers, ct3 ping-pong), so waits keep their own timeout
+// while the memory's workers live. The helper of a wait records the address it waits at, plus 1 (so
+// that 0 means a free cell), in WAIT_TABLE (one of WAIT_SLOTS cells, chosen from the address) and
+// clears it when the wait returns.
+// When the host ends the memory's workers (the memory keeper, ThreadHost.terminate: endWaits in
+// web/app/src/infra/reactor/shared-memory.ts) it sets WAITS_ENDING and notifies every recorded address
+// until the table is empty. From then on, and while the table is full, the helper waits in slices of
+// at most WAIT_SLICE_NS and calls the module's import wasi_snapshot_preview1.sched_yield between them;
+// the browser ends the worker in that call. The helper re-reads WAITS_ENDING after it recorded its
+// address, so a notify that comes before its wait is repeated by the host (it notifies until the table
+// is empty). Before it records the address it loads from it, which traps as the wait would (bounds,
+// alignment), so no address stays recorded after a trap. The helper returns what the instruction
+// returns (0 woken, 1 not equal, 2 timed out; the host's notify is a wake that the guest's futexes
+// treat as spurious), and waits at least a finite timeout in full. A module that does not import
+// sched_yield (the hosts' test fixtures) has no host function to call, and its wait helpers are the
+// single wait, as before; the web build refuses a threaded module without it (web/app/build/reactors.ts).
 //
 // memory.init stays as it is: only __wasm_init_memory (the module's start) and __wasm_init_tls
 // use it, the latter in the spawning thread, called from pthread_create right after the malloc
@@ -78,11 +87,16 @@ const fs = require("node:fs");
 
 const GUARD_SECTION = "losat.shared_memory_guard";
 const GUARD_VERSION = 4;
-// The longest slice of a wait, in nanoseconds: how long a worker that the page ends may still hold
-// the shared memory, and how often a waiting thread wakes for nothing (10 times a second).
+// The longest slice of a wait once the host ends the workers, in nanoseconds: how long such a
+// worker may still hold the shared memory.
 const WAIT_SLICE_NS = 100_000_000;
+// Nonzero once the host ends the memory's workers (endWaits): waits wait in slices (the header).
+const WAITS_ENDING = 20;
+// WAIT_SLOTS i32 cells from WAIT_TABLE: the address of a wait in progress plus 1, 0 for none (the header).
+const WAIT_TABLE = 64;
+const WAIT_SLOTS = 64;
 // Address of the largest memory size, in pages, that a thread of the guest grew the memory to
-// (0 = none yet). Addresses below 1024 are unused (wasm-ld's default global base) or, with
+// (0 = none yet). WAITS_ENDING and WAIT_TABLE lie below 1024 too. Addresses below 1024 are unused (wasm-ld's default global base) or, with
 // --stack-first as rustc links this target, the last bytes of the main thread's stack, reached
 // only at the end of an overflow (docs/evidence/wasm_oob_20261101/). A wrong value here costs
 // one more memory.grow(0), or leaves the bound check of the helpers as the only refresh.
@@ -260,29 +274,66 @@ function boundCheck(bytes, offset, size) {
 // After an atomic instruction that reads memory: memory.grow(0) when memory.size < GROWN_PAGES.
 const ACQUIRE_CHECK = [0x3f, 0, 0x41, GROWN_PAGES, 0xfe, 0x10, 2, 0, 0x49, 0x04, 0x40, 0x41, 0, 0x40, 0, 0x1a, 0x0b];
 
-// A wait in slices (the header): the bound check, then
-//   loop: slice = timeout < 0 || timeout > SLICE ? SLICE : timeout
-//         result = wait(address, expected, slice); result != 2 (woken, not equal): done
-//         a finite timeout: timeout -= slice; timeout <= 0: done (result is 2)
-//         sched_yield(); again
+// i32.const of a 32-bit value (signed LEB128 of its two's complement).
+function i32Const(value) {
+  let v = value | 0;
+  const bytes = [];
+  for (;;) {
+    const byte = v & 127;
+    v >>= 7;
+    if ((v === 0 && !(byte & 64)) || (v === -1 && (byte & 64))) return [0x41, ...bytes, byte];
+    bytes.push(byte | 128);
+  }
+}
+
+// A wait (the header): the bound check, a load at the address (it traps as the wait would), then
+//   loop: if WAITS_ENDING or no free cell (sliced):
+//           slice = timeout < 0 || timeout > SLICE ? SLICE : timeout
+//           result = wait(address, expected, slice); result != 2 (woken, not equal): done
+//           a finite timeout: timeout -= slice; timeout <= 0: done (result is 2)
+//           sched_yield(); again
+//         record address + 1 in a free cell (from cell (address >> 2) & (SLOTS - 1) on); none free:
+//           sliced = 1; again
+//         WAITS_ENDING now: clear the cell; again
+//         result = wait(address, expected, timeout); clear the cell; done
 // then the acquire check, and the result.
 function waitBody({ sub, align, offset }, yieldIndex) {
-  // (param address i32) (param expected) (param timeout i64) (local bytes i64) (local result i32) (local slice i64)
+  // (param address i32) (param expected) (param timeout i64) (local bytes i64) (local result i32)
+  // (local slice i64) (local cell i32) (local probe i32) (local at = address + offset + 1, i32) (local sliced i32)
   const { size } = atomicShape(sub);
   const slice = signedLeb(WAIT_SLICE_NS);
+  const wait = [0xfe, ...uleb(sub), ...uleb(align), ...uleb(offset)];
+  const ending = [0x41, 0, 0xfe, 0x10, 2, ...uleb(WAITS_ENDING)];
+  const clearCell = [0x20, 6, 0x41, 2, 0x74, 0x41, 0, 0xfe, 0x17, 2, ...uleb(WAIT_TABLE)];
   return Buffer.from([
-    3, 1, 0x7e, 1, 0x7f, 1, 0x7e,
+    4, 1, 0x7e, 1, 0x7f, 1, 0x7e, 4, 0x7f,
     ...boundCheck(3, offset, size),
+    0x20, 0, 0xfe, sub === 1 ? 0x10 : 0x11, ...uleb(align), ...uleb(offset), 0x1a,
+    0x20, 0, ...i32Const(offset), 0x6a, 0x41, 1, 0x6a, 0x21, 8,
     0x02, 0x40, 0x03, 0x40,
+    0x20, 9, ...ending, 0x72, 0x04, 0x40,
     0x20, 2, 0x42, 0, 0x53, 0x20, 2, 0x42, ...slice, 0x55, 0x72,
     0x04, 0x7e, 0x42, ...slice, 0x05, 0x20, 2, 0x0b, 0x21, 5,
-    0x20, 0, 0x20, 1, 0x20, 5,
-    0xfe, ...uleb(sub), ...uleb(align), ...uleb(offset),
-    0x22, 4, 0x41, 2, 0x47, 0x0d, 1,
+    0x20, 0, 0x20, 1, 0x20, 5, ...wait,
+    0x22, 4, 0x41, 2, 0x47, 0x0d, 2,
     0x20, 2, 0x42, 0, 0x59, 0x04, 0x40,
-    0x20, 2, 0x20, 5, 0x7d, 0x22, 2, 0x42, 0, 0x57, 0x0d, 2,
+    0x20, 2, 0x20, 5, 0x7d, 0x22, 2, 0x42, 0, 0x57, 0x0d, 3,
     0x0b,
-    0x10, ...uleb(yieldIndex), 0x1a, 0x0c, 0,
+    0x10, ...uleb(yieldIndex), 0x1a, 0x0c, 1,
+    0x0b,
+    0x41, 0, 0x21, 7,
+    0x02, 0x40, 0x03, 0x40,
+    0x20, 7, ...i32Const(WAIT_SLOTS), 0x4f, 0x0d, 1,
+    0x20, 8, 0x41, 2, 0x76, 0x20, 7, 0x6a, ...i32Const(WAIT_SLOTS - 1), 0x71, 0x21, 6,
+    0x20, 6, 0x41, 2, 0x74, 0x41, 0, 0x20, 8, 0xfe, 0x48, 2, ...uleb(WAIT_TABLE),
+    0x45, 0x0d, 1,
+    0x20, 7, 0x41, 1, 0x6a, 0x21, 7, 0x0c, 0,
+    0x0b, 0x0b,
+    0x20, 7, ...i32Const(WAIT_SLOTS), 0x4f, 0x04, 0x40, 0x41, 1, 0x21, 9, 0x0c, 1, 0x0b,
+    ...ending, 0x04, 0x40, ...clearCell, 0x0c, 1, 0x0b,
+    0x20, 0, 0x20, 1, 0x20, 2, ...wait, 0x21, 4,
+    ...clearCell,
+    0x0c, 1,
     0x0b, 0x0b,
     ...ACQUIRE_CHECK,
     0x20, 4, 0x0b,
@@ -549,11 +600,14 @@ function verifyGuarded(bytes) {
   for (let i = fill + 3; i < n; i += 1) {
     const found = [];
     walk(m.bodies[i], (guarded) => { if (guarded && typeof guarded !== "string") found.push(guarded); });
-    const yieldIndex = found.length > 0 && isWait(found[0].sub) ? schedYield(m) : undefined;
-    if (found.length === 0 || !Buffer.from(m.bodies[i]).equals(atomicBody(found[0], yieldIndex))) {
+    // The helper's operation: its first atomic instruction, or the wait of a wait helper (which loads
+    // WAITS_ENDING first).
+    const op = found.find((g) => isWait(g.sub)) ?? found[0];
+    const yieldIndex = op !== undefined && isWait(op.sub) ? schedYield(m) : undefined;
+    if (op === undefined || !Buffer.from(m.bodies[i]).equals(atomicBody(op, yieldIndex))) {
       throw new Error("the guard's helpers are not the guard's bodies");
     }
-    if (!atomicType(found[0]).equals(typeOf(i))) throw new Error("the guard's helpers do not have the guard's type");
+    if (!atomicType(op).equals(typeOf(i))) throw new Error("the guard's helpers do not have the guard's type");
   }
   const calls = [0, 0, 0, 0];
   for (let i = 0; i < fill; i += 1) {
@@ -576,8 +630,8 @@ function verifyGuarded(bytes) {
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
-// Host compatibility only. Whether the guard waits in slices in `bytes` (the header): the module
-// imports wasi_snapshot_preview1.sched_yield, () -> i32.
+// Host compatibility only. Whether the guard's waits in `bytes` can end with their worker (the
+// header): the module imports wasi_snapshot_preview1.sched_yield, () -> i32.
 function slicesWaits(bytes) {
   return schedYield(layout(bytes)) !== undefined;
 }
@@ -627,4 +681,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { guardSharedMemory, guardRecord, verifyGuarded, slicesWaits, GUARD_SECTION };
+module.exports = { guardSharedMemory, guardRecord, verifyGuarded, slicesWaits, GUARD_SECTION, WAITS_ENDING, WAIT_TABLE, WAIT_SLOTS };

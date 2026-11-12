@@ -410,52 +410,111 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
-// A wait waits in slices and calls sched_yield between them (the header of wasi_shared_memory.js):
-// WebKit ends a worker whose thread waits only there. The results are the instruction's.
+// A wait keeps its timeout while the host has not ended the memory's workers, and records its address
+// in the guard's table; once the host set WAITS_ENDING (or while the table is full) it waits in slices
+// and calls sched_yield between them, where WebKit ends a worker (the header of wasi_shared_memory.js).
+// The host ends waits as web/app/src/infra/reactor/shared-memory.ts endWaits does: WAITS_ENDING, then a
+// notify of every recorded address until the table is empty. The results are the instruction's.
 const WAIT_CHILD = `
   const { Worker } = require("node:worker_threads");
-  const [original, guarded] = process.argv.slice(1).map((file) => new WebAssembly.Module(require("node:fs").readFileSync(file)));
-  const run = (module) => {
+  const { WAITS_ENDING, WAIT_TABLE, WAIT_SLOTS } = require(process.argv[3]);
+  const [original, guarded] = [process.argv[1], process.argv[2]].map((file) => new WebAssembly.Module(require("node:fs").readFileSync(file)));
+  const A = 2048;
+  const instance = (module, memory, counter) => new WebAssembly.Instance(module, {
+    env: { memory }, wasi_snapshot_preview1: { sched_yield: () => { counter.n += 1; return 0; } } }).exports;
+  const table = (memory) => [...new Int32Array(memory.buffer, WAIT_TABLE, WAIT_SLOTS)].filter((a) => a !== 0);
+  // A worker that, after ms, records the table, then sets WAITS_ENDING if asked, and notifies the
+  // address (or every recorded one until the table is empty, as endWaits).
+  const later = (memory, ms, how) => new Worker(\`
+    const { workerData, parentPort } = require("node:worker_threads");
+    const { buffer, ms, how, ENDING, TABLE, SLOTS } = workerData;
+    const view = new Int32Array(buffer);
+    setTimeout(() => {
+      const seen = [...view.subarray(TABLE / 4, TABLE / 4 + SLOTS)].filter((a) => a !== 0);
+      if (how === "end") {
+        Atomics.store(view, ENDING / 4, 1);
+        for (let round = 0; round < 1000; round += 1) {
+          const recorded = [...view.subarray(TABLE / 4, TABLE / 4 + SLOTS)].filter((a) => a !== 0);
+          if (recorded.length === 0) break;
+          for (const a of recorded) Atomics.notify(view, (a - 1) >> 2);
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+        }
+      } else Atomics.notify(view, ${"$"}{A} >> 2);
+      parentPort.postMessage(seen);
+    }, ms);\`, { eval: true, workerData: { buffer: memory.buffer, ms, how, ENDING: WAITS_ENDING, TABLE: WAIT_TABLE, SLOTS: WAIT_SLOTS } });
+  const seenBy = (worker) => new Promise((resolve) => worker.once("message", resolve));
+  // The original module has no table: nothing could end its untimed wait, so it runs the parts up to the full table.
+  const run = async (module, all) => {
     const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
-    let yields = 0;
-    const { op0: wait32, op1: wait64 } = new WebAssembly.Instance(module, {
-      env: { memory }, wasi_snapshot_preview1: { sched_yield: () => { yields += 1; return 0; } } }).exports;
-    const timed = (call) => { yields = 0; const start = performance.now(); const result = call(); return { result, yields, ms: performance.now() - start }; };
-    const out = {
-      notEqual: timed(() => wait32(16, 1, -1n)),
-      atOnce: timed(() => wait32(16, 0, 0n)),
-      timed250: timed(() => wait32(16, 0, 250_000_000n)),
-      wait64: timed(() => wait64(24, 0n, 120_000_000n)),
-    };
-    // A notify 150 ms later wakes a wait without a timeout.
-    const notifier = new Worker("const { workerData } = require('node:worker_threads');"
-      + "setTimeout(() => Atomics.notify(new Int32Array(workerData), 4, 1), 150);", { eval: true, workerData: memory.buffer });
-    out.notified = timed(() => wait32(16, 0, -1n));
-    notifier.terminate();
+    const view = new Int32Array(memory.buffer);
+    const counter = { n: 0 };
+    const { op0: wait32, op1: wait64, op2: wait32at8 } = instance(module, memory, counter);
+    const timed = (call) => { counter.n = 0; const start = performance.now(); let result; try { result = call(); } catch (err) { result = err.message; } return { result, yields: counter.n, ms: performance.now() - start, table: table(memory) }; };
+    const out = {};
+    out.notEqual = timed(() => wait32(A, 1, -1n));
+    out.atOnce = timed(() => wait32(A, 0, 0n));
+    out.timed250 = timed(() => wait32(A, 0, 250_000_000n));
+    out.wait64 = timed(() => wait64(A, 0n, 120_000_000n));
+    let w = later(memory, 150, "notify");
+    out.notified = timed(() => wait32(A, 0, -1n));
+    out.notifiedSaw = await seenBy(w);
+    w = later(memory, 100, "notify");
+    out.offset = timed(() => wait32at8(A - 8, 0, -1n));
+    out.offsetSaw = await seenBy(w);
+    out.outOfBounds = timed(() => wait32(65536, 0, -1n));
+    out.misaligned = timed(() => wait32(A + 1, 0, -1n));
+    // The table full: the wait waits in slices.
+    view.fill(4, WAIT_TABLE / 4, WAIT_TABLE / 4 + WAIT_SLOTS);
+    out.full = timed(() => wait32(A, 0, 250_000_000n));
+    view.fill(0, WAIT_TABLE / 4, WAIT_TABLE / 4 + WAIT_SLOTS);
+    if (!all) return out;
+    // The host ends the waits: the untimed wait returns woken; the next waits are in slices.
+    w = later(memory, 100, "end");
+    out.ended = timed(() => wait32(A, 0, -1n));
+    out.endedSaw = await seenBy(w);
+    out.slicedTimed = timed(() => wait32(A, 0, 250_000_000n));
+    w = later(memory, 150, "notify");
+    out.slicedNotified = timed(() => wait32(A, 0, -1n));
+    await seenBy(w);
     return out;
   };
-  console.log(JSON.stringify({ original: run(original), guarded: run(guarded) }));
+  (async () => console.log(JSON.stringify({ original: await run(original, false), guarded: await run(guarded, true) })))();
 `;
 
-test("a wait waits in slices with sched_yield between them, and a notify wakes it at once", { timeout: 60000 }, () => {
-  const waits = [{ ...ATOMICS[1], offset: 0 }, { ...ATOMICS[2], offset: 0 }];
+test("a wait keeps its timeout and records its address until the host ends the waits; then it waits in slices", { timeout: 60000 }, () => {
+  const waits = [{ ...ATOMICS[1], offset: 0 }, { ...ATOMICS[2], offset: 0 }, { ...ATOMICS[1], offset: 8 }];
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-wait-"));
   try {
     const original = path.join(directory, "original.wasm");
     const guarded = path.join(directory, "guarded.wasm");
     fs.writeFileSync(original, atomicFixture(waits));
     fs.writeFileSync(guarded, guardSharedMemory(atomicFixture(waits)).bytes);
-    const run = spawnSync(process.execPath, ["-e", WAIT_CHILD, original, guarded], { encoding: "utf8", timeout: 30000 });
+    const run = spawnSync(process.execPath, ["-e", WAIT_CHILD, original, guarded, require.resolve("./wasi_shared_memory")],
+      { encoding: "utf8", timeout: 40000 });
     assert.equal(run.status, 0, run.stderr);
     const { original: before, guarded: after } = JSON.parse(run.stdout);
-    for (const name of Object.keys(before)) assert.equal(after[name].result, before[name].result, name);
-    assert.deepEqual(Object.values(after).map((r) => r.result), [1, 2, 2, 2, 0]);
-    // 250 ms in slices of 100, 100 and 50 ms; 120 ms in 100 and 20; neither shorter than asked.
-    assert.deepEqual([after.notEqual.yields, after.atOnce.yields, after.timed250.yields, after.wait64.yields], [0, 0, 2, 1]);
+    // Before the host ends the waits: the instruction's results, its timeout, no sched_yield.
+    for (const name of ["notEqual", "atOnce", "timed250", "wait64", "notified", "offset", "outOfBounds", "misaligned"]) {
+      assert.equal(after[name].result, before[name].result, name);
+      assert.equal(after[name].yields, 0, name);
+      assert.deepEqual(after[name].table, [], `${name}: the table is empty after the wait`);
+    }
+    assert.deepEqual([after.notEqual.result, after.atOnce.result, after.timed250.result, after.wait64.result, after.notified.result],
+      [1, 2, 2, 2, 0]);
     assert.ok(after.timed250.ms >= 249 && after.wait64.ms >= 119, JSON.stringify(after));
-    // The notify came in the second slice or later, and woke the wait without waiting out its slice.
-    assert.ok(after.notified.yields >= 1 && after.notified.ms < 1000, JSON.stringify(after.notified));
-    assert.equal(before.timed250.yields + before.notified.yields, 0);
+    // While a wait waits, the table holds its address (with the memarg's offset) plus 1.
+    assert.deepEqual(after.notifiedSaw, [2049]);
+    assert.deepEqual(after.offsetSaw, [2049]);
+    assert.match(after.outOfBounds.result, /out of bounds/);
+    // A full table: slices of 100, 100 and 50 ms with sched_yield between them.
+    assert.deepEqual([after.full.result, after.full.yields], [2, 2]);
+    // The host's end: the recorded untimed wait returns woken, and from then on waits are in slices.
+    assert.deepEqual([after.ended.result, after.ended.yields, after.endedSaw], [0, 0, [2049]]);
+    assert.deepEqual([after.slicedTimed.result, after.slicedTimed.yields], [2, 2]);
+    assert.ok(after.slicedTimed.ms >= 249, JSON.stringify(after.slicedTimed));
+    assert.equal(after.slicedNotified.result, 0);
+    assert.ok(after.slicedNotified.yields >= 1 && after.slicedNotified.ms < 1000, JSON.stringify(after.slicedNotified));
+    assert.deepEqual(after.slicedTimed.table, []);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

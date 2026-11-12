@@ -14,10 +14,11 @@
 // build stops rather than serve an unguarded threaded module: the guard throws on an encoding
 // that it declines, and a module in which it finds nothing to guard is refused here. An
 // artifact that is guarded already (it carries the guard's record) is served as it is, once
-// that guard verifies. The guard also makes each wait of the module wait in slices with a call
-// of its import sched_yield between them, because WebKit never ends a worker whose thread
-// waits without a timeout, and keeps its shared memory; it can do so only in a module that
-// imports sched_yield, so a threaded module without that import is refused here too.
+// that guard verifies. The guard also lets the waits of the module end with their worker: WebKit
+// never ends a worker whose thread waits without a timeout, and keeps its shared memory, so each
+// wait records its address, and once the keeper ends the waits (shared-memory.ts endWaits) they
+// wait in slices with a call of the module's import sched_yield between them. It can do so only
+// in a module that imports sched_yield, so a threaded module without that import is refused here.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';

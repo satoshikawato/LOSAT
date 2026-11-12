@@ -124,6 +124,8 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: Keepe
     threadWorkers: workers.map((worker) => worker.terminated),
     keepers: keepers.map((keeper) => keeper.terminated),
   }));
+  /** The calls of endWaits: the grows before it, and whether the thread workers had ended. */
+  const endedWaits: Array<{ grows: number; threadWorkersEnded: boolean[] }> = [];
   const threads = new ThreadHost({
     module: {} as WebAssembly.Module,
     memory: memory as unknown as WebAssembly.Memory,
@@ -143,8 +145,11 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: Keepe
       keepers.push(keeper);
       return keeper as unknown as Worker;
     },
+    endWaits: () => {
+      endedWaits.push({ grows: memory.grows.length, threadWorkersEnded: workers.map((worker) => worker.terminated) });
+    },
   });
-  return { threads, workers, keepers, memory, faultChannel, keeperChannel, use };
+  return { threads, workers, keepers, memory, faultChannel, keeperChannel, use, endedWaits };
 }
 
 describe('ThreadHost', () => {
@@ -202,7 +207,7 @@ describe('ThreadHost', () => {
     expect(workers.every((worker) => worker.terminated)).toBe(true);
   });
 
-  it('grows the memory to its maximum before it ends the workers while a thread runs, and not when none runs', async () => {
+  it('grows the memory to its maximum and ends its waits before it ends the workers while a thread runs, and not when none runs', async () => {
     // A thread that runs may be growing the memory: WebKit crashes the page when workers
     // with instances on it end then (a thread of a pool that has not returned when the
     // runtime moves to the other module, runtime.ts load).
@@ -211,6 +216,8 @@ describe('ThreadHost', () => {
     expect(running.threads.spawn(1000)).toBe(1);
     running.threads.terminate();
     expect(running.memory.grows).toEqual([{ pages: 65_533, threadWorkersEnded: [false, false], keeperEnded: [false] }]);
+    // WebKit ends a worker whose thread waits only once the waits are ended (shared-memory.ts, endWaits).
+    expect(running.endedWaits).toEqual([{ grows: 1, threadWorkersEnded: [false, false] }]);
     expect(running.workers.every((worker) => worker.terminated)).toBe(true);
     expect(running.keepers[0]!.terminated).toBe(true);
 
@@ -218,6 +225,7 @@ describe('ThreadHost', () => {
     await idle.threads.prepare(2);
     idle.threads.terminate();
     expect(idle.memory.grows).toEqual([]);
+    expect(idle.endedWaits).toEqual([]);
     expect(idle.workers.every((worker) => worker.terminated)).toBe(true);
 
     // A grow that fails does not keep the workers from ending.

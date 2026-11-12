@@ -145,7 +145,11 @@ impl Arena {
     }
 
     /// (tests) whether the arena was allocated (a slot of the pool a stage used).
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub(super) fn allocated(&self) -> bool {
         !self.next.is_empty()
     }

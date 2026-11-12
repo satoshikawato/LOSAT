@@ -170,6 +170,9 @@ pub enum MakedbError {
     Database(SeqDbError),
     /// A request makeblastdb serves and LOSAT does not.
     Unsupported(String),
+    /// NCBI's `CIOException::eFlush` of the metadata file's stream: the text makeblastdb
+    /// prints after "BLAST failed to write output: ", exit status 6.
+    Output(&'static str),
     /// NCBI's `CArgException` raised after the arguments were parsed: the text
     /// makeblastdb prints after "Command line argument error: ".
     Argument(String),
@@ -238,17 +241,28 @@ impl MakedbError {
     //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
     /// The exit code: 1 (`BLAST_INPUT_ERROR`) for an error of the options or
     /// of the database creation, 2 (`BLAST_DATABASE_ERROR`) when the new
     /// database cannot be opened, 4 (`BLAST_OUT_OF_MEMORY`) for a failed
-    /// allocation, and 255 (`BLAST_UNKNOWN_ERROR`) otherwise, which includes
-    /// the failures of the file system that LOSAT reports itself.
+    /// allocation, 6 (`BLAST_OUTPUT_ERROR`) when the metadata file's stream cannot be
+    /// flushed, and 255 (`BLAST_UNKNOWN_ERROR`) otherwise, which includes LOSAT's own
+    /// refusals and an input file that cannot be read.
     pub fn exit_code(&self) -> i32 {
         match self {
             MakedbError::Build(
                 WriteDbError::Exception(_) | WriteDbError::Other(_) | WriteDbError::Io { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
+            MakedbError::Output(_) => 6,
             MakedbError::Database(_) | MakedbError::Build(WriteDbError::Database(_)) => 2,
             MakedbError::Build(
                 WriteDbError::Creation(_)
@@ -267,6 +281,7 @@ impl std::fmt::Display for MakedbError {
             MakedbError::Build(error) => error.fmt(f),
             MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
             MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
+            MakedbError::Output(message) => write!(f, "BLAST failed to write output: {message}"),
             MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
         }
     }
@@ -1214,7 +1229,7 @@ fn add_input_and_close(
         db.end_build(false, &mut warn)
     };
     if closed? {
-        open_new_database(db, title, is_protein, now)?;
+        open_new_database(db, title, is_protein, now, err)?;
     }
     Ok(())
 }
@@ -1240,9 +1255,13 @@ fn add_input_and_close(
 //     }
 // ```
 // `CSeqDB sdb(new_db, t)` throws a `CSeqDBException` when the reader cannot
-// open what was written; the usual cause is an alias file of an earlier
+// open what was written; the usual causes are an alias file of an earlier
 // database of the same name that `DeleteBlastDb` could not resolve and
-// therefore left in place, which now hides the new single volume. LOSAT
+// therefore left in place, which now hides the new single volume, and an
+// index file or alias file that is not a file (one that could not be created
+// or renamed, a link to a device: `CFile::Exists` asks for a regular file).
+// The other files of a volume are not opened then: one that is missing is
+// left out of the metadata (`db_files_metadata`). LOSAT
 // resolves the database here for that outcome and for the values of the
 // metadata, and it only resolves: the alias files are read and every volume is
 // located, but no volume is opened. The volumes were written a moment ago, and
@@ -1267,6 +1286,7 @@ fn open_new_database(
     title: &str,
     is_protein: bool,
     now: &LocalTime,
+    err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     let new_db = db.output_dbname();
     let seqtype = if is_protein {
@@ -1370,7 +1390,10 @@ fn open_new_database(
         bytes_to_cache,
         files,
     };
-    write_metadata_file(new_db, is_protein, &metadata).map_err(MakedbError::Build)
+    match write_metadata_file(new_db, is_protein, &metadata, err) {
+        Some(message) => Err(MakedbError::Output(message)),
+        None => Ok(()),
+    }
 }
 
 fn add_fasta(

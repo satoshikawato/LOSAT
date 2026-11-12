@@ -290,6 +290,34 @@ Removal of an existing database and the paths of the output:
   ...` or `Could not find volume or alias file ...`, exit status 2) when the file is the
   volume's `.pin`, `.nin`, and ends normally when it is another file (`.phr`, `.psq`, an
   index file).
+- An output file that cannot be created (a directory of its name that the removal of the old
+  database could not delete) or written (a full device): LOSAT writes it as makeblastdb does,
+  through a model of the `ofstream` of makeblastdb 2.17.0 (the official Linux x64 release,
+  which links libstdc++ 13.2 statically: a put area of 8191 bytes, writes that do not fit go out
+  at once, a failed write leaves the stream failed and every later output a no-op; the C++
+  libraries of makeblastdb on macOS and Windows are not compared), and does not test it, as
+  makeblastdb does not. The build goes on;
+  a volume file under its numbered name is renamed whatever is there (a directory, a link as
+  the link); the new database is opened as makeblastdb opens it, so a missing index or alias
+  file ends with `No alias or index file found ...` or `Could not find volume or alias file
+  ...` (exit status 2) and any other missing file is left out of the metadata file. A device
+  that fills during the build leaves regular files cut short: makeblastdb's reader reads the cut
+  index files when it opens the database, where LOSAT, which does not open the volumes (below),
+  takes the totals from the writer (not compared with a makeblastdb run). The
+  metadata file's serializer reports what makeblastdb's reports, at the same byte: `Error:
+  (802.5) [makeblastdb] CObjectOStream: error at byte N: stack is empty: write fault` (exit
+  status 0) when a write of its 4096-byte buffer fails, and, when the stream's flush fails,
+  that error with `cannot close output stream`, the report of the failed close, and `BLAST
+  failed to write output: COStreamBuffer::Flush: failed` (exit status 6). The errors of
+  `close(2)` are not seen (makeblastdb does not test the close either). The data files of LMDB
+  (`.pdb`, `.ptf`) are not `ofstream`s: their errors stay LMDB's (`BLAST Database error: LMDB
+  runtime error: ...` and the creation errors below). A duplicate id that the close finds in
+  the last sequence removes the files of the build and then runs the writer's destructors in
+  makeblastdb's order (the `.pot` and `.pto` files and the commit of `.ptf`, the `.pos` file and
+  the commit into the removed `.pdb`, the close of the last volume, whose ISAM and OID to GI
+  files are made under its numbered name). Where one of these destructors throws, makeblastdb
+  aborts and the steps after it do not run; LOSAT ends with the build's error there (the lock
+  files: below).
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
   `.ncbirc` is not removed (`losat makeblastdb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
@@ -334,9 +362,8 @@ Version 5 and the options added to the writer:
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
-- A file that cannot be created or written, and an input file that cannot be
-  opened: makeblastdb does not test its streams and ends with exit status 0 and a damaged
-  or missing database. LOSAT removes the files of the build and ends with
+- An input file that cannot be opened: makeblastdb does not test its stream and ends with
+  exit status 0 and a missing database. LOSAT removes the files of the build and ends with
   `Error: <path>: <system error>` and exit status 255.
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights); LOSAT stops when it creates the first

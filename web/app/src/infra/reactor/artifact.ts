@@ -34,6 +34,10 @@ export const ABI_EXPORTS: readonly string[] = Object.freeze([
   'losat_web2_scan_chunk',
   'losat_web2_scan_end',
   'losat_web2_run',
+  'losat_web2_file_begin',
+  'losat_web2_file_chunk',
+  'losat_web2_file_end',
+  'losat_web2_file_release',
 ]);
 
 class Reader {

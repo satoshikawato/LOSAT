@@ -9,6 +9,7 @@
 // thread workers, or that renewal, before the search that would start them. `describe` and
 // `validate` go to the Data worker's serial reactor, which can answer while a search runs
 // (src/infra/reactor/control.ts).
+import type { CountsSnapshot } from '../../domain/run';
 import {
   InputMismatchError,
   RunCancelledError,
@@ -24,7 +25,7 @@ import {
 import { engineBuildName, type EngineAssets } from '../reactor/assets';
 import type { EngineControl } from '../reactor/control';
 import { loadReactor } from '../reactor/instance';
-import { chooseThreads, DEFAULT_RENEWAL, renewalReason, type RenewalLimits } from './policy';
+import { chooseThreads, DEFAULT_RENEWAL, limitsHolding, renewalReason, type RenewalLimits } from './policy';
 import type {
   EngineCommand,
   EngineEvent,
@@ -34,6 +35,7 @@ import type {
   ModuleSource,
   ThreadFault,
   WorkerError,
+  WorkerCounts,
   WorkerInput,
   WorkerRun,
 } from './protocol';
@@ -190,6 +192,7 @@ export class WasmEngine implements EngineGateway {
       threads,
       query: workerInput(program, request.query),
       subject: workerInput(program, request.subject),
+      ...(request.windowMasker === undefined ? {} : { windowMasker: workerCounts(request.windowMasker) }),
       output,
     };
     generation.worker.postMessage(command, [output]);
@@ -274,7 +277,7 @@ export class WasmEngine implements EngineGateway {
       return;
     }
     const { result } = event;
-    generation.renew = renewalReason(result.memory, this.renewal);
+    generation.renew = renewalReason(result.memory, limitsHolding(this.renewal, result.countsBytes));
     this.settle(active, undefined, {
       path: result.path,
       threads: result.threads,
@@ -283,6 +286,7 @@ export class WasmEngine implements EngineGateway {
       runtimeGeneration: generation.id,
       memory: result.memory,
       subjectRetained: result.subjectRetained,
+      ...(result.windowMasker === undefined ? {} : { windowMasker: result.windowMasker }),
     });
   }
 
@@ -350,6 +354,15 @@ export class WasmEngine implements EngineGateway {
 /** The retained-subject key: the program, the SHA-256 and the dataset revisions (plan §4.6). */
 export function inputKey(program: string, input: EngineInput): string {
   return JSON.stringify([program, input.sha256, input.revisionIds]);
+}
+
+/** The key of a counts file: its name, size and last-modified time (the SHA-256 is known only after the engine read it). */
+export function countsKey(counts: CountsSnapshot): string {
+  return JSON.stringify([counts.name, counts.size, counts.lastModified]);
+}
+
+function workerCounts(counts: CountsSnapshot): WorkerCounts {
+  return { name: counts.name, blob: counts.file, key: countsKey(counts) };
 }
 
 function workerInput(program: string, input: EngineInput): WorkerInput {

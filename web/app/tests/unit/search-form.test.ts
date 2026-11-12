@@ -426,8 +426,11 @@ describe("the selects of the protein modes: NCBI's values that LOSAT reads", () 
     expect(fieldChoices(field('tblastn', '-comp_based_stats'), optionsOf('tblastn').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
   });
 
-  it("gives BLASTX NCBI's matrices in either task", () => {
-    for (const values of [{}, { '-task': 'blastx-fast' }, { '-word_size': '5' }]) expect(list('blastx', '-matrix', values)).toEqual(MATRICES);
+  it("gives BLASTX NCBI's matrices and word sizes 2, 3, 5 and 6 in either task", () => {
+    for (const values of [{}, { '-task': 'blastx-fast' }, { '-word_size': '5' }]) {
+      expect(list('blastx', '-matrix', values)).toEqual(MATRICES);
+      expect(list('blastx', '-word_size', values)).toEqual(['2', '3', '5', '6']);
+    }
   });
 
   it("gives TBLASTX NCBI's word sizes 2 and 3", () => {

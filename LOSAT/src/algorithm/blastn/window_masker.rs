@@ -53,6 +53,7 @@ use std::sync::Arc;
 use crate::blastinput::ncbi_environment::WindowMaskerRegistry;
 use crate::cli::NativeError;
 use crate::report::blast_xml::filter::WindowMasker as FilterOption;
+use crate::report::diag_log::Posts;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::winmask::{CountsSource, MaskerParams, SeqMasker, StatType, WinMaskError};
 
@@ -70,7 +71,7 @@ pub struct WindowMasker {
     /// What NCBI writes each time it loads the registry of `-window_masker_taxid` to find the
     /// file (`ncbi_environment::WindowMaskerRegistry`; `load_posts`); empty for
     /// `-window_masker_db`, which loads no registry.
-    registry_posts: Vec<u8>,
+    registry_posts: Posts,
     /// Whether only the run's first load writes `registry_posts`.
     registry_posts_once: bool,
 }
@@ -136,7 +137,7 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
         name: name.to_string(),
         taxid: None,
         masker: build(name, source),
-        registry_posts: Vec::new(),
+        registry_posts: Posts::new(),
         registry_posts_once: false,
     })
 }
@@ -214,7 +215,7 @@ pub(crate) fn open_taxid(
         name,
         taxid: Some(taxid),
         masker,
-        registry_posts: registry.load_posts.clone().into_bytes(),
+        registry_posts: registry.load_posts.clone(),
         registry_posts_once: registry.posts_once,
     })
 }
@@ -260,9 +261,10 @@ impl WindowMasker {
     /// {
     ///     string db = WindowMaskerTaxidToDb(taxid);
     /// ```
-    pub(crate) fn load_posts(&self, first: bool) -> &[u8] {
+    pub(crate) fn load_posts(&self, first: bool) -> &Posts {
+        static NONE: Posts = Posts::new();
         if self.registry_posts_once && !first {
-            &[]
+            &NONE
         } else {
             &self.registry_posts
         }
@@ -275,7 +277,7 @@ impl WindowMasker {
         error: &WinMaskError,
         queries: usize,
         first: bool,
-    ) -> Option<(Vec<u8>, NativeError)> {
+    ) -> Option<(Posts, NativeError)> {
         batch_error(
             error,
             queries,
@@ -392,9 +394,9 @@ impl WindowMasker {
 pub(crate) fn batch_error(
     error: &WinMaskError,
     queries: usize,
-    first_load: &[u8],
-    later_loads: &[u8],
-) -> Option<(Vec<u8>, NativeError)> {
+    first_load: &Posts,
+    later_loads: &Posts,
+) -> Option<(Posts, NativeError)> {
     let text = match error {
         WinMaskError::BadIndex { .. } => error.to_string(),
         _ => error.create_report()?,
@@ -406,12 +408,12 @@ pub(crate) fn batch_error(
     //                 ERR_POST( Warning << "file read failed: "
     //                                   << "bit array optimizations are not used." );
     // ```
-    let mut warnings = Vec::new();
+    let mut warnings = Posts::new();
     let mut message = String::from("BLAST engine error: ");
     for query in 0..queries {
-        warnings.extend_from_slice(if query == 0 { first_load } else { later_loads });
+        warnings.append(if query == 0 { first_load } else { later_loads });
         for warning in error.warnings() {
-            warnings.extend_from_slice(format!("Warning: [blastn] {warning}\n").as_bytes());
+            warnings.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
         }
         message.push_str("Warning: ");
         message.push_str(&text);
@@ -552,15 +554,17 @@ mod tests {
         assert_eq!(found.filter_option(), FilterOption::Taxid(562));
         assert!(found.load_posts(true).is_empty() && found.load_posts(false).is_empty());
         // What each load of the registry writes, or only the first.
-        for (once, later) in [(false, &b"posted\n"[..]), (true, &b""[..])] {
+        let mut posted = Posts::new();
+        posted.post(crate::report::diag_log::CRITICAL, "posted\n");
+        for (once, later) in [(false, posted.clone()), (true, Posts::new())] {
             let registry = WindowMaskerRegistry {
-                load_posts: "posted\n".to_string(),
+                load_posts: posted.clone(),
                 posts_once: once,
                 ..root.clone()
             };
             let masker = open_taxid(562, &registry, &FileCounts).unwrap();
-            assert_eq!(masker.load_posts(true), b"posted\n");
-            assert_eq!(masker.load_posts(false), later);
+            assert_eq!(masker.load_posts(true), &posted);
+            assert_eq!(masker.load_posts(false), &later);
         }
         // A binary counts file under the optimized binary's name.
         assert!(open_taxid(7227, root, &FileCounts)
@@ -569,12 +573,13 @@ mod tests {
             .is_none());
         let missing = open_taxid(9606, root, &FileCounts).unwrap();
         assert_eq!(missing.name, "");
-        let (warnings, error) = batch_error(missing.build_error().unwrap(), 2, b"", b"").unwrap();
+        let none = &Posts::new();
+        let (warnings, error) = batch_error(missing.build_error().unwrap(), 2, none, none).unwrap();
         assert!(warnings.is_empty());
         // Each query's read of the file comes after a load of the registry.
-        let (posted, _) =
-            batch_error(missing.build_error().unwrap(), 3, b"first\n", b"later\n").unwrap();
-        assert_eq!(posted, b"first\nlater\nlater\n");
+        let (first, later) = (Posts::of_lines(b"first\n".to_vec()), posted);
+        let (posts, _) = batch_error(missing.build_error().unwrap(), 3, &first, &later).unwrap();
+        assert_eq!(posts.text(), b"first\nposted\nposted\n");
         let one = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open \n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n ");
         assert_eq!(error.exit, 3);
         assert_eq!(error.message, format!("BLAST engine error: {one}{one}\n"));
@@ -589,10 +594,11 @@ mod tests {
     // 実機確認"; the bytes are those of tests/blastn_window_masker.rs's fixtures).
     #[test]
     fn a_counts_file_that_fails_stops_the_batch_with_one_message_per_query() {
+        let none = &Posts::new();
         let factory = format!("    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n");
         let unit = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_obinary.cpp\", line 114: Error: (Exception::bad parameter) ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - unit size must be in [1,16]\n{factory} ");
         let (warnings, error) =
-            batch_error(&WinMaskError::format(FormatSite::UnitSize), 2, b"", b"").unwrap();
+            batch_error(&WinMaskError::format(FormatSite::UnitSize), 2, none, none).unwrap();
         assert!(warnings.is_empty());
         assert_eq!(error.exit, 3);
         assert_eq!(error.message, format!("BLAST engine error: {unit}{unit}\n"));
@@ -600,9 +606,9 @@ mod tests {
             site: FormatSite::HashTable,
             warnings: vec!["file read failed: bit array optimizations are not used.".into()],
         };
-        let (warnings, _) = batch_error(&short, 2, b"", b"").unwrap();
+        let (warnings, _) = batch_error(&short, 2, none, none).unwrap();
         assert_eq!(
-            warnings,
+            warnings.text(),
             b"Warning: [blastn] file read failed: bit array optimizations are not used.\nWarning: [blastn] file read failed: bit array optimizations are not used.\n"
         );
         let (_, bad_index) = batch_error(
@@ -611,14 +617,16 @@ mod tests {
                 value: 14779,
             },
             1,
-            b"",
-            b"",
+            none,
+            none,
         )
         .unwrap();
         assert_eq!(
             bad_index.message,
             "BLAST engine error: Warning: bad index at key 8764 : 14779 \n"
         );
-        assert!(batch_error(&WinMaskError::EmptyCacheBitArray { unit: 2 }, 1, b"", b"").is_none());
+        assert!(
+            batch_error(&WinMaskError::EmptyCacheBitArray { unit: 2 }, 1, none, none).is_none()
+        );
     }
 }

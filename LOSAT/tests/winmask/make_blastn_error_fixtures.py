@@ -11,8 +11,9 @@ line NP M/DECISIONS.md 14); other builds differ in that path only.
   tests/winmask/counts/mg1655_u9.obinary, and the -window_masker_taxid directory taxid/ (562 and -1:
   that file, 7: the unit size 17, 8: unreadable, 9606: a directory in its place, 10: ascii counts)
   with the registry files home_rc/.ncbirc, cfg_inidont/{blastn.ini,.ncbirc} and the malformed
-  .ncbirc files of cfg_rcbad, cfg_rcbadapp, cfg_rcpre and cfg_rcbom (tests/blastn_window_masker.rs
-  makes the same bytes, with ncbi.ini for .ncbirc on Windows).
+  .ncbirc files of cfg_rcbad, cfg_rcbadapp, cfg_rcpre and cfg_rcbom, the files with an entry set again
+  of cfg_rcdup and cfg_rcdupbad, and short.fa, subjects with fewer letters than subjects
+  (tests/blastn_window_masker.rs makes the same bytes, with ncbi.ini for .ncbirc on Windows).
 - freeze --ncbi-bin DIR [--cases NAME ...]: runs `DIR/blastn <args> -num_threads 1` from LOSAT/ for
   each row of cases.tsv (or the rows named) with the row's environment and writes <case>.out,
   <case>.err and <case>.rc.
@@ -96,6 +97,13 @@ def make_counts() -> None:
         "cfg_rcpre/.ncbirc": b"x y = 1\n" + rc,
         "cfg_rcbom/blastn.ini": b"[NCBI]\nDONT_USE_NCBIRC = 1\n",
         "cfg_rcbom/.ncbirc": b"\xef",
+        # an entry set again (line NP M3c review): in a well-formed file, and above a malformed line
+        "cfg_rcdup/blastn.ini": b"[NCBI]\nDONT_USE_NCBIRC = 1\n",
+        "cfg_rcdup/.ncbirc": rc + rc.split(b"\n", 1)[1],
+        "cfg_rcdupbad/blastn.ini": b"[NCBI]\nDONT_USE_NCBIRC = 1\n",
+        "cfg_rcdupbad/.ncbirc": rc + rc.split(b"\n", 1)[1] + b"[my blast]\nx = 1\n",
+        # subjects with fewer letters than subjects (the average subject length is 0)
+        "short.fa": b">s1\nA\n>s2\n\n",
     }
     for name, content in taxid_files.items():
         (WORK / name).parent.mkdir(parents=True, exist_ok=True)

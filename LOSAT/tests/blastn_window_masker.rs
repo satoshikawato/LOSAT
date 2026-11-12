@@ -117,6 +117,11 @@ fn make_counts() {
         // line before the entry, a file of one byte whose stream fails.
         let rc_bad = [rc.as_slice(), b"[my blast]\nx = 1\n"].concat();
         let rc_pre = [b"x y = 1\n".as_slice(), rc.as_slice()].concat();
+        // An entry set again (line NP M3c review): in a well-formed file, and above a malformed
+        // line.
+        let entry = &rc[rc.iter().position(|&byte| byte == b'\n').unwrap() + 1..];
+        let rc_dup = [rc.as_slice(), entry].concat();
+        let rc_dup_bad = [rc_dup.as_slice(), b"[my blast]\nx = 1\n"].concat();
         let taxid_files: Vec<(String, Vec<u8>)> = vec![
             ("taxid/562/wmasker.obinary".into(), data.clone()),
             ("taxid/-1/wmasker.obinary".into(), data.clone()),
@@ -136,8 +141,14 @@ fn make_counts() {
             (system_wide("cfg_rcbadapp"), rc_bad),
             ("cfg_rcpre/blastn.ini".into(), ini_dont.clone()),
             (system_wide("cfg_rcpre"), rc_pre),
-            ("cfg_rcbom/blastn.ini".into(), ini_dont),
+            ("cfg_rcbom/blastn.ini".into(), ini_dont.clone()),
             (system_wide("cfg_rcbom"), b"\xef".to_vec()),
+            ("cfg_rcdup/blastn.ini".into(), ini_dont.clone()),
+            (system_wide("cfg_rcdup"), rc_dup),
+            ("cfg_rcdupbad/blastn.ini".into(), ini_dont),
+            (system_wide("cfg_rcdupbad"), rc_dup_bad),
+            // Subjects with fewer letters than subjects (the average subject length is 0).
+            ("short.fa".into(), b">s1\nA\n>s2\n\n".to_vec()),
         ];
         for (name, content) in taxid_files {
             let path = work.join(name);

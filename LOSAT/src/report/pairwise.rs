@@ -5987,10 +5987,10 @@ mod tblastx_tests {
                         &report,
                         None,
                         None,
-                        Some(&mut crate::report::query_warnings::QueryWarnings {
-                            before: &before,
-                            sink: &mut diagnostics,
-                        }),
+                        Some(&mut crate::report::query_warnings::QueryWarnings::new(
+                            &before,
+                            &mut diagnostics,
+                        )),
                         x_pool,
                     )
                     .unwrap();

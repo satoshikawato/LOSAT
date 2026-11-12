@@ -24,7 +24,7 @@
 //! ```
 //! Every diagnostic that the application posts is printed (the handler it wraps) and, when
 //! the application writes an archive, saved with its severity (`eDiag_Warning` 1,
-//! `eDiag_Error` 2) and its text with the white space cleaned. LOSAT prints the same lines
+//! `eDiag_Error` 2, `eDiag_Critical` 3) and its text with the white space cleaned. LOSAT prints the same lines
 //! (its standard error equals NCBI's), so the lines that go to its diagnostics stream are
 //! the messages: `DiagLog` collects them as they are written, and an archive takes the ones
 //! saved since the previous archive (`CBlastFormat::WriteArchive`, `m_Bah.ResetMessages()`).
@@ -33,6 +33,108 @@
 pub const WARNING: i32 = 1;
 /// `eDiag_Error`.
 pub const ERROR: i32 = 2;
+/// `eDiag_Critical`.
+pub const CRITICAL: i32 = 3;
+
+/// What NCBI posts at one place of a run, in order: standard error shows their texts one after
+/// the other, and the BLAST archive saves each post as one message of its severity
+/// (`CBlastAppDiagHandler::Post`). The diagnostics stream saves each line written to it as a
+/// warning (`DiagTee`), which is what the reader's and the search's one-line warnings are: they
+/// are kept as lines (`lines`). A post of another severity, or whose text has several lines (an
+/// exception's `what()`), is kept whole (`post`) and saved as one message (`write`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Posts(Vec<Post>);
+
+/// One item of `Posts`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Post {
+    /// Lines that are each a warning.
+    Lines(Vec<u8>),
+    /// One post of `severity` (`WARNING`, `ERROR`, `CRITICAL`) with its text.
+    Whole { severity: i32, text: Vec<u8> },
+}
+
+impl Posts {
+    /// No post.
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// The posts of `lines`, each line a warning.
+    pub fn of_lines(lines: Vec<u8>) -> Self {
+        let mut posts = Self::new();
+        if !lines.is_empty() {
+            posts.0.push(Post::Lines(lines));
+        }
+        posts
+    }
+
+    /// Adds `lines`, each line a warning.
+    pub fn lines(&mut self, lines: &[u8]) {
+        if lines.is_empty() {
+            return;
+        }
+        match self.0.last_mut() {
+            Some(Post::Lines(last)) => last.extend_from_slice(lines),
+            _ => self.0.push(Post::Lines(lines.to_vec())),
+        }
+    }
+
+    /// Adds one post of `severity` whose text is `text` (with its line feed).
+    pub fn post(&mut self, severity: i32, text: impl Into<Vec<u8>>) {
+        let text = text.into();
+        if !text.is_empty() {
+            self.0.push(Post::Whole { severity, text });
+        }
+    }
+
+    /// Adds the posts of `other` after these.
+    pub fn append(&mut self, other: &Posts) {
+        for post in &other.0 {
+            match post {
+                Post::Lines(lines) => self.lines(lines),
+                Post::Whole { .. } => self.0.push(post.clone()),
+            }
+        }
+    }
+
+    /// Whether there is no post.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// What standard error shows of the posts.
+    pub fn text(&self) -> Vec<u8> {
+        let mut text = Vec::new();
+        for post in &self.0 {
+            match post {
+                Post::Lines(bytes) | Post::Whole { text: bytes, .. } => {
+                    text.extend_from_slice(bytes)
+                }
+            }
+        }
+        text
+    }
+
+    /// Writes the posts to `diagnostics`, the stream of the run's diagnostics: the lines as they
+    /// are, and with the BLAST archive (`archive`, whose handle saves what that stream writes)
+    /// each whole post saved as one message (`ArchiveHandle::write_post`).
+    pub fn write(
+        &self,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        for post in &self.0 {
+            match (post, archive) {
+                (Post::Whole { severity, text }, Some(handle)) => {
+                    handle.write_post(diagnostics, *severity, text)?
+                }
+                (Post::Lines(text) | Post::Whole { text, .. }, _) => diagnostics.write_all(text)?,
+            }
+        }
+        Ok(())
+    }
+}
 
 /// A saved message: its severity and its sanitized text.
 pub type Message = (i32, Vec<u8>);

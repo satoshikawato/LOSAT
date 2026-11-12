@@ -40,6 +40,10 @@ pub(super) struct ContextInputs<'a> {
     pub(super) batching: QueryBatching,
     pub(super) first_batch: bool,
     pub(super) stage: BatchStage<'a>,
+    /// Whether NCBI searches the batch chunk by chunk (`search_query_chunks`): the subjects are
+    /// then checked by the set-up of each chunk (`BLAST_GapAlignSetUp` in the chunk's
+    /// `CPrelimSearchRunner`), after the chunk's masks, not by the batch's.
+    pub(super) split: bool,
     pub(super) subjects: SubjectSource<'a>,
     pub(super) seq_data: &'a SequenceData<'a>,
     pub(super) megablast: bool,
@@ -232,6 +236,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         query_contexts,
         first_batch,
         stage,
+        split,
         subjects,
         seq_data,
         megablast,
@@ -317,7 +322,14 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // oracle (campaign dbsearch-20261012, `$BUILD_ROOT/dbsearch/db4/smoke/empty`: the
     // nucleotide fixture's index with no sequence): the outfmt 0 prolog, then `BLAST engine
     // error: Database memory map file error`, exit status 3, for outfmt 0, 6 and 7.
-    if any_valid_context {
+    // A split batch checks them in its chunks (`ContextInputs::split`): the first chunk with a
+    // valid context stops NCBI there, after the masks of the chunks up to it (NCBI BLAST+ 2.17.0
+    // on 2026-11-12, line NP M3c review `c3`: `CHUNK_SIZE=600` and subjects with fewer letters
+    // than subjects post the registry of `-window_masker_taxid` for the batch and for chunk 0,
+    // then `The average subject length is too short`). The search spaces of the batch below
+    // (`SplitQuery_SetEffectiveSearchSpace`) check nothing.
+    let check_subjects = any_valid_context && !split;
+    if check_subjects {
         if let SubjectSource::Database(database) = subjects {
             if database.metadata().db_num_seqs == 0 {
                 return Err(database_search_error(
@@ -330,7 +342,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
             }
         }
     }
-    if any_valid_context {
+    if check_subjects {
         let total_length = seq_data.db_len_total as i64;
         let (total_length, num_seqs) = if total_length > 0 {
             (total_length, seq_data.db_num_seqs as i64)

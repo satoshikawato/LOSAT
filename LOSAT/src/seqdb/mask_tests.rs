@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::mask::{ncbi_split, string_to_int};
+use super::mask::ncbi_split;
 use super::*;
 
 fn fixture_dir() -> PathBuf {
@@ -1277,34 +1277,9 @@ fn the_other_volumes_columns_are_opened_first() {
     );
 }
 
+// The integers (`NStr::StringToInt`) are tested with `crate::ncbi_str`.
 #[test]
-fn integers_and_splits_follow_ncbi() {
-    for (text, value) in [
-        ("0", Some(0)),
-        ("30", Some(30)),
-        ("+30", Some(30)),
-        ("-5", Some(-5)),
-        ("007", Some(7)),
-        ("2147483647", Some(i32::MAX)),
-        ("-2147483648", Some(i32::MIN)),
-        ("2147483648", None),
-        ("-2147483649", None),
-        ("99999999999999999999999999", None),
-        ("", None),
-        ("+", None),
-        ("-", None),
-        (" 5", None),
-        ("5 ", None),
-        ("5x", None),
-        ("0x10", None),
-        ("1,000", None),
-        ("--5", None),
-        // The text ends at a NUL, as the C string does.
-        ("5\u{0}x", Some(5)),
-        ("\u{0}5", None),
-    ] {
-        assert_eq!(string_to_int(text), value, "{text:?}");
-    }
+fn splits_follow_ncbi() {
     let split: [(&str, &[&str]); 9] = [
         ("", &[]),
         ("30", &["30"]),

@@ -117,7 +117,7 @@ use std::path::{Path, PathBuf};
 
 use super::file::DbFile;
 use super::SeqDbError;
-use crate::ncbi_str::printable_string;
+use crate::ncbi_str::{printable_string, string_to_int, string_to_uint, ALLOW_TRAILING_SYMBOLS};
 use crate::seqid::accguide::{parse_flags, SeqIdWarning, SEQID_NOT_SET};
 use crate::seqid::label;
 use crate::seqid::model::{ObjectId, ParsedSeqId, TextseqId};
@@ -2092,6 +2092,7 @@ impl StringIsam {
                 .ok_or_else(|| bad("a record has no line end"))?
                 + at;
             let oid = string_to_uint(&page[at..val_end])
+                .ok()
                 .and_then(|v| i32::try_from(v).ok())
                 .ok_or_else(|| {
                     bad(&format!(
@@ -2599,17 +2600,6 @@ fn atoi(s: &[u8]) -> i32 {
     (if negative { -value } else { value }) as i32
 }
 
-/// `NStr::StringToUInt(str)` with no flags: an optional `+`, digits only, at most `UINT_MAX`.
-fn string_to_uint(s: &[u8]) -> Option<u32> {
-    let digits = s.strip_prefix(b"+").unwrap_or(s);
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    digits.iter().try_fold(0u32, |n, &c| {
-        n.checked_mul(10)?.checked_add(u32::from(c - b'0'))
-    })
-}
-
 /// One entry of a list of string ids (`CSeqDBGiList::SSiOid`): the id and its OID, set by
 /// [`StringIsam::ids_to_oids`] (NCBI: -1 while unknown).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3059,38 +3049,6 @@ impl NegativeOids {
     }
 }
 
-/// `NStr::StringToInt(str, fConvErr_NoThrow | fAllowTrailingSymbols)`: an optional sign and
-/// digits, anything after them ignored; 0 when there are no digits or the number does not fit.
-fn string_to_int_trailing(s: &[u8]) -> i32 {
-    let mut pos = 0;
-    let mut sign = false;
-    match s.first() {
-        Some(b'-') => {
-            sign = true;
-            pos = 1;
-        }
-        Some(b'+') => pos = 1,
-        _ => {}
-    }
-    let pos0 = pos;
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(sign);
-    let mut n: i64 = 0;
-    while pos < s.len() && s[pos].is_ascii_digit() {
-        let delta = i64::from(s[pos] - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return 0;
-        }
-        n = n * 10 + delta;
-        pos += 1;
-    }
-    if pos == pos0 {
-        return 0;
-    }
-    let n = if sign { -n } else { n };
-    i32::try_from(n).unwrap_or(0)
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2735-2789
 // ```c++
 // void CSeqDBVol::x_CheckVersions(const string         & acc,
@@ -3161,7 +3119,8 @@ pub fn check_versions(
     let pos = acc.iter().position(|&c| c == b'.');
     // `acc.find(".")` is asserted to exist; without it `pos + 1` wraps to 0 and `nover` is `acc`.
     let ver_str = &acc[pos.map_or(0, |p| p + 1)..];
-    let vernum = string_to_int_trailing(ver_str);
+    // `fConvErr_NoThrow`: 0 for a text NCBI cannot convert.
+    let vernum = string_to_int(ver_str, ALLOW_TRAILING_SYMBOLS).unwrap_or(0);
     let mut nover = &acc[..pos.unwrap_or(acc.len())];
     while let Some(bar) = nover.iter().position(|&c| c == b'|') {
         nover = &nover[bar + 1..];

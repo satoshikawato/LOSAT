@@ -16,7 +16,7 @@ use super::model::{
     TextseqId, SEQ_ID_ALTERNATIVES,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::ncbi_str::{is_blank, is_space};
+use crate::ncbi_str::{is_blank, is_space, string_to_int8, string_to_non_negative_int};
 
 /// A `CSeqIdException` (`eFormat`): where NCBI throws it and its message.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,94 +73,6 @@ pub fn truncate_spaces(s: &[u8]) -> &[u8] {
         .rposition(|&c| !is_space(c))
         .map_or(start, |end| end + 1);
     &s[start..end.max(start)]
-}
-
-/// `NStr::StringToNonNegativeInt(str)`: the value, or -1.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:457-491
-/// ```c++
-/// int NStr::StringToNonNegativeInt(const CTempString str, TStringToNumFlags flags)
-/// {
-///     int error = 0, ret = -1;
-///     size_t len = str.size();
-///
-///     if (!len) {
-///         error = EINVAL;
-///     } else {
-///         size_t i = 0;
-///         // skip leading '+' if any
-///         if (str.data()[0] == '+'  &&  len > 1) {
-///             ++i;
-///         }
-///         unsigned v = 0;
-///         for (; i < len; ++i) {
-///             unsigned d = str.data()[i] - '0';
-///             if (d > 9) {
-///                 error = EINVAL;
-///                 break;
-///             }
-///             unsigned nv = v * 10 + d;
-///             const unsigned kOverflowLimit = (INT_MAX - 9) / 10 + 1;
-///             if (v >= kOverflowLimit) {
-///                 // possible overflow
-///                 if (v > kOverflowLimit || nv > INT_MAX) {
-///                     error = ERANGE;
-///                     break;
-///                 }
-///             }
-///             v = nv;
-///         }
-///         if (!error) {
-///             ret = static_cast<int>(v);
-///         }
-///     }
-/// ```
-pub fn string_to_non_negative_int(s: &[u8]) -> i32 {
-    if s.is_empty() {
-        return -1;
-    }
-    let digits = if s[0] == b'+' && s.len() > 1 {
-        &s[1..]
-    } else {
-        s
-    };
-    let mut value: u32 = 0;
-    for &c in digits {
-        let d = u32::from(c.wrapping_sub(b'0'));
-        if d > 9 {
-            return -1;
-        }
-        let next = value.wrapping_mul(10).wrapping_add(d);
-        const OVERFLOW_LIMIT: u32 = (i32::MAX as u32 - 9) / 10 + 1;
-        if value >= OVERFLOW_LIMIT && (value > OVERFLOW_LIMIT || next > i32::MAX as u32) {
-            return -1;
-        }
-        value = next;
-    }
-    value as i32
-}
-
-/// `NStr::StringToNumeric<TGi>(str)` (`NStr::StringToInt8` with no flags, `crate::ncbi_str`):
-/// `None` where NCBI throws, which `CSeq_id::Set` catches.
-///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2925-2935
-/// ```c++
-///         if ( the_type == e_Gi ) {
-///             try {
-///                 TGi gi = NStr::StringToNumeric<TGi>(acc);
-///                 if ( gi > ZERO_GI ) {
-///                     SetGi(gi);
-///                     return *this;
-///                 }
-///             }
-///             catch ( CException& /*ignored*/ ) {
-///                 // will be processed by the code below
-///             }
-/// ```
-/// `acc` is a `CTempString` (the accession with its spaces truncated): a NUL byte in it ends
-/// the digits and passes the end check, as for any `CTempString` (`ncbi_str::string_to_int8`).
-fn string_to_int8(s: &[u8]) -> Option<i64> {
-    crate::ncbi_str::string_to_int8(s, 0).ok()
 }
 
 /// `CObject_id::SetStrOrId(str)`.
@@ -748,8 +660,25 @@ pub fn set_typed(
         SEQID_NOT_SET => return Ok(None),
         SEQID_LOCAL => ParsedSeqId::Local(str_or_id(acc)),
         SEQID_GIBBSQ | SEQID_GIBBMT | SEQID_GIIM | SEQID_GI => {
+            // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2925-2935
+            // ```c++
+            //         if ( the_type == e_Gi ) {
+            //             try {
+            //                 TGi gi = NStr::StringToNumeric<TGi>(acc);
+            //                 if ( gi > ZERO_GI ) {
+            //                     SetGi(gi);
+            //                     return *this;
+            //                 }
+            //             }
+            //             catch ( CException& /*ignored*/ ) {
+            //                 // will be processed by the code below
+            //             }
+            // ```
+            // `StringToNumeric<TGi>` is `NStr::StringToInt8` with no flags; `acc` is a
+            // `CTempString` (the accession with its spaces truncated): a NUL byte in it ends the
+            // digits and passes the end check.
             if choice == SEQID_GI {
-                if let Some(gi) = string_to_int8(acc) {
+                if let Ok(gi) = string_to_int8(acc, 0) {
                     if gi > 0 {
                         return Ok(Some(ParsedSeqId::Gi(gi)));
                     }

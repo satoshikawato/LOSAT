@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
+use crate::ncbi_str::string_to_non_negative_int;
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
@@ -16,7 +17,7 @@ use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
 use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
-use crate::seqid::parse::{seq_id_from_text, string_to_non_negative_int};
+use crate::seqid::parse::seq_id_from_text;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::args::{self, Args};

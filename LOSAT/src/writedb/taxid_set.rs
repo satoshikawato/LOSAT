@@ -47,21 +47,6 @@ pub enum TaxIdMapError {
     BlankLine(usize),
 }
 
-// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3582-3587
-// ```c++
-//     template <typename TNumeric>
-//     static typename enable_if< is_integral<TNumeric>::value && is_signed<TNumeric>::value && (sizeof(TNumeric) == sizeof(int) && !is_same<TNumeric, long>::value), TNumeric>::type
-//     x_StringToNumeric(const CTempString str, TStringToNumFlags flags, int base)
-//     {
-//         return StringToInt(str, flags, base);
-//     }
-// ```
-/// `NStr::StringToNumeric<TTaxId>(str, fAllowLeadingSpaces)` (`TTaxId` is `int`:
-/// `StringToInt`).
-fn string_to_taxid(s: &[u8]) -> Result<i32, NcbiException> {
-    string_to_int(s, ALLOW_LEADING_SPACES)
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:157-160
 // ```c++
 // void GetSeqIdKey(const objects::CSeq_id & id, string & key)
@@ -347,7 +332,18 @@ impl TaxIdSet {
             let gi_str = tokens[0];
             let tx_str: &[u8] = if tokens.len() == 2 { tokens[1] } else { b"" };
             if !gi_str.is_empty() && !tx_str.is_empty() {
-                let taxid = string_to_taxid(tx_str).map_err(TaxIdMapError::Exception)?;
+                // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3582-3587
+                // ```c++
+                //     template <typename TNumeric>
+                //     static typename enable_if< is_integral<TNumeric>::value && is_signed<TNumeric>::value && (sizeof(TNumeric) == sizeof(int) && !is_same<TNumeric, long>::value), TNumeric>::type
+                //     x_StringToNumeric(const CTempString str, TStringToNumFlags flags, int base)
+                //     {
+                //         return StringToInt(str, flags, base);
+                //     }
+                // ```
+                // `TTaxId` is an `int`: `StringToNumeric<TTaxId>` is `NStr::StringToInt`.
+                let taxid = string_to_int(tx_str, ALLOW_LEADING_SPACES)
+                    .map_err(TaxIdMapError::Exception)?;
                 let key = accession_to_key(gi_str, warn).map_err(TaxIdMapError::Exception)?;
                 self.map.set(&key, taxid);
             }

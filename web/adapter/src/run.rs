@@ -267,8 +267,8 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTN")
             .and_then(|()| args.resolve_dust())
             .and_then(|()| {
-                if names_registered_counts(&args) {
-                    args.window_masker_counts = Some(crate::files::source());
+                if validates_window_masker(&args) {
+                    give_blastn_counts(&mut args, &crate::files::source());
                     args.resolve_window_masker()
                 } else {
                     Ok(())
@@ -958,24 +958,34 @@ fn link_format0(
     }
 }
 
-/// Whether `validate` checks the file of `-window_masker_db`, where the command line checks it:
-/// after `-dust`, before the query range and the other options (`resolve_window_masker`, with the
-/// CLI's message for a format other than the two binary ones). Only for a name that is registered:
-/// a host that validates an argv without its files (the application's control reactor) leaves the
-/// file to `run`, where a name that is not registered is the CLI's file that cannot be opened.
-fn names_registered_counts(args: &LOSAT::web_adapter::BlastnArgs) -> bool {
-    args.window_masker_db
-        .as_deref()
-        .is_some_and(crate::files::registered)
+/// Whether `validate` reads the WindowMasker options where the command line reads them: after
+/// `-dust`, before the query range and the other options (`resolve_window_masker`: the check of
+/// the file of `-window_masker_db`, with the CLI's message for a format other than the two binary
+/// ones, then "at most one of" the options, then the file of `-window_masker_taxid`). Not when
+/// `-window_masker_db` names a file that is not registered: a host that validates an argv without
+/// its files (the application's control reactor) leaves the file to `run`, where a name that is
+/// not registered is the CLI's file that cannot be opened. A taxid whose file is not registered
+/// is the CLI's taxid without a file, whose error comes with the search (`batch_error`). An argv
+/// without the options is validated as before named input files.
+fn validates_window_masker(args: &LOSAT::web_adapter::BlastnArgs) -> bool {
+    match args.window_masker_db.as_deref() {
+        Some(name) => crate::files::registered(name),
+        None => args.window_masker_taxid.is_some(),
+    }
 }
 
-/// The counts source of BLASTN's `-window_masker_db`: the named input files registered when the
-/// run starts (`files::source`), which the engine opens by the option's value as the command line
-/// opens the file of that name. `None` without the option, so a run without it gives the engine
-/// what it gave before named input files.
+/// The counts source of BLASTN's `-window_masker_db` and `-window_masker_taxid`: the named input
+/// files registered when the run starts (`files::source`), which the engine opens by the option's
+/// value, or by the taxid's name in `files::WINDOW_MASKER_PATH`, as the command line opens the
+/// file of that name. `None` without the options, so a run without them gives the engine what it
+/// gave before named input files.
 fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
     match command {
-        Commands::Blastn(args) if args.window_masker_db.is_some() => Some(crate::files::source()),
+        Commands::Blastn(args)
+            if args.window_masker_db.is_some() || args.window_masker_taxid.is_some() =>
+        {
+            Some(crate::files::source())
+        }
         _ => None,
     }
 }
@@ -983,7 +993,17 @@ fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
 /// Gives a search's command the run's counts source (`window_masker_counts`).
 fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
     if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
-        args.window_masker_counts = Some(counts.clone());
+        give_blastn_counts(args, counts);
+    }
+}
+
+/// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` LOSAT Web's
+/// directory of counts files (`files::WINDOW_MASKER_PATH`), where the command line gives the
+/// directory of NCBI's registry.
+fn give_blastn_counts(args: &mut LOSAT::web_adapter::BlastnArgs, counts: &Arc<dyn CountsSource>) {
+    args.window_masker_counts = Some(counts.clone());
+    if args.window_masker_taxid.is_some() {
+        args.window_masker_path = Some(Ok(Some(crate::files::WINDOW_MASKER_PATH.to_string())));
     }
 }
 

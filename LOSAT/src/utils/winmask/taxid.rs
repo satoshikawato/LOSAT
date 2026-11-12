@@ -3,6 +3,8 @@
 use std::ffi::OsString;
 use std::path::{PathBuf, MAIN_SEPARATOR};
 
+use super::CountsSource;
+
 /// The file under `<directory>/<taxid>/`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:73
@@ -14,7 +16,8 @@ const STAT_FILE_NAME: &str = "wmasker.obinary";
 /// `WindowMaskerTaxidToDb(taxid)`: the counts file of `taxid` under `directory` (the registry
 /// entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`,
 /// `ncbi_environment::ApplicationSettings::window_masker_path`; `None` or empty: the current
-/// directory), or `None` when that path is not a file (or a link to one). Only the name decides:
+/// directory), or `None` when `source` has no file (or link to one) at that path (the file
+/// system for the command line, the registered files for LOSAT Web). Only the name decides:
 /// NCBI does not check the format of the file it finds (an ascii counts file under that name
 /// is read as one), unlike `-window_masker_db`. `Err` when the current directory is needed
 /// and cannot be read.
@@ -43,13 +46,17 @@ const STAT_FILE_NAME: &str = "wmasker.obinary";
 /// }
 /// ```
 /// `CFile::Exists` is `IsFile()`, which follows links (ncbifile.hpp:4039-4042).
-pub fn taxid_stat_file(directory: Option<&str>, taxid: i32) -> std::io::Result<Option<PathBuf>> {
+pub fn taxid_stat_file(
+    directory: Option<&str>,
+    taxid: i32,
+    source: &dyn CountsSource,
+) -> std::io::Result<Option<PathBuf>> {
     let directory: OsString = match directory.filter(|value| !value.is_empty()) {
         Some(value) => value.into(),
         None => std::env::current_dir()?.into_os_string(),
     };
     let path = stat_file_path(directory, taxid);
-    Ok(path.is_file().then_some(path))
+    Ok(source.is_file(&path).then_some(path))
 }
 
 /// `<directory>/<taxid>/wmasker.obinary` as NCBI joins the strings (a separator is added
@@ -71,6 +78,9 @@ fn stat_file_path(mut directory: OsString, taxid: i32) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::winmask::{FileCounts, MaskerParams, StatFile, UnitCounts, WinMaskError};
+    use std::path::Path;
+    use std::sync::Arc;
 
     // NCBI 2.17.0 blastn, 2026-10-19 (line NP M3 notes): `-window_masker_taxid -1` read
     // `<dir>/-1/wmasker.obinary`, `+7227`, `07227` and `0x1C3B` read `<dir>/7227/` (the path
@@ -86,7 +96,8 @@ mod tests {
         std::fs::write(dir.join("7227").join(STAT_FILE_NAME), b"x").unwrap();
         std::fs::write(dir.join("-1").join(STAT_FILE_NAME), b"x").unwrap();
         let root = dir.to_str().unwrap();
-        let found = |directory: &str, taxid| taxid_stat_file(Some(directory), taxid).unwrap();
+        let found =
+            |directory: &str, taxid| taxid_stat_file(Some(directory), taxid, &FileCounts).unwrap();
         assert_eq!(
             found(root, 7227),
             Some(PathBuf::from(format!(
@@ -127,13 +138,47 @@ mod tests {
         let cwd = std::env::current_dir().unwrap().into_os_string();
         let expected = stat_file_path(cwd, 7227);
         assert!(!expected.is_file());
-        assert_eq!(taxid_stat_file(None, 7227).unwrap(), None);
-        assert_eq!(taxid_stat_file(Some(""), 7227).unwrap(), None);
+        assert_eq!(taxid_stat_file(None, 7227, &FileCounts).unwrap(), None);
+        assert_eq!(taxid_stat_file(Some(""), 7227, &FileCounts).unwrap(), None);
         assert_eq!(
             stat_file_path("/w".into(), 7227),
             PathBuf::from(format!(
                 "/w{MAIN_SEPARATOR}7227{MAIN_SEPARATOR}wmasker.obinary"
             ))
         );
+    }
+
+    /// A source with files at some paths only (LOSAT Web's registered files).
+    #[derive(Debug)]
+    struct Paths(&'static [&'static str]);
+
+    impl CountsSource for Paths {
+        fn discover(&self, _: &str) -> Result<StatFile, WinMaskError> {
+            unreachable!("only the paths are asked")
+        }
+
+        fn counts(&self, _: &str, _: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
+            unreachable!("only the paths are asked")
+        }
+
+        fn is_file(&self, path: &Path) -> bool {
+            self.0.iter().any(|known| Path::new(known) == path)
+        }
+    }
+
+    #[test]
+    fn the_source_says_which_files_are_there() {
+        let source = Paths(&["windowmasker/9606/wmasker.obinary"]);
+        assert_eq!(
+            taxid_stat_file(Some("windowmasker"), 9606, &source).unwrap(),
+            Some(PathBuf::from(format!(
+                "windowmasker{MAIN_SEPARATOR}9606{MAIN_SEPARATOR}wmasker.obinary"
+            )))
+        );
+        assert_eq!(
+            taxid_stat_file(Some("windowmasker"), 10090, &source).unwrap(),
+            None
+        );
+        assert_eq!(taxid_stat_file(Some("other"), 9606, &source).unwrap(), None);
     }
 }

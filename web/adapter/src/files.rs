@@ -1,6 +1,7 @@
 //! Named input files (docs/web/abi_v2.md §4 `file_begin`): files that an argv names by a value
 //! of an option, which the host gives in chunks under that name. Kind 1 is a WindowMasker unit
-//! counts file, the value of BLASTN's `-window_masker_db`.
+//! counts file: the value of BLASTN's `-window_masker_db`, or the file of `-window_masker_taxid
+//! <taxid>`, `windowmasker/<taxid>/wmasker.obinary` (`WINDOW_MASKER_PATH`).
 //!
 //! The command line opens the counts file by its name twice: NCBI's check of the format
 //! (`DiscoverStatType`) and its reader (`CSeqMaskerIstatFactory::create`). A registered file
@@ -21,8 +22,14 @@ use LOSAT::web_adapter::{
 
 use crate::json;
 
-/// The kind of a WindowMasker unit counts file (`-window_masker_db`).
+/// The kind of a WindowMasker unit counts file (`-window_masker_db`, `-window_masker_taxid`).
 pub const KIND_WINDOW_MASKER_COUNTS: u32 = 1;
+
+/// The directory of BLASTN's `-window_masker_taxid` in LOSAT Web, where the command line reads
+/// NCBI's registry entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`: the counts file of a taxid is the
+/// file registered as `windowmasker/<taxid>/wmasker.obinary` (the engine joins the names as NCBI
+/// does, `taxid_stat_file`), and a taxid without one is the command line's taxid without a file.
+pub const WINDOW_MASKER_PATH: &str = "windowmasker";
 
 /// A file whose chunks are coming.
 struct Loading {
@@ -285,6 +292,13 @@ impl CountsSource for RegisteredCounts {
             )),
         }
     }
+
+    /// A registered file is a file of its name (compared byte for byte, as the names of
+    /// `-window_masker_db`); nothing else is.
+    fn is_file(&self, path: &std::path::Path) -> bool {
+        path.to_str()
+            .is_some_and(|name| self.files.contains_key(name))
+    }
 }
 
 /// Whether a file of this name is registered (`file_end` succeeded and it was not released).
@@ -359,6 +373,26 @@ mod tests {
             }
             release(file).expect("release");
         }
+    }
+
+    #[test]
+    fn registered_names_are_the_files_of_the_taxid_directory() {
+        use std::path::Path;
+        let bytes = counts_bytes("mg1655_u9.obinary");
+        let name = format!("{WINDOW_MASKER_PATH}/77/wmasker.obinary");
+        let (file, _) = register(&name, &bytes, 1 << 16);
+        let held = source();
+        assert!(held.is_file(Path::new(&name)));
+        for other in [
+            "windowmasker/78/wmasker.obinary",
+            "windowmasker//77/wmasker.obinary",
+            "windowmasker/77",
+        ] {
+            assert!(!held.is_file(Path::new(other)), "{other}");
+        }
+        release(file).expect("release");
+        assert!(held.is_file(Path::new(&name)), "a run keeps its table");
+        assert!(!source().is_file(Path::new(&name)), "released");
     }
 
     #[test]

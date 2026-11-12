@@ -152,8 +152,9 @@ fn build(name: &str, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskErro
 
 /// The masker of `-window_masker_taxid <taxid>` (not 0) with the counts file
 /// `<directory>/<taxid>/wmasker.obinary` (`directory`: the registry entry
-/// `[WINDOW_MASKER] WINDOW_MASKER_PATH`, `None` or empty for the current directory), which NCBI
-/// looks for when it sets up each query batch: a path that is no file is the empty name, whose
+/// `[WINDOW_MASKER] WINDOW_MASKER_PATH`, `None` or empty for the current directory; LOSAT Web's
+/// directory of registered files), which NCBI looks for when it sets up each query batch (in
+/// `source`): a path that is no file is the empty name, whose
 /// error (`could not open `) each batch reports (`batch_error`). NCBI checks no format of the
 /// file (unlike `-window_masker_db`'s, `open`) and reads the ascii counts too, which LOSAT does not
 /// read: it refuses them before the search.
@@ -172,7 +173,7 @@ pub(crate) fn open_taxid(
     directory: Option<&str>,
     source: &dyn CountsSource,
 ) -> anyhow::Result<WindowMasker> {
-    let file = crate::utils::winmask::taxid_stat_file(directory, taxid).map_err(|error| {
+    let file = crate::utils::winmask::taxid_stat_file(directory, taxid, source).map_err(|error| {
         anyhow::anyhow!(
             "-window_masker_taxid {taxid}: the current directory, where NCBI BLAST+ looks for the counts file, cannot be read ({error}); this is not supported by LOSAT's BLASTN"
         )

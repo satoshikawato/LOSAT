@@ -3486,15 +3486,16 @@ fn restore_displayed_o(
 /// ```
 ///
 /// The Seq-aligns (outfmt 8, 12) show the engine's counts, NCBI's `num_ident` and
-/// `num_positives` of the search's letters (blast_seqalign.cpp:1199-1222): with
-/// `engine_counts` (`ReportNeeds::seqalign`), the counts of each HSP that the recount
-/// changes are kept there first.
+/// `num_positives` of the search's letters (blast_seqalign.cpp:1199-1222), and the outfmt 0
+/// report reads that `num_ident` back for `-sorthits` and `-sorthsps`
+/// (`PairwiseHit::seqalign_num_ident`): the counts of each HSP that the recount changes are
+/// kept in `engine_counts` first.
 fn recount_shown_identities(
     hit_lists: &mut [Option<BlastpHitList>],
     query_records: &[FastaRecord],
     subjects: ShownSubjects<'_>,
     matrix: ScoringMatrix,
-    mut engine_counts: Option<&mut super::seqalign::EngineCounts>,
+    engine_counts: &mut super::seqalign::EngineCounts,
 ) {
     let has_o = |sequence: &[u8]| {
         sequence
@@ -3577,13 +3578,11 @@ fn recount_shown_identities(
                 .sum();
             let num_positives =
                 crate::utils::matrix::protein_display_positives(&query_row, &subject_row, matrix);
-            if let Some(saved) = engine_counts.as_deref_mut() {
-                if (num_ident, num_positives) != (hsp.num_ident, hsp.num_positives) {
-                    saved.save(
-                        (q_idx as u32, list_index as u32, hsp_index as u32),
-                        (hsp.num_ident, hsp.num_positives),
-                    );
-                }
+            if (num_ident, num_positives) != (hsp.num_ident, hsp.num_positives) {
+                engine_counts.save(
+                    (q_idx as u32, list_index as u32, hsp_index as u32),
+                    (hsp.num_ident, hsp.num_positives),
+                );
             }
             hsp.num_ident = num_ident;
             hsp.num_positives = num_positives;
@@ -3630,7 +3629,7 @@ fn subject_stored_gap_columns(subject: &[u8], hit: &Hit) -> Vec<u32> {
 
 #[allow(clippy::too_many_arguments)]
 fn build_pairwise_hits(
-    hits: Vec<(Hit, u8)>,
+    hits: Vec<(Hit, u8, usize)>,
     query_contexts: &[QueryContext],
     subjects: &[EncodedProtein],
     matrix: ScoringMatrix,
@@ -3639,7 +3638,7 @@ fn build_pairwise_hits(
     shown_subjects: ShownSubjects<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<Vec<PairwiseHit>> {
-    let row = |(mut hit, comp_adjustment_method): (Hit, u8)| -> Result<PairwiseHit> {
+    let row = |(mut hit, comp_adjustment_method, seqalign_num_ident): (Hit, u8, usize)| -> Result<PairwiseHit> {
         let q_idx = hit.q_idx as usize;
         let s_idx = hit.s_idx as usize;
         let query = query_nomask_sequence(&query_contexts[q_idx]);
@@ -3774,6 +3773,10 @@ fn build_pairwise_hits(
             // consumed only by the TBLASTN writer; BLASTP keeps its writer.
             sum_n: None,
             subject_stored_gaps,
+            // The Seq-align's `num_ident` (`collect_hits_and_methods_from_hit_lists`): the
+            // engine's, which `hit.num_ident` holds unless the display recount replaced it
+            // (`recount_shown_identities`).
+            seqalign_num_ident,
         })
     };
     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the
@@ -7767,11 +7770,14 @@ fn write_reports_without_queries(
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
+                // (A report without queries writes no alignment and no table: the line length
+                // and the sorts are those of the run, `ResolvedBlastpArgs`.)
                 let config = PairwiseConfig {
-                    line_length: 60,
+                    line_length: args.line_length,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
+                    sort: args.sort,
                 };
                 write_blastp_pairwise_report(
                     &[],
@@ -8832,8 +8838,10 @@ fn run_resolved_in_pool(
         })
         .collect::<Result<Vec<_>>>()?;
     // What the requested formats need beyond outfmt 0, 6 and 7, decided once for the search
-    // (`ReportNeeds`): the engine's identities and positives of the HSPs whose counts the
-    // pyrrolysine recount replaces (`EngineCounts`).
+    // (`ReportNeeds`): the engine's positives of the composition-adjusted matches
+    // (`engine_positives`). The engine's counts of the HSPs that the pyrrolysine recount
+    // changes are kept for every format (`EngineCounts`: the Seq-aligns', which outfmt 0 reads
+    // back with `-sorthits` and `-sorthsps`).
     let needs = crate::report::record::ReportNeeds {
         // The archive's Seq-aligns are those of outfmt 8.
         seqalign: requested_formats
@@ -12856,7 +12864,7 @@ fn run_resolved_in_pool(
         query_records,
         shown_subjects,
         args.scoring.matrix,
-        needs.seqalign.then_some(&mut engine_counts),
+        &mut engine_counts,
     );
 
     let subject_name_label = if subject_label.is_empty() {
@@ -12938,9 +12946,10 @@ fn run_resolved_in_pool(
     let x_rows_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
     let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
         let end = window.end.min(hit_lists.len());
+        let first = window.start.min(end);
         let mut hits =
-            collect_hits_and_methods_from_hit_lists(&hit_lists[window.start.min(end)..end]);
-        for (hit, _) in hits.iter_mut() {
+            collect_hits_and_methods_from_hit_lists(&hit_lists[first..end], first, &engine_counts);
+        for (hit, _, _) in hits.iter_mut() {
             let q_shift = ranges.query_input.placements.offset(hit.q_idx as usize);
             let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
             hit.q_start -= q_shift;
@@ -13888,12 +13897,20 @@ fn run_resolved_in_pool(
                 // ```c++
                 //         formatter.SetLineLength(fmt_args->GetLineLength());
                 // ```
-                // (`args.line_length`: rpsblast's `-line_length`, else 60.)
+                // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:246-248
+                // ```c++
+                //         formatter.SetLineLength(fmt_args->GetLineLength());
+                //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+                //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+                // ```
+                // (`args.line_length`: `-line_length`, else 60; `args.sort`: blastp's
+                // `-sorthits` and `-sorthsps`, none for psiblast and rpsblast.)
                 let pairwise_config = PairwiseConfig {
                     line_length: args.line_length,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
+                    sort: args.sort,
                 };
                 // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
                 // (the file's values).

@@ -5,9 +5,9 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
 
+use crate::ncbi_app::args::Args;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
-use super::args::Args;
 use super::{refusal, Diag};
 
 /// The separator NCBI puts after a directory (`CDirEntry::GetPathSeparator`).
@@ -781,7 +781,8 @@ pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut dy
             Err(ListStop::Refused(reason)) => return diag.refuse(&reason),
         }
     }
-    // NCBI's stream ignores a failed write (no exception is enabled on it), so does this.
+    // NCBI's stream ignores a failed write (no exception is enabled on it), so does the run's
+    // `ncbi_app::files::Ostream` that `out` is.
     let _ = out.write_all(&text);
     let _ = out.flush();
     0

@@ -25,14 +25,16 @@ use std::collections::VecDeque;
 // ...
 // return x_GetRand32Bits() >> 1;
 // ```
-struct NcbiLfgRandom {
+/// `CRandom` of `CIupac2Ncbi2na_converter` (the random numbers that resolve `N`): one per
+/// `CSymDustMasker`, so the calls of one masker draw from one sequence of numbers.
+pub(crate) struct NcbiLfgRandom {
     state: [u32; 33],
     rj: i32,
     rk: i32,
 }
 
 impl NcbiLfgRandom {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             state: [
                 0xd53f1852, 0xdfc78b83, 0x4f256096, 0x0e643df7, 0x82c359bf, 0xc7794dfa, 0xd5e9ffaa,
@@ -197,34 +199,71 @@ impl DustMasker {
         }
     }
 
-    /// Mask a sequence and return the list of masked intervals
+    /// `CSymDustMasker::operator()(seq)`: the masked intervals of the whole sequence, with a
+    /// new masker's random numbers (blastn's `Blast_FindDustFilterLoc` makes one masker per
+    /// query).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:286-288
+    /// ```c
+    /// CSymDustMasker::operator()( const sequence_type & seq )
+    /// { return (*this)( seq, 0, seq.size() - 1 ); }
+    /// ```
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
-        if seq.len() < 3 {
+        if seq.is_empty() {
             return Vec::new();
         }
-        self.mask_subsequence(seq, 0, seq.len())
+        self.mask_range(seq, 0, seq.len() - 1, &mut NcbiLfgRandom::new())
     }
 
-    /// Mask a subsequence and return the list of masked intervals
-    pub fn mask_subsequence(&self, seq: &[u8], start: usize, stop: usize) -> Vec<MaskedInterval> {
-        // NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:229-233,280-281
-        // ```c
-        // while( stop > 2 + start )    // there must be at least one triplet
-        // {
-        //     // initializations
-        //     P.clear();
-        //     triplets w( window_, low_k_, P, thresholds_ );
-        // ...
-        //     if( w.start() > 0 ) start += w.start();
-        //     else break;
-        // ```
-        // `mask_subsequence_reference` ports this function. The ring-buffer version (was
-        // LOSAT_X_DUSTRING) runs the same steps and only needs a window of at most `X_RING` (64, the
-        // largest NCBI window); a larger window uses the reference.
+    /// `CSymDustMasker::operator()(seq, start, stop)`: the masked intervals of the positions
+    /// `start..=stop` (NCBI's `stop` is the last position), drawing the random numbers of
+    /// `N` from `rng`, the masker's converter (dustmasker calls one masker over the pieces of
+    /// a sequence between runs of `N`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:214-229
+    /// ```c
+    /// CSymDustMasker::operator()( const sequence_type & seq,
+    ///                             size_type start, size_type stop )
+    /// {
+    ///     std::unique_ptr< TMaskList > res( new TMaskList );
+    ///
+    ///     if( seq.empty() )
+    ///         return res;
+    ///
+    ///     if( stop >= seq.size() )
+    ///         stop = seq.size() - 1;
+    ///
+    ///     if( start > stop )
+    ///         start = stop;
+    ///
+    ///     while( stop > 2 + start )    // there must be at least one triplet
+    /// ```
+    /// `mask_range_reference` ports this function. The ring-buffer version (was
+    /// LOSAT_X_DUSTRING) runs the same steps and only needs a window of at most `X_RING` (64,
+    /// the largest NCBI window); a larger window uses the reference.
+    ///
+    /// Inlined into each caller with `x_mask_range`, so blastn's `mask_sequence` gets a copy
+    /// with `start` 0, `stop` the last position and its own random state. One shared copy for
+    /// blastn and dustmasker kept those values live in the inner loop, which then moved
+    /// registers on every letter: blastn's DUST ran 7.6 % more instructions than dev's
+    /// (callgrind of ba17fdf17, megablast, 12 MB of cDNA).
+    #[inline(always)]
+    pub(crate) fn mask_range(
+        &self,
+        seq: &[u8],
+        start: usize,
+        stop: usize,
+        rng: &mut NcbiLfgRandom,
+    ) -> Vec<MaskedInterval> {
+        if seq.is_empty() {
+            return Vec::new();
+        }
+        let stop = stop.min(seq.len() - 1);
+        let start = start.min(stop);
         if self.window <= X_RING {
-            self.x_mask_subsequence(seq, start, stop)
+            self.x_mask_range(seq, start, stop, rng)
         } else {
-            self.mask_subsequence_reference(seq, start, stop)
+            self.mask_range_reference(seq, start, stop, rng)
         }
     }
 
@@ -244,24 +283,22 @@ impl DustMasker {
     // This is `CSymDustMasker::operator()` with the window in `XTripletWindow` and the base
     // codes from `X_BASE_CODE`. The bases are converted in the same order, so a random
     // number for an `N` is drawn at the same point. It gives the same intervals.
-    // `mask_subsequence_reference` step for step, with the window in `XTripletWindow` and the
+    // `mask_range_reference` step for step, with the window in `XTripletWindow` and the
     // base codes from a table.
-    fn x_mask_subsequence(&self, seq: &[u8], start: usize, stop: usize) -> Vec<MaskedInterval> {
+    #[inline(always)]
+    fn x_mask_range(
+        &self,
+        seq: &[u8],
+        start: usize,
+        stop: usize,
+        rng: &mut NcbiLfgRandom,
+    ) -> Vec<MaskedInterval> {
+        // NCBI's `it.GetPos() <= stop` as `pos < end` over the letters up to `stop`: the
+        // compiler then knows that each `seq[pos]` is in bounds.
+        let seq = &seq[..=stop];
+        let end = seq.len();
         let mut result = Vec::new();
-
-        if seq.is_empty() {
-            return result;
-        }
-
-        let stop = stop.min(seq.len());
-        let start = start.min(stop);
-
-        if stop <= start + 2 {
-            return result;
-        }
-
         let mut current_start = start;
-        let mut rng = NcbiLfgRandom::new();
         // NCBI reference: ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
         // ```c
         // case 67: return 1;
@@ -285,11 +322,11 @@ impl DustMasker {
             let mut window = XTripletWindow::new(self.window, self.low_k, &self.thresholds);
 
             let mut current_triplet =
-                (code(seq[current_start], &mut rng) << 2) + code(seq[current_start + 1], &mut rng);
+                (code(seq[current_start], rng) << 2) + code(seq[current_start + 1], rng);
             let mut pos = current_start + 2;
             let mut done = false;
 
-            while !done && pos < stop {
+            while !done && pos < end {
                 if !perfect_list.is_empty() {
                     self.save_masked_regions(
                         &mut result,
@@ -299,7 +336,7 @@ impl DustMasker {
                     );
                 }
 
-                let new_triplet = ((current_triplet << 2) & 0x3F) + code(seq[pos], &mut rng);
+                let new_triplet = ((current_triplet << 2) & 0x3F) + code(seq[pos], rng);
                 current_triplet = new_triplet;
                 pos += 1;
 
@@ -308,7 +345,7 @@ impl DustMasker {
                         window.find_perfect(&mut perfect_list);
                     }
                 } else {
-                    while pos < stop {
+                    while pos < end {
                         if !perfect_list.is_empty() {
                             self.save_masked_regions(
                                 &mut result,
@@ -318,8 +355,7 @@ impl DustMasker {
                             );
                         }
 
-                        let new_triplet =
-                            ((current_triplet << 2) & 0x3F) + code(seq[pos], &mut rng);
+                        let new_triplet = ((current_triplet << 2) & 0x3F) + code(seq[pos], rng);
                         current_triplet = new_triplet;
 
                         if window.shift_window(new_triplet, &mut perfect_list) {
@@ -347,28 +383,15 @@ impl DustMasker {
         result
     }
 
-    fn mask_subsequence_reference(
+    fn mask_range_reference(
         &self,
         seq: &[u8],
         start: usize,
         stop: usize,
+        rng: &mut NcbiLfgRandom,
     ) -> Vec<MaskedInterval> {
         let mut result = Vec::new();
-
-        if seq.is_empty() {
-            return result;
-        }
-
-        let stop = stop.min(seq.len());
-        let start = start.min(stop);
-
-        // Need at least 3 bases for one triplet
-        if stop <= start + 2 {
-            return result;
-        }
-
         let mut current_start = start;
-        let mut rng = NcbiLfgRandom::new();
 
         while stop > current_start + 2 {
             // Initialize perfect intervals list for this window
@@ -387,13 +410,13 @@ impl DustMasker {
             // t = ((t<<2)&TRIPLET_MASK) + (converter_( *it )&0x3);
             // ++it;
             // ```
-            let mut current_triplet =
-                (Self::convert_iupac_to_ncbi2na(seq[current_start], &mut rng) << 2)
-                    + Self::convert_iupac_to_ncbi2na(seq[current_start + 1], &mut rng);
+            let mut current_triplet = (Self::convert_iupac_to_ncbi2na(seq[current_start], rng)
+                << 2)
+                + Self::convert_iupac_to_ncbi2na(seq[current_start + 1], rng);
             let mut pos = current_start + 2;
             let mut done = false;
 
-            while !done && pos < stop {
+            while !done && pos <= stop {
                 // Save masked regions from previous window position
                 self.save_masked_regions(
                     &mut result,
@@ -403,8 +426,8 @@ impl DustMasker {
                 );
 
                 // Shift window by adding new triplet
-                let new_triplet = ((current_triplet << 2) & 0x3F)
-                    + Self::convert_iupac_to_ncbi2na(seq[pos], &mut rng);
+                let new_triplet =
+                    ((current_triplet << 2) & 0x3F) + Self::convert_iupac_to_ncbi2na(seq[pos], rng);
                 current_triplet = new_triplet;
                 pos += 1;
 
@@ -414,7 +437,7 @@ impl DustMasker {
                     }
                 } else {
                     // Window contains only one triplet value - fast path
-                    while pos < stop {
+                    while pos <= stop {
                         self.save_masked_regions(
                             &mut result,
                             window.start(),
@@ -423,7 +446,7 @@ impl DustMasker {
                         );
 
                         let new_triplet = ((current_triplet << 2) & 0x3F)
-                            + Self::convert_iupac_to_ncbi2na(seq[pos], &mut rng);
+                            + Self::convert_iupac_to_ncbi2na(seq[pos], rng);
                         current_triplet = new_triplet;
 
                         if window.shift_window(new_triplet, &mut perfect_list) {
@@ -1342,13 +1365,16 @@ mod tests {
             } else {
                 0
             };
+            // `stop` is the last position, `start` at most `stop` (as `mask_range` makes them).
             let stop = if case % 7 == 0 {
-                rng.below(len as u64 + 1) as usize
+                rng.below(len as u64) as usize
             } else {
-                len
+                len - 1
             };
-            let reference = masker.mask_subsequence_reference(&seq, start, stop);
-            let fast = masker.x_mask_subsequence(&seq, start, stop);
+            let start = start.min(stop);
+            let reference =
+                masker.mask_range_reference(&seq, start, stop, &mut NcbiLfgRandom::new());
+            let fast = masker.x_mask_range(&seq, start, stop, &mut NcbiLfgRandom::new());
             assert_eq!(
                 fast, reference,
                 "case {case}: level={level} window={window} linker={linker} start={start} stop={stop}"

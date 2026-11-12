@@ -6,13 +6,14 @@ use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
 use crate::blastinput::db_filter::{NO_TAXONOMY_WARNING, TAXONOMY_FILE};
+use crate::ncbi_app::args::{arg_message, Args};
+use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds};
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::tax_sqlite::TaxonomySqlite;
 use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
 use crate::seqdb::{SearchPath, SeqDb};
 
-use super::args::{self, Args};
 use super::{database_error, refusal, Diag};
 
 /// What ends the reading of the taxids before the database opens: the exit status, the
@@ -73,19 +74,20 @@ pub(super) struct Ended(pub i32);
 // 8). `-taxids 1` never ends in NCBI (the parent of taxid 1 is 1, probe J120); LOSAT's walk
 // visits each taxid once and ends with every taxid below it (`TaxonomySqlite::descendants`,
 // DI-8 DECISIONS 10).
-/// The taxids of `-taxids` / `-taxidlist`, with their descendants in the taxonomy file of
-/// the search path unless `-no_taxid_expansion`; NCBI's warning when that file is missing
-/// or not one NCBI reads goes to `diag`.
+/// The taxids of `-taxids` / `-taxidlist` (`-` reads `stdin`), with their descendants in the
+/// taxonomy file of the search path unless `-no_taxid_expansion`; NCBI's warning when that file
+/// is missing or not one NCBI reads goes to `diag`.
 pub(super) fn tax_id_list(
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
+    stdin: &mut Cin<'_>,
 ) -> Result<BTreeSet<i32>, Ended> {
     let ids: Vec<Vec<u8>> = match (args.value("taxids"), args.value("taxidlist")) {
         (Some(""), _) => Vec::new(),
         (Some(input), _) => input.split(',').map(|id| id.as_bytes().to_vec()).collect(),
         (None, Some(file)) => {
-            let Ok(bytes) = args::read_input_file("taxidlist", file) else {
+            let Ok(bytes) = read_input_file("taxidlist", file, stdin) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
                 // ```c++
                 //     catch (const CArgException& e) {                                        \
@@ -95,11 +97,11 @@ pub(super) fn tax_id_list(
                 // ```
                 diag.post(&format!(
                     "Command line argument error: {}",
-                    args::arg_message("taxidlist", "File is not accessible", file)
+                    arg_message("taxidlist", "File is not accessible", file)
                 ));
                 return Err(Ended(1));
             };
-            args::input_lines(&bytes, args::LineEnds::HOST)
+            input_lines(&bytes, LineEnds::HOST)
                 .into_iter()
                 .map(<[u8]>::to_vec)
                 .collect()
@@ -461,8 +463,12 @@ pub(super) fn tax_info(
         };
         line.clear();
         fields.line(taxid, names.as_ref(), num_seqs, &mut line);
-        // NCBI's stream ignores a failed write (no exception is enabled on it).
-        let _ = sink.write_all(&line);
+        // `out` is the run's `ncbi_app::files::Ostream`: a failed write does nothing, as in
+        // NCBI's stream (no exception is enabled on it); a closed pipe ends the program, where
+        // SIGPIPE ends NCBI's.
+        if sink.write_all(&line).is_err() {
+            return 0;
+        }
     }
     let _ = sink.flush();
     0

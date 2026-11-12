@@ -191,6 +191,7 @@ pub(super) fn render(
     scoring: LocalStageDScoring,
     matrix_name: &str,
     report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
@@ -447,6 +448,7 @@ pub(super) fn render(
                 scoring,
                 matrix_name,
                 report_counts,
+                formatting,
                 ranges,
                 probe.as_mut(),
                 warnings.as_mut(),
@@ -1068,6 +1070,27 @@ fn pairwise_hits(
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
                     subject_stored_gaps: Vec::new(),
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:519-531
+                    // ```c
+                    //             query = query_blk->sequence +
+                    //                 query_info->contexts[hsp->context].query_offset;
+                    //             query_nomask = query_blk->sequence_nomask +
+                    //                 query_info->contexts[hsp->context].query_offset;
+                    //         }
+                    //
+                    //         /* Translate subject if needed. */
+                    //         if (program_number == eBlastTypeTblastn) {
+                    //             const Uint1* target_sequence = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+                    //             status = Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp, scoring_options, 0, sbp);
+                    //         }
+                    //         else
+                    //             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
+                    // ```
+                    // The Seq-align's `num_ident` (`tabular.rs`, the outfmt 8 / 11 / 12
+                    // writers): the engine's identities, counted on the masked query, so that a
+                    // SEG-masked letter is a mismatch there and an identity in the rows
+                    // (`report_num_ident`).
+                    seqalign_num_ident: usize::try_from(payload.num_ident)?,
                 });
             }
         }
@@ -1094,6 +1117,7 @@ fn write_pairwise(
     scoring: LocalStageDScoring,
     matrix_name: &str,
     report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
     ranges: &ReportRanges<'_>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
@@ -1194,9 +1218,17 @@ fn write_pairwise(
         .iter()
         .map(|record| Arc::from(record.title()))
         .collect();
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
     let config = PairwiseConfig {
         program: "tblastn".into(),
         protein_matrix: scoring.matrix,
+        line_length: formatting.line_length(),
+        sort: formatting.report_sort(),
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(
@@ -1627,6 +1659,7 @@ mod tests {
                 &vec![false; queries.len()],
                 LocalStageDScoring::default(),
                 "BLOSUM62",
+                Default::default(),
                 Default::default(),
                 1,
                 Some(&seg),

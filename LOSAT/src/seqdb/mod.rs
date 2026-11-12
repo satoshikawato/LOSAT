@@ -714,6 +714,16 @@ fn alias_range_refusal(
     })
 }
 
+/// The walks of the alias files' counts that NCBI's `CSeqDB` constructor makes without a list,
+/// in its order (seqdbimpl.cpp:117-139, quoted at [`SeqDb::open_every_oid_in`]).
+const UNLISTED_WALK_KEYS: &[alias::WalkKey] = &[
+    alias::WalkKey::Nseq,
+    alias::WalkKey::Length,
+    alias::WalkKey::MinSeqLength,
+    alias::WalkKey::StatsNseq,
+    alias::WalkKey::StatsTotlen,
+];
+
 fn fix_string(s: &[u8]) -> &[u8] {
     match s.iter().position(|&byte| byte == 0) {
         Some(at) => &s[..at],
@@ -1419,6 +1429,65 @@ impl SeqDb {
         self.volume_starts[self.volumes.len()]
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:44-49
+    // ```c++
+    // CRef< CSeq_entry > CMaskBDBReader::GetNextSequence()
+    // {
+    //     CRef< CSeq_entry > entry( null );
+    //     if( oid_ < seqdb_->GetNumOIDs() ) {
+    //         CRef< CBioseq > seq = seqdb_->GetBioseq( oid_++ );
+    // ```
+    /// Every OID of the volumes as an ordinal id ([`SeqDb::num_oids`] of them): the alias
+    /// files' OID ranges (`FIRST_OID`, `LAST_OID`) no longer leave any out. For a reader that
+    /// loops `GetNumOIDs` and reads each OID with `GetBioseq(oid)`, which reads an OID outside
+    /// the ranges too (dustmasker's `CMaskBDBReader`). Only before a list
+    /// ([`SeqDb::restrict`]): the alias keys of lists are refused when the database opens.
+    fn include_every_oid(&mut self) {
+        debug_assert!(!self.list_applied, "include_every_oid after a list");
+        self.filter = None;
+        self.num_seqs = self.num_oids();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:117-139
+    // ```c++
+    //         if (m_NeedTotalsScan) {
+    //             CSeqDBLockHold locked(m_Atlas);
+    //
+    //             // This is a whole-database scan; it's always done in
+    //             // approximate length mode.
+    //             x_ScanTotals(true, & m_NumSeqs, & m_TotalLength,
+    //                                & m_MaxLength, & m_MinLength, locked);
+    //
+    //         } else {
+    //             m_NumSeqs     = x_GetNumSeqs();
+    //             m_TotalLength = x_GetTotalLength();
+    //             m_MaxLength   = x_GetMaxLength();
+    //             m_MinLength   = x_GetMinLength();
+    //             ...
+    //         }
+    //         m_NumSeqsStats     = x_GetNumSeqsStats();
+    //         m_TotalLengthStats = x_GetTotalLengthStats();
+    // ```
+    /// Opens the database `name` for a reader that loops `GetNumOIDs` and reads each OID with
+    /// `GetBioseq(oid)` (dustmasker's `CMaskBDBReader`, which makes `CSeqDB(name, type)`):
+    /// [`SeqDb::open_search_in`], the errors of the walks of the alias files' counts that NCBI's
+    /// constructor makes (those of [`SeqDb::check_alias_values`] without a list), and
+    /// `include_every_oid`. LOSAT's refusals of the values that only a search reads
+    /// differently are not made, as such a reader reads none of them: an OID range with another
+    /// name of the same `-db`, a `FIRST_OID` or `LAST_OID` of 2^31 or more, a negative `NSEQ`,
+    /// a `LENGTH` of 0 (NCBI 2.17.0 dustmasker reads them as it reads the database without the
+    /// alias file: review 2 of line RG item K1, F5).
+    pub fn open_every_oid_in(
+        name: &str,
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<Self, SeqDbError> {
+        let mut db = Self::open_search_in(name, seqtype, path)?;
+        db.walk_errors(UNLISTED_WALK_KEYS)?;
+        db.include_every_oid();
+        Ok(db)
+    }
+
     /// `CSeqDB::GetNumSeqs` of the search: the walk of `NSEQ` (the volumes' OIDs below the
     /// alias files without the key) without a list, the included OIDs with one. It is not the
     /// number of included OIDs ([`SeqDb::num_seqs`]) when an alias file has `NSEQ` or a range.
@@ -1632,13 +1701,7 @@ impl SeqDb {
         let keys: &[WalkKey] = if self.list_applied {
             &[WalkKey::StatsNseq, WalkKey::StatsTotlen]
         } else {
-            &[
-                WalkKey::Nseq,
-                WalkKey::Length,
-                WalkKey::MinSeqLength,
-                WalkKey::StatsNseq,
-                WalkKey::StatsTotlen,
-            ]
+            UNLISTED_WALK_KEYS
         };
         self.walk_errors(keys)?;
         if let Some((path, message)) = &self.alias_refusal {

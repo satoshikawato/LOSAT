@@ -242,6 +242,10 @@ pub struct TblastnArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     // NCBI blast_args.cpp:196-206: -qcov_hsp_perc in 0..100, -max_hsps >= 1.
     #[arg(long = "max_hsps", value_parser = blastn_count, help = "Set maximum number of HSPs per subject sequence to save for each query")]
     pub max_hsps: Option<usize>,
@@ -387,6 +391,14 @@ pub struct ResolvedTblastnArgs {
     /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
     pub num_descriptions: usize,
     pub num_alignments: usize,
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
+    /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
     pub max_target_seqs_given: bool,
     /// The -max_hsps value, or 0 (every HSP).
@@ -696,12 +708,13 @@ impl TblastnArgs {
         // (`blastinput::report_counts`), with the handler's warnings. The formats of a
         // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
         let own_outfmt = [choice.number];
-        let (counts, warnings) = crate::blastinput::report_counts::run_report_counts(
+        let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
             "tblastn",
             outfmts.unwrap_or(&own_outfmt),
             self.max_target_seqs,
             self.num_descriptions,
             self.num_alignments,
+            &self.formatting,
         )?;
         diagnostics.write_all(&warnings)?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
@@ -827,6 +840,7 @@ impl TblastnArgs {
             window_size,
             hitlist_size: counts.hitlist_size,
             num_descriptions: counts.num_descriptions,
+            formatting: self.formatting,
             num_alignments: counts.num_alignments,
             max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.

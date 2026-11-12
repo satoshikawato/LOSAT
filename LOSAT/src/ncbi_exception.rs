@@ -229,7 +229,8 @@ impl NcbiException {
     //     return text;
     // }
     // ```
-    /// `s_GetExceptionText`: the message and the extra text of the class.
+    /// `s_GetExceptionText`: the message and the extra text of the class (the text of each
+    /// exception of a chain that NCBI's diagnostics post, `ncbi_app::args`).
     pub(crate) fn text(&self) -> String {
         match &self.extra {
             Some(extra) => format!("{} ({extra})", self.message),

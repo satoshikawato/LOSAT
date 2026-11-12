@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.11
+- Version: 1.14
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -18,7 +18,12 @@
   item PS16a, DECISIONS 27 of its task record; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07); 1.11 2026-11-12 (`-logfile` and `-conffile` run on the command
   line as in NCBI, line RG item E1, after the Owner's ask of 2026-11-12 to add the features NCBI
-  has and LOSAT lacked)
+  has and LOSAT lacked); 1.12 2026-11-13 (`-dryrun` runs on the command line as in NCBI, line RG
+  item E1b, the same ask); 1.13 2026-11-13 (`losat blastdbcmd` and `losat dustmasker` in the
+  scope, exception 10, a closed pipe; line RG, item K1, RG DECISIONS K1-8; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07); 1.14 2026-11-13 (exception 10:
+  blastdbcmd's retrieval goes on after a failed write and its `-metadata` refuses one; line RG,
+  item K1b, RG DECISIONS K1b-3; Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -28,8 +33,9 @@
 ## Scope
 
 The command-line behaviour of every LOSAT program (BLASTN, BLASTP, TBLASTN, TBLASTX,
-BLASTX, and since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report takes the
-place of a search result) that is not part of a search result: argument parsing, help text, thread
+BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report takes the
+place of a search result, and since version 1.13 `losat blastdbcmd` and `losat dustmasker`,
+whose outputs do) that is not part of a search result: argument parsing, help text, thread
 warnings, output-write failures and memory exhaustion. Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
 those errors remain under the root [`AGENTS.md`](../../AGENTS.md) bit-perfect rule.
@@ -162,6 +168,29 @@ BLAST+.
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
+10. **Closed pipe in blastdbcmd's and dustmasker's output** (version 1.13, 2026-11-13,
+   Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14 the same day, item K1b,
+   K1b-3 and K1b-5). A write of NCBI's blastdbcmd 2.17.0 or dustmasker 1.0.0 to a pipe whose
+   reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
+   shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
+   sees the failed write and ends the program at once, with exit status 0 and no message, in
+   every mode and format: nothing more is read, written or reported, as in NCBI's ended process.
+   On Windows, where NCBI's write fails without a signal, a closed pipe is a failed write like
+   a full disk. A failed write that is not a closed pipe (`-out /dev/full`) is NCBI's: where
+   NCBI writes to the `ostream` itself (dustmasker's `interval`, `acclist` and `fasta`,
+   blastdbcmd's retrieval, `-info`, `-list`, `-tax_info`) the later writes are dropped and the
+   run goes on to its end with its exit status (0, or the error of a later input or entry, such
+   as blastdbcmd's `Skipped` of an id that is not found, exit status 1); where NCBI writes
+   through its serial stream, which reports a failed write (dustmasker's `seqloc_*` and
+   `maskinfo_*`: exit status 3, 0 or 134 by the case; blastdbcmd's `-metadata`: exit status 6),
+   LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
+   is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
+   Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
+   `ends_like_sigpipe`), `dustmasker::work::run` (`Failure::ClosedPipe`),
+   `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`), `blastdbcmd/metadata.rs`,
+   `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
+   blastdbcmd`'s or `losat dustmasker`'s output closes the pipe early, LOSAT stops at once with
+   exit status 0, where NCBI's programs are ended by SIGPIPE (141).
 
 ## Decided handling that is not an exception
 
@@ -188,7 +217,14 @@ BLAST+.
   BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX, PSIBLAST and RPSBLAST (and `-conffile` of
   makeblastdb and blastdbcmd): they run as in NCBI (`README.md`, NCBI C++ Toolkit options).
   rpsbproc, the library API and the Web engine still refuse them, and BLASTX refuses the other
-  words by name, as the other programs do.
+  words by name, as the other programs do. Since version 1.12 `-dryrun` is no longer refused on
+  the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
+  and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
+  (`ncbiapp.cpp:705-707`, 292-296). An argument error is reported as without `-dryrun`
+  (exception 1), and the parser's refusals of an NCBI option that LOSAT does not run, or of a
+  value form it does not read, stay (LOSAT has no definition to check them as NCBI does; line RG
+  DECISIONS E1b-2), as do the refusals of registry and environment settings (some, such as
+  `DIAG_POST_LEVEL`, make NCBI write `DryRun`'s message; DECISIONS E1b-6). rpsbproc (its own `DryRun`), the library API and the Web engine refuse it.
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

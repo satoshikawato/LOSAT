@@ -30,16 +30,24 @@ mod db_seqidlist;
 mod db_taxid_root;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
+#[path = "../dustmasker_fixtures.rs"]
+mod dustmasker_fixtures;
 #[path = "../entry_names.rs"]
 mod entry_names;
 #[path = "../library_api.rs"]
 mod library_api;
+#[path = "../library_examples.rs"]
+mod library_examples;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
+#[path = "../makeblastdb_output_streams.rs"]
+mod makeblastdb_output_streams;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
 #[path = "../ncbi_lookup_paths.rs"]
 mod ncbi_lookup_paths;
+#[path = "../ncbi_toolkit_dryrun.rs"]
+mod ncbi_toolkit_dryrun;
 #[path = "../ncbi_toolkit_file_options.rs"]
 mod ncbi_toolkit_file_options;
 #[path = "../newton_lanes8_default.rs"]

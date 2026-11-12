@@ -359,6 +359,10 @@ pub struct BlastnArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// The hit list size (NCBI BLAST hitlist_size) and the numbers of descriptions and
     /// alignments of the pairwise report, which `process_options` sets from
     /// `-max_target_seqs`, `-num_descriptions`, `-num_alignments` and the output format
@@ -478,12 +482,20 @@ pub struct BlastnArgs {
     //                 "Enable WindowMasker filtering using a Taxonomic ID",
     //                 CArgDescriptions::eInteger);
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2285
+    // ```c++
+    // 	arg_desc.SetDependency(kArgNoTaxIdExpansion,CArgDescriptions::eExcludes, kArgWindowMaskerTaxId);
+    // ```
     // Read by the filtering handler after `-dust` (`resolve_window_masker`); 0 is no
-    // WindowMasker, but it is one of the filtering databases given.
+    // WindowMasker, but it is one of the filtering databases given. The database arguments
+    // exclude it with `-no_taxid_expansion` (`DbFilterArgs`, shared with programs that have no
+    // `-window_masker_taxid`): an argument error, also with `-dryrun` (NCBI BLAST+ 2.17.0, line RG
+    // item E1b probe `blastn.x.no_taxid_expansion.window_masker_taxid`: USAGE, rc 1).
     #[arg(
         long = "window_masker_taxid",
         value_name = "window_masker_taxid",
         value_parser = ncbi_integer,
+        conflicts_with = "no_taxid_expansion",
         help = "Enable WindowMasker filtering using a Taxonomic ID"
     )]
     pub window_masker_taxid: Option<i32>,

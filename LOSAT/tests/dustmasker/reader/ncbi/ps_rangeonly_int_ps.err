@@ -1,0 +1,2 @@
+Error: (CObjReaderParseException::eFormat) Unable to locate sequence id in definition line (m_Pos = 0)
+Error: (106.16) Application's execution failed (CObjReaderParseException::eFormat) Unable to locate sequence id in definition line (m_Pos = 0)

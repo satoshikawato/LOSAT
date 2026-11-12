@@ -1,0 +1,8 @@
+>seq1 test sequence	199	279
+>seq1 test sequence	430	480
+>seq1 test sequence	578	670
+>seq3 second low	0	69
+>seq3 second low	160	249
+>len10	0	9
+>len64	0	63
+>len65	0	64

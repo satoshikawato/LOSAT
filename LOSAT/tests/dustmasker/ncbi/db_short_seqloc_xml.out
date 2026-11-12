@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<!DOCTYPE Seq-loc PUBLIC "-//NCBI//NCBI Seqloc/EN" "NCBI_Seqloc.dtd">
+<Seq-loc>
+  <Seq-loc_int>
+    <Seq-interval>
+      <Seq-interval_from>0</Seq-interval_from>
+      <Seq-interval_to>9</Seq-interval_to>
+      <Seq-interval_id>
+        <Seq-id>
+          <Seq-id_general>
+            <Dbtag>
+              <Dbtag_db>BL_ORD_ID</Dbtag_db>
+              <Dbtag_tag>
+                <Object-id>
+                  <Object-id_id>4</Object-id_id>
+                </Object-id>
+              </Dbtag_tag>
+            </Dbtag>
+          </Seq-id_general>
+        </Seq-id>
+      </Seq-interval_id>
+    </Seq-interval>
+  </Seq-loc_int>
+</Seq-loc>
+<?xml version="1.0"?>
+<!DOCTYPE Seq-loc PUBLIC "-//NCBI//NCBI Seqloc/EN" "NCBI_Seqloc.dtd">
+<Seq-loc>
+  <Seq-loc_int>
+    <Seq-interval>
+      <Seq-interval_from>0</Seq-interval_from>
+      <Seq-interval_to>63</Seq-interval_to>
+      <Seq-interval_id>
+        <Seq-id>
+          <Seq-id_general>
+            <Dbtag>
+              <Dbtag_db>BL_ORD_ID</Dbtag_db>
+              <Dbtag_tag>
+                <Object-id>
+                  <Object-id_id>5</Object-id_id>
+                </Object-id>
+              </Dbtag_tag>
+            </Dbtag>
+          </Seq-id_general>
+        </Seq-id>
+      </Seq-interval_id>
+    </Seq-interval>
+  </Seq-loc_int>
+</Seq-loc>
+<?xml version="1.0"?>
+<!DOCTYPE Seq-loc PUBLIC "-//NCBI//NCBI Seqloc/EN" "NCBI_Seqloc.dtd">
+<Seq-loc>
+  <Seq-loc_int>
+    <Seq-interval>
+      <Seq-interval_from>0</Seq-interval_from>
+      <Seq-interval_to>64</Seq-interval_to>
+      <Seq-interval_id>
+        <Seq-id>
+          <Seq-id_general>
+            <Dbtag>
+              <Dbtag_db>BL_ORD_ID</Dbtag_db>
+              <Dbtag_tag>
+                <Object-id>
+                  <Object-id_id>6</Object-id_id>
+                </Object-id>
+              </Dbtag_tag>
+            </Dbtag>
+          </Seq-id_general>
+        </Seq-id>
+      </Seq-interval_id>
+    </Seq-interval>
+  </Seq-loc_int>
+</Seq-loc>

@@ -286,20 +286,28 @@ where
         }
     } else if tokens.get(1).is_some_and(|token| token == "makeblastdb") {
         // makeblastdb's application reads the same words (its own refusals of the others come
-        // with its arguments): a last `-logfile` or `-conffile` without a value is dropped, and
-        // the library API refuses `-conffile` (NCBI BLAST+ 2.17.0, probes
-        // `makeblastdb.log_noval`, `makeblastdb.conf_noval`: rc 0).
+        // with its arguments): a last `-logfile` or `-conffile` without a value is dropped,
+        // `-dryrun` goes to the entry (`main_entry`), and the library API refuses `-conffile`
+        // and `-dryrun` (NCBI BLAST+ 2.17.0, probes `makeblastdb.log_noval`,
+        // `makeblastdb.conf_noval`: rc 0).
         use crate::blastinput::ncbi_environment::{preparse, Preparsed};
         if let Preparsed::Words {
             words,
             conffile,
-            dryrun: false,
+            dryrun,
         } = preparse(&tokens[2..])
         {
             let no_start =
                 crate::blastinput::ncbi_environment::application_start_of_process().is_none();
-            if no_start && conffile.is_some() {
-                let word = toolkit_file_word(&tokens[2..]).unwrap_or("-conffile");
+            if no_start && (conffile.is_some() || dryrun) {
+                // The library's makeblastdb takes `-logfile` (its own argument): the word named is
+                // the one refused.
+                let name = if conffile.is_some() {
+                    "-conffile"
+                } else {
+                    "-dryrun"
+                };
+                let word = toolkit_word_as_written(&tokens[2..], name).unwrap_or(name);
                 return Err(toolkit_file_word_error("makeblastdb", word));
             }
             tokens.truncate(2);
@@ -615,11 +623,8 @@ const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "html",
     "import_search_strategy",
     "index_name",
-    "line_length",
     "negative_gilist",
     "remote",
-    "sorthits",
-    "sorthsps",
     "version",
 ];
 
@@ -650,12 +655,9 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "html",
     "import_search_strategy",
     "ipglist",
-    "line_length",
     "negative_gilist",
     "negative_ipglist",
     "remote",
-    "sorthits",
-    "sorthsps",
     "subject_besthit",
     "version",
 ];
@@ -932,9 +934,9 @@ const TOOLKIT_PROGRAMS: &[&str] = &[
 // arguments, anywhere before `--`, also where another option expects its value, but not as the
 // value of `-logfile` or `-conffile`)
 /// The first word before the arguments that LOSAT refuses in `program`, where NCBI's application
-/// reads it (`ncbi_environment::preparse`): a full version (NCBI's build details), `-dryrun`
-/// (NCBI then runs nothing; line RG item E1b), and in rpsbproc `-logfile` and `-conffile` (item
-/// E1c). In an option's value too: `-out -dryrun` loses the value of `-out` in NCBI. The command
+/// reads it (`ncbi_environment::preparse`): a full version (NCBI's build details), and in
+/// rpsbproc `-dryrun` (rpsbproc's own dry run checks its input), `-logfile` and `-conffile` (line
+/// RG item E1c). In an option's value too: `-out -dryrun` loses the value of `-out` in NCBI. The command
 /// line never brings `-version` here: `main` prints the version before parsing
 /// (`ncbi_version_request`). The Web engine, which parses its options here and has no version to
 /// print, refuses it.
@@ -949,47 +951,53 @@ fn ncbi_preparsed_toolkit_word<'a>(program: &str, tokens: &'a [OsString]) -> Opt
     match preparse(tokens) {
         Preparsed::Version => exact("-version"),
         Preparsed::Refused(word) => exact(word),
-        Preparsed::Words { dryrun: true, .. } => exact("-dryrun"),
+        Preparsed::Words { dryrun: true, .. } if program == "rpsbproc" => exact("-dryrun"),
         Preparsed::Words { .. } if program == "rpsbproc" => toolkit_file_word(tokens),
         Preparsed::Words { .. } => None,
     }
 }
 
-/// The first `-logfile` or `-conffile` that NCBI's application reads in `tokens` (with its
-/// value; `ncbi_environment::preparse`), as written.
+/// The first `-logfile`, `-conffile` or `-dryrun` that NCBI's application reads in `tokens` (with
+/// its value; `ncbi_environment::preparse`), as written.
 fn toolkit_file_word(tokens: &[OsString]) -> Option<&str> {
     use crate::blastinput::ncbi_environment::{log_file, preparse, Preparsed};
-    let conffile = matches!(
-        preparse(tokens),
+    let (conffile, dryrun) = match preparse(tokens) {
         Preparsed::Words {
-            conffile: Some(_),
-            ..
-        }
-    );
-    let named = |name: &'static str| {
-        tokens
-            .iter()
-            .filter_map(|token| token.to_str())
-            .find(|text| {
-                text.strip_prefix(name)
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('='))
-            })
+            conffile, dryrun, ..
+        } => (conffile.is_some(), dryrun),
+        _ => (false, false),
     };
     if log_file(tokens).is_some() {
-        return named("-logfile");
+        return toolkit_word_as_written(tokens, "-logfile");
     }
     if conffile {
-        return named("-conffile");
+        return toolkit_word_as_written(tokens, "-conffile");
+    }
+    if dryrun {
+        return toolkit_word_as_written(tokens, "-dryrun");
     }
     None
 }
 
+/// The first word of `tokens` that is the toolkit option `name` (`-conffile` also as
+/// `-conffile=FILE`), as written.
+fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a str> {
+    tokens
+        .iter()
+        .filter_map(|token| token.to_str())
+        .find(|text| match text.strip_prefix(name) {
+            Some(rest) => rest.is_empty() || (name != "-dryrun" && rest.starts_with('=')),
+            None => false,
+        })
+}
+
 // No NCBI counterpart: NCBI has no library API. The application start of the command line
 // (`cli::main_entry`, `ncbi_environment::start_application`) reads `-logfile` and `-conffile`
-// before the arguments; LOSAT's library and the Web engine run none, so they do not take them
-// (as the library takes no PSSM file, `api::search`).
-/// LOSAT's refusal of the toolkit file option `word` (`-logfile` or `-conffile`) in `program`
-/// when the parser's caller ran no application start: the library API and the Web engine.
+// before the arguments, and the entry ends a `-dryrun` after them; LOSAT's library and the Web
+// engine run none, so they do not take them (as the library takes no PSSM file, `api::search`).
+/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile` or `-dryrun`) in
+/// `program` when the parser's caller ran no application start: the library API and the Web
+/// engine.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidValue,
@@ -1079,22 +1087,23 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // ```
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
-// makeblastdb (line RG item E1); rpsbproc refuses them (`RPSBPROC_TOOLKIT_FILE_ARGS`, item E1c).
+// makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b); rpsbproc refuses
+// those three (`RPSBPROC_TOOLKIT_ARGS`, item E1c).
 const NCBI_TOOLKIT_ARGS: &[&str] = &[
     "help-full",
     "xmlhelp",
     "version-full",
     "version-full-xml",
     "version-full-json",
-    "dryrun",
 ];
 
-/// The toolkit's file options that rpsbproc refuses (line RG item E1c).
-const RPSBPROC_TOOLKIT_FILE_ARGS: &[&str] = &["logfile", "conffile"];
+/// The toolkit's options that rpsbproc refuses and the other programs run (line RG item E1c):
+/// rpsbproc's own `DryRun` checks its input, and its registry is env-parity's refusal.
+const RPSBPROC_TOOLKIT_ARGS: &[&str] = &["logfile", "conffile", "dryrun"];
 
 fn is_ncbi_toolkit_arg(program: &str, name: &str) -> bool {
     NCBI_TOOLKIT_ARGS.contains(&name)
-        || (program == "rpsbproc" && RPSBPROC_TOOLKIT_FILE_ARGS.contains(&name))
+        || (program == "rpsbproc" && RPSBPROC_TOOLKIT_ARGS.contains(&name))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
@@ -1118,11 +1127,8 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "gilist",
     "html",
     "import_search_strategy",
-    "line_length",
     "negative_gilist",
     "remote",
-    "sorthits",
-    "sorthsps",
     "subject_besthit",
     "use_sw_tback",
     "version",
@@ -1154,12 +1160,9 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "gilist",
     "html",
     "import_search_strategy",
-    "line_length",
     "max_intron_length",
     "negative_gilist",
     "remote",
-    "sorthits",
-    "sorthsps",
     "strand",
     "subject_besthit",
     "sum_stats",
@@ -1180,10 +1183,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 // ```
 // Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
 const UNPORTED_BLASTX_ARGS: &[&str] = &[
-    "line_length",
     "html",
-    "sorthits",
-    "sorthsps",
     "gilist",
     "negative_gilist",
     "entrez_query",

@@ -96,6 +96,53 @@ const FASTA_TAGS: [&[u8]; 20] = [
 // ```
 // The tag of a patent id with an application number is `pat|` too (the constant named
 // `pgp` holds "pat|").
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2347-2375
+// ```c++
+// CNcbiOstream& CSeq_id::WriteAsFasta(CNcbiOstream& ostr, const CBioseq& bioseq)
+// {
+//     bool is_na            = bioseq.GetInst().GetMol() != CSeq_inst::eMol_aa;
+//     CRef<CSeq_id> best_id = FindBestChoice(bioseq.GetId(),
+//                                            is_na ? CSeq_id::FastaNARank
+//                                            : CSeq_id::FastaAARank);
+//     ...
+//     bool found_gi = false;
+//     ITERATE (CBioseq::TId, id, bioseq.GetId()) {
+//         if ((*id)->IsGi()) {
+//             (*id)->WriteAsFasta(ostr);
+//             found_gi = true;
+//             break;
+//         }
+//     }
+//     if (best_id.NotEmpty()  &&  !best_id->IsGi() ) {
+//         if (found_gi) {
+//             ostr << '|';
+//         }
+//         best_id->WriteAsFasta(ostr);
+//     }
+//     return ostr;
+// }
+// ```
+/// `CSeq_id::WriteAsFasta(ostr, bioseq)` (`GetStringDescr(bioseq, eFormat_FastA)`): the first
+/// GI of the Bioseq's ids `ids`, then `|` and its best id for FASTA (`FastaAARank` for a
+/// protein, else `FastaNARank`) when that is not a GI: `gi|123|gb|ABC12345.1|`.
+pub fn bioseq_fasta(ids: &[ParsedSeqId], protein: bool, out: &mut Vec<u8>) {
+    let best = if protein {
+        find_best(ids, super::rank::fasta_aa_score)
+    } else {
+        find_best(ids, super::rank::fasta_na_score)
+    };
+    let gi = ids.iter().find(|id| id.gi().is_some());
+    if let Some(gi) = gi {
+        fasta(gi, out);
+    }
+    if let Some(best) = best.filter(|best| best.gi().is_none()) {
+        if gi.is_some() {
+            out.push(b'|');
+        }
+        fasta(best, out);
+    }
+}
+
 /// `CSeq_id::AsFastaString` (`WriteAsFasta`): `ref|XP_000001.1|`, `tr|A0A000|A0A000_YEAST`,
 /// `pdb|1ABC|A`, `gnl|mydb|prot10`, `gi|1414`, ...
 pub fn fasta(id: &ParsedSeqId, out: &mut Vec<u8>) {

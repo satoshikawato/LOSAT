@@ -6119,12 +6119,15 @@ pub fn write_blastx_pairwise_report<W: Write>(
 //         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
 //                                           m_Outfile);
 // ```
+/// `program` is the program line's name: `BLASTX`, or `RPSTBLASTN`, whose prolog is BLASTX's (the
+/// Gapped BLAST reference only, blast_format.cpp:416-426 quoted at `write_translated_pairwise_intro`).
 pub fn write_blastx_prolog(
     writer: &mut impl Write,
+    program: &str,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_translated_pairwise_intro(writer, "BLASTX", &report.version)?;
+    write_translated_pairwise_intro(writer, program, &report.version)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }

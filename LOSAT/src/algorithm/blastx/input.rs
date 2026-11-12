@@ -812,7 +812,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                     &mut records,
                     pending_title_warning.take(),
                     protein,
-                    parse_deflines.and_then(|read| read.id_scope),
+                    parse_deflines
+                        .and_then(|read| read.id_scope.map(|scope| (scope, read.program.upper))),
                     warn,
                 )?;
                 emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
@@ -1045,7 +1046,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             &mut records,
             pending_title_warning.take(),
             protein,
-            parse_deflines.and_then(|read| read.id_scope),
+            parse_deflines.and_then(|read| read.id_scope.map(|scope| (scope, read.program.upper))),
             warn,
         )?;
         emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
@@ -1071,6 +1072,8 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
 struct BelievedRead<'a> {
     strand: crate::report::archive::bioseq::SeqLocStrand,
     id_scope: Option<&'a crate::seqid::id_scope::IdScope>,
+    /// The program of the reader's messages (`FastaStream::program`).
+    program: super::args::ProgramName,
 }
 
 /// A defline under `-parse_deflines` (`fasta_reader::believed`).
@@ -1096,21 +1099,27 @@ fn read_believed_defline(
         refuse_range_in_archive, refused_id, BelievedIds,
     };
     let mut written = Ok(());
-    let parsed = parse_believed_defline(line, protein, "blastx", line_number, &mut |message| {
-        if written.is_ok() {
-            written = warn(&InputWarning {
-                line: line_number as usize,
-                kind: "defline_id",
-                positions: Vec::new(),
-                text: message.to_vec(),
-            });
-        }
-    });
+    let parsed = parse_believed_defline(
+        line,
+        protein,
+        read.program.lower,
+        line_number,
+        &mut |message| {
+            if written.is_ok() {
+                written = warn(&InputWarning {
+                    line: line_number as usize,
+                    kind: "defline_id",
+                    positions: Vec::new(),
+                    text: message.to_vec(),
+                });
+            }
+        },
+    );
     written?;
     let parsed = parsed.map_err(FastaParseError)?;
     let role = if protein { "subject" } else { "query" };
     if parsed.range && keep_defline {
-        return Err(refuse_range_in_archive(role, "BLASTX"));
+        return Err(refuse_range_in_archive(role, read.program.upper));
     }
     let molecule = named_molecule(&parsed.ids);
     let ids = if parsed.ids.is_empty() || parsed.range {
@@ -1125,9 +1134,9 @@ fn read_believed_defline(
     // Two queries with one id are the scopes' of the query batches (`QueryScopes`, which the
     // search adds as the reader delivers the batches): NCBI's formatter empties the scope after
     // each batch against a database.
-    let refusal = refused_id(&ids, role, "BLASTX").or_else(|| {
+    let refusal = refused_id(&ids, role, read.program.upper).or_else(|| {
         protein
-            .then(|| duplicate_id(&ids, keys, role, "BLASTX"))
+            .then(|| duplicate_id(&ids, keys, role, read.program.upper))
             .flatten()
     });
     if let Some(refusal) = refusal {
@@ -1194,7 +1203,7 @@ fn finish_record(
     records: &mut Vec<FastaRecord>,
     title_warning: Option<InputWarning>,
     protein: bool,
-    id_scope: Option<&crate::seqid::id_scope::IdScope>,
+    id_scope: Option<(&crate::seqid::id_scope::IdScope, &str)>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<()> {
     if let Some(warning) = title_warning {
@@ -1202,9 +1211,9 @@ fn finish_record(
         record.warnings.push(warning);
     }
     // A nucleotide query and a protein subject are never one record (`RecordMark`).
-    if let (Some(scope), Some(believed)) = (id_scope, record.believed()) {
+    if let (Some((scope, program)), Some(believed)) = (id_scope, record.believed()) {
         let role = if protein { "subject" } else { "query" };
-        scope.add_record(&believed.ids, None, role, "BLASTX")?;
+        scope.add_record(&believed.ids, None, role, program)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:334-340
     // ```c++
@@ -1839,6 +1848,9 @@ pub(crate) struct FastaStream<R: Read> {
     /// Seq-id (`fasta_reader::seq_id::reject_seq_id_line`); `None` reads every first line as
     /// FASTA, as NCBI does with the data loaders off.
     pub(crate) seq_id_role: Option<&'static str>,
+    /// The program of the reader's messages (`args::ProgramName`; BLASTX unless the run is
+    /// RPSTBLASTN's, `QueryStreamSettings::program`).
+    pub(crate) program: super::args::ProgramName,
     /// `CStreamLineReader::UngetLine`: the line that the next read gives again (the Seq-id step
     /// of `read_fasta_stream` read it and handed it back).
     unget_line: Option<Vec<u8>>,
@@ -1911,6 +1923,7 @@ impl<R: Read> FastaStream<R> {
             id_scope: None,
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,
             seq_id_role: None,
+            program: super::args::ProgramName::BLASTX,
             unget_line: None,
         }
     }
@@ -2450,6 +2463,8 @@ pub(crate) struct QueryStreamSettings {
     pub(crate) strand: crate::report::archive::bioseq::SeqLocStrand,
     /// NCBI's data loaders (`FastaStream::seq_id_role`).
     pub(crate) data_loaders: bool,
+    /// The program of the reader's messages (`FastaStream::program`).
+    pub(crate) program: super::args::ProgramName,
 }
 
 impl QueryStreamSettings {
@@ -2460,6 +2475,7 @@ impl QueryStreamSettings {
         stream.id_scope = self.id_scope.clone();
         stream.strand = self.strand;
         stream.seq_id_role = self.data_loaders.then_some("query");
+        stream.program = self.program;
         stream
     }
 
@@ -2688,6 +2704,7 @@ fn read_fasta_stream<R: Read>(
     let parse_deflines = stream.parse_deflines.then_some(BelievedRead {
         strand: stream.strand,
         id_scope: id_scope.as_deref(),
+        program: stream.program,
     });
     // A file without records gives one empty batch; one whose records a range skipped gave it
     // already.
@@ -2716,9 +2733,11 @@ fn read_fasta_stream<R: Read>(
     // (`UngetLine`).
     if let Some(role) = stream.seq_id_role {
         if let Some(line) = stream.next() {
-            if let Some(refusal) =
-                crate::blastinput::fasta_reader::seq_id::reject_seq_id_line(&line, "BLASTX", role)
-            {
+            if let Some(refusal) = crate::blastinput::fasta_reader::seq_id::reject_seq_id_line(
+                &line,
+                stream.program.upper,
+                role,
+            ) {
                 return Err(refusal);
             }
             stream.unget_line = Some(line);
@@ -3813,6 +3832,7 @@ mod query_settings_tests {
     #[test]
     fn a_read_before_the_search_reads_as_the_search_and_keeps_the_search_ids() {
         let settings = QueryStreamSettings {
+            program: crate::algorithm::blastx::args::ProgramName::BLASTX,
             parse_deflines: true,
             id_scope: Some(Default::default()),
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,

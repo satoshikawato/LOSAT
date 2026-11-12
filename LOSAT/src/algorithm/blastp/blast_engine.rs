@@ -7836,7 +7836,9 @@ fn write_reports_without_queries(
 /// searched batch's: the call's first batch, or, when that batch holds invalid queries only,
 /// which NCBI does not search (local_blast.cpp:177-180), a later one, after the reports of the
 /// batches before it (`unsearched_batches_then_engine_error`). `chunk` is a split query's chunk
-/// (its batch is searched). `database_name` is empty for a subject set.
+/// (its batch is searched), or an error that NCBI raises in the call's first batch whatever its
+/// queries' validity (`rps_hooks::RpsEngineError`'s flag). `database_name` is empty for a
+/// subject set.
 #[allow(clippy::too_many_arguments)]
 fn preliminary_search_error(
     args: &ResolvedBlastpArgs,
@@ -10867,8 +10869,10 @@ fn run_resolved_in_pool(
     // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
     let mut rps_gapped_k: Option<Vec<f64>> = None;
     // A database of several volumes: its merged lists are not sorted or cut below, and it prints
-    // no query warnings.
-    let mut rps_multi_volume = false;
+    // no query warnings; so even when no batch is searched (every query invalid), as NCBI merges
+    // the volumes' empty results (review A of PS12a, S2's rpsblast half).
+    let mut rps_multi_volume = args.rps_search.is_some()
+        && database.is_some_and(|database| rps_hooks::volume_count(database) > 1);
     if let Some(rps) = args.rps_search.as_deref() {
         let run = rps_hooks::RpsSearchRun {
             contexts: &contexts,
@@ -10905,7 +10909,7 @@ fn run_resolved_in_pool(
                     reports,
                     &query_batches,
                     &query_batch_skipped,
-                    false,
+                    engine_error.1,
                     database.name(),
                     &engine_error.0,
                 ),
@@ -11168,6 +11172,23 @@ fn run_resolved_in_pool(
             }
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
+    // ```c++
+    // 		CRef<CSeq_align_set>  align_set(new CSeq_align_set);
+    //         ...
+    // 		CRef<CSearchResults> aggregate_search_results (new CSearchResults(thread_results[0]->GetSeqId(),
+    // 														   	   	   	   	  align_set,
+    // ```
+    // The merge of several volumes gives each query an alignment set, empty for a batch
+    // that was not searched, so outfmt 7 counts `# 0 hits found` there (review A of
+    // PS12a, S2's rpsblast half).
+    let merged_unsearched;
+    let tabular_unsearched: &[bool] = if rps_multi_volume {
+        merged_unsearched = vec![false; query_batch_skipped.len()];
+        &merged_unsearched
+    } else {
+        &query_batch_skipped
+    };
 
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
@@ -14181,7 +14202,7 @@ fn run_resolved_in_pool(
                         .or(context.subject_name.as_deref())
                         .unwrap_or_default(),
                     subjects: tabular_subjects,
-                    unsearched: &query_batch_skipped,
+                    unsearched: tabular_unsearched,
                     hits_found: psiblast_hits_found.as_deref(),
                     prolog: reports.x_prolog,
                     epilog: reports
@@ -14237,7 +14258,7 @@ fn run_resolved_in_pool(
                     &query_titles,
                     &subject_ids,
                     &subject_accessions,
-                    &query_batch_skipped,
+                    tabular_unsearched,
                     psiblast_hits_found.as_deref(),
                     &context,
                     probe.as_mut(),

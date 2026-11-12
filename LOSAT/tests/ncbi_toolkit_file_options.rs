@@ -86,7 +86,8 @@ fn text(bytes: &[u8]) -> String {
 
 /// NCBI BLAST+ 2.17.0 (probes `log_warn`, `log_qerr`, `log_empty`, `log_nodir`, `log_old`): the
 /// warning of `-max_target_seqs 1` and the error of a missing `-query` go to the `-logfile` file
-/// in tblastx and rpsblast and to the standard error in the other programs; the file is made
+/// in tblastx, rpsblast and rpstblastn (its missing `-query` here) and to the standard error in
+/// the other programs; the file is made
 /// (appended to) in every program, the output is the same as without it.
 #[test]
 fn run_messages_go_where_ncbi_sends_them() {
@@ -127,14 +128,23 @@ fn run_messages_go_where_ncbi_sends_them() {
         }
         assert!(!dir.join("nodir").exists());
     }
-    // A missing `-query`, rpsblast too (its error comes before the database is opened).
+    // A missing `-query`, rpsblast and rpstblastn too (their error comes before the database is
+    // opened; rpstblastn: PS12a's probe `log_qerr` of 2026-11-13, NCBI's official 2.17.0, which
+    // writes it into the file as rpsblast does, rpstblastn_app.cpp:111-114).
     let error =
         "Command line argument error: Argument \"query\". File is not accessible:  `missing.fa'\n";
     for program in [
-        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast", "rpsblast",
+        "blastn",
+        "blastp",
+        "blastx",
+        "tblastn",
+        "tblastx",
+        "psiblast",
+        "rpsblast",
+        "rpstblastn",
     ] {
         let _ = fs::remove_file(dir.join("log.txt"));
-        let other = if program == "rpsblast" {
+        let other = if matches!(program, "rpsblast" | "rpstblastn") {
             ["-db", "nodb"]
         } else {
             let subject = match program {
@@ -150,7 +160,7 @@ fn run_messages_go_where_ncbi_sends_them() {
         let run = run_in(&dir, &words, &[]);
         assert_eq!(run.status.code(), Some(1), "{program}: {run:?}");
         let file = fs::read_to_string(dir.join("log.txt")).unwrap();
-        if matches!(program, "tblastx" | "rpsblast") {
+        if matches!(program, "tblastx" | "rpsblast" | "rpstblastn") {
             assert_eq!(
                 (text(&run.stderr), file),
                 (String::new(), error.to_string()),

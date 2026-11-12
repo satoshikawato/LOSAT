@@ -55,8 +55,17 @@ use crate::report::tabular::{
 /// outfmt 7's `# BLASTX 2.17.0+` line.
 const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::ncbi_blast_version!());
 
-/// The program of NCBI's messages.
-const PROGRAM: &str = "blastx";
+/// outfmt 7's line of an RPSTBLASTN run (`ResolvedOptions::rpstblastn`).
+const RPSTBLASTN_VERSION: &str = concat!("RPSTBLASTN ", crate::ncbi_blast_version!());
+
+/// The program line of the run's tabular reports (`args::ProgramName`).
+fn program_version(program: super::args::ProgramName) -> &'static str {
+    if program == super::args::ProgramName::RPSTBLASTN {
+        RPSTBLASTN_VERSION
+    } else {
+        PROGRAM_VERSION
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
 // ```c++
@@ -77,6 +86,7 @@ const PROGRAM: &str = "blastx";
 /// the report's lines before it are flushed; nothing when `taxdb.bti` is found or no plural name
 /// is among the fields.
 fn write_taxdb_warning(
+    program: &str,
     spec: &TabularSpec,
     taxdb_found: bool,
     writer: &mut dyn Write,
@@ -84,7 +94,7 @@ fn write_taxdb_warning(
 ) -> Result<()> {
     if spec.checks_taxdb() && !taxdb_found {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(PROGRAM).as_bytes())?;
+        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -113,6 +123,7 @@ fn write_taxdb_warning(
 /// BLASTX writes its prologs before the search, as NCBI (outfmt 0's too): a refusal of the first
 /// query batch comes after them.
 pub(super) fn write_prolog(
+    program: super::args::ProgramName,
     spec: &TabularSpec,
     taxdb_found: bool,
     writer: &mut dyn Write,
@@ -121,10 +132,10 @@ pub(super) fn write_prolog(
     if spec.kind != TabularKind::CsvWithHeader {
         return Ok(());
     }
-    write_taxdb_warning(spec, taxdb_found, writer, diagnostics)?;
+    write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
     TabularWriter {
         spec,
-        program_version: PROGRAM_VERSION,
+        program_version: program_version(program),
         matrix: None,
     }
     .prolog(writer)?;
@@ -142,13 +153,14 @@ pub(super) fn write_prolog(
 ///         return;
 /// ```
 pub(super) fn write_epilog_warning(
+    program: super::args::ProgramName,
     spec: &TabularSpec,
     taxdb_found: bool,
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     if spec.kind == TabularKind::Commented {
-        write_taxdb_warning(spec, taxdb_found, writer, diagnostics)?;
+        write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
     }
     Ok(())
 }
@@ -312,11 +324,27 @@ pub(super) fn write_blastx_tabular(
     // ```c++
     //     CAlignFormatUtil::GetAsciiProteinMatrix(m_MatrixName, m_ScoringMatrix);
     // ```
-    // The search's matrix (`-matrix`, item SC6 of line NP).
+    // The search's matrix (`-matrix`, item SC6 of line NP). RPSTBLASTN's options carry no matrix
+    // name (the `.aux` matrix goes to the search's options only), so NCBI's formatter has no
+    // matrix and counts the identities as the positives, as rpsblast's
+    // (`blastp::tabular::write_rpsblast_tabular`).
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:238
+    // ```c++
+    //           m_MatrixName(opts.GetMatrixName()),
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3552-3556
+    // ```c++
+    //     retval.Resize(0, 0, -1);
+    //     if (matrix_name == NULL ||
+    //         NStr::TruncateSpaces(string(matrix_name)).empty()) {
+    //         return;
+    //     }
+    // ```
     let table = TabularWriter {
         spec,
-        program_version: PROGRAM_VERSION,
-        matrix: Some(options.scoring),
+        program_version: program_version(options.program()),
+        matrix: options.rpstblastn.is_none().then_some(options.scoring),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
@@ -354,16 +382,18 @@ pub(super) fn write_blastx_tabular(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(
-                query,
-                batch.search_skipped,
-                options.filtered_empty,
-            ))?;
+            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
             // NCBI makes a formatter for each query's report, and it warns when the field list
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).
-            write_taxdb_warning(spec, options.taxdb_found, &mut *writer, &mut *stderr)?;
+            write_taxdb_warning(
+                options.program().lower,
+                spec,
+                options.taxdb_found,
+                &mut *writer,
+                &mut *stderr,
+            )?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
             // ```c++
             // CBlastTabularInfo::~CBlastTabularInfo()
@@ -393,7 +423,8 @@ pub(super) fn write_blastx_tabular(
                     &mut buf,
                     query.query_line().as_bytes(),
                     &database,
-                    (!batch.search_skipped).then_some(count),
+                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
+                    (!batch.search_skipped || options.merged_volumes()).then_some(count),
                 )?;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:787-790
                 // ```c++
@@ -424,7 +455,9 @@ pub(super) fn write_blastx_tabular(
                     local_id(query).as_bytes(),
                     query_length,
                 );
-                for list in lists {
+                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
+                let listed = &lists[..lists.len().min(options.shown_lists())];
+                for list in listed {
                     let shown_hsps = || {
                         list.hsps
                             .iter()

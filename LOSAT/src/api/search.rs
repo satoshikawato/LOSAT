@@ -103,7 +103,10 @@ impl Search {
             Commands::Tblastx(args) => args.parse_deflines,
             Commands::Blastx(args) => args.parse_deflines,
             Commands::Psiblast(args) => args.parse_deflines,
-            Commands::Rpsblast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => false,
+            Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => false,
         }
     }
 

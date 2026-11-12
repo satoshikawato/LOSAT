@@ -7949,7 +7949,8 @@ struct BlastpReports<'a> {
 /// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
 /// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
 /// archive (`archive`), `OLD_FSC` in RPSBLAST (BLASTP and PSIBLAST read it) and query split
-/// values that NCBI cannot convert. Other
+/// values that NCBI cannot convert (not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never
+/// splits). Other
 /// batch sizes change a blastp report only through the query batches
 /// (`read_query_batches`; the redo of a query reads the heaps of its batch,
 /// `kappa_query_batches`) and the query split (`search_split_query_batches`).
@@ -7967,7 +7968,9 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
     if app == BlastpApp::Rpsblast {
         app::check_old_fsc(app_name)?;
     }
-    app::check_query_split_environment(app_name, false)??;
+    // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
+    // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
+    app::check_query_split_environment(app_name, false, app != BlastpApp::Rpsblast)??;
     Ok(())
 }
 

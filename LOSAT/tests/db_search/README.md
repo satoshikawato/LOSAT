@@ -1192,3 +1192,13 @@ The other queries are `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and `taxfilt
 - `db.acbs.blastx.wrap*` and `db.acbs.blastx.rej*` search `bslice` with a `-max_target_seqs` whose preliminary
   size NCBI's 32-bit int wraps: 2147483647 (48 with composition-based statistics), 1073741824 without them
   (10), and 1073741824 with them (negative: NCBI crashes, LOSAT refuses).
+
+## psiblast's id options (line RG, series Q, Q1)
+
+- `q1_sq1` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/q1_subj_q1.faa -dbtype prot -parse_seqids
+  -out tests/db_search/q1_sq1` (NCBI BLAST+ 2.17.0, run from `LOSAT/`): its first sequence is `lcl|Query_1`, the
+  Seq-id of an `-in_pssm` query, which NCBI's `-parse_deflines` then shows as the PSSM's query (rows
+  `db.ps.q1.*q1db*`).
+- `tests/fixtures/pssm/q1_tfp.asn.gz`: NCBI BLAST+ 2.17.0 `psiblast -query tests/db_search/taxfilter/q.faa -db
+  tests/db_search/taxfilter/tfp -save_pssm_after_last_round -out_pssm` (gzip -n -9), the `-in_pssm` of the rows
+  `db.ps.q1.in.*`.

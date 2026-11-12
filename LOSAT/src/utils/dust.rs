@@ -241,6 +241,13 @@ impl DustMasker {
     /// `mask_range_reference` ports this function. The ring-buffer version (was
     /// LOSAT_X_DUSTRING) runs the same steps and only needs a window of at most `X_RING` (64,
     /// the largest NCBI window); a larger window uses the reference.
+    ///
+    /// Inlined into each caller with `x_mask_range`, so blastn's `mask_sequence` gets a copy
+    /// with `start` 0, `stop` the last position and its own random state. One shared copy for
+    /// blastn and dustmasker kept those values live in the inner loop, which then moved
+    /// registers on every letter: blastn's DUST ran 7.6 % more instructions than dev's
+    /// (callgrind of ba17fdf17, megablast, 12 MB of cDNA).
+    #[inline(always)]
     pub(crate) fn mask_range(
         &self,
         seq: &[u8],
@@ -278,6 +285,7 @@ impl DustMasker {
     // number for an `N` is drawn at the same point. It gives the same intervals.
     // `mask_range_reference` step for step, with the window in `XTripletWindow` and the
     // base codes from a table.
+    #[inline(always)]
     fn x_mask_range(
         &self,
         seq: &[u8],
@@ -286,8 +294,7 @@ impl DustMasker {
         rng: &mut NcbiLfgRandom,
     ) -> Vec<MaskedInterval> {
         // NCBI's `it.GetPos() <= stop` as `pos < end` over the letters up to `stop`: the
-        // compiler then knows that each `seq[pos]` is in bounds (with `pos < end` it checked
-        // every letter, and blastn's DUST ran 2.3 % more instructions: ws A/B of 5bb86e93a).
+        // compiler then knows that each `seq[pos]` is in bounds.
         let seq = &seq[..=stop];
         let end = seq.len();
         let mut result = Vec::new();

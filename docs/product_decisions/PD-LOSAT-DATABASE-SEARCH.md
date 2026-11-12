@@ -284,6 +284,12 @@ Removal of an existing database and the paths of the output:
   is removed with its contents, read-only parts included, and a symbolic link is removed, not
   followed (`CDirEntry::Remove`); a volume file's final name is cleared the same way before
   the volume is renamed to it (a directory `NAME.pin` that is no database is removed then).
+  Where the removal fails (the directory holds a directory that cannot be read), the volume
+  file keeps its numbered name and the build goes on, as in makeblastdb, which does not look at
+  the result of the rename: it ends where the database is read (`No alias or index file found
+  ...` or `Could not find volume or alias file ...`, exit status 2) when the file is the
+  volume's `.pin`, `.nin`, and ends normally when it is another file (`.phr`, `.psq`, an
+  index file).
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
   `.ncbirc` is not removed (`losat makeblastdb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
@@ -300,19 +306,31 @@ Version 5 and the options added to the writer:
   (makeblastdb's corelib also finds it as the value of another option).
 - Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
   that removes what the earlier files added; makeblastdb skips it without a word.
-- LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
-  of a database; one left at the path is removed, makeblastdb's final state after a build; a
-  build that fails after LMDB has created its lock file leaves them in makeblastdb, not in
-  LOSAT). On Unix a
-  lock file that LMDB cannot create stops LOSAT where it stops makeblastdb: an
-  output name of 247 bytes or more, whose `NAME.pdb-lock` passes the file-name limit of 255
-  bytes, ends with "BLAST Database error: LMDB runtime error: mdb_env_open: File name too
-  long" (exit status 2) when the second sequence is added, or that creation error (exit status
-  1) for one sequence, with no file written, in both programs; a directory of a lock file's
-  name that the removal of the old database could not remove (it holds a directory that cannot
-  be read) ends the same way with "Is a directory". On Windows these cases have not been
-  compared with a makeblastdb run: LOSAT's paths are not bound by `MAX_PATH`, which binds
-  LMDB's `CreateFileW`, and LOSAT does not check a directory of the lock file's name.
+- LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are made as makeblastdb makes them:
+  LMDB creates each when it opens its environment, before the data file, with 8192 bytes of a
+  lock region that no transaction has used, and the writer removes it when it is destroyed,
+  also when the build ends with an error that makeblastdb reports. Where makeblastdb aborts
+  instead (the crash inputs listed below, and a write that fails while its LMDB writer is
+  destroyed, for example on a full disk) it leaves both lock files, with the `.pot` and `.pto`
+  files; LOSAT ends those builds with an error and removes the lock files. A lock file stays
+  where makeblastdb leaves it: when LMDB has made the lock file and cannot finish opening the
+  environment (a directory of the data file's name that the removal of the old database could
+  not delete: `BLAST Database error: LMDB runtime error: mdb_env_open: Is a directory`, exit
+  status 2; or a data file that cannot be written, `No space left on device`), the lock file of
+  that environment is left, and with it the `NAME.pdb` of the other environment when it is the
+  `NAME.ptf` that cannot be made. A lock file that LMDB cannot create stops LOSAT where it
+  stops makeblastdb: an output name of 247 bytes or more, whose `NAME.pdb-lock` passes the
+  file-name limit of 255 bytes, ends with "BLAST Database error: LMDB runtime error:
+  mdb_env_open: File name too long" (exit status 2) when the second sequence is added, or that
+  creation error (exit status 1) for one sequence, with no file written, in both programs; a
+  directory of a lock file's name that the removal of the old database could not remove (it
+  holds a directory that cannot be read) ends the same way with "Is a directory". The bytes of
+  the lock file are those of the official Linux x64 release, which keeps robust
+  process-shared POSIX mutexes in it; the lock file of makeblastdb on macOS (named
+  semaphores) and on Windows (named mutexes) holds other data, which LOSAT does not
+  reproduce, and neither platform has been compared with a makeblastdb run: LMDB's
+  `CreateFileW` gives a Windows error code, where LOSAT reports the text of the system's error
+  number, and LOSAT's paths are not bound by `MAX_PATH`, which binds LMDB's `CreateFileW`.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
@@ -320,11 +338,6 @@ Errors that makeblastdb does not detect, or detects elsewhere:
   opened: makeblastdb does not test its streams and ends with exit status 0 and a damaged
   or missing database. LOSAT removes the files of the build and ends with
   `Error: <path>: <system error>` and exit status 255.
-- A volume whose final name is a directory that the removal cannot delete (it holds a
-  directory that cannot be read): makeblastdb's rename fails without a word, the volume stays
-  under its numbered name (`NAME.00.pin`) and makeblastdb ends with `No alias or index file
-  found ...` (exit status 2); LOSAT ends with `Error: <volume> -> <name>: Is a directory`
-  (exit status 255) and leaves `NAME.ptf` (probe of 2026-11-08).
 - On Windows, an output directory that exists but is not writable: makeblastdb stops before
   its log (it reads the directory's access rights); LOSAT stops when it creates the first
   file, after the first lines of the log.
@@ -365,7 +378,12 @@ Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1
   there, so that an existing database of the output name has been removed first, as
   makeblastdb removes it, and the errors of `-max_file_sz` and `-taxid_map` come first.
 
-Reproduced although it looks wrong (deterministic NCBI behaviour): with `-hash_index`, no
+Reproduced although it looks wrong (deterministic NCBI behaviour): a file that is already at the
+numbered name of a file the writer never created (`NAME.00.pnd`, `NAME.00.ppi` of a protein
+database with `-parse_seqids`, an ISAM file without entries) is given the final name as well
+(`NAME.pnd`, `NAME.ppi`), and is counted among the files of the metadata file; a file of the
+names makeblastdb does not make for the build (`NAME.00.pog` without `-parse_seqids`, `NAME.00.psd`
+of a version 5 database, trace index files) is left alone. With `-hash_index`, no
 `-parse_seqids` and several volumes, the first sequence of a later volume is indexed under the
 ordinal id it would have had in the earlier volume, so makeblastdb and LOSAT both stop with
 "Duplicate seq_ids are found: GNL|BL_ORD_ID|n" when that volume holds more than n sequences.

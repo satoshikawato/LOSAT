@@ -517,7 +517,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "sorthits"
             | "sorthsps"
             | "version"
-            | "window_masker_taxid"
     )
 }
 

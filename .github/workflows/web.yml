@@ -67,9 +67,10 @@ jobs:
           #   LOSAT/tests/wasi_*.js
           #   LOSAT/tests/outfmt0_manifest.tsv
           #   LOSAT/tests/fixtures/web_v1_*/** (the vectors of the Web API v1 tests)
+          #   LOSAT/tests/compressed/** (the zstd CLI files that web/adapter/tests/inflate.rs reads)
           #   docs/assets/losat-logo*.svg (the README's logos; tests/unit/logo.test.ts reads them)
           #   .github/workflows/web.yml
-          pattern='^(web/.*|LOSAT/src/.*|LOSAT/build\.rs|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/\.cargo/.*|LOSAT/tests/wasi_[^/]*\.js|LOSAT/tests/outfmt0_manifest\.tsv|LOSAT/tests/fixtures/web_v1_[^/]*/.*|docs/assets/losat-logo[^/]*\.svg|\.github/workflows/web\.yml)$'
+          pattern='^(web/.*|LOSAT/src/.*|LOSAT/build\.rs|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/\.cargo/.*|LOSAT/tests/wasi_[^/]*\.js|LOSAT/tests/outfmt0_manifest\.tsv|LOSAT/tests/fixtures/web_v1_[^/]*/.*|LOSAT/tests/compressed/.*|docs/assets/losat-logo[^/]*\.svg|\.github/workflows/web\.yml)$'
           files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
           echo "Changed files:"
           printf '%s\n' "$files"
@@ -239,11 +240,13 @@ jobs:
   # of the reactors job, in Chromium, Firefox and WebKit, compared with the native CLI of the
   # same commit and NCBI's frozen bytes (tests/e2e/engine.spec.ts); the other E2E tests on
   # the application built with the engine; and the reactor tests in Node (the RecordScanner
-  # contract on the serial reactor, responses of more than 1 MiB). One job per browser and
-  # shard (until 2026-11 one job ran the three, 31 min): `--project` selects the same tests that
-  # the browser ran there and `--shard` half of them for Firefox and WebKit (14.5 and 15.1 min a
-  # job for the whole browser, Chromium 10.4), with the same two workers. Each job installs
-  # Chromium as well, for the storage tests' Chromium profile (tests/e2e/support/profile.ts).
+  # contract on the serial reactor, responses of more than 1 MiB, and the inflation of
+  # compressed sources and Example sets with the engine's decoders: bytes, sentences, limit).
+  # One job per browser and shard (until 2026-11 one job ran the three, 31 min): `--project`
+  # selects the same tests that the browser ran there and `--shard` half of them for Firefox and
+  # WebKit (14.5 and 15.1 min a job for the whole browser, Chromium 10.4), with the same two
+  # workers. Each job installs Chromium as well, for the storage tests' Chromium profile
+  # (tests/e2e/support/profile.ts).
   browser-engine:
     name: browser-engine (${{ matrix.project }} ${{ matrix.shard }})
     needs: [changes, reactors, native]
@@ -293,7 +296,7 @@ jobs:
       # waited on every package, holding the job for hours; this step stops it instead.
       - run: npx playwright install --with-deps ${{ matrix.browsers }}
         timeout-minutes: 10
-      - name: RecordScanner contract on the serial reactor (Node)
+      - name: RecordScanner contract and inflation on the serial reactor (Node)
         if: matrix.project == 'chromium'
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors

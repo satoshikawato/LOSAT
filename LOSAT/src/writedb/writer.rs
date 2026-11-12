@@ -827,11 +827,11 @@ impl WriteDb {
         drop(self.volumes[count - 1].take_offset_arrays());
         drop(self.volumes[count - 1].take_index_scratch());
         if count == 1 {
-            self.volumes[0].rename_single()?;
+            self.volumes[0].rename_single();
         } else if count > 100 {
             let num_digits = count.ilog10() + 1;
             for volume in &mut self.volumes {
-                volume.rename_file_index(num_digits)?;
+                volume.rename_file_index(num_digits);
             }
         }
         if count > 1 {

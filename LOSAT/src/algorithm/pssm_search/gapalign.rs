@@ -1064,6 +1064,10 @@ pub(crate) struct PssmTraceback {
     pub(crate) subject_stop: i32,
     pub(crate) score: i32,
     pub(crate) edit_script: Vec<GapEditOp>,
+    /// `*fence_hit`: the alignment read a `FENCE_SENTRY` of a partly translated subject (tblastn
+    /// `-in_pssm`, whose traceback then translates the subject whole; a protein subject has
+    /// none, and psiblast does not read it).
+    pub(crate) fence_hit: bool,
 }
 
 /// `BLAST_GappedAlignmentWithTraceback` with a PSSM (not out-of-frame): `ALIGN_EX` to the left
@@ -1233,6 +1237,7 @@ pub(crate) fn pssm_gapped_alignment_with_traceback<R: PssmRows>(
         subject_stop,
         score: score_left + score_right,
         edit_script,
+        fence_hit,
     }
 }
 

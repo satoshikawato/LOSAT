@@ -240,25 +240,25 @@ mod tests {
         }
     }
 
-    /// A pipe whose reader has closed.
-    struct ClosedPipe;
-
-    impl Write for ClosedPipe {
-        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     // A closed pipe ends NCBI's process by SIGPIPE outside Windows (exit status 141, no
     // message), whatever the format: the run ends at once, silently (PD-LOSAT-CLI-NONSEARCH-
     // DIFFERENCES exception 10; review of line RG item K1b, F2).
     #[test]
     #[cfg(not(windows))]
     fn a_closed_pipe_ends_the_run_silently() {
+        /// A pipe whose reader has closed.
+        struct ClosedPipe;
+
+        impl Write for ClosedPipe {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/dustmasker/in/basic.fa")
             .into_os_string();

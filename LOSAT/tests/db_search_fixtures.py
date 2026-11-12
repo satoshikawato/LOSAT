@@ -12,7 +12,7 @@ extra_args is that <tmp>, where any other file the run writes is reported; `pssm
 <tmp>/<row_id>.asn` instead and `pssm-both` both, and in these two kinds only a file of 64 KB or less is frozen,
 a larger one being compared by its SHA-256 in side_sha256). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
-(a psiblast query cell `pssm-gz:PATH` or `pssm:PATH` is a PSSM query: `-in_pssm FILE` in place of
+(a psiblast or tblastn query cell `pssm-gz:PATH` or `pssm:PATH` is a PSSM query: `-in_pssm FILE` in place of
 `-query QUERY`, the gzipped file PATH inflated into a temporary directory, or PATH as it is;
 xinclude_fixtures.py `query_argv`)
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty

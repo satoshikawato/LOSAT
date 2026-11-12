@@ -6177,13 +6177,12 @@ fn psiblast_stop_at_invalid_query(
         })
         .collect();
     let contexts = pssm_hooks::psi_contexts(args, &frames);
-    // `kbp_psi` of a PSSM query (`PsiSearch::ungapped_karlin`), valid as `s_BlastKarlinBlkIsValid`
-    // (blast_parameters.c:43-50) holds it.
+    // `kbp_psi` of a PSSM query, valid as `s_BlastKarlinBlkIsValid` holds it
+    // (`PsiSearch::ungapped_karlin_valid`).
     let kbp_psi_valid = |context: &QueryContext| {
-        args.psi_search.as_deref().is_none_or(|psi| {
-            let kbp = psi.ungapped_karlin(&context.karlin_params);
-            kbp.lambda > 0.0 && kbp.k > 0.0 && kbp.h > 0.0
-        })
+        args.psi_search
+            .as_deref()
+            .is_none_or(|psi| psi.ungapped_karlin_valid(&context.karlin_params))
     };
     // The PSSM query whose letters give no Karlin-Altschul parameters crashes NCBI before (below).
     let empty_database = database.is_some_and(|database| database.num_oids() == 0)

@@ -493,7 +493,7 @@ fn pssm_redo(
     if !has_lists {
         return Ok(preliminary_hit_lists.iter().map(|_| None).collect());
     }
-    let sbp = crate::algorithm::psiblast::pssm::score_block(
+    let sbp = crate::algorithm::pssm_search::in_pssm::score_block(
         args.scoring.matrix,
         crate::core::psi::KarlinBlk {
             lambda: gapped_params.lambda,

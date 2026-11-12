@@ -175,6 +175,9 @@ BLAST+.
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
    sees the failed write and ends the program at once, with exit status 0 and no message, in
    every mode and format: nothing more is read, written or reported, as in NCBI's ended process.
+   As NCBI's `cerr` is tied to `cout`, both programs flush their output before each line of
+   diagnostics, so the closed pipe is met before the line (and with `2>&1` the lines come after
+   the output written before them, as NCBI's do).
    On Windows, where NCBI's write fails without a signal, a closed pipe is a failed write like
    a full disk. A failed write that is not a closed pipe (`-out /dev/full`) is NCBI's: where
    NCBI writes to the `ostream` itself (dustmasker's `interval`, `acclist` and `fasta`,
@@ -186,8 +189,9 @@ BLAST+.
    LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
    is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
-   `ends_like_sigpipe`), `dustmasker::work::run` (`Failure::ClosedPipe`),
-   `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`), `blastdbcmd/metadata.rs`,
+   `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
+   (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
+   `blastdbcmd/metadata.rs`,
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
    blastdbcmd`'s or `losat dustmasker`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).

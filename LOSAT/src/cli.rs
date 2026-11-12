@@ -1127,7 +1127,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "gilist",
     "html",
     "import_search_strategy",
-    "in_pssm",
     "negative_gilist",
     "remote",
     "subject_besthit",

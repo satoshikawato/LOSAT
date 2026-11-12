@@ -14,7 +14,11 @@
 // build stops rather than serve an unguarded threaded module: the guard throws on an encoding
 // that it declines, and a module in which it finds nothing to guard is refused here. An
 // artifact that is guarded already (it carries the guard's record) is served as it is, once
-// that guard verifies.
+// that guard verifies. The guard also lets the waits of the module end with their worker: WebKit
+// never ends a worker whose thread waits without a timeout, and keeps its shared memory, so each
+// wait records its address, and once the keeper ends the waits (shared-memory.ts endWaits) they
+// wait in slices with a call of the module's import sched_yield between them. It can do so only
+// in a module that imports sched_yield, so a threaded module without that import is refused here.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -34,15 +38,16 @@ interface Guarded {
 }
 
 /** The guard of LOSAT/tests/wasi_shared_memory.js, loaded only for a build with the engine. */
-function guardSharedMemory(bytes: Uint8Array): Guarded {
+function guardSharedMemory(bytes: Uint8Array): Guarded & { readonly slicesWaits: boolean } {
   const guard = createRequire(import.meta.url)('../../../LOSAT/tests/wasi_shared_memory.js') as {
-    guardSharedMemory: typeof guardSharedMemory;
+    guardSharedMemory: (bytes: Uint8Array) => Guarded;
     verifyGuarded(bytes: Uint8Array): unknown;
+    slicesWaits(bytes: Uint8Array): boolean;
   };
   const guarded = guard.guardSharedMemory(bytes);
   // The guard returns an artifact that carries its record as it is, so the record is checked here.
   if (guarded.record !== null) guard.verifyGuarded(guarded.bytes);
-  return guarded;
+  return { ...guarded, slicesWaits: guard.slicesWaits(guarded.bytes) };
 }
 
 export const REACTORS_ENV = 'LOSAT_WEB_REACTORS';
@@ -90,6 +95,9 @@ export function findReactors(env: NodeJS.ProcessEnv = process.env): Reactors | u
     }
     const guarded = guardSharedMemory(artifact);
     if (guarded.record === null) throw new Error(`${path}: the shared-memory guard found no memory.fill, memory.copy, memory.grow or atomic instruction to guard`);
+    if (!guarded.slicesWaits) {
+      throw new Error(`${path}: the threaded module does not import wasi_snapshot_preview1.sched_yield, so its waits would not end when the page ends their worker`);
+    }
     const where = guarded.fill + guarded.copy + guarded.grow + guarded.atomic === 0 ? 'in the artifact' : 'LOSAT/tests/wasi_shared_memory.js';
     const sha256 = sha256Hex(guarded.bytes);
     return {

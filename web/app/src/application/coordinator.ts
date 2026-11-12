@@ -10,7 +10,7 @@
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
 import { outputFileName, outputMediaType, runOutputs, type RunOutput } from '../domain/output-format';
-import { fastaParser, programById, type ProgramId } from '../domain/programs';
+import { fastaParser, programById, WINDOW_MASKER_FLAG, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -46,6 +46,8 @@ export interface SearchRequest {
   readonly requestedThreads: number | 'auto';
   /** The run's name (NCBI's "Job Title"); the snapshot keeps it trimmed, or not at all when empty. */
   readonly title?: string;
+  /** The counts file that the parameters' `-window_masker_db` names (BLASTN); the run reads it under that name. */
+  readonly windowMasker?: File;
 }
 
 export interface RunView {
@@ -157,6 +159,12 @@ export class Coordinator {
         return { ok: false, message: errorMessage(error) };
       }
       const title = request.title?.trim();
+      // The run reads the file under the name that its argv gives the option.
+      const countsName = optionValue(argv, WINDOW_MASKER_FLAG);
+      const windowMasker =
+        request.windowMasker === undefined || countsName === undefined
+          ? undefined
+          : Object.freeze({ name: countsName, file: request.windowMasker, size: request.windowMasker.size, lastModified: request.windowMasker.lastModified });
       snapshots.push(
         Object.freeze({
           runId: this.deps.newRunId(),
@@ -167,6 +175,7 @@ export class Coordinator {
           query,
           subject,
           requestedThreads: request.requestedThreads,
+          ...(windowMasker === undefined ? {} : { windowMasker }),
           queuedAt: this.deps.now(),
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
@@ -332,6 +341,7 @@ export class Coordinator {
           query: engineInput(snapshot.query),
           subject: engineInput(snapshot.subject),
           requestedThreads: snapshot.requestedThreads,
+          ...(snapshot.windowMasker === undefined ? {} : { windowMasker: snapshot.windowMasker }),
         },
         output,
         (phase) => this.onPhase(runId, phase),
@@ -351,6 +361,7 @@ export class Coordinator {
           ...(runtime.runtimeGeneration === undefined ? {} : { runtimeGeneration: runtime.runtimeGeneration }),
           ...(runtime.memory === undefined ? {} : { memory: runtime.memory }),
           ...(runtime.subjectRetained === undefined ? {} : { subjectRetained: runtime.subjectRetained }),
+          ...(runtime.windowMasker === undefined ? {} : { windowMasker: runtime.windowMasker }),
         },
       });
     } catch (error) {

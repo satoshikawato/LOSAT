@@ -458,6 +458,26 @@ describe('WasmEngine', () => {
     await next;
   });
 
+  it('allows the high-water mark for the counts file that the instance holds, so that the counts are not read again after every search', async () => {
+    const { engine, workers } = setup({ highWaterBytes: 100 });
+    // 249 bytes of memory after the search: past the mark of 100, but under 100 + 2 x 75 for the counts.
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: { ...RESULT, countsBytes: 75, memory: { ...RESULT.memory, linearBytesAfter: 249 } } });
+    await run;
+    const next = engine.run(request('r2'), output(), () => undefined);
+    await posted(() => workers[0], 2);
+    expect(workers[0]!.terminated).toBe(false);
+    // At that mark it is renewed: the counts go with the instance.
+    workers[0]!.send({ type: 'done', generation: 1, runId: 'r2', ok: true, result: { ...RESULT, countsBytes: 75, memory: { ...RESULT.memory, linearBytesAfter: 250 } } });
+    await next;
+    const third = engine.run(request('r3'), output(), () => undefined);
+    await posted(() => workers[1], 1);
+    expect(workers[0]!.terminated).toBe(true);
+    workers[1]!.send({ type: 'done', generation: 2, runId: 'r3', ok: true, result: RESULT });
+    await third;
+  });
+
   it('keeps the name, role and detail of an InputMismatchError', async () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1'), output(), () => undefined);

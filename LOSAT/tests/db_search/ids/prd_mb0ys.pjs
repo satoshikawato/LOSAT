@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "prd_mb0ys",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_mb0ys (parsed Seq-ids)",
+  "number-of-letters": 100,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-11T20:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49530,
+  "bytes-to-cache": 222,
+  "files": [
+    "prd_mb0ys.pdb",
+    "prd_mb0ys.phr",
+    "prd_mb0ys.pin",
+    "prd_mb0ys.pog",
+    "prd_mb0ys.pos",
+    "prd_mb0ys.pot",
+    "prd_mb0ys.psq",
+    "prd_mb0ys.ptf",
+    "prd_mb0ys.pto"
+  ]
+}

@@ -124,10 +124,11 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
     sets["word"] = [["-word_size", word] for word in (*words, "0x3", "03", "+3", "3.0")]
     sets["word"] += [["-threshold", value] for value in thresholds]
     # BLASTX's six frames make NCBI's tables of a low threshold take minutes and gigabytes per
-    # case: its pairs are the word sizes LOSAT runs (3 and 5) with thresholds of 11.5 and up.
+    # case: its pairs are thresholds of 11.5 and up, each word size with 21 and the word sizes up
+    # to 5 with 11.5 too (the compressed tables of 6 and 7 at 11.5 take NCBI 45 s a case).
     if program == "blastx":
-        sets["word"] += [["-word_size", word, "-threshold", value] for word in ("3", "5")
-                         for value in ("11.5", "21")]
+        sets["word"] += [["-word_size", word, "-threshold", value] for word in words[1:7]
+                         for value in ("11.5", "21") if value == "21" or int(word) <= 5]
     else:
         sets["word"] += [["-word_size", word, "-threshold", value] for word in words[1:6]
                          for value in ("1", "11", "11.5", "21")]
@@ -200,7 +201,7 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
                         ["-lcase_masking", "-soft_masking", "false"]]
     if program == "blastx":
         sets["task"] = [["-task", task] for task in ("blastx", "blastx-fast", "BLASTX", "tblastn", "blastx-fast ", "")]
-        sets["task"] += [["-task", "blastx-fast", "-word_size", value] for value in ("3", "5", "6")]
+        sets["task"] += [["-task", "blastx-fast", "-word_size", value] for value in ("2", "3", "4", "5", "6", "7")]
         sets["task"] += [["-task", "blastx-fast", "-matrix", matrix] for matrix in ("PAM30", "BLOSUM80")]
         sets["word"] += [["-word_size", word] for word in ("-1", "0", "9", "0x5", "05", "+5", "5.0", "", "x")]
         sets["gencode"] = [["-query_gencode", code] for code in GENCODES]

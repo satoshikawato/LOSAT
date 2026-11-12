@@ -217,14 +217,10 @@ pub enum Commands {
     //     arg.Reset(new CProgramDescriptionArgs(kProgram,
     //                                "Translated Reverse Position Specific BLAST"));
     // ```
-    // `-h` and `-help` write NCBI's frozen texts (`rpstblastn::args::{USAGE, HELP}`; the
-    // reader stops at them, `try_parse_from_command`).
+    // `-h` and `-help` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the reader
+    // stops at them, `try_parse_from_command`).
     /// Translated Reverse Position Specific BLAST (rpstblastn)
-    #[command(
-        help_template = "{before-help}",
-        before_help = rpstblastn::args::USAGE,
-        before_long_help = rpstblastn::args::HELP
-    )]
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpstblastn(rpstblastn::RpstblastnArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
@@ -294,6 +290,9 @@ where
     let mut input = tokens.into_iter();
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
     let mut scope = &command;
+    // rpstblastn's help flag: the words up to its program name and the value of its
+    // `RpstblastnArgs::ncbi_help`.
+    let mut ncbi_help: Option<(usize, &str)> = None;
     // The first option of the NCBI search programs whose value is not UTF-8, rejected once the
     // command line parses (`non_utf8_value_error`).
     let mut non_utf8_value: Option<(&clap::Command, String)> = None;
@@ -309,14 +308,19 @@ where
         if let Some(subcommand) = scope.find_subcommand(text) {
             scope = subcommand;
             translated.push(token);
+            if scope.get_name() == "rpstblastn" {
+                ncbi_help = Some((translated.len(), ""));
+            }
             continue;
         }
         // NCBI's reader stops at its help flags (`CArgDescriptions::x_CheckAutoHelp`, the words
-        // before them read first); rpstblastn writes NCBI's texts and reads no word after them.
+        // before them read first); rpstblastn writes NCBI's texts and reads no word after them
+        // (`RpstblastnArgs::ncbi_help`).
         let stops_at_help = scope.get_name() == "rpstblastn";
         if matches!(text, "-help" | "--help") {
             translated.push("--help".into());
             if stops_at_help {
+                ncbi_help = ncbi_help.map(|(start, _)| (start, "full"));
                 break;
             }
             continue;
@@ -330,6 +334,7 @@ where
         if text == "-h" {
             translated.push("-h".into());
             if stops_at_help {
+                ncbi_help = ncbi_help.map(|(start, _)| (start, "short"));
                 break;
             }
             continue;
@@ -373,9 +378,10 @@ where
             .unwrap_or("")
             .split_once('=')
             .map_or((key.unwrap_or(""), None), |(k, v)| (k, Some(v)));
+        // A hidden argument is the reader's own (`RpstblastnArgs::ncbi_help`), named by no word.
         let Some(arg) = scope
             .get_arguments()
-            .find(|arg| arg.get_long() == Some(name))
+            .find(|arg| arg.get_long() == Some(name) && !arg.is_hide_set())
         else {
             return Err(unknown_option_error(scope, name, text));
         };
@@ -425,7 +431,22 @@ where
             translated.push(format!("--{name}").into());
         }
     }
-    let mut matches = command.clone().try_get_matches_from(translated)?;
+    let mut matches = match command.clone().try_get_matches_from(&translated) {
+        // The parser stopped at rpstblastn's help flag, the words before it read (NCBI's
+        // order): the program writes NCBI's text (`RpstblastnArgs::ncbi_help_text`), and the
+        // words before the flag, read, are not used (NCBI checks their dependencies after).
+        Err(error) if error.kind() == ErrorKind::DisplayHelp => match ncbi_help {
+            Some((start, value)) if !value.is_empty() => {
+                translated.truncate(start);
+                translated.push(format!("--ncbi_help={value}").into());
+                let mut matches = command.clone().try_get_matches_from(translated)?;
+                return T::from_arg_matches_mut(&mut matches)
+                    .map_err(|error| error.format(&mut command.clone()));
+            }
+            _ => return Err(error),
+        },
+        matches => matches?,
+    };
     let parsed = T::from_arg_matches_mut(&mut matches)
         .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {
@@ -506,17 +527,10 @@ pub fn render_message(error: &clap::Error) -> String {
             }
         }
     }
-    let message = message
+    message
         .replace("'-h'", "'-help'")
         .replace("-h, --help", "-help")
-        .replace("-V, --version", "--version");
-    // NCBI's `rpstblastn -help` ends with an empty line, which clap's help writer trims.
-    if error.kind() == ErrorKind::DisplayHelp
-        && message.trim_end() == rpstblastn::args::HELP.trim_end()
-    {
-        return rpstblastn::args::HELP.to_string();
-    }
-    message
+        .replace("-V, --version", "--version")
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125

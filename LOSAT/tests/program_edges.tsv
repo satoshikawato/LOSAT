@@ -24,12 +24,12 @@ pssm_search	blastp	code
 pssm_search	tblastx	code
 rps_search	blastn	code
 rps_search	blastp	code
-rps_search	blastx	code
-rps_search	common	code
 rps_search	pssm_search	code
 rpsblast	blastp	code
 rpsblast	rps_search	code
+rpstblastn	blastp	code
 rpstblastn	blastx	code
+rpstblastn	common	code
 rpstblastn	rps_search	code
 rpstblastn	rpsblast	code
 tblastn	blastn	code

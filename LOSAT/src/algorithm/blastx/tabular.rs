@@ -58,8 +58,14 @@ const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::ncbi_blast_version!());
 /// outfmt 7's line of an RPSTBLASTN run (`ResolvedOptions::rpstblastn`).
 const RPSTBLASTN_VERSION: &str = concat!("RPSTBLASTN ", crate::ncbi_blast_version!());
 
-/// The program of NCBI's messages.
-const PROGRAM: &str = "blastx";
+/// The program line of the run's tabular reports (`args::ProgramName`).
+fn program_version(program: super::args::ProgramName) -> &'static str {
+    if program == super::args::ProgramName::RPSTBLASTN {
+        RPSTBLASTN_VERSION
+    } else {
+        PROGRAM_VERSION
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
 // ```c++
@@ -117,6 +123,7 @@ fn write_taxdb_warning(
 /// BLASTX writes its prologs before the search, as NCBI (outfmt 0's too): a refusal of the first
 /// query batch comes after them.
 pub(super) fn write_prolog(
+    program: super::args::ProgramName,
     spec: &TabularSpec,
     taxdb_found: bool,
     writer: &mut dyn Write,
@@ -125,10 +132,10 @@ pub(super) fn write_prolog(
     if spec.kind != TabularKind::CsvWithHeader {
         return Ok(());
     }
-    write_taxdb_warning(PROGRAM, spec, taxdb_found, writer, diagnostics)?;
+    write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
     TabularWriter {
         spec,
-        program_version: PROGRAM_VERSION,
+        program_version: program_version(program),
         matrix: None,
     }
     .prolog(writer)?;
@@ -146,13 +153,14 @@ pub(super) fn write_prolog(
 ///         return;
 /// ```
 pub(super) fn write_epilog_warning(
+    program: super::args::ProgramName,
     spec: &TabularSpec,
     taxdb_found: bool,
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     if spec.kind == TabularKind::Commented {
-        write_taxdb_warning(PROGRAM, spec, taxdb_found, writer, diagnostics)?;
+        write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
     }
     Ok(())
 }
@@ -333,17 +341,10 @@ pub(super) fn write_blastx_tabular(
     //         return;
     //     }
     // ```
-    let table = match options.rpstblastn {
-        Some(_) => TabularWriter {
-            spec,
-            program_version: RPSTBLASTN_VERSION,
-            matrix: None,
-        },
-        None => TabularWriter {
-            spec,
-            program_version: PROGRAM_VERSION,
-            matrix: Some(options.scoring),
-        },
+    let table = TabularWriter {
+        spec,
+        program_version: program_version(options.program()),
+        matrix: options.rpstblastn.is_none().then_some(options.scoring),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
@@ -381,18 +382,13 @@ pub(super) fn write_blastx_tabular(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(
-                super::report::ncbi_program(options),
-                query,
-                batch.search_skipped,
-                options.filtered_empty,
-            ))?;
+            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
             // NCBI makes a formatter for each query's report, and it warns when the field list
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).
             write_taxdb_warning(
-                super::report::ncbi_program(options),
+                options.program().lower,
                 spec,
                 options.taxdb_found,
                 &mut *writer,
@@ -427,7 +423,8 @@ pub(super) fn write_blastx_tabular(
                     &mut buf,
                     query.query_line().as_bytes(),
                     &database,
-                    (!batch.search_skipped).then_some(count),
+                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
+                    (!batch.search_skipped || options.merged_volumes()).then_some(count),
                 )?;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:787-790
                 // ```c++

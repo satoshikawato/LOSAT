@@ -346,6 +346,11 @@ pub fn main_entry() -> Result<()> {
         // }
         // ```
         Commands::Rpstblastn(args) => {
+            // NCBI's `-help` and `-h` texts, which its reader writes before the application runs.
+            if let Some(text) = args.ncbi_help_text() {
+                print!("{text}");
+                return Ok(());
+            }
             // rpstblastn is an NCBI application as blastx: its application layer reads its
             // environment and registry files (`rpstblastn.ini`, then `.ncbirc`) before its own
             // code runs; LOSAT rejects the settings that change the output, before its own

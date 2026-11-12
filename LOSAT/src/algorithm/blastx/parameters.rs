@@ -326,14 +326,16 @@ pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGu
 pub struct SearchSpaceOverflow {
     pub db_length: i64,
     pub query_length: usize,
+    /// The program of the refusal (`args::ProgramName::upper`).
+    pub program: &'static str,
 }
 
 impl std::fmt::Display for SearchSpaceOverflow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's BLASTX",
-            self.db_length, self.query_length
+            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's {}",
+            self.db_length, self.query_length, self.program
         )
     }
 }
@@ -395,9 +397,10 @@ pub fn effective_lengths(
             None => (db_length - db_count * adj)
                 .max(1)
                 .checked_mul(c.length as i64 - adj)
-                .ok_or(SearchSpaceOverflow {
+                .ok_or_else(|| SearchSpaceOverflow {
                     db_length,
                     query_length: c.length,
+                    program: options.program().upper,
                 })?,
         };
     }
@@ -603,7 +606,8 @@ pub fn subject_parameters(
     // length is too short"; LOSAT refuses the search instead.
     ensure!(
         !options.old_fsc || avg_subject_length > 0,
-        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
+        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's {}",
+        options.program().upper
     );
     let n = if options.gapped && !options.old_fsc {
         i32::try_from(min_subject_length.max(10))?

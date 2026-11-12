@@ -5256,7 +5256,6 @@ pub fn write_blastx_pairwise_report<W: Write>(
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     )>,
     records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
-    query_gapped_k: Option<&[f64]>,
     mut probe: Option<&mut FormatProbe<'_>>,
     first_hsp: HspIndex,
 ) -> io::Result<()> {
@@ -5387,7 +5386,6 @@ pub fn write_blastx_pairwise_report<W: Write>(
             &mut writer,
             query,
             report,
-            query_gapped_k.map(|gapped_k| gapped_k[qidx]),
             query_validity[qidx],
             skipped[qidx],
             options.gapped,
@@ -5617,14 +5615,10 @@ pub fn write_blastx_epilog(
 //             sprintf(buffer, "%#8.3g ", gbp->a_un);
 //             out << buffer;
 // ```
-/// `gapped_k`: the query's gapped K where it is not the report's (an RPSTBLASTN search with
-/// composition-based statistics, `BatchResults::gapped_k`), as rpsblast's
-/// (`BlastpSections::gapped_karlin`).
 fn write_blastx_query_footer(
     writer: &mut impl Write,
     query: &BlastpPairwiseQuery,
     report: &BlastpPairwiseReport,
-    gapped_k: Option<f64>,
     valid: bool,
     skipped: bool,
     gapped: bool,
@@ -5636,13 +5630,7 @@ fn write_blastx_query_footer(
         return write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            match gapped_k {
-                Some(k) => KarlinParams {
-                    k,
-                    ..report.gapped_karlin
-                },
-                None => report.gapped_karlin,
-            },
+            report.gapped_karlin,
             report.gumbel,
             query.effective_search_space,
             false,

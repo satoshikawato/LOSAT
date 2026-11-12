@@ -303,13 +303,11 @@ fn run_inner(
     // the reader tries the first line of the query or the `-subject` file as a Seq-id
     // (`FastaStream::seq_id_role`).
     // An RPSTBLASTN run (`BlastxArgs::rpstblastn`) is the NCBI application rpstblastn: its
-    // settings, messages and query batches are that program's.
-    let (program, losat_program) = match &args.rpstblastn {
-        Some(_) => ("rpstblastn", "RPSTBLASTN"),
-        None => ("blastx", "BLASTX"),
-    };
-    let settings = crate::blastinput::ncbi_environment::check_ncbi_application_settings(program)
-        .map_err(anyhow::Error::msg)?;
+    // settings, messages and query batches are that program's (`args::ProgramName`).
+    let program = args.program();
+    let settings =
+        crate::blastinput::ncbi_environment::check_ncbi_application_settings(program.lower)
+            .map_err(anyhow::Error::msg)?;
     let id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>> =
         args.parse_deflines.then(Default::default);
     // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
@@ -545,7 +543,7 @@ fn run_inner(
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
     let query_file =
-        crate::blastinput::input_files::open_input(&args.query, "query", losat_program)
+        crate::blastinput::input_files::open_input(&args.query, "query", program.upper)
             .map_err(early_archive_error)?;
     let destination: Box<dyn Write> =
         match (args.out.as_deref().filter(|p| *p != Path::new("-")), &hold) {
@@ -630,7 +628,7 @@ fn run_inner(
     let query_range = crate::blastinput::seq_range::parse_optional_range(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,
-        losat_program,
+        program.upper,
     )?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
@@ -658,10 +656,15 @@ fn run_inner(
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
     let database = match args.database_name() {
         Some(name) => {
-            let database =
-                BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
-                    .showing_gis(args.show_gis)
-                    .in_id_scope(id_scope.clone());
+            let database = BlastxDatabase::open_restricted(
+                name,
+                &settings,
+                list.as_ref(),
+                &mut stderr,
+                program.upper,
+            )?
+            .showing_gis(args.show_gis)
+            .in_id_scope(id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
                 &args.db_filter,
@@ -669,7 +672,7 @@ fn run_inner(
                 database.filtered_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
-                "BLASTX",
+                program.upper,
             )?;
             Some(database)
         }
@@ -720,6 +723,7 @@ fn run_inner(
     // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
     // reads of the file before the search share (`QueryStreamSettings`).
     let query_settings = QueryStreamSettings {
+        program,
         parse_deflines: args.parse_deflines,
         id_scope: id_scope.clone(),
         strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
@@ -732,7 +736,7 @@ fn run_inner(
         None => BATCH_SIZE,
     };
     let batch_size =
-        crate::blastinput::app::query_batch_size(losat_program, default_batch_size as u32)
+        crate::blastinput::app::query_batch_size(program.upper, default_batch_size as u32)
             .map(|size| size as usize);
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
@@ -847,7 +851,7 @@ fn run_inner(
     };
     let mut query_stream = query_settings.stream(query_file);
     if stream_is_empty(&mut query_stream) {
-        stderr.write_all(format!("Warning: [{program}] Query is Empty!\n").as_bytes())?;
+        stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
         if let Some(handle) = &archive {
             handle.take_messages();
@@ -943,10 +947,16 @@ fn run_inner(
     // batch's report; LOSAT refuses both before the search, where an empty query has already
     // ended the run as NCBI ends it (`Query is Empty!`, exit status 0).
     app::check_search_environment(
-        losat_program,
+        program.upper,
         database.is_none(),
         format == Some(app::ReportFormat::ArchiveFormat),
     )?;
+    // RPSTBLASTN's refusals of the database's files and of its options, before the first byte
+    // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
+    // run).
+    if let Some(search) = options.rpstblastn.clone() {
+        options.rpstblastn = Some(search.for_database(&options, database.as_ref())?);
+    }
     // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
     // volume is opened (`seqdb::Volume::open`).
     if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
@@ -2889,7 +2899,7 @@ pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
         // RPSTBLASTN's formatting options (`-line_length`, `-sorthits`, `-sorthsps`) warn in
         // NCBI's order as rpsblast's do.
         Some(search) => counts.warnings_with(
-            "rpstblastn",
+            args.program().lower,
             outfmt,
             args.num_descriptions.is_some(),
             &search.formatting(),
@@ -2984,7 +2994,6 @@ mod reader_batch_tests {
         let records: Vec<_> = (0..queries).map(|_| record(30)).collect();
         vec![BatchResults {
             query_ordinal: 0,
-            gapped_k: None,
             queries: vec![Vec::new(); queries],
             prepared: super::super::query_setup::prepare_queries(
                 &records,

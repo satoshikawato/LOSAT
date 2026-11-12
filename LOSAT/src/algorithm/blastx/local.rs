@@ -829,14 +829,19 @@ fn search_database(
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
-    let database =
-        BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut *outputs.diagnostics)?
-            .showing_gis(args.show_gis)
-            .in_id_scope(database_id_scope(
-                args.parse_deflines,
-                query_records,
-                "BLASTX",
-            )?);
+    let database = BlastxDatabase::open_restricted(
+        name,
+        &settings,
+        list.as_ref(),
+        &mut *outputs.diagnostics,
+        super::args::ProgramName::BLASTX.upper,
+    )?
+    .showing_gis(args.show_gis)
+    .in_id_scope(database_id_scope(
+        args.parse_deflines,
+        query_records,
+        "BLASTX",
+    )?);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         &args.db_filter,

@@ -5,18 +5,18 @@ use clap::Args;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::search::TranslatedRpsSearch;
 use crate::algorithm::blastx::BlastxArgs;
 use crate::algorithm::rps_search::engine::RpsSearch;
-use crate::algorithm::rps_search::translated::TranslatedRpsSearch;
 use crate::algorithm::rpsblast::args::{
-    rps_composition_mode, rpsblast_line_length, rpsblast_mt_mode, rpsblast_sort_option,
+    check_rps_outfmt, rps_composition_mode, rpsblast_line_length, rpsblast_mt_mode,
+    rpsblast_sort_option,
 };
 use crate::blastinput::report_counts::FormattingArgs;
 use crate::blastinput::value_parsers::*;
 
 /// The text of `rpstblastn -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage`), frozen as NCBI
-/// writes it. `losat rpstblastn -help` writes it (`cli::try_parse_from_command`,
-/// `cli::render_message`).
+/// writes it. `losat rpstblastn -help` writes it (`RpstblastnArgs::ncbi_help`).
 pub const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
@@ -179,39 +179,36 @@ pub struct RpstblastnArgs {
     /// (accepted); with them it is refused until item PS12c.
     #[arg(long = "use_sw_tback", default_value_t = false)]
     pub use_sw_tback: bool,
-}
-
-/// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its errors
-/// are NCBI's); the formats that NCBI runs and LOSAT's RPSTBLASTN does not write yet are refused
-/// (item PS15a, DECISIONS 38 D8). Outfmt 17 goes on to NCBI's own error (BLASTX's
-/// `formatting_handler_check`: "SAM format is only applicable to blastn").
-fn check_outfmt(outfmt: &str) -> Result<()> {
-    use crate::blastinput::app::ReportFormat;
-    let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
-    if let Some(format) = ReportFormat::from_number(choice.number) {
-        if !matches!(
-            format,
-            ReportFormat::Pairwise
-                | ReportFormat::Tabular
-                | ReportFormat::TabularWithComments
-                | ReportFormat::CommaSeparatedValues
-                | ReportFormat::Sam
-        ) {
-            bail!(
-                "output format {} is not supported by LOSAT's RPSTBLASTN",
-                choice.number
-            );
-        }
-    }
-    Ok(())
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834 (quoted at `USAGE`)
+    /// `-help` (`full`) or `-h` (`short`): NCBI's reader stops at them, the words before them
+    /// read first. The command line's reader sets this hidden argument there
+    /// (`cli::try_parse_from_command`; no word of the user names a hidden argument), and the run
+    /// writes NCBI's text (`ncbi_help_text`).
+    #[arg(long = "ncbi_help", hide = true, value_parser = ["full", "short"])]
+    pub(crate) ncbi_help: Option<String>,
 }
 
 impl RpstblastnArgs {
+    /// NCBI's text of `-help` or `-h` when the command line asks for it (`ncbi_help`).
+    pub fn ncbi_help_text(&self) -> Option<&'static str> {
+        match self.ncbi_help.as_deref() {
+            Some("full") => Some(HELP),
+            Some(_) => Some(USAGE),
+            None => None,
+        }
+    }
+
     /// The RPS search of the arguments (what BLASTX's arguments do not hold), after LOSAT's
     /// refusals of what a later item runs, in NCBI's order of the option handlers: `-outfmt`
     /// first, then the composition-based statistics and the search space.
-    pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
-        check_outfmt(&self.outfmt)?;
+    pub(crate) fn rps_search(&self, old_fsc: bool) -> Result<TranslatedRpsSearch> {
+        // NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`);
+        // outfmt 13 and 14 to the standard output get NCBI's own error (BLASTX's).
+        let to_standard_output = self
+            .out
+            .as_deref()
+            .is_none_or(|path| path.as_os_str() == "-");
+        check_rps_outfmt(&self.outfmt, "RPSTBLASTN", to_standard_output)?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         if self.use_sw_tback && requested_cbs > 0 {
             bail!(
@@ -233,7 +230,7 @@ impl RpstblastnArgs {
         if self.dbsize.is_some() {
             bail!("the NCBI BLAST+ option -dbsize is not supported by LOSAT's RPSTBLASTN yet");
         }
-        if crate::blastinput::app::old_fsc_environment() {
+        if old_fsc {
             bail!(
                 "the environment variable OLD_FSC, which makes NCBI BLAST+ compute without its finite-size correction (the Gumbel block), is not supported by LOSAT's RPSTBLASTN yet"
             );
@@ -255,13 +252,20 @@ impl RpstblastnArgs {
                 sort_hsps: self.sorthsps,
             },
             ungapped: self.ungapped,
+            several_volumes: false,
         })
     }
 
     /// BLASTX's arguments of the RPSTBLASTN search, with the RPS search that takes the place of
     /// BLASTX's (`BlastxArgs::rpstblastn`, `rps_search`).
     pub fn into_blastx_args(self) -> Result<BlastxArgs> {
-        let search = self.rps_search()?;
+        self.into_blastx_args_for(crate::blastinput::app::old_fsc_environment())
+    }
+
+    /// `into_blastx_args` with `old_fsc`, whether the environment variable `OLD_FSC` is set
+    /// (`app::old_fsc_environment`).
+    pub(crate) fn into_blastx_args_for(self, old_fsc: bool) -> Result<BlastxArgs> {
+        let search = self.rps_search(old_fsc)?;
         let requested_cbs = search.search.requested_cbs;
         Ok(BlastxArgs {
             query: self.query,
@@ -368,13 +372,13 @@ mod tests {
     fn refusal(extra: &[&str]) -> String {
         parse(extra)
             .unwrap()
-            .into_blastx_args()
+            .into_blastx_args_for(false)
             .unwrap_err()
             .to_string()
     }
 
     fn search(extra: &[&str]) -> TranslatedRpsSearch {
-        parse(extra).unwrap().rps_search().unwrap()
+        parse(extra).unwrap().rps_search(false).unwrap()
     }
 
     // ncbiargs.cpp:3829-3834 (quoted at `USAGE`): `-help` and `-h` write NCBI's texts, whatever
@@ -395,10 +399,28 @@ mod tests {
         for (words, text) in [
             (&["-help"][..], HELP),
             (&["-help", "-no_such_option"], HELP),
+            (&["--help"], HELP),
             (&["-h"], USAGE),
             (&["-evalue", "1", "-h", "-xyz", "2"], USAGE),
+            // NCBI checks the dependencies of the words after its reader (`x_PostCheck`).
+            (
+                &["-max_target_seqs", "1", "-num_alignments", "1", "-help"],
+                HELP,
+            ),
         ] {
-            assert_eq!(parse(words).unwrap_err(), text, "{words:?}");
+            assert_eq!(
+                parse(words).unwrap().ncbi_help_text(),
+                Some(text),
+                "{words:?}"
+            );
+        }
+        assert_eq!(parse(&[]).unwrap().ncbi_help_text(), None);
+        // The hidden argument is the reader's: no word of the user names it.
+        for words in [&["-ncbi_help", "full"][..], &["--ncbi_help=full"]] {
+            assert!(
+                parse(words).unwrap_err().contains("unknown option"),
+                "{words:?}"
+            );
         }
         // A word before the help that NCBI's reader refuses is refused first.
         assert!(parse(&["-no_such_option", "-help"])
@@ -416,7 +438,7 @@ mod tests {
         for value in ["0", "F", "f", "D", "d"] {
             let args = parse(&["-comp_based_stats", value])
                 .unwrap()
-                .into_blastx_args()
+                .into_blastx_args_for(false)
                 .unwrap();
             assert_eq!(args.comp_based_stats, "0", "{value}");
             assert!(args.rpstblastn.is_some());
@@ -433,6 +455,13 @@ mod tests {
                 "{value}"
             );
         }
+        // `OLD_FSC` (read by `into_blastx_args`, given here).
+        assert!(parse(&["-comp_based_stats", "0"])
+            .unwrap()
+            .rps_search(true)
+            .unwrap_err()
+            .to_string()
+            .contains("OLD_FSC"));
         // The default (1).
         assert_eq!(
             refusal(&[]),
@@ -441,7 +470,7 @@ mod tests {
         // ungapped with the default: NCBI's options error (BLASTX's resolve).
         let error = parse(&["-ungapped"])
             .unwrap()
-            .into_blastx_args()
+            .into_blastx_args_for(false)
             .unwrap()
             .resolve()
             .unwrap_err();
@@ -464,6 +493,10 @@ mod tests {
             (&["-outfmt", "11"], "output format 11 is not supported by LOSAT's RPSTBLASTN"),
             (&["-outfmt", "20"], "output format 20 is not supported by LOSAT's RPSTBLASTN"),
             (
+                &["-outfmt", "13", "-out", "x.json"],
+                "output format 13 is not supported by LOSAT's RPSTBLASTN",
+            ),
+            (
                 &["-comp_based_stats", "0", "-searchsp", "1000"],
                 "-searchsp is not supported by LOSAT's RPSTBLASTN yet",
             ),
@@ -479,11 +512,21 @@ mod tests {
             assert!(refusal(extra).contains(text), "{extra:?}: {}", refusal(extra));
         }
         // The formats LOSAT writes, a custom field list and NCBI's own error of 17 (BLASTX's).
-        for outfmt in ["0", "6", "7", "10", "6 qseqid sseqid qframe", "17"] {
+        // 13 and 14 to the standard output go on to NCBI's error too (BLASTX's).
+        for outfmt in [
+            "0",
+            "6",
+            "7",
+            "10",
+            "6 qseqid sseqid qframe",
+            "17",
+            "13",
+            "14",
+        ] {
             assert!(
                 parse(&["-comp_based_stats", "0", "-outfmt", outfmt])
                     .unwrap()
-                    .into_blastx_args()
+                    .into_blastx_args_for(false)
                     .is_ok(),
                 "{outfmt}"
             );
@@ -491,7 +534,7 @@ mod tests {
         // -use_sw_tback without statistics: accepted, NCBI's search does not read it.
         assert!(parse(&["-use_sw_tback", "-comp_based_stats", "0"])
             .unwrap()
-            .into_blastx_args()
+            .into_blastx_args_for(false)
             .is_ok());
         for name in ["html", "remote", "entrez_query", "import_search_strategy"] {
             let error = parse(&[&format!("-{name}"), "x"]).unwrap_err();
@@ -590,7 +633,7 @@ mod tests {
             "-window_size",
             "0",
         ];
-        let args = parse(&words).unwrap().into_blastx_args().unwrap();
+        let args = parse(&words).unwrap().into_blastx_args_for(false).unwrap();
         assert_eq!(
             (
                 args.strand.as_str(),
@@ -647,7 +690,11 @@ mod tests {
         ];
         assert!(search(&words).search.sum_stats);
         assert_eq!(
-            parse(&words).unwrap().into_blastx_args().unwrap().seg,
+            parse(&words)
+                .unwrap()
+                .into_blastx_args_for(false)
+                .unwrap()
+                .seg,
             "yes"
         );
     }

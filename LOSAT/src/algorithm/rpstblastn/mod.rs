@@ -8,6 +8,7 @@
 //! (DECISIONS 38 D1).
 
 pub mod args;
+pub(crate) mod search;
 
 pub use args::RpstblastnArgs;
 

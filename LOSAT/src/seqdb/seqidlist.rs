@@ -280,7 +280,7 @@ fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<Vec<u8>>
         }
         if p > head {
             let acc = &bytes[head..p];
-            let str_id = crate::seqid::parse::truncate_spaces(acc);
+            let str_id = crate::ncbi_str::truncate_spaces(acc);
             if !str_id.is_empty() {
                 sis.push(str_id.to_vec());
             } else {

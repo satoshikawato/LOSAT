@@ -229,12 +229,43 @@ pub(super) fn run(
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let mut writer = writer(options)?;
-    let result = masks_of_input(options, fasta_source, &mut writer, out);
-    let finished = writer.finish(out);
+    // A failed write leaves NCBI's stream bad, and it goes on silently (exit 0): `out` drops
+    // the bytes after the first failed write.
+    let mut out = OstreamOf {
+        inner: out,
+        bad: false,
+    };
+    let result = masks_of_input(options, fasta_source, &mut writer, &mut out);
+    // A refusal of LOSAT's stops before NCBI's run would end: nothing more is written.
+    if !matches!(result, Err(Failure::Refused(_))) {
+        writer.finish(&mut out)?;
+    }
     result?;
-    finished?;
-    out.flush()
-        .map_err(|error| Failure::Refused(format!("writing the output failed: {error}")))
+    let _ = out.flush();
+    Ok(())
+}
+
+/// The output as NCBI's `ostream`: after a write fails (`badbit`), later writes do nothing and
+/// report nothing.
+struct OstreamOf<'a> {
+    inner: &'a mut dyn Write,
+    bad: bool,
+}
+
+impl Write for OstreamOf<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if !self.bad && self.inner.write_all(buf).is_err() {
+            self.bad = true;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.bad && self.inner.flush().is_err() {
+            self.bad = true;
+        }
+        Ok(())
+    }
 }
 
 fn masks_of_input(
@@ -288,6 +319,7 @@ fn reader(
         "blastdb" => Ok(Box::new(DatabaseSource::open(
             options.input,
             options.blastdb_registry,
+            prints_title(options.outfmt),
         )?)),
         _ => Err(Failure::Std("Unknown input format".to_string())),
     }
@@ -325,10 +357,22 @@ fn reader(
 struct DatabaseSource {
     db: SeqDb,
     oid: u32,
+    /// Whether the writer prints the title (`interval`, `acclist`, `fasta`; the `seqloc_*` and
+    /// `maskinfo_*` writers take only the Seq-id).
+    title_printed: bool,
+}
+
+/// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
+fn prints_title(outfmt: &str) -> bool {
+    matches!(outfmt, "interval" | "acclist" | "fasta")
 }
 
 impl DatabaseSource {
-    fn open(name: &str, registry: Result<Option<&str>, &str>) -> Result<Self, Failure> {
+    fn open(
+        name: &str,
+        registry: Result<Option<&str>, &str>,
+        title_printed: bool,
+    ) -> Result<Self, Failure> {
         let registry = registry.map_err(|reason| {
             Failure::Refused(
                 crate::algorithm::common::database::refusal(reason, super::PROGRAM).to_string(),
@@ -336,7 +380,11 @@ impl DatabaseSource {
         })?;
         let path = SearchPath::from_environment(registry).map_err(database_failure)?;
         let db = SeqDb::open_in(name, SeqType::Nucleotide, &path).map_err(database_failure)?;
-        Ok(DatabaseSource { db, oid: 0 })
+        Ok(DatabaseSource {
+            db,
+            oid: 0,
+            title_printed,
+        })
     }
 }
 
@@ -398,7 +446,7 @@ impl SequenceSource for DatabaseSource {
             .deflines
             .iter()
             .any(|defline| defline.taxid.is_some_and(|taxid| taxid > 0));
-        if has_source && bioseq_title_from_source(&title, &bioseq_ids(&ids)) {
+        if self.title_printed && has_source && bioseq_title_from_source(&title, &bioseq_ids(&ids)) {
             return Err(Failure::Refused(unsupported(&format!(
                 "sequence {oid} of the database, which has no title and a taxid (NCBI makes its \
                  title from the taxonomy),"

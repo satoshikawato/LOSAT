@@ -27,7 +27,6 @@ use std::collections::VecDeque;
 // ```
 /// `CRandom` of `CIupac2Ncbi2na_converter` (the random numbers that resolve `N`): one per
 /// `CSymDustMasker`, so the calls of one masker draw from one sequence of numbers.
-#[derive(Clone)]
 pub(crate) struct NcbiLfgRandom {
     state: [u32; 33],
     rj: i32,
@@ -284,13 +283,13 @@ impl DustMasker {
         seq: &[u8],
         start: usize,
         stop: usize,
-        caller_rng: &mut NcbiLfgRandom,
+        rng: &mut NcbiLfgRandom,
     ) -> Vec<MaskedInterval> {
-        // The masker's numbers in a local copy for the loop (written back at the end): drawn
-        // through the caller's reference they cost a load and a store per `N` and per state
-        // update, which made blastn's DUST run ~1 % more instructions (ws A/B of e328aebb7).
-        let mut local_rng = caller_rng.clone();
-        let rng = &mut local_rng;
+        // NCBI's `it.GetPos() <= stop` as `pos < end` over the letters up to `stop`: the
+        // compiler then knows that each `seq[pos]` is in bounds (with `pos < end` it checked
+        // every letter, and blastn's DUST ran 2.3 % more instructions: ws A/B of 5bb86e93a).
+        let seq = &seq[..=stop];
+        let end = seq.len();
         let mut result = Vec::new();
         let mut current_start = start;
         // NCBI reference: ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
@@ -320,7 +319,7 @@ impl DustMasker {
             let mut pos = current_start + 2;
             let mut done = false;
 
-            while !done && pos <= stop {
+            while !done && pos < end {
                 if !perfect_list.is_empty() {
                     self.save_masked_regions(
                         &mut result,
@@ -339,7 +338,7 @@ impl DustMasker {
                         window.find_perfect(&mut perfect_list);
                     }
                 } else {
-                    while pos <= stop {
+                    while pos < end {
                         if !perfect_list.is_empty() {
                             self.save_masked_regions(
                                 &mut result,
@@ -374,7 +373,6 @@ impl DustMasker {
             }
         }
 
-        *caller_rng = local_rng;
         result
     }
 

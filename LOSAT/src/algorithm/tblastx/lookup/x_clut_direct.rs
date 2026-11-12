@@ -690,7 +690,6 @@ impl XSink for Vec<u32> {
     }
 }
 
-/// The words of one query offset, as `add_word_hits` adds them (module header).
 /// No NCBI counterpart: a query word as `XWords` reads it: a slice of the table's word length
 /// (`[u8]`, read at run time) or an array of a word length fixed by the build's instance
 /// (`[u8; W]`, BLASTX's `x_bx_buckets_on`, item SC9 of line NP), whose length and checks the
@@ -718,6 +717,7 @@ impl<const W: usize> XQueryWord for [u8; W] {
     }
 }
 
+/// The words of one query offset, as `add_word_hits` adds them (module header).
 struct XWords<'a> {
     word_length: usize,
     alphabet: usize,
@@ -737,6 +737,7 @@ impl<'a> XWords<'a> {
     /// the table's.
     #[inline(always)]
     fn length_of<Q: XQueryWord + ?Sized>(&self) -> usize {
+        debug_assert!(Q::LEN.is_none_or(|w| w == self.word_length));
         Q::LEN.unwrap_or(self.word_length)
     }
 
@@ -3236,8 +3237,10 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
 /// on vectors kept between builds with `LOSAT_X_BXCLUTPOOL` (`blastx::seed::Lookup`'s drop gives
 /// them back). A query of more than `X_U16_LETTERS` letters gets `x_tbn_build_compressed_lookup`'s
 /// table, also on kept vectors. One instance per word length `WORD` (`-word_size` 5 to 7, chosen
-/// once per query batch by `blastx::seed`), so that each build's loops take their word length as a
-/// constant, as the one of `-word_size 5` did when it was the only one (item SC9 of line NP).
+/// once per query batch by `blastx::seed`), so that the bucket fill's walk of the neighbouring
+/// words takes its length as a constant, as it did when 5 was the only one (item SC9 of line NP;
+/// 6 and 7 decline at its PV test and take the count-and-fill builder, with the length at run
+/// time).
 #[inline(never)]
 pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     scaled_threshold: i32,

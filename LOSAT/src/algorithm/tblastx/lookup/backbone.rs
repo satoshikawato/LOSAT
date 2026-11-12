@@ -2477,7 +2477,7 @@ fn build_ncbi_lookup_with(
 }
 
 /// The reference builder's table of a BLASTX lookup query (the inputs `build_ncbi_lookup_with`
-/// takes), for the tests of `blastx::seed` (item SC9 of line NP; one of threaded builds).
+/// takes), for the tests of `blastx::seed` (item SC9 of line NP, a test of threaded builds).
 #[cfg(all(
     test,
     feature = "parallel",

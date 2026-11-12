@@ -189,7 +189,7 @@ maintainer to accept it.
    `LOSAT/tests/db_search/taxfilter/root/taxonomy4blast.sqlite3` (whose root has the one
    child 131567), LOSAT's `-taxids 1` writes NCBI's bytes of `-taxids 131567`
    (`LOSAT/tests/db_taxid_root.rs`, rows `db.tf.bp.root.6` and `db.tf.tbn.root.6` of
-   `LOSAT/tests/db_search_manifest.tsv`, BLASTP and TBLASTN) and fewer than the whole
+   `LOSAT/tests/db_search_manifest/`, BLASTP and TBLASTN) and fewer than the whole
    database, whose two taxids outside the file are not descendants.
    Version 1.8 (line BDC's BDC3a, the same standing delegation): `losat blastdbcmd -taxids`
    and `-taxidlist` expand their taxids with the same walk. NCBI's `blastdbcmd -db

@@ -482,14 +482,16 @@ pub(crate) fn x_print_shadow_summary() {
 //                     diag_array[diag_coord].last_hit =
 //                         s_last_off - (wordsize - 1) + diag_offset;
 // ```
-pub(crate) fn x_word_finder_diag(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_word_finder_diag<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Option<Vec<InitHsp>>> {
     let Lookup::Standard(table, kept) = lookup else {
         if x_bxdiag_mode() != 2 {
@@ -512,7 +514,7 @@ pub(crate) fn x_word_finder_diag(
             return Ok(None);
         }
         let (hits, counts) = x_word_finder_fused_or_sent(
-            mode, batch, parameters, options, subject, table, kept, diagonals, sent,
+            scoring, mode, batch, parameters, options, subject, table, kept, diagonals, sent,
         )?;
         x_add_counts(counts);
         return Ok(Some(hits));
@@ -522,7 +524,8 @@ pub(crate) fn x_word_finder_diag(
         offset: diagonals.offset,
         window: diagonals.window,
     };
-    let reference = word_finder(
+    let reference = word_finder_any(
+        scoring,
         batch,
         parameters,
         options,
@@ -532,7 +535,7 @@ pub(crate) fn x_word_finder_diag(
         |_| {},
     )?;
     let (fused, counts) = x_word_finder_fused_or_sent(
-        mode, batch, parameters, options, subject, table, kept, diagonals, sent,
+        scoring, mode, batch, parameters, options, subject, table, kept, diagonals, sent,
     )?;
     x_add_counts(counts);
     if fused != reference {
@@ -579,18 +582,21 @@ pub(crate) fn x_word_finder_diag(
 /// finder scans it.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606 (as in
 // `x_word_finder_diag`)
-pub(crate) fn x_word_finder_narrow(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_word_finder_narrow<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
     lookup: &NarrowLookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
     let NarrowLookup { table, kept } = lookup;
     if options.window_size <= 0 || x_bxdiag_mode() != 1 {
         return word_finder_narrow(
+            scoring,
             batch,
             parameters,
             options,
@@ -605,6 +611,7 @@ pub(crate) fn x_word_finder_narrow(
     debug_assert!(pays, "a table of 16-bit hits is built to be fused");
     crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", true);
     let (hits, counts) = x_word_finder_fused_or_sent(
+        scoring,
         x_cell_mode(),
         batch,
         parameters,
@@ -637,9 +644,10 @@ fn x_add_counts(counts: [u64; 4]) {
 // No NCBI counterpart: chooses the instance of the fused loop; both give the reference's hits and
 // table.
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): [`x_word_finder_fused`], or with `sent` its instance with the
-/// sentinel walks, [`x_word_finder_fused_sent`].
+/// sentinel walks, [`x_word_finder_fused_sent`] (with the keys of the matrix of `sent`).
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused_or_sent<K: XCell>(
+fn x_word_finder_fused_or_sent<K: XCell, S: BxScoring>(
+    scoring: S,
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -648,14 +656,14 @@ fn x_word_finder_fused_or_sent<K: XCell>(
     table: &BlastAaLookupTable<K>,
     kept: &XKeptPresence,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     match sent {
         Some(sent) => x_word_finder_fused_sent(
             mode, batch, parameters, options, subject, table, kept, diagonals, sent,
         ),
         None => x_word_finder_fused(
-            mode, batch, parameters, options, subject, table, kept, diagonals,
+            scoring, mode, batch, parameters, options, subject, table, kept, diagonals,
         ),
     }
 }
@@ -683,7 +691,8 @@ fn x_word_finder_fused_or_sent<K: XCell>(
 //                                   offset_pairs, array_size, scan_range);
 // ```
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused<K: XCell>(
+fn x_word_finder_fused<K: XCell, S: BxScoring>(
+    scoring: S,
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -755,7 +764,10 @@ fn x_word_finder_fused<K: XCell>(
                 //                                               &hsp_len, use_pssm,
                 //                                               wordsize, &right_extend,
                 // ```
-                let Some(result) = extend_two_hit_blosum62(
+                // The matrix's walks: BLOSUM62's `extend_two_hit_blosum62`, or another matrix's
+                // (`bx_two_hit`).
+                let Some(result) = bx_two_hit(
+                    scoring,
                     query,
                     subject,
                     (previous + word) as usize,
@@ -827,7 +839,7 @@ fn x_word_finder_fused<K: XCell>(
 // `x_word_finder_fused`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_fused_sent<K: XCell>(
+fn x_word_finder_fused_sent<K: XCell, S: BxScoring>(
     mode: XCellTest,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -836,7 +848,7 @@ fn x_word_finder_fused_sent<K: XCell>(
     table: &BlastAaLookupTable<K>,
     kept: &XKeptPresence,
     diagonals: &mut Diagonals,
-    sent: XSent<'_>,
+    sent: XSent<'_, S>,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     let word = options.word_size;
     let offset = diagonals.offset;
@@ -962,9 +974,28 @@ mod tests {
         ResolvedOptions,
         BxLookup,
     ) {
+        search_with(query, window, subject_length, narrow, "BLOSUM62", &[])
+    }
+
+    /// [`search`] with `-matrix matrix` (its default gap costs and threshold, its score block) and
+    /// the options `extra`; another matrix than BLOSUM62 takes its build (`Lookup::x_new_of`, item
+    /// SC6b).
+    fn search_with(
+        query: &[u8],
+        window: i32,
+        subject_length: usize,
+        narrow: bool,
+        matrix: &str,
+        extra: &[&str],
+    ) -> (
+        PreparedQueryBatch,
+        Vec<ContextParameters>,
+        ResolvedOptions,
+        BxLookup,
+    ) {
         let q = parse_fasta(query, false, false).unwrap();
         let window = window.to_string();
-        let args = [
+        let mut args = vec![
             "losat",
             "blastx",
             "-query",
@@ -973,7 +1004,10 @@ mod tests {
             "subject",
             "-window_size",
             &window,
+            "-matrix",
+            matrix,
         ];
+        args.extend_from_slice(extra);
         let crate::cli::Commands::Blastx(args) =
             crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
                 .unwrap()
@@ -983,7 +1017,7 @@ mod tests {
         };
         let options = args.resolve().unwrap();
         let batch = prepare_queries(&q, &options).unwrap();
-        let mut params = parameters::score_block(&batch);
+        let mut params = parameters::score_block_for(&batch, options.scoring);
         parameters::effective_lengths(
             &batch,
             &mut params,
@@ -993,7 +1027,11 @@ mod tests {
             None,
         )
         .unwrap();
-        let lookup = Lookup::x_new_as(&batch, &params, &options, 1, narrow.then_some(0)).unwrap();
+        let lookup = if options.scoring == ScoringMatrix::Blosum62 {
+            Lookup::x_new_as(&batch, &params, &options, 1, narrow.then_some(0)).unwrap()
+        } else {
+            Lookup::x_new_of(&batch, &params, &options, 1, narrow.then_some(0)).unwrap()
+        };
         assert_eq!(matches!(lookup, BxLookup::Narrow(_)), narrow);
         parameters::subject_parameters(
             &batch,
@@ -1079,31 +1117,64 @@ mod tests {
         start(&mut fused);
         sent.iter_mut().for_each(&start);
         let (mut hits, mut counts) = (0, [0u64; 4]);
+        let matrix = options.scoring;
         for (i, subject) in subjects.iter().enumerate() {
-            let expected = word_finder_bx(
-                batch,
-                params,
-                options,
-                subject,
-                lookup,
-                &mut reference,
-                |_| {},
-            )
-            .unwrap();
-            let (actual, c) = x_word_finder_fused(
-                mode, batch, params, options, subject, table, kept, &mut fused,
-            )
-            .unwrap();
-            let run = format!("{mode:?} subject {i}");
+            // BLOSUM62's reference and fused loop, or the instances of another matrix (item SC6b).
+            let (expected, (actual, c)) = if matrix == ScoringMatrix::Blosum62 {
+                (
+                    word_finder_bx(
+                        batch,
+                        params,
+                        options,
+                        subject,
+                        lookup,
+                        &mut reference,
+                        |_| {},
+                    )
+                    .unwrap(),
+                    x_word_finder_fused(
+                        Blosum62Bx, mode, batch, params, options, subject, table, kept, &mut fused,
+                    )
+                    .unwrap(),
+                )
+            } else {
+                let scoring = MatrixBx::of(matrix);
+                (
+                    word_finder_bx_of(
+                        scoring,
+                        batch,
+                        params,
+                        options,
+                        subject,
+                        lookup,
+                        &mut reference,
+                        |_| {},
+                    )
+                    .unwrap(),
+                    x_word_finder_fused(
+                        scoring, mode, batch, params, options, subject, table, kept, &mut fused,
+                    )
+                    .unwrap(),
+                )
+            };
+            let run = format!("{matrix:?} {mode:?} subject {i}");
             assert_eq!(actual, expected, "{run}");
             assert_eq!(fused.offset, reference.offset, "{run}");
             assert!(fused.entries == reference.entries, "{run}");
             let lead: Vec<u8> = std::iter::once(0).chain(subject.iter().copied()).collect();
             for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
-                let x = XSent::for_test(&batch.sequence_start, &lead, shadow);
-                let (got, c2) = x_word_finder_fused_sent(
-                    mode, batch, params, options, subject, table, kept, table_sent, x,
-                )
+                let (got, c2) = if matrix == ScoringMatrix::Blosum62 {
+                    let x = XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow);
+                    x_word_finder_fused_sent(
+                        mode, batch, params, options, subject, table, kept, table_sent, x,
+                    )
+                } else {
+                    let x =
+                        XSent::for_test(MatrixBx::of(matrix), &batch.sequence_start, &lead, shadow);
+                    x_word_finder_fused_sent(
+                        mode, batch, params, options, subject, table, kept, table_sent, x,
+                    )
+                }
                 .unwrap();
                 assert_eq!(got, expected, "{run} sent shadow={shadow}");
                 assert_eq!(c2, c, "{run} sent shadow={shadow}");
@@ -1285,6 +1356,60 @@ mod tests {
         }
     }
 
+    /// The 6 kb of AP027131 as a query and its first 40 proteins as subjects (with their mean
+    /// length) of the tests of the other matrices.
+    fn other_matrix_inputs() -> (Vec<u8>, Vec<Vec<u8>>, usize) {
+        let fasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+        let genome = parse_fasta(
+            &std::fs::read(fasta.join("AP027131.fasta")).unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+        let piece = String::from_utf8(genome[0].sequence[200_000..206_000].to_vec()).unwrap();
+        let query = format!(">piece\n{piece}\n").into_bytes();
+        let mut subjects = subjects(&std::fs::read(fasta.join("AP027131.faa")).unwrap());
+        subjects.truncate(40);
+        let mean = subjects.iter().map(|s| s.len() - 1).sum::<usize>() / subjects.len();
+        (query, subjects, mean)
+    }
+
+    /// BLASTX's other matrices, gapped, and IDENTITY, which an ungapped search takes with word size
+    /// 3 (its byte table has keys for the sentinel walks).
+    const OTHER_MATRICES: [(&str, &[&str]); 8] = [
+        ("BLOSUM45", &[]),
+        ("BLOSUM50", &[]),
+        ("BLOSUM80", &[]),
+        ("BLOSUM90", &[]),
+        ("PAM30", &[]),
+        ("PAM70", &[]),
+        ("PAM250", &[]),
+        ("IDENTITY", &["-ungapped", "-comp_based_stats", "0"]),
+    ];
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-606 (as above), with
+    // `matrix->data` of the search's matrix (`s_BlastAaExtendTwoHit`).
+    // The test above with every other matrix of BLASTX's table and IDENTITY (item SC6b): their
+    // tables of either width, the fused loop with their walks (`bx_two_hit`) and the sentinel walks
+    // with their keys give the reference's hits and diagonal table.
+    #[test]
+    fn the_fused_loop_matches_the_reference_with_other_matrices() {
+        let (query, subjects, mean) = other_matrix_inputs();
+        for (matrix, extra) in OTHER_MATRICES {
+            for narrow in [false, true] {
+                let s = search_with(&query, 40, mean, narrow, matrix, extra);
+                assert_ne!(s.2.scoring, ScoringMatrix::Blosum62);
+                for mode in modes() {
+                    let (hits, counts) = compare(&s, &subjects, mode, |_| {});
+                    assert!(hits > 0, "{matrix} {mode:?}: no hit");
+                    if mode != XCellTest::Diag(XDiagMode::PerHit) {
+                        assert!(counts[2] > 0, "{matrix} {mode:?} {counts:?}");
+                    }
+                }
+            }
+        }
+    }
+
     // No NCBI counterpart (speed only): the table of 16-bit hits is the table of 32-bit hits of the
     // same query in every property that chooses the loop (its hits per used cell are the build's
     // choice of the width, `x_narrow_cutoff`), and the entry point of the seed stage scans it, with
@@ -1342,6 +1467,7 @@ mod tests {
             )
             .unwrap();
             let actual = crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_scan(
+                Blosum62Bx,
                 batch,
                 params,
                 options,
@@ -1356,6 +1482,87 @@ mod tests {
             hits += actual.len();
         }
         assert!(hits > 0);
+    }
+
+    // No NCBI counterpart (speed only): the entry point of another matrix's seed stage
+    // (`x_word_finder_scan` with `MatrixBx`, item SC6b) scans its tables as the search builds them
+    // (16-bit hits where `x_narrow_cutoff` lets the fused loop take them), with and without the
+    // sentinel walks, and with `-window_size 0` (the one-hit stage, the direct loop), to the
+    // reference's hits and diagonal table.
+    #[test]
+    fn another_matrix_s_seed_stage_gives_the_reference_hits() {
+        let (query, subjects, mean) = other_matrix_inputs();
+        let mut widths = Vec::new();
+        for (matrix, extra) in OTHER_MATRICES {
+            for window in [40, 0] {
+                let (batch, params, options, _) =
+                    search_with(&query, window, mean, false, matrix, extra);
+                let lookup =
+                    Lookup::x_new_of(&batch, &params, &options, 1, x_narrow_cutoff(&options))
+                        .unwrap();
+                if window > 0 {
+                    widths.push((matrix, matches!(lookup, BxLookup::Narrow(_))));
+                } else {
+                    assert!(
+                        matches!(lookup, BxLookup::Wide(_)),
+                        "{matrix}: one-hit table"
+                    );
+                }
+                let scoring = MatrixBx::of(options.scoring);
+                let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
+                // The sentinel walks only with a two-hit window (`query_fits_of`).
+                for with_sent in [false, window > 0] {
+                    let mut reference = Diagonals::new(length, options.window_size).unwrap();
+                    let mut scanned = Diagonals::new(length, options.window_size).unwrap();
+                    let mut hits = 0;
+                    for subject in &subjects {
+                        let expected = word_finder_bx_of(
+                            scoring,
+                            &batch,
+                            &params,
+                            &options,
+                            subject,
+                            &lookup,
+                            &mut reference,
+                            |_| {},
+                        )
+                        .unwrap();
+                        let lead: Vec<u8> =
+                            std::iter::once(0).chain(subject.iter().copied()).collect();
+                        let sent = with_sent
+                            .then(|| XSent::for_test(scoring, &batch.sequence_start, &lead, false));
+                        let actual =
+                            crate::algorithm::blastx::seed::x_seed_scan::x_word_finder_scan(
+                                scoring,
+                                &batch,
+                                &params,
+                                &options,
+                                subject,
+                                &lookup,
+                                &mut scanned,
+                                sent,
+                            )
+                            .unwrap();
+                        let run = format!("{matrix} window={window} sent={with_sent}");
+                        assert_eq!(actual, expected, "{run}");
+                        assert!(
+                            scanned.offset == reference.offset
+                                && scanned.entries == reference.entries,
+                            "{run}"
+                        );
+                        hits += actual.len();
+                    }
+                    assert!(hits > 0, "{matrix} window={window}");
+                }
+            }
+        }
+        // Where the fused loop acts (`x_bxdiag_mode`: AVX2 and POPCNT, or a value of
+        // LOSAT_X_BXDIAG), some of these tables take 16-bit hits and the others the direct loop.
+        if x_bxdiag_mode() == 1 {
+            assert!(widths.iter().any(|w| w.1), "{widths:?}");
+            assert!(widths.iter().any(|w| !w.1), "{widths:?}");
+        }
+        eprintln!("16-bit tables: {widths:?}");
     }
 
     // No NCBI counterpart (speed only): the choice of the loop names a table by its build number,

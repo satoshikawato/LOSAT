@@ -19,6 +19,18 @@ use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::tabular::SubjectFetch;
 
+/// The failure of the batch whose setup NCBI fails with an engine error
+/// (`stage_d_pipeline::SetupEngineError`), or else that of a read of the database
+/// (`x_read_failure`); any other error is returned as `Err` to stop the run.
+fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
+    match error.downcast::<super::stage_d_pipeline::SetupEngineError>() {
+        Ok(super::stage_d_pipeline::SetupEngineError(text)) => {
+            Ok(crate::blastinput::app::engine_error(text))
+        }
+        Err(error) => x_read_failure(error),
+    }
+}
+
 /// The failure of the batch whose search a read of the database
 /// failed (`common::x_db_stream::XReadError`), as the check's error fails the first batch with a valid
 /// context: a reader error of NCBI's own is the engine error; LOSAT's refusal (and any other
@@ -1524,8 +1536,9 @@ fn search(
                 .collect(),
         };
         // A read of the database that failed while the batches
-        // were searched ahead: they are searched again one at a time below, so that the batch
-        // that reads it fails after the reports of the batches before.
+        // were searched ahead, or a batch's setup that NCBI fails (`SetupEngineError`): they are
+        // searched again one at a time below, so that the batch fails after the reports of the
+        // batches before.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
@@ -1550,7 +1563,12 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error) if error.is::<XReadError>() => None,
+            Err(error)
+                if error.is::<XReadError>()
+                    || error.is::<super::stage_d_pipeline::SetupEngineError>() =>
+            {
+                None
+            }
             Err(error) => return Err(error),
         };
         for range in query_input
@@ -1597,10 +1615,11 @@ fn search(
                     ),
                 };
                 // A read of the database that failed in this
-                // batch fails it as the check's error would (below).
+                // batch fails it as the check's error would (below); so does NCBI's engine error
+                // of its setup.
                 match x_searched_here {
                     Ok(report) => report,
-                    Err(error) => match x_read_failure(error) {
+                    Err(error) => match batch_failure(error) {
                         Ok(failure) => {
                             failed = Some((range, failure));
                             break;

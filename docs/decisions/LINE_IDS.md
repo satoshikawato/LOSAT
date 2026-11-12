@@ -7,7 +7,7 @@ This file gives each cited ID one row: what it is, its state, its main pull requ
 in this repository that holds its fullest record ("external" when there is none).
 
 As of dev b3b82f9ea with line PS's PS7 (2026-11-12): 198 IDs cited in the tree, 119 of them in
-`CHANGELOG.md`, `changelog.d/` and `docs/`; 167 rows below. State: 149 done, 18 in progress, 0 stopped.
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 168 rows below. State: 149 done, 19 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,

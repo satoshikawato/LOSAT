@@ -107,7 +107,7 @@ fn mt_mode_1_with_threads_and_a_database_is_refused() {
     assert_eq!(refused.status.code(), Some(1), "{refused:?}");
     assert!(refused.stdout.is_empty());
     assert!(String::from_utf8_lossy(&refused.stderr)
-        .contains("-mt_mode 1 with -num_threads above 1 and -db"));
+        .contains("-mt_mode 1 with -num_threads above 1, -db and -in_pssm, with which"));
     let args = ["-in_pssm", pssm, "-evalue", "1000"];
     let one = tblastn_on(&db, "1", &args, Stdio::null());
     let mut mt1 = args.to_vec();

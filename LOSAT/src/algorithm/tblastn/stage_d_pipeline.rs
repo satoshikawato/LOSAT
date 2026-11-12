@@ -61,6 +61,21 @@ use crate::utils::matrix::aa_char_to_ncbistdaa;
 use crate::utils::seg::SegParams;
 use crate::utils::threading::{with_search_pool, SearchPool};
 
+/// NCBI's engine error of a batch whose setup fails (`CBlastException` "BLAST engine error",
+/// after the outfmt 0 prolog), with the text after `BLAST engine error: `: a PSSM query whose
+/// file's ungapped values make `kbp_psi` invalid (`query_set_setup`). `tblastn_app::search`
+/// fails the batch with it, as a read of the database that fails.
+#[derive(Debug)]
+pub(super) struct SetupEngineError(pub(super) &'static str);
+
+impl std::fmt::Display for SetupEngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for SetupEngineError {}
+
 // NCBI c++/src/algo/blast/core/blast_options.c:673-675;
 // c++/include/algo/blast/core/blast_options.h:128,144,163:
 // gap_x_dropoff = BLAST_GAP_X_DROPOFF_PROT; /* 15 */
@@ -2691,6 +2706,26 @@ fn query_set_setup(
         // the effective lengths keep `kbp_gap_std` and the gap trigger `kbp_std`
         // (`LocalKarlinBlocks`).
         Some(psi) => {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:182-184
+            // ```c
+            //    if ((status=s_BlastFindValidKarlinBlk(sbp->kbp, query_info, &kbp)) != 0)
+            //          return status;
+            // ```
+            // `sbp->kbp` is `kbp_psi` (blast_stat.c:2826). A PSSM query whose letters give its
+            // context a valid `kbp_std` but whose file's ungapped values make `kbp_psi` invalid
+            // (`lambdaUngapped`, `kappaUngapped` or `hUngapped` negative) stops the search's
+            // setup, before any subject is read, with NCBI's engine error of an invalid query
+            // (probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review). A PSSM query without a
+            // valid context is the one that NCBI crashes with, refused after the batches.
+            if valid_contexts.iter().any(|&valid| valid)
+                && !contexts.iter().any(|context| {
+                    context.is_valid && psi.ungapped_karlin_valid(&context.karlin_params)
+                })
+            {
+                return Err(
+                    SetupEngineError(crate::report::query_warnings::INVALID_QUERY_MESSAGE).into(),
+                );
+            }
             let gapped_psi: Vec<_> = gapped_by_context
                 .iter()
                 .map(|kbp| psi.gapped_karlin(kbp))

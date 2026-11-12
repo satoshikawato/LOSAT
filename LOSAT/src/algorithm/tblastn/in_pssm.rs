@@ -88,11 +88,6 @@ pub(super) fn check_records_only(args: &TblastnArgs) -> Result<()> {
     Ok(())
 }
 
-/// The refusal of what NCBI BLAST+ 2.17.0's PSI-TBLASTN runs and LOSAT's does not.
-fn refuse(what: impl std::fmt::Display) -> anyhow::Error {
-    anyhow::anyhow!("{what} with -in_pssm is not supported by LOSAT's TBLASTN")
-}
-
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of
 /// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4), the
 /// output formats other than 0, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI), and a PSSM
@@ -113,9 +108,9 @@ pub(super) fn check_limits(
     // NCBI's split by queries reads the query file, which a PSSM search has not opened: NCBI
     // BLAST+ 2.17.0 aborts (probe `ts1.mt1.n2.6`). With `-subject` it runs on one thread.
     if args.mt_mode == Some(1) && resolved.num_threads > 1 && args.db.is_some() {
-        return Err(refuse(
-            "-mt_mode 1 with -num_threads above 1 and -db, with which NCBI BLAST+ 2.17.0's tblastn crashes,",
-        ));
+        bail!(
+            "-mt_mode 1 with -num_threads above 1, -db and -in_pssm, with which NCBI BLAST+ 2.17.0's tblastn aborts, is not supported by LOSAT's TBLASTN"
+        );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:791-796 (the tabular
     // formats of tblastn; the pairwise report, `PrintOneResultSet`)

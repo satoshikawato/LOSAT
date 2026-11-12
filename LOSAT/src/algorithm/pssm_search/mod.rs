@@ -122,6 +122,26 @@ impl PsiSearch {
         }
     }
 
+    /// Whether `kbp_psi[0]` (`ungapped_karlin`) is valid: a file's negative ungapped value makes
+    /// it invalid, and the search's setup then stops with NCBI's engine error of an invalid query
+    /// (`s_BlastFindValidKarlinBlk` over `sbp->kbp = kbp_psi`, blast_stat.c:2826).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
+    /// ```c
+    /// static Boolean s_BlastKarlinBlkIsValid(const Blast_KarlinBlk* kbp)
+    /// {
+    ///     if ( !kbp ) {
+    ///         return FALSE;
+    ///     } else {
+    ///         return (kbp->Lambda > 0 && kbp->K > 0 && kbp->H > 0);
+    ///     }
+    /// }
+    /// ```
+    pub(crate) fn ungapped_karlin_valid(&self, kbp_std: &KarlinParams) -> bool {
+        let kbp = self.ungapped_karlin(kbp_std);
+        kbp.lambda > 0.0 && kbp.k > 0.0 && kbp.h > 0.0
+    }
+
     /// `kbp_gap_psi[0]`: the file's gapped values, or those of `kbp_gap_std` (the table's values
     /// of BLOSUM62 with the search's gap costs, which `kbp_gap_psi` is a copy of).
     ///

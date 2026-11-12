@@ -137,21 +137,13 @@ pub(crate) fn strategy_for(
 ) -> Result<StrategyExport> {
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
     let mut inputs = option_inputs(args);
-    inputs.hitlist_size = strategy_hitlist_size(args, outfmt);
-    StrategyExport::for_file(file, &inputs, database, "BLASTP")
-}
-
-/// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's
-/// (`option_inputs`) is that of outfmt 11, while outfmt 0 to 4 take the larger of
-/// `-num_descriptions` and `-num_alignments` (blast_args.cpp:2910-2936, probe `nd` of RG-F1).
-fn strategy_hitlist_size(args: &BlastpArgs, outfmt: i32) -> i32 {
-    crate::blastinput::report_counts::report_counts(
+    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
         outfmt,
         args.max_target_seqs,
         args.num_descriptions,
         args.num_alignments,
-    )
-    .hitlist_size as i32
+    );
+    StrategyExport::for_file(file, &inputs, database, "BLASTP")
 }
 
 /// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and

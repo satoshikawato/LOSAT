@@ -162,6 +162,24 @@ fn is_same_as_output(_file: &std::fs::File, path: &Path, out: Option<&Path>) -> 
     std::fs::canonicalize(out).is_ok_and(|out| out == own)
 }
 
+/// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's is that
+/// of outfmt 11, while outfmt 0 to 4 take the larger of `-num_descriptions` and `-num_alignments`
+/// (blast_args.cpp:2910-2936, probe `nd` of RG-F1).
+pub(crate) fn hitlist_size(
+    outfmt: i32,
+    max_target_seqs: Option<usize>,
+    num_descriptions: Option<usize>,
+    num_alignments: Option<usize>,
+) -> i32 {
+    crate::blastinput::report_counts::report_counts(
+        outfmt,
+        max_target_seqs,
+        num_descriptions,
+        num_alignments,
+    )
+    .hitlist_size as i32
+}
+
 impl StrategyExport {
     /// The export of a run of `inputs.program` into `sink` (`create_strategy_file`). `database`
     /// is the `-db` argument as NCBI keeps it (`None` for `-subject`); `label` names the program

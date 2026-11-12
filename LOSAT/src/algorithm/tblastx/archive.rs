@@ -140,13 +140,12 @@ pub(crate) fn strategy_for(
     file: std::fs::File,
 ) -> Result<StrategyExport> {
     let mut inputs = option_inputs(args);
-    inputs.hitlist_size = crate::blastinput::report_counts::report_counts(
+    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
         outfmt,
         args.max_target_seqs,
         args.num_descriptions,
         args.num_alignments,
-    )
-    .hitlist_size as i32;
+    );
     StrategyExport::for_file(file, &inputs, args.database_name(), "TBLASTX")
 }
 

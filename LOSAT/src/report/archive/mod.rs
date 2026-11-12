@@ -463,6 +463,18 @@ pub fn check_titles_for(
     check_titles_in(encoding, records, role, label, "-outfmt 11")
 }
 
+/// The encoding whose rule the titles of a run's requests follow, for a reader that checks
+/// record by record: ASN.1 text when the run writes a search strategy (whose refusals hold the
+/// archive's in every encoding, `ArchiveEncoding::writes_text`), else the archive's
+/// (`ArchiveEncoding::from_env`); `None` without either (`check_request_titles`).
+pub fn request_title_encoding(archive: bool, strategy: bool) -> Option<ArchiveEncoding> {
+    if strategy {
+        Some(ArchiveEncoding::Text)
+    } else {
+        archive.then(ArchiveEncoding::from_env)
+    }
+}
+
 /// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
 /// encoding) and the search strategy's (`strategy`, always ASN.1 text,
 /// `strategy::StrategyExport`).

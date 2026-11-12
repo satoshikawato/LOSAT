@@ -414,7 +414,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // refuse, and the batches are not checked again (`titles_may_refuse`).
     let titles_may_refuse = archive.is_some()
         && batch_size > 0
-        && (archive::batches_may_refuse(&resolved[0], &mut |deliver| {
+        && (archive::batches_may_refuse(&resolved[0], true, false, &mut |deliver| {
             reader_batches(
                 query_records,
                 lowercase,
@@ -550,6 +550,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 queries,
                 database.is_none().then_some(subjects),
                 queries_before == 0,
+                true,
+                false,
             )?;
         }
         let hits = match made_hits {
@@ -629,12 +631,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 archive::write_blastx_archive(
                     &archive::ArchiveCall {
                         handle,
-                        options,
-                        queries,
+                        batch: archive::CallBatch {
+                            options,
+                            queries,
+                            subject_records,
+                            batches: results,
+                        },
                         subjects: call_subjects,
                         names,
-                        subject_records,
-                        batches: results,
                     },
                     writer,
                 )
@@ -706,6 +710,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         &mut **diagnostics,
         search_error,
         &mut render,
+        // The library and LOSAT Web write no search strategy (`api::search::file_options`).
+        &mut |_, _| Ok(()),
     )
     .map_err(input_error)
     .inspect_err(|error| {

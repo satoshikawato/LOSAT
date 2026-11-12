@@ -352,6 +352,8 @@ fn parse_blastn_args(
         scan_step: 0,
         outfmt: "6".to_string(),
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
         command_line: None,
         // The command line's progress bar; a web search writes nothing to standard error.
         progress_bar: false,

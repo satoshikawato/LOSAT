@@ -1447,7 +1447,7 @@ fn scan_subject_kmers_range_mb_any<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     if subject_len < lut_word_length || !(9..=12).contains(&lut_word_length) {
         return;
@@ -1471,13 +1471,17 @@ fn scan_subject_kmers_range_mb_any<F>(
                 | ((packed[byte_idx + 1] as u32) << 8)
                 | (packed[byte_idx + 2] as u32);
             let kmer = ((idx >> shift) as u64) & mask;
-            on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
+            if !on_kmer(byte_idx * COMPRESSION_RATIO, kmer) {
+                return;
+            }
             byte_idx = byte_idx.saturating_add(step_bytes);
         }
         let mut pos = byte_idx * COMPRESSION_RATIO;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, lut_word_length);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1497,12 +1501,16 @@ fn scan_subject_kmers_range_mb_any<F>(
                     | ((packed[byte_idx + 2] as u32) << 8)
                     | (packed[byte_idx + 3] as u32);
                 let kmer = ((idx >> shift) as u64) & mask;
-                on_kmer(pos, kmer);
+                if !on_kmer(pos, kmer) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
             }
             while pos <= end {
                 let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                on_kmer(pos, kmer);
+                if !on_kmer(pos, kmer) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
             }
             return;
@@ -1519,12 +1527,16 @@ fn scan_subject_kmers_range_mb_any<F>(
                 | ((packed[byte_idx + 1] as u32) << 8)
                 | (packed[byte_idx + 2] as u32);
             let kmer = ((idx >> shift) as u64) & mask;
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, lut_word_length);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1533,7 +1545,9 @@ fn scan_subject_kmers_range_mb_any<F>(
     let mut pos = start;
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, lut_word_length);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1574,7 +1588,7 @@ fn scan_subject_kmers_range_mb_9_1<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 9;
     debug_assert_eq!(scan_step, 1);
@@ -1587,7 +1601,9 @@ fn scan_subject_kmers_range_mb_9_1<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1614,25 +1630,33 @@ fn scan_subject_kmers_range_mb_9_1<F>(
         match state {
             0 => {
                 let index = ((init_index >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 1;
             }
             1 => {
                 let index = ((init_index >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 2;
             }
             2 => {
                 let index = ((init_index >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 3;
             }
             _ => {
                 let index = (init_index as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 0;
                 byte_idx = byte_idx.saturating_add(1);
@@ -1643,7 +1667,9 @@ fn scan_subject_kmers_range_mb_9_1<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1680,7 +1706,7 @@ fn scan_subject_kmers_range_mb_9_2<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 9;
     debug_assert_eq!(scan_step, 2);
@@ -1693,7 +1719,9 @@ fn scan_subject_kmers_range_mb_9_2<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1719,12 +1747,16 @@ fn scan_subject_kmers_range_mb_9_2<F>(
 
         if !use_shift2 {
             let index = ((init_index >> 6) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             use_shift2 = true;
         } else {
             let index = ((init_index >> 2) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(1);
             init_valid = false;
@@ -1734,7 +1766,9 @@ fn scan_subject_kmers_range_mb_9_2<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1776,7 +1810,7 @@ fn scan_subject_kmers_range_mb_10_1<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 10;
     debug_assert_eq!(scan_step, 1);
@@ -1789,7 +1823,9 @@ fn scan_subject_kmers_range_mb_10_1<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1816,19 +1852,25 @@ fn scan_subject_kmers_range_mb_10_1<F>(
         match state {
             0 => {
                 let index = ((init_index >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 1;
             }
             1 => {
                 let index = ((init_index >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 2;
             }
             2 => {
                 let index = (init_index as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 3;
             }
@@ -1839,7 +1881,9 @@ fn scan_subject_kmers_range_mb_10_1<F>(
                 let s3 = packed[byte_idx + 3] as u32;
                 init_index = (init_index << 8) | s3;
                 let index = ((init_index >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 0;
                 byte_idx = byte_idx.saturating_add(1);
@@ -1850,7 +1894,9 @@ fn scan_subject_kmers_range_mb_10_1<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1887,7 +1933,7 @@ fn scan_subject_kmers_range_mb_10_2<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 10;
     debug_assert_eq!(scan_step, 2);
@@ -1900,7 +1946,9 @@ fn scan_subject_kmers_range_mb_10_2<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -1926,12 +1974,16 @@ fn scan_subject_kmers_range_mb_10_2<F>(
 
         if !use_shift0 {
             let index = ((init_index >> 4) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             use_shift0 = true;
         } else {
             let index = (init_index as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(1);
             init_valid = false;
@@ -1941,7 +1993,9 @@ fn scan_subject_kmers_range_mb_10_2<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -1988,7 +2042,7 @@ fn scan_subject_kmers_range_mb_10_3<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 10;
     debug_assert_eq!(scan_step, 3);
@@ -2001,7 +2055,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2056,7 +2112,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2075,7 +2133,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                     | ((packed[idx1] as u32) << 8)
                     | (packed[idx2] as u32);
                 let index = ((init_index >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 1;
             }
@@ -2086,13 +2146,17 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                 }
                 init_index = (init_index << 8) | (packed[idx3 as usize] as u32);
                 let index = ((init_index >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 2;
             }
             2 => {
                 let index = (init_index as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 state = 3;
             }
@@ -2103,7 +2167,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                 }
                 init_index = (init_index << 8) | (packed[idx4 as usize] as u32);
                 let index = ((init_index >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += 3;
                 state = 0;
@@ -2113,7 +2179,9 @@ fn scan_subject_kmers_range_mb_10_3<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2160,7 +2228,7 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 11;
     debug_assert_eq!(scan_step % COMPRESSION_RATIO, 1);
@@ -2173,7 +2241,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2195,7 +2265,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 1] as u32) << 8)
                     | (packed[byte_idx + 2] as u32);
                 let index = ((idx >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte);
                 state = 1;
@@ -2208,7 +2280,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 1] as u32) << 8)
                     | (packed[byte_idx + 2] as u32);
                 let index = (idx as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte);
                 state = 2;
@@ -2222,7 +2296,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 2] as u32) << 8)
                     | (packed[byte_idx + 3] as u32);
                 let index = ((idx >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte);
                 state = 3;
@@ -2236,7 +2312,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                     | ((packed[byte_idx + 2] as u32) << 8)
                     | (packed[byte_idx + 3] as u32);
                 let index = ((idx >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx = byte_idx.saturating_add(scan_step_byte + 1);
                 state = 0;
@@ -2246,7 +2324,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2285,7 +2365,7 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 11;
     debug_assert_eq!(scan_step % COMPRESSION_RATIO, 2);
@@ -2298,7 +2378,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2324,7 +2406,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
                 | ((packed[byte_idx + 1] as u32) << 8)
                 | (packed[byte_idx + 2] as u32);
             let index = ((idx >> top_shift) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(scan_step_byte);
             use_bottom = true;
@@ -2337,7 +2421,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
                 | ((packed[byte_idx + 2] as u32) << 8)
                 | (packed[byte_idx + 3] as u32);
             let index = ((idx >> bottom_shift) as u64) & mask;
-            on_kmer(pos, index);
+            if !on_kmer(pos, index) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
             byte_idx = byte_idx.saturating_add(scan_step_byte + 1);
             use_bottom = false;
@@ -2346,7 +2432,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2397,7 +2485,7 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     const LUT_WORD_LENGTH: usize = 11;
     debug_assert_eq!(scan_step % COMPRESSION_RATIO, 3);
@@ -2410,7 +2498,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
         let mut pos = start;
         while pos <= end {
             let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-            on_kmer(pos, kmer);
+            if !on_kmer(pos, kmer) {
+                return;
+            }
             pos = pos.saturating_add(scan_step);
         }
         return;
@@ -2447,7 +2537,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx1] as u32) << 8)
                     | (packed[idx2] as u32);
                 let index = ((idx >> 2) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += scan_step_byte as i32;
                 state = 1;
@@ -2466,7 +2558,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx2] as u32) << 8)
                     | (packed[idx3u] as u32);
                 let index = ((idx >> 4) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += scan_step_byte as i32;
                 state = 2;
@@ -2485,7 +2579,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx3] as u32) << 8)
                     | (packed[idx4u] as u32);
                 let index = ((idx >> 6) as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += scan_step_byte as i32;
                 state = 3;
@@ -2502,7 +2598,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                     | ((packed[idx3] as u32) << 8)
                     | (packed[idx4u] as u32);
                 let index = (idx as u64) & mask;
-                on_kmer(pos, index);
+                if !on_kmer(pos, index) {
+                    return;
+                }
                 pos = pos.saturating_add(scan_step);
                 byte_idx += (scan_step_byte + 3) as i32;
                 state = 0;
@@ -2512,7 +2610,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
 
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, LUT_WORD_LENGTH);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2672,7 +2772,7 @@ fn scan_subject_kmers_range<F>(
     end: usize,
     on_kmer: &mut F,
 ) where
-    F: FnMut(usize, u64),
+    F: FnMut(usize, u64) -> bool,
 {
     if subject_len < lut_word_length || lut_word_length == 0 {
         return;
@@ -2723,13 +2823,17 @@ fn scan_subject_kmers_range<F>(
                 while byte_idx <= end_byte_idx {
                     let idx = ((packed[byte_idx] as u16) << 8) | packed[byte_idx + 1] as u16;
                     let kmer = ((idx >> shift) as u64) & mask;
-                    on_kmer(byte_idx * COMPRESSION_RATIO, kmer);
+                    if !on_kmer(byte_idx * COMPRESSION_RATIO, kmer) {
+                        return;
+                    }
                     byte_idx += step_bytes;
                 }
                 let mut pos = byte_idx * COMPRESSION_RATIO;
                 while pos <= end {
                     let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 return;
@@ -2757,12 +2861,16 @@ fn scan_subject_kmers_range<F>(
                         | ((packed[byte_idx + 1] as u32) << 8)
                         | (packed[byte_idx + 2] as u32);
                     let kmer = ((idx >> shift) as u64) & mask;
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 while pos <= end {
                     let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 return;
@@ -2788,12 +2896,16 @@ fn scan_subject_kmers_range<F>(
                     let shift = 2 * (8 - ((pos % COMPRESSION_RATIO) + lut_word_length));
                     let idx = ((packed[byte_idx] as u16) << 8) | packed[byte_idx + 1] as u16;
                     let kmer = ((idx >> shift) as u64) & mask;
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 while pos <= end {
                     let kmer = packed_kmer_at(packed, pos, lut_word_length);
-                    on_kmer(pos, kmer);
+                    if !on_kmer(pos, kmer) {
+                        return;
+                    }
                     pos = pos.saturating_add(scan_step);
                 }
                 return;
@@ -2815,7 +2927,9 @@ fn scan_subject_kmers_range<F>(
     let mut pos = start;
     while pos <= end {
         let kmer = packed_kmer_at(packed, pos, lut_word_length);
-        on_kmer(pos, kmer);
+        if !on_kmer(pos, kmer) {
+            return;
+        }
         pos = pos.saturating_add(scan_step);
     }
 }
@@ -2941,7 +3055,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     subject_masked,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -2958,7 +3075,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -2975,7 +3095,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -2992,7 +3115,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3009,7 +3135,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3026,7 +3155,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3043,7 +3175,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3060,7 +3195,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3077,7 +3215,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     scan_step,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),
@@ -3096,7 +3237,10 @@ fn scan_subject_kmers_with_ranges<F>(
                     subject_masked,
                     start,
                     end,
-                    &mut |kmer_start, kmer| on_kmer(kmer_start, s_range, kmer),
+                    &mut |kmer_start, kmer| {
+                        on_kmer(kmer_start, s_range, kmer);
+                        true
+                    },
                 );
             },
         ),

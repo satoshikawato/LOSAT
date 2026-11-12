@@ -75,8 +75,8 @@ use super::super::{
     QueryContextIndex, UngappedHit,
 };
 use super::{
-    part, plan_strips, pool_threads, run_strips, scan_kernel, FoldCounts, PartScratch, Seed,
-    SeedOut, StageStats, StripJob,
+    part, plan_strips, pool_threads, run_strips, scan_kernel, Cut, FoldCounts, PartScratch, Resume,
+    Seed, SeedOut, StageStats, StripJob,
 };
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -195,25 +195,51 @@ fn in_scope(x: &NaInputs<'_>) -> bool {
 /// a word in the table's order, `q_off_1 == 0` skipped as the reference skips it; each pair
 /// becomes a `Seed` with the context of its query offset.
 fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
+    scan_strip_na_from::<O, false>(x, job, job.start, 0, out);
+}
+
+/// `scan_strip_na` from the word at `start` (`job.start`, or where a piece stopped), passing over
+/// that word's first `skip` pairs. EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at
+/// the first pair `out` has no room for (`Cut`) and returns where it goes on; `None` when the
+/// strip is done.
+fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
+    x: &NaInputs<'_>,
+    job: &StripJob,
+    start: usize,
+    skip: u32,
+    out: &mut O,
+) -> Option<Resume> {
     let s_range = job.s_range;
-    let mut on_kmer = |kmer_start: usize, current_kmer: u64| {
-        for &q_off_1 in x.hits(current_kmer) {
-            if q_off_1 == 0 {
-                continue;
-            }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
-            // ```c
-            // offset_pairs[i].qs_offsets.q_off = q_off - 1;
-            // ```
-            let q_off0 = q_off_1 as usize - 1;
-            let context_idx = x.query_context_index.context_for_offset(q_off0);
-            out.push(Seed {
-                context: context_idx as u32,
-                q: q_off0 as u32,
-                s: kmer_start as u32,
-                s_range: s_range as u32,
-            });
+    let cut = Cut::new(skip);
+    let pair = |q_off_1: u32, kmer_start: usize, out: &mut O| {
+        if q_off_1 == 0 {
+            return;
         }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
+        // ```c
+        // offset_pairs[i].qs_offsets.q_off = q_off - 1;
+        // ```
+        let q_off0 = q_off_1 as usize - 1;
+        let context_idx = x.query_context_index.context_for_offset(q_off0);
+        out.push(Seed {
+            context: context_idx as u32,
+            q: q_off0 as u32,
+            s: kmer_start as u32,
+            s_range: s_range as u32,
+        });
+    };
+    let mut on_kmer = |kmer_start: usize, current_kmer: u64| {
+        let run = x.hits(current_kmer);
+        if PIECE {
+            cut.run(kmer_start, run, out, |q_off_1, out| {
+                pair(q_off_1, kmer_start, out)
+            });
+            return cut.go();
+        }
+        for &q_off_1 in run {
+            pair(q_off_1, kmer_start, out);
+        }
+        true
     };
     scan_kernel(
         x.search_seq_packed,
@@ -221,10 +247,11 @@ fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
         x.word_length,
         x.scan_step,
         x.subject_masked,
-        job.start,
+        start,
         job.end,
         &mut on_kmer,
     );
+    cut.stop.get()
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:656-672
@@ -663,6 +690,12 @@ fn seed_stage_of(
             crate::utils::xreach::x_reach!("LOSAT_X_BNSEEDLISTS", true);
             let produce_lists =
                 |i: usize, out: &mut part::PartSink<'_>| scan_strip_na(x, &jobs[i], out);
+            // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
+            let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
+                let job = &jobs[i];
+                let (start, skip) = from.map_or((job.start, 0), |r| (r.s, r.skip));
+                scan_strip_na_from::<_, true>(x, job, start, skip, out)
+            };
             let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
                 let part::PartState {
                     hash,
@@ -693,6 +726,7 @@ fn seed_stage_of(
                 fold_part,
                 &produce,
                 &produce_lists,
+                &produce_piece,
                 &fold_one,
                 timed,
             );
@@ -1133,14 +1167,23 @@ mod tests {
                     // unpartitioned, and partitioned in both forms of LOSAT_X_BNSEEDLISTS's stage
                     // on one scratch (its strip buffers passing from one form to the other)
                     let mut scratch = PartScratch::default();
-                    for (partitioned, lists) in
-                        [(false, false), (true, false), (true, true), (true, false)]
-                    {
+                    // (and the lists' stage in pieces of 1 seed, a few and hundreds,
+                    // EXPERIMENT LOSAT_X_SEEDPIECE: the kernels stop inside words' runs)
+                    for (partitioned, lists, pieces) in [
+                        (false, false, 0usize),
+                        (true, false, 0),
+                        (true, true, 0),
+                        (true, true, 1),
+                        (true, true, 2 + (threads + target) % 7),
+                        (true, true, 300 + 17 * threads),
+                        (true, false, 0),
+                    ] {
                         if partitioned && threads < 2 {
                             continue;
                         }
+                        scratch.x_pieces = Some(pieces);
                         let at =
-                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned} lists {lists}");
+                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned} lists {lists} pieces {pieces}");
                         let (state, keys, stats_seeds, strips) = pool.install(|| {
                             let mut hash = new_hash();
                             let mut hits = Vec::new();

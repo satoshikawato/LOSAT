@@ -1,0 +1,705 @@
+//! EXPERIMENT (LOSAT_X_SEEDPIECE; a strict-set switch): the partitioned seed stage of the strips
+//! paths (`x_pair_seed_part.rs` `seed_stage_part_lists` with LOSAT_X_PAIRPARHOME: dc-megablast's
+//! two-hit stage, and the stages of `x_pair_seed.rs` and `na` with LOSAT_X_BNSEEDLISTS) holds a
+//! strip's seeds in pieces of at most `PIECE_SEEDS` seeds, each in an arena of a fixed size,
+//! instead of in one growable list per partition and strip. No NCBI counterpart (scheduling and
+//! memory only).
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
+//! ```c
+//!     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+//!
+//!         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+//! ...
+//!         hits_extended += extend(offset_pairs, hitsfound, word_params,
+//!                                 lookup_wrap, query, subject, matrix,
+//!                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
+//!     }
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1447-1454 (`MB_ACCESS_HITS`)
+//! ```c
+//!    if (PV_TEST(pv, index, pv_array_bts)) {                         \
+//!       if (total_hits >= max_hits) {                                 \
+//!          if ((Int4)(s_off) > scan_range[0])                         \
+//!             scan_range[0] = s_off;                                  \
+//!          break;                                                     \
+//!       }                                                             \
+//! ```
+//! NCBI scans the subject into an offset array of `OFFSET_ARRAY_SIZE + longest_chain` pairs per
+//! thread, stops when it is full and extends those pairs before the scan goes on from where it
+//! stopped; only the diagonal hash carries over from one batch to the next. The strips stage
+//! scans strips on any thread and folds every partition's seeds of a strip after those of the
+//! strips before, so a strip's seeds wait until every partition has folded them; their lists
+//! kept the largest capacity any strip had needed (`Vec` doubling, the buffers recycled), and on
+//! dc-megablast's 5 Mb chunks at 16 threads that held about 80 MiB, nearly all of it capacity of
+//! partitions that had once held a strip's main-diagonal run (results/s12c8 of line EB).
+//!
+//! The form here: a strip's scan stops at the first pair a piece has no room for (`Cut`; inside a
+//! word's run as well, so no word makes a piece larger) and goes on from that word in a later
+//! piece, on any thread (the stop is data, `Resume`, parked with the strip), as NCBI's scan goes
+//! on from `scan_range[0]`. A piece is an arena of `PIECE_SEEDS / BLOCK + parts` blocks of
+//! `BLOCK` seeds, enough for `PIECE_SEEDS` seeds whatever partitions they go to; each partition's
+//! seeds of the piece are a chain of blocks in scan order. The arenas are a pool of
+//! `PIECES_PER_THREAD * threads + RESERVED` slots, allocated at their size once and kept in the
+//! subject scratch, so a stage holds at most that many pieces whatever the subject, the query or
+//! the density of the seeds; the strip the slowest partition is in (the lowest strip not done)
+//! alone may take the last `RESERVED` slots, so that it can always go on (no wait for a piece
+//! nobody frees). A participant produces one piece per turn and parks the rest of the strip, so
+//! that a helper never holds a strip half-scanned (it can leave a stalled stage at any turn).
+//!
+//! Why the output is the same: a partition folds the pieces of a strip in order and the strips
+//! in order, a piece's seeds of the partition in scan order (the blocks of its chain), so each
+//! partition folds the seeds of the reference order (`x_pair_seed_part.rs` module comment); the
+//! seeds' positions in the strip's scan order count on across the pieces (`PieceSink::k`), so
+//! the keys (strip, position), the order of the hits and the numbers of the appended cells are
+//! those of the strips stage; the scan gives the same pairs in the same order (`Cut`: a scan
+//! started again at a word gives the words from that one on, and the first pairs of that word
+//! that an earlier piece took are passed over); the fold's statements do not change.
+
+use super::super::super::{DiagHashTable, UngappedHit, DIAGHASH_NUM_BUCKETS};
+use super::super::{Resume, Seed, SeedOut};
+use super::{
+    bucket_of, lock, merge, pause, read, run_participants, write, AtHome, Failing, InStage,
+    OwnLines, PartScratch, PartState, PartStats, Run, HELPER_STALL, IN_STAGE,
+};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock, PoisonError, RwLock};
+
+/// No NCBI counterpart: reads LOSAT_X_SEEDPIECE once (a strict-set switch that carries a number:
+/// on unless it is `0`, with pieces of the number of seeds given from 2 to 2^21, else of
+/// `PIECE_SEEDS`): the seeds of a piece, `None` when the switch is off. It does not change any
+/// value NCBI computes.
+pub(super) fn seeds() -> Option<usize> {
+    static N: OnceLock<Option<usize>> = OnceLock::new();
+    *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_SEEDPIECE", 2..=1 << 21, PIECE_SEEDS))
+}
+
+/// The seeds of one piece at most (NCBI's `OFFSET_ARRAY_SIZE`, 4,096 pairs per batch, times 4).
+pub(super) const PIECE_SEEDS: usize = 16_384;
+/// The seeds of a block of a piece (a partition's seeds of a piece are a chain of blocks).
+const BLOCK: usize = 64;
+/// The pieces of a stage per thread of the stage (the pool of arenas).
+pub(super) const PIECES_PER_THREAD: usize = 3;
+/// The slots of the pool only the lowest strip not done may take.
+pub(super) const RESERVED: usize = 2;
+/// No block (the end of a chain, or a partition without a block yet).
+const NONE: u16 = u16::MAX;
+/// `StripState::published`: the strip's scan is done (the count below it is final).
+const DONE: u32 = 1 << 31;
+
+const ZERO: Seed = Seed {
+    context: 0,
+    q: 0,
+    s: 0,
+    s_range: 0,
+};
+
+/// One partition's seeds of a piece: the first and the last block of its chain and the seeds in
+/// the last one (`BLOCK` before its first seed, so that the first push takes a block).
+#[derive(Clone, Copy)]
+struct Chain {
+    head: u16,
+    tail: u16,
+    fill: u16,
+}
+
+const EMPTY: Chain = Chain {
+    head: NONE,
+    tail: NONE,
+    fill: BLOCK as u16,
+};
+
+/// No NCBI counterpart (scheduling only): one piece's seeds, cut by partition: blocks of `BLOCK`
+/// seeds (and their positions in the strip's scan order) taken in order (`used`), each
+/// partition's blocks linked in its order (`next`). Its size is set once for the partition count
+/// (`reset`) and does not change with the seeds.
+#[derive(Default)]
+pub(super) struct Arena {
+    seeds: Vec<Seed>,
+    pos: Vec<u32>,
+    next: Vec<u16>,
+    chains: Vec<Chain>,
+    used: u16,
+}
+
+impl Arena {
+    /// The blocks of an arena for `parts` partitions: `piece_seeds` seeds in any cut, since a
+    /// partition's last block is the only one not full.
+    fn blocks(parts: usize, piece_seeds: usize) -> usize {
+        piece_seeds.div_ceil(BLOCK) + parts
+    }
+
+    /// Empty, for `parts` partitions and pieces of `piece_seeds` seeds (allocated at its size
+    /// the first time).
+    fn reset(&mut self, parts: usize, piece_seeds: usize) {
+        let blocks = Self::blocks(parts, piece_seeds);
+        if self.next.len() != blocks {
+            self.seeds = vec![ZERO; blocks * BLOCK];
+            self.pos = vec![0; blocks * BLOCK];
+            self.next = vec![NONE; blocks];
+        }
+        self.chains.clear();
+        self.chains.resize(parts, EMPTY);
+        self.used = 0;
+    }
+
+    /// (tests) whether the arena was allocated (a slot of the pool a stage used).
+    #[cfg(test)]
+    pub(super) fn allocated(&self) -> bool {
+        !self.next.is_empty()
+    }
+
+    /// Partition p's seeds of the piece in scan order, with their positions, through `f`: one
+    /// call per run of consecutive blocks of its chain.
+    #[inline]
+    fn for_each_run(&self, p: usize, mut f: impl FnMut(&[Seed], &[u32])) {
+        let chain = self.chains[p];
+        if chain.head == NONE {
+            return;
+        }
+        let tail = chain.tail as usize;
+        let mut b = chain.head as usize;
+        let mut first = b;
+        loop {
+            if b == tail {
+                let (a, z) = (first * BLOCK, b * BLOCK + chain.fill as usize);
+                f(&self.seeds[a..z], &self.pos[a..z]);
+                return;
+            }
+            let next = self.next[b] as usize;
+            if next != b + 1 {
+                let (a, z) = (first * BLOCK, (b + 1) * BLOCK);
+                f(&self.seeds[a..z], &self.pos[a..z]);
+                first = next;
+            }
+            b = next;
+        }
+    }
+}
+
+/// No NCBI counterpart (scheduling only): the receiver of a piece's seeds: each seed to the
+/// block chain of its partition (`table`: the partition of each bucket, `bucket % parts`), with
+/// its position in the strip's scan order (`k`, counted on from the pieces before), until
+/// `limit` (`room`, which `Cut` reads).
+pub(in super::super) struct PieceSink<'a> {
+    table: &'a [u16; DIAGHASH_NUM_BUCKETS],
+    arena: &'a mut Arena,
+    k: u32,
+    limit: u32,
+}
+
+impl SeedOut for PieceSink<'_> {
+    #[inline(always)]
+    fn push(&mut self, seed: Seed) {
+        let p = self.table[bucket_of(&seed)] as usize;
+        let a = &mut *self.arena;
+        debug_assert!(p < a.chains.len());
+        // SAFETY: the table holds `bucket % parts` and there are `parts` chains (`reset`).
+        let chain = unsafe { a.chains.get_unchecked_mut(p) };
+        if chain.fill as usize == BLOCK {
+            let b = a.used;
+            // (a piece takes at most `PIECE_SEEDS` seeds, `Cut`; the test keeps the stores below
+            // in the arena whatever its caller does)
+            assert!(
+                (b as usize) < a.next.len(),
+                "LOSAT_X_SEEDPIECE: a full arena"
+            );
+            a.used = b + 1;
+            a.next[b as usize] = NONE;
+            if chain.head == NONE {
+                chain.head = b;
+            } else {
+                a.next[chain.tail as usize] = b;
+            }
+            chain.tail = b;
+            chain.fill = 0;
+        }
+        let at = chain.tail as usize * BLOCK + chain.fill as usize;
+        debug_assert!(at < a.seeds.len());
+        // SAFETY: `chain.tail` is a block below `next.len()` (the test above when it was taken)
+        // and `fill < BLOCK`, so `at` is below `blocks * BLOCK`, the length of both.
+        unsafe {
+            *a.seeds.get_unchecked_mut(at) = seed;
+            *a.pos.get_unchecked_mut(at) = self.k;
+        }
+        chain.fill += 1;
+        self.k += 1;
+    }
+
+    #[inline(always)]
+    fn room(&self) -> usize {
+        (self.limit - self.k) as usize
+    }
+
+    #[inline(always)]
+    fn close(&mut self) {
+        self.limit = self.k;
+    }
+}
+
+/// No NCBI counterpart (scheduling only): a strip's pieces: their slots in the pool, in order,
+/// and how many there are, with `DONE` once the strip's scan is done.
+#[derive(Default)]
+struct StripState {
+    pieces: Mutex<Vec<u32>>,
+    published: AtomicU32,
+}
+
+/// No NCBI counterpart (scheduling only): a strip whose scan stopped at the end of a piece:
+/// where it goes on, the next seed's position and the pieces it has.
+#[derive(Clone, Copy)]
+struct Parked {
+    strip: usize,
+    from: Resume,
+    k: u32,
+}
+
+/// No NCBI counterpart (scheduling only): what the participants hand out under one lock: the
+/// parked strips, the free slots of the pool and the next strip nobody has scanned.
+struct Sched {
+    parked: Vec<Parked>,
+    free: Vec<u32>,
+    cursor: usize,
+}
+
+/// The lowest parked strip (`usize::MAX` if none).
+fn lowest_parked(parked: &[Parked]) -> usize {
+    parked.iter().map(|p| p.strip).min().unwrap_or(usize::MAX)
+}
+
+/// A partition's next piece: (strip << 32) | piece.
+#[inline(always)]
+fn pack(strip: usize, piece: u32) -> u64 {
+    ((strip as u64) << 32) | u64::from(piece)
+}
+
+#[inline(always)]
+fn strip_of(lane: u64) -> usize {
+    (lane >> 32) as usize
+}
+
+/// No NCBI counterpart (scheduling only): `seed_stage_part_lists`'s stage (after `rebuild`) in
+/// pieces (module comment). `scan` scans strip i from the start (`None`) or from where a piece
+/// stopped into a piece's sink and returns where the strip goes on (`None`: done); `fold` folds a
+/// run of a partition's seeds of a piece (`PartOut::strip` set). The folds are shared as in
+/// `seed_stage_home` (home partitions, `Run`), with a piece where that stage has a strip: each
+/// partition folds its pieces in order, one folder at a time (its lock), so the output is the
+/// same. `ahead` bounds the strips handed out past the slowest partition's (as there), the pool
+/// the pieces.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn seed_stage_pieces<FP, FF>(
+    n: usize,
+    threads: usize,
+    ahead: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    scratch: &mut PartScratch,
+    parts: usize,
+    occ0: u32,
+    piece_seeds: usize,
+    scan: &FP,
+    fold: &FF,
+    timed: bool,
+) -> PartStats
+where
+    FP: Fn(usize, Option<Resume>, &mut PieceSink<'_>) -> Option<Resume> + Sync,
+    FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
+{
+    crate::utils::xreach::x_reach!("LOSAT_X_SEEDPIECE", true);
+    let threads = threads.max(1);
+    let slots_n = PIECES_PER_THREAD * threads + RESERVED;
+    let states: Vec<Mutex<OwnLines<PartState>>> = scratch
+        .parts
+        .drain(..)
+        .map(|st| Mutex::new(OwnLines(st)))
+        .collect();
+    let mut arenas = std::mem::take(&mut scratch.arenas);
+    arenas.resize_with(slots_n.max(arenas.len()), Arena::default);
+    let pool: Vec<RwLock<Arena>> = arenas.into_iter().map(RwLock::new).collect();
+    let sched = Mutex::new(Sched {
+        parked: Vec::new(),
+        // (popped from the end: slot 0 first, so the arenas allocated are those the stage needed
+        // at once)
+        free: (0..slots_n as u32).rev().collect(),
+        cursor: 0,
+    });
+    // (hints read without the lock: the parked strips, the free slots, the next strip)
+    let parked_n = AtomicUsize::new(0);
+    let free_n = AtomicUsize::new(slots_n);
+    let cursor_hint = AtomicUsize::new(0);
+    let low_parked = AtomicUsize::new(n);
+    let lanes: Vec<OwnLines<AtomicU64>> = (0..parts).map(|_| OwnLines(AtomicU64::new(0))).collect();
+    let homes: Vec<AtomicBool> = (0..parts).map(|_| AtomicBool::new(false)).collect();
+    let strips: Vec<StripState> = (0..n).map(|_| StripState::default()).collect();
+    // the pieces below it have gone back to the pool (every partition folded them)
+    let freed = AtomicU64::new(0);
+    let produced = AtomicU64::new(0);
+    let failed = AtomicBool::new(false);
+    let left = AtomicUsize::new(0);
+    let runs = AtomicU64::new(0);
+    let away = AtomicU64::new(0);
+    let table: [u16; DIAGHASH_NUM_BUCKETS] = std::array::from_fn(|b| (b % parts) as u16);
+
+    // The slowest partition's next piece (every partition has folded the pieces below it); the
+    // pieces below it go back to the pool, by the participant that moves `freed`.
+    let slowest = || -> u64 {
+        let min_next = lanes
+            .iter()
+            .map(|lane| lane.0.load(Ordering::Acquire))
+            .min()
+            .unwrap_or(pack(n, 0));
+        // (a load first, as in `seed_stage_home`; lock order: the schedule, then a strip's pieces)
+        if freed.load(Ordering::Relaxed) < min_next {
+            let mut s = lock(&sched);
+            let f = freed.load(Ordering::Relaxed);
+            if f < min_next {
+                freed.store(min_next, Ordering::Relaxed);
+                let (fs, fk) = (strip_of(f), f as u32);
+                let (ms, mk) = (strip_of(min_next), min_next as u32);
+                for (i, strip) in strips.iter().enumerate().take((ms + 1).min(n)).skip(fs) {
+                    let pieces = lock(&strip.pieces);
+                    let from = if i == fs { fk as usize } else { 0 };
+                    let to = if i == ms { mk as usize } else { pieces.len() };
+                    if from < to {
+                        s.free.extend_from_slice(&pieces[from..to]);
+                    }
+                }
+                free_n.store(s.free.len(), Ordering::Relaxed);
+            }
+        }
+        min_next
+    };
+
+    // One piece of the lowest parked strip, or of the next strip within `ahead` strips of the
+    // slowest partition's (`low`), if a slot of the pool is free for it; `false` if not.
+    let produce = |low: usize| -> bool {
+        if free_n.load(Ordering::Relaxed) <= RESERVED {
+            slowest();
+            // (the strip it would take: the lowest parked one, else the next one)
+            let next = if parked_n.load(Ordering::Relaxed) > 0 {
+                low_parked.load(Ordering::Relaxed)
+            } else {
+                cursor_hint.load(Ordering::Relaxed)
+            };
+            if free_n.load(Ordering::Relaxed) <= RESERVED
+                && (next != low || free_n.load(Ordering::Relaxed) == 0)
+            {
+                return false;
+            }
+        }
+        let (strip, from, k, slot) = {
+            let mut s = lock(&sched);
+            let lowest = s
+                .parked
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, p)| p.strip)
+                .map(|(at, p)| (at, *p));
+            let (at, strip) = match lowest {
+                Some((at, p)) => (Some(at), p.strip),
+                None if s.cursor < n && s.cursor < low + ahead => (None, s.cursor),
+                None => return false,
+            };
+            let may = s.free.len() > RESERVED || (strip == low && !s.free.is_empty());
+            if !may {
+                return false;
+            }
+            let slot = s.free.pop().expect("a free slot");
+            free_n.store(s.free.len(), Ordering::Relaxed);
+            let (from, k) = match at {
+                Some(at) => {
+                    let p = s.parked.swap_remove(at);
+                    parked_n.store(s.parked.len(), Ordering::Relaxed);
+                    low_parked.store(lowest_parked(&s.parked), Ordering::Relaxed);
+                    (Some(p.from), p.k)
+                }
+                None => {
+                    s.cursor += 1;
+                    cursor_hint.store(s.cursor, Ordering::Relaxed);
+                    (None, 0)
+                }
+            };
+            (strip, from, k, slot)
+        };
+        let (next, k_end, empty) = {
+            let mut arena = write(&pool[slot as usize]);
+            arena.reset(parts, piece_seeds);
+            let mut sink = PieceSink {
+                table: &table,
+                arena: &mut arena,
+                k,
+                limit: k + piece_seeds as u32,
+            };
+            let next = scan(strip, from, &mut sink);
+            let k_end = sink.k;
+            (next, k_end, arena.used == 0)
+        };
+        let st = &strips[strip];
+        let count = if empty {
+            // (a piece stops only when it is full, so an empty one ends its strip)
+            debug_assert!(next.is_none());
+            let mut s = lock(&sched);
+            s.free.push(slot);
+            free_n.store(s.free.len(), Ordering::Relaxed);
+            st.published.load(Ordering::Relaxed)
+        } else {
+            let mut pieces = lock(&st.pieces);
+            pieces.push(slot);
+            pieces.len() as u32
+        };
+        st.published.store(
+            count | if next.is_none() { DONE } else { 0 },
+            Ordering::Release,
+        );
+        produced.fetch_add(1, Ordering::Relaxed);
+        if let Some(from) = next {
+            let mut s = lock(&sched);
+            s.parked.push(Parked {
+                strip,
+                from,
+                k: k_end,
+            });
+            parked_n.store(s.parked.len(), Ordering::Relaxed);
+            low_parked.store(lowest_parked(&s.parked), Ordering::Relaxed);
+        }
+        true
+    };
+
+    // (the owner's time in scans, in waits and in the ungapped extensions of its folds)
+    let participant = |me: usize, owner: bool| -> (u64, u64, u64) {
+        // A helper job that this thread steals while it waits inside a participant (a nested
+        // parallel call) does not join: it could wait for the partition that participant holds.
+        if !owner && IN_STAGE.with(Cell::get) {
+            return (0, 0, 0);
+        }
+        let _in_stage = InStage::enter();
+        let mut failing = Failing {
+            failed: &failed,
+            done: false,
+        };
+        let _at_home = AtHome::enter(&homes, me, threads);
+        let (mut scan_ns, mut wait_ns, mut pause_ns) = (0u64, 0u64, 0u64);
+        let (mut my_runs, mut my_away) = (0u64, 0u64);
+        let mut wait_start: Option<std::time::Instant> = None;
+        let mut idle = 0u32;
+        let mut stall: Option<(std::time::Instant, u64)> = None;
+        // the slowest partition's next piece as this participant last read it (it only grows)
+        let mut seen = 0u64;
+
+        // Folds partition p's ready pieces from its next one on, in order, if it can lock p, and
+        // returns how many steps (a piece folded, or a strip whose pieces it has all folded left):
+        // every ready piece (`Run::Home`, `Run::Tail`), while p has no participant at home
+        // (`Run::Orphan`), or one step (`Run::Slowest`).
+        let mut run = |p: usize, kind: Run, pause_ns: &mut u64| -> u64 {
+            let lane = &lanes[p].0;
+            let ready = |v: u64| {
+                let i = strip_of(v);
+                i < n && {
+                    let published = strips[i].published.load(Ordering::Acquire);
+                    v as u32 != published & !DONE || published & DONE != 0
+                }
+            };
+            if !ready(lane.load(Ordering::Acquire)) {
+                return 0;
+            }
+            let Ok(mut guard) = states[p].try_lock() else {
+                return 0;
+            };
+            let st = &mut guard.0;
+            // (only the participant that holds p's lock moves p's lane)
+            let mut v = lane.load(Ordering::Relaxed);
+            let mut folded = 0u64;
+            while strip_of(v) < n {
+                let (i, k) = (strip_of(v), v as u32);
+                let published = strips[i].published.load(Ordering::Acquire);
+                if k < published & !DONE {
+                    let slot = lock(&strips[i].pieces)[k as usize];
+                    let arena = read(&pool[slot as usize]);
+                    st.out.strip = i as u64;
+                    let t0 = timed.then(std::time::Instant::now);
+                    let pause0 = st.scan_pause_ns;
+                    arena.for_each_run(p, |seeds, pos| fold(st, seeds, pos));
+                    if let Some(t0) = t0 {
+                        st.fold_ns += t0.elapsed().as_nanos() as u64;
+                    }
+                    if owner {
+                        *pause_ns += st.scan_pause_ns - pause0;
+                    }
+                    drop(arena);
+                    v = pack(i, k + 1);
+                } else if published & DONE != 0 {
+                    v = pack(i + 1, 0);
+                } else {
+                    break;
+                }
+                lane.store(v, Ordering::Release);
+                folded += 1;
+                match kind {
+                    Run::Home | Run::Tail => {}
+                    Run::Orphan if !homes[p].load(Ordering::Relaxed) => {}
+                    Run::Orphan | Run::Slowest => break,
+                }
+            }
+            if folded > 0 {
+                my_runs += 1;
+                if kind != Run::Home {
+                    my_away += folded;
+                }
+            }
+            folded
+        };
+
+        loop {
+            if failed.load(Ordering::Acquire) {
+                if owner {
+                    panic!("LOSAT_X_PAIRPARFOLD: a participant of the partitioned fold failed");
+                }
+                failing.done = true;
+                break;
+            }
+            let mut did = false;
+            // its home partitions, and those without a participant at home in the stage
+            for k in 0..parts {
+                let p = (me + k) % parts;
+                let kind = if p % threads == me {
+                    Run::Home
+                } else if !homes[p].load(Ordering::Relaxed) {
+                    Run::Orphan
+                } else {
+                    continue;
+                };
+                did |= run(p, kind, &mut pause_ns) > 0;
+            }
+            let work = |seen: u64| {
+                parked_n.load(Ordering::Relaxed) > 0
+                    || cursor_hint.load(Ordering::Relaxed) < n.min(strip_of(seen) + ahead)
+            };
+            if !did || !work(seen) {
+                seen = slowest();
+                if strip_of(seen) >= n {
+                    failing.done = true;
+                    break;
+                }
+            }
+            if work(seen) {
+                let t0 = (timed && owner).then(std::time::Instant::now);
+                if produce(strip_of(seen)) {
+                    did = true;
+                }
+                if let Some(t0) = t0 {
+                    scan_ns += t0.elapsed().as_nanos() as u64;
+                }
+            }
+            if !did {
+                // nothing of its own: a piece of the slowest partition, or once every strip is
+                // handed out and none is parked every ready piece of any partition
+                let tail = cursor_hint.load(Ordering::Relaxed) >= n
+                    && parked_n.load(Ordering::Relaxed) == 0;
+                for k in 0..parts {
+                    let p = (me + k) % parts;
+                    if p % threads == me {
+                        continue;
+                    }
+                    let kind = if tail { Run::Tail } else { Run::Slowest };
+                    if (tail || lanes[p].0.load(Ordering::Acquire) == seen)
+                        && run(p, kind, &mut pause_ns) > 0
+                    {
+                        did = true;
+                        break;
+                    }
+                }
+            }
+            if did {
+                idle = 0;
+                stall = None;
+                if let Some(t0) = wait_start.take() {
+                    wait_ns += t0.elapsed().as_nanos() as u64;
+                }
+            } else {
+                if timed && owner && wait_start.is_none() {
+                    wait_start = Some(std::time::Instant::now());
+                }
+                idle = idle.saturating_add(1);
+                if !owner && idle.is_multiple_of(64) {
+                    // the owner can finish the stage alone; the stage's progress: pieces made
+                    // plus the partitions' next pieces
+                    let now = lanes
+                        .iter()
+                        .map(|lane| lane.0.load(Ordering::Relaxed))
+                        .fold(produced.load(Ordering::Relaxed), u64::wrapping_add);
+                    match stall {
+                        Some((since, seen_progress)) if seen_progress == now => {
+                            if since.elapsed() >= HELPER_STALL {
+                                left.fetch_add(1, Ordering::Relaxed);
+                                failing.done = true;
+                                break;
+                            }
+                        }
+                        _ => stall = Some((std::time::Instant::now(), now)),
+                    }
+                }
+                pause(idle, owner);
+            }
+        }
+        if let Some(t0) = wait_start {
+            wait_ns += t0.elapsed().as_nanos() as u64;
+        }
+        runs.fetch_add(my_runs, Ordering::Relaxed);
+        away.fetch_add(my_away, Ordering::Relaxed);
+        (scan_ns, wait_ns, pause_ns)
+    };
+
+    let (owner_scan_ns, wait_ns, owner_pause_ns) = run_participants(threads, &participant);
+
+    let mut states: Vec<PartState> = states
+        .into_iter()
+        .map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner).0)
+        .collect();
+    let t_merge = timed.then(std::time::Instant::now);
+    let mut stats = PartStats {
+        scan_pause_ns: owner_pause_ns,
+        owner_scan_ns,
+        wait_ns,
+        helpers_left: left.into_inner() as u64,
+        runs: runs.into_inner(),
+        away: away.into_inner(),
+        units: produced.into_inner() * parts as u64,
+        ..PartStats::default()
+    };
+    for st in &states {
+        stats.counts.seeds += st.counts.seeds;
+        stats.counts.skipped += st.counts.skipped;
+        stats.fold_ns += st.fold_ns;
+        stats.ungapped_ns += st.out.ungapped_ns;
+        stats.ungapped_calls += st.out.ungapped_calls;
+    }
+    merge(
+        hash,
+        hits,
+        &mut states,
+        occ0,
+        n,
+        &mut scratch.order,
+        &mut scratch.apps,
+    );
+    if let Some(t0) = t_merge {
+        stats.merge_ns = t0.elapsed().as_nanos() as u64;
+    }
+    // (the participant that saw every partition past the last strip gave every piece back)
+    debug_assert_eq!(freed.load(Ordering::Relaxed), pack(n, 0));
+    debug_assert_eq!(
+        sched
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .free
+            .len(),
+        slots_n
+    );
+    scratch.parts = states;
+    scratch.arenas = pool
+        .into_iter()
+        .map(|a| a.into_inner().unwrap_or_else(PoisonError::into_inner))
+        .collect();
+    stats
+}

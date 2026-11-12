@@ -435,6 +435,7 @@ export LOSAT_X_QSTREAM=1
 export LOSAT_X_REDOCONTAINIDX=1
 export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDCOMPACT=1
+export LOSAT_X_SEEDPIECE=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDIAGPACK=1
@@ -4074,6 +4075,37 @@ Scheduling (each value computed by one thread with the original function; order 
   time +0.03-0.05 s (node 0, `perf stat`). One thread (node 0, `perf stat`, outputs the same): instructions of dev,
   the switch and `=0` within 0.01 % (blastn-short of the 236 cDNAs 260.834 / 260.821 / 260.821 G; 1,775 cDNAs
   blastn, megablast and dc-megablast too).
+- `LOSAT_X_SEEDPIECE=1` (BLASTN `-task dc-megablast`, `blastn`, `megablast` and `blastn-short`: the partitioned stages
+  of `LOSAT_X_DCSEEDLEAN` and `LOSAT_X_BNSEEDLISTS` with `LOSAT_X_PAIRPARHOME`, two threads or more, one unmasked
+  subject, a query block above 8,000 letters; memory; in the strict set from the pull request that added it,
+  2026-11-12: `LOSAT_X_SEEDPIECE=0` turns it off; a number from 2 to 2,097,152 sets the seeds of a piece, any other
+  value or none the built-in 16,384) holds a strip's seeds in pieces of a fixed size instead of in one list per
+  partition and strip (`x_pair_seed_piece.rs`, exactness argument in its module comment). NCBI scans into an offset
+  array of 4,096 + `longest_chain` pairs, stops when it is full and extends those pairs before the scan goes on
+  (`blast_nascan.c` `MB_ACCESS_HITS`, `na_ungapped.c` `BlastNaWordFinder`); the strips stage did not stop, and a
+  strip's lists waited until every partition had folded them, each keeping the largest capacity any strip had needed
+  (on dc-megablast's 5 Mb chunks at 16 threads about 80 MiB, nearly all capacity left by main-diagonal runs). Now:
+  - the scan kernels' callbacks return whether the scan goes on (the reference callers always `true`); a strip's scan
+    (`scan_strip_from`, `scan_strip_disc_from`, `scan_strip_na_from` with `PIECE`) compares each word's run with the
+    piece's room and stops at the first pair it has no room for, inside a run as well (`Cut`), returning the word's
+    offset and the pairs of that word it read (`Resume`); the words still in the CSR's prefetch ring are dropped and
+    the next piece scans again from that word, passing over the pairs it read;
+  - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (P partitions), each partition's
+    seeds a chain of blocks in scan order; the arenas are a pool of 3 T + 2 (T threads), allocated at their size once
+    and kept in the subject scratch, the last two for the strip the slowest partition is in alone;
+  - a participant makes one piece per turn and parks the rest of its strip (any participant goes on with it), so
+    no helper holds a strip half-scanned; a partition folds the pieces of a strip in order, then the next strip, and
+    the positions count on across a strip's pieces, so the keys, the hits' order and the appended cells' numbers are
+    those of the strips.
+  `x_reach!` at each such stage, always the switch's side while it is on. Tests: the part tests of
+  `x_pair_seed_part.rs` (`seed_stage_part_equals_the_reference_fold` in pieces of 1, a few and hundreds to thousands
+  of seeds on 1 to 8 threads and 2 to 17 partitions; the nested parallel call of #218, the stalled stage and the
+  panicking participant in pieces), `seed_stage_on_strips_equals_one_scan` of `x_pair_seed.rs` and
+  `x_pair_seed_na.rs` and `disc_two_hit_stage_on_strips_equals_one_scan` (the real kernels in pieces of 1 seed, a few
+  and hundreds), and `LOSAT/tests/blastn_seed_piece.rs` (dc-megablast, blastn, megablast and blastn-short: the
+  default at 2 and 4 threads and pieces of 3 to 97 seeds at 2 and 3 threads against `=0`, with the sides of
+  `LOSAT_X_REACH`).
+  Evidence: (to be measured, line EB s13).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the

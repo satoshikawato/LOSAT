@@ -69,10 +69,12 @@ use super::super::{
     packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, DiagStruct, UngappedHit,
 };
 use super::{
-    part, plan_strips, pool_threads, run_strips, seed_of_pair, DiagArray, FoldCounts, Inputs,
-    PartScratch, Seed, SeedOut, StageStats, StripJob,
+    part, plan_strips, pool_threads, run_strips, seed_of_pair, Cut, DiagArray, FoldCounts, Inputs,
+    PartScratch, Resume, Seed, SeedOut, StageStats, StripJob,
 };
-use crate::algorithm::blastn::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
+use crate::algorithm::blastn::disc_lookup::{
+    choose_disc_scan_subject, disc_word_scan_subject_until,
+};
 use crate::algorithm::blastn::lookup::x_dc_csr::{Csr, Ring};
 use crate::algorithm::blastn::lookup::DiscTemplates;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -228,22 +230,39 @@ fn in_scope_array(x: &Inputs<'_>) -> bool {
 /// through `seed_of_pair`, into `out` (a list, or with LOSAT_X_DCSEEDLEAN the strip's
 /// partitions' lists).
 fn scan_strip_disc<O: SeedOut>(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &mut O) {
+    scan_strip_disc_from::<O, false>(x, disc, job, job.start, 0, out);
+}
+
+/// `scan_strip_disc` from the word at `start` (`job.start`, or where a piece stopped), passing
+/// over that word's first `skip` pairs (both templates' pairs count, the first template's
+/// first). EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at the first pair `out`
+/// has no room for (`Cut`) and returns where it goes on; `None` when the strip is done.
+pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    job: &StripJob,
+    start: usize,
+    skip: u32,
+    out: &mut O,
+) -> Option<Resume> {
     // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains to walk.
     if let Some(csr) = disc.x_csr() {
-        return scan_strip_disc_csr(x, disc, csr, job, out);
+        return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, start, skip, out);
     }
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
-    disc_word_scan_subject(
+    let cut = Cut::new(skip);
+    disc_word_scan_subject_until(
         kind,
         x.search_seq_packed,
         disc.template_type,
         disc.second_template_type,
         disc.template_length as i32,
-        [job.start as i32, job.end as i32],
+        [start as i32, job.end as i32],
         &mut |s_off, index, index2| {
             let kmer_start = s_off as usize;
+            let (mut j, skip) = (0u32, if PIECE { cut.skip.replace(0) } else { 0 });
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
             // ```c
             //     while (q_off) {
@@ -253,6 +272,9 @@ fn scan_strip_disc<O: SeedOut>(x: &Inputs<'_>, disc: &DiscTemplates, job: &Strip
             //     }
             // ```
             two_stage.for_each_hit(index as u64, |q_off_1| {
+                if PIECE && !cut.take(kmer_start, &mut j, skip, out) {
+                    return;
+                }
                 if q_off_1 != 0 {
                     seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
                 }
@@ -269,11 +291,16 @@ fn scan_strip_disc<O: SeedOut>(x: &Inputs<'_>, disc: &DiscTemplates, job: &Strip
             // ```
             if let Some(index2) = index2 {
                 two_stage.for_each_hit2(u64::from(index2), |q_off_1| {
+                    if PIECE && !cut.take(kmer_start, &mut j, skip, out) {
+                        return;
+                    }
                     seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
                 });
             }
+            !PIECE || cut.go()
         },
     );
+    cut.stop.get()
 }
 
 /// EXPERIMENT (LOSAT_X_DCCSR): `scan_strip_disc` over a table laid out as CSR
@@ -291,37 +318,54 @@ fn scan_strip_disc<O: SeedOut>(x: &Inputs<'_>, disc: &DiscTemplates, job: &Strip
 ///     }
 /// ```
 #[inline(never)]
-fn scan_strip_disc_csr<O: SeedOut>(
+fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     csr: &Csr,
     job: &StripJob,
+    start: usize,
+    skip: u32,
     out: &mut O,
-) {
+) -> Option<Resume> {
     debug_assert!(!disc.two_templates);
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
+    let cut = Cut::new(skip);
     let mut emit = |(s_off, index): (i32, u32)| {
         if !two_stage.has_hits(u64::from(index)) {
             return;
         }
         let kmer_start = s_off as usize;
-        for &q_off_1 in csr.run(index as usize) {
-            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        let run = csr.run(index as usize);
+        if PIECE {
+            cut.run(kmer_start, run, out, |q_off_1, out| {
+                seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
+            });
+        } else {
+            for &q_off_1 in run {
+                seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+            }
         }
     };
     let mut ring: Ring<'_, (i32, u32)> = Ring::new(csr);
-    disc_word_scan_subject(
+    disc_word_scan_subject_until(
         kind,
         x.search_seq_packed,
         disc.template_type,
         disc.second_template_type,
         disc.template_length as i32,
-        [job.start as i32, job.end as i32],
-        &mut |s_off, index, _index2| ring.push((s_off, index), |w| w.1 as usize, &mut emit),
+        [start as i32, job.end as i32],
+        &mut |s_off, index, _index2| {
+            ring.push((s_off, index), |w| w.1 as usize, &mut emit);
+            !PIECE || cut.go()
+        },
     );
-    ring.flush(&mut emit);
+    // (a stopped scan drops the words still in the ring: the next piece scans them again)
+    if !PIECE || cut.go() {
+        ring.flush(&mut emit);
+    }
+    cut.stop.get()
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825-841
@@ -1070,6 +1114,12 @@ fn seed_stage_lists<const LEAN: bool, const MEMO: bool>(
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_disc(x, disc, &jobs[i], out);
     let produce_lists =
         |i: usize, out: &mut part::PartSink<'_>| scan_strip_disc(x, disc, &jobs[i], out);
+    // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
+    let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
+        let job = &jobs[i];
+        let (start, skip) = from.map_or((job.start, 0), |r| (r.s, r.skip));
+        scan_strip_disc_from::<_, true>(x, disc, job, start, skip, out)
+    };
     let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
         let part::PartState {
             hash,
@@ -1100,6 +1150,7 @@ fn seed_stage_lists<const LEAN: bool, const MEMO: bool>(
         fold_part,
         &produce,
         &produce_lists,
+        &produce_piece,
         &fold_one,
         timed,
     )
@@ -2518,8 +2569,16 @@ mod tests {
                                 let mut hash = new_table();
                                 let mut scratch = PartScratch::default();
                                 for (chunk, &(xc, stage)) in chunks.iter().enumerate() {
+                                    // EXPERIMENT (LOSAT_X_SEEDPIECE): the lists' stage in pieces
+                                    // of 1 seed, a few, hundreds, or the strips' lists, the
+                                    // stages of a configuration alternating (the real kernels
+                                    // stop inside words' runs and restart at many offsets)
+                                    let pieces = [1usize, 3 + case_no % 11, 0, 250 + 37 * k]
+                                        [(k + chunk + 2 * usize::from(levels) + usize::from(memo))
+                                            % 4];
+                                    scratch.x_pieces = Some(pieces);
                                     let at = format!(
-                                        "case {case_no} threads {threads} parts {parts} levels {levels} memo {memo} lean {lean} lists {lists} chunk {chunk}"
+                                        "case {case_no} threads {threads} parts {parts} levels {levels} memo {memo} lean {lean} lists {lists} pieces {pieces} chunk {chunk}"
                                     );
                                     hash.offset = xc.diag_offset as i32;
                                     let mut hits = Vec::new();

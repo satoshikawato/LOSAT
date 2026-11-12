@@ -7,7 +7,9 @@ import type { OutputStream } from '../../ports/run-output';
 import { EngineStoppedError } from '../reactor/abi';
 import { loadReactor } from '../reactor/instance';
 import { RunOutputWriter } from '../run-output/writer';
+import { InstanceUse } from './instance-use';
 import {
+  HOLD_USE_CHANNEL,
   STOP_AT_OUTPUT_CHANNEL,
   type EngineCommand,
   type EngineEvent,
@@ -71,18 +73,44 @@ function stopIfArmed(): void {
   throw new Error('a test stopped the engine at its first output');
 }
 
+// Test builds: a page arms the next use of the threaded instance to hold at its start until the
+// Gateway ends the runtime, so that a test ends it during the use (tests/e2e/harness/engine.ts,
+// cancelDuringWarmUp). The worker cannot take a message while it holds; the mark of the use
+// count can be read (instance-use.ts).
+let holdUse = false;
+let prepareFailure: string | undefined;
+const holding = __LOSAT_TEST_HOOKS__ ? new BroadcastChannel(HOLD_USE_CHANNEL) : undefined;
+if (holding !== undefined) {
+  holding.onmessage = (event: MessageEvent<{ type?: string }>) => {
+    if (event.data?.type !== 'arm') return;
+    holdUse = true;
+    holding.postMessage({ type: 'armed' });
+  };
+}
+
+function holdIfArmed(use: InstanceUse | undefined): void {
+  if (!holdUse || use === undefined) return;
+  holdUse = false;
+  holding?.postMessage({ type: 'holding' });
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  // A test that does not end the runtime fails on its own timeout; the use then goes on.
+  const until = performance.now() + 120_000;
+  while (!use.retiring() && performance.now() < until) Atomics.wait(pause, 0, 0, 10);
+}
+
 function init(command: EngineInit): void {
   generation = command.generation;
   let serial: ReturnType<typeof moduleOf> | undefined;
   let threads: ReturnType<typeof moduleOf> | undefined;
+  const use = command.use === undefined ? undefined : new InstanceUse(command.use);
   runtime = new EngineRuntime({
     serial: async () => (await (serial ??= moduleOf(command.modules.serial))).module,
     threads: () => (threads ??= moduleOf(command.modules.threads)),
     builds: command.builds,
     faultChannel: command.faultChannel,
     keeperChannel: command.keeperChannel,
-    onThreadedSearch: () => scope.postMessage({ type: 'threaded-search', generation }),
-    ...(__LOSAT_TEST_HOOKS__ ? { beforeOutput: stopIfArmed } : {}),
+    use,
+    ...(__LOSAT_TEST_HOOKS__ ? { beforeOutput: stopIfArmed, onUse: () => holdIfArmed(use) } : {}),
   });
 }
 
@@ -100,8 +128,14 @@ function toWorkerError(error: unknown): WorkerError {
 async function prepare(threads: number, argv: readonly string[] | undefined): Promise<void> {
   try {
     await runtime?.prepare(threads, argv);
-  } catch {
+  } catch (error) {
     // The search that follows starts the runtime again and reports what fails.
+    if (__LOSAT_TEST_HOOKS__) prepareFailure = String(error);
+  }
+  // Test builds: a warm-up armed to hold that did not use the threaded instance says why, so
+  // that its test fails with the reason rather than waiting for the hold (cancelDuringWarmUp).
+  if (__LOSAT_TEST_HOOKS__ && holdUse && argv !== undefined) {
+    holding?.postMessage({ type: 'not-held', reason: prepareFailure ?? 'the warm-up made no use of the threaded instance' });
   }
 }
 

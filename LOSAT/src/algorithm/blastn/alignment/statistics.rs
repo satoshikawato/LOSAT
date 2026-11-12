@@ -4,7 +4,7 @@
 //! and performing full region alignments (for cluster-then-extend chaining).
 
 /// Align a region using banded Smith-Waterman (for cluster-then-extend chaining).
-/// Unlike extend_gapped_heuristic which extends from a seed, this aligns the entire region.
+/// Unlike a seed extension, this aligns the entire region.
 /// Returns: (q_start, q_end, s_start, s_end, score, matches, mismatches, gap_opens, gap_letters)
 /// where q_start/q_end and s_start/s_end are 0-based coordinates within the input slices.
 ///

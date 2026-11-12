@@ -31,8 +31,6 @@
 //! `general` and the `Textseq-id` ones, `Seq-data` other than `iupacaa`, `ncbieaa` and
 //! `ncbistdaa`, and a REAL mantissa of more than 18 digits.
 
-#[cfg(test)]
-use crate::report::serial::asn_text_reader::libm_pow10;
 use crate::report::serial::asn_text_reader::{is_first_id_char, Reader, SliceSource};
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
@@ -64,6 +62,7 @@ type Result<T> = std::result::Result<T, PssmTextError>;
 //     return s;
 // }
 // ```
+#[cfg(test)]
 pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
     read_pssm_with_parameters_and_skips(text).map(|(pssm, _)| pssm)
 }

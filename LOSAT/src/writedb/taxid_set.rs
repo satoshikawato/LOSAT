@@ -5,9 +5,9 @@
 use std::io::BufRead;
 
 use crate::ncbi_exception::NcbiException;
-use crate::ncbi_str::{string_to_int, string_to_int8, ALLOW_LEADING_SPACES};
+use crate::ncbi_str::{string_to_int, string_to_int8, truncate_spaces, ALLOW_LEADING_SPACES};
 use crate::seqid::accguide::{parse_flags, SeqIdWarning};
-use crate::seqid::parse::{seq_id_from_text, truncate_spaces};
+use crate::seqid::parse::seq_id_from_text;
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
 use super::id_set::KeyMap;

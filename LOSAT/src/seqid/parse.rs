@@ -16,7 +16,7 @@ use super::model::{
     TextseqId, SEQ_ID_ALTERNATIVES,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::ncbi_str::{is_blank, is_space, string_to_int8, string_to_non_negative_int};
+use crate::ncbi_str::{is_blank, string_to_int8, string_to_non_negative_int, truncate_spaces};
 
 /// A `CSeqIdException` (`eFormat`): where NCBI throws it and its message.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,16 +64,6 @@ impl SeqIdError {
 
 const SEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Seq_id.cpp";
 const TEXTSEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Textseq_id.cpp";
-
-/// `NStr::TruncateSpaces_Unsafe(s, NStr::eTrunc_Both)`.
-pub fn truncate_spaces(s: &[u8]) -> &[u8] {
-    let start = s.iter().position(|&c| !is_space(c)).unwrap_or(s.len());
-    let end = s
-        .iter()
-        .rposition(|&c| !is_space(c))
-        .map_or(start, |end| end + 1);
-    &s[start..end.max(start)]
-}
 
 /// `CObject_id::SetStrOrId(str)`.
 ///

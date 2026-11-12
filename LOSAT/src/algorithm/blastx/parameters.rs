@@ -599,17 +599,35 @@ pub fn subject_parameters(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
-    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
-    // length is too short"; LOSAT refuses the search instead.
-    ensure!(
-        !options.old_fsc || avg_subject_length > 0,
-        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
-    );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527
+    // ```c
+    //        if (scoring_options->gapped_calculation) {
+    //        ...
+    //        } else {
+    //           ASSERT(sbp->kbp_gap == NULL);
+    //           /* for ungapped cases we do not have gbp filled */
+    //           if (sbp->gbp) {
+    //               sfree(sbp->gbp);
+    //               sbp->gbp=NULL;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+    // ```c
+    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+    //         new_msg->message = strdup("The average subject length is too short");
+    //         new_msg->severity = eBlastSevFatal;
+    // ```
+    // Without the Gumbel block (`-searchsp` or `OLD_FSC`, `blast_stat.c:921-923`, or an ungapped
+    // search) the length is the average, and a set of subjects whose average is below one letter
+    // fails the batch's setup: the engine error after the start of the outfmt 0 report, exit
+    // status 3, as every other error of this setup (`native::database_search_error`; NCBI
+    // 2.17.0 blastx `-subject` of three empty records, or of `M`, `` and ``, with `-searchsp`,
+    // `OLD_FSC` or `-ungapped -comp_based_stats 0`, env parity probe f_probe of 2026-11-12).
     let n = if options.gapped && !options.old_fsc {
         i32::try_from(min_subject_length.max(10))?
     } else {
         avg_subject_length
     };
+    ensure!(n > 0, "The average subject length is too short");
     effective_lengths(
         batch,
         parameters,

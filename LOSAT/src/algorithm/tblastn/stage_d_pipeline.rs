@@ -1035,6 +1035,33 @@ fn run_local_search(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
+// ```c
+//     case BLASTERR_SUBJECT_LENGTH_INVALID:
+//         new_msg->message = strdup("The average subject length is too short");
+//         new_msg->severity = eBlastSevFatal;
+// ```
+/// NCBI's `BLASTERR_SUBJECT_LENGTH_INVALID` of a query batch's setup
+/// (`run_local_search_with_pool`, blast_setup.c:969-980): NCBI 2.17.0 tblastn writes the start
+/// of the outfmt 0 report (and the reports of the batches before), then `BLAST engine error:
+/// The average subject length is too short`, exit status 3 (`-subject` of three empty records,
+/// or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`; env parity probe f_probe of 2026-11-12).
+#[derive(Debug)]
+pub(crate) struct SubjectLengthInvalid;
+
+impl SubjectLengthInvalid {
+    /// The text after `BLAST engine error: `.
+    pub(crate) const TEXT: &'static str = "The average subject length is too short";
+}
+
+impl std::fmt::Display for SubjectLengthInvalid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BLAST engine error: {}", Self::TEXT)
+    }
+}
+
+impl std::error::Error for SubjectLengthInvalid {}
+
 /// Diagnostic (LOSAT_TIMING): adds the time from `start` to its drop to the common line's `search`
 /// (utils/xtiming.rs). No NCBI counterpart; it reads the clock only with LOSAT_TIMING.
 struct XSearchTimer(Option<std::time::Instant>);
@@ -1195,12 +1222,17 @@ fn run_local_search_with_pool(
     // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
     //    }
     // ```
-    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
-    // length is too short"; LOSAT refuses the search instead.
-    ensure!(
-        !profile.subject_set.old_fsc || !valid_contexts.iter().any(|&valid| valid) || min_subject_length > 0,
-        "-searchsp or OLD_FSC (no finite-size correction) with subjects of an average length below one letter is not supported by LOSAT's TBLASTN"
-    );
+    // Without the Gumbel block (`-searchsp` or `OLD_FSC`; LOSAT's tblastn has no ungapped
+    // search) a set of subjects whose average is below one letter, in nucleotides, fails the
+    // setup of a batch that NCBI searches (one with a valid context): `tblastn_app::search`
+    // fails it with NCBI's engine error after the reports of the batches before
+    // (`SubjectLengthInvalid`).
+    if profile.subject_set.old_fsc
+        && valid_contexts.iter().any(|&valid| valid)
+        && min_subject_length == 0
+    {
+        return Err(SubjectLengthInvalid.into());
+    }
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
         // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:

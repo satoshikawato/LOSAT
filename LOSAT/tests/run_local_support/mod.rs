@@ -62,6 +62,36 @@ pub fn temp_path(name: &str) -> PathBuf {
     ))
 }
 
+/// The outcome of `losat <program> -query <query> -subject <subject> <args>` with the variables
+/// `env` set and the batch size and `OLD_FSC` removed otherwise: the exit status, stdout and
+/// stderr.
+pub fn subject_cli(
+    program: &str,
+    query: &Path,
+    subject: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> (Option<i32>, String, String) {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_losat"));
+    command
+        .arg(program)
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(subject)
+        .args(args)
+        .env_remove("LOSAT_TIMING")
+        .env_remove("BATCH_SIZE")
+        .env_remove("OLD_FSC")
+        .envs(env.iter().copied());
+    let output = command.output().expect("run LOSAT CLI");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
 /// A temporary FASTA file, removed when dropped.
 pub struct TempFasta(pub PathBuf);
 

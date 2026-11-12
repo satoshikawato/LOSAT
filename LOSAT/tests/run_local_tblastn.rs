@@ -751,3 +751,69 @@ fn queries_without_residues_are_kept_and_a_batch_of_them_stops() {
         }
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
+// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `stage_d_pipeline::SubjectLengthInvalid`).
+// Without the Gumbel block (`-searchsp` or `OLD_FSC`) a set of subjects whose average is below one letter
+// fails the setup of a batch with NCBI's engine error (exit 3) after the start of the outfmt 0
+// report, and after the report of a first batch that NCBI does not search (`BATCH_SIZE=1`, an
+// invalid query first). NCBI 2.17.0 tblastn with these inputs (env parity probes f_probe/t of
+// 2026-11-12, `tn.*`).
+#[test]
+fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error() {
+    let query = repository("LOSAT/tests/fasta/psiblast/ps5c_qx_tk.faa");
+    let subject = TempFasta::new(
+        "tblastn_short_average.fna",
+        &[("a", &b"A"[..]), ("b", &b""[..]), ("c", &b""[..])],
+    );
+    let path = subject.0.display().to_string();
+    let subjects_warning = "Warning: [tblastn] Subject_2 b: Subject sequence contains no data\n\
+                            Warning: [tblastn] Subject_3 c: Subject sequence contains no data\n";
+    let error = "BLAST engine error: The average subject length is too short\n";
+    let prolog_end = format!(
+        "Database: User specified sequence set (Input: {path}).\n           3 sequences; 1 total letters\n\n"
+    );
+    for (args, env, first_batch) in [
+        (&["-searchsp", "1000"][..], &[][..], false),
+        (&[][..], &[("OLD_FSC", "1"), ("BATCH_SIZE", "1")][..], true),
+    ] {
+        for outfmt in ["0", "6", "7"] {
+            let args: Vec<&str> = args.iter().copied().chain(["-outfmt", outfmt]).collect();
+            let (code, stdout, stderr) =
+                run_local_support::subject_cli("tblastn", &query, &subject.0, &args, env);
+            assert_eq!(code, Some(3), "{args:?} {env:?}: {stderr}");
+            let invalid = if first_batch {
+                "Warning: [tblastn] Query_1 qx all X: Could not calculate ungapped Karlin-Altschul \
+                 parameters due to an invalid query sequence or its translation. Please verify the \
+                 query sequence(s) and/or filtering options \n"
+            } else {
+                ""
+            };
+            assert_eq!(
+                stderr,
+                format!("{subjects_warning}{invalid}{error}"),
+                "{args:?} {env:?}"
+            );
+            match (outfmt, first_batch) {
+                ("0", false) => assert!(
+                    stdout.starts_with("TBLASTN 2.17.0+\n") && stdout.ends_with(&prolog_end),
+                    "{stdout}"
+                ),
+                ("0", true) => assert!(
+                    stdout.starts_with("TBLASTN 2.17.0+\n")
+                        && stdout.ends_with(&format!(
+                            "{prolog_end}\n\nQuery= qx all X\n\nLength=30\n\n\n***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nEffective search space used: 0\n"
+                        )),
+                    "{stdout}"
+                ),
+                ("7", true) => assert_eq!(
+                    stdout,
+                    format!(
+                        "# TBLASTN 2.17.0+\n# Query: qx all X\n# Database: User specified sequence set (Input: {path})\n"
+                    )
+                ),
+                _ => assert!(stdout.is_empty(), "{args:?} {env:?}: {stdout}"),
+            }
+        }
+    }
+}

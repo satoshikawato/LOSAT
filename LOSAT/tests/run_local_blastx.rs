@@ -13,7 +13,7 @@ use std::process::Command;
 
 use run_local_support::{
     assert_observer_ranges, assert_tabular_ranges, cli_out_path, fixture_sequence,
-    run_formats_with, temp_path, Run,
+    run_formats_with, temp_path, Run, TempFasta,
 };
 use LOSAT::algorithm::blastx::BlastxArgs;
 use LOSAT::api::local_blast::{
@@ -1203,4 +1203,84 @@ fn environment_child() {
         }
     };
     std::fs::write(out, written).expect("write the child's file");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
+// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `parameters::subject_parameters`).
+// Without the Gumbel block (`-searchsp`, `OLD_FSC` or `-ungapped`) a set of subjects whose average is below one letter
+// fails the setup of a batch with NCBI's engine error (exit 3) after the start of the outfmt 0
+// report, and after the report of a first batch that NCBI does not search (`BATCH_SIZE=1`, an
+// invalid query first). NCBI 2.17.0 blastx with these inputs (env parity probes f_probe/t of
+// 2026-11-12, `bx.*`).
+#[test]
+fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error() {
+    let query_file = TempFasta::new(
+        "blastx_short_average_query.fna",
+        &[
+            ("qx all N", &[b'N'; 90][..]),
+            (
+                "qn tk",
+                &b"ATGCAACTGATTCTGAGCCACCATCTGACCATGGCGGGCCGCGTGGAACTGGTGACCGGCCCGATGTTTGCGGGCAAAAGCACCTATCTG"[..],
+            ),
+        ],
+    );
+    let query = query_file.0.clone();
+    let subject = TempFasta::new(
+        "blastx_short_average.faa",
+        &[("a", &b"M"[..]), ("b", &b""[..]), ("c", &b""[..])],
+    );
+    let path = subject.0.display().to_string();
+    let subjects_warning = "Warning: [blastx] Subject_2 b: Subject sequence contains no data\n\
+                            Warning: [blastx] Subject_3 c: Subject sequence contains no data\n";
+    let error = "BLAST engine error: The average subject length is too short\n";
+    let prolog_end = format!(
+        "Database: User specified sequence set (Input: {path}).\n           3 sequences; 1 total letters\n\n"
+    );
+    for (args, env, first_batch) in [
+        (&["-searchsp", "1000"][..], &[][..], false),
+        (
+            &["-ungapped", "-comp_based_stats", "0"][..],
+            &[("BATCH_SIZE", "1")][..],
+            true,
+        ),
+    ] {
+        for outfmt in ["0", "6", "7"] {
+            let args: Vec<&str> = args.iter().copied().chain(["-outfmt", outfmt]).collect();
+            let (code, stdout, stderr) =
+                run_local_support::subject_cli("blastx", &query, &subject.0, &args, env);
+            assert_eq!(code, Some(3), "{args:?} {env:?}: {stderr}");
+            let invalid = if first_batch {
+                "Warning: [blastx] Query_1 qx all N: Could not calculate ungapped Karlin-Altschul \
+                 parameters due to an invalid query sequence or its translation. Please verify the \
+                 query sequence(s) and/or filtering options \n"
+            } else {
+                ""
+            };
+            assert_eq!(
+                stderr,
+                format!("{subjects_warning}{invalid}{error}"),
+                "{args:?} {env:?}"
+            );
+            match (outfmt, first_batch) {
+                ("0", false) => assert!(
+                    stdout.starts_with("BLASTX 2.17.0+\n") && stdout.ends_with(&prolog_end),
+                    "{stdout}"
+                ),
+                ("0", true) => assert!(
+                    stdout.starts_with("BLASTX 2.17.0+\n")
+                        && stdout.ends_with(&format!(
+                            "{prolog_end}\n\nQuery= qx all N\n\nLength=90\n\n\n***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nEffective search space used: 0\n"
+                        )),
+                    "{stdout}"
+                ),
+                ("7", true) => assert_eq!(
+                    stdout,
+                    format!(
+                        "# BLASTX 2.17.0+\n# Query: qx all N\n# Database: User specified sequence set (Input: {path})\n"
+                    )
+                ),
+                _ => assert!(stdout.is_empty(), "{args:?} {env:?}: {stdout}"),
+            }
+        }
+    }
 }

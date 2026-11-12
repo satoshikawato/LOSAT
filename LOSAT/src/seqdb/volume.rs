@@ -186,6 +186,12 @@ impl Volume {
         self.lazy_file(&self.seq, "sq")
     }
 
+    /// Opens the sequence file, as the first read of a sequence does (`seq_file`): its error
+    /// where it cannot be opened, as NCBI's first read of the volume throws it.
+    pub fn open_sequence_file(&self) -> Result<(), SeqDbError> {
+        self.seq_file().map(|_| ())
+    }
+
     fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
         self.lazy_file(&self.hdr, "hr")
     }

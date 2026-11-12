@@ -426,6 +426,8 @@ class TblastxOptions(TypedDict, total=False):
 class PsiblastOptions(TypedDict, total=False):
     dbsize: int
     """Effective length of the database"""
+    searchsp: int
+    """Effective length of the search space"""
     evalue: float
     """Expectation value (E) threshold for saving hits [default: 10]"""
     threshold: float

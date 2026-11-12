@@ -173,13 +173,17 @@ impl std::error::Error for WinMaskError {}
 
 /// Where the counts files that the callers name are read from: NCBI's checks of the format
 /// (`DiscoverStatType`) and its readers (`CSeqMaskerIstatFactory::create`) open the file by
-/// name; LOSAT opens it through a source, so that LOSAT Web can give counts it holds in memory
-/// under the name of the command line. `FileCounts` is the file system.
+/// name, and `-window_masker_taxid` asks whether its file is there (`WindowMaskerTaxidToDb`);
+/// LOSAT asks a source, so that LOSAT Web can give counts it holds in memory under the name of
+/// the command line. `FileCounts` is the file system.
 pub trait CountsSource: Send + Sync + fmt::Debug {
     /// `CSeqMaskerIstatFactory::DiscoverStatType( name )`.
     fn discover(&self, name: &str) -> Result<StatFile, WinMaskError>;
     /// `CSeqMaskerIstatFactory::create( name, ... )` with `params`.
     fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError>;
+    /// `CFile( path ).Exists()`: whether `path` is a file (or a link to one), which NCBI asks of
+    /// the counts file of `-window_masker_taxid` (`taxid_stat_file`).
+    fn is_file(&self, path: &Path) -> bool;
 }
 
 /// The counts files of the file system, by path.
@@ -193,6 +197,10 @@ impl CountsSource for FileCounts {
 
     fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
         UnitCounts::open(Path::new(name), params).map(Arc::new)
+    }
+
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
     }
 }
 

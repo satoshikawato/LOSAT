@@ -8,6 +8,7 @@
 // command line, as typed there, which the engine's `validate` reads (DW-42). The task and the
 // genetic codes are shown elsewhere (SearchPanel, InputPanel).
 import { computed } from 'vue';
+import type { CountsLoader } from '../application/counts';
 import type { DraftState, SearchDraft } from '../application/draft';
 import { fieldRows, pairRows, sectionShown, sectionsAt, type PairRow } from '../domain/parameters';
 import { programById, type ParameterField as Field } from '../domain/programs';
@@ -16,7 +17,7 @@ import ParameterField from './ParameterField.vue';
 import ParameterPair from './ParameterPair.vue';
 import { refusal, refusedMark } from './refusal';
 
-const props = defineProps<{ draft: SearchDraft; state: DraftState }>();
+const props = defineProps<{ draft: SearchDraft; state: DraftState; counts?: CountsLoader | undefined }>();
 const sectionId = (title: string) => `parameters-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`;
 /** The row's NCBI select of pairs, where the program has one for it and the engine describes both fields. */
 function pairOf(row: string | undefined, fields: readonly Field[]): PairRow | undefined {
@@ -63,7 +64,16 @@ const extraRefused = computed(() => refusal(props.state)?.extra === true);
         <div v-else class="param-row param-row-group">
           <span class="param-label">{{ row.row }}</span>
           <div class="param-control param-group">
-            <ParameterField v-for="field in row.fields" :key="field.flag" :draft="draft" :state="state" :field="field" inline />
+            <!-- A taxonomy ID is shown in the row of the field that it names the counts for (ParameterField). -->
+            <ParameterField
+              v-for="field in row.fields.filter((f) => f.kind !== 'taxid')"
+              :key="field.flag"
+              :draft="draft"
+              :state="state"
+              :field="field"
+              :counts="counts"
+              inline
+            />
           </div>
         </div>
       </template>

@@ -3,6 +3,7 @@ import { nextTick, onMounted, onUnmounted, ref, useId } from 'vue';
 import type { Attention } from '../application/attention';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
+import type { CountsLoader } from '../application/counts';
 import type { ExampleLoader } from '../application/examples';
 import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
@@ -19,6 +20,7 @@ const props = defineProps<{
   coordinator: Coordinator;
   draft: SearchDraft;
   examples: ExampleLoader;
+  counts: CountsLoader;
   results: ResultsBrowser;
   attention: Attention;
   usesFakeEngine: boolean;
@@ -106,6 +108,7 @@ onUnmounted(() => {
         :aria-labelledby="MAIN_TABS[0].id"
         :draft="draft"
         :examples="examples"
+        :counts="counts"
         :attention="attention"
         :attention-state="attentionState"
         @submitted="openResults"

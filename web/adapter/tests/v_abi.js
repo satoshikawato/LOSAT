@@ -25,7 +25,9 @@
 // the argv's value (`file_begin`, `file_chunk`, `file_end`; abi_v2.md §4) before the run, and keeps
 // it for the next searches that name it, as the application keeps one (abi_v2.md §6); a value that
 // is not a regular file is not registered, which the run reports as the CLI reports a file it
-// cannot open.
+// cannot open. A search with `"window_masker_path"` (BLASTN `-window_masker_taxid`) runs the CLI
+// with that WINDOW_MASKER_PATH, and the host registers the directory's counts files under LOSAT
+// Web's directory (`registerTaxidCounts`).
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -259,6 +261,43 @@ function registerCounts(reactor, counts, search) {
   return { name, held: "registered" };
 }
 
+// LOSAT Web's directory of -window_masker_taxid (web/adapter/src/files.rs WINDOW_MASKER_PATH).
+const WEB_WINDOW_MASKER_PATH = "windowmasker";
+
+// The counts files of a search's -window_masker_taxid directory (`"window_masker_path"`, the CLI's
+// WINDOW_MASKER_PATH): every readable regular file <path>/<n>/wmasker.obinary, registered as
+// windowmasker/<n>/wmasker.obinary and kept across runs (a file the CLI cannot read, or a directory
+// of that name, is not registered: LOSAT Web has neither). Returns null without the directory.
+function registerTaxidCounts(reactor, counts, search) {
+  if (search.window_masker_path === undefined) return null;
+  const root = path.resolve(search.cwd, search.window_masker_path);
+  let registered = 0, kept = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(root, entry.name, "wmasker.obinary");
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+      fs.accessSync(file, fs.constants.R_OK);
+    } catch {
+      continue;
+    }
+    const name = `${WEB_WINDOW_MASKER_PATH}/${entry.name}/wmasker.obinary`;
+    const known = counts.get(name);
+    if (known && known.file === file) {
+      kept++;
+      continue;
+    }
+    if (known) {
+      assert.equal(reactor.call("losat_web2_file_release", known.handle).status, 0);
+      counts.delete(name);
+    }
+    const { handle } = registerFile(reactor, name, file);
+    counts.set(name, { handle, file });
+    registered++;
+  }
+  return { name: WEB_WINDOW_MASKER_PATH, held: registered ? "registered" : "kept" };
+}
+
 async function openSerial(wasmPath) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {} });
   let reactor;
@@ -287,6 +326,15 @@ function inputPath(search, option) {
   return path.resolve(search.cwd, search.argv[search.argv.indexOf(option) + 1]);
 }
 
+// The CLI's environment of a search: the harness's, with the search's directory of
+// -window_masker_taxid as NCBI's WINDOW_MASKER_PATH (and without one inherited otherwise).
+function nativeEnv(search) {
+  const env = { ...process.env };
+  delete env.WINDOW_MASKER_PATH;
+  if (search.window_masker_path !== undefined) env.WINDOW_MASKER_PATH = search.window_masker_path;
+  return env;
+}
+
 // The CLI's outputs of a search, one run per format with -out. A search with
 // `"expect": "failure"` fails in the CLI (exit 3 or 1), whose files keep what was written
 // before the failure (the outfmt 0 prolog before a first query batch fails).
@@ -297,7 +345,7 @@ function nativeOutputs(native, search, scratch) {
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
-    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
+    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
     const failed = result.status !== 0;
     if (failed !== (search.expect === "failure")) {
       throw new Error(`native ${argv.join(" ")} ${failed ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
@@ -325,7 +373,7 @@ function nativeOutputs(native, search, scratch) {
     const directory = fs.mkdtempSync(path.join(scratch, "native.custom."));
     const out = path.join(directory, search.files ? "results" : "native.custom.out");
     const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
-    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
+    const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
     if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed (exit ${result.status}): ${result.error ?? result.stderr}`);
     outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
     fs.rmSync(directory, { recursive: true, force: true });
@@ -600,7 +648,7 @@ async function main() {
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs
-    const counts = new Map(); // the -window_masker_db value -> { handle, file }, kept across runs
+    const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;
     for (const search of all) {
       const program = search.program;
@@ -615,7 +663,8 @@ async function main() {
       const q = reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
       assert.ok(q.status > 0, `register query: ${q.error}`);
       const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
-      const named = registerCounts(reactor, counts, search);
+      const taxid = registerTaxidCounts(reactor, counts, search);
+      const named = registerCounts(reactor, counts, search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
         const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
@@ -689,7 +738,7 @@ async function main() {
     }
     for (const handle of subjects.values()) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     for (const { handle } of counts.values()) assert.equal(reactor.call("losat_web2_file_release", handle).status, 0);
-    if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db: ${countsRegistered} counts registrations, ${countsKept} searches with counts kept or unregistered`);
+    if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db and -window_masker_taxid: ${countsRegistered} searches that registered counts, ${countsKept} searches with counts kept or unregistered`);
     await close();
   }
   if (options.out) fs.writeFileSync(path.join(options.out, "v-abi-results.json"), JSON.stringify(results, null, 2) + "\n");

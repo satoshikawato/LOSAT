@@ -1,6 +1,7 @@
 //! Named input files (docs/web/abi_v2.md §4 `file_begin`): files that an argv names by a value
 //! of an option, which the host gives in chunks under that name. Kind 1 is a WindowMasker unit
-//! counts file, the value of BLASTN's `-window_masker_db`.
+//! counts file: the value of BLASTN's `-window_masker_db`, or the file of `-window_masker_taxid
+//! <taxid>`, `windowmasker/<taxid>/wmasker.obinary` (`WINDOW_MASKER_PATH`).
 //!
 //! The command line opens the counts file by its name twice: NCBI's check of the format
 //! (`DiscoverStatType`) and its reader (`CSeqMaskerIstatFactory::create`). A registered file
@@ -21,8 +22,14 @@ use LOSAT::web_adapter::{
 
 use crate::json;
 
-/// The kind of a WindowMasker unit counts file (`-window_masker_db`).
+/// The kind of a WindowMasker unit counts file (`-window_masker_db`, `-window_masker_taxid`).
 pub const KIND_WINDOW_MASKER_COUNTS: u32 = 1;
+
+/// The directory of BLASTN's `-window_masker_taxid` in LOSAT Web, where the command line reads
+/// NCBI's registry entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`: the counts file of a taxid is the
+/// file registered as `windowmasker/<taxid>/wmasker.obinary` (the engine joins the names as NCBI
+/// does, `taxid_stat_file`), and a taxid without one is the command line's taxid without a file.
+pub const WINDOW_MASKER_PATH: &str = "windowmasker";
 
 /// A file whose chunks are coming.
 struct Loading {
@@ -32,14 +39,17 @@ struct Loading {
     sha: Sha256,
 }
 
-/// A registered counts file: what NCBI's check of the format found, and what its reader read
-/// (only for the two binary formats, the ones NCBI reads after the check), as `Result`s, so that a
-/// run reports them where the command line does.
+/// A registered counts file: what NCBI's check of the format found, and what its reader read, as
+/// `Result`s, so that a run reports them where the command line does. The reader's result is kept
+/// for every format: `-window_masker_db` reads the file only after the check accepted one of the
+/// two binary formats (`blast_args.cpp:446-458`), but the file of `-window_masker_taxid` is read
+/// without that check (`WindowMaskerTaxidToDb`), and the reader's own errors then come with the
+/// search ("unrecognized unit counts format" for an unknown format).
 struct Counts {
     name: String,
     sha256: String,
     found: Result<StatFile, WinMaskError>,
-    counts: Option<Result<Arc<UnitCounts>, WinMaskError>>,
+    counts: Result<Arc<UnitCounts>, WinMaskError>,
 }
 
 #[derive(Default)]
@@ -150,16 +160,10 @@ pub fn end(file: u32) -> Result<String, String> {
         let _ = write!(sha256, "{byte:02x}");
     }
     let found = discover_stat_type_in(&mut Cursor::new(bytes.as_slice()));
-    // NCBI reads the counts only after its check accepted one of the two binary formats
-    // (`blast_args.cpp:446-458`); blastn's reader settings are the defaults
-    // (`s_BuildSeqMasker`).
-    let counts = match &found {
-        Ok(stat) if matches!(stat.stat_type, StatType::OBinary | StatType::Binary) => Some(
-            UnitCounts::read(&mut Cursor::new(bytes.as_slice()), &MaskerParams::default())
-                .map(Arc::new),
-        ),
-        _ => None,
-    };
+    // The command line's reader with blastn's settings (`s_BuildSeqMasker`); for a format other
+    // than the two binary ones it reads the format alone and returns its error.
+    let counts = UnitCounts::read(&mut Cursor::new(bytes.as_slice()), &MaskerParams::default())
+        .map(Arc::new);
     drop(bytes);
     let counts = Arc::new(Counts {
         name,
@@ -185,6 +189,11 @@ pub fn release(file: u32) -> Result<(), String> {
     } else {
         Err(format!("unknown input file {file}"))
     }
+}
+
+/// The two formats that NCBI's check of `-window_masker_db` accepts.
+fn is_binary(stat_type: StatType) -> bool {
+    matches!(stat_type, StatType::OBinary | StatType::Binary)
 }
 
 fn stat_type_name(stat_type: StatType) -> &'static str {
@@ -217,14 +226,13 @@ fn file_json(handle: u32, size: usize, file: &Counts) -> String {
     out.push_str(",\"unit_size\":");
     json::optional(
         &mut out,
-        match &file.counts {
-            Some(Ok(counts)) => Some(counts.unit_size()),
-            _ => None,
-        },
+        file.counts.as_ref().ok().map(|counts| counts.unit_size()),
     );
     out.push_str(",\"error\":");
+    // The reader's error of a file that the check refused is the check's: only the check's is told.
     let error = match (&file.found, &file.counts) {
-        (Err(error), _) | (Ok(_), Some(Err(error))) => Some(error.to_string()),
+        (Err(error), _) => Some(error.to_string()),
+        (Ok(stat), Err(error)) if is_binary(stat.stat_type) => Some(error.to_string()),
         _ => None,
     };
     json::optional_string(&mut out, error.as_deref());
@@ -275,16 +283,14 @@ impl CountsSource for RegisteredCounts {
                 ),
             });
         }
-        match &file.counts {
-            Some(counts) => counts.clone(),
-            // The engine asks for the counts only after the check found a binary format
-            // (`-window_masker_db`; LOSAT Web refuses `-window_masker_taxid`).
-            None => Err(WinMaskError::CreateFail {
-                message: format!(
-                    "LOSAT Web holds the WindowMasker counts {name} only in the two binary formats"
-                ),
-            }),
-        }
+        file.counts.clone()
+    }
+
+    /// A registered file is a file of its name (compared byte for byte, as the names of
+    /// `-window_masker_db`); nothing else is.
+    fn is_file(&self, path: &std::path::Path) -> bool {
+        path.to_str()
+            .is_some_and(|name| self.files.contains_key(name))
     }
 }
 
@@ -360,6 +366,49 @@ mod tests {
             }
             release(file).expect("release");
         }
+    }
+
+    // The file of `-window_masker_taxid` is read without NCBI's check of the format: the counts of a
+    // registered file are the command line's reader's result for any format.
+    #[test]
+    fn the_counts_of_any_format_are_the_readers() {
+        for (name, bytes) in [
+            ("empty.any", &b""[..]),
+            ("short.any", &b"abc"[..]),
+            ("text.any", &b"9\nAAAAAAAAA 3\n"[..]),
+        ] {
+            let (file, response) = register(name, bytes, 4);
+            let want = UnitCounts::read(&mut Cursor::new(bytes), &MaskerParams::default())
+                .map(|_| ())
+                .expect_err("not counts LOSAT reads");
+            let got = source()
+                .counts(name, &MaskerParams::default())
+                .map(|_| ())
+                .expect_err("the reader's error");
+            assert_eq!(got, want, "{name}");
+            assert!(response.contains("\"unit_size\":null"), "{response}");
+            release(file).expect("release");
+        }
+    }
+
+    #[test]
+    fn registered_names_are_the_files_of_the_taxid_directory() {
+        use std::path::Path;
+        let bytes = counts_bytes("mg1655_u9.obinary");
+        let name = format!("{WINDOW_MASKER_PATH}/77/wmasker.obinary");
+        let (file, _) = register(&name, &bytes, 1 << 16);
+        let held = source();
+        assert!(held.is_file(Path::new(&name)));
+        for other in [
+            "windowmasker/78/wmasker.obinary",
+            "windowmasker//77/wmasker.obinary",
+            "windowmasker/77",
+        ] {
+            assert!(!held.is_file(Path::new(other)), "{other}");
+        }
+        release(file).expect("release");
+        assert!(held.is_file(Path::new(&name)), "a run keeps its table");
+        assert!(!source().is_file(Path::new(&name)), "released");
     }
 
     #[test]

@@ -4,11 +4,14 @@ import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { Attention } from './application/attention';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
+import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
 import { ResultsBrowser } from './application/results';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
+import { browserCountsDeletions } from './infra/browser/counts-deletions';
+import { BrowserCountsDownloader } from './infra/browser/counts-downloader';
 import { browserExampleDeletions } from './infra/browser/example-deletions';
 import { BrowserFileDownloader } from './infra/browser/example-downloader';
 import { browserPage } from './infra/browser/page';
@@ -24,6 +27,8 @@ export interface App {
   readonly draft: SearchDraft;
   /** The Example sets that load into the draft (line WF-2). */
   readonly examples: ExampleLoader;
+  /** The WindowMasker counts of the taxonomy IDs, downloaded when the user asks (line WW2). */
+  readonly counts: CountsLoader;
   /** What the results screen shows (application/results.ts). */
   readonly results: ResultsBrowser;
   /** Wake lock, the warning before leaving, and the check after the page was hidden. */
@@ -77,6 +82,12 @@ export function createApp(options: AppOptions = {}): App {
     deletions: browserExampleDeletions(),
     saver: browserFileSaver,
   });
+  const counts = new CountsLoader({
+    downloader: new BrowserCountsDownloader({ store: data }),
+    store: data,
+    draft,
+    deletions: browserCountsDeletions(),
+  });
   const results = new ResultsBrowser({
     data,
     describe: (program) => engine.describe(program),
@@ -91,5 +102,5 @@ export function createApp(options: AppOptions = {}): App {
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, examples, results, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, examples, counts, results, attention, usesFakeEngine: ENGINE_ASSETS === null };
 }

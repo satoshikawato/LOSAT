@@ -943,7 +943,7 @@ const TOOLKIT_PROGRAMS: &[&str] = &[
 /// option's value too. The command line never brings `-version` here: `main` prints the version
 /// before parsing (`ncbi_version_request`). The Web engine, which parses its options here and
 /// has no version to print, refuses it.
-fn ncbi_preparsed_toolkit_word<'a>(tokens: &'a [OsString]) -> Option<&'a str> {
+fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
     let exact = |word: &str| {
         tokens

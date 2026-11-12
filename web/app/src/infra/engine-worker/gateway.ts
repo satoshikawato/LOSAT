@@ -39,16 +39,10 @@ import type {
 } from './protocol';
 
 /**
- * How long a runtime that ends during a search waits for the keeper to grow its memory
- * (retire). The keeper answers in milliseconds; it does not answer only if it is gone.
+ * How a runtime ended (retire): at once (no search runs on its threaded instance), or once the
+ * keeper grew the shared memory.
  */
-const KEEPER_TIMEOUT_MS = 1_000;
-
-/**
- * How a runtime ended (retire): at once (no search ran on its threaded instance), once the
- * keeper grew the shared memory, or after KEEPER_TIMEOUT_MS without the keeper's answer.
- */
-export type RuntimeEnd = 'at-once' | 'grown' | 'timeout';
+export type RuntimeEnd = 'at-once' | 'grown';
 
 export interface WasmEngineOptions {
   readonly assets: EngineAssets;
@@ -60,8 +54,6 @@ export interface WasmEngineOptions {
   readonly createWorker?: () => Worker;
   /** Loads the two modules; by default they are fetched, checked and compiled (tests replace it). */
   readonly loadModules?: () => Promise<{ readonly serial: ModuleSource; readonly threads: ModuleSource }>;
-  /** KEEPER_TIMEOUT_MS by default (tests change it). */
-  readonly keeperTimeoutMs?: number;
   /** Told how each runtime ended (tests record it). */
   readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
 }
@@ -257,10 +249,11 @@ export class WasmEngine implements EngineGateway {
       generation.threadedSearch = true;
       return;
     }
-    // A search ended: no thread of it runs. A stopped instance's Engine worker has also ended
-    // its thread workers and the keeper, or the search's threads never started, so the
-    // worker can end at once.
-    if (event.type === 'done') generation.threadedSearch = false;
+    // A search that returned, or failed without stopping its instance: its call into the
+    // instance returned, and a later end of the worker is at once. Threads of a search whose
+    // instance stopped may still run and grow the memory: the Engine worker keeps them and
+    // the keeper (runtime.ts), and the worker ends after the keeper's grow (retire).
+    if (event.type === 'done' && (event.ok || event.error.stopped !== true)) generation.threadedSearch = false;
     const active = this.active;
     if (active === undefined || active.settled || active.generation !== generation || active.runId !== event.runId) return;
     if (event.type === 'phase') {
@@ -299,9 +292,13 @@ export class WasmEngine implements EngineGateway {
    * During a search on the threaded instance, its threads may be growing the shared memory,
    * and WebKit crashes the page when workers with instances on a shared memory end while a
    * thread grows it (growToMaximum). The generation then ends once the keeper has grown the
-   * memory to its maximum, where no thread can grow it, or after KEEPER_TIMEOUT_MS if the
-   * keeper does not answer. Until then the ended search may still run and write to its output
-   * port, whose Data worker side the coordinator discards.
+   * memory to its maximum, where no thread can grow it. The keeper is itself a thread that
+   * grows the memory, so the worker does not end before its answer, however long the grow
+   * takes: on a busy machine it took up to 2 s, longer than the 1 s that the Gateway once
+   * waited before it ended the worker without the grow. The keeper lives as long as the
+   * Engine worker during such a search, also after the instance stopped (runtime.ts), and
+   * it answers also when the grow fails (memory-keeper.ts). Until then the ended search may
+   * still run and write to its output port, whose Data worker side the coordinator discards.
    */
   private retire(): void {
     const generation = this.current;
@@ -328,11 +325,8 @@ export class WasmEngine implements EngineGateway {
       end('at-once');
       return;
     }
-    const timer = setTimeout(() => end('timeout'), this.options.keeperTimeoutMs ?? KEEPER_TIMEOUT_MS);
     keeper.onmessage = (event: MessageEvent<KeeperGrown>) => {
-      if (event.data?.type !== 'grown') return;
-      clearTimeout(timer);
-      end('grown');
+      if (event.data?.type === 'grown') end('grown');
     };
     const grow: KeeperGrow = { type: 'grow' };
     keeper.postMessage(grow);

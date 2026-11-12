@@ -722,7 +722,6 @@ fn unix_program_name(
 
 /// `path` without its trailing '/'s (`CDirEntry::DeleteTrailingPathSeparator` on Unix,
 /// ncbifile.cpp:465-472): empty when it has only '/'s.
-#[cfg(any(unix, test))]
 fn trim_trailing_slashes(path: &[u8]) -> &[u8] {
     match path.iter().rposition(|&byte| byte != b'/') {
         Some(at) => &path[..=at],
@@ -831,9 +830,9 @@ fn trim_trailing_slashes(path: &[u8]) -> &[u8] {
 /// warning and stops following them: `None` then (a loop of links; the path that the system
 /// resolved to run the program, within its own limit of 40 links on Linux, never reaches it,
 /// but the name "ncbi" of a program before its arguments are set can, `program_directories`).
-/// Without `read_link`, never `None`.
-#[cfg(any(unix, test))]
-fn normalize_path(
+/// Without `read_link`, never `None`. rpsbproc's launch path (`rpsbproc::program_paths`,
+/// `eIgnoreLinks`) is normalized here on every target.
+pub(crate) fn normalize_path(
     path: &[u8],
     read_link: Option<&dyn Fn(&[u8]) -> Option<Vec<u8>>>,
 ) -> Option<Vec<u8>> {

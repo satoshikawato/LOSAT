@@ -1478,7 +1478,7 @@ pub fn build_pv_direct_lookup(
         let pv_size = (table_size + PV_ARRAY_MASK) >> PV_ARRAY_BTS;
         (pv_size, PV_ARRAY_BTS)
     };
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
 
     if debug_mode {
         let offsets_bytes = (table_size + 1) * std::mem::size_of::<u32>();
@@ -1777,7 +1777,7 @@ pub fn build_na_lookup(
     debug_assert!(word_length >= lut_word_length);
 
     let table_size = 1usize << (2 * lut_word_length);
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
 
     if debug_mode {
         let backbone_bytes = table_size * std::mem::size_of::<NaLookupBackboneCell>();
@@ -2026,7 +2026,7 @@ fn build_mb_lookup(
         db_word_counts.is_some(),
         lut_word_length,
     );
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
     let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
     let x_words = x_mb_lookup_par::Words {
         queries_blastna,
@@ -2378,7 +2378,7 @@ pub(crate) fn build_two_stage_lookup_kept(
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
     x_scan_letters: Option<u64>,
 ) -> TwoStageLookup {
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
 
     if debug_mode {
         eprintln!(
@@ -3008,7 +3008,7 @@ pub fn build_direct_lookup(
 ) -> DirectKmerLookup {
     let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
     let table_size = 1usize << (2 * safe_word_size); // 4^word_size
-    let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
+    let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();
 
     if debug_mode {
         let offsets_bytes = (table_size + 1) * std::mem::size_of::<u32>();

@@ -3802,6 +3802,72 @@ fn blast_greedy_align_rows(
     best_dist
 }
 
+/// The `xdrop_offset` that NCBI's greedy alignment computes for the raw X-drop `x_dropoff` with
+/// the search's scores (`BLAST_AffineGreedyAlign`, `BLAST_GreedyAlign`), in NCBI's `Int4`
+/// arithmetic as its x86-64 build of NCBI BLAST+ 2.17.0 runs it: an odd reward doubles the
+/// X-drop in two's complement (`INT_MIN`, a raw X-drop past `Int4`, doubles to 0). It is also
+/// the `d_diff` of the greedy memory (`s_BlastGreedyAlignMemAlloc`), with the larger of the two
+/// X-drops of the search. An offset of 0 or less makes NCBI read and write before its `max_score`
+/// array (`aux_data->max_score[index]` for the distances below the offset) or, for the memory,
+/// fail to allocate it (`BLAST engine error: Unknown error code -1`), so the search refuses such an
+/// X-drop (`scoring::check_gapped_x_dropoffs`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:801-811
+/// ```c
+///     if (match_score % 2 == 1) {
+///         match_score *= 2;
+///         mismatch_score *= 2;
+///         xdrop_threshold *= 2;
+///         in_gap_open *= 2;
+///         in_gap_extend *= 2;
+///     }
+///
+///     if (in_gap_open == 0 && in_gap_extend == 0) {
+///         return BLAST_GreedyAlign(seq1, len1, seq2, len2, reverse,
+///                                  xdrop_threshold, match_score,
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:452-453 (`BLAST_GreedyAlign`)
+/// ```c
+///     xdrop_offset = (xdrop_threshold + match_cost / 2) /
+///                            (match_cost + mismatch_cost) + 1;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:843-873
+/// ```c
+///     match_score_half = match_score / 2;
+///     op_cost = match_score + mismatch_score;
+///     gap_open = in_gap_open;
+///     gap_extend = in_gap_extend + match_score_half;
+///     score_common_factor = BLAST_Gdb3(&op_cost, &gap_open, &gap_extend);
+///     ...
+///     xdrop_offset = (xdrop_threshold + match_score_half) /
+///                                       score_common_factor + 1;
+/// ```
+pub(crate) fn greedy_xdrop_offset(
+    x_dropoff: i32,
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+) -> i32 {
+    let (mut match_score, mut mismatch_score, mut xdrop_threshold) = (reward, -penalty, x_dropoff);
+    let (mut gap_open, mut gap_extend) = (gap_open, gap_extend);
+    if match_score % 2 == 1 {
+        match_score *= 2;
+        mismatch_score *= 2;
+        xdrop_threshold = xdrop_threshold.wrapping_mul(2);
+        gap_open *= 2;
+        gap_extend *= 2;
+    }
+    if gap_open == 0 && gap_extend == 0 {
+        return xdrop_threshold.wrapping_add(match_score / 2) / (match_score + mismatch_score) + 1;
+    }
+    let match_score_half = match_score / 2;
+    let mut op_cost = match_score + mismatch_score;
+    let mut gap_extend = gap_extend + match_score_half;
+    let score_common_factor = gdb3(&mut op_cost, &mut gap_open, &mut gap_extend);
+    xdrop_threshold.wrapping_add(match_score_half) / score_common_factor + 1
+}
+
 /// Affine greedy alignment with optional traceback.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
 fn blast_affine_greedy_align(
@@ -3831,10 +3897,13 @@ fn blast_affine_greedy_align(
     let mut k: i32;
     let mut longest_match_run: i32;
 
+    // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) doubles to 0, as NCBI's x86-64 build
+    // computes it; the search refused every X-drop whose offset this leaves at 0 or less
+    // (`greedy_xdrop_offset`), so the sums below stay in `Int4`.
     if match_score % 2 == 1 {
         match_score *= 2;
         mismatch_score *= 2;
-        xdrop_threshold *= 2;
+        xdrop_threshold = xdrop_threshold.wrapping_mul(2);
         in_gap_open *= 2;
         in_gap_extend *= 2;
     }

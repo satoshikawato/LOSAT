@@ -4,7 +4,6 @@
 use super::args::BlastnArgs;
 use super::blast_engine::NO_DATA_MESSAGE;
 use super::coordination::determine_scoring_params;
-use super::ncbi_cutoffs::NCBIMATH_LN2;
 use super::pairwise::query_ungapped_karlin_blastna;
 use crate::blastinput::report_counts::{run_report_counts, ReportCounts};
 use crate::cli::NativeError;
@@ -652,7 +651,9 @@ pub(crate) fn context_blocks_ungapped(
 /// ```
 /// Gapped blocks from the tables are the same for every context; blocks copied from the
 /// ungapped ones differ with the composition, so the X-drops depend on the contexts of the
-/// batch. Without a valid context the batch is not searched.
+/// batch. Without a valid context the batch is not searched. The conversion is the protein
+/// programs' (`core::x_drop::gapped_x_dropoffs`): a value past `Int4` is `INT_MIN`, as the
+/// x86-64 build of NCBI BLAST+ 2.17.0 converts it.
 pub(crate) fn gap_x_dropoffs(
     context_karlin: &[Option<ContextKarlin>],
     x_drop_gapped_bits: f64,
@@ -664,9 +665,67 @@ pub(crate) fn gap_x_dropoffs(
         .map(|blocks| blocks.gapped.lambda)
         .reduce(f64::min)
         .unwrap_or(KarlinParams::default().lambda);
-    let gapped = (x_drop_gapped_bits * NCBIMATH_LN2 / min_lambda) as i32;
-    let finale = (x_drop_final_bits * NCBIMATH_LN2 / min_lambda).max(gapped as f64) as i32;
-    (gapped, finale)
+    crate::core::x_drop::gapped_x_dropoffs(x_drop_gapped_bits, x_drop_final_bits, min_lambda)
+}
+
+/// The refusal, before a batch's subjects are searched, of the gapped X-drops (raw,
+/// [`gap_x_dropoffs`]) that NCBI's kernels cannot run with the search's scores:
+/// - dynamic programming (`use_dp`): the final X-drop of `ALIGN_EX` past the sizes that NCBI keeps
+///   in `Int4` (`core::x_drop::kernel_x_drop_fits`, as the protein programs refuse it). The
+///   preliminary stage runs with the smaller of the X-drop and the HSP's ungapped score
+///   (`s_BlastDynProgNtGappedAlignment`), so no preliminary X-drop is refused;
+/// - greedy extension (`-task megablast`): an X-drop of either stage whose `xdrop_offset`
+///   (`alignment::greedy::greedy_xdrop_offset`) is 0 or less: NCBI then reads and writes before
+///   its `max_score` array or fails to allocate it (NCBI 2.17.0: `BLAST engine error: Unknown
+///   error code -1`, or a crash on a corrupted heap, line RG X1b probe).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3008-3010
+/// ```c
+///    Int4 x_dropoff =  gap_align->gap_x_dropoff;
+///    if(init_hsp->ungapped_data->score < x_dropoff) x_dropoff = init_hsp->ungapped_data->score;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:496-498
+/// ```c
+///     max_score = aux_data->max_score + xdrop_offset;
+///     for (index = 0; index < xdrop_offset; index++)
+///         aux_data->max_score[index] = 0;
+/// ```
+pub(crate) fn check_gapped_x_dropoffs(
+    use_dp: bool,
+    (gap_bits, final_bits): (f64, f64),
+    (gapped, finale): (i32, i32),
+    (reward, penalty): (i32, i32),
+    (gap_open, gap_extend): (i32, i32),
+) -> anyhow::Result<()> {
+    // The final X-drop is the larger of its own and the preliminary one: when they are equal,
+    // `-xdrop_gap` set it.
+    let (final_option, final_bits) = if finale == gapped {
+        ("-xdrop_gap", gap_bits)
+    } else {
+        ("-xdrop_gap_final", final_bits)
+    };
+    if use_dp {
+        if !crate::core::x_drop::kernel_x_drop_fits(finale, gap_open, gap_extend) {
+            return Err(crate::core::x_drop::kernel_x_drop_error(
+                "BLASTN",
+                final_option,
+                final_bits,
+            ));
+        }
+        return Ok(());
+    }
+    use super::alignment::greedy::greedy_xdrop_offset;
+    for (option, bits, x_dropoff) in [
+        ("-xdrop_gap", gap_bits, gapped),
+        (final_option, final_bits, finale),
+    ] {
+        if greedy_xdrop_offset(x_dropoff, reward, penalty, gap_open, gap_extend) <= 0 {
+            anyhow::bail!(
+                "an {option} of {bits:?} bits, whose raw X-drop makes NCBI BLAST+'s greedy alignment (-task megablast) read and write outside its arrays or fail to allocate them, is not supported by LOSAT's BLASTN"
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@
 
 use anyhow::Result;
 
+use super::redo::RpsQueryStats;
 use super::rescale::{residue_probabilities, rps_rescale_pssm};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHsp, BlastpHspList};
@@ -267,8 +268,9 @@ impl RpsTraceback<'_> {
         stats: EvalueStats<'_>,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
-        if self.redo.is_some() {
-            return self.trace_query_redo(prelim, query, q_idx, batch_kbp, stats, scratch);
+        if let Some(redo) = self.redo.as_ref() {
+            let statistics = RpsQueryStats { batch_kbp, stats };
+            return self.trace_query_redo(redo, prelim, query, q_idx, statistics, scratch);
         }
         let probabilities = residue_probabilities(query);
         let mut lists: Vec<BlastpHspList<XPrelimHsp>> = prelim

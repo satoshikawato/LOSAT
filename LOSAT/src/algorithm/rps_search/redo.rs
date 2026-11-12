@@ -58,6 +58,14 @@ pub(crate) struct RpsRedoParams<'a> {
     pub(crate) x_drop_final_bits: f64,
 }
 
+/// The statistics the traceback of one query reads: the batch's ungapped Karlin block and the
+/// query's E-value statistics in this volume.
+#[derive(Clone, Copy)]
+pub(super) struct RpsQueryStats<'a> {
+    pub(super) batch_kbp: &'a KarlinParams,
+    pub(super) stats: EvalueStats<'a>,
+}
+
 impl RpsTraceback<'_> {
     /// The redo of the query of letters `query` (without sentinels) from its preliminary hit
     /// list. NCBI reads the lists in the order of the stream: sorted by best E-value, then the
@@ -82,17 +90,14 @@ impl RpsTraceback<'_> {
     /// (`kbp_psi[0]`).
     pub(super) fn trace_query_redo(
         &self,
+        redo: &RpsRedoParams<'_>,
         mut prelim: BlastpHitList<XPrelimHsp>,
         query: &[u8],
         q_idx: u32,
-        batch_kbp: &KarlinParams,
-        stats: EvalueStats<'_>,
+        statistics: RpsQueryStats<'_>,
         scratch: &mut RpsTraceScratch,
     ) -> Result<RpsTraced> {
-        let redo = self
-            .redo
-            .as_ref()
-            .expect("the redo runs with the redo's parameters");
+        let RpsQueryStats { batch_kbp, stats } = statistics;
         prelim.sort_by_evalue();
         let count = prelim.hsplist_count;
         let mut hit_list: Option<BlastpHitList> = None;

@@ -1567,7 +1567,7 @@ fn refuse_id_of_a_query(
         return Err(parsed_refusal(
             ordinal,
             "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \
-             for it)",
+             for it in the reports of that query's batch)",
             program,
         ));
     }

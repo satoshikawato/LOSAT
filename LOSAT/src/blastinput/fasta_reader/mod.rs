@@ -232,6 +232,23 @@ impl FastaRecord {
         self.source.as_ref()?.believed.as_deref()
     }
 
+    /// The record whose Seq-id is its local id `local_id` (a string), shown as `-parse_deflines`
+    /// shows the ids it read: psiblast `-in_pssm`, whose query is the PSSM's Bioseq, and whose
+    /// local id NCBI's formatter then shows (`Query= Query_1 <title>`, `qseqid` `Query_1`). An
+    /// integer local id (`local id 5`) shows as the string of its digits does.
+    pub fn believing_local_id(mut self) -> Self {
+        use crate::seqid::model::{ObjectId, ParsedSeqId};
+        let ids = vec![ParsedSeqId::Local(ObjectId::Str(
+            self.local_id.clone().into_bytes(),
+        ))];
+        let believed =
+            believed::BelievedIds::new(ids, crate::report::archive::bioseq::SeqLocStrand::Unknown);
+        self.local_id = believed.bare_id();
+        self.source.get_or_insert_with(Default::default).believed =
+            Some(std::sync::Arc::new(believed));
+        self
+    }
+
     /// What `Query=` and `# Query:` show: the title, and with `-parse_deflines` the id before it
     /// (`local_id`, `BelievedIds::bare_id`).
     ///

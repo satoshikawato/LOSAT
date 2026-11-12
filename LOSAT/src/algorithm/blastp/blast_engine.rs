@@ -7687,7 +7687,6 @@ fn write_reports_without_queries(
                 };
                 let config = PairwiseConfig {
                     line_length: 60,
-                    show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
@@ -11319,7 +11318,6 @@ fn run_resolved_in_pool(
                 gap_open: ((args.scoring.gap_open as f64) * local_scaling_factor).round() as i32,
                 gap_extend: ((args.scoring.gap_extend as f64) * local_scaling_factor).round()
                     as i32,
-                decline_align: 0,
                 x_dropoff: blastp_redo_x_dropoff(
                     scaled_gapped_lambda,
                     &gapped_params,
@@ -11335,7 +11333,6 @@ fn run_resolved_in_pool(
             // ```
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: i32::from(args.comp_based_stats.unified_p),
-            unified_p: args.comp_based_stats.unified_p,
             log_k: gapped_params.k.ln(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3584-3690
             // ```c
@@ -11345,24 +11342,19 @@ fn run_resolved_in_pool(
             //                          localScalingFactor);
             // ```
             score_divisor: local_scaling_factor,
-            restricted_alignment: false,
             smith_waterman: false,
             near_identical_cutoff: blastp_redo_near_identical_cutoff(scaled_gapped_lambda),
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: contexts[q_idx].aa_len as i32,
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: blastp_redo_cutoff_score(do_link_hsps, 0, local_scaling_factor),
-            cutoff_evalue: args.evalue,
-            do_link_hsps,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:382-406
             // ```c
             // Nearly identical alignments are computed with exact subjects,
             // and others with segged subjects; this makes comparing end
             // points more difficult.
             // ```
-            is_same_adjustment: false,
         })
     };
 
@@ -12738,8 +12730,6 @@ fn run_resolved_in_pool(
         None => total_db_len,
     };
     let context = ReportContext {
-        query_name: None,
-        query_length: query_lengths.first().copied(),
         subject_name: Some(subject_name_label.clone()),
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
         // ```c++
@@ -12754,8 +12744,6 @@ fn run_resolved_in_pool(
             Some(database) => database.name().to_string(),
             None => format!("User specified sequence set (Input: {subject_input_label})"),
         }),
-        database_num_sequences: Some(shown_num_sequences),
-        database_total_letters: Some(shown_total_letters),
         program: args.app.ncbi_name().to_string(),
     };
 
@@ -13703,7 +13691,6 @@ fn run_resolved_in_pool(
                 // (`args.line_length`: rpsblast's `-line_length`, else 60.)
                 let pairwise_config = PairwiseConfig {
                     line_length: args.line_length,
-                    show_gi: false,
                     show_frame: false,
                     program: args.app.ncbi_name().to_string(),
                     protein_matrix: args.scoring.matrix,
@@ -14530,7 +14517,6 @@ mod tests {
     fn make_query_context(q_idx: u32, frame_base: i32) -> QueryContext {
         QueryContext {
             q_idx,
-            f_idx: 0,
             frame: 1,
             aa_seq: vec![0, 1, 2, 3, 0],
             aa_seq_nomask: None,

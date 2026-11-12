@@ -22,9 +22,7 @@ use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
-pub use istat::{
-    discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
-};
+pub use istat::{discover_stat_type, FormatSite, StatFile, StatType, UnitCounts};
 pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
@@ -189,6 +187,7 @@ const UNIT_STEP: u8 = 1;
 
 impl SeqMasker {
     /// `s_BuildSeqMasker( lstat )` with `params` in place of its zeros.
+    #[cfg(test)]
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
         Self::new(Arc::new(UnitCounts::open(path, params)?), params)
     }
@@ -224,10 +223,12 @@ impl SeqMasker {
         Ok(Self { ustat, window_size })
     }
 
+    #[cfg(test)]
     pub fn unit_counts(&self) -> &UnitCounts {
         &self.ustat
     }
 
+    #[cfg(test)]
     pub fn window_size(&self) -> u8 {
         self.window_size
     }

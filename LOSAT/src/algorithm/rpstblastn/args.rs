@@ -277,6 +277,12 @@ impl RpstblastnArgs {
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,
             searchsp: None,
+            // `-xdrop_ungap` reaches NCBI's options check in BLASTX's resolve ("x_dropoff must be
+            // greater than zero"); the search's X-drops are the RPS engine's, at the database's
+            // scale (`RpsSearch`), so BLASTX's gapped ones keep their defaults.
+            xdrop_ungap: self.xdrop_ungap,
+            xdrop_gap: None,
+            xdrop_gap_final: None,
             out: self.out,
             task: "blastx".to_string(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67

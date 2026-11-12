@@ -680,7 +680,10 @@ pub(super) fn run_local(
                 let args = psiblast_args(args, outputs)?;
                 run_local_database_blastp(args, query, settings("psiblast")?, outputs)
             }
-            Commands::Rpsblast(_) | Commands::Rpstblastn(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
+            Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => {
                 unreachable!("Program::parse admits the search programs only")
             }
         };
@@ -726,7 +729,10 @@ pub(super) fn run_local(
             let args = psiblast_args(args, outputs)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
-        Commands::Rpsblast(_) | Commands::Rpstblastn(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
+        Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     }
@@ -932,7 +938,10 @@ fn set_output_file(command: &mut Commands, path: &Path) {
         Commands::Tblastx(args) => args.out = out,
         Commands::Blastx(args) => args.out = out,
         Commands::Psiblast(args) => args.out = out,
-        Commands::Rpsblast(_) | Commands::Rpstblastn(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => {
+        Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
             unreachable!("Program::parse admits the search programs only")
         }
     }

@@ -4,7 +4,7 @@ use std::ffi::{OsStr, OsString};
 
 /// The names that run a program without its subcommand word (`entry_argv`), as `losat
 /// --install-shims` links them. No NCBI counterpart: NCBI has one executable per program.
-pub const ENTRY_NAMES: [&str; 10] = [
+pub const ENTRY_NAMES: [&str; 11] = [
     "blastn",
     "blastp",
     "blastx",

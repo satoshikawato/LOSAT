@@ -164,10 +164,6 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         self.formatting
     }
 
-    fn ungapped_x_dropoff(&self) -> Option<f64> {
-        self.search.x_drop_ungapped_bits
-    }
-
     fn merges_volumes(&self) -> bool {
         self.several_volumes
     }
@@ -785,8 +781,6 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("crashes after an ungapped search"));
-        search.search.x_drop_ungapped_bits = Some(-1.0);
-        assert_eq!(search.ungapped_x_dropoff(), Some(-1.0));
         assert!(!search.merges_volumes());
         assert_eq!(
             search.formatting(),

@@ -482,9 +482,6 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
     /// `-line_length`, `-sorthits` and `-sorthsps`, which BLASTX does not have: the formatting
     /// handler's warnings (`native::warnings_of`) and the pairwise report's line length.
     fn formatting(&self) -> crate::blastinput::report_counts::FormattingArgs;
-    /// `-xdrop_ungap` in bits as given, which BLASTX does not have: its check is NCBI's options'
-    /// (`resolve`).
-    fn ungapped_x_dropoff(&self) -> Option<f64>;
     /// Whether the batches' results are merged over a database of several volumes, as NCBI's
     /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no
     /// query warning, `report::query_warning`) and gives a batch that was not searched an empty
@@ -1079,23 +1076,6 @@ impl BlastxArgs {
         // 		return BLASTERR_OPTION_VALUE_INVALID;
         // 	}
         // ```
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:608-618 (the
-        // ungapped X-drop of RPSTBLASTN, `-xdrop_ungap`; quoted at
-        // `protein_options_check::validate_protein_options`)
-        // ```c
-        //    if (program_number != eBlastTypeBlastn  &&
-        //        program_number != eBlastTypeMapping &&
-        //        (!Blast_ProgramIsPhiBlast(program_number)) &&
-        //        options->x_dropoff <= 0.0)
-        // ```
-        if self
-            .rpstblastn
-            .as_ref()
-            .and_then(|search| search.ungapped_x_dropoff())
-            .is_some_and(|x_dropoff| x_dropoff <= 0.0)
-        {
-            return Err(SemanticOptionsError::from("x_dropoff must be greater than zero").into());
-        }
         if counts.hitlist_size < 1 {
             return Err(SemanticOptionsError::from("No hits are being saved").into());
         }

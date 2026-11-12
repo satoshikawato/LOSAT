@@ -242,7 +242,7 @@ impl Cut {
 
     /// The pairs `run` of the word at subject offset `s`, in order, through `pair`, while `out`
     /// has room: all of them, or those before the first pair it has no room for, where the cut
-    /// stops (and `out` is closed, so the later words take this cold path and leave). The first
+    /// stops (and `out` is closed, so the later words leave at the test of `go`). The first
     /// word passes over the pairs the pieces before took. `pair` pushes at most one seed.
     #[inline(always)]
     fn run<O: SeedOut>(
@@ -254,39 +254,33 @@ impl Cut {
     ) {
         let skip = self.skip.replace(0) as usize;
         let run = &run[skip..];
-        if run.len() <= out.room() {
-            for &q in run {
-                pair(q, out);
-            }
-            return;
-        }
-        self.run_cold(s, skip, run, out, pair);
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn run_cold<O: SeedOut>(
-        &self,
-        s: usize,
-        skip: usize,
-        run: &[u32],
-        out: &mut O,
-        mut pair: impl FnMut(u32, &mut O),
-    ) {
-        if !self.go() {
+        // (one loop that calls `pair` at one place, so that it is inlined into the loop as the
+        // strips' scan inlines `seed_of_pair`: called from a second loop it stayed a call per
+        // pair, about 30 instructions more per seed, results/s14p of line EB; the room test runs
+        // only for a run that may not fit, `fits` being the same for the whole loop)
+        let fits = run.len() <= out.room();
+        if !fits && !self.go() {
             return;
         }
         for (j, &q) in run.iter().enumerate() {
-            if out.room() == 0 {
-                self.stop.set(Some(Resume {
-                    skip: (skip + j) as u32,
-                    ..Resume::at(s)
-                }));
-                out.close();
+            if !fits && out.room() == 0 {
+                self.stop_at(s, skip + j, out);
                 return;
             }
             pair(q, out);
         }
+    }
+
+    /// The cut at the pair `skip` of the run of the word at `s` (the first pair `out` has no
+    /// room for): the scan stops there and `out` is closed.
+    #[cold]
+    #[inline(never)]
+    fn stop_at<O: SeedOut>(&self, s: usize, skip: usize, out: &mut O) {
+        self.stop.set(Some(Resume {
+            skip: skip as u32,
+            ..Resume::at(s)
+        }));
+        out.close();
     }
 
     /// For a word whose pairs are chains: where the first word's walk of its chain starts (the

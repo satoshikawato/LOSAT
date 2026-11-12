@@ -1,6 +1,6 @@
 # Inputs of the `-db` fixtures
 
-Used by `LOSAT/tests/db_search_fixtures.py` and `LOSAT/tests/db_search_manifest.tsv` (rows that run
+Used by `LOSAT/tests/db_search_fixtures.py` and `LOSAT/tests/db_search_manifest/` (rows that run
 `losat blastp -db ...`, `losat blastn -db ...`, `losat tblastn -db ...`, `losat blastx -db ...` or `losat tblastx -db ...` against frozen NCBI BLAST+ 2.17.0
 `blastp -db ...`, `blastn -db ...`, `tblastn -db ...`, `blastx -db ...` or `tblastx -db ... -num_threads 1` bytes; the manifest's `program` column says which). NCBI is the
 comparison oracle only; the tests read the committed files and run no NCBI program.
@@ -1023,7 +1023,7 @@ most 9 in BLOSUM62).
       makeblastdb -in "pa1 pb1 pc1 pd1" -input_type blastdb -dbtype prot -blastdb_version 4 -title "nz reppo" \
           -out $D/nz_reppo
 
-## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a and PS11b)
+## `rps/`: the RPS-BLAST profile databases (line PS, series PR, PS11a, PS11b and PS11c-1)
 
 - `rps_mini` (version 5), `rps_mini4` (version 4) and `rps_mini26` (version 4, a 26-column `.rps` with the 26-letter
   magic `0x1e16` in `.rps` and `.loo`, its `.freq` left at 28 columns, as NCBI's own test database `rpstest_le`):
@@ -1045,8 +1045,15 @@ most 9 in BLOSUM62).
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
 - Queries: `tests/fasta/WSSV.faa` (177 records, 10 query batches; its long records share diagonals of the 1,024-entry
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt
-  0 K of each batch's first query) and `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30
-  and a J at 60, part of the ribonucleotide reductase).
+  0 K of each batch's first query), `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30
+  and a J at 60, part of the ribonucleotide reductase) and `tests/fasta/rps/mask.faa` (PS11c-1, the masks:
+  `YP_009220478.1` of `WSSV.faa` as it is, whose acidic low-complexity run SEG masks, and `YP_009220601.1`, the TK-TMK
+  record, as `tk_lc` with its residues 61-120 in lower case for `-lcase_masking`; lines of 60 letters, 819 bytes. Made
+  from `WSSV.faa` by taking the two records, renaming the second and lowering the case of its letters 61-120), and
+  `tests/fasta/rps/nident_gate.faa` (PS11c-1 review: record `BDT63522.1` of `tests/fasta/PajaWSV.faa`, lines of 60
+  letters, 1,563 bytes, with 401 of its 1,473 letters in lower case at random: Python's `random.seed(7)`, then one
+  `random.random() < 0.3` draw per letter over the first 30 records of `PajaWSV.faa` in file order, a letter lowered
+  where it is true; with `-lcase_masking` some of its HSPs have identities on masked letters only).
 
 ## outfmt 11 titles where NCBI's search fails (line NP, series SM, DECISIONS 25)
 
@@ -1064,6 +1071,37 @@ Rows `db.archtitle.*.nosq.*` search databases without their sequence file:
 A database without its header file fails the first batch whose hits read a definition line, with a message that holds the
 file's absolute path; that case is `a_title_in_the_batch_that_a_missing_header_file_fails_is_not_refused` in
 `tests/outfmt11_titles.rs` (a temporary database made by `LOSAT makeblastdb`).
+
+## Databases with column files (line SW, SW8 follow-up 2)
+
+Rows `db.col.*` search databases whose volumes have column files: a column is the files `.?Xa` (index), `.?Xb`
+(big-endian data) and `.?Xc` (little-endian data) for a letter X, and `makeblastdb -mask_data` writes the masks as the
+column `BlastDb/MaskData` (`.paa .pab .pac`, `.naa .nab .nac`). NCBI's searches open a volume's columns only through
+`CSeqDBVol::x_OpenAllColumns`, which runs only for a masking algorithm named by `-db_soft_mask`, `-db_hard_mask` or an
+imported search strategy (`-import_search_strategy`; LOSAT refuses all three: rows `db.col.rej.*` for the first two),
+so a search without one writes the bytes of the same database without its columns, whatever the column files hold.
+`coldb/` holds what `make_coldb.py NCBI_BIN` builds (makeblastdb, segmasker, dustmasker and windowmasker 2.17.0; the
+records and taxids of `taxfilter/tfp.faa`, `tfp.map`, `tfn.fna` and `tfn.map`; `.pjs` and `.njs` dropped), and the
+files below that it does not build:
+
+- `p5m`: version 5 protein, `-parse_seqids`, taxid map, the seg masks of `segmasker -parse_seqids` (algorithm 21).
+- `p4m`: version 4 protein without `-parse_seqids`, the seg masks of `segmasker`.
+- `n5m`: version 5 nucleotide, `-parse_seqids`, taxid map, two volumes (`-max_file_sz 4KB`), each with its column, the
+  masks of `dustmasker -parse_seqids` (11) and `windowmasker -parse_seqids` (30).
+- `n4m`: version 4 nucleotide without `-parse_seqids`, the masks of `dustmasker`.
+- `dmg/CASE/p4m` (twelve cases) and `dmg/CASE/n4m` (`idx_junk`, `data_cut`, `be_only`): copies of `p4m` and `n4m` whose
+  column is damaged (`make_coldb.py` `DAMAGE`): the index cut, junk, empty or of format version 2, the data files cut or
+  junk, one data file or both missing, the index missing, the column of a database of 6 sequences, the column twice under
+  two letters. NCBI's column reader stops on most of them (`blastdbcmd -info`, or a search with `-db_soft_mask`); its
+  searches without a database mask do not read them.
+- `ucol/user-column-db.*` (not built by the script): every file of NCBI's
+  `c++/src/algo/blast/unit_tests/seqdb_reader/data/user-column-db`, copied as it is (598d8ae6; six proteins with parsed Seq-ids and the user column `comedy`, its big-endian data file `.pab` alone; NCBI's
+  tools cannot write a user column). `tests/seqdb/db` holds the same database without its ISAM files, on which NCBI's
+  outfmt 6 and 7 stop with a null pointer exception, columns or not. `uq.faa` (calfumirin-1, XP_642131.1) and `uq.fna`
+  (its back-translation by hand, one fixed codon per amino acid; neither built by the script) are the queries of its
+  rows.
+
+The other queries are `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX).
 
 ## ADAPTIVE_CBS (line SW, env parity G2+G3)
 

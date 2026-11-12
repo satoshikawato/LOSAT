@@ -30,8 +30,8 @@
 //! and the subject's residues): the query's coordinates in the record (start above the end on a
 //! minus frame) and its frame, the subject's coordinates, the scores, the alignment's lengths and
 //! gaps, and the two rows (the query's codons translated, `report::alignment`), from which it
-//! counts the identities and, with the formatter's matrix (`GetAsciiProteinMatrix` of BLOSUM62),
-//! the positives again (`report::tabular::TabularWriter::row`). The subject frame is 0
+//! counts the identities and, with the formatter's matrix (`GetAsciiProteinMatrix` of the search's
+//! matrix), the positives again (`report::tabular::TabularWriter::row`). The subject frame is 0
 //! (`sframe`, and the second number of `frames`), `sstrand` is `N/A` (a protein subject) and
 //! `qcovus` is `N/A` (NCBI computes it for blastn only).
 
@@ -312,7 +312,7 @@ pub(super) fn write_blastx_tabular(
     // ```c++
     //     CAlignFormatUtil::GetAsciiProteinMatrix(m_MatrixName, m_ScoringMatrix);
     // ```
-    // BLASTX searches with BLOSUM62 only (`args.rs`).
+    // The search's matrix (`-matrix`, item SC6 of line NP).
     let table = TabularWriter {
         spec,
         program_version: PROGRAM_VERSION,

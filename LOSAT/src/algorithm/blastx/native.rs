@@ -15,8 +15,8 @@ use super::{
     // }
     // ```
     input::{
-        parse_fasta_stream_keeping, stream_is_empty, FastaParseError, FastaStream, InputWarning,
-        NoDeflineError, QueryStreamSettings,
+        parse_fasta_stream_keeping, read_fasta_stream_batches, stream_is_empty, FastaParseError,
+        FastaStream, InputWarning, NoDeflineError, QueryStreamSettings,
     },
     query_setup::BATCH_SIZE,
     report,
@@ -350,12 +350,22 @@ fn run_inner(
     hold_slot.clone_from(&hold);
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.
-    let resolution = args.resolve();
+    let mut resolution = args.resolve();
     if resolution
         .as_ref()
         .is_err_and(|e| e.downcast_ref::<SemanticOptionsError>().is_none())
     {
         return resolution.map(|_| ());
+    }
+    // An ungapped search's `-matrix` that NCBI's tables do not have is looked for as a file when
+    // NCBI sets up a query batch (`ApplicationSettings::matrix_file`): the first batch is refused
+    // then (`query_setup::matrix_error_message`), and a run without a batch reads no file.
+    if let Ok(options) = &mut resolution {
+        if options.unknown_matrix {
+            options.matrix_file = settings
+                .matrix_file(&options.matrix)
+                .map_err(anyhow::Error::msg)?;
+        }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3157-3165
     // ```c++
@@ -1156,7 +1166,7 @@ fn run_inner(
         search_subjects,
         args.parse_deflines,
         &mut |deliver, warn| {
-            parse_fasta_stream_keeping(
+            read_fasta_stream_batches(
                 &mut query_stream,
                 false,
                 args.lcase_masking,
@@ -1552,13 +1562,13 @@ pub(super) fn write_empty_subject_warnings(
 }
 
 /// A reader of a run's query batches (`run_query_batches`): it delivers each reader batch and
-/// writes the bytes of each reader warning, in the reader's order, and returns the records it
-/// keeps. The command line reads the query file (`parse_fasta_stream_keeping`) and keeps every
-/// record; LOSAT Web's `run_local` delivers the records its host registered and keeps none.
+/// writes the bytes of each reader warning, in the reader's order, and keeps no record (the search
+/// holds the batches it searches). The command line reads the query file
+/// (`read_fasta_stream_batches`); LOSAT Web's `run_local` delivers the records its host registered.
 pub(super) type QueryBatchReader<'r> = dyn FnMut(
         &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
         &mut dyn FnMut(&[u8]) -> Result<()>,
-    ) -> Result<Vec<FastaRecord>>
+    ) -> Result<()>
     + 'r;
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
@@ -2531,7 +2541,8 @@ type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
 // searched alone. At most `bound` batches are read and not yet written. `split` makes a reader
 // batch its units (the flow's batches); a reader batch of several units (in the capped flow with
 // `LOSAT_X_BXCAPFILL`, every reader batch) is prepared by `prepare` (phase 1, one task per unit)
-// before any of its units is searched. Returns what the reader returns.
+// before any of its units is searched. Returns the reader's error, if any (the reading stops at
+// the first batch whose search or write fails).
 // No NCBI counterpart: scheduling of the batch searches only (NCBI's -mt_mode 1 runs batches as
 // nodes and prints them in order, blastx_app.cpp:345-357, cited in `run`); every value written
 // is computed by the same calls as without the switch, in the same order of writing.
@@ -2553,7 +2564,7 @@ fn x_flow(
         Result<Vec<BatchResults>>,
     ) -> Result<()>,
     write_warning: &mut dyn FnMut(&[u8]) -> Result<()>,
-) -> Result<Vec<FastaRecord>> {
+) -> Result<()> {
     use super::x_timing::Run as XRun;
     use std::cell::{Cell, RefCell};
     use std::collections::{BTreeMap, VecDeque};

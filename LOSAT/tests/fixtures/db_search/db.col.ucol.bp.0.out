@@ -1,0 +1,76 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User defined column
+           6 sequences; 1,106 total letters
+
+
+
+Query= uq1 calfumirin-1 query
+
+Length=169
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_642131.1 calfumirin-1 [Dictyostelium discoideum AX4]               337     7e-125
+
+
+>XP_642131.1 calfumirin-1 [Dictyostelium discoideum AX4]
+ P54670 Calfumirin-1 (CAF-1)
+ BAA06266.1 calfumirin-1 [Dictyostelium discoideum]
+ EAL68086.1 calfumirin-1 [Dictyostelium discoideum AX4]
+Length=169
+
+ Score = 337 bits (864),  Expect = 7e-125, Method: Compositional matrix adjust.
+ Identities = 169/169 (100%), Positives = 169/169 (100%), Gaps = 0/169 (0%)
+
+Query  1    MASTQNIVEEVQKMLDTYDTNKDGEITKAEAVEYFKGKKAFNPERSAIYLFQVYDKDNDG  60
+            MASTQNIVEEVQKMLDTYDTNKDGEITKAEAVEYFKGKKAFNPERSAIYLFQVYDKDNDG
+Sbjct  1    MASTQNIVEEVQKMLDTYDTNKDGEITKAEAVEYFKGKKAFNPERSAIYLFQVYDKDNDG  60
+
+Query  61   KITIKELAGDIDFDKALKEYKEKQAKSKQQEAEVEEDIEAFILRHNKDDNTDITKDELIQ  120
+            KITIKELAGDIDFDKALKEYKEKQAKSKQQEAEVEEDIEAFILRHNKDDNTDITKDELIQ
+Sbjct  61   KITIKELAGDIDFDKALKEYKEKQAKSKQQEAEVEEDIEAFILRHNKDDNTDITKDELIQ  120
+
+Query  121  GFKETGAKDPEKSANFILTEMDTNKDGTITVKELRVYYQKVQKLLNPDQ  169
+            GFKETGAKDPEKSANFILTEMDTNKDGTITVKELRVYYQKVQKLLNPDQ
+Sbjct  121  GFKETGAKDPEKSANFILTEMDTNKDGTITVKELRVYYQKVQKLLNPDQ  169
+
+
+
+Lambda      K        H        a         alpha
+   0.309    0.129    0.344    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 128714
+
+
+  Database: User defined column
+    Posted date:  Dec 4, 2007  5:13 PM
+  Number of letters in database: 1,106
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

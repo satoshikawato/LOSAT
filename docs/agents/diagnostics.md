@@ -4347,7 +4347,7 @@ Scheduling (each value computed by one thread with the original function; order 
   or several one at a time under `LOSAT_X_BNFEWSUBJ`): the preliminary gapped
   loop of a subject chunk and the traceback of the subject run per query on the search pool instead of on the thread
   that owns the subject over all queries in one order (`blastn/blast_engine/x_qgroup_par.rs`, dispatched in
-  `search_query_batch`). NCBI runs both loops of a subject on one thread with one interval tree
+  `search_query_batch` for the preliminary loop and in `traceback_list::traceback_subject_hits` for the traceback). NCBI runs both loops of a subject on one thread with one interval tree
   (`blast_gapalign.c:3850,3917-3922`, `blast_traceback.c:375,404-405`); with one subject (`-subject` with one record,
   the loop's batches of a query file) the look-ahead helpers only computed alignments ahead of that loop, and the two
   loops with the purges and sorts around them were 57 % of a blastn batch's wall at 16 threads (5,000 and 31,168 cDNAs
@@ -4356,7 +4356,7 @@ Scheduling (each value computed by one thread with the original function; order 
   comparator (stable), runs the same loop body (the loop is a closure, `x_prelim_list`, called once on the owner with
   the look-ahead helpers or once per query without them) and purges its list; the purged lists are concatenated in query
   order and sorted by score as before (rayon's stable `par_sort_by` on the search pool). The kept HSPs of the traceback
-  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`x_trace_list`, no
+  are the queries' hit lists one after another, so each query's slice runs the traceback loop (`trace_hsp_list`, no
   helpers and no speculative batches in a task), the passes up to the second purge (`traceback_post_purge`) and the score sort,
   final tree and e-values (`traceback_final_list`); the final lists are concatenated in query order and sorted stably by score.
   The queries are handed out from an atomic counter, the query with the most HSPs first (ungapped hits per query before

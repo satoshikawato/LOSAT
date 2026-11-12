@@ -270,7 +270,7 @@ flowchart LR
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`; `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges` and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
 | purge, reap, collect | `Blast_HSPListPurgeHSPsWithCommonEndpoints`, `s_Blast_HSPListReapByPrelimEvalue`, `s_BlastHSPCollectorRun` | `purge_prelim_hits_with_common_endpoints`, `PrelimHitCollector` | `prepare_preliminary_hits_for_kappa_in_place`, `PrelimCollector` |
-| traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | the loop `x_trace_list` stays in `process_subject` (`run.rs`, its second call per subject); its steps are in `traceback_subject.rs`, `traceback_hsp.rs` and `traceback_finish.rs` | `traceback::OrdinaryTraceback` |
+| traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `process_subject` (`run.rs`, its second call per subject) calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
 | report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` | the `match outfmt` at the end of `run_resolved_in_pool` |
@@ -338,7 +338,8 @@ psiblast is blastp with a round driver (`blastp/blast_engine/psi_round.rs`, `sea
 blastx, tblastn and tblastx follow the same stages with their own drivers: blastx in
 `blastx/native.rs`, `search.rs` and `runtime.rs`; tblastn in `tblastn/tblastn_app.rs` and
 `stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
-sets up a query batch with `batch_setup.rs` and `context_cutoffs.rs`. rpsblast has no driver of its
+sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tables.rs`, runs its
+subject loop with `subject_loop.rs` and ends with `batch_finish.rs`. rpsblast has no driver of its
 own: it runs blastp's (`BlastpApp::Rpsblast`), which hands the search to `rps_search` from
 `blastp/blast_engine/rps_hooks.rs`. In RPS the roles are swapped as in NCBI: the profiles are the
 "query" and the user's query is the "subject".
@@ -429,7 +430,7 @@ single-threaded run inserts results into the hit lists. The patterns, each with 
 
 | Where | What | Runs on |
 | :--- | :--- | :--- |
-| `tblastx/blast_engine/run_impl.rs` | the writer thread that collects subject results (`std::thread::spawn`) | a new OS thread (native only) |
+| `tblastx/blast_engine/subject_loop.rs` | the writer thread that collects subject results (`std::thread::spawn`) | a new OS thread (native only) |
 | `blastn/blast_engine/x_query_scan_par.rs` | the first reading of a large query file by several threads, before the search pool exists | scoped OS threads (Unix) |
 | `tblastn/stage_d_pipeline.rs` | the last query batches searched at the same time, each with its own pool (`LOSAT_X_TBNOWNPOOLS`) | scoped OS threads (native) |
 | `blastinput/x_packed_subjects.rs` | packing `-subject` records while the reader reads the next ones | one scoped OS thread (native) |

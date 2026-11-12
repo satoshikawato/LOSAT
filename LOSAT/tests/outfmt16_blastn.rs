@@ -2,7 +2,7 @@
 //! The `-subject` report that NCBI holds back one query (a failed batch loses it), the documents
 //! of a run with no query, and the searches LOSAT refuses before the first byte (a byte >= 0x80 in
 //! a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS 30:
-//! the rows `db.sa.x16_ntaxid.nonascii.*` of `db_search_manifest.tsv`), the prologs of the runs
+//! the rows `db.sa.x16_ntaxid.nonascii.*` of `db_search_manifest/blastn.tsv`), the prologs of the runs
 //! that stop early, the taxonomy database that only outfmt 15 and 16 read, and the sink of a file. The bytes of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16`
 //! (`badbatch_blastn_{sub,db}_{15,16}.out`: `BATCH_SIZE=100 blastn -query qnucl_bad.fna -subject
 //! snucl.fna | -db db/snucl -num_threads 1 -outfmt N`; `unsearched_blastn_*`: the same with

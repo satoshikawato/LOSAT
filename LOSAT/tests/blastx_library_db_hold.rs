@@ -17,6 +17,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::library_examples::example_binary;
+
 fn engine() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
@@ -72,35 +74,6 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
-}
-
-/// An example of the library API, built (with the profile of the binary) when a single test
-/// target was asked for.
-fn example_binary(name: &str) -> PathBuf {
-    let bin_dir = Path::new(env!("CARGO_BIN_EXE_losat"))
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let example = bin_dir
-        .join("examples")
-        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-    if !example.exists() {
-        let profile: &[&str] = if bin_dir.ends_with("release") {
-            &["--release"]
-        } else {
-            &["--profile", "test"]
-        };
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--example", name])
-            .args(profile)
-            .arg("--target-dir")
-            .arg(bin_dir.parent().unwrap())
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .status()
-            .expect("build the example");
-        assert!(status.success(), "cargo build --example {name}");
-    }
-    example
 }
 
 struct Run {

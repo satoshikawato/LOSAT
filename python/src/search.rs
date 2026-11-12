@@ -224,18 +224,38 @@ pub fn makeblastdb<'py>(
     Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
 }
 
-/// `blastdbcmd` with the command line's words. Returns what it writes to standard output and to
-/// standard error.
+/// `blastdbcmd` with the command line's words: `input` is its standard input (a batch file `-`).
+/// Returns what it writes to standard output and to standard error.
 #[pyfunction]
 pub fn blastdbcmd<'py>(
     py: Python<'py>,
     argv: Vec<String>,
+    input: PyBackedBytes,
 ) -> PyResult<(Bound<'py, PyBytes>, String)> {
     let (output, diagnostics) = py
         .detach(|| {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-            api::run_blastdbcmd(&words, &mut output, &mut diagnostics)?;
+            api::run_blastdbcmd(&words, &mut &*input, &mut output, &mut diagnostics)?;
+            Ok((output, diagnostics))
+        })
+        .map_err(exception)?;
+    Ok((PyBytes::new(py, &output), diagnostics_text(&diagnostics)))
+}
+
+/// `dustmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn dustmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    let (output, diagnostics) = py
+        .detach(|| {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            api::run_dustmasker(&words, &mut &*input, &mut output, &mut diagnostics)?;
             Ok((output, diagnostics))
         })
         .map_err(exception)?;

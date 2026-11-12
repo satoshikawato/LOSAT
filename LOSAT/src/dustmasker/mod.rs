@@ -9,7 +9,7 @@ mod masker;
 mod work;
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 
 use crate::ncbi_app::args::{flag, key, Constraint, Desc, Kind};
 use crate::ncbi_app::{no_dependencies, Tool};
@@ -149,14 +149,16 @@ pub(crate) fn run(words: &[OsString]) -> i32 {
     crate::ncbi_app::run(&TOOL, words, app::run)
 }
 
-/// The run of one command line, its output on `out` and its errors on `err`; the exit status
-/// (NCBI's application around dustmasker's `Run`: `ncbi_app::run_with`).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the library API does not run dustmasker yet")
-)]
-pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    crate::ncbi_app::run_with(&TOOL, words, out, err, app::run)
+/// The run of one command line with `input` as its standard input, its output on `out` and its
+/// errors on `err`; the exit status (NCBI's application around dustmasker's `Run`:
+/// `ncbi_app::run_with`). The library API's `run_dustmasker`.
+pub(crate) fn run_with(
+    words: &[OsString],
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_with(&TOOL, words, input, out, err, app::run)
 }
 
 #[cfg(test)]
@@ -167,7 +169,7 @@ mod tests {
         let words: Vec<OsString> = line.iter().map(OsString::from).collect();
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let status = run_with(&words, &mut out, &mut err);
+        let status = run_with(&words, &mut std::io::empty(), &mut out, &mut err);
         (
             status,
             String::from_utf8(out).unwrap(),
@@ -265,7 +267,7 @@ mod tests {
             ];
             let mut err = Vec::new();
             assert_eq!(
-                run_with(&words, &mut FullDisk, &mut err),
+                run_with(&words, &mut std::io::empty(), &mut FullDisk, &mut err),
                 status,
                 "{outfmt}"
             );

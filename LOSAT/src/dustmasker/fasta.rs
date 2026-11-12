@@ -9,10 +9,10 @@ use super::work::{Failure, Record, SequenceSource};
 
 /// The reader of `input`, or the failure of its first read (NCBI's line reader reads its first
 /// buffer in the constructor).
-pub(super) fn source<R: Read + 'static>(
+pub(super) fn source<'a, R: Read + 'a>(
     input: R,
     parse_seqids: bool,
-) -> Result<Box<dyn SequenceSource>, Failure> {
+) -> Result<Box<dyn SequenceSource + 'a>, Failure> {
     let reader = MaskFastaReader::new(input, false, parse_seqids).map_err(read_failure)?;
     Ok(Box::new(FastaSource { reader }))
 }

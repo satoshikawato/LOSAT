@@ -11,7 +11,7 @@ pub(crate) mod args;
 pub(crate) mod files;
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
     application_start_of_process, check_ncbi_application_settings, diag_target, log_file, preparse,
@@ -154,7 +154,7 @@ impl Diag<'_> {
     //     m_MainText = false;
     // }
     // ```
-    /// A `CArgException` that the program's `Run` throws (`Args::input_file`,
+    /// A `CArgException` that the program's `Run` throws (`files::open_input_file`,
     /// `Args::output_file`): the application adds `Application's execution failed` to it and
     /// reports it as an argument error, after the usage; exit status 1.
     pub(crate) fn run_arg_exception(&mut self, error: ArgException) -> i32 {
@@ -245,16 +245,22 @@ pub(crate) fn run(tool: &'static Tool, words: &[OsString], body: Body) -> i32 {
     let stderr = std::io::stderr();
     let mut out = stdout.lock();
     let mut err = stderr.lock();
-    let status = run_with(tool, words, &mut out, &mut err, body);
+    let status = run_with(tool, words, &mut std::io::stdin(), &mut out, &mut err, body);
     let _ = out.flush();
     let _ = err.flush();
     status
 }
 
-/// A program's `Run`: it gets the arguments, the application's settings, the standard output
+/// A program's `Run`: it gets the arguments, the application's settings, the standard input
+/// (what an `eInputFile` argument `-` reads: `files::open_input_file`), the standard output
 /// and the diagnostics, and returns the exit status.
-pub(crate) type Body =
-    fn(args: &Args, settings: &ApplicationSettings, out: &mut dyn Write, diag: &mut Diag) -> i32;
+pub(crate) type Body = fn(
+    args: &Args,
+    settings: &ApplicationSettings,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit` loads the
 // configuration before the arguments are read; quoted at `ApplicationStart`)
@@ -266,7 +272,8 @@ pub(crate) type Body =
 //         string x_conf(conf);
 //         LoadConfig(*m_Config, &x_conf);
 // ```
-/// The run of `tool` with `words`, its output on `out` and its errors on `err`; the exit status.
+/// The run of `tool` with `words`, its standard input `input`, its output on `out` and its
+/// errors on `err`; the exit status.
 ///
 /// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
 /// it cannot be opened), then `-version` is read, then the configuration is loaded (its
@@ -281,6 +288,7 @@ pub(crate) type Body =
 pub(crate) fn run_with(
     tool: &'static Tool,
     words: &[OsString],
+    input: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
     body: Body,
@@ -375,7 +383,7 @@ pub(crate) fn run_with(
     if dryrun {
         return 0;
     }
-    body(&args, &settings, out, &mut diag)
+    body(&args, &settings, input, out, &mut diag)
 }
 
 #[cfg(test)]

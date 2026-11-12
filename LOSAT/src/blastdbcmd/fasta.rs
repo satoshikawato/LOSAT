@@ -149,7 +149,10 @@ impl FastaFormatter {
             reverse_complement(&mut letters);
         }
         write_sequence(&letters, self.width, &mut text);
-        out.write_all(&text).map_err(Stop::io)
+        // `out` is an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write does
+        // nothing, as in NCBI's `ostream`.
+        let _ = out.write_all(&text);
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2927-2975

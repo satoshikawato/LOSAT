@@ -3,11 +3,14 @@
 //! is the standard input) gives NCBI's standard output, standard error and exit status, frozen in
 //! `tests/dustmasker/ncbi/<name>.{out,err,rc}` (probe of line RG, item K1, 2026-11-12 on ws). A
 //! name the table repeats is compared on its last row, whose output the probe kept. NCBI is not
-//! run here.
+//! run here. Every row runs through the library API too (`LOSAT::api::run_dustmasker`, by
+//! `examples/library_command_line`), with the same bytes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use crate::library_examples::example_binary;
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/dustmasker")
@@ -75,8 +78,13 @@ fn cases() -> Vec<Case> {
 /// No LOSAT, NCBI or BLAST variable, no registry file (`NCBI_CONFIG_PATH` names the fixture
 /// directory, which has none).
 fn run(case: &Case) -> (Vec<u8>, Vec<u8>, i32) {
+    run_program(Path::new(env!("CARGO_BIN_EXE_losat")), case)
+}
+
+/// `run` of `program dustmasker` (the command line, or the library's example).
+fn run_program(program: &Path, case: &Case) -> (Vec<u8>, Vec<u8>, i32) {
     let dir = fixtures();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    let mut command = Command::new(program);
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLAST") {
@@ -131,6 +139,47 @@ fn dustmasker_gives_ncbis_bytes() {
         .map(|case| case.name.clone())
         .collect();
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+}
+
+// `run_dustmasker` is the command line's run without its application start, which reads the
+// file of `-conffile` and ends `-dryrun` (`ncbi_app::run_with`): the library refuses those two
+// words, as `run_blastdbcmd` does. The example ends every failure with exit status 1.
+#[test]
+fn dustmasker_through_the_library_gives_the_command_line_s_bytes() {
+    let example = example_binary("library_command_line");
+    let mut differ = Vec::new();
+    let mut refused = 0;
+    for case in cases() {
+        let (out, err, status) = run_program(&example, &case);
+        let word = ["-conffile", "-dryrun"].into_iter().find(|word| {
+            case.words
+                .iter()
+                .any(|given| given == word || given.starts_with(&format!("{word}=")))
+        });
+        let expected = match word {
+            Some(word) => {
+                refused += 1;
+                let text = format!(
+                    "Error: the NCBI C++ Toolkit option {word} runs on the command line of \
+                     LOSAT's DUSTMASKER only: the library API and the Web engine run no NCBI \
+                     application start, which reads it\n"
+                );
+                (Vec::new(), text.into_bytes(), 1)
+            }
+            None => {
+                let (out, err, status) = expected(&case.name);
+                (out, err, i32::from(status != 0))
+            }
+        };
+        if (out, err, status) != expected {
+            differ.push(case.name.clone());
+        }
+    }
+    assert!(refused > 0);
+    assert!(
+        differ.is_empty(),
+        "rows that differ through the library: {differ:?}"
+    );
 }
 
 #[test]

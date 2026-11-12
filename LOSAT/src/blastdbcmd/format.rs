@@ -186,7 +186,9 @@ impl FormatSpec {
         let mut print = |defline: Option<&BlastDefline>, line: &mut Vec<u8>| -> Result<(), Stop> {
             line.clear();
             let printed = self.x_print(source, oid, length, defline, &seq, &hash, &masks, line);
-            out.write_all(line).map_err(Stop::io)?;
+            // `out` is an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write does
+            // nothing, as in NCBI's `ostream`.
+            let _ = out.write_all(line);
             printed
         };
         if !self.get_defline {
@@ -237,7 +239,7 @@ impl FormatSpec {
             match kind {
                 b'o' => line.extend_from_slice(b"-1"),
                 b'l' => {
-                    out.write_all(&line).map_err(Stop::io)?;
+                    let _ = out.write_all(&line);
                     return Err(missing());
                 }
                 b'd' => {
@@ -247,7 +249,7 @@ impl FormatSpec {
                     )));
                 }
                 other => {
-                    out.write_all(&line).map_err(Stop::io)?;
+                    let _ = out.write_all(&line);
                     let mut message = b"Unrecognized format specification: '%".to_vec();
                     message.push(other);
                     message.push(b'\'');
@@ -257,7 +259,8 @@ impl FormatSpec {
         }
         line.extend_from_slice(&self.separators[self.types.len()]);
         line.push(b'\n');
-        out.write_all(&line).map_err(Stop::io)
+        let _ = out.write_all(&line);
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-262

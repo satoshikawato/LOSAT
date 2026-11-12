@@ -483,7 +483,8 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 | 項目 | 実装 |
 |---|---|
 | `run_makeblastdb(argv, input, output, diagnostics)` | CLI の語をそのまま parser に渡し、`run_with` を呼ぶ。`input` は CLI の標準入力で、`-in -` か `-in` なしのときに読むので、メモリ上の FASTA から database を作れる。データベースの書き先は `-out` |
-| `run_blastdbcmd(argv, output, diagnostics)` | NCBI の引数読み（`blastdbcmd::args`）をそのまま使う `run_with`。`output` は CLI の標準出力 |
+| `run_blastdbcmd(argv, input, output, diagnostics)` | NCBI の引数読み（`ncbi_app::args`）をそのまま使う `run_with`。`input` は CLI の標準入力（`-entry_batch -`、`-ipg_batch -`、`-taxidlist -`）、`output` は CLI の標準出力 |
+| `run_dustmasker(argv, input, output, diagnostics)` | blastdbcmd と同じ殻（`ncbi_app`）の `dustmasker::run_with`。`input` は CLI の標準入力（`-in -` と `-in` なし）、`output` は CLI の標準出力。`-conffile`・`-dryrun` は CLI の application start が読むので断る |
 | 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。parser の拒否は `Error::Argv` |
 
 CLI の `run_with` はもとから writer を取っていたので、engine の変更は無い。

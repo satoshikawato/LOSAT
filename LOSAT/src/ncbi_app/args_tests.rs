@@ -151,7 +151,7 @@ fn defaults_and_flags_are_ncbi_s_values() {
     assert!(args.given("in") && !args.given("n"));
     // A file key without a value has no stream (`CArg_NoValue`).
     assert_eq!(
-        args.input_file("opt").err().unwrap(),
+        args.output_file("opt", &mut Vec::new()).err().unwrap(),
         ArgException::new(
             "eNoValue",
             "Argument \"opt\". The argument has no value".to_string()

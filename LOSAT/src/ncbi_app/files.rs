@@ -116,12 +116,14 @@ impl TextMode {
 }
 
 /// Where an input stream reads from.
-enum Source {
-    Stdin(std::io::Stdin),
+enum Source<'a> {
+    /// The standard input: the process's on the command line, the caller's reader in the library
+    /// API (`api::run_dustmasker`, `api::run_blastdbcmd`).
+    Stdin(&'a mut dyn Read),
     File(File),
 }
 
-impl Read for Source {
+impl Read for Source<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Source::Stdin(stdin) => stdin.read(buf),
@@ -134,15 +136,15 @@ impl Read for Source {
 /// input or the file, read in the text mode of LOSAT's platform. It is not buffered (wrap it in a
 /// `std::io::BufReader` to read lines); a read error is the operating system's (NCBI's
 /// libstdc++ stream throws its own text for it, which the program that reads writes).
-pub(crate) struct InputFile {
-    source: Source,
+pub(crate) struct InputFile<'a> {
+    source: Source<'a>,
     text: TextMode,
     /// Bytes of the text mode not handed out yet (Windows only), from `at`.
     pending: Vec<u8>,
     at: usize,
 }
 
-impl Read for InputFile {
+impl Read for InputFile<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.text.platform != LineEnds::Windows {
             return self.source.read(buf);
@@ -195,12 +197,16 @@ impl Read for InputFile {
 //     }
 //     CArg_Ios::x_Open(flags);
 // ```
-/// `AsInputFile()` of the argument `name` whose value is `value`: `-` is the standard input
-/// (probes K30-K32 of line BDC), the empty name opens nothing (K39), and another name opens the
-/// file; on Linux a directory opens too (its reads fail). `Err` is NCBI's `eNoFile`.
-pub(crate) fn open_input_file(name: &str, value: &str) -> Result<InputFile, ArgException> {
+/// `AsInputFile()` of the argument `name` whose value is `value`: `-` is the standard input,
+/// `stdin` (probes K30-K32 of line BDC), the empty name opens nothing (K39), and another name
+/// opens the file; on Linux a directory opens too (its reads fail). `Err` is NCBI's `eNoFile`.
+pub(crate) fn open_input_file<'a>(
+    name: &str,
+    value: &str,
+    stdin: &'a mut dyn Read,
+) -> Result<InputFile<'a>, ArgException> {
     let source = if value == "-" {
-        Source::Stdin(std::io::stdin())
+        Source::Stdin(stdin)
     } else if value.is_empty() {
         return Err(not_accessible(name, value));
     } else {
@@ -214,15 +220,21 @@ pub(crate) fn open_input_file(name: &str, value: &str) -> Result<InputFile, ArgE
     })
 }
 
-/// The bytes of the input file `value` of the argument `name` (`AsInputFile`) as the loops of
-/// `NcbiGetlineEOL` over its stream read them (blastdbcmd's batch files, `input_lines`): `Err`
-/// with NCBI's message (`File is not accessible`) when it does not open or a read fails. On Linux
-/// the stream of a directory opens and reads nothing there (probes K33-K35 of line BDC).
-pub(crate) fn read_input_file(name: &str, value: &str) -> Result<Vec<u8>, String> {
+/// The bytes of the input file `value` of the argument `name` (`AsInputFile`, `-` is `stdin`)
+/// as the loops of `NcbiGetlineEOL` over its stream read them (blastdbcmd's batch files,
+/// `input_lines`): `Err` with NCBI's message (`File is not accessible`) when it does not open or
+/// a read fails. On Linux the stream of a directory opens and reads nothing there (probes
+/// K33-K35 of line BDC).
+pub(crate) fn read_input_file(
+    name: &str,
+    value: &str,
+    stdin: &mut dyn Read,
+) -> Result<Vec<u8>, String> {
     if cfg!(unix) && value != "-" && !value.is_empty() && std::path::Path::new(value).is_dir() {
         return Ok(Vec::new());
     }
-    let mut file = open_input_file(name, value).map_err(|error| error.message().to_string())?;
+    let mut file =
+        open_input_file(name, value, stdin).map_err(|error| error.message().to_string())?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .map_err(|_| not_accessible(name, value).message().to_string())?;
@@ -313,6 +325,46 @@ impl Write for OutputFile<'_> {
             OutputFile::Stdout(out) => out.flush(),
             OutputFile::File(file) => file.flush(),
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
+// `CNcbiOfstream`, or takes `cout`, without exceptions enabled on it: a failed write sets
+// `badbit` and later writes do nothing)
+/// An output as NCBI's `ostream` writes to it: after a write fails (`badbit`), the later writes
+/// do nothing and nothing reports the failure, so the run goes on to its end (NCBI 2.17.0 with
+/// `-out /dev/full`: dustmasker's `interval`, `acclist` and `fasta` writers, blastdbcmd's
+/// retrieval, which still posts the errors of later entries). [`Ostream::bad`] tells a writer
+/// that NCBI's serial stream would report the failure (`CObjectOStream`), which LOSAT refuses.
+pub(crate) struct Ostream<'a> {
+    inner: &'a mut dyn Write,
+    bad: bool,
+}
+
+impl<'a> Ostream<'a> {
+    pub(crate) fn new(inner: &'a mut dyn Write) -> Self {
+        Ostream { inner, bad: false }
+    }
+
+    /// Whether a write or a flush has failed (`badbit`).
+    pub(crate) fn bad(&self) -> bool {
+        self.bad
+    }
+}
+
+impl Write for Ostream<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if !self.bad && self.inner.write_all(buf).is_err() {
+            self.bad = true;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.bad && self.inner.flush().is_err() {
+            self.bad = true;
+        }
+        Ok(())
     }
 }
 
@@ -426,9 +478,62 @@ mod tests {
         }
     }
 
+    // `-` is the caller's standard input (the process's on the command line, a reader of the
+    // library API's caller), read in the text mode as a file is.
+    #[test]
+    fn the_standard_input_is_the_reader_given() {
+        let mut stdin: &[u8] = b"a\nb\n";
+        let mut bytes = Vec::new();
+        open_input_file("in", "-", &mut stdin)
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes, b"a\nb\n");
+        assert_eq!(
+            read_input_file("entry_batch", "-", &mut &b"x\n"[..]).unwrap(),
+            b"x\n"
+        );
+    }
+
+    /// A writer that takes `room` bytes, then fails.
+    struct Room(usize, Vec<u8>);
+
+    impl Write for Room {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if buf.len() > self.0 {
+                return Err(std::io::Error::other("no space left"));
+            }
+            self.0 -= buf.len();
+            self.1.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // NCBI's `ostream` after a failed write: `badbit`, and later writes, even ones that would
+    // fit, do nothing; nothing reports it.
+    #[test]
+    fn an_ostream_drops_every_write_after_the_first_that_fails() {
+        let mut room = Room(4, Vec::new());
+        let mut out = Ostream::new(&mut room);
+        out.write_all(b"abc").unwrap();
+        assert!(!out.bad());
+        out.write_all(b"de").unwrap();
+        assert!(out.bad());
+        out.write_all(b"f").unwrap();
+        out.flush().unwrap();
+        assert!(out.bad());
+        assert_eq!(room.1, b"abc");
+    }
+
     #[test]
     fn a_stream_that_does_not_open_is_ncbi_s_exception() {
-        let error = open_input_file("in", "").err().unwrap();
+        let error = open_input_file("in", "", &mut std::io::empty())
+            .err()
+            .unwrap();
         assert_eq!(
             error,
             ArgException::new(
@@ -438,7 +543,10 @@ mod tests {
         );
         let missing = "no/such/dir/x.fa";
         assert_eq!(
-            open_input_file("in", missing).err().unwrap().message(),
+            open_input_file("in", missing, &mut std::io::empty())
+                .err()
+                .unwrap()
+                .message(),
             "Argument \"in\". File is not accessible:  `no/such/dir/x.fa'"
         );
         let mut stdout = Vec::new();

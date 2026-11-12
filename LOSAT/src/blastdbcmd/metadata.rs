@@ -5,6 +5,7 @@
 use std::io::Write;
 
 use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::Ostream;
 use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::writedb::metadata::{db_files_metadata, DbMetadata};
@@ -152,8 +153,21 @@ pub(super) fn metadata(
         bytes_to_cache,
         files,
     };
-    // NCBI's stream ignores a failed write (no exception is enabled on it), so does this.
+    // NCBI's serial stream (`CObjectOStreamJson`) checks its writes: NCBI 2.17.0 with `-out
+    // /dev/full` posts the failure of `json_out->Flush()` (`CObjectOStream: error at byte <the
+    // JSON's length>`, three more lines of the stream's close, `BLAST failed to write output:
+    // COStreamBuffer::Flush: failed`) and ends with exit status 6, or with other lines where a
+    // JSON longer than the stream's buffer first fails (review 2 of line RG item K1, F2). LOSAT
+    // refuses it, as dustmasker's serial writers do (RG DECISIONS K1-9).
+    let mut out = Ostream::new(out);
     let _ = out.write_all(&metadata.to_json());
     let _ = out.flush();
+    if out.bad() {
+        return diag.refuse(&format!(
+            "a failed write of the -metadata output (NCBI's serial stream reports it) is not \
+             supported by LOSAT's {}",
+            super::PROGRAM
+        ));
+    }
     0
 }

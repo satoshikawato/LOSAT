@@ -3,7 +3,7 @@
 //! `-tax_info`, the taxids of the database (`x_PrintBlastDatabaseTaxInformation`).
 
 use std::collections::BTreeSet;
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Read, Write};
 
 use crate::blastinput::db_filter::{NO_TAXONOMY_WARNING, TAXONOMY_FILE};
 use crate::ncbi_app::args::{arg_message, Args};
@@ -74,19 +74,20 @@ pub(super) struct Ended(pub i32);
 // 8). `-taxids 1` never ends in NCBI (the parent of taxid 1 is 1, probe J120); LOSAT's walk
 // visits each taxid once and ends with every taxid below it (`TaxonomySqlite::descendants`,
 // DI-8 DECISIONS 10).
-/// The taxids of `-taxids` / `-taxidlist`, with their descendants in the taxonomy file of
-/// the search path unless `-no_taxid_expansion`; NCBI's warning when that file is missing
-/// or not one NCBI reads goes to `diag`.
+/// The taxids of `-taxids` / `-taxidlist` (`-` reads `stdin`), with their descendants in the
+/// taxonomy file of the search path unless `-no_taxid_expansion`; NCBI's warning when that file
+/// is missing or not one NCBI reads goes to `diag`.
 pub(super) fn tax_id_list(
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
+    stdin: &mut dyn Read,
 ) -> Result<BTreeSet<i32>, Ended> {
     let ids: Vec<Vec<u8>> = match (args.value("taxids"), args.value("taxidlist")) {
         (Some(""), _) => Vec::new(),
         (Some(input), _) => input.split(',').map(|id| id.as_bytes().to_vec()).collect(),
         (None, Some(file)) => {
-            let Ok(bytes) = read_input_file("taxidlist", file) else {
+            let Ok(bytes) = read_input_file("taxidlist", file, stdin) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
                 // ```c++
                 //     catch (const CArgException& e) {                                        \

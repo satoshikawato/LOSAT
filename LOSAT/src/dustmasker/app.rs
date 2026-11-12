@@ -1,13 +1,13 @@
 //! dustmasker's `Run` (`CDustMaskApplication::Run`) on the arguments that NCBI's reader read
 //! (`ncbi_app::args::Args`): the streams of `-out` and `-in`, then `work::run`.
 
-use std::io::Write;
+use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::Diag;
 
-use super::work::{self, report, Failure, Options, Report, SequenceSource};
+use super::work::{self, report, Options, Report};
 
 /// `CDustMaskApplication::Run` on `args`; the exit status (3 after an exception of `Run` that is
 /// not an argument error, ncbiapp.cpp:711-734).
@@ -27,11 +27,11 @@ use super::work::{self, report, Failure, Options, Report, SequenceSource};
 ///     duster_type::size_type window = GetArgs()["window"].AsInteger();
 ///     duster_type::size_type linker = GetArgs()["linker"].AsInteger();
 /// ```
-/// `-in` is opened where `x_GetReader` asks for it (`AsInputFile`, fasta input only), after
-/// the writer: an `-in` that does not open still lets a `maskinfo_*` writer write its object.
+/// `stdin` is the standard input, which `-in -` reads (`work::run` opens `-in`).
 pub(super) fn run(
     args: &Args,
     settings: &ApplicationSettings,
+    stdin: &mut dyn Read,
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
@@ -54,12 +54,7 @@ pub(super) fn run(
             Err(reason) => Err(reason.as_str()),
         },
     };
-    let parse_seqids = options.parse_seqids;
-    let mut fasta_source = || -> Result<Box<dyn SequenceSource>, Failure> {
-        let input = args.input_file("in").map_err(Failure::Arg)?;
-        super::fasta::source(input, parse_seqids)
-    };
-    match work::run(&options, &mut fasta_source, &mut output) {
+    match work::run(&options, stdin, &mut output) {
         Ok(()) => 0,
         Err(failure) => match report(failure) {
             Report::Posts { lines, status } => {

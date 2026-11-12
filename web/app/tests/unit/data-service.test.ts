@@ -501,13 +501,11 @@ describe('DataService sources named .gz, .bz2 or .zst (the inflation port)', () 
     expect(calls).toEqual(['open e.fa.zst', 'end', 'cancel']);
   });
 
-  it('refuses a file that the engine names bzip2, without reading it', async () => {
-    const { inflater, calls } = scripted({ compression: 'bzip2' });
+  it('reads a file that the engine names bzip2 as it reads gzip and zstd', async () => {
+    const { inflater, calls } = scripted({ compression: 'bzip2', plainName: 'x.fa' });
     const { data } = service({ inflater });
-    expect(await rejection(data.addSource(new File([THREE], 'x.fa.Bz2')))).toBe(
-      "'x.fa.Bz2' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)",
-    );
-    expect(calls).toEqual(['open x.fa.Bz2', 'cancel']);
+    expect(await data.addSource(new File([THREE], 'x.fa.Bz2'))).toEqual({ sourceId: 'token-1', name: 'x.fa', size: THREE.length });
+    expect(calls).toEqual(['open x.fa.Bz2', `push ${THREE.length}`, 'end', 'cancel']);
   });
 
   it('frees the inflation of a file that cannot be read', async () => {

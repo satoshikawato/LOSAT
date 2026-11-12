@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.14
+- Version: 1.15
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -23,7 +23,9 @@
   1.13 2026-11-12 (exception 9, the `losat rpsbproc` exception: PSSM-IDs of 2^31 and more,
   line PS item PS16a; decided 2026-11-11, numbered after 1.12);
   1.14 2026-11-12 (exception 10, the `losat rpsbproc` exception: a motif check that reads past
-  the stored positions, line PS item PS16b; decided 2026-11-11, numbered after 1.13)
+  the stored positions, line PS item PS16b; decided 2026-11-11, numbered after 1.13);
+  1.15 2026-11-12 (the explicit rejections of `losat rpsbproc`, rule 3, line PS items PS16a and
+  PS16b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -438,6 +440,34 @@ of exception 9 (PS16a) did.
   cannot fetch, in the default tabular fields), pads the line without end (an outfmt 0
   description id of 65 bytes or more) or crashes (a protein title of punctuation): version 1.10,
   the table in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md).
+
+- `losat rpsbproc` (version 1.15, 2026-11-12, line PS items PS16a and PS16b, line PS
+  `DECISIONS.md` 37 and 40, Owner-delegated): where NCBI's rpsbproc 0.5.1 reads memory outside
+  its strings or its result depends on the host's memory, LOSAT refuses (exit 1) and names the
+  data line, site or position; the report keeps the lines before it, and no part of a line.
+  - A `cdtrack.txt` line on which NCBI's loader reads past the line's terminating 0 (a line that
+    ends without a root or after a field it skips; PS16a).
+  - A motif match that reads beyond the residues of a site, where NCBI's answer depends on the
+    bytes it reads there: LOSAT runs the match once with every such read failing and once with
+    every such read passing, and gives the answer where the two agree (NCBI's search tries every
+    count, so that answer holds for any bytes); where they differ, NCBI's answer depends on its
+    stack's bytes (`Hx(0,10)W` on `HKY`). Also refused where the two agree, if a read may leave
+    NCBI's buffer of the residues (the capacity of `minMap`; past it a read may fault, by the
+    memory layout; `DECISIONS.md` 40).
+  - A motif whose check makes NCBI hold 1 GiB or more at once in allocations below 2^47 bytes:
+    the minimal map's string with its old buffer while it grows, or the match records of
+    `curr.flex` with the copies of them on NCBI's stack and the string of the residues. NCBI's
+    allocations then succeed or throw `std::bad_alloc` by the host's memory and overcommit: the
+    oracle `H-{<}(0,67108863)-{<}(0,67108863)-K` (1.5 GiB of records in allocations of 512 MB)
+    and `Hx(536870910)K` (a map of 512 MB, then 1 GiB) exit 0 under a 4 GiB address space and
+    with `std::bad_alloc` under 1.5 GiB in both 0.5.1 builds. A repeat that does not advance
+    (`<*`) grows NCBI's records until the memory runs out. One allocation of 2^47 bytes or more
+    throws `std::bad_alloc` on every host, and a map longer than the string's `max_size()`
+    (2^63 - 1 in NCBI's C++20 builds) throws `basic_string::_M_replace_aux`: there LOSAT ends as
+    NCBI does (exit 3), and below 1 GiB it gives NCBI's result.
+  - A site or motif position outside the query's residues other than their end, also a query
+    without residues: NCBI reads memory outside the string (its two 0.5.1 builds print different
+    bytes for a query without `seq-data`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

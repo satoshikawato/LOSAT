@@ -611,8 +611,6 @@ pub struct SeqDb {
     search_path: Option<SearchPath>,
     /// `-show_gis` of the search that reads the headers for its reports.
     reports_show_gis: bool,
-    /// The ids of the queries of the search under `-parse_deflines`.
-    id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
     /// Whether the database was opened with a positive list (`SeqDb::restrict`).
     positive_list: bool,
     /// `SeqDb::list_taxids`.
@@ -844,19 +842,6 @@ impl SeqDb {
     /// Sets `reports_show_gis`.
     pub fn set_reports_show_gis(&mut self, show_gis: bool) {
         self.reports_show_gis = show_gis;
-    }
-
-    /// The ids of the queries of the search that reads the headers, under `-parse_deflines`.
-    pub fn id_scope(&self) -> Option<&crate::seqid::id_scope::IdScope> {
-        self.id_scope.as_deref()
-    }
-
-    /// Sets `id_scope`.
-    pub fn set_id_scope(
-        &mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) {
-        self.id_scope = id_scope;
     }
 
     /// Whether the database was opened with a positive list (`CSeqDB::GetGiList` is set), whatever
@@ -1232,7 +1217,6 @@ impl SeqDb {
             filter: None,
             search_path: None,
             reports_show_gis: false,
-            id_scope: None,
             positive_list: false,
             list_taxids: Vec::new(),
             name_records: Vec::new(),

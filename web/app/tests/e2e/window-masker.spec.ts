@@ -13,7 +13,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, nativeExpectation, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, openFiles, openParameters, openSearch, program, submit, task, waitStatus } from './support/search';
+import { chooseRun, openFiles, openParameters, openSearch, program, storedOutputs, submit, task, waitStatus } from './support/search';
 
 const COUNTS = 'LOSAT/tests/winmask/counts/mg1655_u9.obinary';
 const QUERY = 'LOSAT/tests/fixtures/blastn_regression/inputs/wm_query.fa';
@@ -43,9 +43,10 @@ async function setUpSearch(page: Page): Promise<void> {
   await task(page, 'blastn');
 }
 
-/** Checks "Species-specific repeats filter for:" and chooses the counts file. */
+/** Checks "Species-specific repeats filter for:", names the counts by a file (WW2: a taxonomy ID is the default) and chooses it. */
 async function chooseCounts(page: Page): Promise<void> {
   await page.getByTestId(`param-${FLAG}`).check();
+  await page.getByTestId(`param-${FLAG}-by`).selectOption('file');
   await page.getByTestId(`param-${FLAG}-file`).setInputFiles({ name: baseName(COUNTS), mimeType: 'application/octet-stream', buffer: read(COUNTS) });
   await expect(page.getByTestId(`param-${FLAG}-name`)).toContainText(baseName(COUNTS));
 }
@@ -69,6 +70,7 @@ test('the field: a box and a file in the Filter row, an empty box keeps the sear
 
   // Checked without a file: the sentence that asks for it, no argument, and Run does not start.
   await checkbox.check();
+  await page.getByTestId(`param-${FLAG}-by`).selectOption('file');
   await expect(page.getByTestId(`param-${FLAG}-missing`)).toHaveText('Choose the WindowMasker counts file.');
   await expect(field).not.toHaveClass(/changed/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
@@ -127,23 +129,6 @@ test.describe('the engine and the native CLI', () => {
   test.skip(!BUILD_HAS_ENGINE, 'needs the engine build (LOSAT_WEB_REACTORS)');
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);
 
-  /**
-   * The stored outputs of a run, saved from "Download All" (the bytes the application stores), and its warnings.
-   */
-  async function outputsOf(page: Page, run: number): Promise<{ outputs: Record<0 | 6 | 7, Buffer>; warnings: string }> {
-    await chooseRun(page, run);
-    const outputs: Partial<Record<0 | 6 | 7, Buffer>> = {};
-    for (const format of [0, 6, 7] as const) {
-      await page.getByTestId('results-download-all').click();
-      const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId(`results-download-${format}`).click()]);
-      outputs[format] = readFileSync((await download.path())!);
-    }
-    await page.getByTestId('results-view-details').click();
-    const none = await page.getByTestId('run-diagnostics-none').count();
-    const warnings = none > 0 ? '' : ((await page.getByTestId('run-diagnostics').textContent()) ?? '');
-    return { outputs: outputs as Record<0 | 6 | 7, Buffer>, warnings };
-  }
-
   test('searches with the counts file give the bytes of the native CLI and of NCBI; the engine keeps the counts and gives them up with the program', async ({ page }, testInfo) => {
     // The native CLI runs the argv that the application builds, with the inputs named alike.
     const directory = testInfo.outputPath('native');
@@ -165,7 +150,7 @@ test.describe('the engine and the native CLI', () => {
     async function search(run: number, expected: 'read' | 'kept' | 'none'): Promise<void> {
       await submit(page);
       await waitStatus(page, run, 'completed');
-      const { outputs, warnings } = await outputsOf(page, run);
+      const { outputs, warnings } = await storedOutputs(page, run);
       if (expected !== 'none') {
         expect({ run, 0: sha256(outputs[0]), 6: sha256(outputs[6]), 7: sha256(outputs[7]) }).toEqual({ run, 0: native.sha256[0], 6: native.sha256[6], 7: native.sha256[7] });
         expect(sha256(warnings), `run ${run}: the warnings`).toBe(native.stderrSha256);

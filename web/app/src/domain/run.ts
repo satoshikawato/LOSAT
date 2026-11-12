@@ -1,5 +1,6 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
+import type { CountsOrigin } from './counts';
 import type { RecordKey } from './dataset';
 import type { ProgramId } from './programs';
 
@@ -32,15 +33,18 @@ export interface InputSnapshot {
 }
 
 /**
- * The WindowMasker unit counts file of a run (`-window_masker_db`): the file that the run's
- * engine reads under the argv's name. It lives in the working session only, as the run does.
+ * The WindowMasker unit counts file of a run (`-window_masker_db`, or `-window_masker_taxid`): the file
+ * that the run's engine reads under the name below. It lives in the working session only, as the
+ * run does (the file of a taxonomy ID is kept by the browser, and the run reads it from there).
  */
 export interface CountsSnapshot {
-  /** The value of `-window_masker_db` in the argv. */
+  /** The value of `-window_masker_db` in the argv; for `-window_masker_taxid`, the name that the engine looks for (windowmasker/<taxid>/wmasker.obinary). */
   readonly name: string;
   readonly file: Blob;
   readonly size: number;
   readonly lastModified: number;
+  /** For `-window_masker_taxid`: where the file was downloaded from. */
+  readonly origin?: CountsOrigin;
 }
 
 /** What a run did with its counts file (RunRecord.windowMasker). */
@@ -53,6 +57,8 @@ export interface CountsRecord {
   readonly retained: boolean;
   /** Milliseconds spent giving the file to the engine; 0 when it was retained. */
   readonly loadMs: number;
+  /** For `-window_masker_taxid`: the taxonomy ID, the URL and the Last-Modified of the file that was read. */
+  readonly origin?: CountsOrigin;
 }
 
 export interface RunSnapshot {

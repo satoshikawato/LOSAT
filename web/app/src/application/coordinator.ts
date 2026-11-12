@@ -8,6 +8,7 @@
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
+import { countsName, parseTaxid, WINDOW_MASKER_TAXID_FLAG, type CountsOrigin } from '../domain/counts';
 import type { FastaParserKind } from '../domain/dataset';
 import { outputFileName, outputMediaType, runOutputs, type RunOutput } from '../domain/output-format';
 import { fastaParser, programById, WINDOW_MASKER_FLAG, type ProgramId } from '../domain/programs';
@@ -46,8 +47,14 @@ export interface SearchRequest {
   readonly requestedThreads: number | 'auto';
   /** The run's name (NCBI's "Job Title"); the snapshot keeps it trimmed, or not at all when empty. */
   readonly title?: string;
-  /** The counts file that the parameters' `-window_masker_db` names (BLASTN); the run reads it under that name. */
+  /**
+   * The counts file of the search (BLASTN): the file that the parameters' `-window_masker_db` names,
+   * which the run reads under that name, or the file kept for the `-window_masker_taxid` (line WW2),
+   * which it reads under the name that the engine looks for (domain/counts.ts).
+   */
   readonly windowMasker?: File;
+  /** Where the counts of a taxonomy ID came from; the run records it. */
+  readonly windowMaskerOrigin?: CountsOrigin;
 }
 
 export interface RunView {
@@ -160,11 +167,18 @@ export class Coordinator {
       }
       const title = request.title?.trim();
       // The run reads the file under the name that its argv gives the option.
-      const countsName = optionValue(argv, WINDOW_MASKER_FLAG);
+      const taxid = parseTaxid(optionValue(argv, WINDOW_MASKER_TAXID_FLAG) ?? '');
+      const name = optionValue(argv, WINDOW_MASKER_FLAG) ?? (taxid === undefined ? undefined : countsName(taxid));
       const windowMasker =
-        request.windowMasker === undefined || countsName === undefined
+        request.windowMasker === undefined || name === undefined
           ? undefined
-          : Object.freeze({ name: countsName, file: request.windowMasker, size: request.windowMasker.size, lastModified: request.windowMasker.lastModified });
+          : Object.freeze({
+              name,
+              file: request.windowMasker,
+              size: request.windowMasker.size,
+              lastModified: request.windowMasker.lastModified,
+              ...(taxid === undefined || request.windowMaskerOrigin?.taxid !== taxid ? {} : { origin: request.windowMaskerOrigin }),
+            });
       snapshots.push(
         Object.freeze({
           runId: this.deps.newRunId(),
@@ -361,7 +375,9 @@ export class Coordinator {
           ...(runtime.runtimeGeneration === undefined ? {} : { runtimeGeneration: runtime.runtimeGeneration }),
           ...(runtime.memory === undefined ? {} : { memory: runtime.memory }),
           ...(runtime.subjectRetained === undefined ? {} : { subjectRetained: runtime.subjectRetained }),
-          ...(runtime.windowMasker === undefined ? {} : { windowMasker: runtime.windowMasker }),
+          ...(runtime.windowMasker === undefined
+            ? {}
+            : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
         },
       });
     } catch (error) {

@@ -42,7 +42,8 @@
 //! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as
 //! `on_word` does, and runs the steps of `process_offset_pairs` that read nothing but the
 //! inputs (the context of the query offset, the bounds test, the word extension of
-//! `s_BlastNaExtend`); a pair that passes becomes a `Seed`, in the order of the pairs.
+//! `s_BlastNaExtend`, which `process_offset_pairs` calls as `pair_extend::word_extend_pair`);
+//! a pair that passes becomes a `Seed`, in the order of the pairs.
 //! Phase 2, on the owner thread only: the seeds of strip 0, 1, 2, ... in that order go
 //! through a statement-for-statement copy of the rest of `process_offset_pairs` for one-hit
 //! mode (diagonal-hash retrieve, the `last_hit` test, `type_of_word`, the ungapped

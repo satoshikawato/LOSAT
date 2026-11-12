@@ -126,8 +126,8 @@ pub(crate) fn ordinary_traceback_observed(
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
-    let xdrop = ((options.gap_x_dropoff_final * std::f64::consts::LN_2 / ka.lambda) as i32)
-        .max((options.gap_x_dropoff * std::f64::consts::LN_2 / ka.lambda) as i32);
+    // blast_parameters.c:454-463: the final X-drop (`parameters::gapped_x_drops`).
+    let xdrop = super::parameters::gapped_x_drops(options, &ka).1;
     let mut tree = BlastIntervalTree::new(
         0,
         batch.sequence_start.len() as i32,

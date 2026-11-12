@@ -1300,6 +1300,23 @@ fn check_ncbi_options(
             "Word-size must be less than 6 for protein comparison",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:608-618 (the initial
+    // word options' check, after the lookup table's and before the hit saving options')
+    // ```c
+    //    if (program_number != eBlastTypeBlastn  &&
+    //        program_number != eBlastTypeMapping &&
+    //        (!Blast_ProgramIsPhiBlast(program_number)) &&
+    //        options->x_dropoff <= 0.0)
+    //    {
+    //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //                             "x_dropoff must be greater than zero");
+    //          return BLASTERR_OPTION_VALUE_INVALID;
+    //    }
+    // ```
+    // (`<= 0.0` is false for NaN, as in C.)
+    if args.x_drop_ungapped_bits() <= 0.0 {
+        return Err(options_error("x_dropoff must be greater than zero"));
+    }
     // The hit saving options' check of the hit list size comes before the e-value's.
     counts.validate()?;
     if args.evalue <= 0.0 {

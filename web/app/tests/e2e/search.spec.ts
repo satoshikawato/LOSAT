@@ -6,7 +6,8 @@ import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
-import { gzipSync, zstdCompressSync } from 'node:zlib';
+import { dirname } from 'node:path';
+import { constants as zlib, gzipSync, zstdCompressSync } from 'node:zlib';
 import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
 import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
 import { TMP_DIRECTORY } from '../../src/infra/data/session';
@@ -92,7 +93,12 @@ test('a file is summarized with its records, not put in the paste box; files can
 // the index read; NCBI's reader skips the '!', and the record is left out with its checkbox.
 const REFUSED_RECORD = '>bad\nACGT!ACGT\n';
 
+// Compressed files are inflated by the engine's decoders (ABI v2 inflate_*; swebok-improve SW8 D2):
+// a build without the engine reads every file as it is.
+const NO_DECODERS = "the engine's decoders inflate a compressed file (engine build)";
+
 test('a file named .gz is inflated when it is opened and shows its plain name', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
   await openFiles(page, 'subject', [{ name: 'LC738884.fasta.gz', text: gzipSync(fasta('LC738884.fasta')) }]);
   await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
   await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
@@ -103,6 +109,7 @@ test('a file named .gz is inflated when it is opened and shows its plain name', 
 });
 
 test('a file named .zst is inflated when it is opened and shows its plain name', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
   await openFiles(page, 'subject', [{ name: 'LC738884.fasta.zst', text: zstdCompressSync(fasta('LC738884.fasta')) }]);
   await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
   await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
@@ -112,12 +119,49 @@ test('a file named .zst is inflated when it is opened and shows its plain name',
   await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
 });
 
-test('a file named .bz2 is refused when it is opened and shows the error on its card', async ({ page }) => {
+test('a file named .bz2 is inflated when it is opened and shows its plain name', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
+  // Node has no bzip2 encoder: the bzip2 command writes the file (the Linux runners have it).
+  const packed = spawnSync('bzip2', ['-9c'], { input: fasta('LC738884.fasta'), maxBuffer: 1 << 26 });
+  expect(packed.status, String(packed.error ?? packed.stderr)).toBe(0);
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.bz2', text: packed.stdout }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+});
+
+test("a file named .bz2 that is not bzip2 data is refused with the command line's sentence on its card", async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
   await openFiles(page, 'subject', [{ name: 'two.fa.bz2', text: '>a\nACGT\n' }]);
   await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'failed');
   await expect(page.getByTestId('subject-source-0-error')).toHaveText(
-    "This input cannot be read: 'two.fa.bz2' is named .bz2; the web app reads .gz and .zst, not bzip2 (the command line does)",
+    "This input cannot be read: 'two.fa.bz2' is named .bz2 but is not bzip2 data (bzip2: bz2 header missing); LOSAT reads a file named .bz2 through bzip2",
   );
+});
+
+test("a file named .zst whose checksum is wrong is refused with the command line's sentence", async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
+  const name = 'LC738884.fasta.zst';
+  const packed = Buffer.from(zstdCompressSync(fasta('LC738884.fasta'), { params: { [zlib.ZSTD_c_checksumFlag]: 1 } }));
+  packed[packed.length - 1]! ^= 1;
+  await openFiles(page, 'subject', [{ name, text: packed }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'failed');
+  const sentence = `'${name}' is named .zst but is not zstd data (a zstd frame's checksum does not match its data); LOSAT reads a file named .zst through zstd`;
+  await expect(page.getByTestId('subject-source-0-error')).toHaveText(`This input cannot be read: ${sentence}`);
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `the native CLI's sentence: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  // The command line reads the same bytes under the same name, and puts its option before the sentence.
+  const file = testInfo.outputPath(name);
+  writeFileSync(file, packed);
+  writeFileSync(testInfo.outputPath('s.fa'), '>s\nACGTACGTACGTACGTAAACCCGGGTTT\n');
+  const run = spawnSync(NATIVE, ['blastn', '-query', name, '-subject', 's.fa', '-outfmt', '6'], { cwd: dirname(file), timeout: 60_000 });
+  expect(run.status).toBe(1);
+  expect(String(run.stderr)).toBe(`Error: -query: ${sentence}\n`);
 });
 
 test('records: duplicate IDs by number, a record that the input check refuses (FakeEngine), exclusion, and a run after exclusion', async ({ page }) => {

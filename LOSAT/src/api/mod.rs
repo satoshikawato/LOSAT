@@ -128,6 +128,7 @@ pub use error::Error;
 pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
 pub use run::{run, run_collect, run_to_file, HspRecord, Outcome, QueryStats, Report, Strand};
+pub(crate) use search::pssm_file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{run_blastdbcmd, run_makeblastdb};
 pub use view::{QueryHits, SubjectHits};

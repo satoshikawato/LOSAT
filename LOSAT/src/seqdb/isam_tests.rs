@@ -989,6 +989,9 @@ fn simplified_keys_of_the_id_forms() {
     assert_eq!(simplify("lcl|MyProt"), "myprot");
     assert_eq!(simplify("lcl|123"), "lcl|123");
     assert_eq!(simplify("123"), "lcl|123");
+    // `StringToNumeric<Int8>` reads up to a NUL (ncbistr.cpp:851), so the bare number before
+    // it makes the key local (seqdbcommon.cpp:2592).
+    assert_eq!(simplify("12\u{0}x"), "lcl|12\u{0}x");
     assert_eq!(simplify("myprot_13"), "myprot_13");
     // pdb
     assert_eq!(simplify("1ABC_A"), "pdb|1abc|a");

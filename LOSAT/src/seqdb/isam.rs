@@ -117,7 +117,7 @@ use std::path::{Path, PathBuf};
 
 use super::file::DbFile;
 use super::SeqDbError;
-use crate::ncbi_str::{printable_string, string_to_int, string_to_uint, ALLOW_TRAILING_SYMBOLS};
+use crate::ncbi_str::{string_to_int, string_to_int8, string_to_uint, ALLOW_TRAILING_SYMBOLS};
 use crate::seqid::accguide::{parse_flags, SeqIdWarning, SEQID_NOT_SET};
 use crate::seqid::label;
 use crate::seqid::model::{ObjectId, ParsedSeqId, TextseqId};
@@ -3204,64 +3204,6 @@ impl std::fmt::Display for SimplifyError {
 
 impl std::error::Error for SimplifyError {}
 
-/// `NStr::StringToInt8(str)` with no flags: an optional sign and digits, nothing else.
-fn string_to_int8(s: &[u8]) -> Option<i64> {
-    let (negative, digits) = match s.first() {
-        Some(b'-') => (true, &s[1..]),
-        Some(b'+') => (false, &s[1..]),
-        _ => (false, s),
-    };
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let mut n: i128 = 0;
-    for &c in digits {
-        n = n * 10 + i128::from(c - b'0');
-        if n > i128::from(i64::MAX) + 1 {
-            return None;
-        }
-    }
-    let n = if negative { -n } else { n };
-    i64::try_from(n).ok()
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:845-860
-// ```c++
-//     Int8 limdiv = kMax_I8 / base;
-//     Int8 limoff = kMax_I8 % base + (sign ? 1 : 0);
-//     ...
-//     while (char ch = str[pos]) {
-//         int delta;  // corresponding numeric value of 'ch'
-//         // Check digit
-//         if (!s_IsGoodCharForRadix(ch, base, &delta)) {
-//             break;
-//         }
-//         // Check for overflow
-//         if (n >= limdiv  &&  (n > limdiv  ||  delta > limoff)) {
-//             S2N_CONVERSION_ERROR(int8_t, kEmptyStr, ERANGE, pos);
-//         }
-// ```
-/// Whether `NStr::StringToInt8(s)` fails with its ", overflow" message: the digits after an
-/// optional sign overflow before the first other byte (which fails without it).
-fn int8_digits_overflow(s: &[u8]) -> bool {
-    let negative = s.first() == Some(&b'-');
-    let digits = match s.first() {
-        Some(b'-' | b'+') => &s[1..],
-        _ => s,
-    };
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(negative);
-    let mut n: i64 = 0;
-    for &c in digits.iter().take_while(|c| c.is_ascii_digit()) {
-        let delta = i64::from(c - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return true;
-        }
-        n = n * 10 + delta;
-    }
-    false
-}
-
 /// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
 /// BDC).
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
@@ -3485,17 +3427,8 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
             if dbt.db == b"ti" {
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
-                    ObjectId::Str(text) => string_to_int8(text).ok_or_else(|| {
-                        SimplifyError::Exception(format!(
-                            "Cannot convert string '{}' to Int8{}",
-                            printable_string(text),
-                            if int8_digits_overflow(text) {
-                                ", overflow"
-                            } else {
-                                ""
-                            }
-                        ))
-                    })?,
+                    ObjectId::Str(text) => string_to_int8(text, 0)
+                        .map_err(|error| SimplifyError::Exception(error.get_msg().to_string()))?,
                     ObjectId::Id(n) => i64::from(*n),
                 };
                 out.id_type = SeqDbIdType::Ti;
@@ -3851,7 +3784,7 @@ pub fn seqdb_simplify_accession(acc: &[u8]) -> Result<SimplifiedAccession, Simpl
             } else {
                 out.str_id = acc.to_vec();
             }
-        } else if string_to_int8(acc).is_some() {
+        } else if string_to_int8(acc, 0).is_ok() {
             out.str_id = [b"lcl|".as_slice(), acc].concat();
         } else {
             out.str_id = acc.to_vec();

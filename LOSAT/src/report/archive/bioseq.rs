@@ -65,56 +65,6 @@ pub struct QuerySeqLoc<'a> {
     pub id: &'a crate::seqid::ParsedSeqId,
 }
 
-/// `NStr::PrintableString(s, 0)`: a byte outside 0x20..0x7e, a backslash or a quote is
-/// written as an escape.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3732-3845
-/// (`\t \r \n \a \b \f \v` as letters, `\\` `\'` `\"` backslashed, a `?` next to a `?` as
-/// `\?`, other bytes as reduced octal: `\303\251`, `\1`).
-pub fn printable_string(text: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len() + 8);
-    for (index, &byte) in text.iter().enumerate() {
-        let escape = match byte {
-            7 => Some(b'a'),
-            8 => Some(b'b'),
-            12 => Some(b'f'),
-            13 => Some(b'r'),
-            9 => Some(b't'),
-            11 => Some(b'v'),
-            10 => {
-                out.extend_from_slice(b"\\n\\\n");
-                continue;
-            }
-            b'\\' | b'\'' | b'"' => Some(byte),
-            b'?' if (index > 0 && text[index - 1] == b'?')
-                || (index + 1 < text.len() && text[index + 1] == b'?') =>
-            {
-                Some(b'?')
-            }
-            _ => None,
-        };
-        if let Some(escape) = escape {
-            out.push(b'\\');
-            out.push(escape);
-        } else if !(0x20..0x7f).contains(&byte) {
-            let mut reduce = index + 1 == text.len() || !(b'0'..=b'7').contains(&text[index + 1]);
-            out.push(b'\\');
-            let (v1, v2, v3) = (byte >> 6, (byte >> 3) & 7, byte & 7);
-            if v1 != 0 || !reduce {
-                out.push(b'0' + v1);
-                reduce = false;
-            }
-            if v2 != 0 || !reduce {
-                out.push(b'0' + v2);
-            }
-            out.push(b'0' + v3);
-        } else {
-            out.push(byte);
-        }
-    }
-    out
-}
-
 /// `NCBI4na` code of an upper-case nucleotide letter (`-ACMGRSVTWYHKDBN`); a letter outside
 /// the table is `N`.
 fn ncbi4na_code(letter: u8) -> u8 {
@@ -239,7 +189,12 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
     enc.end_member();
     enc.member("data", 2);
     enc.variant("User-field_data", "str", 0);
-    enc.visible_str(&printable_string(bioseq.defline));
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:601
+    // ```c++
+    //         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
+    // ```
+    // The default mode `fNewLine_Quote` writes a line feed as `\n` (ncbistr.hpp:2730).
+    enc.visible_str(crate::ncbi_str::printable_string(bioseq.defline).as_bytes());
     enc.end_variant();
     enc.end_member();
     enc.end_sequence();
@@ -315,14 +270,17 @@ mod tests {
 
     #[test]
     fn printable_string_follows_ncbi() {
-        assert_eq!(printable_string(b">plain text"), b">plain text");
-        assert_eq!(printable_string(b"a\tb\\c'd\"e"), b"a\\tb\\\\c\\'d\\\"e");
-        assert_eq!(printable_string(b"what??"), b"what\\?\\?");
-        assert_eq!(printable_string(b"one?two"), b"one?two");
-        assert_eq!(printable_string(b"caf\xc3\xa9"), b"caf\\303\\251");
-        assert_eq!(printable_string(b"\x01x"), b"\\1x");
-        assert_eq!(printable_string(b"\x011"), b"\\0011");
-        assert_eq!(printable_string(b"\x07\x08\x0c\r\x0b"), b"\\a\\b\\f\\r\\v");
+        let printable = |text: &[u8]| crate::ncbi_str::printable_string(text).into_bytes();
+        assert_eq!(printable(b">plain text"), b">plain text");
+        assert_eq!(printable(b"a\tb\\c'd\"e"), b"a\\tb\\\\c\\'d\\\"e");
+        assert_eq!(printable(b"what??"), b"what\\?\\?");
+        assert_eq!(printable(b"one?two"), b"one?two");
+        assert_eq!(printable(b"caf\xc3\xa9"), b"caf\\303\\251");
+        assert_eq!(printable(b"\x01x"), b"\\1x");
+        assert_eq!(printable(b"\x011"), b"\\0011");
+        assert_eq!(printable(b"\x07\x08\x0c\r\x0b"), b"\\a\\b\\f\\r\\v");
+        // `fNewLine_Quote`: a line feed is `\n`, not the `\n\` and line feed of `fNewLine_Passthru`.
+        assert_eq!(printable(b"a\nb"), b"a\\nb");
     }
 
     #[test]

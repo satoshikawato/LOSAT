@@ -5,8 +5,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ncbi_str::printable_string;
-
 /// What an option holds (`CArgDescriptions::EType` of a key, or a flag).
 ///
 /// The file types of NCBI (`eInputFile`, `eOutputFile`) are strings here: blastdbcmd describes
@@ -1038,116 +1036,18 @@ fn integer_value(name: &str, value: &str) -> Result<i64, ArgsError> {
     Ok(number)
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-871
-// ```c++
-// Int8 NStr::StringToInt8(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     ...
-//     // Determine sign
-//     bool sign = false;
-//     switch (str[pos]) {
-//     case '-':
-//         sign = true;
-//         /*FALLTHRU*/
-//     case '+':
-//         pos++;
-//         break;
-//     ...
-//     }
-//     SIZE_TYPE pos0 = pos;
-//     ...
-//     Int8 n = 0;
-//     Int8 limdiv = base==10? kMax_I8 / 10: kMax_I8 / base;
-//     Int8 limoff = (base==10? kMax_I8 % 10: kMax_I8 % base) + (sign ? 1 : 0);
-//     ...
-//     while (char ch = str[pos]) {
-//         ...
-//         if ( !s_IsGoodCharForRadix(ch, base, &delta) ) {
-//             break;
-//         }
-//         // Overflow check
-//         if ( n >= limdiv  &&  (n > limdiv  ||  delta > limoff) ) {
-//             S2N_CONVERT_ERROR_OVERFLOW(Int8);
-//         }
-//         n *= base;
-//         n += delta;
-//         pos++;
-//     }
-//
-//     // Last checks
-//     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-//         S2N_CONVERT_ERROR_INVAL(Int8);
-//     }
-//     ...
-//     n = sign ? -n : n;
-//     CHECK_ENDPTR(Int8);
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:546-557
-// ```c++
-//     s += "Cannot convert string '";
-//     s += NStr::PrintableString(str);
-//     s += "' to ";
-//     s += to_type;
-//     if ( !msg.empty() ) {
-//         s += ", ";
-//         s += msg;
-//     }
-// ```
-// The `CStringException` adds its position (`m_Pos = N`, ncbistr.hpp:4438) to the message.
-/// `NStr::StringToInt8(value)` in base 10 with no flags: the number, or the message of
-/// NCBI's exception as the argument reader reports it (with the exception's position).
+/// `NStr::StringToInt8(value)` in base 10 with no flags (`ncbi_str::string_to_int8`): the
+/// number, or the message of NCBI's exception as the argument reader reports it (with the
+/// exception's position, `m_Pos = N`, ncbistr.hpp:4438).
 fn string_to_int8(value: &str) -> Result<i64, String> {
-    string_to_int8_at(value).map_err(|(message, pos)| format!("{message} (m_Pos = {pos})"))
+    crate::ncbi_str::string_to_int8(value.as_bytes(), 0).map_err(|error| error.text())
 }
 
-/// `NStr::StringToInt8(value)`: the number, or the message of NCBI's exception as
-/// `GetMsg` gives it (without the position).
+/// `NStr::StringToInt8(value)`: the number, or the message of NCBI's exception as `GetMsg`
+/// gives it (without the position).
 pub(super) fn string_to_int8_message(value: &str) -> Result<i64, String> {
-    string_to_int8_at(value).map_err(|(message, _)| message)
-}
-
-/// `NStr::StringToInt8(value)`: the number, or the message of NCBI's exception and the
-/// position the exception holds (`m_Pos`).
-fn string_to_int8_at(value: &str) -> Result<i64, (String, usize)> {
-    let bytes = value.as_bytes();
-    let error = |extra: &str, pos: usize| {
-        (
-            format!(
-                "Cannot convert string '{}' to Int8{extra}",
-                printable_string(value.as_bytes())
-            ),
-            pos,
-        )
-    };
-    let mut pos = 0;
-    let sign = match bytes.first() {
-        Some(b'-') => {
-            pos = 1;
-            true
-        }
-        Some(b'+') => {
-            pos = 1;
-            false
-        }
-        _ => false,
-    };
-    let pos0 = pos;
-    let limdiv = i64::MAX / 10;
-    let limoff = i64::MAX % 10 + i64::from(sign);
-    let mut n: i64 = 0;
-    while let Some(&byte) = bytes.get(pos).filter(|byte| byte.is_ascii_digit()) {
-        let delta = i64::from(byte - b'0');
-        if n >= limdiv && (n > limdiv || delta > limoff) {
-            return Err(error(", overflow", pos));
-        }
-        // `i64::MIN` passes the overflow check as its magnitude, one past `i64::MAX`.
-        n = n.wrapping_mul(10).wrapping_add(delta);
-        pos += 1;
-    }
-    if pos == pos0 || pos < bytes.len() {
-        return Err(error("", pos));
-    }
-    Ok(if sign { n.wrapping_neg() } else { n })
+    crate::ncbi_str::string_to_int8(value.as_bytes(), 0)
+        .map_err(|error| error.get_msg().to_string())
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3162-3296
@@ -1478,6 +1378,13 @@ mod tests {
         assert_eq!(
             string_to_int8("").unwrap_err(),
             "Cannot convert string '' to Int8 (m_Pos = 0)"
+        );
+        // NCBI reads up to a NUL (`while (char ch = str[pos])`, `CHECK_ENDPTR` sees the NUL): a
+        // batch line `12\0x` is 12.
+        assert_eq!(string_to_int8("12\u{0}x"), Ok(12));
+        assert_eq!(
+            string_to_int8_message("\u{0}1").unwrap_err(),
+            "Cannot convert string '\\0001' to Int8"
         );
         assert!(matches!(
             integer_value("line_length", "0x10"),

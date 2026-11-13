@@ -411,6 +411,21 @@ impl TblastxArgs {
     /// a file (`BlastFindMatrixPath`, blast_stat.c:1631-1660); LOSAT reads no matrix file, and
     /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3), which LOSAT
     /// refuses (`matrix_file`).
+    pub fn scoring_matrix(&self) -> TblastxMatrix {
+        let name = self.matrix_name();
+        if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {
+            return TblastxMatrix::Table(matrix);
+        }
+        let identity = name
+            .get(..8)
+            .is_some_and(|start| start.eq_ignore_ascii_case("identity"));
+        if identity {
+            TblastxMatrix::Aborts
+        } else {
+            TblastxMatrix::Unknown
+        }
+    }
+
     /// Looks up the file that NCBI reads for an `Unknown` matrix (`scoring_matrix`) with `search`
     /// (`MatrixSearch::file`) into `matrix_file`: the first step of the command line's run
     /// (`run`) and of the library's searches (`run_local_database`, `api::run`'s search of
@@ -426,21 +441,6 @@ impl TblastxArgs {
                 .map_err(anyhow::Error::msg)?;
         }
         Ok(())
-    }
-
-    pub fn scoring_matrix(&self) -> TblastxMatrix {
-        let name = self.matrix_name();
-        if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {
-            return TblastxMatrix::Table(matrix);
-        }
-        let identity = name
-            .get(..8)
-            .is_some_and(|start| start.eq_ignore_ascii_case("identity"));
-        if identity {
-            TblastxMatrix::Aborts
-        } else {
-            TblastxMatrix::Unknown
-        }
     }
 
     /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.

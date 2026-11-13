@@ -5,9 +5,10 @@
 //! after the arguments, ends a `-dryrun` (`ncbi_environment::ApplicationStart`, quoted there).
 //! The command line's entry runs one start per process (`cli::main_entry`); the library runs one
 //! per call that needs it: at the call's beginning when its argv has `-logfile`, `-conffile` or
-//! `-dryrun` (`Search::starts`), else when the call first reads NCBI's settings (a database
-//! search, blastn's `-window_masker_taxid`). A search of records without those reads no NCBI
-//! setting (the contract of `api`).
+//! `-dryrun` (`Search::starts`), else when the call first reads NCBI's settings, where NCBI's
+//! library looks them up itself (a database search, blastn's `-window_masker_taxid`, the organism
+//! report of outfmt 18, the file of a `-matrix` that NCBI's tables do not have). A search of
+//! records without those reads no NCBI setting (the contract of `api`).
 
 use std::ffi::OsStr;
 use std::io::Write;
@@ -117,11 +118,18 @@ impl CallStart {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (quoted at
     // `cli::main_entry`: the BLAST programs keep the default `DryRun`, which returns 0 after the
     // arguments have passed their definitions)
-    /// The start of a call of `search`: run now, with its messages on `diagnostics`, when the
-    /// argv has `-logfile`, `-conffile` or `-dryrun`. Settings that LOSAT refuses
-    /// (`ApplicationStart::settings`) are the call's error then, dry run or not, as the command
-    /// line refuses them after its start (`cli::main_entry`'s `start.settings()?`).
-    pub(super) fn new(search: &Search, diagnostics: &mut dyn Write) -> Result<CallStart, Error> {
+    /// The start of a call of `search` with `inputs`, in the command line's order
+    /// (`cli::main_entry`): the start, run now with its messages on `diagnostics` when the argv
+    /// has `-logfile`, `-conffile` or `-dryrun`; the parse of the argv with the kind of the call's
+    /// subject (`Search::command`: `-subject_loc` with a database fails here, dry run or not; it
+    /// reads no record); then the settings that LOSAT refuses (`ApplicationStart::settings`), the
+    /// call's error when the start has run, as the command line refuses them after its parse
+    /// (`start.settings()?`).
+    pub(super) fn new(
+        search: &Search,
+        inputs: Inputs<'_>,
+        diagnostics: &mut dyn Write,
+    ) -> Result<CallStart, Error> {
         let program = search.program().name();
         let mut call = CallStart {
             program,
@@ -129,8 +137,12 @@ impl CallStart {
             log: None,
             dry_run: search.dry_run(),
         };
-        if search.starts() {
-            let started = begin(program, search.argv(), diagnostics)?;
+        let started = match search.starts() {
+            true => Some(begin(program, search.argv(), diagnostics)?),
+            false => None,
+        };
+        search.command(inputs)?;
+        if let Some(started) = started {
             if let Err(reason) = &started.settings {
                 return Err(Error::Search(reason.clone()));
             }
@@ -142,16 +154,11 @@ impl CallStart {
         Ok(call)
     }
 
-    /// Whether the call is a dry run, which ends here: the start has run (`CallStart::new`) and
-    /// the arguments have passed the parser with the kind of the call's subject
-    /// (`Search::command`: `-subject_loc` with a database fails as without `-dryrun`). Neither
-    /// the records nor `-outfmt` are read (NCBI reads them in `Run`).
-    pub(super) fn dry_run(&self, search: &Search, inputs: Inputs<'_>) -> Result<bool, Error> {
-        if !self.dry_run {
-            return Ok(false);
-        }
-        search.command(inputs)?;
-        Ok(true)
+    /// Whether the call is a dry run, which ends here: the start, the parse with the call's kind
+    /// of subject and the settings have passed (`CallStart::new`). Neither the records nor
+    /// `-outfmt` are read (NCBI reads them in `Run`).
+    pub(super) fn dry_run(&self) -> bool {
+        self.dry_run
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:345-347
@@ -226,16 +233,21 @@ impl RunLog {
         }
     }
 
-    /// The error of a failed run (`Error::search`). The text of its `NativeError` goes to the
-    /// `-logfile` file too, where the command line writes it (its standard error is the file
-    /// there); the error keeps it.
+    /// The error of a failed run (`Error::search`), posted (`RunLog::post`).
     pub(super) fn failed(&mut self, error: &anyhow::Error) -> Error {
+        self.post(error);
+        Error::search(error)
+    }
+
+    /// Writes the text of `error`, a `NativeError` of the run, to the `-logfile` file, where the
+    /// command line writes it (its standard error is the file there); the caller's error keeps
+    /// it. LOSAT's own refusals stay off the file, as on the command line (`cli::main_entry`).
+    pub(super) fn post(&mut self, error: &anyhow::Error) {
         if let (Some(DiagTarget::File(file)), Some(native)) =
             (&mut self.0, error.downcast_ref::<crate::cli::NativeError>())
         {
             let _ = file.write_all(native.message.as_bytes());
         }
-        Error::search(error)
     }
 }
 

@@ -101,7 +101,8 @@ report), and LOSAT refuses a `.ncbirc` with a syntax error there: NCBI's rpsbpro
 of a source file of its own build. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs the same start in a call whose
 arguments have `-logfile`, `-conffile` or `-dryrun`, and in a call that reads NCBI's settings (a
-database search, blastn's `-window_masker_taxid`, the organism report of outfmt 18): its messages
+database search, blastn's `-window_masker_taxid`, the organism report of outfmt 18, the file of a
+`-matrix` that NCBI's tables do not have in tblastx and ungapped blastx): its messages
 go where the command line writes them, and a start that stops the command line's program is the
 call's error.
 

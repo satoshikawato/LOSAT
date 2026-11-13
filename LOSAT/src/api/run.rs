@@ -42,7 +42,7 @@ use super::local_blast::{
 };
 use super::program::Program;
 use super::search::Search;
-use super::start::{CallStart, RunSink};
+use super::start::{CallStart, RunLog, RunSink};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
@@ -677,8 +677,9 @@ fn subject_taxdb(
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
 // change the output. A search of records reads neither, but for the directory of BLASTN's
-// `-window_masker_taxid` and the taxonomy database of the organism report (outfmt 18), which
-// NCBI's library looks for itself. The settings are the call's application start's
+// `-window_masker_taxid`, the taxonomy database of the organism report (outfmt 18) and the file
+// of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped BLASTX), which NCBI's library
+// looks for itself. The settings are the call's application start's
 // (`start::CallStart::settings`).
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
@@ -831,11 +832,13 @@ pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Er
 
 /// The searches of a call: `formats` grouped by hit list size (`search_groups`), and the threads
 /// of the pool they share. A `-outfmt` value that the command line rejects, and a call without
-/// formats (the engines refuse one), fail here, before any search.
+/// formats (the engines refuse one), fail here, before any search; the command line's error of
+/// a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
 fn searches(
     search: &Search,
     inputs: Inputs<'_>,
     formats: &[&str],
+    log: &mut RunLog,
 ) -> Result<(Vec<Vec<usize>>, usize), Error> {
     use crate::blastinput::app::output_format::ARCHIVE_FORMAT;
     use crate::blastinput::app::parse_formatting_string;
@@ -848,7 +851,10 @@ fn searches(
         .map(|outfmt| {
             parse_formatting_string(outfmt)
                 .map(|choice| choice.number)
-                .map_err(|error| Error::Argv(format!("{error:#}")))
+                .map_err(|error| {
+                    log.post(&error);
+                    Error::Argv(format!("{error:#}"))
+                })
         })
         .collect::<Result<_, _>>()?;
     if numbers.contains(&ARCHIVE_FORMAT) {
@@ -881,17 +887,17 @@ pub fn run(
     reports: &mut [(&str, &mut (dyn Write + Send))],
     diagnostics: &mut (dyn Write + Send),
 ) -> Result<(), Error> {
-    let mut start = CallStart::new(search, &mut *diagnostics)?;
-    if start.dry_run(search, inputs)? {
+    let mut start = CallStart::new(search, inputs, &mut *diagnostics)?;
+    if start.dry_run() {
         return Ok(());
     }
+    let mut log = start.take_log();
     let formats: Vec<&str> = reports.iter().map(|(outfmt, _)| *outfmt).collect();
-    let (groups, threads) = searches(search, inputs, &formats)?;
+    let (groups, threads) = searches(search, inputs, &formats, &mut log)?;
     let mut writers: Vec<Option<&mut (dyn Write + Send)>> = reports
         .iter_mut()
         .map(|(_, writer)| Some(&mut **writer))
         .collect();
-    let mut log = start.take_log();
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
             let command = search.command(inputs)?;
@@ -956,20 +962,20 @@ pub fn run_to_file(
             "run_to_file writes a file: `run` gives a report to a writer".to_string(),
         ));
     }
-    let mut start = CallStart::new(search, &mut *diagnostics)?;
+    let mut start = CallStart::new(search, inputs, &mut *diagnostics)?;
     // The command line's dry run does not make the `-out` file (line RG item E1b).
-    if start.dry_run(search, inputs)? {
+    if start.dry_run() {
         return Ok(());
     }
+    // tblastx writes the errors of an `-outfmt` value and of an `-out` it cannot make to its
+    // `-logfile` file, as its other errors (`RunLog::failed`).
+    let mut log = start.take_log();
     let threads = {
         let formats = [outfmt];
-        searches(search, inputs, &formats)?.1
+        searches(search, inputs, &formats, &mut log)?.1
     };
     let mut command = search.command(inputs)?;
     set_output_file(&mut command, path);
-    // tblastx writes the error of an `-out` it cannot make to its `-logfile` file, as its other
-    // errors (`RunLog::failed`).
-    let mut log = start.take_log();
     let file =
         File::create(path).map_err(|_| log.failed(&crate::cli::inaccessible("out", path)))?;
     let mut file = BufWriter::new(file);
@@ -1234,8 +1240,8 @@ pub fn run_collect(
     formats: &[&str],
 ) -> Result<Outcome, Error> {
     let mut diagnostics: Vec<u8> = Vec::new();
-    let mut start = CallStart::new(search, &mut diagnostics)?;
-    if start.dry_run(search, inputs)? {
+    let mut start = CallStart::new(search, inputs, &mut diagnostics)?;
+    if start.dry_run() {
         return Ok(Outcome {
             reports: formats
                 .iter()
@@ -1251,9 +1257,9 @@ pub fn run_collect(
             diagnostics,
         });
     }
-    let (groups, threads) = searches(search, inputs, formats)?;
-    let mut searched: Vec<Searched> = Vec::new();
     let mut log = start.take_log();
+    let (groups, threads) = searches(search, inputs, formats, &mut log)?;
+    let mut searched: Vec<Searched> = Vec::new();
     // The searches of one call share one thread pool (`with_run_pool`), as the command line's
     // one search has one.
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {

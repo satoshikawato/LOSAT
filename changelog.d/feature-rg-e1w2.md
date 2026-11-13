@@ -8,3 +8,6 @@
 - The library's database searches, and its searches with outfmt 18 or blastn's `-window_masker_taxid`, write NCBI's
   messages about a registry file (such as a malformed `.ncbirc`) and go on, or stop with NCBI's text, as the command line
   does. They refused the file.
+- The library's tblastx, and blastx with `-ungapped`, look up the file of a `-matrix` that NCBI's tables do not have
+  (`BLASTMAT`, `NCBI_DATA_PATH`, `[NCBI] Data`, `./data`) and refuse it as the command line does, where they gave NCBI's
+  `Unknown error code -1`; such a search reads NCBI's settings for it, as a database search does.

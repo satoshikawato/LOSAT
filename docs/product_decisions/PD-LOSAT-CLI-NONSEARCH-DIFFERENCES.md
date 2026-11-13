@@ -37,7 +37,7 @@
   NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
-  E1w2-1 to E1w2-10, Owner-delegated, the same standing instruction)
+  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -294,9 +294,10 @@ BLAST+.
   (`Package-Config`'s configure line, `Build-Signature`, the build dates and revisions,
   `Stable-Components-Version`, `Production-Version`, `Built-As`, rpsbproc's toolkit component)
   are not written; the keys NCBI writes whenever there is a package stay, empty (line RG
-  DECISIONS E3-1). The library API and the Web engine refuse the versions, `-version` too, as
-  they refuse `-logfile`, `-conffile` and `-dryrun`, but in blastdbcmd, dustmasker, segmasker and
-  convert2blastmask, whose library runs print them as their `-version` (E3-2). A failed write of a program's
+  DECISIONS E3-1). The library API and the Web engine refuse the versions, `-version` too, but
+  in blastdbcmd, dustmasker, segmasker and convert2blastmask, whose library runs print them as
+  their `-version` (E3-2), and, since version 1.21, makeblastdb, whose library run prints them
+  to its output (line RG DECISIONS E1w2-6). A failed write of a program's
   version, help or argument error (`-version > /dev/full`) is dropped, as NCBI's `cout` drops it
   (exit status 0 for a version or a help), where LOSAT's earlier write panicked (exit status
   134); a closed pipe there is exception 10; rpsbproc keeps exception 9 (E3-3).

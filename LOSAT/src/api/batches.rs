@@ -217,13 +217,13 @@ pub struct Batches<'a> {
 /// per run about a taxonomy database comes with every batch that reads one.
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
     let mut start_messages = Vec::new();
-    let mut start = CallStart::new(search, &mut start_messages)?;
+    let mut start = CallStart::new(search, inputs, &mut start_messages)?;
     let lengths: Vec<usize> = inputs
         .query
         .iter()
         .map(|record| record.seq().len())
         .collect();
-    if start.dry_run(search, inputs)? {
+    if start.dry_run() {
         let log = start.take_log();
         return Ok(Batches {
             search,

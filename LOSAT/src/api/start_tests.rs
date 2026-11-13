@@ -101,24 +101,24 @@ fn the_dry_run_and_the_start_are_the_argv_s_words() {
 fn a_records_search_without_the_words_starts_nothing() {
     let mut diagnostics = Vec::<u8>::new();
     let search = validate(Program::Blastp, &["-evalue", "1"]).unwrap();
-    let call = CallStart::new(&search, &mut diagnostics).unwrap();
+    let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
     assert!(call.settings.is_none());
     assert!(call.log.is_none());
-    assert_eq!(call.dry_run(&search, Inputs::new(&[], &[])), Ok(false));
+    assert!(!call.dry_run());
     assert!(diagnostics.is_empty());
     // With one of the words the start runs at once, and its settings are kept for the call.
     let dir = scratch("nostart");
     let conffile = dir.join("c.ini");
     std::fs::write(&conffile, "[BLAST]\n").unwrap();
     let search = validate(Program::Blastp, &["-conffile", path_text(&conffile)]).unwrap();
-    let call = CallStart::new(&search, &mut diagnostics).unwrap();
+    let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
     assert!(matches!(call.settings, Some(Ok(_))));
     // Only tblastx's run messages follow `-logfile` (`run_messages_follow_log`).
     assert!(call.log.is_none());
     assert!(diagnostics.is_empty());
     let log = dir.join("log.txt");
     let search = validate(Program::Tblastx, &["-logfile", path_text(&log)]).unwrap();
-    let call = CallStart::new(&search, &mut diagnostics).unwrap();
+    let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
     assert!(matches!(call.log, Some(DiagTarget::File(_))));
     assert_eq!(std::fs::read(&log).unwrap(), b"");
     let _ = std::fs::remove_dir_all(&dir);
@@ -485,8 +485,22 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
         run_to_file(&search, database, "6", &out, &mut diagnostics),
         Err(refused.clone())
     );
-    assert_eq!(run_batches(&search, database).err(), Some(refused));
+    assert_eq!(run_batches(&search, database).err(), Some(refused.clone()));
     assert!(diagnostics.is_empty() && !out.exists());
+    // The parse comes before the settings that LOSAT refuses, as on the command line
+    // (`cli::main_entry`: the parser, then `start.settings()?`).
+    let conffile = dir.join("c.ini");
+    std::fs::write(&conffile, "[BLAST]\nLONG_SEQID=1\n").unwrap();
+    for dry in [&[][..], &["-dryrun"]] {
+        let mut argv = vec!["-subject_loc", "1-10", "-conffile", path_text(&conffile)];
+        argv.extend_from_slice(dry);
+        let search = validate(Program::Blastp, &argv).unwrap();
+        assert_eq!(
+            run_collect(&search, database, &["6"]).err(),
+            Some(refused.clone()),
+            "{dry:?}"
+        );
+    }
     // The words hold with records.
     let records = Inputs::new(&query, &subject);
     let outcome = run_collect(&search, records, &["6"]).unwrap();
@@ -580,5 +594,63 @@ fn the_batches_write_the_run_s_messages_once() {
             .collect::<Vec<_>>(),
         [warning, String::new()]
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (quoted at
+// `ncbi_environment::run_messages_follow_log`): tblastx reads `-outfmt` in its run, after the
+// standard error went to the `-logfile` target, so the command line's error of a value goes to
+// the file (`losat tblastx ... -outfmt 99 -logfile log.txt`: `Error: Formatting choice is out of
+// range`); blastn's goes to its standard error. The library's error is `Error::Argv`, as without
+// `-logfile`.
+#[test]
+fn an_outfmt_error_goes_where_the_run_s_errors_go() {
+    let dir = scratch("outfmtlog");
+    let (query, subject) = nucleotides();
+    let inputs = Inputs::new(&query, &subject);
+    let log = dir.join("log.txt");
+    for outfmt in ["99", "abc"] {
+        let native = crate::blastinput::app::parse_formatting_string(outfmt).unwrap_err();
+        let message = native
+            .downcast_ref::<crate::cli::NativeError>()
+            .unwrap()
+            .message
+            .clone();
+        let refused = Error::Argv(format!("{native:#}"));
+        for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
+            let search = validate(program, &["-logfile", path_text(&log)]).unwrap();
+            std::fs::write(&log, "").unwrap();
+            assert_eq!(
+                run_collect(&search, inputs, &[outfmt]).err(),
+                Some(refused.clone()),
+                "{program} {outfmt}"
+            );
+            assert_eq!(std::fs::read_to_string(&log).unwrap(), logged, "{program}");
+            std::fs::write(&log, "").unwrap();
+            let mut diagnostics = Vec::<u8>::new();
+            assert_eq!(
+                run(
+                    &search,
+                    inputs,
+                    &mut [(outfmt, &mut Vec::<u8>::new())],
+                    &mut diagnostics
+                ),
+                Err(refused.clone()),
+                "{program} {outfmt}"
+            );
+            let out = dir.join("out.txt");
+            assert_eq!(
+                run_to_file(&search, inputs, outfmt, &out, &mut diagnostics),
+                Err(refused.clone()),
+                "{program} {outfmt}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&log).unwrap(),
+                logged.repeat(2),
+                "{program}"
+            );
+            assert!(diagnostics.is_empty() && !out.exists(), "{program}");
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

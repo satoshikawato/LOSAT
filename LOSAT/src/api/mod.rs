@@ -80,7 +80,9 @@
 //!   here too. A database search reads what the command line reads to find a database (`BLASTDB`,
 //!   `.ncbirc`) and the query batch and archive settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...);
 //!   a search of records reads no NCBI setting, unless its argv has one of the NCBI C++ Toolkit's
-//!   words below.
+//!   words below, but where NCBI's library looks one up itself: blastn's `-window_masker_taxid`,
+//!   the organism report of outfmt 18 and the file of a `-matrix` that NCBI's tables do not have
+//!   (tblastx, blastx `-ungapped`).
 //! - `-logfile`, `-conffile` and `-dryrun` work as on the command line: a call whose argv has one
 //!   runs NCBI's application start first (as does a call that reads NCBI's settings, when it
 //!   first reads them). The start's messages about the registry files go where the command line

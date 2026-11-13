@@ -127,6 +127,29 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
         }
     };
     let data_path = format!("{}{dp}", if cfg!(windows) { ";;" } else { "::" });
+    // The subjects as databases too, for the library's database searches (`run_local_database`).
+    for (fasta, dbtype, name) in [
+        ("arch_tbx_s.fna", "nucl", "TBLASTX"),
+        ("arch_bx_s.faa", "prot", "BLASTX"),
+    ] {
+        let out = dir.join("db").join(name).display().to_string();
+        let made = run_in(
+            Path::new(BIN),
+            &[
+                "makeblastdb",
+                "-in",
+                &input(fasta),
+                "-dbtype",
+                dbtype,
+                "-out",
+                &out,
+            ],
+            &dir,
+            &[],
+            b"",
+        );
+        assert_eq!(made.status.code(), Some(0), "{made:?}");
+    }
     for (program, words) in matrix_runs() {
         let mut args: Vec<&str> = words.iter().map(String::as_str).collect();
         let query = input(if program == "TBLASTX" {
@@ -137,6 +160,11 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
         args.extend(["-matrix", "mymat", "-num_threads", "1"]);
         let mut with_query = args.clone();
         with_query.extend(["-query", &query]);
+        // The same search of the database of the subject.
+        let db = dir.join("db").join(program).display().to_string();
+        let mut with_db = with_query.clone();
+        with_db[1] = "-db";
+        with_db[2] = &db;
         for (at, envs) in [
             ("bm/MYMAT", vec![("BLASTMAT", bm.as_str())]),
             ("bm/nt/MYMAT", vec![("BLASTMAT", bm.as_str())]),
@@ -167,6 +195,13 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                 "{program} {at}: {stderr}"
             );
             check_library(&with_query, &dir, &envs, &output, program);
+            let output = run_in(Path::new(BIN), &with_db, &dir, &envs, b"");
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("-matrix mymat is not a matrix of NCBI BLAST+'s tables"),
+                "{program} {at} -db: {output:?}"
+            );
+            check_library(&with_db, &dir, &envs, &output, program);
             // No query, no batch: NCBI reads no matrix (an empty pipe: the report without
             // queries).
             let mut empty = args.clone();
@@ -191,6 +226,8 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                 "{program} {envs:?}: {stderr}"
             );
             check_library(&with_query, &at, &envs, &output, program);
+            let output = run_in(Path::new(BIN), &with_db, &at, &envs, b"");
+            check_library(&with_db, &at, &envs, &output, program);
         }
     }
     let _ = fs::remove_dir_all(&dir);

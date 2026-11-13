@@ -104,7 +104,7 @@ use crate::blastinput::fasta_reader::{
     ReaderConfig,
 };
 use crate::blastinput::input_files::{
-    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
+    check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
 use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
@@ -9062,8 +9062,13 @@ struct QueryBatching {
 /// it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
 fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
     let read = |variable: &str| -> Result<Option<i32>> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-60
+        // ```c++
+        //     char* chunk_sz_str = getenv("CHUNK_SIZE");
+        //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+        // ```
         match std::env::var_os(variable) {
-            Some(value) if !is_blank(value.as_encoded_bytes()) => {
+            Some(value) if !crate::ncbi_str::is_blank(value.as_encoded_bytes()) => {
                 match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
                     Some(number) => Ok(Some(number)),
                     None => anyhow::bail!(

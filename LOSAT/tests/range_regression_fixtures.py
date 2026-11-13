@@ -34,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blastn_regression_fixtures import FIELDS, REPORT_ENV, run_case, sha256  # noqa: E402
+from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
 
 ENGINE = Path(__file__).resolve().parents[1]
 FIXTURES = ENGINE / "tests/fixtures/range_regression"
@@ -151,12 +152,12 @@ def command_freeze(args) -> int:
         raise SystemExit(f"unset {REPORT_ENV} and remove ~/.ncbirc before freezing")
     bin_dir = Path(args.bin_dir).resolve()
     version = subprocess.run([str(bin_dir / "blastn"), "-version"], capture_output=True,
-                             text=True).stdout.strip().replace("\n", "; ")
+                             text=True, env=ncbi_env(dict(os.environ))).stdout.strip().replace("\n", "; ")
     FIXTURES.mkdir(parents=True, exist_ok=True)
     rows = []
     for case_id, argv, extra, case_env, oracle_env in CASES:
         program, rest = argv.split(" ", 1)
-        result = run_case(str(bin_dir / program), [], case_id, rest, oracle_env or case_env)
+        result = run_case(str(bin_dir / program), [], case_id, rest, oracle_env or case_env, env_of=ncbi_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:

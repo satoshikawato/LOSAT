@@ -891,14 +891,20 @@ def command_freeze(args) -> int:
     return 0
 
 
-def run_case(program: str, prefix: list[str], case_id: str, argv: str, case_env: str, extra: str = ""):
+def run_case(program: str, prefix: list[str], case_id: str, argv: str, case_env: str, extra: str = "",
+             env_of=None):
+    """The run of a case; `env_of` (when given) turns the cleaned environment into the run's
+    (range_regression_fixtures' NCBI runs: db_search_fixtures.ncbi_env)."""
     command = [program, *prefix, *shlex.split(argv), *shlex.split(extra)]
+    env = clean_env(case_env)
+    if env_of is not None:
+        env = env_of(env)
     if case_id.endswith(".merged"):
         result = subprocess.run(command, cwd=ENGINE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                env=clean_env(case_env))
+                                env=env)
         result.stderr = b""
         return result
-    return subprocess.run(command, cwd=ENGINE, capture_output=True, env=clean_env(case_env))
+    return subprocess.run(command, cwd=ENGINE, capture_output=True, env=env)
 
 
 def check_one(losat: str, row: dict[str, str], threads: int | None = None) -> tuple[str, str]:

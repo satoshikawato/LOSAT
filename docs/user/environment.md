@@ -87,14 +87,18 @@ go to the standard error stream, and with `-logfile` as in NCBI BLAST+: those of
 standard error stream and into the file, the others into the file (`-logfile /dev/null` and
 `-logfile ""` discard them), except that blastn, blastp, blastx, tblastn and psiblast write the
 messages again to the standard error stream. The messages of the run go into the file in
-tblastx and rpsblast, and to the standard error stream in the other search programs, as in NCBI
-BLAST+. `-conffile FILE` loads FILE in place of `<program>.ini` (a name without a directory is
+tblastx, rpsblast and rpstblastn, and to the standard error stream in the other search programs,
+as in NCBI BLAST+. `-conffile FILE` loads FILE in place of `<program>.ini` (a name without a directory is
 looked for where `<program>.ini` is looked for, a name with one is that file); a FILE that is not
 a file ends the program with NCBI BLAST+'s message and exit status 255, before `-h`. With
 `-dryrun` the configuration is loaded and the settings that LOSAT refuses are refused as without
 it (some of them, such as `DIAG_POST_LEVEL`, would make NCBI BLAST+ write a message); the program
 then stops after its options.
-rpsbproc refuses `-logfile`, `-conffile` and `-dryrun`. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
+rpsbproc writes its messages to the `-logfile` file as NCBI's rpsbproc does, and its program information,
+progress and dry run line to the standard error stream; its `-dryrun` runs its own dry run (its start, then
+the line of its status). rpsbproc reads `.ncbirc` once, when its configuration is loaded (it has no usage
+report), and LOSAT refuses a `.ncbirc` with a syntax error there: NCBI's rpsbproc reports it with the name
+of a source file of its own build. LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in
 UTF-16, or a malformed line that is not UTF-8. LOSAT's library runs no program start and refuses
 a file that NCBI BLAST+ reports.
 

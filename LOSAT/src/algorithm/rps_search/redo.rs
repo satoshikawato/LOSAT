@@ -115,7 +115,7 @@ impl RpsTraceback<'_> {
             if list.hsps.is_empty() {
                 continue;
             }
-            let consensus = &self.consensus[start..start + length];
+            let consensus = &self.consensus.letters()?[start..start + length];
             redo.files
                 .freq_ratios(start, length, &mut scratch.freq_bytes, &mut scratch.ratios)
                 .map_err(|error| {
@@ -185,6 +185,8 @@ impl RpsTraceback<'_> {
                 expect_value: self.expect_value,
                 query_length: length as i32,
                 rps_roles: true,
+                // rpsblast's databases are BLOSUM62's (the others are refused).
+                matrix: crate::config::ScoringMatrix::Blosum62,
             }
             .redo_match(&mut run, list.oid, &hsps, query);
             let exceeded = run.bound_exceeded();
@@ -203,7 +205,7 @@ impl RpsTraceback<'_> {
                 continue;
             };
             hsp_list.query_index = q_idx;
-            swap_roles(&mut hsp_list, query.len());
+            swap_roles(&mut hsp_list, |_| query.len());
             sort_by_score(&mut hsp_list.hsps);
             if hsp_list.hsps.is_empty() {
                 continue;

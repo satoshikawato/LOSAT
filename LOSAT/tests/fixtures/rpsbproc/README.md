@@ -36,7 +36,7 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
 
 ## CASES.tsv
 
-`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `refuse`: LOSAT refuses, exit 1, with
+`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `refuse`: LOSAT refuses, exit 1, with
 the bytes of `refused/<case>.{out,err,rc}`: the XML input until the XML reader of a later item, PS16d, and the
 refusals of PS16b below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a
@@ -99,3 +99,31 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   - `refuse_nodata`: `arch/q_nodata.asn`, `mfirst.asn` without the query's `seq-data` (review oracle R19), with
     `sites/`: the site's positions are outside the (empty) residues, where NCBI reads memory outside the string
     (its two builds print different bytes).
+
+## The NCBI C++ Toolkit options (line RG, item E1c)
+
+- The rows `e1c_*` (2026-11-13): `-dryrun` (rpsbproc's own `DryRun` after its `Init`), `-logfile log.txt` and
+  `-conffile c.ini`. `oracle/<case>.{out,err,rc}` and `.outfile` / `.log` (the `out.txt` and `log.txt` the run
+  made): NCBI's rpsbproc 0.5.1, the binary of the 2025-05-13 package and bioconda's (on the BLAST+ 2.17.0 toolkit),
+  which gave the same bytes, run as the test runs LOSAT (the run directory above, no `LOSAT_` or `NCBI_` variable,
+  `NCBI_CONFIG_PATH` = the run directory, stdin from `/dev/null` or the named file).
+- `conf/`: the registry files of the setups `conf:<file>` (copied as `c.ini`), `ini:<file>` (as `rpsbproc.ini`) and
+  `ncbirc:<file>` (as `.ncbirc`): `blast.ini` is `[BLAST]` alone; `garbage.ini` a line that is not an entry,
+  `sec.ini` an unclosed section, `quote.ini` a value with a quote inside, `cont.ini` a continued value then a line
+  that is not an entry (NCBI's report, exit 2); `bom2.ini` a UTF-8 byte order mark and one byte more (NCBI's
+  `Error: (110.4) Error reading the registry after line 1: `, the run goes on); `bom1.ini` the first byte of one (as a
+  `.ncbirc`: the same post; as a `.ini` NCBI posts nothing).
+- `arch/bad/subj_sequences.asn`, `matrix_integer.asn`, `evalue_rawscore.asn` (the review of item E1c): `arch/one.asn`
+  edited by hand: `subject sequences { }`, `MatrixName` `value integer 5`, `EvalueThreshold` `value cutoff raw-score
+  5`. NCBI writes the `SESSION` line's tab before each getter throws; with `-o log.txt -logfile log.txt` its stream
+  keeps the part of that line until the program ends, and writes it over the start of the exception's report.
+  `matrix_integer_longdb.asn` is `matrix_integer.asn` with a database name of 5,000 bytes, which libstdc++'s buffer of
+  8,192 bytes keeps (an insertion is written directly only when it does not fit in what is left);
+  `matrix_integer_db8165.asn` one of 8,165 bytes, after which the buffer holds 8,190 bytes and takes the `char` of the
+  next tab (`put`) without writing (the review 2 of item E1c).
+- `use` `linux` (`linux_cout_longdb`): run only on Linux (`rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux`):
+  `-logfile /dev/stdout` with the standard output a pipe, where glibc's buffer of `cout` (4,096 bytes) decides the
+  order of the report and the diagnostics.
+- `refused/refuse_xml.*`: LOSAT's bytes for the XML input with a successful `Init`, refused when its run would read the
+  archive (NCBI's standard error up to its warning `Warning: XML format support is deprecated!`, then the refusal).
+  With `-dryrun` NCBI reads no archive and passes, and LOSAT gives its bytes (`e1c_dry_xml`).

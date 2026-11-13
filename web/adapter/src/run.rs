@@ -34,6 +34,7 @@ impl Program {
             "blastx" => Ok(Self::Blastx),
             "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
             "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
+            "rpstblastn" => Err("rpstblastn is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -111,6 +112,7 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Blastx(a) => &mut a.outfmt,
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
@@ -575,6 +577,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         // Rejected by `Program::parse`.
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => [None; 3],
     }
@@ -592,6 +595,7 @@ fn num_threads(command: &Commands) -> usize {
         // Rejected by `Program::parse`.
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => 1,
     }
@@ -803,6 +807,7 @@ fn search(
             }
             Commands::Psiblast(_)
             | Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")

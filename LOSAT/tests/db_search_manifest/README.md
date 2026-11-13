@@ -1,6 +1,6 @@
 # LOSAT -db fixture rows, one file per program
 
-`<program>.tsv` holds the rows of one program (`blastp blastn tblastn blastx tblastx psiblast rpsblast`; the `program`
+`<program>.tsv` holds the rows of one program (`blastp blastn tblastn blastx tblastx psiblast rpsblast rpstblastn`; the `program`
 column decides the file). `LOSAT/tests/db_search_fixtures.py` is the one loader: `read_manifest` reads the files in that
 program order (each in its own row order), `freeze` writes a row back to its own program's file. Every file starts with
 the same header line, after its `# Rows ...` comment lines (a comment that describes rows of several programs is

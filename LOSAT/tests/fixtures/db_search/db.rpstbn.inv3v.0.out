@@ -1,0 +1,367 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini3v
+           3 sequences; 560 total letters
+
+
+
+Query= len1
+
+Length=1
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len2
+
+Length=2
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len3
+
+Length=3
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len4
+
+Length=4
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len5
+
+Length=5
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len6
+
+Length=6
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len7
+
+Length=7
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len11
+
+Length=11
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= len12
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= tkcut570
+
+Length=570
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= tkrc570
+
+Length=570
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= tkcut571
+
+Length=571
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= tkrc571
+
+Length=571
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= tkcut572
+
+Length=572
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= tkrc572
+
+Length=572
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= nrun
+
+Length=600
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= lower
+
+Length=600
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= amb
+
+Length=600
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+  Database: rps_mini3v
+    Posted date:  Nov 8, 2026  9:56 AM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

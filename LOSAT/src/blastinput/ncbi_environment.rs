@@ -1806,19 +1806,28 @@ impl DiagTarget {
 //     int status = BLAST_EXIT_SUCCESS;
 //     CBlastAppDiagHandler bah;
 // ```
+// NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:111-114 (and :241-244 for
+// `x_RunMTBySplitQuery`; both are called from `Run`)
+// ```c++
+// int CRPSTBlastnApp::x_RunMTBySplitDB(void)
+// {
+//     int status = BLAST_EXIT_SUCCESS;
+//     CBlastAppDiagHandler bah;
+// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_aux.hpp:252
 // ```c++
 // 	CBlastAppDiagHandler():m_handler(GetDiagHandler(true)), m_save (true) {}
 // ```
 /// Whether the messages of `program`'s run go where its diagnostics go (the file of
-/// `-logfile`): tblastx and rpsblast, whose application makes its `CBlastAppDiagHandler` in
-/// `Run`, after `-logfile` set up the diagnostics. blastn, blastp, blastx, tblastn and psiblast
+/// `-logfile`): tblastx, rpsblast and rpstblastn, whose application makes its
+/// `CBlastAppDiagHandler` in `Run`, after `-logfile` set up the diagnostics. blastn, blastp, blastx, tblastn and psiblast
 /// hold theirs as a member, made with the application before `AppMain` from the handler of
 /// `cerr` (`replays_to_stderr`): their run's messages go to `cerr` whatever the `-logfile`.
 /// NCBI BLAST+ 2.17.0 (line RG `E/SURVEY_E1.md`): `-max_target_seqs 1`'s warning, a missing
-/// `-query` and `-evalue 0` go to `log.txt` in tblastx and rpsblast and to stderr in the others.
+/// `-query` and `-evalue 0` go to `log.txt` in tblastx and rpsblast and to stderr in the others;
+/// rpstblastn as tblastx (PS12a's probes of 2026-11-13, `PR/ws/ps12a/probe_e1_rpstbn.py`).
 pub fn run_messages_follow_log(program: &str) -> bool {
-    matches!(program, "tblastx" | "rpsblast")
+    matches!(program, "tblastx" | "rpsblast" | "rpstblastn")
 }
 
 impl DiagTarget {
@@ -2026,7 +2035,8 @@ pub enum Preparsed<S> {
     /// The words left for the argument reader, the registry file of the last `-conffile FILE`
     /// or `-conffile=FILE` (`conf_arg`, which NCBI loads in place of `<program>.ini`), and
     /// whether there was `-dryrun` (NCBI reads the arguments, then runs nothing: the command
-    /// line's entry, `cli::main_entry`; rpsbproc, the library API and the Web engine refuse it).
+    /// line's entry, `cli::main_entry`; rpsbproc runs its own `DryRun` after its `Init`,
+    /// `rpsbproc::dry_run`; the library API and the Web engine refuse it).
     Words {
         words: Vec<S>,
         conffile: Option<OsString>,
@@ -2098,7 +2108,8 @@ pub enum Preparsed<S> {
 /// The words NCBI's application takes before its argument reader: `-version` anywhere before
 /// `--` (but not as the value of `-logfile` or `-conffile`), the full versions, `-dryrun` and
 /// `-conffile`. A `-logfile` or `-conffile` without a value is dropped. `-dryrun` ends the run
-/// after the arguments (`cli::main_entry`), LOSAT refuses the full versions (NCBI's build
+/// after the arguments (`cli::main_entry`; rpsbproc's after its `Init`, `rpsbproc::dry_run`),
+/// LOSAT refuses the full versions (NCBI's build
 /// details); the file of the last
 /// `-conffile` is the application start's configuration (`start_application`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
@@ -2361,7 +2372,7 @@ impl ApplicationStart {
 /// those whose application holds a `CBlastAppDiagHandler` as a member (blastn, blastp, blastx,
 /// tblastn, psiblast). The handler takes the default handler (`cerr`) when the application is
 /// made, before `AppMain`, and puts it back when the application ends, before the collected
-/// messages are posted; tblastx and rpsblast make theirs in `Run`, and makeblastdb and
+/// messages are posted; tblastx, rpsblast and rpstblastn make theirs in `Run`, and makeblastdb and
 /// blastdbcmd have none, so their messages go to the `-logfile` target. NCBI BLAST+ 2.17.0, the
 /// official Linux x64 release (g_reg probes `probe_h`, 2026-11-12, a malformed `.ncbirc` and
 /// `<program>.ini`): blastn, blastp, blastx, tblastn and psiblast with `-logfile log.txt` write
@@ -2477,15 +2488,22 @@ fn has_usage_report(program: &str) -> bool {
     !matches!(program, "rpsbproc" | "dustmasker" | "segmasker")
 }
 
-/// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the reports of
-/// its registry files name its own toolkit build (`rpsbproc_registry_refusal`).
+/// Whether NCBI's `program` is built apart from BLAST+ 2.17.0 (rpsbproc), so that the posts of
+/// its system-wide file name its own toolkit build (`rpsbproc_registry_refusal`).
 fn has_own_build(program: &str) -> bool {
     program == "rpsbproc"
 }
 
-/// LOSAT's refusal of a registry file that NCBI's rpsbproc reports when it loads its
-/// configuration (`application_start`): its exception reports name the place of its own
-/// toolkit build, which LOSAT does not write.
+/// LOSAT's refusal of a system-wide file (`.ncbirc`) whose syntax error NCBI's rpsbproc reports
+/// when it loads its configuration (`application_start`): the post quotes the exception's
+/// `what()`, whose place is a source file of the toolkit build of that rpsbproc (`T0 "/opt/conda/conda-bld/
+/// rpsbproc_<n>/work/ncbi_cxx/c++/src/corelib/ncbireg.cpp", line 722` in bioconda's 0.5.1, the
+/// package of 2025-05-13 another), which LOSAT does not write. The reports of its `rpsbproc.ini`
+/// and of the file of `-conffile` name no place (`NcbiException::report_default_ex`), nor does
+/// the post of a `.ncbirc` whose stream fails (`ncbi_registry::error_reading_post`): they are
+/// NCBI's bytes, as in the BLAST programs (NCBI rpsbproc 0.5.1, both builds, line RG
+/// `E/SURVEY_E1c.md`: probes `c_ini_bad`, `c_conf_bad`, `c_conf_bad_log`, `c_conf_unread_dot`,
+/// and of its review 1, `r_ncbirc_bom1`; line RG DECISIONS E1c-3).
 fn rpsbproc_registry_refusal(path: &Path) -> String {
     format!(
         "the registry file {} has an error that NCBI's rpsbproc reports when it starts; this is not supported by LOSAT's rpsbproc",
@@ -2834,10 +2852,6 @@ fn application_start(
     let mut posts = String::new();
     if let Some((path, read)) = &ini {
         start.library_note = start.library_note.take().or(library_note(path, read));
-        if (read.error.is_some() || read.stream_failed) && has_own_build(program) {
-            start.config = Err(rpsbproc_registry_refusal(path));
-            return ended(start);
-        }
         if let Some(error) = &read.error {
             let report = error.report_default_ex(106, 15, "Application's initialization failed");
             start.config = match &environment_refusal {
@@ -2866,7 +2880,7 @@ fn application_start(
                 if !kept {
                     posts.push_str(&system_wide_posts(read));
                 }
-                if has_own_build(program) && !system_wide_posts(read).is_empty() {
+                if has_own_build(program) && read.error.is_some() {
                     start.config = Err(rpsbproc_registry_refusal(path));
                     return ended(start);
                 }
@@ -4232,7 +4246,9 @@ mod tests {
 
     // NCBI's rpsbproc 0.5.1 (the 2025-05-13 package and bioconda's, env parity probe of
     // 2026-11-12 on ws; quoted at `has_usage_report`): no usage report, so neither its read of
-    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a file that rpsbproc reports is LOSAT's refusal.
+    // `.ncbirc` nor its `BLAST_USAGE_REPORT`; a `.ncbirc` that rpsbproc reports is LOSAT's
+    // refusal (`rpsbproc_registry_refusal`), a malformed `rpsbproc.ini` or `-conffile` file is
+    // NCBI's report, exit status 2 (line RG probes `c_ini_bad`, `c_conf_bad`).
     #[test]
     fn rpsbproc_starts_without_the_usage_report() {
         let dir = std::env::temp_dir().join(format!(
@@ -4271,7 +4287,11 @@ mod tests {
         assert!(malformed.settings.unwrap_err().contains("LOSAT's rpsbproc"));
         std::fs::remove_file(&ncbirc).unwrap();
         std::fs::write(dir.join("rpsbproc.ini"), "garbage\n").unwrap();
-        assert!(start(&[]).config.unwrap_err().contains("LOSAT's rpsbproc"));
+        let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
+        assert_eq!(
+            start(&[]).config,
+            Ok(ConfigLoad::Failed(report.to_string()))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

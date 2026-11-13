@@ -10,7 +10,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 //     arg.Reset(new CProgramDescriptionArgs(kProgram,
 //                                   "Translated Query-Protein Subject BLAST"));
 // ```
-use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, tblastn, tblastx};
+use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // ```c++
@@ -211,6 +211,17 @@ pub enum Commands {
     /// Reverse Position Specific BLAST (rpsblast)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpsblast(rpsblast::RpsblastArgs),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-50
+    // ```c++
+    //     static const string kProgram("rpstblastn");
+    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
+    //                                "Translated Reverse Position Specific BLAST"));
+    // ```
+    // `-h` and `-help` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the reader
+    // stops at them, `try_parse_from_command`).
+    /// Translated Reverse Position Specific BLAST (rpstblastn)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
+    Rpstblastn(rpstblastn::RpstblastnArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
     //     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
@@ -269,7 +280,7 @@ where
         .and_then(|text| command.find_subcommand(text))
         .filter(|program| TOOLKIT_PROGRAMS.contains(&program.get_name()))
     {
-        if let Some(word) = ncbi_preparsed_toolkit_word(program.get_name(), &tokens[2..]) {
+        if let Some(word) = ncbi_preparsed_toolkit_word(&tokens[2..]) {
             let name = word.trim_start_matches('-');
             let name = name.split_once('=').map_or(name, |(key, _)| key);
             return Err(unknown_option_error(program, name, word));
@@ -317,6 +328,9 @@ where
     let mut input = tokens.into_iter();
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
     let mut scope = &command;
+    // rpstblastn's help flag: the words up to its program name and the value of its
+    // `RpstblastnArgs::ncbi_help`.
+    let mut ncbi_help: Option<(usize, &str)> = None;
     // The first option of the NCBI search programs whose value is not UTF-8, rejected once the
     // command line parses (`non_utf8_value_error`).
     let mut non_utf8_value: Option<(&clap::Command, String)> = None;
@@ -332,10 +346,21 @@ where
         if let Some(subcommand) = scope.find_subcommand(text) {
             scope = subcommand;
             translated.push(token);
+            if scope.get_name() == "rpstblastn" {
+                ncbi_help = Some((translated.len(), ""));
+            }
             continue;
         }
+        // NCBI's reader stops at its help flags (`CArgDescriptions::x_CheckAutoHelp`, the words
+        // before them read first); rpstblastn writes NCBI's texts and reads no word after them
+        // (`RpstblastnArgs::ncbi_help`).
+        let stops_at_help = scope.get_name() == "rpstblastn";
         if matches!(text, "-help" | "--help") {
             translated.push("--help".into());
+            if stops_at_help {
+                ncbi_help = ncbi_help.map(|(start, _)| (start, "full"));
+                break;
+            }
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
@@ -346,6 +371,10 @@ where
         // `-h` is the short usage of every NCBI program (rc 0); clap's `-h` is its short help.
         if text == "-h" {
             translated.push("-h".into());
+            if stops_at_help {
+                ncbi_help = ncbi_help.map(|(start, _)| (start, "short"));
+                break;
+            }
             continue;
         }
         if text == "--version" && std::ptr::eq(scope, &command) {
@@ -376,6 +405,7 @@ where
                     | "tblastx"
                     | "psiblast"
                     | "rpsblast"
+                    | "rpstblastn"
                     | "makeblastdb"
                     | "rpsbproc"
             )
@@ -397,9 +427,12 @@ where
             .unwrap_or("")
             .split_once('=')
             .map_or((key.unwrap_or(""), None), |(k, v)| (k, Some(v)));
+        // rpstblastn's `RpstblastnArgs::ncbi_help` is the reader's own, named by no word; the
+        // other hidden arguments (the toolkit's `-logfile`, `-conffile`) are the user's.
         let Some(arg) = scope
             .get_arguments()
             .find(|arg| arg.get_long() == Some(name))
+            .filter(|_| name != rpstblastn::args::NCBI_HELP_ARG)
         else {
             return Err(unknown_option_error(scope, name, text));
         };
@@ -449,7 +482,22 @@ where
             translated.push(format!("--{name}").into());
         }
     }
-    let mut matches = command.clone().try_get_matches_from(translated)?;
+    let mut matches = match command.clone().try_get_matches_from(&translated) {
+        // The parser stopped at rpstblastn's help flag, the words before it read (NCBI's
+        // order): the program writes NCBI's text (`RpstblastnArgs::ncbi_help_text`), and the
+        // words before the flag, read, are not used (NCBI checks their dependencies after).
+        Err(error) if error.kind() == ErrorKind::DisplayHelp => match ncbi_help {
+            Some((start, value)) if !value.is_empty() => {
+                translated.truncate(start);
+                translated.push(format!("--ncbi_help={value}").into());
+                let mut matches = command.clone().try_get_matches_from(translated)?;
+                return T::from_arg_matches_mut(&mut matches)
+                    .map_err(|error| error.format(&mut command.clone()));
+            }
+            _ => return Err(error),
+        },
+        matches => matches?,
+    };
     let parsed = T::from_arg_matches_mut(&mut matches)
         .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {
@@ -477,7 +525,14 @@ fn inline_value(token: &std::ffi::OsStr) -> OsString {
 fn is_ncbi_search_program(scope: &clap::Command) -> bool {
     matches!(
         scope.get_name(),
-        "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx" | "psiblast" | "rpsblast"
+        "blastn"
+            | "blastp"
+            | "blastx"
+            | "tblastn"
+            | "tblastx"
+            | "psiblast"
+            | "rpsblast"
+            | "rpstblastn"
     )
 }
 
@@ -722,6 +777,18 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
     UNPORTED_RPSBLAST_ARGS.contains(&name)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (quoted at
+// `algorithm::rpstblastn::args`)
+/// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote and search
+/// strategy options of every program. The composition-based statistics of a later item are
+/// refused once per run (`rpstblastn::search::TranslatedRpsSearch::check_options`).
+fn is_unported_rpstblastn_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "entrez_query" | "export_search_strategy" | "html" | "import_search_strategy" | "remote"
+    )
+}
+
 /// LOSAT's refusal of the NCBI C++ Toolkit option `-name` in `program` (decision D9).
 fn toolkit_option_error(program: &str, name: &str) -> clap::Error {
     // The BLAST programs are named in capitals; makeblastdb and rpsbproc as in their other
@@ -827,11 +894,17 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSBLAST"),
         );
     }
+    if scope.get_name() == "rpstblastn" && is_unported_rpstblastn_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSTBLASTN"),
+        );
+    }
     if let Some(program) = TOOLKIT_PROGRAMS
         .iter()
         .copied()
         .find(|program| scope.get_name() == *program)
-        .filter(|program| is_ncbi_toolkit_arg(program, name))
+        .filter(|_| is_ncbi_toolkit_arg(name))
     {
         return toolkit_option_error(program, name);
     }
@@ -892,6 +965,7 @@ where
         "tblastx" => "tblastx",
         "psiblast" => "psiblast",
         "rpsblast" => "rpsblast",
+        "rpstblastn" => "rpstblastn",
         "makeblastdb" => "makeblastdb",
         "rpsbproc" => "rpsbproc",
         _ => return None,
@@ -926,21 +1000,26 @@ where
 /// The NCBI applications whose words before the arguments `try_parse_from` reads
 /// (`ncbi_environment::preparse`).
 const TOOLKIT_PROGRAMS: &[&str] = &[
-    "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast", "rpsblast", "rpsbproc",
+    "blastn",
+    "blastp",
+    "blastx",
+    "tblastn",
+    "tblastx",
+    "psiblast",
+    "rpsblast",
+    "rpstblastn",
+    "rpsbproc",
 ];
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
 // `ncbi_environment::preparse`: `-version`, the full versions and `-dryrun` are read before the
 // arguments, anywhere before `--`, also where another option expects its value, but not as the
 // value of `-logfile` or `-conffile`)
-/// The first word before the arguments that LOSAT refuses in `program`, where NCBI's application
-/// reads it (`ncbi_environment::preparse`): a full version (NCBI's build details), and in
-/// rpsbproc `-dryrun` (rpsbproc's own dry run checks its input), `-logfile` and `-conffile` (line
-/// RG item E1c). In an option's value too: `-out -dryrun` loses the value of `-out` in NCBI. The command
-/// line never brings `-version` here: `main` prints the version before parsing
-/// (`ncbi_version_request`). The Web engine, which parses its options here and has no version to
-/// print, refuses it.
-fn ncbi_preparsed_toolkit_word<'a>(program: &str, tokens: &'a [OsString]) -> Option<&'a str> {
+/// The first word before the arguments that LOSAT refuses, where NCBI's application reads it (`ncbi_environment::preparse`): a full version (NCBI's build details), in an
+/// option's value too. The command line never brings `-version` here: `main` prints the version
+/// before parsing (`ncbi_version_request`). The Web engine, which parses its options here and
+/// has no version to print, refuses it.
+fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
     let exact = |word: &str| {
         tokens
@@ -951,8 +1030,6 @@ fn ncbi_preparsed_toolkit_word<'a>(program: &str, tokens: &'a [OsString]) -> Opt
     match preparse(tokens) {
         Preparsed::Version => exact("-version"),
         Preparsed::Refused(word) => exact(word),
-        Preparsed::Words { dryrun: true, .. } if program == "rpsbproc" => exact("-dryrun"),
-        Preparsed::Words { .. } if program == "rpsbproc" => toolkit_file_word(tokens),
         Preparsed::Words { .. } => None,
     }
 }
@@ -1087,8 +1164,8 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // ```
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
-// makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b); rpsbproc refuses
-// those three (`RPSBPROC_TOOLKIT_ARGS`, item E1c).
+// makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b), the three in
+// rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`).
 const NCBI_TOOLKIT_ARGS: &[&str] = &[
     "help-full",
     "xmlhelp",
@@ -1097,13 +1174,8 @@ const NCBI_TOOLKIT_ARGS: &[&str] = &[
     "version-full-json",
 ];
 
-/// The toolkit's options that rpsbproc refuses and the other programs run (line RG item E1c):
-/// rpsbproc's own `DryRun` checks its input, and its registry is env-parity's refusal.
-const RPSBPROC_TOOLKIT_ARGS: &[&str] = &["logfile", "conffile", "dryrun"];
-
-fn is_ncbi_toolkit_arg(program: &str, name: &str) -> bool {
+fn is_ncbi_toolkit_arg(name: &str) -> bool {
     NCBI_TOOLKIT_ARGS.contains(&name)
-        || (program == "rpsbproc" && RPSBPROC_TOOLKIT_ARGS.contains(&name))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50

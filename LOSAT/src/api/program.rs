@@ -87,6 +87,10 @@ impl Program {
             "rpsblast" => Err(Error::Argv(
                 "rpsblast is not available through the library API".to_string(),
             )),
+            // rpstblastn (series PR, item PS12a) likewise.
+            "rpstblastn" => Err(Error::Argv(
+                "rpstblastn is not available through the library API".to_string(),
+            )),
             other => Err(Error::Argv(format!("unknown program '{other}'"))),
         }
     }
@@ -142,14 +146,16 @@ mod tests {
             let error = Program::parse(tool).unwrap_err();
             assert!(error.message().contains("not a search program"), "{error}");
         }
-        // rpsblast runs on the command line only (line PS, PS11a).
-        let error = Program::parse("rpsblast").unwrap_err();
-        assert!(
-            error
-                .message()
-                .contains("rpsblast is not available through the library API"),
-            "{error}"
-        );
+        // rpsblast and rpstblastn run on the command line only (line PS, PS11a, PS12a).
+        for program in ["rpsblast", "rpstblastn"] {
+            let error = Program::parse(program).unwrap_err();
+            assert!(
+                error.message().contains(&format!(
+                    "{program} is not available through the library API"
+                )),
+                "{error}"
+            );
+        }
         assert_eq!(
             Program::parse("nosuch"),
             Err(Error::Argv("unknown program 'nosuch'".to_string()))

@@ -136,3 +136,55 @@ refuse_rd2.mfirst	refuse	-	data-with:sites+rd2	-i arch/mfirst.asn -d rd2
 refuse_rd19.mfirst	refuse	-	data-with:sites+rd19	-i arch/mfirst.asn -d rd19
 refuse_rd20.mfirst	refuse	-	data-with:sites+rd20	-i arch/mfirst.asn -d rd20
 refuse_nodata	refuse	-	data-with:sites	-i arch/q_nodata.asn -d sites
+e1c_dry_ok	compare	-	-	-i arch/one.asn -d data -dryrun
+e1c_dry_q	compare	-	-	-dryrun -i arch/three.asn -d data -q
+e1c_dry_nod	compare	-	-	-i arch/one.asn -dryrun
+e1c_dry_stdin	compare	arch/one.asn	-	-d data -dryrun
+e1c_dry_nodata	compare	-	-	-i arch/one.asn -d nodata -dryrun
+e1c_dry_noannot	compare	-	data-without:cddannot.dat	-i arch/one.asn -d data_missing -dryrun
+e1c_dry_bsnul	compare	-	data-with:d_bsnul	-i arch/one.asn -d d_bsnul -dryrun
+e1c_dry_out	compare	-	-	-i arch/one.asn -d data -o out.txt -dryrun
+e1c_dry_out_nodir	compare	-	-	-i arch/one.asn -d data -o nodir/out.txt -dryrun
+e1c_dry_in_missing	compare	-	-	-i missing.asn -d data -dryrun
+e1c_dry_in_missing_stdin	compare	arch/one.asn	-	-i missing.asn -d data -dryrun
+e1c_dry_xml_failin	compare	arch/one.xml	-	-i missing.asn -d data -dryrun
+e1c_dry_xml_nodata	compare	-	-	-i arch/one.xml -d nodata -dryrun
+e1c_dry_lcl	compare	-	-	-i arch/lcl.asn -d data -dryrun
+e1c_dry_trunc	compare	-	-	-i arch/bad/trunc.asn -d data -dryrun
+e1c_xml_nodata	compare	-	-	-i arch/one.xml -d nodata
+e1c_log_ok	compare	-	-	-i arch/one.asn -d data -logfile log.txt
+e1c_log_in_missing	compare	-	-	-i missing.asn -d data -logfile log.txt
+e1c_log_nodata	compare	-	-	-i arch/one.asn -d nodata -logfile log.txt
+e1c_log_bsnul	compare	-	data-with:d_bsnul	-i arch/one.asn -d d_bsnul -logfile log.txt
+e1c_log_lcl	compare	-	-	-i arch/lcl.asn -d data -logfile log.txt
+e1c_log_noaligns	compare	-	-	-i arch/bad/noaligns.asn -d data -logfile log.txt
+e1c_log_out_nodir	compare	-	-	-i arch/one.asn -d data -o nodir/out.txt -logfile log.txt
+e1c_log_xml_failin	compare	arch/one.xml	-	-i missing.asn -d data -logfile log.txt
+e1c_log_dry_in	compare	-	-	-i missing.asn -d data -dryrun -logfile log.txt
+e1c_log_eq	compare	-	-	-logfile=log.txt -i missing.asn -d data
+e1c_log_devnull	compare	-	-	-logfile /dev/null -i missing.asn -d data
+e1c_conf_ok	compare	-	conf:blast.ini	-i arch/one.asn -d data -conffile c.ini
+e1c_conf_missing	compare	-	-	-i arch/one.asn -d data -conffile missing.ini
+e1c_conf_bad	compare	-	conf:garbage.ini	-i arch/one.asn -d data -conffile c.ini
+e1c_conf_bad_log	compare	-	conf:garbage.ini	-i arch/one.asn -d data -conffile c.ini -logfile log.txt
+e1c_conf_ini_bad	compare	-	conf:blast.ini,ini:garbage.ini	-i arch/one.asn -d data -conffile c.ini
+e1c_ini_bad	compare	-	ini:garbage.ini	-i arch/one.asn -d data
+e1c_conf_dry	compare	-	conf:blast.ini	-i arch/one.asn -d data -conffile c.ini -dryrun
+e1c_conf_missing_log	compare	-	-	-i arch/one.asn -d data -conffile missing.ini -logfile log.txt
+e1c_dry_xml	compare	-	-	-i arch/one.xml -d data -dryrun
+e1c_ini_sec	compare	-	ini:sec.ini	-i arch/one.asn -d data
+e1c_ini_quote	compare	-	ini:quote.ini	-i arch/one.asn -d data
+e1c_ini_cont	compare	-	ini:cont.ini	-i arch/one.asn -d data
+e1c_conf_bom2_log	compare	-	conf:bom2.ini	-i arch/one.asn -d data -conffile c.ini -logfile log.txt
+e1c_ncbirc_bom1	compare	-	ncbirc:bom1.ini	-i arch/one.asn -d data
+e1c_ncbirc_bom1_dry	compare	-	ncbirc:bom1.ini	-i arch/one.asn -d data -dryrun
+e1c_subj	compare	-	-	-i arch/bad/subj_sequences.asn -d data
+e1c_mat	compare	-	-	-i arch/bad/matrix_integer.asn -d data
+e1c_ev	compare	-	-	-i arch/bad/evalue_rawscore.asn -d data
+e1c_subj_same	compare	-	-	-i arch/bad/subj_sequences.asn -d data -o log.txt -logfile log.txt
+e1c_mat_same	compare	-	-	-i arch/bad/matrix_integer.asn -d data -o log.txt -logfile log.txt
+e1c_ev_same	compare	-	-	-i arch/bad/evalue_rawscore.asn -d data -o log.txt -logfile log.txt
+e1c_subj_out_log	compare	-	-	-i arch/bad/subj_sequences.asn -d data -o out.txt -logfile log.txt
+e1c_mat_longdb_same	compare	-	-	-i arch/bad/matrix_integer_longdb.asn -d data -o log.txt -logfile log.txt
+e1c_mat_db8165_same	compare	-	-	-i arch/bad/matrix_integer_db8165.asn -d data -o log.txt -logfile log.txt
+linux_cout_longdb	linux	-	-	-i arch/bad/matrix_integer_longdb.asn -d data -logfile /dev/stdout

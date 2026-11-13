@@ -87,7 +87,7 @@ pub(crate) struct ReaderFlags {
     /// The reader of convert2blastmask (`CMaskFromFasta`, a subclass): it keeps the masked
     /// intervals of each record (`SaveMask` before each record makes `m_CurrentMask`, so lower
     /// case letters open intervals) and reads a data line that starts with a digit as an
-    /// interval (`Record::masks`).
+    /// interval (`FastaReader::take_masks`).
     pub(crate) mask_from_fasta: bool,
     /// `fParseGaps`: a hyphen of a nucleotide sequence is a gap, and `>?` lines stay gaps.
     pub(crate) parse_gaps: bool,
@@ -510,10 +510,6 @@ pub(crate) struct Record {
     /// `AssignMolType` found.
     pub(crate) is_aa: bool,
     pub(crate) inst: SeqInst,
-    /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()`: the intervals of the
-    /// record's lower case letters and of its interval lines (0-based, inclusive), in the order
-    /// in which they were closed or read; empty otherwise.
-    pub(crate) masks: Vec<(u32, u32)>,
 }
 
 /// The title of a definition line (`SLineTextAndLoc`; its line number is used for the
@@ -795,6 +791,15 @@ impl<R: Read> FastaReader<R> {
         self.state.flags.parse_ids
     }
 
+    /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
+    /// `read_one_seq` returned last: the intervals of its lower case letters and of its
+    /// interval lines (0-based, inclusive), in the order in which they were closed or read;
+    /// empty otherwise. The intervals stay with the reader (not in `Record`) so that the
+    /// records of the other programs, which never have any, are not made larger.
+    pub(crate) fn take_masks(&mut self) -> Vec<(u32, u32)> {
+        std::mem::take(&mut self.state.masks)
+    }
+
     /// `GetLineReader().AtEOF()`.
     pub(crate) fn at_eof(&self) -> bool {
         self.lines.at_eof()
@@ -1036,7 +1041,6 @@ impl<R: Read> FastaReader<R> {
             title_descr: state.title_descr.take(),
             is_aa,
             inst,
-            masks: std::mem::take(&mut state.masks),
         })
     }
 }
@@ -1581,9 +1585,13 @@ impl RecordState {
         line_number: u64,
         warn: ReaderWarn<'_>,
     ) -> Result<(), ReadError> {
-        if self.flags.mask_from_fasta && s[0].is_ascii_digit() {
-            return self.parse_interval_line(s, raw_length, line_number, warn);
-        }
+        // `CMaskFromFasta::ParseDataLine`: an interval line is read as the residue `A`.
+        let s = if self.flags.mask_from_fasta && s[0].is_ascii_digit() {
+            self.parse_interval(s)?;
+            &b"A"[..]
+        } else {
+            s
+        };
         if s.starts_with(b">?") {
             self.parse_gap_line(s, line_number, warn);
             return Ok(());
@@ -1698,6 +1706,7 @@ impl RecordState {
     /// ```
     /// `CMaskFromFasta` keeps its own copy of each interval (`x_OpenMask`, `x_CloseMask`,
     /// quoted at `close_mask`).
+    #[cold]
     fn mask_run(&mut self, run: &[u8]) {
         let base = self.current_pos_with_gaps();
         for (i, byte) in run.iter().enumerate() {
@@ -1741,7 +1750,7 @@ impl RecordState {
     }
 
     /// `CMaskFromFasta::ParseDataLine` of a line that starts with a digit: the interval
-    /// `from - to`, and a residue `A` in its place.
+    /// `from - to` (`parse_data_line` then reads a residue `A` in its place).
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:76-92
     /// ```c++
@@ -1769,13 +1778,8 @@ impl RecordState {
     /// (convert2blastmask 2.17.0: `1abc` reports `''`, `0x10 - 5` reports `'0x10'`). `s` is
     /// the line without its spaces at both ends (`ReadOneSeq`, quoted at
     /// `FastaReader::read_one_seq`).
-    fn parse_interval_line(
-        &mut self,
-        s: &[u8],
-        raw_length: usize,
-        line_number: u64,
-        warn: ReaderWarn<'_>,
-    ) -> Result<(), ReadError> {
+    #[cold]
+    fn parse_interval(&mut self, s: &[u8]) -> Result<(), ReadError> {
         let (s1, s2) = match s.iter().position(|&byte| byte == b'-') {
             Some(dash) => (&s[..dash], &s[dash + 1..]),
             None => (s, &[][..]),
@@ -1783,7 +1787,7 @@ impl RecordState {
         let to = string_to_uint(truncate_spaces(s2)).map_err(ReadError::Ncbi)?;
         let from = string_to_uint(truncate_spaces(s1)).map_err(ReadError::Ncbi)?;
         self.masks.push((from, to));
-        self.parse_data_line(b"A", raw_length, line_number, warn)
+        Ok(())
     }
 
     /// `AssignMolType` without `fForceType`, `fAssumeNuc` or `fAssumeProt`: whether the record

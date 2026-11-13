@@ -277,6 +277,7 @@ impl<'a> MaskFromFasta<'a> {
             return Err(read_failure(error));
         }
         let parses_ids = reader.parses_ids();
+        let mask = reader.take_masks();
         let record = result.map_err(|error| {
             self.reader = None;
             match error {
@@ -294,7 +295,7 @@ impl<'a> MaskFromFasta<'a> {
         };
         Ok(Some(MaskedRecord {
             best_id,
-            mask: record.masks,
+            mask,
         }))
     }
 }

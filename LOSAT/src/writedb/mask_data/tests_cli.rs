@@ -335,12 +335,12 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
         }
     }
     assert!(compared > 300, "{compared} rows compared");
-    assert_eq!(classes["Equal"], 69);
-    assert_eq!(classes.values().sum::<usize>(), 128);
+    assert_eq!(classes["Equal"], 109);
+    assert_eq!(classes.values().sum::<usize>(), 162);
 }
 
 #[test]
-fn the_command_line_reaches_the_sequences_that_ncbi_reaches_with_parse_seqids() {
+fn a_sample_of_the_mask_ids_cases_runs_through_the_command_line() {
     let dir = seqdb_fixtures().join("mask_ids");
     let case_dir = dir.join("case");
     // The first case of each fate, and the masks of the real tools (`A_*`, `B_*`, `N_*`).
@@ -386,11 +386,11 @@ fn the_command_line_reaches_the_sequences_that_ncbi_reaches_with_parse_seqids() 
         let run = run_words(&words, "Oct 20, 2026  1:00 PM", &[&case_dir]);
         let context = format!("{}: {}", row.name, run.stderr);
         if row.loss == "refuse" {
-            assert_ne!(run.status, 0, "{context}");
-            assert!(
-                run.stderr.contains("LOSAT does not support this mask"),
-                "{context}"
-            );
+            // LOSAT's refusal alone: status 1, no destructor message of NCBI's after it.
+            assert_eq!(run.status, 1, "{context}");
+            assert!(run.stderr.starts_with("losat makeblastdb: "), "{context}");
+            assert!(run.stderr.contains("memory addresses"), "{context}");
+            assert_eq!(run.stderr.lines().count(), 1, "{context}");
         } else if row.expected == "NOMATCH" {
             assert_eq!(run.status, 0, "{context}");
             assert_eq!(run.stderr, DESTRUCTOR_MESSAGE, "{context}");

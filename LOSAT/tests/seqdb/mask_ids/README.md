@@ -11,8 +11,9 @@ of `seqid::mask_handle` that reproduce it.
   `-mask_data` in that order), the algorithm ids to read (`%m<id>`), the fate, NCBI's answer.
 - `fasta/`: the sequences. `case/<name>/m*.asnt`: the mask files (`Blast-db-mask-info`, ASN.1 text), one Seq-id
   (or a few) in the Seq-loc of each.
-- Fates: `match` = LOSAT gives NCBI's answer; `refuse` = NCBI's answer depends on memory addresses and
-  LOSAT stops with an error that names what it cannot decide; `env:...` = NCBI's answer needs
+- Fates: `match` = LOSAT gives NCBI's answer; `refuse` = NCBI's answer depends on memory addresses
+  (n41, n42: two `giim` handles of one combination; n59-n62: two handles with the same packed number
+  on one strand) and LOSAT stops with its refusal (status 1) that names the Seq-ids; `env:...` = NCBI's answer needs
   `OBJECTS_PACK_TEXTID=0` or `OBJECTS_PACK_GENERAL=0`, which LOSAT refuses (not run).
 - The answer is `NOMATCH` (makeblastdb exits 0 and prints "No sequences matched any of the masks
   provided.") or the sequences that have a mask: `oid|ranges of each algorithm`, joined by a space; a
@@ -34,6 +35,8 @@ of `seqid::mask_handle` that reproduce it.
   (`-blastdb_version` unset: version 5). The rows of `blastdbcmd` and the exit status and standard
   error of `makeblastdb` are the answers. `n53`-`n55` ran with `OBJECTS_PACK_TEXTID=0` /
   `OBJECTS_PACK_GENERAL=0` in the environment.
+- Cases `n63`, `n64` (added 2026-11-13 by M4a-1 fix A, same commands): `gi 5` and
+  `gb|AY000005.1|` (one packed number) on two strands, and with the same range: NCBI's order is decided.
 - Cases `v*` (28): one variant of a Seq-id per file (`lcl`, `gnl`, `ref`, `gb`, `emb`, `pdb`, `sp`, `gi`
   forms) against `fasta/idprobe_ids.fa`, same commands.
 - `A_dust_parsed`, `B_nuc_dust_parsed`, `B_prot_seg_parsed`, `N_dust_plain`: the masks that

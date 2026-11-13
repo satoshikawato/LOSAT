@@ -429,15 +429,6 @@ Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1
 - Version 4 with `-parse_seqids`: a string-index key longer than 256 bytes (makeblastdb stops
   with "buffer overflow detected").
 - A `-taxid_map` line of white space only (makeblastdb crashes).
-- Mask data that LOSAT does not read: a mask whose Seq-loc is not an interval, a packed interval
-  or a list of points (`whole`, a mix, a feature: makeblastdb reads them), a string with a byte
-  outside 0x20-0x7e that NCBI repairs and logs, and a `UTF8String` tag where a `VisibleString`
-  belongs (`losat makeblastdb: mask data that LOSAT does not read: ...`, exit status 1); two
-  mask Seq-ids that NCBI's handle order does not decide (a giim id with the number of a
-  database sequence's giim id, or two handles with the same packed value for one sequence and
-  algorithm) are named in an error as well. A mask file that NCBI's reader rejects as damaged
-  ends the run with exit status 255 and `Error: mask data in '<file>': <LOSAT's text>` where
-  NCBI prints an exception report that names its build tree.
 - Version 5 with `-parse_seqids`: `LMDB_SPLIT_CHUNK_SIZE` or `LMDB_MIN_SPLIT_SIZE` that is not
   a number of the range of `unsigned int` (makeblastdb aborts in its LMDB writer, after the
   volumes are written, and leaves `NAME.pdb`, `NAME.pos`, `NAME.phr`, `NAME.pin`, `NAME.pog`,
@@ -461,6 +452,25 @@ ordinal id it would have had in the earlier volume, so makeblastdb and LOSAT bot
 "Duplicate seq_ids are found: GNL|BL_ORD_ID|n" when that volume holds more than n sequences.
 `-taxid_map` lines end at a line feed on every platform (makeblastdb on macOS also ends them at a
 carriage return).
+
+Mask data (`-mask_data`) that makeblastdb reads and LOSAT refuses (`losat makeblastdb: ...`,
+exit status 1, without makeblastdb's closing "No sequences matched any of the masks provided."):
+
+- Every Seq-loc alternative of a mask is read (`null`, `empty`, `whole`, `int`, `packed-int`,
+  `pnt`, `packed-pnt`, `mix`, `equiv`, `bond`; a `feat` or a Seq-loc of several Seq-ids ends the
+  run with NCBI's "Cannot get masked range Seq-id"), and several Seq-locs of one sequence are
+  combined as makeblastdb combines them, empty and whole ranges included. What is refused:
+- A string with a byte outside 0x20-0x7e, which NCBI repairs and logs, and a `UTF8String` tag
+  where a `VisibleString` belongs (`mask data that LOSAT does not read: ...`): LOSAT does not
+  write NCBI's diagnostics for them.
+- Ranges whose order NCBI takes from memory addresses: ranges of two different Seq-id handles with
+  the same packed number written on one strand of one sequence and algorithm (`gi|5` and
+  `gb|AY000005.1|`; a local id and a `general` string tag), unless both orders write the same,
+  and ranges of two `giim` handles of one mask combination. The error names the Seq-ids. Which
+  mask a `giim` Seq-id finds follows the order of the mask files, as in makeblastdb.
+- A mask file that NCBI's reader rejects as damaged ends the run with exit status 255 and
+  `Error: mask data in '<file>': <LOSAT's text>` where NCBI prints an exception report that names
+  its build tree.
 
 Undefined behaviour of NCBI that is not reproduced:
 

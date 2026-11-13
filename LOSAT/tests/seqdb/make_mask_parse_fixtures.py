@@ -197,6 +197,40 @@ def hand_cases():
     c["unsupported_mix"] = obj("mix { int " + iv(5, 14) + " }")
     c["unsupported_null"] = obj("null NULL")
     c["unsupported_feat"] = obj("feat gibb 5")
+    # Seq-loc alternatives and their combination (`CSeq_loc::Add` with empty and whole ranges);
+    # sequences 1 (640 bases) and 2 (350 bases).
+    c["seqloc_empty_absorbed"] = obj("int " + iv(51, 70, 1) + ", int " + iv(60, 50, 1))
+    c["seqloc_empty_pushed"] = obj("packed-int { " + iv(10, 20, 1) + " }, int " + iv(60, 50, 1)
+                                   + ", packed-int { " + iv(30, 40, 2) + ", " + iv(0, 5, 2) + " }")
+    c["seqloc_to_max_absorbs"] = obj("int " + iv(5, 4294967295, 1) + ", int " + iv(10, 20, 1)
+                                     + ", int " + iv(2, 3, 1))
+    c["seqloc_empties_order_a"] = obj("packed-int { " + iv(100, 4294967295, 1) + ", " + iv(60, 50, 1)
+                                      + " }, int " + iv(200, 300, 1))
+    c["seqloc_empties_order_b"] = obj("packed-int { " + iv(60, 50, 1) + ", " + iv(100, 4294967295, 1)
+                                      + " }, int " + iv(200, 300, 1))
+    c["seqloc_minus_to_max"] = obj("int " + iv(100, 4294967295, 1, "strand minus,") + ", packed-int { "
+                                   + iv(50, 99, 1, "strand minus,") + ", " + iv(10, 20, 1, "strand minus,") + " }")
+    c["seqloc_whole_and_int"] = obj("whole local id 1, int " + iv(5, 14, 1))
+    c["seqloc_whole_interval"] = obj("int " + iv(0, 4294967294, 1) + ", int " + iv(5, 14, 1))
+    c["seqloc_empty"] = obj("empty local id 1")
+    c["seqloc_empty_and_int"] = obj("empty local id 1, int " + iv(5, 14, 1) + ", empty local id 1")
+    c["seqloc_null_after_int"] = obj("int " + iv(1, 5, 1) + ", null NULL")
+    c["seqloc_mix_with_null"] = obj("mix { null NULL, int " + iv(5, 14, 1) + " }, int " + iv(20, 29, 1))
+    c["seqloc_mix_nested"] = obj("mix { int " + iv(5, 14, 1) + ", mix { pnt { point 20, id local id 1 }, "
+                                 "packed-pnt { id local id 1, points { 30, 25 } } } }")
+    c["seqloc_mix_two_ids"] = obj("mix { int " + iv(5, 14, 1) + ", mix { int " + iv(20, 29, 2) + " } }")
+    c["seqloc_mix_empty"] = obj("mix { }")
+    c["seqloc_feat_in_mix"] = obj("mix { int " + iv(5, 14, 1) + ", feat gibb 5 }")
+    c["seqloc_equiv"] = obj("equiv { int " + iv(5, 14, 1) + ", int " + iv(20, 29, 1) + " }")
+    c["seqloc_bond"] = obj("bond { a { point 5, id local id 1 }, b { point 9, id local id 1 } }")
+    c["seqloc_bond_a_only"] = obj("bond { a { point 5, id local id 1 } }")
+    c["seqloc_pnt_then_int"] = obj("pnt { point 7, id local id 1 }, int " + iv(20, 30, 2))
+    c["seqloc_packed_pnt"] = obj("packed-pnt { id local id 1, points { 7, 3, 9 } }")
+    c["seqloc_packed_pnt_minus_and_int"] = obj("packed-pnt { strand minus, id local id 1, points { 7, 3, 9 } }, "
+                                               "int " + iv(20, 29, 1))
+    c["seqloc_packed_pnt_no_points"] = obj("packed-pnt { id local id 1, points { } }")
+    c["seqloc_three_combined"] = obj("int " + iv(5, 4294967295, 1) + ", int " + iv(60, 50, 1)
+                                     + ", int " + iv(2, 3, 1) + ", int " + iv(1, 1, 1))
     c["cut_inside_object"] = ok[:len(ok) // 2]
     c["cut_after_brace"] = ok + "Blast-db-mask-info ::= {"
     c["cut_after_header"] = ok + "Blast-db-mask-info ::="
@@ -323,6 +357,23 @@ def damaged_binary(dust):
     c["small_more_true_continuation"] = ber_info([ber_mem(3, one)], more=True) + ber_seq(
         ber_mem(0, ber_seq(ber_mem(3, ber_interval(20, 29, 4)))), ber_mem(1, b"\x01\x01\x00"))
     c["small_whole"] = ber_info([ber_mem(2, ber_local(3))])
+    # The Seq-loc alternatives in binary (sequence 1).
+    def pnt(p, i=1):
+        return ber_seq(ber_mem(0, ber_int(p)), ber_mem(2, ber_local(i)))
+    c["seqloc_null_after_int"] = ber_info([ber_mem(3, ber_interval(1, 5, 1)), ber_mem(0, b"\x05\x00")])
+    c["seqloc_empty_and_int"] = ber_info([ber_mem(1, ber_local(1)), ber_mem(3, ber_interval(5, 14, 1))])
+    c["seqloc_whole_and_int"] = ber_info([ber_mem(2, ber_local(1)), ber_mem(3, ber_interval(5, 14, 1))])
+    c["seqloc_pnt"] = ber_info([ber_mem(5, pnt(7))])
+    c["seqloc_packed_pnt"] = ber_info([ber_mem(6, ber_seq(
+        ber_mem(0, b"\x0a\x01\x02"), ber_mem(1, ber_local(1)),
+        ber_mem(3, ber_seq(ber_int(7), ber_int(3), ber_int(9))))), ber_mem(3, ber_interval(20, 29, 1))])
+    c["seqloc_mix_nested"] = ber_info([ber_mem(7, ber_seq(
+        ber_mem(3, ber_interval(5, 14, 1)), ber_mem(7, ber_seq(ber_mem(5, pnt(20)), ber_mem(0, b"\x05\x00")))))])
+    c["seqloc_equiv"] = ber_info([ber_mem(8, ber_seq(
+        ber_mem(3, ber_interval(5, 14, 1)), ber_mem(3, ber_interval(20, 29, 1)), tag=0x31))])
+    c["seqloc_bond"] = ber_info([ber_mem(9, ber_seq(ber_mem(0, pnt(5)), ber_mem(1, pnt(9))))])
+    c["seqloc_feat"] = ber_info([ber_mem(10, ber_mem(0, ber_int(5)))])
+    c["seqloc_empty_pushed"] = ber_info([ber_mem(3, ber_interval(10, 20, 1)), ber_mem(3, ber_interval(60, 50, 1))])
     c["small_application_integer"] = ber_info([ber_mem(3, one)]).replace(ber_mem(0, ber_int(0)), ber_mem(0, b"\x42\x01\x00"))
     c["small_definite_members"] = ber_seq(
         ber_mem(0, ber_int(0), indef=False), ber_mem(1, ber_int(30), indef=False),

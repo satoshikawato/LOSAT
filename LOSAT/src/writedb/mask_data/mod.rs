@@ -2,8 +2,8 @@
 //! registry of masking algorithms, the masked ranges of each sequence, and
 //! the column files (`.?aa`, `.?ab`, `.?ac`) titled `BlastDb/MaskData`.
 //!
-//! Nothing on the command line calls this yet (`losat makeblastdb` refuses `-mask_data`).
-//! The mask files themselves are read by
+//! `losat makeblastdb -mask_data` (and the library's `run_makeblastdb`) reach it through
+//! [`process`]. The mask files themselves are read by
 //! `writedb::mask_info`; [`process`] joins the two as makeblastdb's
 //! `x_ProcessMaskData` and documents the order in which the command line
 //! calls everything.
@@ -25,14 +25,15 @@
 //! match `lcl|5`; `seqid::mask_handle` has the table. With `-parse_seqids` a sequence has the
 //! Seq-ids of its defline (those of the other molecule type turned into `local str`,
 //! build_db.cpp:837-851), without it `local id N`. The ranges of several Seq-ids are combined as
-//! `CSeq_loc::Add(fMerge_All | fSort)` does (seq_loc.cpp:4547-4693).
+//! `CSeq_loc::Add(fMerge_All | fSort)` does (Seq_loc.cpp:4283-4693), empty and whole ranges
+//! included; `giim` Seq-ids find their masks in the order of the mask files, as NCBI's Giim tree.
 //!
-//! What is refused (an error through the mask-data error path that names the Seq-ids): the two
-//! cases whose NCBI result depends on memory addresses, a sequence with a `giim` Seq-id whose
-//! number a `giim` Seq-id of the masks has (seq_id_tree.cpp:2926-2941: the Giim tree's `x_FindInfo`
-//! tests `!gid.Equals(gid2)`), and the ranges of one sequence and algorithm that come from two
-//! handles with the same `m_Packed` (the order of `CSeq_id_Handle::operator<` falls back to the
-//! addresses of the infos, seq_id_handle.hpp:193-207). The environment variables
+//! What is refused (`WriteDbError::Unsupported`: "losat makeblastdb: ...", status 1, naming the
+//! Seq-ids; `range_set` has the rule and NCBI's lines): only what NCBI orders by memory addresses,
+//! ranges of two different handles with the same `m_Packed` written on one strand of a sequence
+//! in an order that matters (`CSeq_id_Handle::operator<` falls back to the addresses of the infos,
+//! seq_id_handle.hpp:193-207), and ranges of two `giim` handles on one strand that are combined
+//! again. The environment variables
 //! `OBJECTS_PACK_TEXTID` and `OBJECTS_PACK_GENERAL` (seq_id_tree.cpp:692-707) change the handles
 //! and are refused at the start of the program (`blastinput::ncbi_environment`).
 //!
@@ -98,7 +99,7 @@ pub(crate) struct MaskWriter {
 }
 
 fn unsupported_late_column() -> WriteDbError {
-    WriteDbError::Other(
+    WriteDbError::Unsupported(
         "the mask column of a database is created before its first volume is written; register \
          the masking algorithms before the first sequence is published (NCBI adds blank records \
          to the open volume, which LOSAT does not)"

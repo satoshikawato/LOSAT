@@ -21,11 +21,14 @@
 //! a mask reaches a sequence is decided by `seqid::mask_handle` and `mask_data::range_set`, not
 //! here.
 //!
-//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): a
-//! `Seq-loc` that is not an interval, packed interval or point list (`whole`, `pnt`, a mix, a
-//! feature: NCBI reads them and LOSAT does not), strings with bytes outside 0x20-0x7e that NCBI
-//! repairs and logs (`fix_visible_chars`; a binary Seq-id has no such byte), and a `UTF8String`
-//! tag where a `VisibleString` belongs (objistrasnb.cpp:276-312).
+//! Every `Seq-loc` alternative is read as `CSeq_loc_CI` and `CSeq_loc::GetId` see it ([`MaskLoc`]):
+//! `null`, `empty`, `whole`, `int`, `packed-int`, `pnt`, `packed-pnt`, `mix` and `equiv` (nested),
+//! `bond`; a `feat` has no Seq-id ("Cannot get masked range Seq-id", as `null` alone).
+//!
+//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): strings
+//! with bytes outside 0x20-0x7e that NCBI repairs and logs (`fix_visible_chars`; a binary Seq-id
+//! has no such byte), and a `UTF8String` tag where a `VisibleString` belongs
+//! (objistrasnb.cpp:276-312): LOSAT does not write NCBI's diagnostics for them.
 
 mod ber;
 mod guess;
@@ -65,14 +68,43 @@ pub(crate) struct MaskList {
 }
 
 /// One Seq-loc of `masks`, reduced to what makeblastdb uses: the Seq-id that
-/// `CSeq_loc::GetId()` returns and the intervals that `CSeq_loc_CI` visits,
-/// in its order.
+/// `CSeq_loc::GetId()` returns and the ranges that `CSeq_loc_CI` visits,
+/// in its order (`eEmpty_Allow`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MaskLoc {
-    /// `None` when the Seq-loc has no Seq-id or several different ones;
+    /// `None` when the Seq-loc has no Seq-id, several different ones or a `feat`;
     /// makeblastdb then stops with "Cannot get masked range Seq-id".
     pub(crate) id: Option<ParsedSeqId>,
-    pub(crate) intervals: Vec<MaskInterval>,
+    pub(crate) parts: Vec<MaskPart>,
+}
+
+#[cfg(test)]
+impl MaskLoc {
+    /// The intervals among the parts.
+    pub(crate) fn intervals(&self) -> Vec<MaskInterval> {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                MaskPart::Interval(iv) => Some(*iv),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// One range of a Seq-loc as `CSeq_loc_CI` visits it. Every part but a `null` one has the Seq-loc's
+/// Seq-id (`MaskLoc::id`: they are all `Equals` to it when it is set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MaskPart {
+    /// An interval (`int`, an element of `packed-int`), a point (`pnt`, a point of `packed-pnt`,
+    /// a point of a `bond`: `from == to`), or a `whole` Seq-loc (`from` 0, `to` 4294967294: the
+    /// same `CRange`, `TRange::GetWhole()`, and no strand).
+    Interval(MaskInterval),
+    /// An `empty` Seq-loc: skipped where the ranges are written, the empty range inside
+    /// `CSeq_loc::Add`.
+    Empty,
+    /// A `null` Seq-loc: no Seq-id.
+    Null,
 }
 
 /// A Seq-interval of a mask, `from` and `to` inclusive as stored.

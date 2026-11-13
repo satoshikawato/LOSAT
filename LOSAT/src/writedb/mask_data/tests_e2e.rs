@@ -55,7 +55,6 @@ impl Case {
             mask_data: self.mask_data.as_deref(),
             mask_id: self.mask_id.as_deref(),
             mask_desc: self.mask_desc.as_deref(),
-            gi_mask_name: None,
             root: Some(&self.root),
         }
     }
@@ -604,14 +603,9 @@ pub(super) fn read_expected(parse_dir: &Path) -> BTreeMap<String, Expected> {
 
 /// Files that makeblastdb reads and LOSAT does not (`MaskFileError::Unsupported`): LOSAT's
 /// outcome is its own refusal (status 1, "losat makeblastdb: mask data that LOSAT does not read: ..."),
-/// whatever NCBI did with them. A new file that LOSAT refuses must be added here.
-const LOSAT_UNSUPPORTED: [&str; 9] = [
-    "h_unsupported_whole.asnt",
-    "h_unsupported_pnt.asnt",
-    "h_unsupported_mix.asnt",
-    "h_unsupported_null.asnt",
-    "h_unsupported_feat.asnt",
-    "b_small_whole.asnb",
+/// whatever NCBI did with them. A new file that LOSAT refuses must be added here. (Every Seq-loc
+/// alternative is read: `h_unsupported_*`, `b_small_whole` and the `*_seqloc_*` files equal NCBI.)
+const LOSAT_UNSUPPORTED: [&str; 3] = [
     // NCBI replaces a byte that is not printable in a `VisibleString` with '#' and logs it, and
     // warns about a UTF8String tag for a VisibleString; those lines are its only standard error.
     // LOSAT does not write them, so it refuses the string.
@@ -769,12 +763,12 @@ fn every_mask_parse_file_runs_end_to_end() {
     assert_eq!(
         tally,
         [
-            ("Equal".to_string(), 69),
+            ("Equal".to_string(), 109),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 1),
             ("Serial".to_string(), 39),
             ("UnknownEncoding".to_string(), 7),
-            ("Unsupported".to_string(), 9),
+            ("Unsupported".to_string(), 3),
         ]
     );
 }
@@ -1194,54 +1188,6 @@ fn a_mask_file_that_cannot_be_opened_is_an_unknown_encoding() {
     assert_eq!(files_named(&out.0, "db."), Vec::<String>::new());
 }
 
-/// `-gi_mask_name` (reachable only with `-gi_mask`, which LOSAT does not offer): the list is
-/// split and checked like the others, and the name replaces the file name in the registration.
-#[test]
-fn gi_mask_names_are_split_and_replace_the_file_name() {
-    let tmp = option_root();
-    let writer = seqdb_fixtures().join("mask_writer");
-    std::fs::copy(writer.join("oth_d.asnt"), tmp.0.join("oth_d.asnt")).unwrap();
-    let mut log = Vec::new();
-    let out = TempDir::new("mask-options-out");
-    let mut db = BuildDatabase::new(
-        &out.base("db"),
-        "t",
-        false,
-        &mut log,
-        &time_of("Oct 20, 2026  1:00 PM"),
-        DbVersion::V4,
-        LINUX,
-        Indices::default(),
-    )
-    .unwrap();
-    let mut warn = |_: &[u8]| {};
-    let mut options = MaskDataOptions {
-        mask_data: Some("dust.asnt,wm.asnt"),
-        gi_mask_name: Some("x"),
-        root: Some(&tmp.0),
-        ..MaskDataOptions::default()
-    };
-    let error = process_mask_data(&mut db, &options, &mut warn).unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "BLAST options error: the size of gi_mask_name does not match that of mask_data."
-    );
-    assert_eq!(error.into_makedb_error().unwrap().exit_code(), 1);
-    // `other` is the program whose name is stored: oth_d.asnt, registered as "gi name".
-    options.mask_data = Some("oth_d.asnt");
-    options.gi_mask_name = Some("gi name");
-    process_mask_data(&mut db, &options, &mut warn).unwrap();
-    // The same file under its own name is another algorithm, the same name again a duplicate.
-    options.gi_mask_name = None;
-    process_mask_data(&mut db, &options, &mut warn).unwrap();
-    options.gi_mask_name = Some("gi name");
-    let error = process_mask_data(&mut db, &options, &mut warn).unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "BLAST Database creation error: Duplicate masking algorithm found."
-    );
-}
-
 // ---------------------------------------------------------------------
 // The mapping of the outcomes
 // ---------------------------------------------------------------------
@@ -1288,7 +1234,10 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
     );
     // The reader's own NCBI-worded error is the same as one raised here.
     let from_reader = MaskDataError::from(MaskFileError::Ncbi(WriteDbError::Options("u".into())));
-    assert!(matches!(from_reader, MaskDataError::Ncbi(_)));
+    assert_eq!(
+        describe(from_reader),
+        Some((1, "BLAST options error: u".to_string()))
+    );
 }
 
 /// A database built without mask data lists and writes no column files, in either format

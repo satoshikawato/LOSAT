@@ -1,12 +1,12 @@
 //! `x_ProcessMaskData` of makeblastdb (`c++/src/app/blastdb/makeblastdb.cpp`): the options
-//! `-mask_data`, `-mask_id`, `-mask_desc` and `-gi_mask_name` are split into lists, every mask
+//! `-mask_data`, `-mask_id` and `-mask_desc` are split into lists, every mask
 //! file is read with [`MaskFileReader`], and the masks are registered with the `BuildDatabase`
 //! and collected for the sequences it will write.
 //!
-//! # The order in which `losat makeblastdb` must call things when `-mask_data` is wired
+//! # The order in which `losat makeblastdb` calls things
 //!
-//! Nothing calls [`process_mask_data`] yet (`losat makeblastdb` refuses `-mask_data`).
-//! `makeblastdb`'s `x_BuildDatabase` does, in this order
+//! `makeblastdb::build_database_with_log` calls [`process_mask_data`] where `makeblastdb`'s
+//! `x_BuildDatabase` does, in this order
 //! (makeblastdb.cpp:1231-1296; `Run`, makeblastdb.cpp:1322-1331):
 //!
 //! ```text
@@ -39,12 +39,11 @@
 //! step 7) and the message of step 6 (`LOG_POST`) are on the standard error stream, in the order
 //! of the events.
 //!
-//! The options `-mask_id`, `-mask_desc`, `-gi_mask_name` depend on others in the argument parser
-//! (makeblastdb.cpp:276-288): `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`,
-//! `-gi_mask_name` needs `-gi_mask`, which needs `-parse_seqids` and excludes `-mask_id`. LOSAT
-//! writes no GI masks, so the CLI refuses `-gi_mask` and `-gi_mask_name` (NCBI's parser
-//! prints the usage text for `-gi_mask_name` without `-gi_mask`, status 1, before any of this
-//! runs), and `gi_mask_name` of [`MaskDataOptions`] is always `None` there.
+//! The options `-mask_id` and `-mask_desc` depend on others in the argument parser
+//! (makeblastdb.cpp:276-288): `-mask_id` needs `-mask_data`, `-mask_desc` needs `-mask_id`.
+//! `-gi_mask_name` (which needs `-gi_mask`) replaces the file name in the registration
+//! (makeblastdb.cpp:960-971); LOSAT writes no GI masks yet and refuses `-gi_mask` and
+//! `-gi_mask_name` in the CLI, so that branch is not here.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -66,8 +65,6 @@ pub(crate) struct MaskDataOptions<'a> {
     pub(crate) mask_id: Option<&'a str>,
     /// `-mask_desc`.
     pub(crate) mask_desc: Option<&'a str>,
-    /// `-gi_mask_name`.
-    pub(crate) gi_mask_name: Option<&'a str>,
     /// The directory in which a relative mask file name is looked up (`None`: the current
     /// directory, as makeblastdb does). The names in the log, the messages and the registry stay
     /// as given. A hook for tests, which cannot change the directory of the process.
@@ -79,12 +76,12 @@ pub(crate) struct MaskDataOptions<'a> {
 /// status.
 #[derive(Debug)]
 pub(crate) enum MaskDataError {
-    /// An exception whose text is NCBI's: `CInvalidDataException` ([`WriteDbError::Options`]) of
-    /// `x_ProcessMaskData` and of the format guess, `CWriteDBException`
-    /// ([`WriteDbError::Creation`]) of the registry and of the masked ranges.
+    /// An error of `x_ProcessMaskData` itself or of the database: `CInvalidDataException`
+    /// ([`WriteDbError::Options`]), `CWriteDBException` ([`WriteDbError::Creation`]) of the
+    /// registry, LOSAT's refusal of a negative algorithm id ([`WriteDbError::Unsupported`]).
     Ncbi(WriteDbError),
-    /// A failure of the mask file reader that NCBI reports in its own words, or does not
-    /// report: [`MaskFileError::Malformed`] (NCBI: a `CSerialException`, status 255, or
+    /// A failure of the mask file reader: [`MaskFileError::Ncbi`] (the format guess, NCBI's
+    /// text), [`MaskFileError::Malformed`] (NCBI: a `CSerialException`, status 255, or
     /// `std::bad_alloc`, status 4), [`MaskFileError::Unsupported`],
     /// [`MaskFileError::EofInContinuation`].
     File(MaskFileError),
@@ -92,10 +89,7 @@ pub(crate) enum MaskDataError {
 
 impl From<MaskFileError> for MaskDataError {
     fn from(error: MaskFileError) -> Self {
-        match error {
-            MaskFileError::Ncbi(error) => MaskDataError::Ncbi(error),
-            other => MaskDataError::File(other),
-        }
+        MaskDataError::File(error)
     }
 }
 
@@ -151,7 +145,7 @@ impl MaskDataError {
     /// Where each outcome of `x_ProcessMaskData` becomes makeblastdb's (exit status, message);
     /// the only place that decides it. `None` is a run that ends with status 0 and no message.
     ///
-    /// * [`MaskDataError::Ncbi`]: `CATCH_ALL` as NCBI (`BLAST options error: ...`, status 1;
+    /// * [`MaskDataError::Ncbi`], [`MaskFileError::Ncbi`]: `CATCH_ALL` as NCBI (`BLAST options error: ...`, status 1;
     ///   `BLAST Database creation error: ...`, status 1; the message of a failure of the file
     ///   system, "Error: ...", status 255).
     /// * [`MaskFileError::Malformed`]: a file that NCBI's serial reader refuses. NCBI ends with
@@ -166,7 +160,9 @@ impl MaskDataError {
     ///   printed here; the destructor's message follows).
     pub(crate) fn into_makedb_error(self) -> Option<MakedbError> {
         match self {
-            MaskDataError::Ncbi(error) => Some(MakedbError::Build(error)),
+            MaskDataError::Ncbi(error) | MaskDataError::File(MaskFileError::Ncbi(error)) => {
+                Some(MakedbError::Build(error))
+            }
             MaskDataError::File(MaskFileError::EofInContinuation { .. }) => None,
             MaskDataError::File(MaskFileError::Unsupported(what)) => Some(
                 MakedbError::Unsupported(format!("mask data that LOSAT does not read: {what}")),
@@ -174,8 +170,6 @@ impl MaskDataError {
             MaskDataError::File(error @ MaskFileError::Malformed { .. }) => {
                 Some(MakedbError::Build(WriteDbError::Other(error.to_string())))
             }
-            // The reader turns this into `MaskDataError::Ncbi`.
-            MaskDataError::File(MaskFileError::Ncbi(error)) => Some(MakedbError::Build(error)),
         }
     }
 }
@@ -497,7 +491,6 @@ pub(crate) fn process_mask_data(
 
     let mut id_list: Vec<&str> = Vec::new();
     let desc_list: Vec<&str>;
-    let mut gi_mask_names: Vec<&str> = Vec::new();
 
     if let Some(ids) = options.mask_id {
         id_list = split_commas(truncate_spaces(ids));
@@ -522,15 +515,6 @@ pub(crate) fn process_mask_data(
     } else {
         // description is optional
         desc_list = vec![""; id_list.len()];
-    }
-
-    if let Some(names) = options.gi_mask_name {
-        gi_mask_names = split_commas(truncate_spaces(names));
-        if file_list.len() != gi_mask_names.len() {
-            return Err(options_error(
-                "the size of gi_mask_name does not match that of mask_data.",
-            ));
-        }
     }
 
     for (i, &file) in file_list.iter().enumerate() {
@@ -563,15 +547,10 @@ pub(crate) fn process_mask_data(
                             opts,
                         )?
                     } else {
-                        let name = if gi_mask_names.is_empty() {
-                            file
-                        } else {
-                            gi_mask_names[i]
-                        };
                         db.register_masking_algorithm(
                             first_obj.algo_program,
                             opts,
-                            name.as_bytes(),
+                            file.as_bytes(),
                         )?
                     };
                     algo_id = Some(id);
@@ -585,12 +564,12 @@ pub(crate) fn process_mask_data(
                     db.set_mask_data_source(MaskedRangeSet::new());
                 }
 
-                for mask in &masks.masks {
-                    let Some(seq_id) = mask.id.as_ref() else {
+                for mask in std::mem::take(&mut masks.masks) {
+                    let Some(seq_id) = mask.id else {
                         return Err(options_error("Cannot get masked range Seq-id"));
                     };
                     if let Some(set) = db.mask_data_source_mut() {
-                        set.insert(algo_id, seq_id, mask)?;
+                        set.insert(algo_id, seq_id, mask.parts)?;
                     }
                 }
 

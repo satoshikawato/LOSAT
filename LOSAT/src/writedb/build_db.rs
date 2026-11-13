@@ -928,17 +928,15 @@ impl<'a> BuildDatabase<'a> {
     // ```
     // The masks are looked up by the Seq-ids of each sequence (`bs->GetId()`): with
     // `-parse_seqids` the parsed ids, else its `local id` (`add_masks_for_seq_id`).
-    /// `SetMaskDataSource`: the masked ranges of the sequences. makeblastdb calls it when
-    /// the first mask file with masks has been read, and keeps adding to the set after that,
-    /// so the caller hands the finished set over before the first sequence is added.
+    /// `SetMaskDataSource`: the masked ranges of the sequences. makeblastdb calls it when it
+    /// reads the first mask list that has masks, with an empty set, and goes on inserting into
+    /// it through [`Self::mask_data_source_mut`] (`process_mask_data` does the same); every
+    /// insert comes before the first sequence is added.
     pub fn set_mask_data_source(&mut self, ranges: MaskedRangeSet) {
         self.mask_data = Some(ranges);
     }
 
-    /// The set that `set_mask_data_source` handed over, to add to. makeblastdb creates the
-    /// set when it reads the first mask list that is not empty, hands it over at once and
-    /// goes on inserting; a caller that follows it calls
-    /// `set_mask_data_source(MaskedRangeSet::new())` at that point and inserts through this.
+    /// The set that `set_mask_data_source` handed over, to insert into.
     pub fn mask_data_source_mut(&mut self) -> Option<&mut MaskedRangeSet> {
         self.mask_data.as_mut()
     }

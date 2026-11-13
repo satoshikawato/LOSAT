@@ -9,10 +9,11 @@ use crate::ncbi_app::args::{ArgException, Args};
 use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::seqdb::mask::FilterProgram;
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
-use crate::seqmasks_io::writer::{FilterProgram, MaskInfoWriter, MaskWriter, Serial, WriteError};
+use crate::seqmasks_io::writer::{MaskInfoWriter, MaskWriter, Serial, WriteError};
 use crate::writedb::fasta_source::reader::{FastaReader, ReadError, ReaderFlags};
 
 /// How a run stops early.
@@ -277,11 +278,12 @@ impl<'a> MaskFromFasta<'a> {
             return Err(read_failure(error));
         }
         let parses_ids = reader.parses_ids();
+        let mask = reader.take_masks();
         let record = result.map_err(|error| {
             self.reader = None;
             match error {
                 ReadError::Parse(error) => Failure::Caught(error.exception()),
-                ReadError::Ncbi(exception) => Failure::Caught(exception),
+                ReadError::Ncbi(exception) => Failure::Caught(*exception),
                 ReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
             }
         })?;
@@ -292,9 +294,6 @@ impl<'a> MaskFromFasta<'a> {
         } else {
             ParsedSeqId::Local(ObjectId::Id(record.local_id as i32))
         };
-        Ok(Some(MaskedRecord {
-            best_id,
-            mask: record.masks,
-        }))
+        Ok(Some(MaskedRecord { best_id, mask }))
     }
 }

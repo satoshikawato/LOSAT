@@ -65,11 +65,9 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    // The errors of the alias files' counts depend on the list (`restrict_database`).
-    let db = SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
-    db.check_accession_tables()
-        .map_err(DatabaseOpenError::Reader)?;
-    Ok(db)
+    // The errors of the alias files' counts depend on the list, and those of the headers and the
+    // accession tables come after them (`restrict_database`).
+    SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)
 }
 
 /// Why `open_search_database` could not open a database.
@@ -96,6 +94,30 @@ pub(crate) fn open_database(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:109-139
+// ```c++
+//         if (gi_list || neg_list || m_Aliases.NeedTotalsScan(m_VolSet)) {
+//             m_NeedTotalsScan = true;
+//             x_InitIdSet();
+//         }
+//         ...
+//         if (m_NeedTotalsScan) {
+//             ...
+//             x_ScanTotals(true, & m_NumSeqs, & m_TotalLength,
+//                                & m_MaxLength, & m_MinLength, locked);
+//
+//         } else {
+//             m_NumSeqs     = x_GetNumSeqs();
+//             m_TotalLength = x_GetTotalLength();
+//             m_MaxLength   = x_GetMaxLength();
+//             m_MinLength   = x_GetMinLength();
+//             ...
+//         }
+//         m_NumSeqsStats     = x_GetNumSeqsStats();
+//         m_TotalLengthStats = x_GetTotalLengthStats();
+// ```
+// The list is resolved in the totals scan (`x_ScanTotals`, `CSeqDBGiListSet`: its errors and
+// warnings), before the alias files' statistics keys are read.
 /// Restricts the search's database `db` (opened as `name` by `open_database`) to the taxid or
 /// seqid list of the command line (line DI-8, `DbFilterArgs::resolve`; none: the whole
 /// database), as NCBI's `CSeqDB` opened with the list (`SeqDb::restrict`), then reads what its
@@ -104,13 +126,22 @@ pub(crate) fn open_database(
 /// (`LOG_POST(Warning << ...)`: the text alone; `ERR_POST`: `Warning: [<program>] <text>`,
 /// the program in lower case as `SetDiagPostPrefix` names it; an `ERR_POST` of an error
 /// before a throw: `Error: [<program>] <text>`), before an error too.
+///
+/// The one owner of the order of a search database's errors, which is NCBI's (probes p4c_e*,
+/// p4c_f2 of line RG D1a-2): the alias files' tree and ranges (`open_database`), the list, the
+/// alias files' counts (`SeqDb::check_alias_values`), the formatter's reopening of each name
+/// (`SeqDb::read_name_records`), then what NCBI meets only when it reads the sequences' headers
+/// and reports: LOSAT's refusal of mixed accession tables (`SeqDb::check_accession_tables`) and
+/// the first headers (`check_seqids`, whose answer it returns: whether the database has parsed
+/// Seq-ids).
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
     name: &str,
     list: Option<&crate::seqdb::DbList>,
     diagnostics: &mut dyn std::io::Write,
+    settings: &ApplicationSettings,
     program: &str,
-) -> Result<()> {
+) -> Result<bool> {
     if let Some(list) = list {
         apply_list(db, list, diagnostics, program)?;
     }
@@ -119,18 +150,28 @@ pub(crate) fn restrict_database(
     // without it, before the search (`pairwise_database`), and meets the others there.
     db.check_alias_values()
         .map_err(|error| database_error(error, program))?;
-    // NCBI asks for the length of OID 0 only where the statistics' total is not positive
-    // (blast_setup.c:925-937, quoted at `SeqDb::statistics_numbers`): over volumes without
-    // sequences an alias file's `LENGTH` or `STATS_TOTLEN` makes NCBI search none instead of
-    // its `Database memory map file error`, which LOSAT does not follow (line RG, D1a-2).
-    if db.num_oids() == 0 && !db.statistics_length_is_empty() {
-        return Err(refusal(
-            "an alias file's LENGTH or STATS_TOTLEN over volumes without sequences",
+    if db.is_restricted() && db.statistics_per_subject() {
+        return Err(database_error(
+            SeqDbError::Unsupported {
+                path: std::path::PathBuf::from(name),
+                message: format!(
+                    "the total length of NCBI's scan of the list is 0 while the search reads {} \
+                     sequences (the scan stops at the FIRST_OID-LAST_OID range of the only alias \
+                     file of the -db), so NCBI computes the statistics of each subject on its \
+                     own; LOSAT does not search such a database with this list yet",
+                    db.num_seqs()
+                ),
+            },
             program,
         ));
     }
     db.read_name_records(name)
-        .map_err(|error| database_error(error, program))
+        .map_err(|error| database_error(error, program))?;
+    db.check_accession_tables()
+        .map_err(|error| database_error(error, program))?;
+    // A database with parsed Seq-ids is read (line DBID), unless a variable changes NCBI's choice
+    // of its Seq-ids.
+    check_seqids(db, settings, program)
 }
 
 /// `restrict_database` with a list.
@@ -156,8 +197,9 @@ fn apply_list(
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
-/// export (`strategy`) what the database's list makes of their requests
-/// (`ArchiveHandle::set_database_filter`). `empty_length` is whether the
+/// export (`strategy`) what the database's list makes of their requests: the run's options
+/// handle, made once per run and shared by both (`report::archive::OptionsHandle::set_database_filter`).
+/// `empty_length` is whether the
 /// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
 /// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
 /// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
@@ -186,14 +228,21 @@ pub(crate) fn note_archive_database_filter(
             "-dbsize with {option} and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    let list = filter.archive_parameter(list_taxids);
-    let empty_database = empty_length && !searchsp;
-    if let Some(strategy) = strategy {
-        strategy.set_database_filter(list.clone(), empty_database);
-    }
-    if let Some(handle) = archive {
-        handle.set_database_filter(list, empty_database);
-    }
+    let options = match (archive, strategy) {
+        (Some(handle), strategy) => {
+            anyhow::ensure!(
+                strategy.is_none_or(|strategy| strategy.options().same(handle.options())),
+                "LOSAT internal error: the archive and the search strategy of one run have two options handles"
+            );
+            handle.options()
+        }
+        (None, Some(strategy)) => strategy.options(),
+        (None, None) => return Ok(()),
+    };
+    options.set_database_filter(
+        filter.archive_parameter(list_taxids),
+        empty_length && !searchsp,
+    )?;
     Ok(())
 }
 
@@ -259,15 +308,17 @@ pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
 }
 
+/// What LOSAT refuses where the statistics read 0 sequences of a positive total length
+/// (`check_statistics_count`, and BLASTX's own check of its statistics).
+pub(crate) const STATISTICS_COUNT_ZERO: &str = "the statistics count 0 sequences of the database (an alias file's NSEQ 0, or its LENGTH or STATS_TOTLEN over volumes without sequences), by which NCBI BLAST+ divides its length";
+
 /// LOSAT's refusal of statistics that read 0 sequences of a positive total length
 /// (`SeqDb::statistics_count_is_zero`), for a search of `program` without the Gumbel block:
-/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG).
+/// NCBI BLAST+ 2.17.0 divides the total by 0 there and crashes (DECISIONS 14 of line RG; an
+/// alias file's `LENGTH` 100 alone over a volume of no OID, probe p4c_dn_nB of D1a-2: SIGFPE).
 pub(crate) fn check_statistics_count(db: &SeqDb, program: &str) -> Result<()> {
     if db.statistics_count_is_zero() {
-        return Err(refusal(
-            "the statistics count 0 sequences of the database (an alias file's NSEQ 0), by which NCBI BLAST+ divides its length",
-            program,
-        ));
+        return Err(refusal(STATISTICS_COUNT_ZERO, program));
     }
     Ok(())
 }
@@ -1642,16 +1693,13 @@ pub(crate) fn parsed_refusal(ordinal: u32, reason: &str, program: &str) -> anyho
     )))
 }
 
-/// The check of a search program's database right after it is opened: the first header of
-/// each volume is read, as before line DBID, and only a header with parsed Seq-ids is let
-/// through (`SeqDb::has_parsed_seqids`; every search program reads such a database). Returns whether the
-/// database has parsed Seq-ids; such a database is LOSAT's refusal where a variable changes
-/// NCBI's choice of its Seq-ids (`ApplicationSettings::seq_id_rank_variable`).
-pub(crate) fn check_seqids(
-    db: &SeqDb,
-    settings: &ApplicationSettings,
-    program: &str,
-) -> Result<bool> {
+/// The check of a search program's database at the end of its opening (`restrict_database`):
+/// the first header of each volume is read, as before line DBID, and only a header with parsed
+/// Seq-ids is let through (`SeqDb::has_parsed_seqids`; every search program reads such a
+/// database). Returns whether the database has parsed Seq-ids; such a database is LOSAT's refusal
+/// where a variable changes NCBI's choice of its Seq-ids
+/// (`ApplicationSettings::seq_id_rank_variable`).
+fn check_seqids(db: &SeqDb, settings: &ApplicationSettings, program: &str) -> Result<bool> {
     let parsed = db
         .has_parsed_seqids()
         .map_err(|error| database_error(error, program))?;
@@ -2806,7 +2854,7 @@ pub(crate) struct TaxdbRun {
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
-    rows_open: std::sync::Mutex<Vec<String>>,
+    rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -3547,13 +3595,61 @@ pub(crate) fn read_reported_taxonomy(
 ///    		if(resolved.empty())
 /// ```
 pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
+    Ok(subject_search_path(settings, program)?
+        .resolve_file("taxdb.bti")
+        .is_some())
+}
+
+/// The search path of NCBI's databases of a `-subject` search (`subject_taxdb_found`).
+fn subject_search_path(settings: &ApplicationSettings, program: &str) -> Result<SearchPath> {
     let registry = match &settings.blastdb {
         Ok(value) => value.as_deref(),
         Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
     };
-    let path =
-        SearchPath::from_environment(registry).map_err(|error| database_error(error, program))?;
-    Ok(path.resolve_file("taxdb.bti").is_some())
+    SearchPath::from_environment(registry).map_err(|error| database_error(error, program))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+// ```c++
+// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
+//                                 SSeqDBTaxInfo  & info  )
+// {
+// 	static CTaxDBFileInfo t;
+// ```
+/// The taxonomy database of a `-subject` search's organism report (outfmt 18): NCBI's
+/// `GetTaxNames` opens its static `CTaxDBFileInfo` through the search path of NCBI's databases at
+/// the report's first lookup. One per run, as a `-db` search's (`TaxdbRun`), made by the command
+/// line with `subject_taxdb_found` (`run_local`'s callers give no search path: none, DECISIONS 7
+/// of line CLI C2, every lookup fails).
+#[derive(Clone, Debug)]
+pub struct SubjectTaxdb(std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>);
+
+impl SubjectTaxdb {
+    /// The run's database where `taxdb.bti` is on the search path of `settings` (else `None`),
+    /// not opened before the report's first lookup. A registry value that LOSAT does not read as
+    /// NCBI is its refusal (`subject_taxdb_found`); `program` names it.
+    pub(crate) fn of(settings: &ApplicationSettings, program: &str) -> Result<Option<Self>> {
+        let path = subject_search_path(settings, program)?;
+        Ok(path.resolve_file("taxdb.bti").is_some().then(|| {
+            SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
+                path,
+            )))
+        }))
+    }
+
+    /// The names that the organism report of a query batch asks for in it
+    /// (`TabularNames::for_report`); a database that LOSAT cannot read as NCBI does is refused as
+    /// in [`tabular_names`].
+    pub(crate) fn report_names(&self, program: &str) -> crate::report::tabular::TabularNames {
+        crate::report::tabular::TabularNames::for_report(
+            crate::report::tax_report::TaxNamesDb::new(
+                std::sync::Arc::clone(&self.0),
+                None,
+                taxdb_error,
+            ),
+            program,
+        )
+    }
 }
 
 /// The names of the taxonomy database that the rows of a tabular report with a name field look
@@ -3574,6 +3670,18 @@ pub(crate) fn tabular_names<'t>(
     let Some(search_path) = db.search_path() else {
         return Ok(None);
     };
+    // The organism report (outfmt 18) looks each taxid up itself where NCBI's report does
+    // (`report::tax_report::TaxLookups`), the texts of an open by earlier rows first.
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        return Ok(Some(crate::report::tabular::TabularNames::for_report(
+            crate::report::tax_report::TaxNamesDb::new(
+                run.taxdb(search_path),
+                Some(std::sync::Arc::clone(&run.rows_open)),
+                taxdb_error,
+            ),
+            program,
+        )));
+    }
     let names = crate::report::tabular::TabularNames::look_up(
         spec,
         &run.taxdb(search_path),

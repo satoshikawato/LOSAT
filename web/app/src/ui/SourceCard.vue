@@ -4,11 +4,12 @@
 // card's words after its name; "Remove" and "Put each accession on its own line" ask the role's
 // block, which moves the focus on, and the buttons that rewrite the box keep it on the card (rewrite).
 import { computed, nextTick, ref, watch } from 'vue';
+import type { InputRole } from 'losat/domain';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
 import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
-import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
+import { programById, residueUnit, sequenceKind } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
 import { announce } from './announcer';
 import { formatBytes, formatCount } from './format';

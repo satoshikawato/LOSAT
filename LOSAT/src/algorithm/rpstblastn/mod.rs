@@ -28,8 +28,12 @@ pub use args::RpstblastnArgs;
 // 	}
 // }
 // ```
-/// Runs the RPSTBLASTN search with BLASTX's driver (`blastx::native::run`). LOSAT's output is
-/// NCBI's `-num_threads 1` output at every thread count and `-mt_mode`.
-pub fn run(args: RpstblastnArgs) -> anyhow::Result<()> {
-    args.into_blastx_args()?.run()
+/// Runs the RPSTBLASTN search with BLASTX's driver (`blastx::native::run`) and the settings of
+/// rpstblastn's application start. LOSAT's output is NCBI's `-num_threads 1` output at every
+/// thread count and `-mt_mode`.
+pub fn run(
+    args: RpstblastnArgs,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> anyhow::Result<()> {
+    args.into_blastx_args()?.run(settings)
 }

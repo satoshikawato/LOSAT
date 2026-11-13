@@ -6,25 +6,34 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { instantiateSerial, sha256Hex } from 'losat';
+import { WINDOW_MASKER_FLAG } from 'losat/domain';
+import type { EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { buildArgv } from '../../src/domain/argv';
 import { changedFields, formParameters, setField, writtenValue, type EngineOption } from '../../src/domain/parameters';
-import { programById, WINDOW_MASKER_FLAG } from '../../src/domain/programs';
-import { sha256Hex } from '../../src/infra/browser/platform';
+import { programById } from '../../src/domain/programs';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
-import { COUNTS_CHUNK_BYTES, EngineRuntime } from '../../src/infra/engine-worker/runtime';
-import { countsKey, WasmEngine } from '../../src/infra/engine-worker/gateway';
-import type { EngineCommand, EngineEvent, WorkerCounts, WorkerRun } from '../../src/infra/engine-worker/protocol';
+import { COUNTS_CHUNK_BYTES, EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
+import { countsKey, WasmEngine } from '../../../packages/losat/src/infra/engine-worker/gateway';
+import type { EngineCommand, EngineEvent, WorkerCounts, WorkerRun } from '../../../packages/losat/src/infra/engine-worker/protocol';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { NodeInflater } from './support/node-inflater';
-import { EngineCallError, EngineStoppedError, FILE_WINDOW_MASKER_COUNTS, ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports, type FileInfo } from '../../src/infra/reactor/abi';
-import { instantiateSerial } from '../../src/infra/reactor/instance';
-import type { EngineRunRequest } from '../../src/ports/engine';
+import {
+  EngineCallError,
+  EngineStoppedError,
+  FILE_WINDOW_MASKER_COUNTS,
+  ReactorAbi,
+  ROLE_QUERY,
+  ROLE_SUBJECT,
+  type AbiExports,
+  type FileInfo,
+} from '../../../packages/losat/src/infra/reactor/abi';
 
 // --- the form and the argv ---------------------------------------------------------------------
 

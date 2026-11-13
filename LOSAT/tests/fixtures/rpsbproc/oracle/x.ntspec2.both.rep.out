@@ -1,0 +1,52 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntspec2.xml
+#Output data file:	(stdout)
+#Annotation data at:	xnew
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00006_25001-30000
+DOMAINS
+1	Query_1[1]	Specific	507824	2293	3204	0	559.527	NF008036	PRK10768	-	-
+1	Query_1[1]	Non-specific	440271	4657	4998	1.50046e-70	241.464	COG0505	CarA	C	-
+1	Query_1[1]	Non-specific	510731	826	999	3.08617e-32	123.665	NF011676	PRK15095	C	-
+1	Query_1[1]	Non-specific	439830	13	180	3.36772e-10	65.4866	COG0060	IleS	N	-
+1	Query_1[2]	Non-specific	503273	1601	2197	3.73591e-127	399.578	NF002188	PRK01045.1-2	N	-
+1	Query_1[2]	Specific	129147	3386	4180	1.08076e-122	385.609	TIGR00036	dapB	-	-
+1	Query_1[3]	Specific	272893	207	698	1.65272e-53	184.869	TIGR00077	lspA	-	529107
+ENDDOMAINS
+SITES
+1	Query_1[1]	Specific	active site	D2320-2322,D2332-2334,D2335-2337,N2407-2409,V2530-2532,I2659-2661,N2761-2763,E2779-2781,N2785-2787,D2992-2994	10	0	239117
+1	Query_1[1]	Specific	tetramer interface	L2500-2502,S2692-2694,C2815-2817,E3061-3063,Q3067-3069,G3070-3072,T3079-3081	7	0	239117
+1	Query_1[2]	Specific	catalytic site	H1646-1648,E1652-1654,S1949-1951,N1955-1957	4	0	260116
+1	Query_1[2]	Specific	NAD(P) binding site	G3407-3409,A3410-3412,G3416-3418,R3419-3421,M3422-3424,L3482-3484,E3485-3487,R3488-3490,F3608-3610,T3611-3613,R3614-3616,E3620-3622,G3623-3625,G3677-3679,T3680-3682,T3683-3685,A3749-3751,A3752-3754,N3755-3757	21	0	467611
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

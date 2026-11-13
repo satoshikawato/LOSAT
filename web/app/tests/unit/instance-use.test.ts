@@ -1,10 +1,16 @@
-// The use count of a threaded instance (src/infra/engine-worker/instance-use.ts), which the
+// The use count of a threaded instance (web/packages/losat/src/infra/engine-worker/instance-use.ts), which the
 // Gateway, the Engine worker and its thread workers share; their use of it runs in the browsers
 // (tests/e2e/engine.spec.ts).
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
-import { InstanceUse, USE_RETIRING } from '../../src/infra/engine-worker/instance-use';
-import { SLOT_ENDED, SLOT_FAILED, SLOT_PREPARING, SLOT_READY, SLOT_RUNNING } from '../../src/infra/engine-worker/protocol';
+import { InstanceUse, USE_RETIRING } from '../../../packages/losat/src/infra/engine-worker/instance-use';
+import {
+  SLOT_ENDED,
+  SLOT_FAILED,
+  SLOT_PREPARING,
+  SLOT_READY,
+  SLOT_RUNNING,
+} from '../../../packages/losat/src/infra/engine-worker/protocol';
 
 function runningSlot(): Int32Array {
   const slot = new Int32Array(new SharedArrayBuffer(4));

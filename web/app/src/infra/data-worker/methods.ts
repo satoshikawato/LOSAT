@@ -1,12 +1,12 @@
 // The methods that the Data worker serves: the DataGateway, the saved Example sets
-// (ports/example.ts), the saved WindowMasker counts (ports/counts.ts), the inflation of a downloaded Example set (ports/inflate.ts), and
+// (ports/example.ts), the saved WindowMasker counts (ports/counts.ts), the inflation of a downloaded Example set (losat/ports: inflate.ts), and
 // `describe` / `validate` of the engine, which its serial reactor answers
-// (src/infra/reactor/control.ts). The compile-time checks below keep the lists complete.
+// (web/packages/losat/src/infra/reactor/control.ts). The compile-time checks below keep the lists complete.
+import type { EngineControl } from 'losat';
+import type { WholeFileInflater } from 'losat/ports';
 import type { CountsStore } from '../../ports/counts';
 import type { DataGateway } from '../../ports/data';
 import type { ExampleStore } from '../../ports/example';
-import type { WholeFileInflater } from '../../ports/inflate';
-import type { EngineControl } from '../reactor/control';
 
 export const DATA_GATEWAY_METHODS = [
   'addSource',

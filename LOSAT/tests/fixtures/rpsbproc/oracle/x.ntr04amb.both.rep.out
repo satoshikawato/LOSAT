@@ -1,0 +1,48 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntr04amb.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00004_15001-20000
+DOMAINS
+1	Query_1[1]	Specific	508064	3721	4608	0	638.977	NF008284	PRK11062	-	-
+1	Query_1[1]	Non-specific	468101	496	1491	3.41315e-31	126.225	NF033592	transpos_IS4_1	-	-
+1	Query_1[2]	Specific	506979	2486	3652	2.51875e-176	535.227	NF007112	PRK09561	-	-
+1	Query_1[2]	Non-specific	199909	2	166	2.11298e-13	69.7614	cd10747	DnaJ_C	N	-
+1	Query_1[-2]	Non-specific	281403	4814	4996	2.85862e-27	108.519	pfam03400	DDE_Tnp_IS1	N	-
+1	Query_1[-2]	Specific	485358	1763	1885	5.18321e-10	56.2495	pfam01848	HOK_GEF	-	452751
+ENDDOMAINS
+SITES
+1	Query_1[1]	Specific	putative dimerization interface	S4045-4047,S4048-4050,L4054-4056,N4057-4059,V4066-4068,E4078-4080,I4084-4086,H4087-4089,X4090-4092,R4093-4095,C4096-4098,F4099-4101,E4102-4104,L4375-4377,G4378-4380,E4381-4383,F4384-4386,D4387-4389,D4390-4392,A4408-4410,F4411-4413,A4417-4419,M4420-4422	23	0	176120
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

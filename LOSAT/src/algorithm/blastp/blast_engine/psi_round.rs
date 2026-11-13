@@ -216,6 +216,7 @@ fn run_queries(
             query_input: &query_input,
             subject_placements: &subjects.placements,
             x_ordinal_base: input_start,
+            split_search_spaces: None,
         };
         let mut state = IterationState::new(plan.num_iterations);
         // The PSSM that the next round searches (`pssm`, made after the round before); before
@@ -315,6 +316,9 @@ fn run_queries(
                         .query_scopes
                         .as_ref()
                         .map(|scopes| scopes.numbered_from(query)),
+
+                    strategy_next: None,
+                    call_requests: None,
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
             );

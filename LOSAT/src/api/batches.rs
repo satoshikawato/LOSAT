@@ -40,7 +40,7 @@ use super::search::Search;
 use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
-use crate::blastinput::ncbi_environment::check_ncbi_application_settings;
+use crate::blastinput::ncbi_environment::library_application_settings;
 use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -111,7 +111,7 @@ fn batch_sizes(command: &Commands, inputs: Inputs<'_>) -> anyhow::Result<BatchSi
         Commands::Blastn(args) => BatchSizes::Blastn(match args.database_name() {
             Some(name) => {
                 let settings =
-                    check_ncbi_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                    library_application_settings("blastn").map_err(anyhow::Error::msg)?;
                 QueryBatchSizes::of_database(args, name, &settings)?
             }
             None => QueryBatchSizes::new(args, inputs.subject)?,

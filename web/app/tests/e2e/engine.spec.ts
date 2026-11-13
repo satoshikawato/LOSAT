@@ -9,8 +9,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type BrowserContext } from '@playwright/test';
+import type { OutputFormat } from 'losat/domain';
 import { test } from './support/test';
-import type { OutputFormat } from '../../src/domain/output-format';
 import type { RetentionResult, SearchCase, SearchResult } from './harness/engine';
 import { buildHarness, type HarnessFiles } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
@@ -24,7 +24,7 @@ test.setTimeout(900_000);
 const EVIDENCE = process.env['LOSAT_WEB_EVIDENCE'] || undefined;
 const FORMATS: readonly OutputFormat[] = [0, 6, 7];
 /**
- * The thread counts of V-BR (WA-RS-03). Auto (infra/engine-worker/policy.ts) and the Threads list
+ * The thread counts of V-BR (WA-RS-03). Auto (web/packages/losat/src/infra/engine-worker/policy.ts) and the Threads list
  * choose any count from 1 to 32, and a run's mark is Supported only at a count that was checked
  * (domain/verification.ts). Every case runs on the serial path and on the threaded path at 2, 4,
  * 8, 16 and 32 threads; one case of each program also runs at every other count.

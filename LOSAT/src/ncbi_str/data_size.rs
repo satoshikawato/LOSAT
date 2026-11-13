@@ -65,7 +65,7 @@ fn convert_error(str_: &[u8], site: ThrowSite, pos: usize) -> DataSizeError {
     // ```
     let mut s = String::new();
     s += "Cannot convert string '";
-    s += &printable_string(str_);
+    s += &String::from_utf8_lossy(&printable_string(str_));
     s += "' to ";
     s += "Uint8";
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:569-575

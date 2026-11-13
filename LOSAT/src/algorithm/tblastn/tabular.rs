@@ -121,6 +121,9 @@ pub(super) struct TblastnTabular<'a> {
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`stage_e_report::tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [Arc<[u8]>],
+    /// The records of a subject set (`-subject`; the organism report shows their local ids and
+    /// titles).
+    pub subject_records: &'a [FastaRecord],
     pub shown: &'a ShownSubjects<'a>,
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub query_batch_skipped: &'a [bool],
@@ -246,6 +249,47 @@ pub(super) fn write_tblastn_tabular(
         },
     };
     let names = tab.inputs.names.as_ref();
+    // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
+    // with `-query_loc` (as outfmt 0's).
+    if spec.kind == TabularKind::TaxReport {
+        let titles: Vec<_> = tab.queries.iter().map(FastaRecord::query_line).collect();
+        let queries: Vec<crate::report::tax_report::TaxQuery<'_>> = tab
+            .queries
+            .iter()
+            .zip(hitlists)
+            .enumerate()
+            .map(
+                |(q_idx, (query, hitlist))| crate::report::tax_report::TaxQuery {
+                    title: &titles[q_idx],
+                    length: tab.ranges.queries.length(q_idx, query.seq().len()),
+                    hsps: hitlist
+                        .lists()
+                        .iter()
+                        .flat_map(|list| {
+                            list.hsps.hsps.iter().zip(&list.payloads).map(
+                                move |(linked, payload)| crate::report::tax_report::TaxHsp {
+                                    subject: list.oid as usize,
+                                    evalue: linked.evalue,
+                                    bit_score: payload.bit_score,
+                                },
+                            )
+                        })
+                        .collect(),
+                },
+            )
+            .collect();
+        return crate::algorithm::common::tabular::write_tax_report(
+            &subjects,
+            tab.subject_records,
+            false,
+            tab.inputs.taxdb_found,
+            names,
+            PROGRAM,
+            &queries,
+            writer,
+            warnings,
+        );
+    }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
     if needs.all_deflines {
@@ -411,14 +455,7 @@ pub(super) fn write_tblastn_tabular(
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide
                 // coordinates of a translated frame, descending on a minus frame (the default
                 // row's, `write_tabular`).
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = super::stage_e_report::subject_endpoints(hsp, subject_len);
                 let (q_start, q_end, s_start, s_end) = record_coordinates(
                     tab.ranges,
                     q_idx,

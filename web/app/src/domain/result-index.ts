@@ -2,8 +2,8 @@
 // each query grouped by subject in the engine's order, sorting and filtering with the
 // engine's values, the limits that a query may have reached, and the orientation of an
 // HSP. Nothing here computes or formats a BLAST value.
+import type { SequenceKind } from 'losat/domain';
 import type { HspTable } from './hsp-table';
-import type { SequenceKind } from './programs';
 
 export interface SubjectGroup {
   /** 0-based record index of the subject in the run's subject input. */

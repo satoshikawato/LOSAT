@@ -2,13 +2,11 @@
 // the temporary storage that holds them. The implementation runs in the Data worker
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
-// (ports/run-output.ts), not through these methods.
-import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/dataset';
+// (losat/ports: run-output.ts), not through these methods.
+import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
+import type { HspRecord, InputCheck } from 'losat/ports';
+import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
-import type { CUSTOM_OUTPUT, OutputFormat, RunOutput } from '../domain/output-format';
-import type { InputRole, ProgramId } from '../domain/programs';
-import type { HspRecord } from './engine';
-import type { InputCheck } from './input-check';
 
 export interface SourceRef {
   readonly sourceId: string;
@@ -31,7 +29,7 @@ export interface DatasetStore {
   /**
    * Keeps a reference to `file`. Its bytes are read with `File.slice` when needed and are
    * never copied into storage (design §6.1). A File named `.gz`, `.bz2` or `.zst` is inflated first
-   * by the engine's decoders (ports/inflate.ts) and kept under its name without the suffix; its ref
+   * by the engine's decoders (losat/ports: inflate.ts) and kept under its name without the suffix; its ref
    * carries that name and the inflated size. A file whose bytes are not what its name says is
    * refused with the engine's sentence.
    */
@@ -51,7 +49,7 @@ export interface DatasetStore {
   buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
   /**
    * The engine's reading of the run input of the revisions for `program` and `role`
-   * (ports/input-check.ts). Resolves with the engine's verdict; rejects only when the
+   * (losat/ports: input-check.ts). Resolves with the engine's verdict; rejects only when the
    * check itself cannot run.
    */
   checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;

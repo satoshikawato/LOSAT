@@ -22,11 +22,13 @@ use std::path::{Path, PathBuf};
 use super::guess::guess_format;
 use super::schema::{
     ChoiceDef, ClassDef, EnumDef, Ty, BLAST_DB_MASK_INFO, BLAST_FILTER_PROGRAM, BLAST_MASK_LIST,
-    DATE, DATE_STD, DBTAG, GIIMPORT_ID, ID_PAT, ID_PAT_ID, NA_STRAND, OBJECT_ID_ID, PATENT_SEQ_ID,
-    PDB_SEQ_ID, SEQ_ID, SEQ_INTERVAL, SEQ_INTERVAL_FROM, SEQ_INTERVAL_ID, SEQ_INTERVAL_STRAND,
-    SEQ_INTERVAL_TO, SEQ_LOC, SEQ_LOC_INT, SEQ_LOC_PACKED_INT, TEXTSEQ_ID, T_OBJECT_ID,
+    DATE, DATE_STD, DBTAG, GIIMPORT_ID, ID_PAT, ID_PAT_ID, NA_STRAND, OBJECT_ID_ID, PACKED_SEQPNT,
+    PATENT_SEQ_ID, PDB_SEQ_ID, SEQ_BOND, SEQ_ID, SEQ_INTERVAL, SEQ_INTERVAL_FROM, SEQ_INTERVAL_ID,
+    SEQ_INTERVAL_STRAND, SEQ_INTERVAL_TO, SEQ_LOC, SEQ_LOC_BOND, SEQ_LOC_EMPTY, SEQ_LOC_EQUIV,
+    SEQ_LOC_INT, SEQ_LOC_MIX, SEQ_LOC_NULL, SEQ_LOC_PACKED_INT, SEQ_LOC_PACKED_PNT, SEQ_LOC_PNT,
+    SEQ_LOC_WHOLE, SEQ_POINT, TEXTSEQ_ID, T_OBJECT_ID,
 };
-use super::{MaskInfo, MaskInterval, MaskList, MaskLoc};
+use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -764,6 +766,71 @@ impl<I: Input> Rd<I> {
         Ok((MaskInterval { from, to, strand }, id))
     }
 
+    /// A `Seq-point` (also the members `a` and `b` of a `Seq-bond`), and its Seq-id.
+    fn read_seq_point(&mut self) -> R<(MaskInterval, ParsedSeqId)> {
+        let (mut point, mut strand, mut id) = (0u32, None, None);
+        let mut scratch = Vec::new();
+        self.read_class(&SEQ_POINT, |s, index| {
+            match index {
+                0 => point = s.inp.read_u32()?,
+                1 => strand = Some(s.inp.read_enum(&NA_STRAND)? as u8),
+                2 => id = Some(s.read_seq_id()?),
+                _ => {
+                    // fuzz: read, not used.
+                    scratch.clear();
+                    s.read_value(
+                        SEQ_POINT.members[index].ty,
+                        SEQ_POINT.members[index].name,
+                        &mut scratch,
+                    )?;
+                }
+            }
+            Ok(())
+        })?;
+        let Some(id) = id else {
+            return format_err("member id expected");
+        };
+        let interval = MaskInterval {
+            from: point,
+            to: point,
+            strand,
+        };
+        Ok((interval, id))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3620
+    // ```c++
+    // bool CSeq_loc::x_CheckId(const CSeq_id*& id, bool may_throw) const
+    // {
+    //     switch ( Which() ) {
+    //     case e_not_set:
+    //     case e_Null:
+    //         {
+    //             // no Seq-id
+    //             return true;
+    //         }
+    //     case e_Empty:
+    //         {
+    //             return x_UpdateId(id, &GetEmpty(), may_throw);
+    //         }
+    //     case e_Whole:
+    //         {
+    //             return x_UpdateId(id, &GetWhole(), may_throw);
+    //         }
+    //     case e_Int: ... x_UpdateId(id, &loc.GetId(), may_throw);
+    //     case e_Pnt: ... x_UpdateId(id, &pnt.GetId(), may_throw);
+    //     case e_Packed_int: ... (each interval) ...
+    //     case e_Packed_pnt: ... x_UpdateId(id, &pnts.GetId(), may_throw);
+    //     case e_Mix: ... (*li)->CheckId(id, may_throw) for each sub-location ...
+    //     case e_Bond: ... A, then B when it is set ...
+    //     case e_Equiv: ... (*li)->CheckId(id, may_throw) for each ...
+    //     case e_Feat:
+    //     default:
+    //         if (may_throw) { NCBI_THROW_FMT(CSeqLocException, eUnsupported, ...); }
+    //         return false;
+    //     }
+    // }
+    // ```
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:403-422
     // ```c++
     // bool CSeq_loc::x_UpdateId(const CSeq_id*& total_id, const CSeq_id* id,
@@ -785,31 +852,6 @@ impl<I: Input> Rd<I> {
     //     return true;
     // }
     // ```
-    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3590
-    // ```c++
-    // bool CSeq_loc::x_CheckId(const CSeq_id*& id, bool may_throw) const
-    // {
-    //     switch ( Which() ) {
-    //     ...
-    //     case e_Int:
-    //         {
-    //             const CSeq_interval& loc = GetInt();
-    //             return x_UpdateId(id, &loc.GetId(), may_throw);
-    //         }
-    //     ...
-    //     case e_Packed_int:
-    //         {
-    //             // Check ID of each interval
-    //             const CPacked_seqint& ints = GetPacked_int();
-    //             ITERATE ( CPacked_seqint::Tdata, ii, ints.Get() ) {
-    //                 const CSeq_interval& loc = **ii;
-    //                 if ( !x_UpdateId(id, &loc.GetId(), may_throw) ) {
-    //                     return false;
-    //                 }
-    //             }
-    //             return true;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_loc.hpp:939-945
     // ```c++
     // inline
@@ -819,60 +861,158 @@ impl<I: Input> Rd<I> {
     //     return CheckId(sip, false) ? sip : NULL;
     // }
     // ```
-    /// `CSeq_loc::GetId()` over the Seq-ids of the intervals of one Seq-loc.
-    fn common_id(ids: Vec<ParsedSeqId>) -> Option<ParsedSeqId> {
-        let mut ids = ids.into_iter();
-        // An empty packed-int has no Seq-id.
-        let first = ids.next()?;
-        // `Equals` compares the values: the typed Seq-ids are equal exactly when it does.
-        ids.all(|id| id == first).then_some(first)
-    }
-
-    /// One `Seq-loc` of `masks`: `int` and `packed-int` are read into a [`MaskLoc`]; every other
-    /// variant is read to check it, then remembered as not supported.
-    fn read_seq_loc(&mut self) -> R<Option<MaskLoc>> {
-        let mut loc = None;
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1439-1555,1559-1600
+    // ```c++
+    // void CSeq_loc_CI_Impl::x_ProcessLocation(const CSeq_loc& loc)
+    // {
+    //     switch ( loc.Which() ) {
+    //     case CSeq_loc::e_not_set:
+    //     case CSeq_loc::e_Null:
+    //     case CSeq_loc::e_Empty:
+    //         ... (a range only with eEmpty_Allow: TRange::GetEmpty(), the Seq-id of `empty`) ...
+    //     case CSeq_loc::e_Whole:
+    //         ... info.m_Range = TRange::GetWhole(); ...
+    //     case CSeq_loc::e_Int:  x_ProcessInterval(loc.GetInt(), loc);
+    //     case CSeq_loc::e_Pnt:  x_ProcessPoint(loc.GetPnt(), loc);
+    //     case CSeq_loc::e_Packed_int: ... x_ProcessInterval(**ii, loc) for each ...
+    //     case CSeq_loc::e_Packed_pnt:
+    //         ... strand of the pack; for each point: info.m_Range.Set(*pi, *pi) ...
+    //     case CSeq_loc::e_Mix:   ... x_ProcessLocation(**li) for each ...
+    //     case CSeq_loc::e_Equiv: ... x_ProcessLocation(**li) for each part ...
+    //     case CSeq_loc::e_Bond:
+    //         x_ProcessPoint(bond.GetA(), loc);
+    //         if ( bond.IsSetB() ) { x_ProcessPoint(bond.GetB(), loc); }
+    //     default:
+    //         NCBI_THROW_FMT(CSeqLocException, eUnsupported, ...);
+    //     }
+    // }
+    // ```
+    /// One `Seq-loc` (any variant, nested `mix` and `equiv` included): appends the ranges
+    /// `CSeq_loc_CI` visits to `parts`, in its order (a `whole` Seq-loc is the interval 0 to
+    /// 4294967294, whose `CRange` is `TRange::GetWhole()`; a point the interval of one position),
+    /// and follows `CSeq_loc::GetId()` in `id` (`x_CheckId`: the first Seq-id, kept while the others
+    /// are `Equals` to it; `Err` once two differ or a `feat` comes, which has none).
+    fn read_seq_loc_parts(
+        &mut self,
+        parts: &mut Vec<MaskPart>,
+        id: &mut Result<Option<ParsedSeqId>, ()>,
+    ) -> R<()> {
+        fn update(total: &mut Result<Option<ParsedSeqId>, ()>, id: ParsedSeqId) {
+            match total {
+                Ok(None) => *total = Ok(Some(id)),
+                // `Equals` compares the values: the typed Seq-ids are equal exactly when it does.
+                Ok(Some(first)) if *first != id => *total = Err(()),
+                _ => {}
+            }
+        }
         self.read_choice(&SEQ_LOC, |s, index| {
             match index {
+                SEQ_LOC_NULL => {
+                    s.inp.read_null()?;
+                    parts.push(MaskPart::Null);
+                }
+                SEQ_LOC_EMPTY => {
+                    let seq_id = s.read_seq_id()?;
+                    update(id, seq_id);
+                    parts.push(MaskPart::Empty);
+                }
+                SEQ_LOC_WHOLE => {
+                    let seq_id = s.read_seq_id()?;
+                    update(id, seq_id);
+                    parts.push(MaskPart::Interval(MaskInterval {
+                        from: 0,
+                        to: u32::MAX - 1,
+                        strand: None,
+                    }));
+                }
                 SEQ_LOC_INT => {
-                    let (interval, id) = s.read_seq_interval()?;
-                    loc = Some(MaskLoc {
-                        id: Self::common_id(vec![id]),
-                        intervals: vec![interval],
-                    });
+                    let (interval, seq_id) = s.read_seq_interval()?;
+                    update(id, seq_id);
+                    parts.push(MaskPart::Interval(interval));
                 }
                 SEQ_LOC_PACKED_INT => {
-                    let mut intervals = Vec::new();
-                    let mut ids = Vec::new();
                     s.read_container(false, |s| {
-                        let (interval, id) = s.read_seq_interval()?;
-                        intervals.push(interval);
-                        ids.push(id);
+                        let (interval, seq_id) = s.read_seq_interval()?;
+                        update(id, seq_id);
+                        parts.push(MaskPart::Interval(interval));
                         Ok(())
                     })?;
-                    loc = Some(MaskLoc {
-                        id: Self::common_id(ids),
-                        intervals,
-                    });
+                }
+                SEQ_LOC_PNT => {
+                    let (interval, seq_id) = s.read_seq_point()?;
+                    update(id, seq_id);
+                    parts.push(MaskPart::Interval(interval));
+                }
+                SEQ_LOC_PACKED_PNT => {
+                    let (mut strand, mut seq_id, mut points) = (None, None, Vec::new());
+                    let mut scratch = Vec::new();
+                    s.read_class(&PACKED_SEQPNT, |s, member| {
+                        match member {
+                            0 => strand = Some(s.inp.read_enum(&NA_STRAND)? as u8),
+                            1 => seq_id = Some(s.read_seq_id()?),
+                            3 => s.read_container(false, |s| {
+                                points.push(s.inp.read_u32()?);
+                                Ok(())
+                            })?,
+                            _ => {
+                                // fuzz: read, not used.
+                                scratch.clear();
+                                s.read_value(
+                                    PACKED_SEQPNT.members[member].ty,
+                                    PACKED_SEQPNT.members[member].name,
+                                    &mut scratch,
+                                )?;
+                            }
+                        }
+                        Ok(())
+                    })?;
+                    let Some(seq_id) = seq_id else {
+                        return format_err("member id expected");
+                    };
+                    update(id, seq_id);
+                    parts.extend(points.into_iter().map(|p| {
+                        MaskPart::Interval(MaskInterval {
+                            from: p,
+                            to: p,
+                            strand,
+                        })
+                    }));
+                }
+                SEQ_LOC_MIX | SEQ_LOC_EQUIV => {
+                    s.read_container(index == SEQ_LOC_EQUIV, |s| s.read_seq_loc_parts(parts, id))?;
+                }
+                SEQ_LOC_BOND => {
+                    s.read_class(&SEQ_BOND, |s, _| {
+                        let (interval, seq_id) = s.read_seq_point()?;
+                        update(id, seq_id);
+                        parts.push(MaskPart::Interval(interval));
+                        Ok(())
+                    })?;
                 }
                 _ => {
+                    // `feat`: read; `x_CheckId` fails, so the Seq-loc has no Seq-id.
                     let mut scratch = Vec::new();
                     s.read_value(
                         SEQ_LOC.variants[index].ty,
                         SEQ_LOC.variants[index].name,
                         &mut scratch,
                     )?;
-                    s.collected.unsupported.get_or_insert_with(|| {
-                        format!(
-                            "Seq-loc variant `{}` in mask data",
-                            SEQ_LOC.variants[index].name
-                        )
-                    });
+                    *id = Err(());
                 }
             }
             Ok(())
-        })?;
-        Ok(loc)
+        })
+    }
+
+    /// One `Seq-loc` of `masks`: the ranges `CSeq_loc_CI` visits and `CSeq_loc::GetId()`.
+    fn read_seq_loc(&mut self) -> R<MaskLoc> {
+        let mut parts = Vec::new();
+        let mut id = Ok(None);
+        self.read_seq_loc_parts(&mut parts, &mut id)?;
+        Ok(MaskLoc {
+            id: id.ok().flatten(),
+            parts,
+        })
     }
 
     /// A `Blast-mask-list`; the caller checks the end of the class frame.
@@ -882,9 +1022,7 @@ impl<I: Input> Rd<I> {
         self.read_class(&BLAST_MASK_LIST, |s, index| {
             if index == 0 {
                 s.read_container(false, |s| {
-                    if let Some(loc) = s.read_seq_loc()? {
-                        masks.push(loc);
-                    }
+                    masks.push(s.read_seq_loc()?);
                     Ok(())
                 })
             } else {

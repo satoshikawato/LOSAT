@@ -66,7 +66,8 @@ fn giim(id: i32, db: Option<&str>) -> ParsedSeqId {
 enum E {
     Same,
     Apart,
-    Undecidable,
+    /// Found in the Giim tree (`range_set`), not by a key.
+    Tree,
 }
 
 /// (probe case, mask Seq-id, database Seq-id as NCBI's FASTA parse gives it, NCBI 2.17.0).
@@ -314,9 +315,9 @@ fn table() -> Vec<(&'static str, ParsedSeqId, ParsedSeqId, E)> {
         ("n33", P::Gibbsq(123), P::Gibbsq(123), E::Same),
         ("n34", P::Gibbmt(123), P::Gibbsq(123), E::Apart),
         ("n35", P::Gibbmt(77), P::Gibbmt(77), E::Same),
-        ("n36", giim(7, None), giim(7, None), E::Undecidable),
-        ("n37", giim(7, Some("x")), giim(7, None), E::Undecidable),
-        ("n39", giim(8, Some("x")), giim(7, None), E::Undecidable),
+        ("n36", giim(7, None), giim(7, None), E::Tree),
+        ("n37", giim(7, Some("x")), giim(7, None), E::Tree),
+        ("n39", giim(8, Some("x")), giim(7, None), E::Tree),
         (
             "n46",
             pat(1, "us", PatentNumber::Number(b("re33188")), None),
@@ -588,7 +589,7 @@ fn table() -> Vec<(&'static str, ParsedSeqId, ParsedSeqId, E)> {
 
 fn relation(mask: &ParsedSeqId, db: &ParsedSeqId) -> E {
     match (mask_handle_key(mask), mask_handle_key(db)) {
-        (Err(_), _) | (_, Err(_)) => E::Undecidable,
+        (Err(_), _) | (_, Err(_)) => E::Tree,
         (Ok(Some(a)), Ok(Some(b))) if a == b => E::Same,
         _ => E::Apart,
     }

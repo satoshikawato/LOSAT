@@ -1,6 +1,7 @@
 //! Which sequence a mask reaches when the database is built with `-parse_seqids` (and without):
-//! the probes of NCBI BLAST+ 2.17.0 behind `tests/seqdb/mask_ids/cases.tsv` (130 cases: 98 of
-//! the handle probe (`seqid::mask_handle`), 28 variant Seq-ids against one FASTA file, the
+//! the probes of NCBI BLAST+ 2.17.0 behind `tests/seqdb/mask_ids/cases.tsv` (134 cases: 98 of
+//! the handle probe (`seqid::mask_handle`), 4 on the order of two handles with one packed number
+//! (`n63`-`n66`, M4a-1 fix A), 28 variant Seq-ids against one FASTA file, the
 //! masks the real `dustmasker` / `segmasker` write with and without `-parse_seqids`), each built
 //! with the library (`process_mask_data`, `BuildDatabase::add_fasta`, `end_build`) in format
 //! version 5 and 4, then read back with `SeqDb::mask_ranges` (what `blastdbcmd %m` prints) and
@@ -9,9 +10,10 @@
 //! A case has one of four fates, the column `loss` of the table:
 //! * `match`: LOSAT gives NCBI's rows (or, for `NOMATCH`, makeblastdb's message "No sequences
 //!   matched any of the masks provided." and status 0);
-//! * `refuse`: NCBI's answer depends on memory addresses (a `giim` Seq-id of a number that the
-//!   masks have, two handles of one sequence with the same `m_Packed`; SPEC 3.1, 3.2), and LOSAT
-//!   stops with an error that names what it cannot decide;
+//! * `refuse`: NCBI's answer depends on memory addresses (two different handles with the same
+//!   `m_Packed`, `giim` handles among them, write different ranges on one strand; `range_set` has
+//!   the rule), and LOSAT stops with its refusal (status 1, "losat makeblastdb:
+//!   ...", no destructor message) that names the Seq-ids;
 //! * `env:...`: NCBI's answer needs `OBJECTS_PACK_TEXTID=0` or `OBJECTS_PACK_GENERAL=0` in the
 //!   environment, which LOSAT refuses (`blastinput::ncbi_environment`); not run here.
 
@@ -127,15 +129,11 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
             let context = format!("{} ({version:?}): {stderr}", row.name);
             match row.loss.as_str() {
                 "refuse" => {
-                    assert_ne!(run.status, 0, "{context}");
-                    assert!(
-                        stderr.contains("LOSAT does not support this mask"),
-                        "{context}"
-                    );
-                    assert!(
-                        stderr.contains("giim") || stderr.contains("memory addresses"),
-                        "{context}"
-                    );
+                    // The library's flow (the CLI drops the destructor message after a refusal:
+                    // `tests_cli`).
+                    assert_eq!(run.status, 1, "{context}");
+                    assert!(stderr.starts_with("losat makeblastdb: "), "{context}");
+                    assert!(stderr.contains("memory addresses"), "{context}");
                     *fates.entry("refused").or_default() += 1;
                 }
                 "match" if row.expected == "NOMATCH" => {
@@ -160,10 +158,10 @@ fn masks_reach_the_sequences_that_ncbi_gives_them_to() {
         }
     }
     println!("{fates:?}");
-    // 130 cases: 3 not run (environment), 13 refused, 48 without a match, the rest matched; each
+    // 132 cases: 3 not run (environment), 6 refused, 51 without a match, the rest matched; each
     // run twice (format versions 5 and 4).
     assert_eq!(fates["env"], 3);
-    assert_eq!(fates["refused"], 26);
-    assert_eq!(no_match, 2 * 48);
-    assert_eq!(matched, 2 * (130 - 3 - 13) - no_match);
+    assert_eq!(fates["refused"], 2 * 7);
+    assert_eq!(no_match, 2 * 51);
+    assert_eq!(matched, 2 * (134 - 3 - 7) - no_match);
 }

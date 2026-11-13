@@ -228,7 +228,7 @@ fn dump_list(list: &MaskList) -> String {
             Some(other) => out += &format!("O{}", other.alternative()),
             None => out += "-",
         }
-        for iv in &loc.intervals {
+        for iv in &loc.intervals() {
             out += &format!(" {}-{}", iv.from, iv.to);
             if let Some(s) = iv.strand {
                 out += &format!("s{s}");
@@ -299,7 +299,7 @@ fn tool_output_values() {
     assert!(!dust[0].masks.more);
     let l1 = &dust[0].masks.masks[0];
     assert_eq!(l1.id, local(1));
-    assert_eq!(l1.intervals, vec![interval(199, 280)]);
+    assert_eq!(l1.intervals(), vec![interval(199, 280)]);
     // sequence 6 has two intervals, in the order of the file
     let l6 = dust[0]
         .masks
@@ -307,8 +307,8 @@ fn tool_output_values() {
         .iter()
         .find(|l| l.id == local(6))
         .unwrap();
-    assert_eq!(l6.intervals.len(), 2);
-    assert!(l6.intervals[0].from < l6.intervals[1].from);
+    assert_eq!(l6.intervals().len(), 2);
+    assert!(l6.intervals()[0].from < l6.intervals()[1].from);
 
     let seg = infos(&parse_dir().join("seg.asnb"));
     assert_eq!((seg[0].algo_program, seg[0].masks.masks.len()), (20, 3));
@@ -318,7 +318,7 @@ fn tool_output_values() {
     assert_eq!(c2m[0].algo_program, 100);
     assert_eq!(c2m[0].masks.masks.len(), 8);
     assert_eq!(
-        c2m[0].masks.masks[2].intervals,
+        c2m[0].masks.masks[2].intervals(),
         vec![interval(30, 59), interval(100, 119)]
     );
 }
@@ -418,7 +418,7 @@ fn masks_equal_what_blastdbcmd_prints() {
                 // Several Seq-locs of one sequence are merged and sorted by NCBI (not here).
                 [_, _, ..] => continue,
                 [one] => one
-                    .intervals
+                    .intervals()
                     .iter()
                     .map(|iv| format!("{}-{};", iv.from, u64::from(iv.to) + 1))
                     .collect(),
@@ -473,13 +473,7 @@ fn outcome(run: &Run) -> Outcome {
 }
 
 /// Files that makeblastdb reads and LOSAT does not.
-const UNSUPPORTED: [&str; 9] = [
-    "h_unsupported_whole.asnt",
-    "h_unsupported_pnt.asnt",
-    "h_unsupported_mix.asnt",
-    "h_unsupported_null.asnt",
-    "h_unsupported_feat.asnt",
-    "b_small_whole.asnb",
+const UNSUPPORTED: [&str; 3] = [
     // NCBI replaces a byte that is not printable in a VisibleString with '#' and logs it, and
     // warns about a UTF8String tag for a VisibleString; LOSAT does not write those lines
     "h_string_nonprint.asnt",
@@ -549,12 +543,6 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
 #[test]
 fn unsupported_files_name_what_is_not_read() {
     for (file, what) in [
-        ("h_unsupported_whole.asnt", "`whole`"),
-        ("h_unsupported_pnt.asnt", "`pnt`"),
-        ("h_unsupported_mix.asnt", "`mix`"),
-        ("h_unsupported_null.asnt", "`null`"),
-        ("h_unsupported_feat.asnt", "`feat`"),
-        ("b_small_whole.asnb", "`whole`"),
         (
             "h_string_nonprint.asnt",
             "byte 0x09 in the VisibleString member `algo-options`",
@@ -580,11 +568,11 @@ fn seq_ids_of_one_seq_loc() {
     let one = |file: &str| -> Vec<MaskLoc> { infos(&parse_dir().join(file)).remove(0).masks.masks };
     // two different `local id`: no Seq-id (makeblastdb: "Cannot get masked range Seq-id")
     assert_eq!(one("h_packed_two_ids.asnt")[0].id, None);
-    assert_eq!(one("h_packed_two_ids.asnt")[0].intervals.len(), 2);
+    assert_eq!(one("h_packed_two_ids.asnt")[0].intervals().len(), 2);
     assert_eq!(one("b_small_two_ids.asnb")[0].id, None);
     // an empty packed-int has none either
     assert_eq!(one("h_packed_empty.asnt")[0].id, None);
-    assert!(one("h_packed_empty.asnt")[0].intervals.is_empty());
+    assert!(one("h_packed_empty.asnt")[0].intervals().is_empty());
     // a `local id` and another kind
     assert_eq!(one("h_local_and_other_id.asnt")[0].id, None);
     // two different Seq-ids that are not `local id` (`gi 5`, `gi 6`) are two Seq-ids as well
@@ -592,7 +580,7 @@ fn seq_ids_of_one_seq_loc() {
     // the same `gi 5`, written with other spacing and a comment: equal
     let same = one("h_same_other_id_spacing.asnt");
     assert_eq!(same[0].id, Some(ParsedSeqId::Gi(5)));
-    assert_eq!(same[0].intervals, vec![interval(5, 14), interval(20, 29)]);
+    assert_eq!(same[0].intervals(), vec![interval(5, 14), interval(20, 29)]);
     // `local str "1"` is not `local id 1`
     assert_eq!(one("h_local_str_1.asnt")[0].id, Some(local_str("1")));
     // a negative `local id` is a number like any other
@@ -619,7 +607,7 @@ fn hand_written_text_values() {
             masks: MaskList {
                 masks: vec![MaskLoc {
                     id: local(3),
-                    intervals: vec![interval(5, 14)],
+                    parts: vec![MaskPart::Interval(interval(5, 14))],
                 }],
                 more: false,
             },
@@ -644,14 +632,14 @@ fn hand_written_text_values() {
     assert_eq!(read("h_algo_program_number.asnt")[0].algo_program, 30);
     assert_eq!(read("h_algo_program_dust.asnt")[0].algo_program, 10);
     assert_eq!(read("h_algo_program_bad_number.asnt")[0].algo_program, 31);
-    let strand = |file: &str| read(file)[0].masks.masks[0].intervals[0].strand;
+    let strand = |file: &str| read(file)[0].masks.masks[0].intervals()[0].strand;
     assert_eq!(strand("h_strand_plus.asnt"), Some(1));
     assert_eq!(strand("h_strand_number.asnt"), Some(3));
     assert_eq!(strand("h_ok.asnt"), None);
     let minus = &read("h_strand_minus_two.asnt")[0].masks.masks[0];
     assert_eq!(minus.id, local(3));
     assert_eq!(
-        minus.intervals,
+        minus.intervals(),
         vec![
             MaskInterval {
                 from: 20,
@@ -670,11 +658,11 @@ fn hand_written_text_values() {
     // numbers
     assert_eq!(read("h_algo_id_negative.asnt")[0].algo_id, i32::MIN);
     assert_eq!(
-        read("h_from_after_to.asnt")[0].masks.masks[0].intervals,
+        read("h_from_after_to.asnt")[0].masks.masks[0].intervals(),
         vec![interval(14, 5)]
     );
     assert_eq!(
-        read("h_to_beyond_sequence.asnt")[0].masks.masks[0].intervals,
+        read("h_to_beyond_sequence.asnt")[0].masks.masks[0].intervals(),
         vec![interval(5, 5000)]
     );
     // empty masks
@@ -834,7 +822,10 @@ fn windowmasker_fixtures() {
             .iter()
             .map(|&(id, ranges)| MaskLoc {
                 id: local(id),
-                intervals: ranges.iter().map(|&(a, b)| interval(a, b)).collect(),
+                parts: ranges
+                    .iter()
+                    .map(|&(a, b)| MaskPart::Interval(interval(a, b)))
+                    .collect(),
             })
             .collect()
     };
@@ -903,7 +894,7 @@ fn dust_and_seg_fixtures() {
             let row = locs
                 .first()
                 .map(|l| {
-                    l.intervals
+                    l.intervals()
                         .iter()
                         .map(|iv| format!("{}-{};", iv.from, iv.to + 1))
                         .collect()
@@ -1196,7 +1187,7 @@ fn an_error_is_final() {
         ));
     }
     // a refusal as well
-    let mut r = MaskFileReader::open(&parse_dir().join("h_unsupported_whole.asnt")).unwrap();
+    let mut r = MaskFileReader::open(&parse_dir().join("h_string_nonprint.asnt")).unwrap();
     assert!(matches!(r.next_info(), Err(MaskFileError::Unsupported(_))));
     assert!(matches!(
         r.next_info(),

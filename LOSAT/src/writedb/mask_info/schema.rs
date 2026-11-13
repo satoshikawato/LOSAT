@@ -175,9 +175,17 @@ pub(super) static SEQ_LOC: ChoiceDef = ChoiceDef {
         var("feat", &T_FEAT_ID),
     ],
 };
-/// Variant numbers of `Seq-loc` that LOSAT reads into a [`super::MaskLoc`].
+/// Variant numbers of `Seq-loc`.
+pub(super) const SEQ_LOC_NULL: usize = 0;
+pub(super) const SEQ_LOC_EMPTY: usize = 1;
+pub(super) const SEQ_LOC_WHOLE: usize = 2;
 pub(super) const SEQ_LOC_INT: usize = 3;
 pub(super) const SEQ_LOC_PACKED_INT: usize = 4;
+pub(super) const SEQ_LOC_PNT: usize = 5;
+pub(super) const SEQ_LOC_PACKED_PNT: usize = 6;
+pub(super) const SEQ_LOC_MIX: usize = 7;
+pub(super) const SEQ_LOC_EQUIV: usize = 8;
+pub(super) const SEQ_LOC_BOND: usize = 9;
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-129
 // ```c++
@@ -250,7 +258,7 @@ pub(super) const SEQ_INTERVAL_ID: usize = 3;
 static T_SEQ_INTERVAL: Ty = Ty::Class(&SEQ_INTERVAL);
 pub(super) static T_PACKED_SEQINT: Ty = Ty::SeqOf(&T_SEQ_INTERVAL);
 
-static SEQ_POINT: ClassDef = ClassDef {
+pub(super) static SEQ_POINT: ClassDef = ClassDef {
     name: "Seq-point",
     members: &[
         req("point", &T_UINT32),
@@ -262,7 +270,7 @@ static SEQ_POINT: ClassDef = ClassDef {
 static T_SEQ_POINT: Ty = Ty::Class(&SEQ_POINT);
 
 static T_UINT32_LIST: Ty = Ty::SeqOf(&T_UINT32);
-static PACKED_SEQPNT: ClassDef = ClassDef {
+pub(super) static PACKED_SEQPNT: ClassDef = ClassDef {
     name: "Packed-seqpnt",
     members: &[
         opt("strand", &T_NA_STRAND),
@@ -286,7 +294,7 @@ pub(super) static NA_STRAND: EnumDef = EnumDef {
 };
 static T_NA_STRAND: Ty = Ty::Enum(&NA_STRAND);
 
-static SEQ_BOND: ClassDef = ClassDef {
+pub(super) static SEQ_BOND: ClassDef = ClassDef {
     name: "Seq-bond",
     members: &[req("a", &T_SEQ_POINT), opt("b", &T_SEQ_POINT)],
 };

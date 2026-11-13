@@ -85,9 +85,10 @@ const REJECTED_VARIABLES: &[&str] = &[
     // ```
     // With `OBJECTS_PACK_TEXTID=0` a GenBank, EMBL or DDBJ accession no longer matches the same
     // accession of another of the three; with `OBJECTS_PACK_GENERAL=0` the order of the ranges of
-    // two `general` ids changes. The registry forms (`[OBJECTS] PACK_TEXTID` in a registry file,
-    // `NCBI_CONFIG__OBJECTS__PACK_TEXTID`) are not harmless entries, so they are refused like
-    // every entry LOSAT does not know.
+    // two `general` ids changes. Refused at any value, NCBI's default 1 included: accepting it
+    // would mean porting how NCBI reads a bool parameter, for a setting nobody gives. The registry
+    // forms (`[OBJECTS] PACK_TEXTID` in a registry file, `NCBI_CONFIG__OBJECTS__PACK_TEXTID`) are
+    // not harmless entries, so they are refused like every entry LOSAT does not know.
     "OBJECTS_PACK_TEXTID",
     "OBJECTS_PACK_GENERAL",
 ];
@@ -206,7 +207,7 @@ fn rejected_variable(name: &OsStr) -> Option<String> {
     }
     if name.starts_with("OBJECTS_PACK_") && REJECTED_VARIABLES.contains(&name) {
         return Some(format!(
-            "the environment variable {name}, which changes how NCBI BLAST+ matches Seq-ids (and so which sequences a mask of makeblastdb reaches), is not supported by LOSAT"
+            "the environment variable {name} is not supported by LOSAT: NCBI BLAST+ reads it to change how Seq-ids are matched (which sequences a mask of makeblastdb reaches); LOSAT does not read it, whatever its value"
         ));
     }
     if name.starts_with("DIAG_") || REJECTED_VARIABLES.contains(&name) {
@@ -3081,7 +3082,7 @@ mod tests {
         // NCBI's Seq-id matching parameters (seq_id_tree.cpp:692-707): their own message.
         for name in ["OBJECTS_PACK_TEXTID", "OBJECTS_PACK_GENERAL"] {
             let message = reject(name, "0").unwrap();
-            assert!(message.contains("matches Seq-ids"), "{message}");
+            assert!(message.contains("Seq-ids are matched"), "{message}");
             assert!(reject(name, "1").is_some(), "{name}");
         }
         assert!(reject("NCBI_CONFIG__OBJECTS__PACK_TEXTID", "0").is_some());

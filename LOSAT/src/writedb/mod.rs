@@ -88,6 +88,10 @@ pub enum WriteDbError {
     /// layer after its environment is open (`lmdb::error`, NCBI's `CSeqDBException` texts of
     /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors.
     Other(String),
+    /// LOSAT's refusal of an input that makeblastdb reads, raised inside the build (mask data
+    /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`): "losat
+    /// makeblastdb: " and the message, exit status 1, like `MakedbError::Unsupported`.
+    Unsupported(String),
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".
     OutOfMemory,
@@ -139,6 +143,7 @@ impl std::fmt::Display for WriteDbError {
             // with an empty line.
             WriteDbError::Exception(e) => write!(f, "Error: {}", e.what()),
             WriteDbError::Other(message) => write!(f, "Error: {message}"),
+            WriteDbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
             WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),
             WriteDbError::Io { path, source } => {
                 write!(f, "Error: {}: {source}", path.display())

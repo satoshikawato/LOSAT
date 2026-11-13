@@ -34,16 +34,16 @@ n32_gnl_str_digits_differ	nuc_main.fa	n	1	n32_gnl_str_digits_differ/m1.asnt	11	m
 n33_gibbsq	nuc_gibb.fa	n	1	n33_gibbsq/m1.asnt	11	match	0|10-41;
 n34_gibbmt_for_gibbsq	nuc_gibb.fa	n	1	n34_gibbmt_for_gibbsq/m1.asnt	11	match	NOMATCH
 n35_gibbmt	nuc_gibb.fa	n	1	n35_gibbmt/m1.asnt	11	match	1|10-41;
-n36_giim_equal	nuc_giim.fa	n	1	n36_giim_equal/m1.asnt	11	refuse	NOMATCH
-n37_giim_db	nuc_giim.fa	n	1	n37_giim_db/m1.asnt	11	refuse	0|10-41;
-n38_giim_release	nuc_giim.fa	n	1	n38_giim_release/m1.asnt	11	refuse	0|10-41;
+n36_giim_equal	nuc_giim.fa	n	1	n36_giim_equal/m1.asnt	11	match	NOMATCH
+n37_giim_db	nuc_giim.fa	n	1	n37_giim_db/m1.asnt	11	match	0|10-41;
+n38_giim_release	nuc_giim.fa	n	1	n38_giim_release/m1.asnt	11	match	0|10-41;
 n39_giim_other_id	nuc_giim.fa	n	1	n39_giim_other_id/m1.asnt	11	match	NOMATCH
-n40_giim_eq_then_db	nuc_giim.fa	n	1	n40_giim_eq_then_db/m1.asnt	11	refuse	NOMATCH
+n40_giim_eq_then_db	nuc_giim.fa	n	1	n40_giim_eq_then_db/m1.asnt	11	match	NOMATCH
 n41_giim_db_then_eq	nuc_giim.fa	n	1	n41_giim_db_then_eq/m1.asnt	11	refuse	0|50-61;10-41;
 n42_giim_db_then_db	nuc_giim.fa	n	1	n42_giim_db_then_db/m1.asnt	11	refuse	0|50-61;10-41;
-n43_giim_files_eq_db	nuc_giim.fa	n	1	n43_giim_files_eq_db/m1.asnt,n43_giim_files_eq_db/m2.asnt	11,12	refuse	NOMATCH
-n44_giim_files_db_eq	nuc_giim.fa	n	1	n44_giim_files_db_eq/m1.asnt,n44_giim_files_db_eq/m2.asnt	11,12	refuse	0|10-41;|50-61;
-n45_giim_db_plus_gb	nuc_giim.fa	n	1	n45_giim_db_plus_gb/m1.asnt	11	refuse	0|10-41; 1|10-41;
+n43_giim_files_eq_db	nuc_giim.fa	n	1	n43_giim_files_eq_db/m1.asnt,n43_giim_files_eq_db/m2.asnt	11,12	match	NOMATCH
+n44_giim_files_db_eq	nuc_giim.fa	n	1	n44_giim_files_db_eq/m1.asnt,n44_giim_files_db_eq/m2.asnt	11,12	match	0|10-41;|50-61;
+n45_giim_db_plus_gb	nuc_giim.fa	n	1	n45_giim_db_plus_gb/m1.asnt	11	match	0|10-41; 1|10-41;
 n46_pat_case	nuc_pat.fa	n	1	n46_pat_case/m1.asnt	11	match	0|10-41;
 n47_pat_doctype	nuc_pat.fa	n	1	n47_pat_doctype/m1.asnt	11	match	0|10-41;
 n48_pat_app_for_number	nuc_pat.fa	n	1	n48_pat_app_for_number/m1.asnt	11	match	NOMATCH
@@ -59,6 +59,10 @@ n59_tie_gi_first	nuc_multi.fa	n	1	n59_tie_gi_first/m1.asnt	11	refuse	1|10-41;50-
 n60_tie_gb_first	nuc_multi.fa	n	1	n60_tie_gb_first/m1.asnt	11	refuse	1|50-61;10-41;
 n61_unpacked_lcl_first	nuc_multi2.fa	n	1	n61_unpacked_lcl_first/m1.asnt	11	refuse	0|10-41;50-61;
 n62_unpacked_gnl_first	nuc_multi2.fa	n	1	n62_unpacked_gnl_first/m1.asnt	11	refuse	0|50-61;10-41;
+n63_tie_two_strands	nuc_multi.fa	n	1	n63_tie_two_strands/m1.asnt	11	match	1|10-41;50-61;
+n64_tie_same_ranges	nuc_multi.fa	n	1	n64_tie_same_ranges/m1.asnt	11	match	1|10-41;10-41;
+n65_giim_tie_same_ranges	nuc_giim.fa	n	1	n65_giim_tie_same_ranges/m1.asnt	11	match	0|10-41;10-41;
+n66_giim_tie_combined_again	nuc_giim.fa	n	1	n66_giim_tie_combined_again/m1.asnt	11	refuse	0|70-81;10-41;10-41;
 n53_nopack_emb_for_gb	nuc_main.fa	n	1	n53_nopack_emb_for_gb/m1.asnt	11	env:OBJECTS_PACK_TEXTID=0	NOMATCH
 n54_nopack_gb_lower	nuc_main.fa	n	1	n54_nopack_gb_lower/m1.asnt	11	env:OBJECTS_PACK_TEXTID=0	0|10-41;
 n55_nopack_general	nuc_main.fa	n	1	n55_nopack_general/m1.asnt	11	env:OBJECTS_PACK_GENERAL=0	9|10-41;

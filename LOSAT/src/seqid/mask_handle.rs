@@ -24,11 +24,12 @@
 //! - A Textseq-id with neither accession nor name gets a new handle on every call: it matches
 //!   nothing, itself included.
 //!
-//! Two things a pure function cannot give, which the caller refuses ([`Undecidable`], and a tie of
-//! [`mask_handle_packed`]): a `giim` id (the Giim tree's `x_FindInfo` takes the first stored
-//! handle of the number whose Giimport-id is *not* `Equals`, seq_id_tree.cpp:2926-2941, so the
-//! handle depends on the ids inserted before), and the order of the ranges that come from two
-//! different handles with the same packed number (their order is the info's address).
+//! Two things a pure function cannot give: the handle of a `giim` id ([`TreeHandle`]: the Giim
+//! tree's `x_FindInfo` takes the first stored handle of the number whose Giimport-id is *not*
+//! `Equals`, seq_id_tree.cpp:2926-2941, so the handle depends on the ids looked up before; the
+//! caller keeps that tree, `writedb::mask_data::range_set`), and the order of the ranges that come
+//! from two different handles with the same packed number ([`mask_handle_packed`]: their order is
+//! the info's address; the caller refuses it where the two orders write different ranges).
 //!
 //! NCBI's `OBJECTS_PACK_TEXTID` and `OBJECTS_PACK_GENERAL` parameters (environment, or
 //! `[OBJECTS] PACK_TEXTID` in the registry; seq_id_tree.cpp:692-707) turn packing off, which would
@@ -39,9 +40,10 @@
 
 use super::model::{Date, DateStd, ObjectId, ParsedSeqId, PatentNumber, PdbSeqId, TextseqId};
 
-/// A Seq-id whose handle a pure function cannot know.
+/// A Seq-id whose handle a pure function cannot know: it is found in a tree whose state the
+/// caller keeps.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Undecidable {
+pub(crate) enum TreeHandle {
     /// A `giim` id: `CSeq_id_Giim_Tree::x_FindInfo` returns the first stored handle of the same
     /// `id` whose Giimport-id is NOT `Equals` (seq_id_tree.cpp:2926-2941), so the handle depends
     /// on the giim ids of that number made before it and their order. Ids of other numbers never
@@ -70,7 +72,7 @@ pub(crate) enum Undecidable {
 /// their keys are equal. `Ok(None)`: a Textseq-id with neither accession nor name, which gets a
 /// new handle on every call (seq_id_tree.cpp:1187-1198) and so is one handle with no Seq-id,
 /// itself included.
-pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, Undecidable> {
+pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeHandle> {
     let mut key = vec![handle_tree(id)];
     match id {
         // CSeq_id_Local_Tree: strings without case, integers exactly, a string never an integer
@@ -82,7 +84,7 @@ pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, Undec
         }
         // CSeq_id_Gi_Tree: the GI; GI 0 has an info of its own (seq_id_tree.cpp:609-627).
         ParsedSeqId::Gi(gi) => key.extend(gi.to_le_bytes()),
-        ParsedSeqId::Giim(giim) => return Err(Undecidable::Giim { id: giim.id }),
+        ParsedSeqId::Giim(giim) => return Err(TreeHandle::Giim { id: giim.id }),
         // CSeq_id_Patent_Tree: country and number (or application number) without case, the
         // kind of number, the sequence number; doc-type is not indexed (seq_id_tree.cpp:3074-3146).
         ParsedSeqId::Patent(patent) => {
@@ -159,7 +161,8 @@ fn textseq_key(id: &ParsedSeqId, text: &TextseqId, mut key: Vec<u8>) -> Option<V
 /// orders handles by `m_Packed - 1` as an unsigned number ([`mask_handle_order`]), then by the
 /// info's address; `CSeq_loc::Add(.., fMerge_All | fSort, NULL)` puts the ranges of each handle
 /// together in that order (Seq_loc.cpp:4278, 4547-4596, 4641-4692, 5011-5021). Two different
-/// handles with the same `m_Packed` (both 0 included) are ordered by address: undecidable.
+/// handles with the same `m_Packed` (both 0 included) are ordered by address, which no pure
+/// function knows.
 pub(crate) fn mask_handle_packed(id: &ParsedSeqId) -> i64 {
     match id {
         ParsedSeqId::Gi(gi) => *gi,

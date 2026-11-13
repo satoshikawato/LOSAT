@@ -306,7 +306,8 @@ impl MakedbError {
             MakedbError::Build(
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
-                | WriteDbError::Options(_),
+                | WriteDbError::Options(_)
+                | WriteDbError::Unsupported(_),
             )
             | MakedbError::Unsupported(_)
             | MakedbError::Argument(_) => 1,
@@ -1133,7 +1134,6 @@ fn build_database_with_log(
         mask_data: args.mask_data.as_deref(),
         mask_id: args.mask_id.as_deref(),
         mask_desc: args.mask_desc.as_deref(),
-        gi_mask_name: None,
         root: None,
     };
     let masked = {
@@ -1141,8 +1141,9 @@ fn build_database_with_log(
         process_mask_data(&mut db, &mask_options, &mut warn)
     };
     if let Err(error) = masked {
-        *end_messages = destructor_messages(&db);
-        return error.into_makedb_error().map_or(Ok(()), Err);
+        let error = error.into_makedb_error();
+        *end_messages = destructor_messages(&db, error.as_ref());
+        return error.map_or(Ok(()), Err);
     }
     if names.is_empty() {
         return Err(unsupported(
@@ -1160,13 +1161,21 @@ fn build_database_with_log(
         stdin,
         err,
     );
-    *end_messages = destructor_messages(&db);
+    *end_messages = destructor_messages(&db, result.as_ref().err());
     result
 }
 
 /// What `~CBuildDatabase` posts (build_db.cpp:1204-1213), in its order: the message about the
 /// masks, then the one about the taxids. Each entry is one message, without its final newline.
-fn destructor_messages(db: &BuildDatabase<'_>) -> Vec<String> {
+/// Nothing after a refusal of LOSAT (`error`): those messages are NCBI's words about the state
+/// of NCBI's run, which LOSAT did not follow (the refusal of `-in ""` posts none either).
+fn destructor_messages(db: &BuildDatabase<'_>, error: Option<&MakedbError>) -> Vec<String> {
+    if matches!(
+        error,
+        Some(MakedbError::Unsupported(_) | MakedbError::Build(WriteDbError::Unsupported(_)))
+    ) {
+        return Vec::new();
+    }
     let mut messages = Vec::new();
     db.post_destruction_diagnostics(&mut |line: &[u8]| {
         messages.push(String::from_utf8_lossy(line).into_owned());

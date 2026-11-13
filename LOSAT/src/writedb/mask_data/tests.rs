@@ -12,7 +12,7 @@ use super::{ranges_are_empty, MaskInfoRegistry, MaskedRangeSet, MaskedRanges};
 use crate::seqdb::{MaskRanges, SeqDb, SeqType};
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
-use crate::writedb::mask_info::{MaskInterval, MaskLoc};
+use crate::writedb::mask_info::{MaskInterval, MaskLoc, MaskPart};
 use crate::writedb::tests::{files_named, TempDir, LINUX};
 use crate::writedb::writer::{DbVersion, Indices, WriteDb};
 use crate::writedb::WriteDbError;
@@ -32,12 +32,14 @@ fn loc(id: i32, ranges: &[(u32, u32)]) -> MaskLoc {
 fn loc_of(id: ParsedSeqId, ranges: &[(u32, u32)]) -> MaskLoc {
     MaskLoc {
         id: Some(id),
-        intervals: ranges
+        parts: ranges
             .iter()
-            .map(|&(from, to)| MaskInterval {
-                from,
-                to,
-                strand: None,
+            .map(|&(from, to)| {
+                MaskPart::Interval(MaskInterval {
+                    from,
+                    to,
+                    strand: None,
+                })
             })
             .collect(),
     }
@@ -46,12 +48,14 @@ fn loc_of(id: ParsedSeqId, ranges: &[(u32, u32)]) -> MaskLoc {
 fn stranded(id: i32, ranges: &[(u32, u32, u8)]) -> MaskLoc {
     MaskLoc {
         id: Some(lid(id)),
-        intervals: ranges
+        parts: ranges
             .iter()
-            .map(|&(from, to, strand)| MaskInterval {
-                from,
-                to,
-                strand: Some(strand),
+            .map(|&(from, to, strand)| {
+                MaskPart::Interval(MaskInterval {
+                    from,
+                    to,
+                    strand: Some(strand),
+                })
             })
             .collect(),
     }
@@ -62,7 +66,7 @@ fn stranded(id: i32, ranges: &[(u32, u32, u8)]) -> MaskLoc {
 fn combined(algo: i32, id: i32, locs: &[MaskLoc]) -> Result<Vec<(u32, u32)>, WriteDbError> {
     let mut set = MaskedRangeSet::new();
     for l in locs {
-        set.insert(algo, &lid(id), l)?;
+        set.insert(algo, lid(id), l.parts.clone())?;
     }
     let ranges = set.get_ranges(&[lid(id)])?;
     assert_eq!(ranges.len(), 1);
@@ -204,51 +208,36 @@ fn reverse_strand_ranges_are_merged_apart_and_come_last() {
     );
 }
 
-#[test]
-fn combinations_with_empty_or_whole_ranges_are_refused() {
-    // NCBI drops an empty range (end before start) from a merged Seq-loc;
-    // LOSAT does not port that.
-    let error = combined(30, 2, &[loc(2, &[(6, 5)]), loc(2, &[(20, 25)])]).unwrap_err();
-    assert!(
-        error.to_string().contains("LOSAT does not support"),
-        "{error}"
-    );
-    assert!(combined(30, 2, &[loc(2, &[(0, u32::MAX)]), loc(2, &[(1, 2)])]).is_err());
-    // A single Seq-loc passes whatever it holds.
-    assert_eq!(
-        combined(30, 2, &[loc(2, &[(6, 5), (20, 25)])]).unwrap(),
-        [(6, 6), (20, 26)]
-    );
-    // A negative algorithm id cannot index NCBI's vector.
-    let mut set = MaskedRangeSet::new();
-    assert!(set.insert(-1, &lid(1), &loc(1, &[(1, 2)])).is_err());
-}
-
-/// NCBI combines the Seq-locs of any Seq-id and only looks up those of the
-/// sequences it writes, so a combination LOSAT refuses is an error only for a
-/// sequence that is looked up.
+/// NCBI combines the Seq-locs of any Seq-id and only looks up those of the sequences it writes,
+/// so a combination whose order NCBI takes from memory addresses is an error only for a sequence
+/// that is looked up and has both Seq-ids.
 #[test]
 fn a_refused_combination_is_an_error_only_when_it_is_looked_up() {
     let mut set = MaskedRangeSet::new();
-    let other = ParsedSeqId::Gi(7);
-    let far = lid(1_000_000);
-    let near = lid(2);
-    for id in [&other, &far, &near] {
-        set.insert(30, id, &loc(2, &[(6, 5)])).unwrap();
-        set.insert(30, id, &loc(2, &[(20, 25)])).unwrap();
-        // More Seq-locs after the refused one change nothing.
-        set.insert(30, id, &loc(2, &[(1, 2)])).unwrap();
-    }
-    set.insert(31, &lid(1), &loc(1, &[(0, 9)])).unwrap();
-    // Sequence 1 has no refused combination (algorithm 30 has no Seq-loc of it).
-    let ranges = set.get_ranges(&[lid(1)]).unwrap();
-    assert_eq!(ranges[1].offsets, [(0, 10)]);
-    // A sequence with one does.
-    let error = set.get_ranges(&[near]).unwrap_err();
-    assert!(
-        error.to_string().contains("LOSAT does not support"),
-        "{error}"
+    let (gi, gb) = (
+        ParsedSeqId::Gi(5),
+        ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+            accession: Some(b"AY000005".to_vec()),
+            version: Some(1),
+            ..Default::default()
+        }),
     );
+    set.insert(30, gi.clone(), loc_of(gi.clone(), &[(10, 40)]).parts)
+        .unwrap();
+    set.insert(30, gb.clone(), loc_of(gb.clone(), &[(50, 60)]).parts)
+        .unwrap();
+    // Each id alone is decided.
+    assert_eq!(
+        set.get_ranges(std::slice::from_ref(&gi)).unwrap()[0].offsets,
+        [(10, 41)]
+    );
+    assert_eq!(
+        set.get_ranges(std::slice::from_ref(&gb)).unwrap()[0].offsets,
+        [(50, 61)]
+    );
+    // A sequence with both is refused (both packed numbers are 5, both on the plus strand).
+    let error = set.get_ranges(&[gi, gb]).unwrap_err();
+    assert!(matches!(error, WriteDbError::Unsupported(_)), "{error:?}");
 }
 
 #[test]
@@ -256,9 +245,12 @@ fn ranges_follow_the_first_insert_of_each_algorithm() {
     let mut set = MaskedRangeSet::new();
     let id1 = lid(1);
     let id2 = lid(2);
-    set.insert(31, &id1, &loc(1, &[(1, 2)])).unwrap();
-    set.insert(30, &id2, &loc(2, &[(3, 4)])).unwrap();
-    set.insert(31, &id2, &loc(2, &[(5, 6)])).unwrap();
+    set.insert(31, id1.clone(), loc(1, &[(1, 2)]).parts)
+        .unwrap();
+    set.insert(30, id2.clone(), loc(2, &[(3, 4)]).parts)
+        .unwrap();
+    set.insert(31, id2.clone(), loc(2, &[(5, 6)]).parts)
+        .unwrap();
     let ranges = set.get_ranges(std::slice::from_ref(&id1)).unwrap().to_vec();
     assert_eq!(
         ranges,
@@ -281,18 +273,22 @@ fn ranges_follow_the_first_insert_of_each_algorithm() {
     // Several ids of one sequence with handles of different packed numbers (`gi|1`, `gi|2`):
     // their Seq-locs are added, in the order of the handles.
     let (g1, g2) = (ParsedSeqId::Gi(1), ParsedSeqId::Gi(2));
-    set.insert(31, &g1, &loc_of(g1.clone(), &[(1, 2)])).unwrap();
-    set.insert(30, &g2, &loc_of(g2.clone(), &[(3, 4)])).unwrap();
-    set.insert(31, &g2, &loc_of(g2.clone(), &[(5, 6)])).unwrap();
+    set.insert(31, g1.clone(), loc_of(g1.clone(), &[(1, 2)]).parts)
+        .unwrap();
+    set.insert(30, g2.clone(), loc_of(g2.clone(), &[(3, 4)]).parts)
+        .unwrap();
+    set.insert(31, g2.clone(), loc_of(g2.clone(), &[(5, 6)]).parts)
+        .unwrap();
     let both = set.get_ranges(&[g2.clone(), g1.clone()]).unwrap();
     assert_eq!(both[0].offsets, [(1, 3), (5, 7)]);
     assert_eq!(both[1].offsets, [(3, 5)]);
     // Two handles with the same packed number (`lcl|1`, `lcl|2`: both 0): NCBI orders them by
-    // memory address, so LOSAT refuses to combine them.
+    // memory address, so LOSAT refuses to write them.
     let error = set.get_ranges(&[id1, id2]).unwrap_err().to_string();
     assert!(error.contains("lcl|1 and lcl|2"), "{error}");
     assert!(
-        error.contains("LOSAT does not support this mask"),
+        error.starts_with("losat makeblastdb: ")
+            && error.contains("LOSAT does not write this mask"),
         "{error}"
     );
 }

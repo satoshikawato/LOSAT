@@ -1,0 +1,1 @@
+Blast-db-mask-info ::= { algo-id 0, algo-program windowmasker, algo-options "x", masks { masks { int { from 5, to 4294967295,  id local id 1 }, int { from 10, to 20,  id local id 1 }, int { from 2, to 3,  id local id 1 } }, more FALSE } }

@@ -86,16 +86,14 @@ pub(crate) const BLAST_OVERLAP_SIZE: i32 = 9;
 /// the composition-based redo link with the parameters of their own setup
 /// (`SThreadLocalDataArraySetup` -> `BLAST_GapAlignSetUp` -> `BlastHitSavingParametersNew`), which
 /// no update reaches, so their `cutoff_small_gap` is 0 too (`EvenGapLinkParams::traceback`).
+/// `gap_size` and `overlap_size` are `BLAST_GAP_SIZE` and `BLAST_OVERLAP_SIZE` in every search (no
+/// option or later setup changes them), which `even_gap_link_hsps` reads as the constants.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct EvenGapLinkParams {
     /// `gap_prob`.
     pub(crate) gap_prob: f64,
     /// `gap_decay_rate`.
     pub(crate) gap_decay_rate: f64,
-    /// `gap_size`.
-    pub(crate) gap_size: i32,
-    /// `overlap_size`.
-    pub(crate) overlap_size: i32,
     /// `cutoff_small_gap`: 0 links with large gaps only (`ignore_small_gaps`).
     pub(crate) cutoff_small_gap: i32,
     /// `cutoff_big_gap`.
@@ -118,8 +116,6 @@ impl EvenGapLinkParams {
         Self {
             gap_prob: BLAST_GAP_PROB_GAPPED,
             gap_decay_rate: BLAST_GAP_DECAY_RATE_GAPPED,
-            gap_size: BLAST_GAP_SIZE,
-            overlap_size: BLAST_OVERLAP_SIZE,
             cutoff_small_gap: 0,
             cutoff_big_gap: 0,
         }
@@ -367,8 +363,10 @@ pub(crate) fn even_gap_link_hsps(
     //
     //    ignore_small_gaps = (cutoff[0] == 0);
     // ```
-    let window_size = params.gap_size + params.overlap_size + 1;
-    let trim_size = (params.overlap_size + 1) / 2;
+    // `link_hsp_params->gap_size` and `overlap_size` are the constants (`EvenGapLinkParams`); the
+    // window of 50 is then the one every caller of `small_gap_sum_e` passes.
+    let window_size = BLAST_GAP_SIZE + BLAST_OVERLAP_SIZE + 1;
+    let trim_size = (BLAST_OVERLAP_SIZE + 1) / 2;
     let gap_prob = params.gap_prob;
     let gap_decay_rate = params.gap_decay_rate;
     let cutoff = [params.cutoff_small_gap as i64, params.cutoff_big_gap as i64];

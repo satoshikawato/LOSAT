@@ -220,18 +220,42 @@ impl AffineRows<'_> {
     }
 
     fn get(&self, d: i32, k: i32) -> GreedyOffset {
-        let row = &self.rows[self.slot(d)];
-        usize::try_from(k - row.lower)
-            .ok()
-            .and_then(|index| row.offsets.get(index))
-            .copied()
-            .unwrap_or(INVALID_GREEDY_OFFSET)
+        self.row(d).at(k)
     }
 
     fn get_mut(&mut self, d: i32, k: i32) -> &mut GreedyOffset {
         let slot = self.slot(d);
         let row = &mut self.rows[slot];
         &mut row.offsets[(k - row.lower) as usize]
+    }
+
+    /// The row of distance `d`.
+    fn row(&self, d: i32) -> &AffineRow {
+        &self.rows[self.slot(d)]
+    }
+
+    /// Takes the row of distance `d` out, to be written while the earlier rows are read; `put`
+    /// gives it back.
+    fn take(&mut self, d: i32) -> AffineRow {
+        let slot = self.slot(d);
+        std::mem::take(&mut self.rows[slot])
+    }
+
+    fn put(&mut self, d: i32, row: AffineRow) {
+        let slot = self.slot(d);
+        self.rows[slot] = row;
+    }
+}
+
+impl AffineRow {
+    /// The offsets of diagonal `k`, or invalid ones outside the row.
+    #[inline(always)]
+    fn at(&self, k: i32) -> GreedyOffset {
+        usize::try_from(k - self.lower)
+            .ok()
+            .and_then(|index| self.offsets.get(index))
+            .copied()
+            .unwrap_or(INVALID_GREEDY_OFFSET)
     }
 }
 
@@ -4045,82 +4069,77 @@ fn blast_affine_greedy_align(
         let tmp_diag_lower = curr_diag_lower;
         let tmp_diag_upper = curr_diag_upper;
         last_seq2_off.start(d, tmp_diag_lower, tmp_diag_upper);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1018-1060
+        // ```c
+        //             if (k + 1 <= diag_upper[d - gap_open_extend] &&
+        //                 k + 1 >= diag_lower[d - gap_open_extend]) {
+        //                 seq2_index = last_seq2_off[d - gap_open_extend][k+1].match_off;
+        //             }
+        // ...
+        //             if (k <= diag_upper[d - op_cost] &&
+        //                 k >= diag_lower[d - op_cost]) {
+        // ```
+        // The loop over `k` reads three earlier distances, `d - gap_open_extend`, `d - gap_extend`
+        // and `d - op_cost`, each only inside its diagonal bounds. Their rows and bounds are the
+        // same for every `k`, so they are looked up once per distance (a distance below 0 has the
+        // empty bounds of NCBI's first `max_penalty` entries). Each `k` then reads and writes the
+        // same cells, in the same order, as the C loop.
+        let prior = |dd: i32| -> (i32, i32) {
+            let idx = dd + diag_offset;
+            if dd >= 0 && idx >= 0 && (idx as usize) < diag_lower.len() {
+                (diag_lower[idx as usize], diag_upper[idx as usize])
+            } else {
+                (INVALID_DIAG, -INVALID_DIAG)
+            }
+        };
+        let d_open = d - gap_open_extend;
+        let d_ext = d - gap_extend;
+        let d_match = d - op_cost;
+        let (open_lo, open_hi) = prior(d_open);
+        let (ext_lo, ext_hi) = prior(d_ext);
+        let (match_lo, match_hi) = prior(d_match);
+        let mut cur = last_seq2_off.take(d);
+        let empty = AffineRow::default();
+        let row_open = if d_open >= 0 { last_seq2_off.row(d_open) } else { &empty };
+        let row_ext = if d_ext >= 0 { last_seq2_off.row(d_ext) } else { &empty };
+        let row_match = if d_match >= 0 { last_seq2_off.row(d_match) } else { &empty };
+        let cur_lower = cur.lower;
 
         for k_val in tmp_diag_lower..=tmp_diag_upper {
             k = k_val;
+            let cell = &mut cur.offsets[(k - cur_lower) as usize];
 
             let mut seq2_index_del = INVALID_OFFSET;
-            let d_open = d - gap_open_extend;
-            let idx_open = d_open + diag_offset;
-            if d_open >= 0
-                && idx_open >= 0
-                && (idx_open as usize) < diag_lower.len()
-                && k + 1 >= diag_lower[idx_open as usize]
-                && k < diag_upper[idx_open as usize]
-            {
-                seq2_index_del = last_seq2_off.get(d_open, k + 1).match_off;
+            if k + 1 >= open_lo && k < open_hi {
+                seq2_index_del = row_open.at(k + 1).match_off;
             }
-
-            let d_ext = d - gap_extend;
-            let idx_ext = d_ext + diag_offset;
-            if d_ext >= 0
-                && idx_ext >= 0
-                && (idx_ext as usize) < diag_lower.len()
-                && k + 1 >= diag_lower[idx_ext as usize]
-                && k < diag_upper[idx_ext as usize]
-            {
-                let ext_off = last_seq2_off.get(d_ext, k + 1).delete_off;
+            if k + 1 >= ext_lo && k < ext_hi {
+                let ext_off = row_ext.at(k + 1).delete_off;
                 if ext_off > seq2_index_del {
                     seq2_index_del = ext_off;
                 }
             }
-
-            if seq2_index_del == INVALID_OFFSET {
-                last_seq2_off.get_mut(d, k).delete_off = INVALID_OFFSET;
+            cell.delete_off = if seq2_index_del == INVALID_OFFSET {
+                INVALID_OFFSET
             } else {
-                last_seq2_off.get_mut(d, k).delete_off = seq2_index_del + 1;
-            }
+                seq2_index_del + 1
+            };
 
             let mut seq2_index_ins = INVALID_OFFSET;
-            if d_open >= 0
-                && idx_open >= 0
-                && (idx_open as usize) < diag_lower.len()
-                && k > diag_lower[idx_open as usize]
-                && k - 1 <= diag_upper[idx_open as usize]
-            {
-                seq2_index_ins = last_seq2_off.get(d_open, k - 1).match_off;
+            if k > open_lo && k - 1 <= open_hi {
+                seq2_index_ins = row_open.at(k - 1).match_off;
             }
-            if d_ext >= 0
-                && idx_ext >= 0
-                && (idx_ext as usize) < diag_lower.len()
-                && k > diag_lower[idx_ext as usize]
-                && k - 1 <= diag_upper[idx_ext as usize]
-            {
-                let ext_off = last_seq2_off.get(d_ext, k - 1).insert_off;
+            if k > ext_lo && k - 1 <= ext_hi {
+                let ext_off = row_ext.at(k - 1).insert_off;
                 if ext_off > seq2_index_ins {
                     seq2_index_ins = ext_off;
                 }
             }
-            if seq2_index_ins == INVALID_OFFSET {
-                last_seq2_off.get_mut(d, k).insert_off = INVALID_OFFSET;
-            } else {
-                last_seq2_off.get_mut(d, k).insert_off = seq2_index_ins;
-            }
+            cell.insert_off = seq2_index_ins;
 
-            seq2_index = last_seq2_off
-                .get(d, k)
-                .insert_off
-                .max(last_seq2_off.get(d, k).delete_off);
-
-            let d_match = d - op_cost;
-            let idx_match = d_match + diag_offset;
-            if d_match >= 0
-                && idx_match >= 0
-                && (idx_match as usize) < diag_lower.len()
-                && k >= diag_lower[idx_match as usize]
-                && k <= diag_upper[idx_match as usize]
-            {
-                seq2_index = seq2_index.max(last_seq2_off.get(d_match, k).match_off + 1);
+            seq2_index = cell.insert_off.max(cell.delete_off);
+            if k >= match_lo && k <= match_hi {
+                seq2_index = seq2_index.max(row_match.at(k).match_off + 1);
             }
 
             seq1_index = seq2_index + k - diag_origin;
@@ -4129,7 +4148,7 @@ fn blast_affine_greedy_align(
                 if k == curr_diag_lower {
                     curr_diag_lower += 1;
                 } else {
-                    last_seq2_off.get_mut(d, k).match_off = INVALID_OFFSET;
+                    cell.match_off = INVALID_OFFSET;
                 }
                 continue;
             }
@@ -4139,6 +4158,7 @@ fn blast_affine_greedy_align(
                 seq1, seq2, len1, len2, seq1_index, seq2_index, reverse, fence_hit,
             );
             if *fence_hit {
+                last_seq2_off.put(d, cur);
                 return -1;
             }
 
@@ -4151,7 +4171,7 @@ fn blast_affine_greedy_align(
             seq1_index += index;
             seq2_index += index;
 
-            last_seq2_off.get_mut(d, k).match_off = seq2_index;
+            cell.match_off = seq2_index;
 
             if seq1_index + seq2_index > curr_extent {
                 curr_extent = seq1_index + seq2_index;
@@ -4168,6 +4188,7 @@ fn blast_affine_greedy_align(
                 end2_diag = k + 1;
             }
         }
+        last_seq2_off.put(d, cur);
 
         let curr_score = curr_extent * match_score_half - d * score_common_factor;
         let prev_max = max_score_base[(d as usize - 1) + max_score_offset];

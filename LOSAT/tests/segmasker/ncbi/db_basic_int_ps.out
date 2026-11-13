@@ -1,0 +1,9 @@
+>gnl|BL_ORD_ID|0 seq1 low complexity test
+2 - 14
+15 - 50
+>gnl|BL_ORD_ID|1 seq2 no lcr
+>gnl|BL_ORD_ID|2 seq3 several regions
+25 - 39
+43 - 58
+149 - 169
+200 - 255

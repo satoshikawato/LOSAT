@@ -30,8 +30,6 @@ mod db_seqidlist;
 mod db_taxid_root;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
-#[path = "../dustmasker_fixtures.rs"]
-mod dustmasker_fixtures;
 #[path = "../entry_names.rs"]
 mod entry_names;
 #[path = "../library_api.rs"]
@@ -44,6 +42,8 @@ mod makeblastdb_ncbi_exceptions;
 mod makeblastdb_output_streams;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../masker_fixtures.rs"]
+mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]
 mod ncbi_lookup_paths;
 #[path = "../ncbi_toolkit_dryrun.rs"]

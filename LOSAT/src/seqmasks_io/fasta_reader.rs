@@ -44,6 +44,29 @@ use crate::writedb::fasta_source::reader::{
     DeltaSeq, ErrCode, FastaReader, ReadError, ReaderFlags, ReaderWarn, Record, SeqInst,
 };
 
+// NCBI reference: libstdc++'s `basic_filebuf::xsgetn` (GCC 14, the compiler of NCBI's 2.17.0
+// build), which NCBI's line reader calls through `istream::read`:
+// ```c++
+//           __throw_ios_failure(__N("basic_filebuf::xsgetn "
+//                                   "error reading the file"), errno);
+// ```
+// (`what()` is the text, `: ` and the `strerror` of `errno`: `-in` naming a directory gives
+// `basic_filebuf::xsgetn error reading the file: Is a directory`, dustmasker and segmasker
+// fixtures `in_dir`.)
+/// The `what()` of the `std::ios_base::failure` that a failed read of the input
+/// (`MaskReadError::Read`) is in NCBI's stream; `None` for an error without an OS error code,
+/// whose text LOSAT does not know.
+pub(crate) fn ios_failure_what(error: &std::io::Error) -> Option<String> {
+    let code = error.raw_os_error()?;
+    let text = error.to_string();
+    let strerror = text
+        .strip_suffix(&format!(" (os error {code})"))
+        .unwrap_or(&text);
+    Some(format!(
+        "basic_filebuf::xsgetn error reading the file: {strerror}"
+    ))
+}
+
 /// What a masking program takes from one `Bioseq` of the reader.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MaskRecord {

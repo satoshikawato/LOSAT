@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 
 use super::args::{arg_message, ArgException};
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 /// The exception of a file argument whose stream does not open.
 ///
@@ -25,6 +26,25 @@ fn not_accessible(name: &str, value: &str) -> ArgException {
         "eNoFile",
         arg_message(name, "File is not accessible", value),
     )
+}
+
+/// The place of `CArg_Ios::x_Open`'s throw (the `NCBI_THROW` of ncbiargs.cpp:618), which
+/// `e.what()` prints without a function: segmasker 2.17.0 catches the `CArgException` of
+/// `AsInputFile` and `AsOutputFile` in its `Run` and writes `e.what()` (fixtures `noin_file`,
+/// `out_bad`).
+const X_OPEN: ThrowSite = ThrowSite {
+    file: "src/corelib/ncbiargs.cpp",
+    line: 618,
+    kind: "CArgException::eNoFile",
+    function: None,
+};
+
+/// The exception that `error` is when a program catches it (`e.what()`): the `eNoFile` of a
+/// file argument that does not open (`open_input_file`, `open_output_file`); `None` for the
+/// others, which those functions do not raise.
+pub(crate) fn file_exception(error: &ArgException) -> Option<NcbiException> {
+    (error.code == "eNoFile" && error.messages.len() == 1)
+        .then(|| NcbiException::new(X_OPEN, error.message()))
 }
 
 /// The platforms on which NCBI reads the lines of an input file differently: the text mode

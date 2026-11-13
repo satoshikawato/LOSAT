@@ -1765,7 +1765,7 @@ fn run_with_stdin(command: &mut Command, input: &str) -> std::process::Output {
     child.wait_with_output().unwrap()
 }
 
-// `tests/dustmasker_fixtures.rs` runs every row of the NCBI fixture through the library too
+// `tests/masker_fixtures.rs` runs every row of the NCBI fixture through the library too
 // (`examples/library_command_line`); this is the API's own contract: the caller's reader is the
 // standard input, and a failure's message is what the command line writes to standard error.
 #[test]

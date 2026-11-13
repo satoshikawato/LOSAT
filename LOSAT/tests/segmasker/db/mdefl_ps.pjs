@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "mdefl_ps",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/more_defl.fa",
+  "number-of-letters": 945,
+  "number-of-sequences": 15,
+  "last-updated": "2026-11-13T08:12:00",
+  "number-of-volumes": 1,
+  "bytes-total": 52000,
+  "bytes-to-cache": 1177,
+  "files": [
+    "mdefl_ps.pdb",
+    "mdefl_ps.phr",
+    "mdefl_ps.pin",
+    "mdefl_ps.pnd",
+    "mdefl_ps.pni",
+    "mdefl_ps.pog",
+    "mdefl_ps.pos",
+    "mdefl_ps.pot",
+    "mdefl_ps.psq",
+    "mdefl_ps.ptf",
+    "mdefl_ps.pto"
+  ]
+}

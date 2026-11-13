@@ -100,6 +100,25 @@ impl SubjectReads {
     }
 }
 
+/// `reads` (by query) with each subject named by its rank in `ordinals` (the reported subjects'
+/// ordinal ids, increasing): the name of the report writers of the programs that make the texts
+/// before their hit lists name the subjects by rank (BLASTN, TBLASTX). A subject that is not
+/// reported keeps no text.
+pub fn reads_by_rank(reads: &[QueryReads], ordinals: &[u32]) -> Vec<QueryReads> {
+    reads
+        .iter()
+        .map(|query| {
+            query
+                .iter()
+                .filter_map(|(ordinal, text)| {
+                    let rank = ordinals.binary_search(ordinal).ok()?;
+                    Some((rank as u32, text.clone()))
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// The texts of query `query`'s reads in `reads`, in order.
 fn reads_of(reads: &[QueryReads], query: usize) -> &[(u32, Vec<u8>)] {
     reads.get(query).map_or(&[], Vec::as_slice)
@@ -194,6 +213,12 @@ impl<'a> ReadCursor<'a> {
         write_after(report, sink, &text)
     }
 
+    /// The texts not written yet of every query (a report that ends without placing them).
+    fn unwritten(&mut self) -> Vec<u8> {
+        let queries = self.reads.len().max(self.query + 1);
+        self.unwritten_before(queries)
+    }
+
     /// The texts not written yet of the queries below `query`, which count as written after
     /// this; the cursor moves to the start of `query`'s.
     fn unwritten_before(&mut self, query: usize) -> Vec<u8> {
@@ -253,6 +278,21 @@ fn write_after(report: &mut dyn Write, sink: &mut dyn Write, text: &[u8]) -> io:
     report.flush()?;
     sink.write_all(text)?;
     sink.flush()
+}
+
+impl Drop for QueryWarnings<'_> {
+    /// The texts of the reads that the report did not place (a writer that stopped early, or a
+    /// read no writer marks) are written when the warnings end, so that standard error keeps
+    /// every text the reports' reads write.
+    fn drop(&mut self) {
+        if let Some(cursor) = self.reads.as_mut() {
+            let text = cursor.unwritten();
+            if !text.is_empty() {
+                let _ = self.sink.write_all(&text);
+                let _ = self.sink.flush();
+            }
+        }
+    }
 }
 
 /// What `QueryWarnings` writes before the report of each query, by query index.

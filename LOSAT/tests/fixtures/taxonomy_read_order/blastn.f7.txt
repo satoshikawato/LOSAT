@@ -4,10 +4,10 @@
 # Fields: query id, subject id, evalue
 # 6 hits found
 qn	gb|AAA00001.1|	0.0
-qn	gb|AAA00001.1|	0.039
-qn	gb|AAA00001.1|	0.039
-qn	gb|AAA00001.1|	0.47
+qn	gb|AAA00001.1|	0.058
+qn	gb|AAA00001.1|	0.058
+qn	gb|AAA00001.1|	0.71
 Error: [blastn] Error: Offset error at end of taxdb file.
 qn	gb|BBB00001.1|	0.0
-qn	gb|BBB00001.1|	0.47
+qn	gb|BBB00001.1|	0.71
 # BLAST processed 1 queries

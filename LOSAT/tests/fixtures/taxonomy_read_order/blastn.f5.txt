@@ -55,7 +55,7 @@
       <Hsp_num>2</Hsp_num>
       <Hsp_bit-score>24.7301</Hsp_bit-score>
       <Hsp_score>26</Hsp_score>
-      <Hsp_evalue>0.03893</Hsp_evalue>
+      <Hsp_evalue>0.0582364</Hsp_evalue>
       <Hsp_query-from>340</Hsp_query-from>
       <Hsp_query-to>352</Hsp_query-to>
       <Hsp_hit-from>271</Hsp_hit-from>
@@ -74,7 +74,7 @@
       <Hsp_num>3</Hsp_num>
       <Hsp_bit-score>24.7301</Hsp_bit-score>
       <Hsp_score>26</Hsp_score>
-      <Hsp_evalue>0.03893</Hsp_evalue>
+      <Hsp_evalue>0.0582364</Hsp_evalue>
       <Hsp_query-from>271</Hsp_query-from>
       <Hsp_query-to>283</Hsp_query-to>
       <Hsp_hit-from>340</Hsp_hit-from>
@@ -93,7 +93,7 @@
       <Hsp_num>4</Hsp_num>
       <Hsp_bit-score>21.1234</Hsp_bit-score>
       <Hsp_score>22</Hsp_score>
-      <Hsp_evalue>0.474264</Hsp_evalue>
+      <Hsp_evalue>0.709464</Hsp_evalue>
       <Hsp_query-from>379</Hsp_query-from>
       <Hsp_query-to>389</Hsp_query-to>
       <Hsp_hit-from>120</Hsp_hit-from>
@@ -141,7 +141,7 @@ Error: [blastn] Error: Offset error at end of taxdb file.
       <Hsp_num>2</Hsp_num>
       <Hsp_bit-score>21.1234</Hsp_bit-score>
       <Hsp_score>22</Hsp_score>
-      <Hsp_evalue>0.474264</Hsp_evalue>
+      <Hsp_evalue>0.709464</Hsp_evalue>
       <Hsp_query-from>380</Hsp_query-from>
       <Hsp_query-to>390</Hsp_query-to>
       <Hsp_hit-from>455</Hsp_hit-from>
@@ -161,10 +161,10 @@ Error: [blastn] Error: Offset error at end of taxdb file.
 </Iteration_hits>
   <Iteration_stat>
     <Statistics>
-      <Statistics_db-num>2</Statistics_db-num>
-      <Statistics_db-len>1500</Statistics_db-len>
-      <Statistics_hsp-len>14</Statistics_hsp-len>
-      <Statistics_eff-space>1083392</Statistics_eff-space>
+      <Statistics_db-num>3</Statistics_db-num>
+      <Statistics_db-len>2250</Statistics_db-len>
+      <Statistics_hsp-len>15</Statistics_hsp-len>
+      <Statistics_eff-space>1620675</Statistics_eff-space>
       <Statistics_kappa>0.41</Statistics_kappa>
       <Statistics_lambda>0.625</Statistics_lambda>
       <Statistics_entropy>0.78</Statistics_entropy>

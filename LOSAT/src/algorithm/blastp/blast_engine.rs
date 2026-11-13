@@ -2930,6 +2930,17 @@ fn write_blastp_tabular_hit_lists(
             continue;
         };
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+            // ```c++
+            //        		const CBioseq_Handle& subject_bh =
+            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+            // ```
+            // The subject's first row (the default fields read it) loads it where the query's
+            // batch did not prefetch it (`QueryWarnings::subject_read`).
+            if let (Some(first), Some(warnings)) = (hsp_list.hsps.first(), warnings.as_deref_mut())
+            {
+                warnings.subject_read(q_idx, first.s_idx, &mut *writer)?;
+            }
             for hsp in &hsp_list.hsps {
                 // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c

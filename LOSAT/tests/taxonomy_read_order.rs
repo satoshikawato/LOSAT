@@ -6,11 +6,13 @@
 //! and NCBI's diagnostics go to `cerr`, which flushes `cout` first: the texts land between the
 //! report's lines where both streams go to one file (a terminal, `2>&1`). Each case's expectation is
 //! NCBI 2.17.0's merged stream of the same run (`tests/fixtures/taxonomy_read_order/<case>.txt`):
-//! `ids/txr_p` and `ids/txr_n` (`make_ids.py --taxrow-only`) hold A (taxid 9606, the best hit) and B
-//! (taxid 99990, whose lookup in `tests/seqdb/taxdb/offset_last_past_end` writes the offset error),
-//! so the text comes between A's and B's lines; in `ids/prd_txself` B (taxid 0, the best hit) comes
-//! before A (99990), and the plural name of B's row opens the damaged `tests/seqdb/taxdb/bad_magic`
-//! first.
+//! `ids/txr_p` and `ids/txr_n` (`make_ids.py --taxrow-only`) hold a decoy without hits (so a
+//! subject's rank among the reported ones is not its ordinal id), A (taxid 9606, the best hit) and
+//! B (taxid 99990, whose lookup in `tests/seqdb/taxdb/offset_last_past_end` writes the offset
+//! error), so the text comes between A's and B's lines, in the default tables (outfmt 6 and 7
+//! without fields) too; `txr_q2.*` end with a query without hits; in `ids/prd_txself` B (taxid 0,
+//! the best hit) comes before A (99990), and the plural name of B's row opens the damaged
+//! `tests/seqdb/taxdb/bad_magic` first.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
 //! ```c++
@@ -195,6 +197,141 @@ const CASES: &[(&str, &str, &str, &str, &str, &[&str], &str)] = &[
         "txr_q.fna",
         &[],
         "5",
+    ),
+    (
+        "blastp.f6",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q.faa",
+        &[],
+        "6",
+    ),
+    (
+        "blastp.f7d",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q.faa",
+        &[],
+        "7",
+    ),
+    (
+        "blastp.lnh",
+        "offset_last_past_end",
+        "blastp",
+        "txr_p",
+        "txr_q2.faa",
+        &[],
+        "0",
+    ),
+    (
+        "psiblast.f6",
+        "offset_last_past_end",
+        "psiblast",
+        "txr_p",
+        "txr_q.faa",
+        &["-num_iterations", "1"],
+        "6",
+    ),
+    (
+        "psiblast.f7d",
+        "offset_last_past_end",
+        "psiblast",
+        "txr_p",
+        "txr_q.faa",
+        &["-num_iterations", "1"],
+        "7",
+    ),
+    (
+        "blastx.f6",
+        "offset_last_past_end",
+        "blastx",
+        "txr_p",
+        "txr_q.fna",
+        &[],
+        "6",
+    ),
+    (
+        "blastx.f7d",
+        "offset_last_past_end",
+        "blastx",
+        "txr_p",
+        "txr_q.fna",
+        &[],
+        "7",
+    ),
+    (
+        "tblastn.f6",
+        "offset_last_past_end",
+        "tblastn",
+        "txr_n",
+        "txr_q.faa",
+        &[],
+        "6",
+    ),
+    (
+        "tblastn.f7d",
+        "offset_last_past_end",
+        "tblastn",
+        "txr_n",
+        "txr_q.faa",
+        &[],
+        "7",
+    ),
+    (
+        "blastn.f6",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q.fna",
+        &["-task", "blastn"],
+        "6",
+    ),
+    (
+        "blastn.f7d",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q.fna",
+        &["-task", "blastn"],
+        "7",
+    ),
+    (
+        "blastn.sci",
+        "offset_last_past_end",
+        "blastn",
+        "txr_n",
+        "txr_q.fna",
+        &["-task", "blastn"],
+        "6 qseqid sscinames",
+    ),
+    (
+        "tblastx.f6",
+        "offset_last_past_end",
+        "tblastx",
+        "txr_n",
+        "txr_q.fna",
+        &[],
+        "6",
+    ),
+    (
+        "tblastx.f7d",
+        "offset_last_past_end",
+        "tblastx",
+        "txr_n",
+        "txr_q.fna",
+        &[],
+        "7",
+    ),
+    (
+        "tblastx.lnh",
+        "offset_last_past_end",
+        "tblastx",
+        "txr_n",
+        "txr_q2.fna",
+        &["-evalue", "1e-50"],
+        "7 qseqid sseqid evalue",
     ),
 ];
 

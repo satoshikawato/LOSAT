@@ -666,6 +666,18 @@ fn write_tabular(
             let _subject = subject_records
                 .get(oid)
                 .context("TBLASTN subject OID out of range")?;
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+            // ```c++
+            //        		const CBioseq_Handle& subject_bh =
+            //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+            // ```
+            // The subject's first row (the default fields read it) loads it where the query's
+            // batch did not prefetch it (`QueryWarnings::subject_read`).
+            if !list.hsps.hsps.is_empty() {
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
+                }
+            }
             ensure!(
                 list.payloads.len() == list.hsps.hsps.len(),
                 "TBLASTN report payload count mismatch"

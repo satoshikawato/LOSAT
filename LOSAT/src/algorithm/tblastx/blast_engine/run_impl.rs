@@ -4010,7 +4010,15 @@ impl BatchReports<'_> {
         let t_output = crate::utils::xtiming::clock();
         let first = self.queries_written.get();
         let reported = first..first + done.searched.len();
-        let reads = self.reads.borrow();
+        // The texts of the reads of the reported queries (`BatchReports::reads`; a query after
+        // the last one that reads a subject has none).
+        let mut query_reads: Vec<crate::report::query_warnings::QueryReads> = {
+            let reads = self.reads.borrow();
+            reported
+                .clone()
+                .map(|query| reads.get(query).cloned().unwrap_or_default())
+                .collect()
+        };
         let queries = &self.query_runs.records[reported.clone()];
         // The queries' input and ranges, numbered from `first` as `done` (`report_stream`).
         let batch_input;
@@ -4100,6 +4108,12 @@ impl BatchReports<'_> {
                     shown,
                     &prefetch,
                 )?;
+                // The texts of the reads, made before the hits named the subjects by rank, by
+                // rank as the writers name them.
+                query_reads = crate::report::query_warnings::reads_by_rank(
+                    &query_reads,
+                    &reported_subjects.ordinals,
+                );
                 // The library's records name a database's sequences through this event.
                 if outputs.hits.is_some() {
                     if let Some(observer) = outputs.observer.as_deref_mut() {
@@ -4180,7 +4194,7 @@ impl BatchReports<'_> {
                 searched: &done.searched,
                 filtered_empty: self.filtered_empty,
                 warnings: &warnings[reported.clone()],
-                query_reads: reads.get(reported.clone()).unwrap_or(&[]),
+                query_reads: &query_reads,
                 ranges,
                 epilog,
                 queries_before: first,

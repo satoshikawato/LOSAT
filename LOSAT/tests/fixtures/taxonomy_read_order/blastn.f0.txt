@@ -9,7 +9,7 @@ protein database search programs", Nucleic Acids Res. 25:3389-3402.
 
 
 Database: txr_n (parsed Seq-ids)
-           2 sequences; 1,500 total letters
+           3 sequences; 2,250 total letters
 
 
 
@@ -84,7 +84,7 @@ Query  720  TTGGATGCATGATACCATGCATAAATGGGGT  750
 Sbjct  720  TTGGATGCATGATACCATGCATAAATGGGGT  750
 
 
- Score = 24.7 bits (26),  Expect = 0.039
+ Score = 24.7 bits (26),  Expect = 0.058
  Identities = 13/13 (100%), Gaps = 0/13 (0%)
  Strand=Plus/Plus
 
@@ -93,7 +93,7 @@ Query  340  CCGGTGAAACTGA  352
 Sbjct  271  CCGGTGAAACTGA  283
 
 
- Score = 24.7 bits (26),  Expect = 0.039
+ Score = 24.7 bits (26),  Expect = 0.058
  Identities = 13/13 (100%), Gaps = 0/13 (0%)
  Strand=Plus/Plus
 
@@ -102,7 +102,7 @@ Query  271  CCGGTGAAACTGA  283
 Sbjct  340  CCGGTGAAACTGA  352
 
 
- Score = 21.1 bits (22),  Expect = 0.47
+ Score = 21.1 bits (22),  Expect = 0.71
  Identities = 11/11 (100%), Gaps = 0/11 (0%)
  Strand=Plus/Minus
 
@@ -171,7 +171,7 @@ Query  720  TTGGATGCATGATACCATGCATAAATGGGGT  750
 Sbjct  720  TTGGAGCCATAATACCATGCATAAATGGGGT  750
 
 
- Score = 21.1 bits (22),  Expect = 0.47
+ Score = 21.1 bits (22),  Expect = 0.71
  Identities = 11/11 (100%), Gaps = 0/11 (0%)
  Strand=Plus/Plus
 
@@ -188,13 +188,13 @@ Gapped
 Lambda      K        H
    0.625    0.410    0.780 
 
-Effective search space used: 1083392
+Effective search space used: 1620675
 
 
   Database: txr_n (parsed Seq-ids)
-    Posted date:  Nov 13, 2026  1:45 PM
-  Number of letters in database: 1,500
-  Number of sequences in database:  2
+    Posted date:  Nov 13, 2026  2:44 PM
+  Number of letters in database: 2,250
+  Number of sequences in database:  3
 
 
 

@@ -11059,8 +11059,16 @@ fn write_reports_untimed(
     } else {
         Vec::new()
     };
+    // The texts of the reads, made before the hit lists named the subjects by rank
+    // (`database::reported_subjects`), by rank as the writers name them.
+    let query_reads = match &reported {
+        Some(reported) => {
+            crate::report::query_warnings::reads_by_rank(results.reads, &reported.ordinals)
+        }
+        None => results.reads.to_vec(),
+    };
     let report_inputs = BlastnReportInputs {
-        query_reads: results.reads,
+        query_reads: &query_reads,
         queries: query_records,
         subjects: subject_letters,
         ranges,

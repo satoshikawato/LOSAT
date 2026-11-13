@@ -153,9 +153,10 @@ and `prd_ax` (A `gb|AAA00001.1|` 99990 and X `gb|XXX00001.1|` 150, a random sequ
 `--pssmread-only` builds only these.
 
 Where the reports read their subjects one by one (line DBID taxrow, review 3 H2 of pssmread), version 5:
-`txr_p` (protein, `txr_p.faa`) and `txr_n` (nucleotide, `txr_n.fna`, the proteins' back-translations), each A
-`gb|AAA00001.1|` taxid 9606 (the best hit of `txr_q.faa` / `txr_q.fna`) and B `gb|BBB00001.1|` taxid 99990, whose lookup
-writes the offset error of `tests/seqdb/taxdb/offset_last_past_end` (`txr.map`), for `tests/taxonomy_read_order.rs`.
+`txr_p` (protein, `txr_p.faa`) and `txr_n` (nucleotide, `txr_n.fna`, the proteins' back-translations), each a decoy
+`gb|DDD00001.1|` taxid 9606 without hits, A `gb|AAA00001.1|` taxid 9606 (the best hit of `txr_q.faa` / `txr_q.fna`;
+`txr_q2.*` add a query without hits) and B `gb|BBB00001.1|` taxid 99990, whose lookup writes the offset error of
+`tests/seqdb/taxdb/offset_last_past_end` (`txr.map`), for `tests/taxonomy_read_order.rs`.
 `--taxrow-only` builds only these.
 
 Copies of one record that follow each other in a hit list (line DBID N3; `make_join_fasta.py`), all version 5:

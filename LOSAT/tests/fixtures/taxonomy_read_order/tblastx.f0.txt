@@ -9,7 +9,7 @@ protein database search programs", Nucleic Acids Res. 25:3389-3402.
 
 
 Database: txr_n (parsed Seq-ids)
-           2 sequences; 1,500 total letters
+           3 sequences; 2,250 total letters
 
 
 
@@ -21,7 +21,8 @@ Sequences producing significant alignments:                          (Bits)  Val
 
 AAA00001.1 a_title                                                    578     2e-169  1
 Error: [tblastx] Error: Offset error at end of taxdb file.
-BBB00001.1 b_title                                                    463     7e-135  1
+BBB00001.1 b_title                                                    463     1e-134  1
+DDD00001.1 decoy                                                      17.6    1.6     1
 
 
 >AAA00001.1 a_title
@@ -52,7 +53,7 @@ Query  721  WMHDTMHKWG  750
 Sbjct  721  WMHDTMHKWG  750
 
 
- Score = 499 bits (1083),  Expect = 1e-145
+ Score = 499 bits (1083),  Expect = 2e-145
  Identities = 211/249 (85%), Positives = 216/249 (87%), Gaps = 0/249 (0%)
  Frame = -3/-3
 
@@ -77,7 +78,7 @@ Query  28   HLPTYDHFY  2
 Sbjct  28   HLPTYDHFY  2
 
 
- Score = 305 bits (660),  Expect(2) = 4e-144
+ Score = 305 bits (660),  Expect(2) = 6e-144
  Identities = 122/137 (89%), Positives = 124/137 (91%), Gaps = 0/137 (0%)
  Frame = -1/-1
 
@@ -94,7 +95,7 @@ Query  390  GNFHFTRPPGLFFQFHR  340
 Sbjct  390  GNFHGTRPPGLFFQFHR  340
 
 
- Score = 210 bits (453),  Expect(2) = 4e-144
+ Score = 210 bits (453),  Expect(2) = 6e-144
  Identities = 88/96 (92%), Positives = 90/96 (94%), Gaps = 0/96 (0%)
  Frame = -1/-1
 
@@ -176,7 +177,7 @@ Query  569  LA*RSGARPVPLVQLLLLNIIT  504
 Sbjct  569  LA*RSGARPVPLVQFRLLNIIT  504
 
 
- Score = 288 bits (623),  Expect(2) = 2e-100
+ Score = 288 bits (623),  Expect(2) = 3e-100
  Identities = 133/153 (87%), Positives = 137/153 (90%), Gaps = 0/153 (0%)
  Frame = +3/+3
 
@@ -193,7 +194,7 @@ Query  363  LVAG*NENYLDSYV*CVWYSDLCSGLEHRSAEN  461
 Sbjct  363  LVAGYHENYLDSYA*CVWYSDLCSGLEHRSAEN  461
 
 
- Score = 84.0 bits (177),  Expect(2) = 2e-100
+ Score = 84.0 bits (177),  Expect(2) = 3e-100
  Identities = 39/47 (83%), Positives = 41/47 (87%), Gaps = 0/47 (0%)
  Frame = +2/+2
 
@@ -202,7 +203,7 @@ Query  608  MVLCRLVK*ALVIVIKM*KVRVFVIIIMCRVVVK*PVIGCMIPCING  748
 Sbjct  608  MVLCILVK*ALVIVIKM*KARRFVIIMNVRNVIK*PVIGCMIPCING  748
 
 
- Score = 23.1 bits (44),  Expect = 0.024
+ Score = 23.1 bits (44),  Expect = 0.036
  Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
  Frame = -3/+3
 
@@ -211,7 +212,7 @@ Query  454  ADRCSNPEHRSEYHTHYTY  398
 Sbjct  420  SDLCSGLEHRSAENCLYRY  476
 
 
- Score = 19.9 bits (37),  Expect = 0.22
+ Score = 19.9 bits (37),  Expect = 0.33
  Identities = 7/11 (64%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
  Frame = +3/-3
 
@@ -220,7 +221,7 @@ Query  420  SDLCSGLEHRS  452
 Sbjct  454  ADRCSNPEHRS  422
 
 
- Score = 17.1 bits (31),  Expect = 1.5
+ Score = 17.1 bits (31),  Expect = 2.2
  Identities = 11/31 (35%), Positives = 13/31 (42%), Gaps = 0/31 (0%)
  Frame = -1/-1
 
@@ -229,7 +230,7 @@ Query  732  IMHPITGHFTTTRHMIIMTNTRTFHIFMTMT  640
 Sbjct  408  IMHMNPGNFHGTRPPGLFFQFHRTTIFGTTT  316
 
 
- Score = 16.6 bits (30),  Expect = 2.1
+ Score = 16.6 bits (30),  Expect = 3.1
  Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
  Frame = -3/-3
 
@@ -238,7 +239,7 @@ Query  82   CYNHDH  65
 Sbjct  139  CYHSDH  122
 
 
- Score = 16.6 bits (30),  Expect = 2.1
+ Score = 16.6 bits (30),  Expect = 3.1
  Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
  Frame = -3/-3
 
@@ -247,7 +248,7 @@ Query  139  CYHSDH  122
 Sbjct  82   CYNHDH  65
 
 
- Score = 16.2 bits (29),  Expect = 2.8
+ Score = 16.2 bits (29),  Expect = 4.2
  Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
  Frame = +2/-2
 
@@ -256,7 +257,7 @@ Query  725  CMIPCI  742
 Sbjct  740  CMVSCI  723
 
 
- Score = 16.2 bits (29),  Expect = 2.8
+ Score = 16.2 bits (29),  Expect = 4.2
  Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
  Frame = -2/+2
 
@@ -265,7 +266,7 @@ Query  740  CMVSCI  723
 Sbjct  725  CMIPCI  742
 
 
- Score = 15.7 bits (28),  Expect = 3.9
+ Score = 15.7 bits (28),  Expect = 5.8
  Identities = 4/8 (50%), Positives = 7/8 (88%), Gaps = 0/8 (0%)
  Frame = +1/-3
 
@@ -274,7 +275,7 @@ Query  673  ICHNNHVP  696
 Sbjct  43   ICCSDHLP  20
 
 
- Score = 15.3 bits (27),  Expect = 5.3
+ Score = 15.3 bits (27),  Expect = 7.9
  Identities = 4/13 (31%), Positives = 9/13 (69%), Gaps = 0/13 (0%)
  Frame = +1/+1
 
@@ -283,28 +284,10 @@ Query  247  WGPGTWLEPVKLS  285
 Sbjct  427  YAPGWSTDPLKIA  465
 
 
- Score = 14.8 bits (26),  Expect = 7.3
- Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
- Frame = -3/-3
-
-Query  346  SPDHDLWYH  320
-            +P+H   YH
-Sbjct  439  NPEHRSEYH  413
-
-
- Score = 14.8 bits (26),  Expect = 7.3
- Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
- Frame = -3/-3
-
-Query  439  NPEHRSEYH  413
-            +P+H   YH
-Sbjct  346  SPDHDLWYH  320
-
-
 >BBB00001.1 b_title
 Length=750
 
- Score = 463 bits (1005),  Expect = 7e-135
+ Score = 463 bits (1005),  Expect = 1e-134
  Identities = 188/250 (75%), Positives = 195/250 (78%), Gaps = 0/250 (0%)
  Frame = +1/+1
 
@@ -329,7 +312,7 @@ Query  721  WMHDTMHKWG  750
 Sbjct  721  WSHNTMHKWG  750
 
 
- Score = 246 bits (531),  Expect(2) = 9e-113
+ Score = 246 bits (531),  Expect(2) = 1e-112
  Identities = 104/137 (76%), Positives = 108/137 (79%), Gaps = 0/137 (0%)
  Frame = -1/-1
 
@@ -346,7 +329,7 @@ Query  390  GNFHFTRPPGLFFQFHR  340
 Sbjct  390  GNFIFTTPPGLFFTFHR  340
 
 
- Score = 165 bits (354),  Expect(2) = 9e-113
+ Score = 165 bits (354),  Expect(2) = 1e-112
  Identities = 75/96 (78%), Positives = 77/96 (80%), Gaps = 0/96 (0%)
  Frame = -1/-1
 
@@ -359,7 +342,7 @@ Query  108  AQFNLIFIHATIMIMHFIFIQKFAATITFPHTTIFT  1
 Sbjct  108  FQFHLIFIMMTIMIMHFIFIQSFAATIAFPHTTIFT  1
 
 
- Score = 382 bits (828),  Expect = 2e-110
+ Score = 382 bits (828),  Expect = 3e-110
  Identities = 164/249 (66%), Positives = 187/249 (75%), Gaps = 0/249 (0%)
  Frame = -3/-3
 
@@ -418,7 +401,7 @@ Query  699  SS*NDL*LDA*YHA*MG  749
 Sbjct  699  SS*NVL*LEP*YHA*MG  749
 
 
- Score = 144 bits (309),  Expect(3) = 8e-81
+ Score = 144 bits (309),  Expect(3) = 1e-80
  Identities = 72/103 (70%), Positives = 75/103 (73%), Gaps = 0/103 (0%)
  Frame = -2/-2
 
@@ -431,7 +414,7 @@ Query  278  FTGSSQVPGPQ*ALLTLIAISWLLRWLCTISGGAFSNGRL*KH  150
 Sbjct  278  FTHSSQSPGPI*ALLQF*AISLLLRWL*PRSGGAFSSGRL*KH  150
 
 
- Score = 119 bits (254),  Expect(3) = 8e-81
+ Score = 119 bits (254),  Expect(3) = 1e-80
  Identities = 58/78 (74%), Positives = 60/78 (77%), Gaps = 0/78 (0%)
  Frame = -2/-2
 
@@ -444,7 +427,7 @@ Query  569  LA*RSGARPVPLVQLLLL  516
 Sbjct  569  LA*PSGAAPVPLVTLLLL  516
 
 
- Score = 59.7 bits (124),  Expect(3) = 8e-81
+ Score = 59.7 bits (124),  Expect(3) = 1e-80
  Identities = 30/38 (79%), Positives = 30/38 (79%), Gaps = 0/38 (0%)
  Frame = -2/-2
 
@@ -453,7 +436,7 @@ Query  116  KRRLSLI*FSSMLQS*SCTLYSFRNLLLQSPSHIRPFL  3
 Sbjct  116  KRLSSFT*FSS**QS*SCTLYSFRALLLQSLSHIRPFL  3
 
 
- Score = 140 bits (301),  Expect(3) = 4e-58
+ Score = 140 bits (301),  Expect(3) = 6e-58
  Identities = 86/129 (67%), Positives = 90/129 (70%), Gaps = 0/129 (0%)
  Frame = +3/+3
 
@@ -470,7 +453,7 @@ Query  363  LVAG*NENY  389
 Sbjct  363  LVAW*R*NY  389
 
 
- Score = 81.3 bits (171),  Expect(3) = 4e-58
+ Score = 81.3 bits (171),  Expect(3) = 6e-58
  Identities = 37/48 (77%), Positives = 43/48 (90%), Gaps = 0/48 (0%)
  Frame = +2/+2
 
@@ -479,7 +462,7 @@ Query  605  GMVLCRLVK*ALVIVIKM*KVRVFVIIIMCRVVVK*PVIGCMIPCING  748
 Sbjct  605  GVVLNGLVK*ALVIVIKM*KVRIFVIVLVCRVVVKCIVIGAIIPCING  748
 
 
- Score = 29.0 bits (57),  Expect(3) = 4e-58
+ Score = 29.0 bits (57),  Expect(3) = 6e-58
  Identities = 12/15 (80%), Positives = 12/15 (80%), Gaps = 0/15 (0%)
  Frame = +3/+3
 
@@ -488,7 +471,7 @@ Query  417  YSDLCSGLEHRSAEN  461
 Sbjct  417  YSDLCSGLGE*SAEN  461
 
 
- Score = 17.6 bits (32),  Expect = 1.1
+ Score = 17.6 bits (32),  Expect = 1.6
  Identities = 9/17 (53%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
  Frame = -2/-2
 
@@ -497,7 +480,7 @@ Query  362  VCSFSFTGPRSLVPRPS  312
 Sbjct  461  IFSGSFTQPRA*V*IPS  411
 
 
- Score = 17.1 bits (31),  Expect = 1.5
+ Score = 17.1 bits (31),  Expect = 2.2
  Identities = 9/21 (43%), Positives = 12/21 (57%), Gaps = 0/21 (0%)
  Frame = +2/-2
 
@@ -506,7 +489,7 @@ Query  467  IPLFILICGVFGM*LCLAIAI  529
 Sbjct  542  VPLVTLLLLVFGT*QIRHISI  480
 
 
- Score = 16.6 bits (30),  Expect = 2.1
+ Score = 16.6 bits (30),  Expect = 3.1
  Identities = 6/20 (30%), Positives = 8/20 (40%), Gaps = 0/20 (0%)
  Frame = +1/-1
 
@@ -515,7 +498,7 @@ Query  157  YKRPFEKAPPDMVHSHRNSQ  216
 Sbjct  630  FTKPFSTTPGMHTQGFNNSQ  571
 
 
- Score = 15.7 bits (28),  Expect = 3.9
+ Score = 15.7 bits (28),  Expect = 5.8
  Identities = 4/7 (57%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
  Frame = -1/+1
 
@@ -524,7 +507,7 @@ Query  402  HMNPGNF  382
 Sbjct  244  HMGPGDW  264
 
 
- Score = 15.3 bits (27),  Expect = 5.3
+ Score = 15.3 bits (27),  Expect = 7.9
  Identities = 3/6 (50%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
  Frame = +2/+2
 
@@ -533,18 +516,39 @@ Query  398  ICVMCV  415
 Sbjct  137  LCIFCV  154
 
 
+>DDD00001.1 decoy
+Length=750
+
+ Score = 17.6 bits (32),  Expect = 1.6
+ Identities = 5/9 (56%), Positives = 8/9 (89%), Gaps = 0/9 (0%)
+ Frame = -2/-1
+
+Query  218  SWLLRWLCT  192
+            SWLLR++ +
+Sbjct  720  SWLLRFMAS  694
+
+
+ Score = 17.1 bits (31),  Expect = 2.2
+ Identities = 6/12 (50%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = -3/+3
+
+Query  469  YKQFSADRCSNP  434
+            YKQ   + CS P
+Sbjct  612  YKQGRGNICSQP  647
+
+
 
 Lambda      K        H
    0.318    0.134    0.401 
 
 
-Effective search space used: 105800
+Effective search space used: 157323
 
 
   Database: txr_n (parsed Seq-ids)
-    Posted date:  Nov 13, 2026  1:45 PM
-  Number of letters in database: 1,500
-  Number of sequences in database:  2
+    Posted date:  Nov 13, 2026  2:44 PM
+  Number of letters in database: 2,250
+  Number of sequences in database:  3
 
 
 

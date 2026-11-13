@@ -17,7 +17,7 @@ Res. 29:2994-3005.
 
 
 Database: txr_p (parsed Seq-ids)
-           2 sequences; 500 total letters
+           3 sequences; 750 total letters
 
 
 
@@ -27,13 +27,13 @@ Length=250
                                                                       Score     E
 Sequences producing significant alignments:                          (Bits)  Value
 
-AAA00001.1 a_title                                                    461     2e-171
+AAA00001.1 a_title                                                    461     3e-171
 
 
 >AAA00001.1 a_title
 Length=250
 
- Score = 461 bits (1186),  Expect = 2e-171, Method: Compositional matrix adjust.
+ Score = 461 bits (1186),  Expect = 3e-171, Method: Compositional matrix adjust.
  Identities = 225/250 (90%), Positives = 227/250 (91%), Gaps = 0/250 (0%)
 
 Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKA  60
@@ -61,7 +61,7 @@ Error: [blastp] Error: Offset error at end of taxdb file.
 >BBB00001.1 b_title
 Length=250
 
- Score = 369 bits (947),  Expect = 4e-135, Method: Compositional matrix adjust.
+ Score = 369 bits (947),  Expect = 5e-135, Method: Compositional matrix adjust.
  Identities = 188/250 (75%), Positives = 195/250 (78%), Gaps = 0/250 (0%)
 
 Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKA  60
@@ -85,6 +85,17 @@ Query  241  WMHDTMHKWG  250
 Sbjct  241  WSHNTMHKWG  250
 
 
+>DDD00001.1 decoy
+Length=250
+
+ Score = 14.2 bits (25),  Expect = 8.9, Method: Compositional matrix adjust.
+ Identities = 11/45 (24%), Positives = 19/45 (42%), Gaps = 7/45 (16%)
+
+Query  32   QIKLSRRFHGGQNGS----SHQLCFYKRPFEKAPP---DMVHSHR  69
+            Q+K +  F G    S    + Q+ ++   + + PP      H HR
+Sbjct  132  QVKQNPIFDGFIIASWGKLAFQVNYWMFTYCRVPPPPESPCHDHR  176
+
+
 
 Lambda      K        H        a         alpha
    0.322    0.136    0.482    0.792     4.96 
@@ -93,13 +104,13 @@ Gapped
 Lambda      K        H        a         alpha    sigma
    0.267   0.0410    0.140     1.90     42.6     43.6 
 
-Effective search space used: 97682
+Effective search space used: 143883
 
 
   Database: txr_p (parsed Seq-ids)
-    Posted date:  Nov 13, 2026  1:45 PM
-  Number of letters in database: 500
-  Number of sequences in database:  2
+    Posted date:  Nov 13, 2026  2:44 PM
+  Number of letters in database: 750
+  Number of sequences in database:  3
 
 
 

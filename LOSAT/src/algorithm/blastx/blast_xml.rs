@@ -443,6 +443,13 @@ impl HeldOutput {
             if let Err(error) = side.release() {
                 state.discarded = true;
                 state.held.clear();
+                // What the run wrote to standard error in the meantime stays.
+                if let Some((stderr, texts)) = state.stderr.as_mut() {
+                    for (_, text) in std::mem::take(texts) {
+                        let _ = stderr.write_all(&text);
+                    }
+                    let _ = stderr.flush();
+                }
                 return Err(error);
             }
         }
@@ -505,7 +512,10 @@ impl Write for HeldOutput {
 
 impl Drop for HeldState {
     fn drop(&mut self) {
-        let texts = self.stderr.as_ref().is_some_and(|(_, texts)| !texts.is_empty());
+        let texts = self
+            .stderr
+            .as_ref()
+            .is_some_and(|(_, texts)| !texts.is_empty());
         if !self.discarded && (!self.held.is_empty() || texts) {
             let _ = self.write_held();
         }
@@ -1370,7 +1380,10 @@ mod held_side_files_tests {
         output.write_all(b"hit2").unwrap();
         assert_eq!(*log.borrow(), ["o:head", "e:w1"]);
         held.release().unwrap();
-        assert_eq!(*log.borrow(), ["o:head", "e:w1", "o:hit1", "e:t2", "o:hit2"]);
+        assert_eq!(
+            *log.borrow(),
+            ["o:head", "e:w1", "o:hit1", "e:t2", "o:hit2"]
+        );
         // A discarded output keeps its standard error texts and drops the output.
         let log = Rc::new(RefCell::new(Vec::new()));
         let held = HeldOutput::new(Box::new(Log(Rc::clone(&log), "o:")), None);

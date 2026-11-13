@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.17
+- Version: 1.18
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -28,7 +28,9 @@
   PS16b);
   1.16 2026-11-13 (the explicit rejections of `losat rpsbproc` for nucleotide queries, rule 3,
   line PS item PS16c);
-  1.17 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers,
+  1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
+  item PS16d);
+  1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers,
   rule 3, line RG item X2)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -489,8 +491,37 @@ of exception 9 (PS16a) did.
     oracle `plusmax`: both builds print -2147483648), `pr - 1` of a residue at `INT_MIN`,
     `xres + 1` of a site's or motif's base). Every case is made by hand; none occurs in the
     rpstblastn archives of PS16c probe 1 (891 jobs).
+  - The BlastOutput XML input (`-outfmt 5` of rpsblast and rpstblastn; version 1.17, 2026-11-13,
+    line PS item PS16d, `DECISIONS.md` 37 and 40): an `Hsp_hseq` shorter than its `Hsp_qseq` by
+    more than one letter (`ParseBlastOutput` reads `hseq` at the indices of `qseq`, past its
+    terminating 0), an alignment that writes a residue other than NUL at or past the end of NCBI's
+    string of the query's frame (`operator[]`; PS16d oracle `n_qlen2`, a nucleotide query of 2 bases
+    whose hits overwrite the string's terminator in both 0.5.1 builds; a NUL written at the end is
+    the defined write of the terminator and is reproduced), a query whose strings NCBI holds as 1
+    GiB or more at once (`NACommit`'s six frames, `PRCommit`'s residues and their copy, in
+    `unsigned int` lengths: a nucleotide query of 0 or 1 base gives frames of more than a billion
+    residues; oracles `n_qlen1`, `n_noqlen` and `p_qlenneg` end with `basic_string::replace` or
+    `std::bad_alloc` by the address space), the coordinate arithmetic of an HSP that overflows
+    NCBI's `int` (`- COORDSBASE` of an `Hsp_query-from`, `Hsp_query-to` or `Hsp_hit-from` of
+    `-2147483648`; `m_iTo - m_iFrom + 1` of "see if NA"; `++hf` and `--hf` of `ParseAlignStrings`
+    at `int`'s limits; an `Hsp_qseq` of 2^31 letters or more), and a REAL of more than 18
+    significant digits (the conversion LOSAT shares with its ASN.1 text readers). Of NCBI's XML
+    reader, LOSAT refuses the constructs that NCBI's BLAST XML writers never produce and that NCBI
+    reads with state LOSAT does not port: attributes (skipped, with NCBI's handling of `xmlns` and
+    `nil`), namespace prefixes (stripped), control characters in character data (replaced by `#`
+    with a warning that quotes NCBI's stack of the read). Every case is made by hand; none occurs
+    in the 2,310 jobs of PS16d probe 1 (NCBI's rpsblast and rpstblastn 2.17.0 XML).
+  - NaN E-values and bit scores of hits, archives and XML alike (version 1.17, the PS16d review
+    S3-3; it narrows PS16a's refusal of every NaN): NCBI's `HUGE_VAL/HUGE_VAL` (sign set, printed
+    `-nan`) is kept and the hits are sorted as libstdc++'s `std::sort` sorts them with
+    `TDomAlignOrderByEValue`, which a NaN makes no strict weak order. Refused only where one of
+    that sort's unguarded loops would read outside its vector (the comparison stays irreflexive and
+    asymmetric with a NaN, so the partition's sentinels hold; the final insertion's walk can leave
+    the vector after the heap sort of a part that reached the depth limit). The permutations of 86
+    NaN inputs equal libstdc++ 13's (unit vectors); the fixture rows `x.h_*nan*`, `nan_hit`,
+    `nan_threshold` equal NCBI.
 
-- TBLASTN with `-window_size 0` (version 1.17, 2026-11-14, line RG item X2, Owner-delegated): with
+- TBLASTN with `-window_size 0` (version 1.18, 2026-11-14, line RG item X2, Owner-delegated): with
   a low `-threshold`, NCBI's one-hit ungapped extension can give a negative `Int4` length, which
   `BlastGetStartForGappedAlignment` reads as `Uint4` (`aa_ungapped.c:1054,1083`,
   `blast_gapalign.c:3393-3413`): it scores the first window of 11 letters from the HSP's start,

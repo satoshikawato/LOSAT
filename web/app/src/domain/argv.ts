@@ -9,8 +9,8 @@ import type { ProgramId } from './programs';
  */
 export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subject', '-out', '-num_threads']);
 
-/** The words with which the CLI prints its help instead of searching (BLAST+'s `-h`, `-help` and `-help-full`). */
-const HELP_WORDS: readonly string[] = Object.freeze(['-h', '-help', '-help-full', '--help']);
+/** The words with which the CLI prints its help instead of searching (BLAST+'s `-h`, `-help`, `-help-full` and `-xmlhelp`). */
+const HELP_WORDS: readonly string[] = Object.freeze(['-h', '-help', '-help-full', '-xmlhelp', '--help']);
 
 /** The CLI's database options: `-db` and the filters of a database search. */
 export const DATABASE_FLAGS: readonly string[] = Object.freeze([

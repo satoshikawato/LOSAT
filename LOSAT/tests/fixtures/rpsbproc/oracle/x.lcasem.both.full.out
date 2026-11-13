@@ -1,0 +1,67 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_lcasem.xml
+#Output data file:	(stdout)
+#Annotation data at:	xnew
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	176	NP_417964.1 putative DNA-binding transcriptional regulator DctR [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	197715	113	169	4.438e-15	66.0114	smart00421	HTH_LUXR	-	481199
+1	Query_1	Specific	99777	116	172	8.10167e-15	65.2484	cd06170	LuxR_C_like	-	532797
+1	Query_1	Specific	442052	90	168	1.19798e-08	52.4506	COG2771	CsgD	N	-
+1	Query_1	Non-specific	513237	115	169	5.94512e-07	44.5136	pfam00196	GerE	-	532797
+1	Query_1	Non-specific	441799	116	168	6.9129e-07	46.4238	COG2197	CitB	N	-
+1	Query_1	Non-specific	443623	115	168	0.00886617	35.4614	COG4566	FixJ	N	-
+ENDDOMAINS
+SITES
+1	Query_1	Specific	DNA binding residues	S117,R118,K119,T132,T133,E134,I142,S143,K145,T146,Y148,C149,H150,K151,H152,I163	16	16	99777
+1	Query_1	Specific	dimerization interface	A128,Q130,T132,I163,N164,E165,R168,H171,I172	9	9	99777
+ENDSITES
+ENDQUERY
+QUERY	Query_2	Peptide	8	YP_009518762.2 protein YmdG [Escherichia coli str. K-12 substr. MG1655]
+ENDQUERY
+QUERY	Query_3	Peptide	250	NP_416077.4 putative antitermination protein Q [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_3	Specific	515680	155	242	8.60584e-35	119.758	pfam03589	Antiterm	-	-
+1	Query_3	Non-specific	515680	61	107	1.53963e-07	48.111	pfam03589	Antiterm	N	-
+1	Query_3	Non-specific	513663	148	192	1.33227e-05	42.1842	pfam00684	DnaJ_CXXCXGXG	C	-
+1	Query_3	Non-specific	199908	148	192	3.23624e-05	41.0871	cd10719	DnaJ_zf	C	473904
+1	Query_3	Specific	513663	113	194	0.000847483	37.1766	pfam00684	DnaJ_CXXCXGXG	-	-
+1	Query_3	Non-specific	199908	113	194	0.00157177	36.0795	cd10719	DnaJ_zf	-	473904
+1	Query_3	Non-specific	199908	104	168	0.00195278	36.0795	cd10719	DnaJ_zf	-	473904
+1	Query_3	Non-specific	510151	111	180	0.00296591	38.3736	NF010883	PRK14290	NC	-
+1	Query_3	Non-specific	513663	107	168	0.00333928	35.2506	pfam00684	DnaJ_CXXCXGXG	-	-
+ENDDOMAINS
+SITES
+1	Query_3	Specific	Zn binding sites	C113,C116,C148,C151,C161,C164,C187,C190	8	8	199908
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

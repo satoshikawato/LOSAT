@@ -1756,6 +1756,38 @@ fn adjust_evalues_for_composition(
     hsp_list.best_evalue = best_evalue;
 }
 
+/// `Blast_HSPListGetEvalues` of the redo (no linking): the e-values from the scaled `kbp_gap`,
+/// with Spouge's finite-size correction when the search has a Gumbel block.
+#[inline]
+fn get_evalues(
+    hsp_list: &mut BlastpHspList,
+    eval_params: &KarlinParams,
+    gumbel_params: Option<&BlastGumbelBlk>,
+    query_workspace: &BlastpKappaQueryWorkspace,
+    subject_length: i32,
+) {
+    match gumbel_params {
+        Some(gumbel_params) => {
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = blast_spouge_stoe(
+                    hsp.raw_score,
+                    eval_params,
+                    gumbel_params,
+                    query_workspace.query_length,
+                    subject_length,
+                );
+            }
+        }
+        None => {
+            let search_space = query_workspace.redo_query_info.eff_search_space;
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = search_space
+                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp();
+            }
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:395-457
 // ```c
 // static int
@@ -1775,6 +1807,7 @@ fn evaluate_and_purge(
     pvalue_for_this_pair: Option<f64>,
     lambda_ratio: Option<f64>,
     score_divisor: f64,
+    do_link_hsps: bool,
 ) -> (i32, f64) {
     let mut best_evalue = f64::MAX;
     let mut best_score = 0;
@@ -1793,27 +1826,40 @@ fn evaluate_and_purge(
     // }
     // ```
     let eval_params = scaled_karlin_params(params, score_divisor);
-    match gumbel_params {
-        Some(gumbel_params) => {
-            for hsp in &mut hsp_list.hsps {
-                hsp.e_value = blast_spouge_stoe(
-                    hsp.raw_score,
-                    &eval_params,
-                    gumbel_params,
-                    query_workspace.query_length,
-                    subject_length,
-                );
-            }
-        }
-        None => {
-            let search_space = query_workspace.redo_query_info.eff_search_space;
-            for hsp in &mut hsp_list.hsps {
-                hsp.e_value = search_space
-                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp();
-            }
-        }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-414
+    // ```c
+    //     if (hitParams->do_sum_stats) {
+    //         status = BLAST_LinkHsps(program_number, hsp_list, queryInfo,
+    //                                 subject_length, sbp,
+    //                                 hitParams->link_hsp_params, TRUE);
+    //     } else {
+    // ```
+    // psiblast's `-sum_stats true`: the linked sets' e-values from the scaled `kbp_gap`, with the
+    // traceback's linking parameters (`EvenGapLinkParams::traceback`); `BLAST_LinkHsps` sorts the
+    // list by score and sets the best e-value.
+    if do_link_hsps {
+        super::hsp::link_hsp_list(
+            hsp_list,
+            crate::core::link_hsps::LinkContext {
+                lambda: eval_params.lambda,
+                log_k: eval_params.k.ln(),
+                query_length: query_workspace.query_length,
+                length_adjustment: query_workspace.length_adjustment,
+                eff_searchsp: query_workspace.redo_query_info.eff_search_space as i64,
+            },
+            subject_length,
+            &crate::core::link_hsps::EvenGapLinkParams::traceback(),
+        );
+    } else {
+        get_evalues(
+            hsp_list,
+            &eval_params,
+            gumbel_params,
+            query_workspace,
+            subject_length,
+        );
+        update_best_evalue(hsp_list);
     }
-    update_best_evalue(hsp_list);
     if let Some(comp_p_value) = pvalue_for_this_pair.filter(|p| (0.0..=1.0).contains(p)) {
         adjust_evalues_for_composition(
             hsp_list,
@@ -2046,6 +2092,7 @@ pub(crate) fn postprocess_preliminary_hits(
         pvalue_for_this_pair,
         lambda_ratio,
         redo_align_params.score_divisor,
+        redo_align_params.do_link_hsps,
     );
     if best_evalue > expect_value || hsp_list.hsps.is_empty() {
         return Ok(BlastpPostprocessResult {
@@ -2285,6 +2332,7 @@ mod tests {
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 0,
+            do_link_hsps: false,
         }
     }
 
@@ -2606,6 +2654,7 @@ mod tests {
             None,
             None,
             1.0,
+            false,
         );
 
         let expected = blast_spouge_stoe(1062, &params, &gumbel, 100, 200);
@@ -2655,6 +2704,7 @@ mod tests {
             None,
             None,
             32.0,
+            false,
         );
 
         assert_eq!(hsp_list.hsps.len(), 1);

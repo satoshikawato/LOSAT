@@ -29,8 +29,9 @@
 //! grammar is checked; inside such a skipped value LOSAT accepts what NCBI's typed reader may
 //! refuse (the members and variants of: the request bodies other than `queue-search`, the
 //! `Seqdesc` variants other than `title` and `user`, `Seq-annot`, `Int-fuzz`, the `Seq-loc`
-//! variants other than `int` and `packed-int`, the `Seq-align` members `bounds` and `ext`,
-//! the segments other than `denseg`, the large `Blast4-value` variants, the `phi-alignments`,
+//! variants other than `int` and `packed-int` (in a `Std-seg` also `null`, `empty`, `whole` and
+//! `pnt`), the `Seq-align` members `bounds` and `ext`, the segments other than `denseg`, `std`
+//! and `packed`, the large `Blast4-value` variants, the `phi-alignments`,
 //! `pssm` and `simple-results` of the results, the `Seq-ext` variants other than `delta` and
 //! the `loc` items of a `delta`, and `Seq-hist` and `gap` data).
 //!
@@ -172,11 +173,86 @@ pub(crate) struct Align {
     pub(crate) score_of_other_type: Option<&'static str>,
 }
 
-/// `Seq-align.segs`: a `Dense-seg`, or the name of another variant.
+/// `Seq-align.segs`: a `Dense-seg`, the `Std-seg`s of a translated search (rpstblastn), or the
+/// name of another variant.
 #[derive(Debug)]
 pub(crate) enum Segs {
     Denseg(DenseSeg),
+    /// (Boxed: its two Seq-ids would make every `Segs` four times as large.)
+    Std(Box<StdAlign>),
     Other(&'static str),
+}
+
+/// The `Std-seg`s of a Seq-align as far as rpsbproc reads them: the query row's id that
+/// `CSeq_align::GetSeq_id(0)` finds, the second id of the first segment (`ParseAlignSegs`'s hit
+/// id) and the first two locations of each segment. The ids of the other places are read and
+/// left (an archive of a genome holds hundreds of thousands of segments).
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:236-241
+// ```text
+// Std-seg ::= SEQUENCE {
+//     dim INTEGER DEFAULT 2 ,       -- dimensionality
+//     ids SET OF Seq-id OPTIONAL ,
+//     loc SET OF Seq-loc ,
+//     scores SET OF Score OPTIONAL }
+// ```
+#[derive(Debug)]
+pub(crate) struct StdAlign {
+    pub(crate) query_id: QueryRowId,
+    /// `ids[1]` of the first segment; `None` when it has fewer than 2 ids.
+    pub(crate) hit_id: Option<ParsedSeqId>,
+    pub(crate) segs: Vec<StdPair>,
+}
+
+/// What `CSeq_align::GetSeq_id(0)` finds in the segments, in order: the first id of the first
+/// segment with ids, else the id of a first location of a single id (`null` has none and goes
+/// on to the next segment).
+#[derive(Debug)]
+pub(crate) enum QueryRowId {
+    Id(ParsedSeqId),
+    /// A first location of another variant (`packed-int`, `mix`, ...), by name, whose id LOSAT
+    /// does not look up.
+    Location(&'static str),
+    /// No segment gives an id.
+    Missing,
+}
+
+/// The first two locations of a `Std-seg` (the query's, the subject's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StdPair {
+    pub(crate) query: StdLoc,
+    pub(crate) hit: StdLoc,
+}
+
+/// A `Seq-loc` of a `Std-seg`, as far as `ParseAlignSegs` reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StdLoc {
+    /// The segment has no location at this place (fewer than 2).
+    Missing,
+    Null,
+    Empty,
+    Whole,
+    /// A `Seq-interval`; `from` and `to` are `TSeqPos` (unsigned), `strand` the value of its
+    /// `Na-strand` when it is set.
+    Int {
+        from: u32,
+        to: u32,
+        strand: Option<i32>,
+    },
+    /// A `Seq-point`.
+    Pnt {
+        point: u32,
+        strand: Option<i32>,
+    },
+    /// Another variant (`packed-int`, `packed-pnt`, `mix`, `equiv`, `bond`, `feat`).
+    Other,
+}
+
+/// A `Seq-interval` as read.
+struct Interval {
+    from: u32,
+    to: u32,
+    strand: Option<i32>,
+    id: ParsedSeqId,
 }
 
 /// `Dense-seg`.
@@ -1081,30 +1157,270 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `Seq-interval`: its id.
     fn seq_interval(&mut self) -> Result<ParsedSeqId> {
+        Ok(self.interval()?.id)
+    }
+
+    /// A `Seq-interval`.
+    fn interval(&mut self) -> Result<Interval> {
         const NAMES: [&str; 6] = ["from", "to", "strand", "id", "fuzz-from", "fuzz-to"];
         let mut members = self.reader.begin_members()?;
-        let (mut from, mut to, mut id) = (false, false, None);
+        let (mut from, mut to, mut strand, mut id) = (None, None, None, None);
         while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
             match index {
-                0 => {
-                    self.reader.uint4()?;
-                    from = true;
-                }
-                1 => {
-                    self.reader.uint4()?;
-                    to = true;
-                }
-                2 => {
-                    self.reader.enumerated(&NA_STRAND)?;
-                }
+                0 => from = Some(self.reader.uint4()?),
+                1 => to = Some(self.reader.uint4()?),
+                2 => strand = Some(self.reader.enumerated(&NA_STRAND)?.1),
                 3 => id = Some(self.seq_id()?),
                 _ => self.skip_value()?,
             }
         }
         match (from, to, id) {
-            (true, true, Some(id)) => Ok(id),
+            (Some(from), Some(to), Some(id)) => Ok(Interval {
+                from,
+                to,
+                strand,
+                id,
+            }),
             _ => Err(self.reader.error("a mandatory member is missing")),
         }
+    }
+
+    /// A `Packed-seg`, read for its grammar (`CSeq_align::GetSeq_id` throws for it before
+    /// rpsbproc reads more of it, `query::query_row_id`).
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:83-92
+    // ```text
+    // Packed-seg ::= SEQUENCE {         -- for (multiway) global or partial alignments
+    //     dim INTEGER DEFAULT 2 ,       -- dimensionality
+    //     numseg INTEGER ,              -- number of segments here
+    //     ids SEQUENCE OF Seq-id ,      -- sequences in order
+    //     starts SEQUENCE OF INTEGER ,  -- start OFFSETS in ids order for whole alignment
+    //     present OCTET STRING ,        -- Boolean if each sequence present or absent in
+    //                                   --   each segment
+    //     lens SEQUENCE OF INTEGER ,    -- length of each segment
+    //     strands SEQUENCE OF Na-strand OPTIONAL ,
+    //     scores SEQUENCE OF Score OPTIONAL }  -- score for each segment
+    // ```
+    // `starts` and `lens` are `TSeqPos` (unsigned) in NCBI's class (seqalign.def:28-30).
+    fn packed_seg(&mut self) -> Result<()> {
+        const NAMES: [&str; 8] = [
+            "dim", "numseg", "ids", "starts", "present", "lens", "strands", "scores",
+        ];
+        let mut seen = [false; 8];
+        let mut members = self.reader.begin_members()?;
+        while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+            seen[index] = true;
+            match index {
+                0 | 1 => {
+                    self.reader.int4()?;
+                }
+                4 => {
+                    self.reader.octets()?;
+                }
+                _ => {
+                    let mut block_start = self.reader.start_block()?;
+                    while self.reader.next_element(&mut block_start)? {
+                        match index {
+                            2 => {
+                                self.seq_id()?;
+                            }
+                            3 | 5 => {
+                                self.reader.uint4()?;
+                            }
+                            6 => {
+                                self.reader.enumerated(&NA_STRAND)?;
+                            }
+                            _ => {
+                                let mut scratch = Align {
+                                    segs: Segs::Other("dendiag"),
+                                    score: None,
+                                    e_value: None,
+                                    bit_score: None,
+                                    num_ident: None,
+                                    score_of_other_type: None,
+                                };
+                                self.align_score(&mut scratch)?;
+                            }
+                        }
+                    }
+                    self.reader.end_block()?;
+                }
+            }
+        }
+        if !(seen[1] && seen[2] && seen[3] && seen[4] && seen[5]) {
+            return Err(self.reader.error("a mandatory member is missing"));
+        }
+        Ok(())
+    }
+
+    /// The `std` segments of a Seq-align (SEQUENCE OF Std-seg).
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:339-358
+    // ```c++
+    //     case C_Segs::e_Std:
+    //         {{
+    //             // If segments have different number of rows, this will try
+    //             // to find the segment with enough rows to get the id.
+    //             ITERATE(CSeq_align::C_Segs::TStd, seg, GetSegs().GetStd()) {
+    //                 if ( (*seg)->IsSetIds()  &&
+    //                      (size_t)row < (*seg)->GetIds().size()) {
+    //                     return *((*seg)->GetIds()[row]);
+    //                 }
+    //                 else if ( (*seg)->IsSetLoc()  &&
+    //                      (size_t)row < (*seg)->GetLoc().size() ) {
+    //                     const CSeq_loc& loc = *(*seg)->GetLoc()[row];
+    //                     CConstRef<CSeq_id> id(loc.GetId());
+    //                     if (id) {
+    //                         return *id;
+    //                     }
+    //                 }
+    //             }
+    //         }}
+    //         break;
+    // ```
+    // (`ids` comes before `loc` in the module's order, so a location's id is kept only for the
+    // first location of a segment without ids while no id is found.)
+    fn std_segs(&mut self) -> Result<StdAlign> {
+        const NAMES: [&str; 4] = ["dim", "ids", "loc", "scores"];
+        let mut align = StdAlign {
+            query_id: QueryRowId::Missing,
+            hit_id: None,
+            segs: Vec::new(),
+        };
+        let mut block_start = self.reader.start_block()?;
+        while self.reader.next_element(&mut block_start)? {
+            let first = align.segs.is_empty();
+            let mut pair = StdPair {
+                query: StdLoc::Missing,
+                hit: StdLoc::Missing,
+            };
+            let mut ids_found = false;
+            let mut loc = false;
+            let mut members = self.reader.begin_members()?;
+            while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+                match index {
+                    0 => {
+                        self.reader.int4()?;
+                    }
+                    1 => {
+                        let mut ids_start = self.reader.start_block()?;
+                        let mut count = 0usize;
+                        while self.reader.next_element(&mut ids_start)? {
+                            let id = self.seq_id()?;
+                            if count == 0 && matches!(align.query_id, QueryRowId::Missing) {
+                                align.query_id = QueryRowId::Id(id);
+                            } else if count == 1 && first {
+                                align.hit_id = Some(id);
+                            }
+                            count += 1;
+                        }
+                        ids_found = count > 0;
+                        self.reader.end_block()?;
+                    }
+                    2 => {
+                        loc = true;
+                        let mut loc_start = self.reader.start_block()?;
+                        let mut count = 0usize;
+                        while self.reader.next_element(&mut loc_start)? {
+                            let wanted = count == 0
+                                && !ids_found
+                                && matches!(align.query_id, QueryRowId::Missing);
+                            let (location, id, name) = self.std_loc(wanted)?;
+                            if wanted {
+                                align.query_id = match (location, id) {
+                                    (_, Some(id)) => QueryRowId::Id(id),
+                                    (StdLoc::Null, None) => QueryRowId::Missing,
+                                    (_, None) => QueryRowId::Location(name),
+                                };
+                            }
+                            match count {
+                                0 => pair.query = location,
+                                1 => pair.hit = location,
+                                _ => {}
+                            }
+                            count += 1;
+                        }
+                        self.reader.end_block()?;
+                    }
+                    _ => {
+                        let mut scratch = Align {
+                            segs: Segs::Other("dendiag"),
+                            score: None,
+                            e_value: None,
+                            bit_score: None,
+                            num_ident: None,
+                            score_of_other_type: None,
+                        };
+                        let mut scores_start = self.reader.start_block()?;
+                        while self.reader.next_element(&mut scores_start)? {
+                            self.align_score(&mut scratch)?;
+                        }
+                        self.reader.end_block()?;
+                    }
+                }
+            }
+            if !loc {
+                return Err(self.reader.error("a mandatory member is missing"));
+            }
+            align.segs.push(pair);
+        }
+        self.reader.end_block()?;
+        Ok(align)
+    }
+
+    /// A `Seq-loc` of a `Std-seg` and its variant's name: `null`, `empty`, `whole`, `int` and
+    /// `pnt` read, the other variants read as values; with `keep_id`, the id of a location of a
+    /// single id (`empty`, `whole`, `int`, `pnt`).
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:103-107
+    // ```text
+    // Seq-point ::= SEQUENCE {
+    //     point INTEGER ,
+    //     strand Na-strand OPTIONAL ,
+    //     id Seq-id ,     -- WARNING: this used to be optional
+    //     fuzz Int-fuzz OPTIONAL }
+    // ```
+    // `point` is `TSeqPos` (unsigned) in NCBI's class.
+    fn std_loc(&mut self, keep_id: bool) -> Result<(StdLoc, Option<ParsedSeqId>, &'static str)> {
+        let variant = self.reader.choice(&SEQ_LOC)?;
+        let name = SEQ_LOC[variant];
+        let keep = |id: ParsedSeqId| keep_id.then_some(id);
+        let (location, id) = match name {
+            "null" => {
+                self.reader.null()?;
+                (StdLoc::Null, None)
+            }
+            "empty" => (StdLoc::Empty, keep(self.seq_id()?)),
+            "whole" => (StdLoc::Whole, keep(self.seq_id()?)),
+            "int" => {
+                let Interval {
+                    from,
+                    to,
+                    strand,
+                    id,
+                } = self.interval()?;
+                (StdLoc::Int { from, to, strand }, keep(id))
+            }
+            "pnt" => {
+                const NAMES: [&str; 4] = ["point", "strand", "id", "fuzz"];
+                let mut members = self.reader.begin_members()?;
+                let (mut point, mut strand, mut id) = (None, None, None);
+                while let Some(index) = self.reader.next_member(&mut members, &NAMES)? {
+                    match index {
+                        0 => point = Some(self.reader.uint4()?),
+                        1 => strand = Some(self.reader.enumerated(&NA_STRAND)?.1),
+                        2 => id = Some(self.seq_id()?),
+                        _ => self.skip_value()?,
+                    }
+                }
+                let (Some(point), Some(id)) = (point, id) else {
+                    return Err(self.reader.error("a mandatory member is missing"));
+                };
+                (StdLoc::Pnt { point, strand }, keep(id))
+            }
+            _ => {
+                self.skip_value()?;
+                (StdLoc::Other, None)
+            }
+        };
+        Ok((location, id, name))
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:332-337
@@ -1641,11 +1957,17 @@ impl<R: Read> ArchiveStream<R> {
                 3 => {
                     segs = true;
                     let variant = self.reader.choice(&SEQ_ALIGN_SEGS)?;
-                    align.segs = if variant == 1 {
-                        Segs::Denseg(self.dense_seg()?)
-                    } else {
-                        self.skip_value()?;
-                        Segs::Other(SEQ_ALIGN_SEGS[variant])
+                    align.segs = match variant {
+                        1 => Segs::Denseg(self.dense_seg()?),
+                        2 => Segs::Std(Box::new(self.std_segs()?)),
+                        3 => {
+                            self.packed_seg()?;
+                            Segs::Other("packed")
+                        }
+                        _ => {
+                            self.skip_value()?;
+                            Segs::Other(SEQ_ALIGN_SEGS[variant])
+                        }
                     };
                 }
                 5 => {

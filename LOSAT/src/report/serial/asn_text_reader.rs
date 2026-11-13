@@ -871,6 +871,36 @@ impl<S: AsnSource> Reader<S> {
         Err(self.error("TRUE or FALSE expected"))
     }
 
+    /// `ReadNull`: the word `NULL`.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:444-455
+    // ```c++
+    // void CObjectIStreamAsn::ReadNull(void)
+    // {
+    //     if ( SkipWhiteSpace() == 'N' &&
+    //          m_Input.PeekCharNoEOF(1) == 'U' &&
+    //          m_Input.PeekCharNoEOF(2) == 'L' &&
+    //          m_Input.PeekCharNoEOF(3) == 'L' &&
+    //          !IdChar(m_Input.PeekCharNoEOF(4)) ) {
+    //         m_Input.SkipChars(4);
+    //     }
+    //     else
+    //         ThrowError(fFormatError, "'NULL' expected");
+    // }
+    // ```
+    pub(crate) fn null(&mut self) -> Result<()> {
+        let c = self.skip_white_space()?;
+        if c == b'N'
+            && self.peek_at(1) == b'U'
+            && self.peek_at(2) == b'L'
+            && self.peek_at(3) == b'L'
+            && !is_id_char(self.peek_at(4))
+        {
+            self.pos += 4;
+            return Ok(());
+        }
+        Err(self.error("'NULL' expected"))
+    }
+
     /// `ReadEnum` of an ENUMERATED type with the values `values`: a name or a number.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
     // ```c++

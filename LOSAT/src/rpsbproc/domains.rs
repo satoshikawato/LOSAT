@@ -5,8 +5,9 @@
 
 use std::collections::HashMap;
 
-use super::archive::{Align, DenseSeg};
+use super::archive::{Align, DenseSeg, StdLoc, StdPair};
 use super::data::{dom_acc_type, CddData, TOTALSIGS};
+use super::frames::{minus_pr_to_plus_na, plus_pr_to_plus_na, plus_rf_idx_to_minus, RF_SIZE};
 use super::segset::SegSet;
 use super::sites::ResiduePos;
 use crate::utils::std_sort::std_sort;
@@ -71,6 +72,49 @@ pub(crate) struct DomAlign {
     /// `m_ClipSet`: the query ranges (as positions on the model, `ori_from` side) that a
     /// structural-domain hit keeps for its motifs (set by `calculate`, empty otherwise).
     pub(crate) clip_set: SegSet,
+    /// `m_eAlignType == ePr2Na`: a hit of a translated query (a `Std-seg` whose query locations
+    /// carry a strand); its `m_starts` are positions on a "pseudo-protein".
+    pub(crate) pr2na: bool,
+    /// `m_ReadingFrame` (`TFRAMEINDEX`, an `unsigned int`): the plus-strand frame index of
+    /// `from` in its two low bits, and for a minus-strand hit the aligned length in codons
+    /// shifted left by 2.
+    pub(crate) reading_frame: u32,
+}
+
+impl DomAlign {
+    /// A hit without segments (`TSeqAlignment::Reset` and the start of `ParseAlignSegs`).
+    fn empty(align: &Align, pssm_id: u32) -> Self {
+        DomAlign {
+            pssm_id,
+            from: i32::MAX,
+            to: 0,
+            m_starts: Vec::new(),
+            s_starts: Vec::new(),
+            lens: Vec::new(),
+            e_value: align.e_value.unwrap_or(0.0),
+            bit_score: align.bit_score.unwrap_or(0.0),
+            region: 0,
+            n_missing: 0.0,
+            c_missing: 0.0,
+            spec_qualified: false,
+            rep_class: 0,
+            rep: false,
+            clip_set: SegSet::new(),
+            pr2na: false,
+            reading_frame: 0,
+        }
+    }
+
+    /// The aligned length in codons of a minus-strand hit (`m_ReadingFrame >> 2`), 0 for the
+    /// others.
+    pub(crate) fn aligned_len(&self) -> u32 {
+        self.reading_frame >> 2
+    }
+
+    /// The plus-strand frame index (`m_ReadingFrame & READINGFRAME::RF_SIZE`).
+    pub(crate) fn plus_rf_idx(&self) -> u32 {
+        self.reading_frame & RF_SIZE
+    }
 }
 
 /// `TDomSeqAlignIndex`: the indices of the alignments in each set.
@@ -183,23 +227,7 @@ fn clean_alignment(seg: &DenseSeg, align: &mut DomAlign) {
 // (`m_vecMStarts[...] + m_vecLens[...] - 1` adds an `int` and an `unsigned int`: the sum wraps
 // as an `unsigned int` and is stored back in an `int`.)
 pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAlign {
-    let mut dom = DomAlign {
-        pssm_id,
-        from: i32::MAX,
-        to: 0,
-        m_starts: Vec::new(),
-        s_starts: Vec::new(),
-        lens: Vec::new(),
-        e_value: align.e_value.unwrap_or(0.0),
-        bit_score: align.bit_score.unwrap_or(0.0),
-        region: 0,
-        n_missing: 0.0,
-        c_missing: 0.0,
-        spec_qualified: false,
-        rep_class: 0,
-        rep: false,
-        clip_set: SegSet::new(),
-    };
+    let mut dom = DomAlign::empty(align, pssm_id);
     clean_alignment(seg, &mut dom);
     if let (Some(&first), Some(&last), Some(&last_len)) =
         (dom.m_starts.first(), dom.m_starts.last(), dom.lens.last())
@@ -208,6 +236,231 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
         dom.to = (last as u32).wrapping_add(last_len).wrapping_sub(1) as i32;
     }
     dom
+}
+
+/// `ParseAlignSegs` of the `Std-seg`s of a translated search and `ParseAlignScores`: the
+/// alignment, without its PSSM-ID (`ProcessCDAlign` sets it), or the refusal of what NCBI
+/// reads outside its vectors.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:44-133
+// ```c++
+// 	case CSeq_align::TSegs::e_Std:
+// 		{
+//
+// 			const CSeq_align::TSegs::TStd &stdsegs = c_segs.GetStd();
+//
+// 			if (!stdsegs.empty())
+// 			{
+// 				CSeq_align::TSegs::TStd::const_iterator iterStdSeg = stdsegs.begin(), iterStdSegEnd = stdsegs.end();
+//
+// 				const CStd_seg::TIds & idsTbl = (*iterStdSeg)->GetIds();	//vector< CRef< CSeq_id > >
+// 				CStd_seg::TIds::const_iterator iter_hit_id = idsTbl.begin();
+// 				++iter_hit_id;
+// 				hit_id = SerialClone(**iter_hit_id);
+//
+// 				for (; iterStdSegEnd != iterStdSeg; ++iterStdSeg)
+// 				{
+// 					const CStd_seg::TLoc &seqlocs = (*iterStdSeg)->GetLoc();	//vector< CRef< CSeq_loc > >
+//
+// 					if (seqlocs[0]->IsNull() || seqlocs[1]->IsNull()) continue;	//unmapped. ignore
+//
+// 					CSeq_loc::E_Choice qloc_type = seqlocs[0]->Which(), hloc_type = seqlocs[1]->Which();
+// 					if (CSeq_loc::e_Empty == qloc_type || CSeq_loc::e_Empty == hloc_type) continue;
+//
+// 					bool error = false;
+// 					// -- query
+// 					switch (qloc_type)
+// 					{
+// 					case CSeq_loc::e_Int:	//interval
+// 						{
+// 							const CSeq_interval &intv = seqlocs[0]->GetInt();
+// 							SeqPos_t f = intv.GetFrom(), t = intv.GetTo();
+// 							if (f < dst.m_iFrom) dst.m_iFrom = f;
+// 							if (t > dst.m_iTo) dst.m_iTo = t;
+// 							dst.m_vecMStarts.push_back(f);
+//
+// 							if (intv.CanGetStrand())
+// 								qstrand = intv.GetStrand();
+// 						}
+// 						break;
+// 					case CSeq_loc::e_Pnt:	//seq point
+// 						{
+// 							const CSeq_point &pnt = seqlocs[0]->GetPnt();
+// 							SeqPos_t p = pnt.GetPoint();
+// 							if (p < dst.m_iFrom) dst.m_iFrom = p;
+// 							if (p > dst.m_iTo) dst.m_iTo = p;
+// 							dst.m_vecMStarts.push_back(p);
+//
+// 							if (pnt.CanGetStrand())
+// 								qstrand = pnt.GetStrand();
+//
+// 						}
+// 						break;
+// 					default:
+// 						error = true;
+// 						break;
+// 					}
+// 					if (!error)
+// 					{
+//
+// 						// -- target, assume always protein
+// 						switch (hloc_type)
+// 						{
+// 						case CSeq_loc::e_Int:	//interval
+// 							{
+// 								const CSeq_interval &intv = seqlocs[1]->GetInt();
+// 								SeqPos_t f = intv.GetFrom(), t = intv.GetTo();
+//
+// 								dst.m_vecSStarts.push_back(f);
+// 								dst.m_vecLens.push_back(t - f + 1);
+// 							}
+// 							break;
+// 						case CSeq_loc::e_Pnt:	//seq point
+//
+// 							{
+// 								const CSeq_point &pnt = seqlocs[1]->GetPnt();
+// 								SeqPos_t p = pnt.GetPoint();
+//
+// 								dst.m_vecSStarts.push_back(p);
+// 								dst.m_vecLens.push_back(1);
+//
+// 							}
+// 							break;
+// 						default:
+// 							error = true;
+// 							break;
+// 						}
+// 					}
+// 				}
+//
+// 			}
+// 		}
+// 		break;
+// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:166-209
+// ```c++
+// 	if (!hit_id.IsNull() && eNa_strand_other != qstrand)	//na and pr
+// 	{
+// 		dst.m_eAlignType = TSeqAlignment::ePr2Na;
+// 		dst.m_ReadingFrame = (dst.m_iFrom % READINGFRAME::RF_SIZE);	//always be the plus side rf
+//
+// 		if (eNa_strand_minus == qstrand || eNa_strand_both_rev == qstrand)
+// 		{
+// 			dst.m_bIsMinus = true;
+// 			SeqLen_t alignedLen = (dst.m_iTo + 1) / READINGFRAME::RF_SIZE;
+// 			dst.m_ReadingFrame |= (alignedLen << 2);	//keep this for align computation
+// 			...
+// 			vector<SeqPos_t> :: iterator iterMS = dst.m_vecMStarts.begin(), iterMSEnd = dst.m_vecMStarts.end();
+// 			vector<SeqLen_t> :: const_iterator iterL = dst.m_vecLens.begin();
+// 			while (iterMS != iterMSEnd)
+// 			{
+// 				*iterMS = alignedLen - (*iterMS / READINGFRAME::RF_SIZE + *iterL);
+// 				++iterMS;
+// 				++iterL;
+// 			}
+// 		}
+// 		else
+// 		{
+// 			for (vector<SeqPos_t> :: iterator iterMS = dst.m_vecMStarts.begin(), iterMSEnd = dst.m_vecMStarts.end(); iterMS != iterMSEnd; ++iterMS)
+// 				*iterMS /= READINGFRAME::RF_SIZE;
+// 		}
+//
+// 	}
+// ```
+// The types decide the arithmetic: `GetFrom`/`GetTo`/`GetPoint` are `TSeqPos` (unsigned)
+// stored in `SeqPos_t` (`int`, wraps in NCBI's build); `t - f + 1` is `int` arithmetic
+// (refused where it overflows, undefined); `m_iFrom % RF_SIZE`, `*iterMS / RF_SIZE` and the
+// minus-strand sum are `unsigned int` arithmetic (wraps); `m_iTo + 1` is `int` (`m_iTo` is
+// at least 0, the overflow of `INT_MAX + 1` is refused). A segment whose subject location is
+// neither `int` nor `pnt` leaves its query start without a subject start and length: the
+// vectors differ in length, which the plus-strand code and the classification read within
+// bounds (LOSAT keeps the three vectors as NCBI does), but the minus-strand loop above reads
+// `m_vecLens` past its end (refused). `ids` with fewer than 2 ids in the first segment and a
+// segment with fewer than 2 locations are read past their ends (refused). The strand that
+// counts is the last one set; `unknown`, `plus` and `both` make a plus-strand hit, `minus`
+// and `both-rev` a minus-strand one, `other` (or none) an alignment of two proteins.
+pub(crate) fn parse_std_align(
+    segs: &[StdPair],
+    align: &Align,
+    pssm_id: u32,
+) -> Result<DomAlign, String> {
+    const STRAND_MINUS: i32 = 2;
+    const STRAND_BOTH_REV: i32 = 4;
+    const STRAND_OTHER: i32 = 255;
+    let mut dom = DomAlign::empty(align, pssm_id);
+    let mut qstrand = STRAND_OTHER;
+    for &StdPair { query, hit } in segs {
+        if query == StdLoc::Missing || hit == StdLoc::Missing {
+            return Err(
+                "a Std-seg with fewer than 2 locations (NCBI reads past them) is not supported by LOSAT's rpsbproc".to_string(),
+            );
+        }
+        if query == StdLoc::Null || hit == StdLoc::Null {
+            continue;
+        }
+        if query == StdLoc::Empty || hit == StdLoc::Empty {
+            continue;
+        }
+        let (start, end, strand) = match query {
+            StdLoc::Int { from, to, strand } => (from as i32, to as i32, strand),
+            StdLoc::Pnt { point, strand } => (point as i32, point as i32, strand),
+            _ => continue,
+        };
+        if start < dom.from {
+            dom.from = start;
+        }
+        if end > dom.to {
+            dom.to = end;
+        }
+        dom.m_starts.push(start);
+        if let Some(strand) = strand {
+            qstrand = strand;
+        }
+        match hit {
+            StdLoc::Int { from, to, .. } => {
+                let (f, t) = (from as i32, to as i32);
+                let len = t
+                    .checked_sub(f)
+                    .and_then(|diff| diff.checked_add(1))
+                    .ok_or_else(|| {
+                        format!(
+                            "a Std-seg subject interval from {from} to {to}, whose length overflows NCBI's int (undefined), is not supported by LOSAT's rpsbproc"
+                        )
+                    })?;
+                dom.s_starts.push(f);
+                dom.lens.push(len as u32);
+            }
+            StdLoc::Pnt { point, .. } => {
+                dom.s_starts.push(point as i32);
+                dom.lens.push(1);
+            }
+            _ => {}
+        }
+    }
+    if qstrand != STRAND_OTHER {
+        dom.pr2na = true;
+        dom.reading_frame = (dom.from as u32) % RF_SIZE;
+        if qstrand == STRAND_MINUS || qstrand == STRAND_BOTH_REV {
+            let end = dom.to.checked_add(1).ok_or_else(|| {
+                "a minus-strand Std-seg that ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc".to_string()
+            })?;
+            let aligned_len = end as u32 / RF_SIZE;
+            dom.reading_frame |= aligned_len << 2;
+            if dom.m_starts.len() > dom.lens.len() {
+                return Err(
+                    "a minus-strand Std-seg with a subject location other than int or pnt (NCBI reads past its segment lengths) is not supported by LOSAT's rpsbproc".to_string(),
+                );
+            }
+            for (start, &len) in dom.m_starts.iter_mut().zip(&dom.lens) {
+                *start =
+                    aligned_len.wrapping_sub((*start as u32 / RF_SIZE).wrapping_add(len)) as i32;
+            }
+        } else {
+            for start in &mut dom.m_starts {
+                *start = (*start as u32 / RF_SIZE) as i32;
+            }
+        }
+    }
+    Ok(dom)
 }
 
 /// `TSeqAlignment::CalcMasterGaps(GAP_THRESHOLD)`: the query ranges between segments that are
@@ -287,9 +540,10 @@ struct Facility {
     gaps: Option<usize>,
 }
 
-/// `CCdAlignProcessor::Calculate` of a protein query: the alignments' scores against their
-/// models, the regions, and the sets of `index`. Structural domains (`sd`) are set apart and
-/// take no region (their clipping, `m_vecSDIndice` and `m_ClipSet`, serves the motif output).
+/// `CCdAlignProcessor::Calculate` of the alignments `selected` (all of a protein query's, or
+/// those of one reading frame of a nucleotide query's): their scores against their models, the
+/// regions, and the sets of `index`. Structural domains (`sd`) are set apart and take no region
+/// (their clipping, `m_vecSDIndice` and `m_ClipSet`, serves the motif output).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:48-130
 // ```c++
 // void CCdAlignProcessor::Calculate(vector<TDomSeqAlignment> &aligns, const vector<size_t> &selIdx, TDomSeqAlignIndex &dst, vector<PssmId_t> &missed, const int * stdmax, size_t nmax) const
@@ -373,12 +627,13 @@ struct Facility {
 // is never printed.
 // (`m_uiLength - (sstart + len)` is `unsigned int` arithmetic stored in an `int`; the ratios
 // divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does.)
-pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
+pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddData) -> AlignIndex {
     let mut index = AlignIndex::default();
     let mut gap_sets: Vec<SegSet> = Vec::new();
     let mut non_multi: Vec<Facility> = Vec::new();
     let mut structural: Vec<Facility> = Vec::new();
-    for (i, align) in aligns.iter_mut().enumerate() {
+    for &i in selected {
+        let align = &mut aligns[i];
         if align.s_starts.is_empty() {
             continue;
         }
@@ -684,13 +939,73 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], data: &CddData) -> AlignIndex {
     index
 }
 
+/// `CCdAlignProcessor::SortReadingFrames`: the indices of the alignments of each reading frame
+/// (`GetRFIdx` of the query's length), or NCBI's exception for a query of length 0.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:20-45
+// ```c++
+// SeqLen_t CCdAlignProcessor::SortReadingFrames(const vector<TDomSeqAlignment> &rSrc, vector<size_t> rfIndice[READINGFRAME::TOTAL_RFS], SeqLen_t qlen)
+// {
+// 	...
+// 	if (qlen > 0)	//calculate
+// 		for (size_t idx = 0, len = rSrc.size(); idx < len; ++idx)
+// 		{
+// 			...
+// 			rfIndice[rSrc[idx].GetRFIdx(qlen)].emplace_back(idx);
+// 		}
+// 	else	//should not happen
+// 		THROW_SIMPLE("Cannot sort reading frames - query sequence length unknown");
+// 	return qlen;
+// }
+// ```
+pub(crate) fn sort_reading_frames(
+    aligns: &[DomAlign],
+    query_len: u32,
+) -> Result<[Vec<usize>; 6], &'static str> {
+    if query_len == 0 {
+        return Err("Cannot sort reading frames - query sequence length unknown");
+    }
+    let mut frames: [Vec<usize>; 6] = Default::default();
+    for (i, align) in aligns.iter().enumerate() {
+        frames[rf_index(align, query_len) as usize].push(i);
+    }
+    Ok(frames)
+}
+
+/// `TSeqAlignment::GetRFIdx(seqLen)`: the reading frame index (0 to 5) of an alignment.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1342-1351
+// ```c++
+// READINGFRAME::TFRAMEINDEX TSeqAlignment::GetRFIdx(SeqLen_t seqLen) const
+// {
+// 	if (ePr2Na != m_eAlignType) return 0;
+// 	SeqLen_t alignedLen = m_ReadingFrame >> 2;	//m_ReadingFrame contains the positive side reading frame, always.
+// 	READINGFRAME::TFRAMEINDEX rfidx = m_ReadingFrame & READINGFRAME::RF_SIZE;
+//
+// 	if (alignedLen > 0)	//negative -- minus strand
+// 		rfidx = READINGFRAME::PlusRFIdx2MinusRFIdx(rfidx, seqLen);
+// 	return rfidx;
+// }
+// ```
+pub(crate) fn rf_index(align: &DomAlign, query_len: u32) -> u32 {
+    if !align.pr2na {
+        return 0;
+    }
+    let rfidx = align.plus_rf_idx();
+    if align.aligned_len() > 0 {
+        plus_rf_idx_to_minus(rfidx, query_len)
+    } else {
+        rfidx
+    }
+}
+
 /// `TSeqAlignment::MapSegSet(segset)` of a protein alignment.
 pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
     set.map_through(&align.m_starts, &align.s_starts, &align.lens);
 }
 
-/// `TSeqAlignment::GetTranslatedPosMap` of a protein alignment: the residues of a mapped set,
-/// each with its position on the query and its original position.
+/// `TSeqAlignment::GetTranslatedPosMap`: the residues of a mapped set, each with its position
+/// on the query (on the translation of its frame for a hit of a translated query) and its
+/// original position; `Err` with the text of NCBI's exception when a minus-strand hit reaches
+/// past the query's length.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1252-1294
 // ```c++
 // READINGFRAME::TFRAMEINDEX TSeqAlignment::GetTranslatedPosMap(const CSegSet &mappedAAsegs, SeqLen_t qLen, vector<TSeg_base::TResiduePos> &rMappedAAPos) const
@@ -701,7 +1016,30 @@ pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
 // 	size_t ttlres = mappedAAsegs.GetTotalResidues();
 //
 // 	rMappedAAPos.reserve(ttlres);
-// 	...
+// 	SeqLen_t aaLen = qLen;	//assume it's aa
+// 	READINGFRAME::TFRAMEINDEX rfidx = m_ReadingFrame & READINGFRAME::RF_SIZE;
+//
+// 	if (ePr2Na == m_eAlignType)
+// 	{
+// 		SeqLen_t alignedLen = m_ReadingFrame >> 2;
+// 		aaLen = (qLen - rfidx) / READINGFRAME::RF_SIZE;
+// 		if (alignedLen > 0)	//minus strand. Plus strand will have 0 == alignedLen
+// 		{
+// 			if (alignedLen > aaLen)	//error
+// 				THROW_SIMPLE("Invalid protein length " << aaLen << ": shorter than aligned range " << alignedLen);
+// 			rfidx = READINGFRAME::PlusRFIdx2MinusRFIdx(rfidx, qLen);
+// 			SeqLen_t offset = aaLen - alignedLen;
+//
+// 			for (CSegSet::TSegs::const_iterator iterSeg = segs.begin(), iterSegEnd = segs.end(); iterSegEnd != iterSeg; ++iterSeg)
+// 			{
+// 				for (SeqPos_t c = iterSeg->from, inc = 0; c <= iterSeg->to; ++c, ++inc)
+// 				{
+// 					rMappedAAPos.emplace_back(c + offset, iterSeg->ori_from + inc);
+// 				}
+// 			}
+// 			goto labelReturn;
+// 		}
+// 	}
 // 	// -- either protein or plus strand translation, no adjust needed.
 // 	for (CSegSet::TSegs::const_iterator iterSeg = segs.begin(), iterSegEnd = segs.end(); iterSegEnd != iterSeg; ++iterSeg)
 // 	{
@@ -711,21 +1049,134 @@ pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
 // 		}
 // 	}
 // ```
-pub(crate) fn translated_pos_map(set: &SegSet) -> Vec<ResiduePos> {
+// (`qLen - rfidx` and `c + offset` are `unsigned int` arithmetic, which wraps; `c + offset`
+// is stored in an `int`.)
+pub(crate) fn translated_pos_map(
+    set: &SegSet,
+    align: &DomAlign,
+    query_len: u32,
+) -> Result<Vec<ResiduePos>, String> {
+    let mut offset = 0u32;
+    if align.pr2na {
+        let aligned_len = align.aligned_len();
+        let aa_len = query_len.wrapping_sub(align.plus_rf_idx()) / RF_SIZE;
+        if aligned_len > 0 {
+            if aligned_len > aa_len {
+                return Err(format!(
+                    "Invalid protein length {aa_len}: shorter than aligned range {aligned_len}"
+                ));
+            }
+            offset = aa_len - aligned_len;
+        }
+    }
     let mut positions = Vec::with_capacity(set.total_residues().max(0) as usize);
     for seg in set.segs() {
         let mut c = seg.from;
         let mut inc = 0i64;
         while c <= seg.to {
             positions.push(ResiduePos {
-                curr: c as i32,
+                curr: (c as i32 as u32).wrapping_add(offset) as i32,
                 ori: (seg.ori_from + inc) as i32,
             });
             c += 1;
             inc += 1;
         }
     }
-    positions
+    Ok(positions)
+}
+
+/// The two ends of a mapped set after `TSeqAlignment::Pr2NaConvert` (`GetLeft`, `GetRight`):
+/// positions on the query's plus strand for a hit of a translated query; the set's own ends
+/// for the others. `None` where NCBI's `int` arithmetic overflows (a position outside `int`,
+/// or `pr - 1` of `INT_MIN`; undefined).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1137-1177
+// ```c++
+// void TSeqAlignment::Pr2NaConvert(CSegSet &segset) const
+// {
+// 	if (ePr2Na == m_eAlignType)
+// 	{
+// 		...
+// 		SeqLen_t alnLen = (m_ReadingFrame >> 2);
+//
+// 		READINGFRAME::TFRAMEINDEX rfidx = m_ReadingFrame & READINGFRAME::RF_SIZE;	//reading frame at positive strand
+// 		segset.m_iFactor = READINGFRAME::RF_SIZE;
+// 		if (alnLen > 0)	//is minus
+// 		{
+// 			// -- alnLen is aligned pr len. Convert to na len
+// 			alnLen = alnLen * READINGFRAME::RF_SIZE + rfidx;
+// 			...
+// 			for (CSegSet::TSegs::iterator iterSeg = segset.m_lstContainer.begin(); iterSeg != segset.m_lstContainer.end(); ++iterSeg)
+// 			{
+// 				SeqPos_t newFrom = READINGFRAME::MinusPr2PlusNA(iterSeg->from, READINGFRAME::RF_SIZE, alnLen);
+// 				iterSeg->from = READINGFRAME::MinusPr2PlusNA(iterSeg->to, READINGFRAME::RF_SIZE, alnLen) - READINGFRAME::RF_SIZE + 1;
+// 				iterSeg->to = newFrom;
+//
+// 				// -- reverse ori_as well
+// 				iterSeg->ori_from += (iterSeg->to - iterSeg->from + 1) / segset.m_iFactor - 1;
+//
+// 			}
+// 			segset.m_iFactor = -segset.m_iFactor;	//change direction
+// 			segset.m_lstContainer.reverse();
+// 		}
+// 		else	//plus strand
+// 		{
+// 			for (CSegSet::TSegs::iterator iter = segset.m_lstContainer.begin(); iter != segset.m_lstContainer.end(); ++iter)
+// 			{
+// 				iter->from = READINGFRAME::PlusPr2PlusNA(iter->from, rfidx, 0);
+// 				iter->to = READINGFRAME::PlusPr2PlusNA(iter->to, rfidx, 0) + READINGFRAME::RF_SIZE - 1;
+//
+// 			}
+// 		}
+// 	}
+// }
+// ```
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:281-290
+// ```c++
+// SeqPos_t CSegSetTmpl<SEGTYPE>::GetLeft(void) const
+// {
+// 	return IsEmpty() ? -1 : m_lstContainer.begin()->from;
+// }
+//
+// template <typename SEGTYPE>
+// SeqPos_t CSegSetTmpl<SEGTYPE>::GetRight(void) const
+// {
+// 	return IsEmpty() ? -1 : m_lstContainer.rbegin()->to;
+// }
+// ```
+// Only the ends are printed (the motif lines), so only the first and the last ranges are
+// converted; `ori_from` is not read after the conversion. The minus strand reverses the list:
+// the left end comes from the last range's `to`, the right end from the first range's `from`.
+pub(crate) fn pr2na_ends(set: &SegSet, align: &DomAlign) -> Option<(i32, i32)> {
+    let (first, last) = (set.segs().first()?, set.segs().last()?);
+    let int = |value: i64| i32::try_from(value).ok();
+    if !align.pr2na {
+        return Some((int(first.from)?, int(last.to)?));
+    }
+    let rfidx = align.plus_rf_idx();
+    let aligned_len = align.aligned_len();
+    if aligned_len > 0 {
+        let na_len = aligned_len.wrapping_mul(RF_SIZE).wrapping_add(rfidx);
+        // Each range's two conversions: `pr - 1` overflows only at `INT_MIN`.
+        for seg in set.segs() {
+            int(seg.from)?.checked_sub(1)?;
+            int(seg.to)?.checked_sub(1)?;
+        }
+        let left = (minus_pr_to_plus_na(int(last.to)?, RF_SIZE, na_len)? as u32)
+            .wrapping_sub(RF_SIZE)
+            .wrapping_add(1) as i32;
+        let right = minus_pr_to_plus_na(int(first.from)?, RF_SIZE, na_len)?;
+        Some((left, right))
+    } else {
+        for seg in set.segs() {
+            int(seg.from)?;
+            int(seg.to)?;
+        }
+        let left = plus_pr_to_plus_na(int(first.from)?, rfidx);
+        let right = (plus_pr_to_plus_na(int(last.to)?, rfidx) as u32)
+            .wrapping_add(RF_SIZE)
+            .wrapping_sub(1) as i32;
+        Some((left, right))
+    }
 }
 
 /// `TDomSeqAlignIndex::CreateRecordSets`, the domain records (`rDomAligns`) of `mode`.

@@ -1,7 +1,10 @@
-//! The pieces of the domain classification: `CleanAlignment`, `CalcMasterGaps`, `CountSrc`.
+//! The pieces of the domain classification: `CleanAlignment`, `CalcMasterGaps`, `CountSrc`, the
+//! `Std-seg`s of a translated query (`ParseAlignSegs`), its reading frames and the mapping of a
+//! site to the frame's translation and to the plus strand (`GetTranslatedPosMap`,
+//! `Pr2NaConvert`).
 
 use super::*;
-use crate::rpsbproc::archive::{Align, DenseSeg, Segs};
+use crate::rpsbproc::archive::{Align, DenseSeg, Segs, StdLoc, StdPair};
 
 fn dense_seg(starts: &[i32], lens: &[u32]) -> DenseSeg {
     DenseSeg {
@@ -63,4 +66,137 @@ fn one_hit_per_source_database() {
     assert!(!count_source(&mut counts, b"PTZ00001"));
     assert!(count_source(&mut counts, b"NF000001"));
     assert!(count_source(&mut counts, b"NF000002"));
+}
+
+fn int(from: u32, to: u32, strand: Option<i32>) -> StdLoc {
+    StdLoc::Int { from, to, strand }
+}
+
+fn std_seg(query: StdLoc, hit: StdLoc) -> StdPair {
+    StdPair { query, hit }
+}
+
+// biodata_blast.cpp:44-209 (quoted at `parse_std_align`): a plus-strand hit of rpstblastn
+// (archive c01, Query_1: 387-2582 with 0-731, a query insertion 2583-2585 with an `empty`
+// subject, 2586-2795 with 732-801): pseudo-protein starts `f / 3`, the frame of `from`.
+#[test]
+fn a_plus_strand_hit_of_a_translated_query() {
+    let segs = [
+        std_seg(int(387, 2582, Some(1)), int(0, 731, Some(0))),
+        std_seg(int(2583, 2585, Some(1)), StdLoc::Empty),
+        std_seg(int(2586, 2795, Some(1)), int(732, 801, Some(0))),
+    ];
+    let dom = parse_std_align(&segs, &align(), 7).unwrap();
+    assert!(dom.pr2na);
+    assert_eq!((dom.from, dom.to), (387, 2795));
+    assert_eq!(dom.m_starts, vec![129, 862]);
+    assert_eq!(dom.s_starts, vec![0, 732]);
+    assert_eq!(dom.lens, vec![732, 70]);
+    assert_eq!((dom.plus_rf_idx(), dom.aligned_len()), (0, 0));
+    assert_eq!(rf_index(&dom, 5000), 0);
+}
+
+// The minus strand: `alignedLen = (m_iTo + 1) / 3`, starts `alignedLen - (f / 3 + len)`, and
+// the frame index from the query's length (`PlusRFIdx2MinusRFIdx`).
+#[test]
+fn a_minus_strand_hit_of_a_translated_query() {
+    let segs = [
+        std_seg(int(301, 599, Some(2)), int(0, 99, None)),
+        std_seg(int(100, 297, Some(2)), int(101, 166, None)),
+    ];
+    let dom = parse_std_align(&segs, &align(), 7).unwrap();
+    assert_eq!((dom.from, dom.to), (100, 599));
+    assert_eq!(dom.aligned_len(), 200);
+    assert_eq!(dom.plus_rf_idx(), 1);
+    // 200 - (301 / 3 + 100) = 0; 200 - (100 / 3 + 66) = 101.
+    assert_eq!(dom.m_starts, vec![0, 101]);
+    // (5000 - 1) % 3 + 3 = 4; (4999 - 1) % 3 + 3 = 3.
+    assert_eq!(rf_index(&dom, 5000), 4);
+    assert_eq!(rf_index(&dom, 4999), 3);
+    let frames = sort_reading_frames(&[dom], 5000).unwrap();
+    assert_eq!(frames[4], vec![0]);
+    assert_eq!(
+        sort_reading_frames(&[], 0),
+        Err("Cannot sort reading frames - query sequence length unknown")
+    );
+}
+
+// Without a strand the hit is an alignment of two proteins; a subject location that is not
+// `int` or `pnt` leaves its query start alone (plus strand: kept as NCBI does), which the
+// minus strand reads past (refused); fewer than 2 locations are refused; `null` and `empty`
+// segments are skipped; a `pnt` is a position of length 1.
+#[test]
+fn std_seg_forms() {
+    let none =
+        parse_std_align(&[std_seg(int(30, 59, None), int(0, 9, None))], &align(), 1).unwrap();
+    assert!(!none.pr2na);
+    assert_eq!(none.m_starts, vec![30]);
+    let plus = [
+        std_seg(int(30, 59, Some(1)), StdLoc::Whole),
+        std_seg(StdLoc::Null, int(0, 9, None)),
+        std_seg(
+            StdLoc::Pnt {
+                point: 90,
+                strand: Some(3),
+            },
+            StdLoc::Pnt {
+                point: 12,
+                strand: None,
+            },
+        ),
+    ];
+    let dom = parse_std_align(&plus, &align(), 1).unwrap();
+    assert_eq!(dom.m_starts, vec![10, 30]);
+    assert_eq!(dom.s_starts, vec![12]);
+    assert_eq!(dom.lens, vec![1]);
+    let minus = [std_seg(int(30, 59, Some(2)), StdLoc::Whole)];
+    assert!(parse_std_align(&minus, &align(), 1).is_err());
+    let short = [std_seg(int(0, 2, Some(1)), StdLoc::Missing)];
+    assert!(parse_std_align(&short, &align(), 1).is_err());
+    let overflow = [std_seg(
+        int(0, 2, Some(1)),
+        int(0x8000_0000, 0x7fff_ffff, None),
+    )];
+    assert!(parse_std_align(&overflow, &align(), 1).is_err());
+}
+
+// basedata.cpp:1252-1300 (quoted at `translated_pos_map`): a minus-strand hit's positions move
+// by `aaLen - alignedLen`; an aligned length beyond the query is NCBI's exception.
+#[test]
+fn positions_on_a_minus_strand_translation() {
+    let segs = [std_seg(int(301, 599, Some(2)), int(0, 99, None))];
+    let dom = parse_std_align(&segs, &align(), 7).unwrap();
+    let mut set = SegSet::new();
+    set.add(10, 12);
+    map_seg_set(&mut set, &dom);
+    // aaLen = (5000 - 1) / 3 = 1666, alignedLen 200: offset 1466.
+    let positions = translated_pos_map(&set, &dom, 5000).unwrap();
+    assert_eq!(
+        positions
+            .iter()
+            .map(|p| (p.curr, p.ori))
+            .collect::<Vec<_>>(),
+        vec![(1476, 10), (1477, 11), (1478, 12)]
+    );
+    assert_eq!(
+        translated_pos_map(&set, &dom, 500),
+        Err("Invalid protein length 166: shorter than aligned range 200".to_string())
+    );
+    // Pr2NaConvert: na length 200 * 3 + 1 = 601; from = 601 - 11 * 3 - 3 - 1 - 3 + 1,
+    // to = 601 - 9 * 3 - 3 - 1.
+    assert_eq!(pr2na_ends(&set, &dom), Some((562, 570)));
+}
+
+// Pr2NaConvert of a plus-strand hit: `pr * 3 + rfidx`, the end `+ 2`.
+#[test]
+fn ends_on_the_plus_strand() {
+    let segs = [std_seg(int(388, 2583, Some(1)), int(0, 731, None))];
+    let dom = parse_std_align(&segs, &align(), 7).unwrap();
+    let mut set = SegSet::new();
+    set.add(5, 9);
+    map_seg_set(&mut set, &dom);
+    // m_starts 129, rfidx 1: 134 * 3 + 1 = 403, 138 * 3 + 1 + 2 = 417.
+    assert_eq!(pr2na_ends(&set, &dom), Some((403, 417)));
+    let positions = translated_pos_map(&set, &dom, 5000).unwrap();
+    assert_eq!(positions[0].curr, 134);
 }

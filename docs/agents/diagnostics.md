@@ -742,8 +742,8 @@ Same values, faster computation:
   AVX2 only; the rule is `x_xdrop_avx2::available()`): the same values, lane width and band steps
   as the 128-bit kernels, so the same result and edit script; a call the 256-bit kernel does not
   take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). `LOSAT_X_DPNOAVX=1` turns it off.
-- `LOSAT_X_DP32=1` (every program's vector X-drop DP, speed; in the strict set from the pull request that
-  added it, 2026-11-13; `=0` returns to the previous path) a call whose X-drop the 16-bit lanes cannot hold
+- `LOSAT_X_DP32=1` (every program's vector X-drop DP, speed; in the strict set from #1097,
+  2026-11-14; `=0` returns to the previous path) a call whose X-drop the 16-bit lanes cannot hold
   (raw X above about 26,700, or `gap_extend > 4095`: `fits_16bit`, the 16-bit kernels' own value-range test)
   no longer returns None to the caller's scalar port (`ALIGN_EX`, `Blast_SemiGappedAlign`,
   `s_BlastAlignPackedNucl`). First the X-drop is clamped to `R = max_m * min(M, N) + 3 * goe + ge * (M + N + 1)`:

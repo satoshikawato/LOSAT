@@ -25,9 +25,9 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 use super::args;
 use super::fasta::FastaFormatter;
 use super::format::FormatSpec;
-use super::letters::{protein_fasta_letters, protein_string_letters};
 use super::range::{parse_sequence_range_open_end, SeqRange, NO_RANGE};
 use super::Diag;
+use crate::sequence::stdaa_letters::{protein_fasta_letters, protein_string_letters};
 
 /// What ends the retrieval before its last sequence.
 #[derive(Debug)]

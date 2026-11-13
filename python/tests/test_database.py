@@ -144,6 +144,14 @@ def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
         output = pylosat.dustmasker(*words, input=data)
         assert output.bytes == stdout
         assert output.diagnostics == stderr.decode()
+    fasta = engine_file("segmasker/in/basic.fa")
+    with open(fasta, "rb") as file:
+        data = file.read()
+    for words in ((), ("-outfmt", "fasta"), ("-outfmt", "maskinfo_asn1_text", "-locut", "2e")):
+        stdout, stderr = losat("segmasker", "-in", fasta, *words)
+        output = pylosat.segmasker(*words, input=data)
+        assert output.bytes == stdout
+        assert output.diagnostics == stderr.decode()
 
 
 def test_a_tool_fails_with_the_command_lines_text(tmp_path):

@@ -1,8 +1,8 @@
 //! The tools of the command line besides the searches: `makeblastdb` builds a BLAST database,
-//! `blastdbcmd` reads one, and `dustmasker` masks the low-complexity regions of nucleotide
-//! sequences. They take the command line's words, read the caller's reader where the command
-//! line reads its standard input, and write what it writes, to the caller's writers; none
-//! touches the process's standard streams.
+//! `blastdbcmd` reads one, `dustmasker` masks the low-complexity regions of nucleotide
+//! sequences and `segmasker` those of protein sequences. They take the command line's words,
+//! read the caller's reader where the command line reads its standard input, and write what it
+//! writes, to the caller's writers; none touches the process's standard streams.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1360-1363
 //! ```c++
@@ -23,6 +23,14 @@
 //! int main( int argc, char * argv[] )
 //! {
 //!     return CDustMaskApplication().AppMain(argc, argv);
+//! }
+//! ```
+//! NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272
+//! ```c++
+//! int main(int argc, const char* argv[])
+//! {
+//!     // Execute main application function
+//!     return SegMaskerApplication().AppMain(argc, argv);
 //! }
 //! ```
 #![warn(missing_docs, unused)]
@@ -109,6 +117,27 @@ pub fn run_dustmasker(
         bytes: Vec::new(),
     };
     let status = crate::dustmasker::run_with(&words, input, output, &mut recorded);
+    outcome(status, recorded.bytes)
+}
+
+/// Runs `segmasker` with the words after the program name, as on the command line: as
+/// [`run_dustmasker`], for protein sequences. `input` is what the command line reads as standard
+/// input (`-in -`, and without `-in`), what it writes to standard output goes to `output` (`-out`
+/// is a file, as there), what it writes to standard error to `diagnostics`, and a failure is an
+/// error whose message is that text. `-conffile` and `-dryrun`, which the command line's NCBI
+/// application start reads, are refused.
+pub fn run_segmasker(
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<(), Error> {
+    let words: Vec<OsString> = argv.iter().map(OsString::from).collect();
+    let mut recorded = Recorded {
+        writer: diagnostics,
+        bytes: Vec::new(),
+    };
+    let status = crate::segmasker::run_with(&words, input, output, &mut recorded);
     outcome(status, recorded.bytes)
 }
 

@@ -1,0 +1,26 @@
+Blast-db-mask-info ::= {
+  algo-id 1,
+  algo-program seg,
+  algo-options "window=12; locut=2.2; hicut=2.5",
+  masks {
+    masks {
+      int {
+        from 41,
+        to 60,
+        id general {
+          db "BL_ORD_ID",
+          tag id 0
+        }
+      },
+      int {
+        from 20,
+        to 40,
+        id general {
+          db "BL_ORD_ID",
+          tag id 1
+        }
+      }
+    },
+    more FALSE
+  }
+}

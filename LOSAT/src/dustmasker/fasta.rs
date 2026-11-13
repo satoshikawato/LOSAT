@@ -41,28 +41,7 @@ impl<R: Read> SequenceSource for FastaSource<R> {
     }
 }
 
-// NCBI reference: libstdc++'s `basic_filebuf::xsgetn` (GCC 14, the compiler of NCBI's 2.17.0
-// build), which NCBI's line reader calls through `istream::read`:
-// ```c++
-//           __throw_ios_failure(__N("basic_filebuf::xsgetn "
-//                                   "error reading the file"), errno);
-// ```
-// (`what()` is the text, `: ` and the `strerror` of `errno`: `-in` naming a directory gives
-// `basic_filebuf::xsgetn error reading the file: Is a directory`, fixture in_dir.)
 /// A failed read of `-in`: the `std::ios_base::failure` of NCBI's stream.
 fn read_failure(error: std::io::Error) -> Failure {
-    let text = error.to_string();
-    match error.raw_os_error() {
-        Some(code) => {
-            let strerror = text
-                .strip_suffix(&format!(" (os error {code})"))
-                .unwrap_or(&text);
-            Failure::Std(format!(
-                "basic_filebuf::xsgetn error reading the file: {strerror}"
-            ))
-        }
-        None => Failure::Refused(super::work::unsupported(&format!(
-            "an input that cannot be read ({text})"
-        ))),
-    }
+    crate::seqmasks_io::run::read_failure(error, super::PROGRAM)
 }

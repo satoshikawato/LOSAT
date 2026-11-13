@@ -1,0 +1,16 @@
+USAGE
+  segmasker [-h] [-help] [-xmlhelp] [-in input_file_name]
+    [-out output_file_name] [-infmt input_format] [-parse_seqids]
+    [-outfmt output_format] [-window integer_value] [-locut float_value]
+    [-hicut float_value] [-version-full] [-version-full-xml]
+    [-version-full-json]
+
+DESCRIPTION
+   Low complexity region masker based on the SEG algorithm
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Cannot convert string '-' to double (m_Pos = 0)
+Error: Argument "locut". Argument cannot be converted:  `-'
+Error:  (CArgException::eConvert) Argument "locut". Argument cannot be converted:  `-'

@@ -4226,8 +4226,9 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
             text
         }
     }
+    // glibc's `%g` keeps the sign of a zero (segmasker's `-locut -0` in `algo-options`).
     if value == 0.0 {
-        return "0".to_string();
+        return if value.is_sign_negative() { "-0" } else { "0" }.to_string();
     }
     // glibc's `%g` of an infinity or a NaN.
     if value.is_infinite() {

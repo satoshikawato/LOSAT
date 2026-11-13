@@ -25,6 +25,9 @@ pub(crate) struct MaskedBioseq<'a> {
     pub ids: &'a [ParsedSeqId],
     pub title: Option<&'a [u8]>,
     pub iupac: &'a [u8],
+    /// Whether the sequence is a protein (`CDeflineGenerator` names a protein without a title
+    /// `unnamed protein product`).
+    pub protein: bool,
 }
 
 /// The serial formats of the `seqloc_*` and `maskinfo_*` writers.
@@ -52,14 +55,23 @@ pub(crate) enum Serial {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FilterProgram {
     Dust,
+    Seg,
 }
 
 impl FilterProgram {
     fn name_and_value(self) -> (&'static str, i32) {
         match self {
             FilterProgram::Dust => ("dust", 10),
+            FilterProgram::Seg => ("seg", 20),
         }
     }
+}
+
+/// Whether the writer of `outfmt` writes through NCBI's serial stream (`CObjectOStream`: the
+/// `seqloc_*` and `maskinfo_*` formats), which reports a failed write; the `interval`,
+/// `acclist` and `fasta` writers write to the `ostream` itself and go on silently.
+pub(crate) fn writes_serial_objects(outfmt: &str) -> bool {
+    outfmt.starts_with("seqloc_") || outfmt.starts_with("maskinfo_")
 }
 
 /// Why a sequence could not be written.
@@ -368,7 +380,7 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
     }
     let defline = generate_bioseq_defline(
         seq.title.unwrap_or_default(),
-        false,
+        seq.protein,
         false,
         &bioseq_ids(seq.ids),
     )

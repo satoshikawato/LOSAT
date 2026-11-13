@@ -1,0 +1,508 @@
+# name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 segmasker 1.0.0 on ws (env_blast, the conda build), 2026-11-13, ad-RG-K-4 (line RG item K2):
+# in/ made by remaining-gaps-20261112/K/k2/probe/gen_inputs.py (proteins with low-complexity pieces, ORFs of tests/fasta/NZ_CP006932.fasta, the dustmasker reader inputs with protein letters), db/ by NCBI makeblastdb 2.17.0 from in/
+# (basic, deflines -> defl, more_defl -parse_seqids -> mdefl_ps, ambig, short, lcr; nucl.fa as a nucleotide db/nucl), the alias files of the dustmasker fixtures as .pal. The rows with an error were run again on the official Linux x64 release
+# (local oracle), which wrote the same bytes but its build tree in the NCBI C++ Exception texts: those name the official tree here, and @CWD@ in the expected text is this directory.
+# The logfile_null rows and help_full come from the local oracle. Not frozen: -version, -version-full and -xmlhelp (LOSAT prints its own version and refuses the others, as dustmasker).
+basic_int	-in in/basic.fa
+basic_int_ps	-in in/basic.fa -parse_seqids
+lcr_int	-in in/lcr.fa
+lcr_int_ps	-in in/lcr.fa -parse_seqids
+orfs_int	-in in/orfs.fa
+orfs_int_ps	-in in/orfs.fa -parse_seqids
+long_int	-in in/long.fa
+long_int_ps	-in in/long.fa -parse_seqids
+short_int	-in in/short.fa
+short_int_ps	-in in/short.fa -parse_seqids
+ambig_int	-in in/ambig.fa
+ambig_int_ps	-in in/ambig.fa -parse_seqids
+deflines_int	-in in/deflines.fa
+deflines_int_ps	-in in/deflines.fa -parse_seqids
+more_defl_int	-in in/more_defl.fa
+more_defl_int_ps	-in in/more_defl.fa -parse_seqids
+dup_int	-in in/dup.fa
+dup_int_ps	-in in/dup.fa -parse_seqids
+noheader_int	-in in/noheader.fa
+noheader_int_ps	-in in/noheader.fa -parse_seqids
+crlf_int	-in in/crlf.fa
+crlf_int_ps	-in in/crlf.fa -parse_seqids
+gaps_int	-in in/gaps.fa
+gaps_int_ps	-in in/gaps.fa -parse_seqids
+badchar_int	-in in/badchar.fa
+badchar_int_ps	-in in/badchar.fa -parse_seqids
+width80_int	-in in/width80.fa
+width80_int_ps	-in in/width80.fa -parse_seqids
+empty_int	-in in/empty.fa
+empty_int_ps	-in in/empty.fa -parse_seqids
+nucl_int	-in in/nucl.fa
+nucl_int_ps	-in in/nucl.fa -parse_seqids
+basic_interval	-in in/basic.fa -outfmt interval
+basic_interval_ps	-in in/basic.fa -outfmt interval -parse_seqids
+basic_fasta	-in in/basic.fa -outfmt fasta
+basic_fasta_ps	-in in/basic.fa -outfmt fasta -parse_seqids
+basic_seqloc_asn1_bin	-in in/basic.fa -outfmt seqloc_asn1_bin
+basic_seqloc_asn1_bin_ps	-in in/basic.fa -outfmt seqloc_asn1_bin -parse_seqids
+basic_seqloc_asn1_text	-in in/basic.fa -outfmt seqloc_asn1_text
+basic_seqloc_asn1_text_ps	-in in/basic.fa -outfmt seqloc_asn1_text -parse_seqids
+basic_seqloc_xml	-in in/basic.fa -outfmt seqloc_xml
+basic_seqloc_xml_ps	-in in/basic.fa -outfmt seqloc_xml -parse_seqids
+basic_maskinfo_asn1_bin	-in in/basic.fa -outfmt maskinfo_asn1_bin
+basic_maskinfo_asn1_bin_ps	-in in/basic.fa -outfmt maskinfo_asn1_bin -parse_seqids
+basic_maskinfo_asn1_text	-in in/basic.fa -outfmt maskinfo_asn1_text
+basic_maskinfo_asn1_text_ps	-in in/basic.fa -outfmt maskinfo_asn1_text -parse_seqids
+basic_maskinfo_xml	-in in/basic.fa -outfmt maskinfo_xml
+basic_maskinfo_xml_ps	-in in/basic.fa -outfmt maskinfo_xml -parse_seqids
+deflines_interval	-in in/deflines.fa -outfmt interval
+deflines_interval_ps	-in in/deflines.fa -outfmt interval -parse_seqids
+deflines_fasta	-in in/deflines.fa -outfmt fasta
+deflines_fasta_ps	-in in/deflines.fa -outfmt fasta -parse_seqids
+deflines_seqloc_asn1_bin	-in in/deflines.fa -outfmt seqloc_asn1_bin
+deflines_seqloc_asn1_bin_ps	-in in/deflines.fa -outfmt seqloc_asn1_bin -parse_seqids
+deflines_seqloc_asn1_text	-in in/deflines.fa -outfmt seqloc_asn1_text
+deflines_seqloc_asn1_text_ps	-in in/deflines.fa -outfmt seqloc_asn1_text -parse_seqids
+deflines_seqloc_xml	-in in/deflines.fa -outfmt seqloc_xml
+deflines_seqloc_xml_ps	-in in/deflines.fa -outfmt seqloc_xml -parse_seqids
+deflines_maskinfo_asn1_bin	-in in/deflines.fa -outfmt maskinfo_asn1_bin
+deflines_maskinfo_asn1_bin_ps	-in in/deflines.fa -outfmt maskinfo_asn1_bin -parse_seqids
+deflines_maskinfo_asn1_text	-in in/deflines.fa -outfmt maskinfo_asn1_text
+deflines_maskinfo_asn1_text_ps	-in in/deflines.fa -outfmt maskinfo_asn1_text -parse_seqids
+deflines_maskinfo_xml	-in in/deflines.fa -outfmt maskinfo_xml
+deflines_maskinfo_xml_ps	-in in/deflines.fa -outfmt maskinfo_xml -parse_seqids
+short_interval	-in in/short.fa -outfmt interval
+short_interval_ps	-in in/short.fa -outfmt interval -parse_seqids
+short_fasta	-in in/short.fa -outfmt fasta
+short_fasta_ps	-in in/short.fa -outfmt fasta -parse_seqids
+short_seqloc_asn1_bin	-in in/short.fa -outfmt seqloc_asn1_bin
+short_seqloc_asn1_bin_ps	-in in/short.fa -outfmt seqloc_asn1_bin -parse_seqids
+short_seqloc_asn1_text	-in in/short.fa -outfmt seqloc_asn1_text
+short_seqloc_asn1_text_ps	-in in/short.fa -outfmt seqloc_asn1_text -parse_seqids
+short_seqloc_xml	-in in/short.fa -outfmt seqloc_xml
+short_seqloc_xml_ps	-in in/short.fa -outfmt seqloc_xml -parse_seqids
+short_maskinfo_asn1_bin	-in in/short.fa -outfmt maskinfo_asn1_bin
+short_maskinfo_asn1_bin_ps	-in in/short.fa -outfmt maskinfo_asn1_bin -parse_seqids
+short_maskinfo_asn1_text	-in in/short.fa -outfmt maskinfo_asn1_text
+short_maskinfo_asn1_text_ps	-in in/short.fa -outfmt maskinfo_asn1_text -parse_seqids
+short_maskinfo_xml	-in in/short.fa -outfmt maskinfo_xml
+short_maskinfo_xml_ps	-in in/short.fa -outfmt maskinfo_xml -parse_seqids
+more_defl_interval	-in in/more_defl.fa -outfmt interval
+more_defl_interval_ps	-in in/more_defl.fa -outfmt interval -parse_seqids
+more_defl_fasta	-in in/more_defl.fa -outfmt fasta
+more_defl_fasta_ps	-in in/more_defl.fa -outfmt fasta -parse_seqids
+more_defl_seqloc_asn1_bin	-in in/more_defl.fa -outfmt seqloc_asn1_bin
+more_defl_seqloc_asn1_bin_ps	-in in/more_defl.fa -outfmt seqloc_asn1_bin -parse_seqids
+more_defl_seqloc_asn1_text	-in in/more_defl.fa -outfmt seqloc_asn1_text
+more_defl_seqloc_asn1_text_ps	-in in/more_defl.fa -outfmt seqloc_asn1_text -parse_seqids
+more_defl_seqloc_xml	-in in/more_defl.fa -outfmt seqloc_xml
+more_defl_seqloc_xml_ps	-in in/more_defl.fa -outfmt seqloc_xml -parse_seqids
+more_defl_maskinfo_asn1_bin	-in in/more_defl.fa -outfmt maskinfo_asn1_bin
+more_defl_maskinfo_asn1_bin_ps	-in in/more_defl.fa -outfmt maskinfo_asn1_bin -parse_seqids
+more_defl_maskinfo_asn1_text	-in in/more_defl.fa -outfmt maskinfo_asn1_text
+more_defl_maskinfo_asn1_text_ps	-in in/more_defl.fa -outfmt maskinfo_asn1_text -parse_seqids
+more_defl_maskinfo_xml	-in in/more_defl.fa -outfmt maskinfo_xml
+more_defl_maskinfo_xml_ps	-in in/more_defl.fa -outfmt maskinfo_xml -parse_seqids
+ambig_interval	-in in/ambig.fa -outfmt interval
+ambig_interval_ps	-in in/ambig.fa -outfmt interval -parse_seqids
+ambig_fasta	-in in/ambig.fa -outfmt fasta
+ambig_fasta_ps	-in in/ambig.fa -outfmt fasta -parse_seqids
+ambig_seqloc_asn1_bin	-in in/ambig.fa -outfmt seqloc_asn1_bin
+ambig_seqloc_asn1_bin_ps	-in in/ambig.fa -outfmt seqloc_asn1_bin -parse_seqids
+ambig_seqloc_asn1_text	-in in/ambig.fa -outfmt seqloc_asn1_text
+ambig_seqloc_asn1_text_ps	-in in/ambig.fa -outfmt seqloc_asn1_text -parse_seqids
+ambig_seqloc_xml	-in in/ambig.fa -outfmt seqloc_xml
+ambig_seqloc_xml_ps	-in in/ambig.fa -outfmt seqloc_xml -parse_seqids
+ambig_maskinfo_asn1_bin	-in in/ambig.fa -outfmt maskinfo_asn1_bin
+ambig_maskinfo_asn1_bin_ps	-in in/ambig.fa -outfmt maskinfo_asn1_bin -parse_seqids
+ambig_maskinfo_asn1_text	-in in/ambig.fa -outfmt maskinfo_asn1_text
+ambig_maskinfo_asn1_text_ps	-in in/ambig.fa -outfmt maskinfo_asn1_text -parse_seqids
+ambig_maskinfo_xml	-in in/ambig.fa -outfmt maskinfo_xml
+ambig_maskinfo_xml_ps	-in in/ambig.fa -outfmt maskinfo_xml -parse_seqids
+lcr_fasta	-in in/lcr.fa -outfmt fasta
+gaps_fasta	-in in/gaps.fa -outfmt fasta
+badchar_fasta	-in in/badchar.fa -outfmt fasta
+width80_fasta	-in in/width80.fa -outfmt fasta
+nucl_fasta	-in in/nucl.fa -outfmt fasta
+long_fasta	-in in/long.fa -outfmt fasta
+orfs_fasta	-in in/orfs.fa -outfmt fasta
+empty_fasta	-in in/empty.fa -outfmt fasta
+empty_maskinfo_asn1_text	-in in/empty.fa -outfmt maskinfo_asn1_text
+empty_maskinfo_asn1_bin	-in in/empty.fa -outfmt maskinfo_asn1_bin
+empty_maskinfo_xml	-in in/empty.fa -outfmt maskinfo_xml
+empty_seqloc_asn1_text	-in in/empty.fa -outfmt seqloc_asn1_text
+win_0	-in in/lcr.fa -window 0
+win_1	-in in/lcr.fa -window 1
+win_2	-in in/lcr.fa -window 2
+win_3	-in in/lcr.fa -window 3
+win_4	-in in/lcr.fa -window 4
+win_5	-in in/lcr.fa -window 5
+win_8	-in in/lcr.fa -window 8
+win_10	-in in/lcr.fa -window 10
+win_11	-in in/lcr.fa -window 11
+win_12	-in in/lcr.fa -window 12
+win_13	-in in/lcr.fa -window 13
+win_14	-in in/lcr.fa -window 14
+win_15	-in in/lcr.fa -window 15
+win_16	-in in/lcr.fa -window 16
+win_17	-in in/lcr.fa -window 17
+win_20	-in in/lcr.fa -window 20
+win_25	-in in/lcr.fa -window 25
+win_32	-in in/lcr.fa -window 32
+win_45	-in in/lcr.fa -window 45
+win_50	-in in/lcr.fa -window 50
+win_64	-in in/lcr.fa -window 64
+win_100	-in in/lcr.fa -window 100
+win_1000	-in in/lcr.fa -window 1000
+win_-1	-in in/lcr.fa -window -1
+win_-12	-in in/lcr.fa -window -12
+win_2147483647	-in in/lcr.fa -window 2147483647
+win_2147483648	-in in/lcr.fa -window 2147483648
+win_-2147483648	-in in/lcr.fa -window -2147483648
+win_-2147483649	-in in/lcr.fa -window -2147483649
+win_0x10	-in in/lcr.fa -window 0x10
+win_0X0c	-in in/lcr.fa -window 0X0c
+win_0x	-in in/lcr.fa -window 0x
+win_010	-in in/lcr.fa -window 010
+win_+12	-in in/lcr.fa -window +12
+win_sp_12	-in in/lcr.fa -window " 12"
+win_12_sp	-in in/lcr.fa -window "12 "
+win_empty	-in in/lcr.fa -window ""
+win_x	-in in/lcr.fa -window x
+win_2.5	-in in/lcr.fa -window 2.5
+win_1e1	-in in/lcr.fa -window 1e1
+win1_long	-in in/long.fa -window 1
+win1_orfs	-in in/orfs.fa -window 1
+win5_long	-in in/long.fa -window 5
+win5_orfs	-in in/orfs.fa -window 5
+win13_long	-in in/long.fa -window 13
+win13_orfs	-in in/orfs.fa -window 13
+win16_long	-in in/long.fa -window 16
+win16_orfs	-in in/orfs.fa -window 16
+win25_long	-in in/long.fa -window 25
+win25_orfs	-in in/orfs.fa -window 25
+win45_long	-in in/long.fa -window 45
+win45_orfs	-in in/orfs.fa -window 45
+win100_long	-in in/long.fa -window 100
+win100_orfs	-in in/orfs.fa -window 100
+lh_0_0	-in in/lcr.fa -locut 0 -hicut 0
+lh_0_0_orfs	-in in/orfs.fa -locut 0 -hicut 0
+lh_1_1.5	-in in/lcr.fa -locut 1 -hicut 1.5
+lh_1_1.5_orfs	-in in/orfs.fa -locut 1 -hicut 1.5
+lh_1.5_1.8	-in in/lcr.fa -locut 1.5 -hicut 1.8
+lh_1.5_1.8_orfs	-in in/orfs.fa -locut 1.5 -hicut 1.8
+lh_1.8_2.1	-in in/lcr.fa -locut 1.8 -hicut 2.1
+lh_1.8_2.1_orfs	-in in/orfs.fa -locut 1.8 -hicut 2.1
+lh_2.2_2.5	-in in/lcr.fa -locut 2.2 -hicut 2.5
+lh_2.2_2.5_orfs	-in in/orfs.fa -locut 2.2 -hicut 2.5
+lh_2.5_2.2	-in in/lcr.fa -locut 2.5 -hicut 2.2
+lh_2.5_2.2_orfs	-in in/orfs.fa -locut 2.5 -hicut 2.2
+lh_3_3	-in in/lcr.fa -locut 3 -hicut 3
+lh_3_3_orfs	-in in/orfs.fa -locut 3 -hicut 3
+lh_3.4_3.75	-in in/lcr.fa -locut 3.4 -hicut 3.75
+lh_3.4_3.75_orfs	-in in/orfs.fa -locut 3.4 -hicut 3.75
+lh_3.5_4	-in in/lcr.fa -locut 3.5 -hicut 4
+lh_3.5_4_orfs	-in in/orfs.fa -locut 3.5 -hicut 4
+lh_4.3_4.3	-in in/lcr.fa -locut 4.3 -hicut 4.3
+lh_4.3_4.3_orfs	-in in/orfs.fa -locut 4.3 -hicut 4.3
+lh_4.33_5	-in in/lcr.fa -locut 4.33 -hicut 5
+lh_4.33_5_orfs	-in in/orfs.fa -locut 4.33 -hicut 5
+lh_-1_-1	-in in/lcr.fa -locut -1 -hicut -1
+lh_-1_-1_orfs	-in in/orfs.fa -locut -1 -hicut -1
+lh_-1_2.5	-in in/lcr.fa -locut -1 -hicut 2.5
+lh_-1_2.5_orfs	-in in/orfs.fa -locut -1 -hicut 2.5
+lh_2.2_-1	-in in/lcr.fa -locut 2.2 -hicut -1
+lh_2.2_-1_orfs	-in in/orfs.fa -locut 2.2 -hicut -1
+lh_0_2.5	-in in/lcr.fa -locut 0 -hicut 2.5
+lh_0_2.5_orfs	-in in/orfs.fa -locut 0 -hicut 2.5
+lh_2.2_0	-in in/lcr.fa -locut 2.2 -hicut 0
+lh_2.2_0_orfs	-in in/orfs.fa -locut 2.2 -hicut 0
+lh_1_0.5	-in in/lcr.fa -locut 1 -hicut 0.5
+lh_1_0.5_orfs	-in in/orfs.fa -locut 1 -hicut 0.5
+lh_2.2_2.2	-in in/lcr.fa -locut 2.2 -hicut 2.2
+lh_2.2_2.2_orfs	-in in/orfs.fa -locut 2.2 -hicut 2.2
+lh_1.9_1.9	-in in/lcr.fa -locut 1.9 -hicut 1.9
+lh_1.9_1.9_orfs	-in in/orfs.fa -locut 1.9 -hicut 1.9
+wlh_10_1.8_2.1	-in in/long.fa -window 10 -locut 1.8 -hicut 2.1
+wlh_10_1.8_2.1_lcr	-in in/lcr.fa -window 10 -locut 1.8 -hicut 2.1
+wlh_8_2.0_2.3	-in in/long.fa -window 8 -locut 2.0 -hicut 2.3
+wlh_8_2.0_2.3_lcr	-in in/lcr.fa -window 8 -locut 2.0 -hicut 2.3
+wlh_25_3_3.3	-in in/long.fa -window 25 -locut 3 -hicut 3.3
+wlh_25_3_3.3_lcr	-in in/lcr.fa -window 25 -locut 3 -hicut 3.3
+wlh_15_2.5_2.8	-in in/long.fa -window 15 -locut 2.5 -hicut 2.8
+wlh_15_2.5_2.8_lcr	-in in/lcr.fa -window 15 -locut 2.5 -hicut 2.8
+wlh_45_3.2_3.6	-in in/long.fa -window 45 -locut 3.2 -hicut 3.6
+wlh_45_3.2_3.6_lcr	-in in/lcr.fa -window 45 -locut 3.2 -hicut 3.6
+wlh_5_1.6_1.9	-in in/long.fa -window 5 -locut 1.6 -hicut 1.9
+wlh_5_1.6_1.9_lcr	-in in/lcr.fa -window 5 -locut 1.6 -hicut 1.9
+dbl00_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.2 -hicut 9
+dbl00_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.2
+dbl01_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2 -hicut 9
+dbl01_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2
+dbl02_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut +2.2 -hicut 9
+dbl02_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut +2.2
+dbl03_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut -0 -hicut 9
+dbl03_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut -0
+dbl04_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut -0.0 -hicut 9
+dbl04_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut -0.0
+dbl05_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut .5 -hicut 9
+dbl05_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut .5
+dbl06_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 5. -hicut 9
+dbl06_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 5.
+dbl07_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.20 -hicut 9
+dbl07_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.20
+dbl08_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 02.2 -hicut 9
+dbl08_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 02.2
+dbl09_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.2e0 -hicut 9
+dbl09_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.2e0
+dbl10_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 22e-1 -hicut 9
+dbl10_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 22e-1
+dbl11_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.22E+1 -hicut 9
+dbl11_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0.22E+1
+dbl12_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e -hicut 9
+dbl12_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e
+dbl13_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1E -hicut 9
+dbl13_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1E
+dbl14_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.2e -hicut 9
+dbl14_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.2e
+dbl15_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.e -hicut 9
+dbl15_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.e
+dbl16_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut .5e -hicut 9
+dbl16_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut .5e
+dbl17_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 12e -hicut 9
+dbl17_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 12e
+dbl18_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e+ -hicut 9
+dbl18_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e+
+dbl19_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e- -hicut 9
+dbl19_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e-
+dbl20_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1ex -hicut 9
+dbl20_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1ex
+dbl21_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e5x -hicut 9
+dbl21_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e5x
+dbl22_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0x1p1 -hicut 9
+dbl22_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0x1p1
+dbl23_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0x2.2 -hicut 9
+dbl23_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0x2.2
+dbl24_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0x10 -hicut 9
+dbl24_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0x10
+dbl25_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0X1P-1 -hicut 9
+dbl25_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0X1P-1
+dbl26_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0x -hicut 9
+dbl26_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0x
+dbl27_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut ,5 -hicut 9
+dbl27_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut ,5
+dbl28_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1,5 -hicut 9
+dbl28_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1,5
+dbl29_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2,2 -hicut 9
+dbl29_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2,2
+dbl30_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut inf -hicut 9
+dbl30_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut inf
+dbl31_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut +inf -hicut 9
+dbl31_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut +inf
+dbl32_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut -inf -hicut 9
+dbl32_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut -inf
+dbl33_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut +Infinity -hicut 9
+dbl33_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut +Infinity
+dbl34_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut infinit -hicut 9
+dbl34_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut infinit
+dbl35_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut nan -hicut 9
+dbl35_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut nan
+dbl36_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut +nan -hicut 9
+dbl36_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut +nan
+dbl37_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut -nan -hicut 9
+dbl37_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut -nan
+dbl38_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut nan(1) -hicut 9
+dbl38_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut nan(1)
+dbl39_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut +nan(1) -hicut 9
+dbl39_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut +nan(1)
+dbl40_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e400 -hicut 9
+dbl40_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e400
+dbl41_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut -1e400 -hicut 9
+dbl41_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut -1e400
+dbl42_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e-400 -hicut 9
+dbl42_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e-400
+dbl43_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 4.9e-324 -hicut 9
+dbl43_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 4.9e-324
+dbl44_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.2250738585072014e-308 -hicut 9
+dbl44_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.2250738585072014e-308
+dbl45_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e308 -hicut 9
+dbl45_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e308
+dbl46_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.2000000000000002 -hicut 9
+dbl46_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.2000000000000002
+dbl47_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1.23456789012345678901 -hicut 9
+dbl47_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1.23456789012345678901
+dbl48_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 123456789 -hicut 9
+dbl48_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 123456789
+dbl49_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1234567 -hicut 9
+dbl49_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1234567
+dbl50_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.0001 -hicut 9
+dbl50_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0.0001
+dbl51_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.00001 -hicut 9
+dbl51_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0.00001
+dbl52_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e-5 -hicut 9
+dbl52_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e-5
+dbl53_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 100000 -hicut 9
+dbl53_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 100000
+dbl54_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1000000 -hicut 9
+dbl54_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1000000
+dbl55_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1e16 -hicut 9
+dbl55_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1e16
+dbl56_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.1 -hicut 9
+dbl56_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0.1
+dbl57_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 3.14159265358979 -hicut 9
+dbl57_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 3.14159265358979
+dbl58_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut " 2.2" -hicut 9
+dbl58_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut " 2.2"
+dbl59_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut "2.2 " -hicut 9
+dbl59_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut "2.2 "
+dbl60_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut "" -hicut 9
+dbl60_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut ""
+dbl61_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut abc -hicut 9
+dbl61_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut abc
+dbl62_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 2.2x -hicut 9
+dbl62_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 2.2x
+dbl63_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut --1 -hicut 9
+dbl63_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut --1
+dbl64_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut +-1 -hicut 9
+dbl64_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut +-1
+dbl65_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut . -hicut 9
+dbl65_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut .
+dbl66_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut - -hicut 9
+dbl66_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut -
+dbl67_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut + -hicut 9
+dbl67_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut +
+dbl68_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut e5 -hicut 9
+dbl68_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut e5
+dbl69_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0e -hicut 9
+dbl69_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0e
+dbl70_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 9999999999999999999 -hicut 9
+dbl70_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 9999999999999999999
+dbl71_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.30000000000000004 -hicut 9
+dbl71_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 0.30000000000000004
+dbl72_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1.7976931348623157e308 -hicut 9
+dbl72_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1.7976931348623157e308
+dbl73_lo	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 1.8e308 -hicut 9
+dbl73_hi	-in in/basic.fa -outfmt maskinfo_asn1_text -locut 0.5 -hicut 1.8e308
+dbl_xml	-in in/basic.fa -outfmt maskinfo_xml -locut 1e-5 -hicut 123456789
+dbl_bin	-in in/basic.fa -outfmt maskinfo_asn1_bin -locut -nan -hicut inf -window -3
+dbl_nan_lcr	-in in/lcr.fa -locut nan -hicut 2.5
+dbl_nanhi_lcr	-in in/lcr.fa -locut 2.2 -hicut -nan
+dbl_inf_lcr	-in in/lcr.fa -locut inf -hicut inf
+dbl_infhi_lcr	-in in/lcr.fa -locut 2.2 -hicut inf
+dbl_1e_lcr	-in in/lcr.fa -locut 2e -hicut 3e
+opts_raw_text	-in in/basic.fa -outfmt maskinfo_asn1_text -window -1 -locut -2 -hicut -3
+opts_raw_xml	-in in/basic.fa -outfmt maskinfo_xml -window 1000 -locut 4.5 -hicut 1
+stdin_int	< in/basic.fa
+stdin_dash	-in - < in/basic.fa
+noin_file	-in in/does_not_exist.fa
+noin_file_mask	-in in/does_not_exist.fa -outfmt maskinfo_asn1_text
+out_bad	-in in/basic.fa -out /nonexistent_dir/x.out
+out_bad_mask	-in in/basic.fa -out /nonexistent_dir/x.out -outfmt maskinfo_asn1_text
+out_bad_noin	-in in/nope.fa -out /nonexistent_dir/x.out
+fmt_bad	-in in/basic.fa -outfmt xyz
+fmt_acclist	-in in/basic.fa -outfmt acclist
+infmt_bad	-in in/basic.fa -infmt xyz
+fmt_upper	-in in/basic.fa -outfmt FASTA
+fmt_seqloc_asn1_binary	-in in/basic.fa -outfmt seqloc_asn1_binary
+unknown_opt	-in in/basic.fa -foo
+hard_masking	-in in/basic.fa -outfmt fasta -hard_masking
+level_opt	-in in/basic.fa -level 20
+help_h	-h
+help_help	-help
+help_noargs_extra	extra_positional
+ps_flag_value	-in in/basic.fa -parse_seqids true
+dup_opt	-in in/basic.fa -window 10 -window 20
+in_dir	-in in
+in_dir_mask	-in in -outfmt maskinfo_asn1_text
+out_dash	-in in/basic.fa -out -
+in_twice	-in in/basic.fa -in in/ambig.fa
+outfmt_empty	-in in/basic.fa -outfmt ""
+infmt_upper	-in in/basic.fa -infmt FASTA
+infmt_empty	-in in/basic.fa -infmt ""
+dryrun_basic	-in in/basic.fa -dryrun
+dryrun_missing_input	-in in/nonexist.fa -dryrun
+dryrun_bad_window	-dryrun -window abc
+dryrun_bad_locut	-dryrun -locut abc
+conf_blastdb	-infmt blastdb -in basic -conffile conf/blastdb.ini
+conf_malformed	-in in/basic.fa -conffile conf/malformed.ini
+conf_missing	-in in/basic.fa -conffile conf/missing.ini
+window_eq	-in in/basic.fa -window=8
+locut_eq	-in in/basic.fa -locut=1.5 -hicut=2
+db_basic_interval	-infmt blastdb -in db/basic -outfmt interval
+db_basic_fasta	-infmt blastdb -in db/basic -outfmt fasta
+db_basic_seqloc_asn1_bin	-infmt blastdb -in db/basic -outfmt seqloc_asn1_bin
+db_basic_seqloc_asn1_text	-infmt blastdb -in db/basic -outfmt seqloc_asn1_text
+db_basic_seqloc_xml	-infmt blastdb -in db/basic -outfmt seqloc_xml
+db_basic_maskinfo_asn1_bin	-infmt blastdb -in db/basic -outfmt maskinfo_asn1_bin
+db_basic_maskinfo_asn1_text	-infmt blastdb -in db/basic -outfmt maskinfo_asn1_text
+db_basic_maskinfo_xml	-infmt blastdb -in db/basic -outfmt maskinfo_xml
+db_basic_int_ps	-infmt blastdb -in db/basic -parse_seqids
+db_basic_mask_ps	-infmt blastdb -in db/basic -outfmt maskinfo_asn1_text -parse_seqids
+db_defl_interval	-infmt blastdb -in db/defl -outfmt interval
+db_defl_fasta	-infmt blastdb -in db/defl -outfmt fasta
+db_defl_seqloc_asn1_bin	-infmt blastdb -in db/defl -outfmt seqloc_asn1_bin
+db_defl_seqloc_asn1_text	-infmt blastdb -in db/defl -outfmt seqloc_asn1_text
+db_defl_seqloc_xml	-infmt blastdb -in db/defl -outfmt seqloc_xml
+db_defl_maskinfo_asn1_bin	-infmt blastdb -in db/defl -outfmt maskinfo_asn1_bin
+db_defl_maskinfo_asn1_text	-infmt blastdb -in db/defl -outfmt maskinfo_asn1_text
+db_defl_maskinfo_xml	-infmt blastdb -in db/defl -outfmt maskinfo_xml
+db_defl_int_ps	-infmt blastdb -in db/defl -parse_seqids
+db_defl_mask_ps	-infmt blastdb -in db/defl -outfmt maskinfo_asn1_text -parse_seqids
+db_mdefl_ps_interval	-infmt blastdb -in db/mdefl_ps -outfmt interval
+db_mdefl_ps_fasta	-infmt blastdb -in db/mdefl_ps -outfmt fasta
+db_mdefl_ps_seqloc_asn1_bin	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_bin
+db_mdefl_ps_seqloc_asn1_text	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_text
+db_mdefl_ps_seqloc_xml	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_xml
+db_mdefl_ps_maskinfo_asn1_bin	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_bin
+db_mdefl_ps_maskinfo_asn1_text	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_text
+db_mdefl_ps_maskinfo_xml	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_xml
+db_mdefl_ps_int_ps	-infmt blastdb -in db/mdefl_ps -parse_seqids
+db_mdefl_ps_mask_ps	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_text -parse_seqids
+db_ambig_interval	-infmt blastdb -in db/ambig -outfmt interval
+db_ambig_fasta	-infmt blastdb -in db/ambig -outfmt fasta
+db_ambig_seqloc_asn1_bin	-infmt blastdb -in db/ambig -outfmt seqloc_asn1_bin
+db_ambig_seqloc_asn1_text	-infmt blastdb -in db/ambig -outfmt seqloc_asn1_text
+db_ambig_seqloc_xml	-infmt blastdb -in db/ambig -outfmt seqloc_xml
+db_ambig_maskinfo_asn1_bin	-infmt blastdb -in db/ambig -outfmt maskinfo_asn1_bin
+db_ambig_maskinfo_asn1_text	-infmt blastdb -in db/ambig -outfmt maskinfo_asn1_text
+db_ambig_maskinfo_xml	-infmt blastdb -in db/ambig -outfmt maskinfo_xml
+db_ambig_int_ps	-infmt blastdb -in db/ambig -parse_seqids
+db_ambig_mask_ps	-infmt blastdb -in db/ambig -outfmt maskinfo_asn1_text -parse_seqids
+db_short_interval	-infmt blastdb -in db/short -outfmt interval
+db_short_fasta	-infmt blastdb -in db/short -outfmt fasta
+db_short_seqloc_asn1_bin	-infmt blastdb -in db/short -outfmt seqloc_asn1_bin
+db_short_seqloc_asn1_text	-infmt blastdb -in db/short -outfmt seqloc_asn1_text
+db_short_seqloc_xml	-infmt blastdb -in db/short -outfmt seqloc_xml
+db_short_maskinfo_asn1_bin	-infmt blastdb -in db/short -outfmt maskinfo_asn1_bin
+db_short_maskinfo_asn1_text	-infmt blastdb -in db/short -outfmt maskinfo_asn1_text
+db_short_maskinfo_xml	-infmt blastdb -in db/short -outfmt maskinfo_xml
+db_short_int_ps	-infmt blastdb -in db/short -parse_seqids
+db_short_mask_ps	-infmt blastdb -in db/short -outfmt maskinfo_asn1_text -parse_seqids
+db_lcr_interval	-infmt blastdb -in db/lcr -outfmt interval
+db_lcr_int_ps	-infmt blastdb -in db/lcr -parse_seqids
+db_nucl	-infmt blastdb -in db/nucl
+db_missing	-infmt blastdb -in db/missing
+db_missing_mask	-infmt blastdb -in db/missing -outfmt maskinfo_asn1_text
+db_stdin	-infmt blastdb < in/basic.fa
+db_lenbad	-infmt blastdb -in db/lenbad
+db_len0	-infmt blastdb -in db/len0
+db_nseqneg	-infmt blastdb -in db/nseqneg
+db_firstbig	-infmt blastdb -in db/firstbig -outfmt fasta
+db_oidr	-infmt blastdb -in db/oidr
+db_oidr_short	-infmt blastdb -in "db/oidr db/short" -outfmt interval
+db_two	-infmt blastdb -in "db/basic db/short" -outfmt fasta
+db_win5	-infmt blastdb -in db/lcr -window 5 -locut 1.5 -hicut 1.8
+db_out_bad	-infmt blastdb -in db/basic -out /nonexistent_dir/x
+db_missing_out_bad	-infmt blastdb -in db/missing -out /nonexistent_dir/x
+logfile_null	-in in/noexist.fa -logfile /dev/null
+logfile_null_ok	-in in/basic.fa -logfile /dev/null
+logfile_null_conf	-in in/basic.fa -conffile conf/malformed.ini -logfile /dev/null
+logfile_null_noheader	-in in/noheader.fa -logfile /dev/null
+help_full	-help-full
+# The review rows (review of line RG item K2, L2 and M1): alias files of a missing volume, without DBLIST and of itself, empty and blank names, and db/r100, a database whose .psq has the byte 100 for two X (db/r21: 21); the local oracle, 2026-11-13, ad-RG-K-4.
+db_alias_missing	-infmt blastdb -in db/alias_missing
+db_alias_missing_mask	-infmt blastdb -in db/alias_missing -outfmt maskinfo_asn1_text
+db_alias_nodblist	-infmt blastdb -in db/alias_nodblist
+db_alias_self	-infmt blastdb -in db/alias_self
+db_empty_name	-infmt blastdb -in ""
+db_space_name	-infmt blastdb -in " "
+db_r21_fasta	-infmt blastdb -in db/r21 -outfmt fasta
+db_r100_fasta	-infmt blastdb -in db/r100 -outfmt fasta
+db_r100_int	-infmt blastdb -in db/r100
+db_r100_mask	-infmt blastdb -in db/r100 -outfmt maskinfo_asn1_text

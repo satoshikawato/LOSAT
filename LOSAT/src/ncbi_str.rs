@@ -19,7 +19,7 @@ mod data_size;
 mod double;
 
 pub use data_size::string_to_uint8_data_size;
-pub(crate) use double::string_to_double;
+pub(crate) use double::{string_to_double, string_to_double_posix_or_local, PosixOrLocalError};
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 

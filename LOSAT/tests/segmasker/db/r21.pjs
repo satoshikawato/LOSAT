@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "r21",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/dbsrc.fa",
+  "number-of-letters": 123,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-13T09:01:00",
+  "number-of-volumes": 1,
+  "bytes-total": 37336,
+  "bytes-to-cache": 230,
+  "files": [
+    "r21.pdb",
+    "r21.phr",
+    "r21.pin",
+    "r21.pot",
+    "r21.psq",
+    "r21.ptf",
+    "r21.pto"
+  ]
+}

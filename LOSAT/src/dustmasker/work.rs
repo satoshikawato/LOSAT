@@ -3,13 +3,12 @@
 
 use std::io::Write;
 
-use crate::ncbi_app::files::{ends_like_sigpipe, open_input_file, Cin, Ostream};
-use crate::ncbi_exception::{err_post_x, NcbiException, ThrowSite};
-use crate::report::db_subject::bioseq_ids;
-use crate::report::defline::bioseq_title_from_source;
-use crate::seqdb::alias::SearchPath;
-use crate::seqdb::{SeqDb, SeqType};
+use crate::ncbi_app::files::{open_input_file, Cin, Ostream};
+use crate::ncbi_exception::{err_post_x, NcbiException};
+use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
+use crate::seqmasks_io::bdb_reader::{prints_title, BdbError, MaskBdbReader};
+use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
 use crate::seqmasks_io::writer::{FilterProgram, MaskWriter, MaskedBioseq, Serial, WriteError};
 
 use super::masker::dust_masks_skip_ns;
@@ -56,19 +55,31 @@ pub(super) enum Failure {
 
 impl From<WriteError> for Failure {
     fn from(error: WriteError) -> Self {
-        match error {
-            WriteError::Io(error) if ends_like_sigpipe(&error) => Failure::ClosedPipe,
-            WriteError::Io(error) => {
-                Failure::Refused(format!("writing the output failed: {error}"))
-            }
-            WriteError::Refused(what) => Failure::Refused(unsupported(&what)),
-        }
+        write_failure(error, super::PROGRAM)
+    }
+}
+
+impl RunFailure for Failure {
+    fn refused(message: String) -> Self {
+        Failure::Refused(message)
+    }
+
+    fn closed_pipe() -> Self {
+        Failure::ClosedPipe
+    }
+
+    fn std_exception(what: String) -> Self {
+        Failure::Std(what)
+    }
+
+    fn stops_writing(&self) -> bool {
+        matches!(self, Failure::Refused(_) | Failure::ClosedPipe)
     }
 }
 
 /// LOSAT's refusal of `what` (a noun phrase).
 pub(super) fn unsupported(what: &str) -> String {
-    format!("{what} is not supported by LOSAT's {}", super::PROGRAM)
+    crate::seqmasks_io::run::unsupported(what, super::PROGRAM)
 }
 
 /// `CMaskReader::GetNextSequence` of a source of sequences.
@@ -241,55 +252,8 @@ pub(super) fn run(
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(out);
-    let mut result = masks_of_input(options, stdin, &mut writer, &mut out);
-    // A refusal of LOSAT's stops before NCBI's run would end, and a closed pipe ends it where
-    // SIGPIPE ends NCBI's: nothing more is written.
-    if !matches!(result, Err(Failure::Refused(_) | Failure::ClosedPipe)) {
-        if let Err(error) = writer.finish(&mut out) {
-            result = Err(error.into());
-        }
-    }
-    // NCBI's `cerr` is tied to `cout`: the output is flushed before the diagnostics of a
-    // failure, and a closed pipe ends the run there, without them.
-    let _ = out.flush();
-    if out.closed() {
-        return Err(Failure::ClosedPipe);
-    }
-    result?;
-    serial_write_failure(&out, options.outfmt)
-}
-
-// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:338-353
-// ```c++
-// void CObjectOStream::Close(void)
-// {
-//     if (m_Fail != fNotOpen) {
-//         try {
-//             DefaultFlush();
-//             ...
-//             m_Output.Close();
-//         }
-//         catch (CException& exc) {
-//             if ( InGoodState() )
-//                 RethrowError(fWriteError, "cannot close output stream",exc);
-//         }
-// ```
-/// LOSAT's refusal when the output `out` of a `seqloc_*` or `maskinfo_*` writer failed. Those
-/// write through NCBI's serial stream (`CObjectOStream`), which checks its writes: NCBI posts
-/// `cannot close output stream` for each object, then stops on `write fault` (exit status 3)
-/// at the next one, or aborts (134) for a `maskinfo` object larger than its 8 KiB buffer. The
-/// `interval`, `acclist` and `fasta` writers write to the `ostream` itself and go on silently,
-/// as here.
-fn serial_write_failure(out: &Ostream<'_>, outfmt: &str) -> Result<(), Failure> {
-    if out.closed() {
-        return Err(Failure::ClosedPipe);
-    }
-    if out.bad() && !matches!(outfmt, "interval" | "acclist" | "fasta") {
-        return Err(Failure::Refused(unsupported(&format!(
-            "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
-        ))));
-    }
-    Ok(())
+    let result = masks_of_input(options, stdin, &mut writer, &mut out);
+    finish(writer, &mut out, result, options.outfmt, super::PROGRAM)
 }
 
 fn masks_of_input(
@@ -311,9 +275,10 @@ fn masks_of_input(
             ids: &record.ids,
             title: record.title.as_deref(),
             iupac: &record.iupac,
+            protein: false,
         };
         writer.print(&seq, &mask, options.parse_seqids, out)?;
-        serial_write_failure(out, options.outfmt)?;
+        serial_write_failure::<Failure>(out, options.outfmt, super::PROGRAM)?;
     }
     Ok(())
 }
@@ -356,47 +321,9 @@ fn reader<'a>(
     }
 }
 
-/// `CMaskBDBReader`: the sequences of a nucleotide BLAST database in OID order, each as
-/// `CSeqDB::GetBioseq` makes it (the Seq-ids of the first definition line, the title joined
-/// from all of them). Every OID of the volumes, also those outside the alias files' OID
-/// ranges (`SeqDb::open_every_oid_in`).
-///
-/// NCBI reference (598d8ae6): c++/include/objtools/seqmasks_io/mask_bdb_reader.hpp:55-61
-/// ```c++
-///     CMaskBDBReader( const string & dbname, bool is_nucl = true)
-///         : CMaskReader( cin ),
-///           seqdb_( new CSeqDB( dbname, (is_nucl
-///                                        ? CSeqDB::eNucleotide
-///                                        : CSeqDB::eProtein)) ),
-///           oid_( 0 )
-///     {}
-/// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:41-55
-/// ```c++
-/// CRef< CSeq_entry > CMaskBDBReader::GetNextSequence()
-/// {
-///     CRef< CSeq_entry > entry( null );
-///
-///     if( oid_ < seqdb_->GetNumOIDs() ) {
-///         CRef< CBioseq > seq = seqdb_->GetBioseq( oid_++ );
-///         entry.Reset( new CSeq_entry );
-///         if( seq.NotEmpty() ) entry->SetSeq( *seq );
-///     }
-///
-///     return entry;
-/// }
-/// ```
+/// `CMaskBDBReader(name)` of a nucleotide database (`seqmasks_io::bdb_reader`).
 struct DatabaseSource {
-    db: SeqDb,
-    oid: u32,
-    /// Whether the writer prints the title (`interval`, `acclist`, `fasta`; the `seqloc_*` and
-    /// `maskinfo_*` writers take only the Seq-id).
-    title_printed: bool,
-}
-
-/// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
-fn prints_title(outfmt: &str) -> bool {
-    matches!(outfmt, "interval" | "acclist" | "fasta")
+    reader: MaskBdbReader,
 }
 
 impl DatabaseSource {
@@ -405,101 +332,35 @@ impl DatabaseSource {
         registry: Result<Option<&str>, &str>,
         title_printed: bool,
     ) -> Result<Self, Failure> {
-        let registry = registry.map_err(|reason| {
-            Failure::Refused(
-                crate::algorithm::common::database::refusal(reason, super::PROGRAM).to_string(),
-            )
-        })?;
-        let path = SearchPath::from_environment(registry).map_err(database_failure)?;
-        // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
-        let db =
-            SeqDb::open_every_oid_in(name, SeqType::Nucleotide, &path).map_err(database_failure)?;
-        Ok(DatabaseSource {
-            db,
-            oid: 0,
+        let reader = MaskBdbReader::open(
+            name,
+            SeqType::Nucleotide,
+            registry,
             title_printed,
-        })
+            super::PROGRAM,
+        )
+        .map_err(database_failure)?;
+        Ok(DatabaseSource { reader })
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:444-450
-// ```c++
-// const char* CException::GetErrCodeString(void) const
-// {
-//     switch (GetErrCode()) {
-//     case eUnknown: return "eUnknown";
-//     default:       return "eInvalid";
-//     }
-// }
-// ```
-// (`CSeqDBException`, seqdbcommon.hpp:73-100, does not name its codes, so every one is reported
-// as `eInvalid`: `(CSeqDBException::eInvalid) No alias or index file found ...` for the
-// `eFileErr` of seqdbalias.cpp:311-321, fixture db_missing.)
-/// An error of the database reader: NCBI's exception (`SeqDbError::ncbi_exception`), its
-/// `CSeqDBException` (`SeqDbError::ncbi_message`), or LOSAT's refusal.
-fn database_failure(error: crate::seqdb::SeqDbError) -> Failure {
-    // An NCBI exception of the reader itself (an alias value that does not convert), reported
-    // as the application reports it (blastdbcmd's `database_error`).
-    if let Some(exception) = error.ncbi_exception() {
-        return Failure::Ncbi(exception.clone());
-    }
-    match error.ncbi_message() {
-        Some(text) => Failure::Ncbi(NcbiException::new(
-            ThrowSite::generated("CSeqDBException::eInvalid"),
-            text,
-        )),
-        None => Failure::Refused(
-            crate::algorithm::common::database::refusal(&error.to_string(), super::PROGRAM)
-                .to_string(),
-        ),
+/// An error of the database reader, reported as `AppMain` reports an exception of `Run`
+/// (`report`), or LOSAT's refusal.
+fn database_failure(error: BdbError) -> Failure {
+    match error {
+        BdbError::Ncbi(exception) => Failure::Ncbi(exception),
+        BdbError::Refused(reason) => Failure::Refused(reason),
+        BdbError::Unsupported(what) => Failure::Refused(unsupported(&what)),
     }
 }
 
 impl SequenceSource for DatabaseSource {
     fn next_record(&mut self) -> Result<Option<Record>, Failure> {
-        if self.oid >= self.db.num_seqs() {
-            return Ok(None);
-        }
-        let oid = self.oid;
-        self.oid += 1;
-        let set = self.db.defline_set(oid).map_err(database_failure)?;
-        if set
-            .deflines
-            .iter()
-            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
-        {
-            return Err(Failure::Refused(unsupported(&format!(
-                "sequence {oid} of the database: a definition line with bytes NCBI reads as '#' \
-                 (it writes an error each time it reads them)"
-            ))));
-        }
-        let ids = set
-            .deflines
-            .first()
-            .map(|defline| defline.ids.clone())
-            .unwrap_or_default();
-        let title = set.bioseq_title();
-        // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
-        // names of a definition line with a taxid; seqdbvol.cpp:1055-1160).
-        let has_source = set
-            .deflines
-            .iter()
-            .any(|defline| defline.taxid.is_some_and(|taxid| taxid > 0));
-        if self.title_printed && has_source && bioseq_title_from_source(&title, &bioseq_ids(&ids)) {
-            return Err(Failure::Refused(unsupported(&format!(
-                "sequence {oid} of the database, which has no title and a taxid (NCBI makes its \
-                 title from the taxonomy),"
-            ))));
-        }
-        let length = self.db.nucleotide_length(oid).map_err(database_failure)?;
-        let iupac = self
-            .db
-            .nucleotide_iupac_range(oid, 0, length)
-            .map_err(database_failure)?;
-        Ok(Some(Record {
-            ids,
-            title: Some(title),
-            iupac,
+        let record = self.reader.next_record().map_err(database_failure)?;
+        Ok(record.map(|record| Record {
+            ids: record.ids,
+            title: Some(record.title),
+            iupac: record.residues,
         }))
     }
 }

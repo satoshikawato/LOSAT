@@ -396,8 +396,11 @@ impl RpsRun<'_> {
             )
             .checked_mul(int_scale)
             .ok_or_else(|| scale_overflow(scale, self.program))?;
-        let gap_trigger = ((self.gap_trigger_bits * std::f64::consts::LN_2 + query.kbp_std.k.ln())
-            / query.kbp_std.lambda) as i32;
+        let gap_trigger = crate::core::x_drop::gap_trigger_raw_score(
+            self.gap_trigger_bits,
+            query.kbp_std.lambda,
+            query.kbp_std.k,
+        );
         Ok(RpsCutoffs {
             x_dropoff,
             word_cutoff: gap_trigger
@@ -489,7 +492,7 @@ impl RpsRun<'_> {
         if !redo && !kernel_x_drop_fits(x_drop_final, gap_open, gap_extend) {
             return Err(final_overflow());
         }
-        // The redo converts its X-drop at its own Lambda (`RedoRun::with_final_x_drop_bits`);
+        // The redo converts its X-drop at its own Lambda (`RedoRun::new`);
         // it is checked here, before any search.
         if redo {
             int4_of(RedoRun::x_dropoff_of(

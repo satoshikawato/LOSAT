@@ -667,6 +667,7 @@ fn parse_blastp_args(
         strategy: None,
         app: blastp::args::BlastpApp::Blastp,
         inclusion_ethresh: None,
+        gap_trigger: None,
         first_query_ordinal: 0,
         psiblast_pssm: None,
         formatting: Default::default(),

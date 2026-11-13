@@ -22,9 +22,6 @@ use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
-use crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE;
-#[cfg(test)]
-use crate::algorithm::tblastx::constants::{X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bp_build_compressed_lookup, x_bp_build_compressed_lookup_of, x_bpclut_on, XCompressedLookup,
     XFlatCompressedLookup, X_BLASTP, X_BLASTP_MATRIX,
@@ -812,19 +809,6 @@ const BLASTP_NEAR_IDENTICAL_BITS_PER_POSITION: f64 = 1.74;
 /// psiblast's `-inclusion_ethresh` changes (`ResolvedBlastpArgs::inclusion_ethresh`).
 pub(super) const PSI_INCLUSION_ETHRESH: f64 = 0.002;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:457-463
-// ```c
-// params->gap_x_dropoff = (Int4)
-//     (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
-// params->gap_x_dropoff_final = (Int4)
-//     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda,
-//         params->gap_x_dropoff);
-// ```
-#[inline]
-fn blastp_gapped_x_dropoff_raw(bits: f64, lambda: f64) -> i32 {
-    ((bits * std::f64::consts::LN_2) / lambda) as i32
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2387-2415
 // ```c
 // gapping_params->x_dropoff = (Int4)
@@ -1437,11 +1421,16 @@ fn blastp_hit_cutoff_score_for_context(
 //    }
 // }
 // ```
-fn blastp_word_cutoff_score_for_context(hit_cutoff_score: i32, ctx: &QueryContext) -> i32 {
+// `bits` is psiblast's `-gap_trigger` or the protein default (`ResolvedBlastpArgs`).
+fn blastp_word_cutoff_score_for_context(
+    hit_cutoff_score: i32,
+    ctx: &QueryContext,
+    bits: f64,
+) -> i32 {
     if !ctx.is_valid {
         return i32::MAX;
     }
-    let gap_trigger = gap_trigger_raw_score(GAP_TRIGGER_BIT_SCORE, &ctx.karlin_params);
+    let gap_trigger = gap_trigger_raw_score(bits, &ctx.karlin_params);
     gap_trigger.min(hit_cutoff_score)
 }
 
@@ -7303,11 +7292,16 @@ fn x_query_block_plan(
         return None;
     }
     // Several outputs, the hit records or an observer. Each
-    // output of several is a writer of the caller (a sink the block search opens itself would be
-    // flushed by every block, and a stream that two outputs share would get each block's formats in
-    // turn); no `-db` (the records' `s_idx` of a database search rank the subjects that the call's
-    // lists name); an observer only with the hit records, which count the HSPs of each block for
-    // the observer's indices (`XOffsetObserver`).
+    // output of several is a writer of the caller: the search of all queries writes each output's
+    // whole report in turn and opens its sink just before (`OutputSink::open`), while the block
+    // search opens every sink once and writes them block by block, so two outputs on standard
+    // output would get each block's formats in turn, two outputs to one file would write over each
+    // other through two handles (the search of all queries leaves the last report), and a file that
+    // cannot be created would stop the run after the first block's part of the outputs before it
+    // instead of after their whole reports (test
+    // `several_file_outputs_are_written_one_after_the_other`); no `-db` (the records' `s_idx` of a
+    // database search rank the subjects that the call's lists name); an observer only with the hit
+    // records, which count the HSPs of each block for the observer's indices (`XOffsetObserver`).
     let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
     if x_web
         && (subject_source.database().is_some()
@@ -9135,15 +9129,15 @@ fn run_resolved_in_pool(
     let (x_drop_gapped, x_drop_gapped_final) =
         crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
     // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
-    // after IDENTITY's reset too; the same choice as `ordinary_traceback` below).
-    if !args.ungapped {
+    // after IDENTITY's reset too; the same choice as `ordinary_traceback` below). A PSSM search
+    // converts its X-drops with the PSSM's Lambda and checks them there (`pssm_hooks::pssm_prelim`).
+    if !args.ungapped && args.psi_search.is_none() {
         crate::core::x_drop::check_gapped_x_dropoffs(
-            "BLASTP",
+            args.app.name(),
             x_drop_bits,
             (x_drop_gapped, x_drop_gapped_final),
             (args.scoring.gap_open, args.scoring.gap_extend),
             args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats
-                || args.psi_search.is_some()
                 || args.rps_search.is_some(),
         )?;
     }
@@ -9609,7 +9603,9 @@ fn run_resolved_in_pool(
     let word_cutoff_scores: Vec<i32> = hit_cutoff_scores
         .iter()
         .zip(contexts.iter())
-        .map(|(&hit_cutoff_score, ctx)| blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx))
+        .map(|(&hit_cutoff_score, ctx)| {
+            blastp_word_cutoff_score_for_context(hit_cutoff_score, ctx, args.gap_trigger_bits)
+        })
         .collect();
 
     // NCBI computes the size in its `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`): a
@@ -11089,6 +11085,7 @@ fn run_resolved_in_pool(
             database,
             subjects,
             blastp_parallel_pool,
+            culling.as_mut(),
             &mut x_compact_hit_lists,
         )
         .map_err(|error| match database {
@@ -14814,6 +14811,7 @@ mod tests {
             strategy: None,
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
+            gap_trigger: None,
             first_query_ordinal: 0,
             psiblast_pssm: None,
             formatting: Default::default(),
@@ -15947,15 +15945,17 @@ mod tests {
             alpha: 1.0,
             beta: -1.0,
         };
+        use crate::algorithm::tblastx::constants::{X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM};
         let scaled_lambda = gapped.lambda / 32.0;
-        let unscaled_final =
-            blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, gapped.lambda).max(
-                blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_PRELIM as f64, gapped.lambda),
-            );
+        let (_, unscaled_final) = crate::core::x_drop::gapped_x_dropoffs(
+            X_DROP_GAPPED_PRELIM as f64,
+            X_DROP_GAPPED_FINAL as f64,
+            gapped.lambda,
+        );
 
         assert_eq!(
             blastp_redo_x_dropoff(X_DROP_GAPPED_FINAL as f64, scaled_lambda, unscaled_final),
-            blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, scaled_lambda)
+            ((X_DROP_GAPPED_FINAL as f64 * std::f64::consts::LN_2 / scaled_lambda) as i32)
                 .max(unscaled_final)
         );
     }
@@ -16512,7 +16512,10 @@ mod tests {
             ),
             i32::MAX
         );
-        assert_eq!(blastp_word_cutoff_score_for_context(50, &invalid), i32::MAX);
+        assert_eq!(
+            blastp_word_cutoff_score_for_context(50, &invalid, 22.0),
+            i32::MAX
+        );
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:306-309

@@ -93,7 +93,7 @@ pub(crate) enum MaskReadError {
     /// The `std::bad_alloc` of a record whose `>?` lines state more residues than can be
     /// allocated.
     OutOfMemory,
-    /// What LOSAT refuses (the text before "is not supported by LOSAT's <program>"): a record
+    /// What LOSAT refuses (the text before `is not supported by LOSAT's <program>`): a record
     /// past NCBI's `TSeqPos` (`SeqInst::PastSeqPos`).
     Refused(String),
 }
@@ -226,11 +226,25 @@ impl<R: Read> MaskFastaReader<R> {
         }
         match result {
             Ok(record) => {
-                if let SeqInst::PastSeqPos { length } = record.inst {
-                    self.reader = None;
-                    return Err(MaskReadError::Refused(past_seq_pos_refusal(length)));
-                }
                 let parsed_ids = reader.parses_ids();
+                if let SeqInst::PastSeqPos { length, .. } = record.inst {
+                    self.reader = None;
+                    let record = mask_record(
+                        Record {
+                            inst: SeqInst::Virtual,
+                            ..record
+                        },
+                        parsed_ids,
+                    );
+                    let mut id = Vec::new();
+                    if let Some(first) = record.ids.first() {
+                        crate::seqid::label::fasta(first, &mut id);
+                    }
+                    return Err(MaskReadError::Refused(past_seq_pos_refusal(
+                        &String::from_utf8_lossy(&id),
+                        length,
+                    )));
+                }
                 Ok(Some(mask_record(record, parsed_ids)))
             }
             Err(ReadError::Parse(error)) if error.code == ErrCode::Eof => {

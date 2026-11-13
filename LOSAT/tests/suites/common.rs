@@ -42,6 +42,8 @@ mod library_examples;
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]
 mod makeblastdb_output_streams;
+#[path = "../makeblastdb_past_32_bits.rs"]
+mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
 #[path = "../masker_fixtures.rs"]

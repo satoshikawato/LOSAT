@@ -378,8 +378,8 @@ fn the_error_of_a_record_without_residues() {
 }
 
 /// A record of 4,294,967,296 letters or more, counting its gaps, is refused (NCBI's length is
-/// a 32-bit `TSeqPos`; line RG DECISIONS K3-6), with nothing allocated for its gaps; the
-/// records before it are read.
+/// a 32-bit `TSeqPos`; line RG DECISIONS K3-6, K3-8), with nothing allocated for its gaps; the
+/// records before it are read, and the refusal names the record.
 #[test]
 fn a_record_past_32_bits_is_refused() {
     for (input, protein, length) in [
@@ -404,7 +404,13 @@ fn a_record_past_32_bits_is_refused() {
         let Some(MaskReadError::Refused(what)) = &read.error else {
             panic!("{:?}", read.error)
         };
-        assert!(what.contains(&format!("({length};")), "{what}");
+        assert!(
+            what.contains(&format!(
+                "(lcl|2: {} letters;",
+                crate::ncbi_str::with_commas(length)
+            )),
+            "{what}"
+        );
     }
 }
 

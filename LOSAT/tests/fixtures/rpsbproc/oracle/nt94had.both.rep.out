@@ -1,0 +1,44 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/nt94had.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	1060	mg00094_467301-468360
+DOMAINS
+1	Query_1[1]	Specific	510757	121	927	0	566.629	NF011705	PRK15126	-	-
+ENDDOMAINS
+SITES
+1	Query_1[1]	Specific	active site	D133-135,M136-138,D139-141,G142-144,T145-147,T235-237,G238-240,K676-678,G742-744,D745-747,A748-750,N754-756,D757-759	13	0	319818
+1	Query_1[1]	Specific	HAD signature motif I	D133-135,M136-138,D139-141,G142-144,T145-147	5	0	319818
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

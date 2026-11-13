@@ -236,7 +236,7 @@ pub enum Commands {
     // static const char *PROGRAM_USAGE =	//multiline
     // "Process output from offline rpsblast to annotate sequence with conserved domain information";
     // ```
-    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein queries)
+    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
     #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
     Rpsbproc(crate::rpsbproc::RpsbprocArgs),
 }
@@ -764,24 +764,17 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // ```
 /// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), `-gap_trigger`, `-sum_stats`, `-culling_limit` (blastp runs it since
-/// O3b; psiblast's first round is not compared with NCBI's under it yet), and the arguments that blastp's engine
-/// does not run either (`is_unported_blastp_arg`; psiblast has no database masks and no
-/// `-mt_mode`).
+/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
+/// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
+/// psiblast has no database masks and no `-mt_mode`). `-sum_stats true` is refused with the
+/// options (`PsiblastArgs::into_blastp_args`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
-    "culling_limit",
     // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
     "export_search_strategy",
-    "gap_trigger",
     "ignore_msa_master",
     "in_msa",
     "msa_master_idx",
     "phi_pattern",
-    "sum_stats",
-    // Line RG X1 ported them to BLASTP's search, not to PSIBLAST's rounds (series RG-Q).
-    "xdrop_gap",
-    "xdrop_gap_final",
-    "xdrop_ungap",
 ];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {

@@ -341,7 +341,7 @@ pub(crate) fn flow_unit_cap(
     unit_cap(threads, options, subjects, |cap| {
         super::x_subject_flow::subjects_per_task()
             .map(|most| capped_subjects_per_task(share(cap), subjects.len(), most))
-            .filter(|&k| super::x_subject_flow::fits(k, pool, false, options, subjects))
+            .filter(|&k| super::x_subject_flow::fits(k, pool, options, subjects))
             .map_or(0, |k| subjects.len().div_ceil(k))
     })
 }
@@ -695,7 +695,6 @@ pub(super) fn chunk_subjects_on_pool(
                     lookup,
                     table,
                     xdrop,
-                    false,
                     oid,
                     x_containment,
                 )?;

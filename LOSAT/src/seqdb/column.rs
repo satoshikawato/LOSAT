@@ -320,6 +320,18 @@ impl Column {
         self.data.path()
     }
 
+    /// Whether the numbers of the data file read byte-reversed on this host: a little-endian
+    /// host that reads the big-endian `.?xb` file because the column has no `.?xc` (`open_all`).
+    pub fn reads_byte_reversed(&self) -> bool {
+        cfg!(target_endian = "little")
+            && !self
+                .data
+                .path()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.ends_with('c'))
+    }
+
     fn format_error(&self, message: impl Into<String>) -> SeqDbError {
         SeqDbError::Format {
             path: self.index.path().to_path_buf(),
@@ -647,6 +659,16 @@ impl Column {
     // ```
     /// The blob of the sequence `oid` (volume-relative); empty when the sequence has none.
     pub fn blob(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
+        let mut blob = Vec::new();
+        self.blob_into(oid, &mut blob)?;
+        Ok(blob)
+    }
+
+    /// [`Column::blob`] into `out`, whose bytes it replaces (its capacity is kept): a search's
+    /// mask reads (`SeqDb::mask_ranges_into`) reuse one buffer per worker. No NCBI counterpart:
+    /// only where the bytes are kept (NCBI's `CBlastDbBlob` points into its mapping).
+    pub fn blob_into(&self, oid: u32, out: &mut Vec<u8>) -> Result<(), SeqDbError> {
+        out.clear();
         if i64::from(oid) >= i64::from(self.num_oids) {
             return Err(SeqDbError::Range(format!(
                 "sequence {oid} is outside the column ({} sequences)",
@@ -661,7 +683,8 @@ impl Column {
                 "the offset array of the column ends before the entry of sequence {oid}"
             )));
         }
-        let offsets = self.index.read_range(istart as u64, iend as u64)?;
+        let mut offsets = [0u8; 8];
+        self.index.read_exact_at(&mut offsets, istart as u64)?;
         let mut blob = Blob::new(&offsets, 0);
         let dstart = blob.read_i32().map_err(|e| self.format_error(e))?;
         let dend = blob.read_i32().map_err(|e| self.format_error(e))?;
@@ -671,7 +694,7 @@ impl Column {
             )));
         }
         if dend == dstart {
-            return Ok(Vec::new());
+            return Ok(());
         }
         // A negative start is undefined in NCBI (a pointer before the mapping); a range
         // past the end of the data file fails `SEQDB_FILE_ASSERT(m_Length >= end)`.
@@ -680,7 +703,10 @@ impl Column {
                 "the data range of sequence {oid} starts at {dstart}"
             )));
         }
-        self.data.read_range(dstart as u64, dend as u64)
+        // The checks of `DbFile::read_range` before its buffer is sized, with its errors.
+        self.data.x_check_range(dstart as u64, dend as u64)?;
+        out.resize((dend - dstart) as usize, 0);
+        self.data.read_exact_at(out, dstart as u64)
     }
 }
 

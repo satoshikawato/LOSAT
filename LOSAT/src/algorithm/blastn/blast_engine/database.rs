@@ -41,6 +41,7 @@ use crate::algorithm::blastn::coordination::SubjectMetadata;
 use crate::algorithm::blastn::hsp::{BlastnHitList, BlastnOutputFormat};
 use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::db_subject::ParsedSubject;
@@ -381,21 +382,23 @@ impl BlastnDatabase {
     /// with the command line's errors. The total length is NCBI's `Int8`; one that the
     /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
-    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`), and the id of the
+    /// database mask `mask` checked as NCBI checks it there (`DbMaskOption::validate_at_open`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
+        mask: Option<&DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
         // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;
@@ -703,6 +706,48 @@ impl BlastnDatabase {
     /// (`algorithm::common::database::pairwise_database`).
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:394-406
+    // ```c++
+    //     // Process the filtering algorithm IDs
+    //     info.filt_algorithm_name.clear();
+    //     info.filt_algorithm_options.clear();
+    //     if (dbfilt_algorithm == -1) {
+    //         return true;
+    //     }
+    //     ...
+    //     seqdb->GetMaskAlgorithmDetails(dbfilt_algorithm,
+    //                                    filtering_algorithm,
+    //                                    info.filt_algorithm_name,
+    //                                    info.filt_algorithm_options);
+    // ```
+    /// `pairwise_database` of a search masked with `mask` (`None`: not masked): each name's
+    /// algorithm, which the `Masked using:` lines show.
+    pub(super) fn pairwise_database_masked(&self, mask: Option<&ResolvedMask>) -> PairwiseDatabase {
+        let mut shown = self.pairwise_database();
+        if let Some(mask) = mask {
+            for (database, algorithm) in shown.databases.iter_mut().zip(&mask.shown) {
+                database.filt_algorithm_name = algorithm.program_name.clone();
+                database.filt_algorithm_options = algorithm.options.clone();
+            }
+        }
+        shown
+    }
+
+    /// The formatter's resolution of `option` (`DbMaskOption::resolve`; its warning goes to
+    /// `warning`), and LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`).
+    pub(super) fn resolve_mask_option(
+        &self,
+        option: &DbMaskOption,
+        warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> Result<Option<ResolvedMask>> {
+        option.resolve(&self.db, &self.name, PROGRAM, warning)
+    }
+
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
+    pub(super) fn check_mask_limits(&self, mask: &ResolvedMask) -> Result<()> {
+        mask.check_losat_limits(&self.db, PROGRAM)
     }
 }
 

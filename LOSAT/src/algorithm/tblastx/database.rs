@@ -86,7 +86,7 @@ impl TblastxDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;

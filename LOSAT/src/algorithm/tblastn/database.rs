@@ -91,7 +91,7 @@ impl TblastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()

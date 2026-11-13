@@ -138,7 +138,7 @@ impl BlastpDatabase {
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids (line DBID): BLASTP (ID2a) and psiblast read it.
-        shared::restrict_database(&mut db, name, list, diagnostics, settings, program)?;
+        shared::restrict_database(&mut db, name, list, None, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),

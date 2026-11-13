@@ -247,7 +247,17 @@ impl ArchiveRequest {
 /// and its archive after it, and LOSAT writes some archives after the searches of later batches,
 /// so each writer passes the batches at its own place.
 #[derive(Clone, Debug, Default)]
-pub struct OptionsHandle(Arc<OnceLock<DatabaseFilter>>);
+pub struct OptionsHandle(Arc<HandleOptions>);
+
+/// What `OptionsHandle` holds: the database list's parameter, set where the database is opened,
+/// and the database masking's, set where the formatter resolves it (after `Query is Empty!`).
+#[derive(Debug, Default)]
+struct HandleOptions {
+    filter: OnceLock<DatabaseFilter>,
+    /// `DbFilteringAlgorithmId` or `DbFilteringAlgorithmKey`, then `SubjectMaskingType`
+    /// (`blastinput::db_mask::ResolvedMask::archive_params`).
+    masking: OnceLock<Vec<options::Param>>,
+}
 
 #[derive(Debug)]
 struct DatabaseFilter {
@@ -296,7 +306,7 @@ impl OptionsHandle {
         list: Option<options::Param>,
         empty_database: bool,
     ) -> anyhow::Result<()> {
-        let set = self.0.set(DatabaseFilter {
+        let set = self.0.filter.set(DatabaseFilter {
             list,
             empty: empty_database,
         });
@@ -307,9 +317,35 @@ impl OptionsHandle {
         Ok(())
     }
 
-    /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
-    pub fn database_list(&self) -> Option<&options::Param> {
-        self.0.get().and_then(|filter| filter.list.as_ref())
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-503
+    // ```c++
+    //     // Set the filtering algorithms
+    //     string algo_key = db->GetFilteringAlgorithmKey();
+    //     if (algo_key != kEmptyStr)
+    //     {
+    //     	int mask_type = (int) db->GetMaskType();
+    // ```
+    /// The database masking's program options (`ResolvedMask::archive_params`), which follow the
+    /// list's: set once per run, where the formatter resolves the masking; a second setting is
+    /// LOSAT's internal error.
+    pub fn set_database_masking(&self, params: Vec<options::Param>) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.0.masking.set(params).is_ok(),
+            "LOSAT internal error: the database masking is set twice in one run"
+        );
+        Ok(())
+    }
+
+    /// The program options of the database: the `TaxidList` or `NegativeTaxidList` option
+    /// (`set_database_filter`), then the masking's (`set_database_masking`).
+    pub fn database_params(&self) -> Vec<options::Param> {
+        self.0
+            .filter
+            .get()
+            .and_then(|filter| filter.list.clone())
+            .into_iter()
+            .chain(self.0.masking.get().into_iter().flatten().cloned())
+            .collect()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
@@ -326,7 +362,7 @@ impl OptionsHandle {
     /// it; a list that kept no sequence makes it 0.
     pub fn pass(&self, carry: &mut SearchSpaceCarry, searched: Option<i64>) {
         if searched.is_some() {
-            let empty = self.0.get().is_some_and(|filter| filter.empty);
+            let empty = self.0.filter.get().is_some_and(|filter| filter.empty);
             carry.0 = if empty { Some(0) } else { searched };
         }
     }

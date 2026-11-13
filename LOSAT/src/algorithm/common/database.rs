@@ -129,15 +129,17 @@ pub(crate) fn open_database(
 ///
 /// The one owner of the order of a search database's errors, which is NCBI's (probes p4c_e*,
 /// p4c_f2 of line RG D1a-2): the alias files' tree and ranges (`open_database`), the list, the
-/// alias files' counts (`SeqDb::check_alias_values`), the formatter's reopening of each name
-/// (`SeqDb::read_name_records`), then what NCBI meets only when it reads the sequences' headers
-/// and reports: LOSAT's refusal of mixed accession tables (`SeqDb::check_accession_tables`) and
-/// the first headers (`check_seqids`, whose answer it returns: whether the database has parsed
-/// Seq-ids).
+/// alias files' counts (`SeqDb::check_alias_values`), the id of a database mask (`mask`, BLASTN's
+/// `-db_soft_mask` / `-db_hard_mask`: `DbMaskOption::validate_at_open`), the formatter's
+/// reopening of each name (`SeqDb::read_name_records`), then what NCBI meets only when it reads
+/// the sequences' headers and reports: LOSAT's refusal of mixed accession tables
+/// (`SeqDb::check_accession_tables`) and the first headers (`check_seqids`, whose answer it
+/// returns: whether the database has parsed Seq-ids).
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
     name: &str,
     list: Option<&crate::seqdb::DbList>,
+    mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
     diagnostics: &mut dyn std::io::Write,
     settings: &ApplicationSettings,
     program: &str,
@@ -164,6 +166,19 @@ pub(crate) fn restrict_database(
             },
             program,
         ));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:292-298
+    // ```c++
+    //     else {
+    //         m_SeqDb.Reset(new CSeqDB(m_DbName, seq_type));
+    //
+    //     }
+    //
+    //     x_ValidateMaskingAlgorithm();
+    //     _ASSERT(m_SeqDb.NotEmpty());
+    // ```
+    if let Some(mask) = mask {
+        mask.validate_at_open(db, name, db.seqtype() == SeqType::Nucleotide, program)?;
     }
     db.read_name_records(name)
         .map_err(|error| database_error(error, program))?;
@@ -244,6 +259,25 @@ pub(crate) fn note_archive_database_filter(
         empty_length && !searchsp,
     )?;
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516 (quoted at
+// `blastinput::db_mask::ResolvedMask::archive_params`)
+/// The database masking's program options (`ResolvedMask::archive_params`) in the run's options
+/// handle, which the archive (`archive`) and the search strategy (`strategy`) share
+/// (`note_archive_database_filter`): set where the formatter resolves the masking, after the
+/// list's, and only for a masked search (NCBI writes none after its warning).
+pub(crate) fn note_archive_database_masking(
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    params: Vec<crate::report::archive::options::Param>,
+) -> Result<()> {
+    let options = match (archive, strategy) {
+        (Some(handle), _) => handle.options(),
+        (None, Some(strategy)) => strategy.options(),
+        (None, None) => return Ok(()),
+    };
+    options.set_database_masking(params)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
@@ -615,6 +649,10 @@ pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
                 date: record.date.clone(),
                 num_sequences: u64::from(record.num_seqs),
                 total_letters: record.total_length,
+                // A search without database masking (`dbfilt_algorithm == -1`); a BLASTN search
+                // with it fills them (`BlastnDatabase::pairwise_database_masked`).
+                filt_algorithm_name: String::new(),
+                filt_algorithm_options: String::new(),
             })
             .collect(),
     )

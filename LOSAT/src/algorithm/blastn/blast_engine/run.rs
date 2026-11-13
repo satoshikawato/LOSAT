@@ -7842,6 +7842,7 @@ fn open_search_database(
                 name,
                 settings,
                 list,
+                args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
@@ -8687,7 +8688,7 @@ fn megablast_index(
 }
 
 fn search(
-    args: BlastnArgs,
+    mut args: BlastnArgs,
     queries: SearchQueries<'_>,
     reading: QueryReading,
     ranges: Ranges<'_>,
@@ -8719,6 +8720,27 @@ fn search(
         Subjects::Database(database) => megablast_index(&args, database, outputs.diagnostics)?,
         Subjects::Records(_) => MegablastIndex::NotAsked,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (quoted at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`): its warning
+    // (one diagnostic, which the archive saves as one message) or its database error, before its
+    // other work; the archive and the search strategy write the result's program options.
+    if let (Subjects::Database(database), Some(option)) = (subjects, args.db_mask.option()) {
+        let archive = args.archive.clone();
+        let diagnostics = &mut *outputs.diagnostics;
+        let resolved = database.resolve_mask_option(&option, &mut |text| match &archive {
+            Some(handle) => handle.write_warning(diagnostics, text),
+            None => diagnostics.write_all(text),
+        })?;
+        if let Some(mask) = resolved.as_ref() {
+            crate::algorithm::common::database::note_archive_database_masking(
+                args.archive.as_ref(),
+                args.strategy.as_ref(),
+                mask.archive_params(),
+            )?;
+        }
+        args.db_mask_resolved = resolved;
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
     // ```c
     //     if(m_IsDbScan) {
@@ -8777,6 +8799,9 @@ fn search(
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
     megablast_index.check()?;
+    if let (Subjects::Database(database), Some(mask)) = (subjects, args.db_mask_resolved.as_ref()) {
+        database.check_mask_limits(mask)?;
+    }
     app::check_search_environment(
         "BLASTN",
         !matches!(subjects, Subjects::Database(_)),
@@ -9353,7 +9378,7 @@ impl ShownSubjects {
                 name: database.name().to_string(),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
-                database: Some(database.pairwise_database()),
+                database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
             },
         }

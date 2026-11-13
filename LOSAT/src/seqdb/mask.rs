@@ -7,9 +7,10 @@
 //! each volume ([`super::column`]): its metadata maps the volume's algorithm ids to
 //! descriptions; the blob of a sequence holds, per algorithm, a list of ranges.
 //!
-//! The reader of `losat blastdbcmd`; LOSAT's searches do not call it, as NCBI's searches do not
-//! without a masking algorithm named by `-db_soft_mask`, `-db_hard_mask` or an imported search
-//! strategy (all three refused by LOSAT). The columns are opened on first use.
+//! The reader of `losat blastdbcmd`, and of BLASTN's `-db_soft_mask` (`blastinput::db_mask`):
+//! NCBI's searches read the columns only with a masking algorithm named by `-db_soft_mask`,
+//! `-db_hard_mask` or an imported search strategy (LOSAT refuses the last two), and so do
+//! LOSAT's. The columns are opened on first use.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -54,6 +55,16 @@ pub enum MaskRanges {
     },
 }
 
+/// The buffers of a search's mask reads ([`SeqDb::mask_ranges_into`]): the blob, the ranges and
+/// the passes of `read_ranges`, kept from one sequence to the next. No NCBI counterpart: NCBI keeps
+/// one `TSequenceRanges` per search thread (`SSeqDB_SeqSrcData::seq_ranges`).
+#[derive(Debug, Default)]
+pub struct MaskReadScratch {
+    blob: Vec<u8>,
+    ranges: Vec<(u32, u32)>,
+    pass_starts: std::collections::HashSet<i64>,
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2138-2141
 // ```c++
 // static bool s_IsNumericId(const string &id) {
@@ -63,7 +74,8 @@ pub enum MaskRanges {
 // ```
 // `StringToNumeric(str, &int, flags, base)` is `NStr::StringToInt` that returns whether it
 // converted the text (`*value || !errno`; a converted 0 leaves `errno` at 0).
-/// `s_IsNumericId(id)`.
+/// `s_IsNumericId(id)` (`blastinput::db_mask::FilteringAlgorithm::parse` is the same test of
+/// the searches, `uniform_search.cpp:149-153`).
 fn is_numeric_id(id: &str) -> bool {
     string_to_int(id.as_bytes(), 0).is_ok()
 }
@@ -890,18 +902,37 @@ fn refuse_other_first_columns(volumes: &[Volume]) -> Result<(), SeqDbError> {
 /// (`column::open_all`; `WriteInt4`) gives each number with its bytes reversed, as NCBI reads
 /// it. Every read is checked against the blob.
 fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)>, SeqDbError> {
+    let mut ranges = Vec::new();
+    read_ranges_into(
+        blob,
+        vol_algo,
+        path,
+        &mut ranges,
+        &mut std::collections::HashSet::new(),
+    )?;
+    Ok(ranges)
+}
+
+/// [`read_ranges`] into `ranges` (appended to), with `pass_starts` the set of the offsets where
+/// the passes started (cleared first; a caller that reads many blobs keeps one set).
+fn read_ranges_into(
+    blob: &[u8],
+    vol_algo: i32,
+    path: &Path,
+    ranges: &mut Vec<(u32, u32)>,
+    pass_starts: &mut std::collections::HashSet<i64>,
+) -> Result<(), SeqDbError> {
     let format = |message: String| SeqDbError::Format {
         path: path.to_path_buf(),
         message,
     };
     let mut blob = Blob::new(blob, 0);
-    let mut ranges = Vec::new();
     let num_ranges = blob.read_i32().map_err(format)?;
     // A skipped entry with a negative `num_pairs` moves the read offset backwards, and NCBI
     // then reads the same entries again for up to 2^31 passes. A pass that starts at an
     // offset where an earlier pass started cannot match or fail differently (that pass
     // would have returned), so the loop ends there with no ranges, as NCBI's does.
-    let mut pass_starts = std::collections::HashSet::new();
+    pass_starts.clear();
     for _ in 0..num_ranges.max(0) {
         if !pass_starts.insert(blob.read_offset()) {
             break;
@@ -942,7 +973,7 @@ fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)
         let skip = i64::from(num_pairs) * 8;
         blob.seek_read(blob.read_offset() + skip);
     }
-    Ok(ranges)
+    Ok(())
 }
 
 impl SeqDb {
@@ -1035,5 +1066,186 @@ impl SeqDb {
             });
         };
         read_ranges(&blob, volume_algo, column.data_path()).map(MaskRanges::Ranges)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:479-492
+    // ```c++
+    //     vector<CTempString> dbs;
+    //     SeqDB_SplitQuoted(blastdb_names, dbs, true);
+    //     retval.reserve(dbs.size());
+    //
+    //     ITERATE(vector<CTempString>, i, dbs) {
+    //         CAlignFormatUtil::SDbInfo info;
+    //         info.is_protein = is_protein;
+    //         bool success = false;
+    // 	// Unsafe OK as kDbName only used in this loop.
+    //         const string kDbName = NStr::TruncateSpaces_Unsafe(*i);
+    //         if (kDbName.empty())
+    //             continue;
+    //
+    //         success = s_FillDbInfoLocally(kDbName, info, dbfilt_algorithm);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:376-406
+    // ```c++
+    //     CRef<CSeqDB> seqdb(new CSeqDB(dbname, info.is_protein
+    //                           ? CSeqDB::eProtein : CSeqDB::eNucleotide));
+    //     ...
+    //     if (dbfilt_algorithm == -1) {
+    //         return true;
+    //     }
+    //     ...
+    //     string filtering_algorithm;
+    //     seqdb->GetMaskAlgorithmDetails(dbfilt_algorithm,
+    //                                    filtering_algorithm,
+    //                                    info.filt_algorithm_name,
+    //                                    info.filt_algorithm_options);
+    // ```
+    /// What the formatter of a search with the filtering algorithm `algo_id` (not -1) reads of
+    /// each name of the `-db` value `name` (opened as [`SeqDb::read_name_records`] opens them:
+    /// a database of one name is this one): that database's own `GetMaskAlgorithmDetails`, one per
+    /// name in the order of the list. The first name whose database does not have the id gives
+    /// NCBI's error (`MaskAlgorithms::details`: "Filtering algorithm ID ... is not supported."
+    /// and that database's table).
+    pub fn name_mask_details(
+        &self,
+        name: &str,
+        algo_id: i32,
+    ) -> Result<Vec<MaskAlgorithm>, SeqDbError> {
+        let names = super::alias::report_names(name);
+        match names.as_slice() {
+            [one] if one == name => Ok(vec![self.mask_algorithms()?.details(algo_id)?]),
+            _ => {
+                let path = match &self.search_path {
+                    Some(path) => path.clone(),
+                    None => super::SearchPath::new(
+                        &std::env::current_dir().unwrap_or_default(),
+                        None,
+                        None,
+                    )?,
+                };
+                let mut details = Vec::with_capacity(names.len());
+                for one in &names {
+                    let alone = Self::open_in(one, self.seqtype, &path)?;
+                    details.append(&mut alone.name_mask_details(one, algo_id)?);
+                }
+                Ok(details)
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242
+    // ```c++
+    // int CSeqDB_IdRemapper::GetVolAlgo(int vol_idx, int algo_id)
+    // {
+    //     if (vol_idx != m_CacheVolIndex || algo_id != m_CacheRealAlgo) {
+    //         m_CacheVolIndex = vol_idx;
+    //         m_CacheRealAlgo = algo_id;
+    //         m_CacheVolAlgo = RealToVol(vol_idx, algo_id);
+    //     }
+    //     return m_CacheVolAlgo;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3345-3358
+    // (quoted at `column::open_all`): a little-endian host reads a column from its `.?xc` file,
+    // or from its `.?xb` file when it has no `.?xc`.
+    /// LOSAT's refusals of a search masked with the filtering algorithm `algo_id` (line NP,
+    /// M/DECISIONS 9; decision D5 of M4a-2), before the search writes anything: a volume with a
+    /// mask column that does not know the algorithm (NCBI translates the id of each of its
+    /// sequences with mask data through the volume-algorithm cache above, which keeps the value of
+    /// another volume, or an unset one on its first call), and a volume whose mask column is read
+    /// from its big-endian `.?xb` file alone (NCBI's search then reads each number byte-reversed:
+    /// ranges past the end of the sequence or inverted, which its scan uses as they are). A volume
+    /// without a mask column has no masks, as in NCBI.
+    pub fn check_search_masks(&self, algo_id: i32) -> Result<(), SeqDbError> {
+        let algorithms = self.mask_algorithms()?;
+        for (index, volume) in self.volumes.iter().enumerate() {
+            let Some(column) = volume.mask_column()? else {
+                continue;
+            };
+            if algorithms.volume_algorithm(index, algo_id).is_none() {
+                return Err(SeqDbError::Unsupported {
+                    path: volume.base().to_path_buf(),
+                    message: format!(
+                        "the volume has mask data without the filtering algorithm {algo_id}, \
+                         for which NCBI BLAST+ 2.17.0 reads the masks of another volume's \
+                         algorithm (or an unset one)"
+                    ),
+                });
+            }
+            if column.reads_byte_reversed() {
+                return Err(SeqDbError::Unsupported {
+                    path: column.data_path().to_path_buf(),
+                    message: "the mask data of the volume has its big-endian file alone, whose \
+                              ranges NCBI BLAST+ 2.17.0 reads byte-reversed on this host"
+                        .to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2531-2546
+    // ```c++
+    //     CBlastDbBlob blob;
+    //     vol->GetColumnBlob(x_GetMaskDataColumn(locked), vol_oid, blob, false, locked);
+    //
+    //     if (blob.Size() != 0) {
+    //         // If there actually is mask data, then we need to do the
+    //         // algorithm translation.
+    //
+    //         int vol_algo_id = -1;
+    //
+    //         try {
+    //             vol_algo_id = m_AlgorithmIds.GetVolAlgo(vol_idx, algo_id);
+    //         }
+    //         catch(CSeqDBException &) {
+    //             return;
+    //         }
+    //
+    //         s_ReadRanges<SReadInt4>(vol_algo_id, ranges, blob);
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321
+    // ```c++
+    //     if (datap->mask_type != eNoSubjMasking) {
+    //         ASSERT(datap->mask_algo_id != -1);
+    //         seqdb.GetMaskData(oid, datap->mask_algo_id, datap->seq_ranges);
+    //     }
+    // ```
+    /// [`SeqDb::mask_ranges_at`] of the search's ordinal id `ordinal` in `scratch`, which every
+    /// sequence of a worker reuses (no allocation per sequence once its buffers have grown). A
+    /// volume without the algorithm is the refusal of [`SeqDb::check_search_masks`], which the
+    /// search made before it started.
+    pub fn mask_ranges_into<'s>(
+        &self,
+        ordinal: u32,
+        algo_id: i32,
+        scratch: &'s mut MaskReadScratch,
+    ) -> Result<&'s [(u32, u32)], SeqDbError> {
+        scratch.ranges.clear();
+        let algorithms = self.mask_algorithms()?;
+        let at = self.find_volume(ordinal)?;
+        let volume = &self.volumes[at.volume];
+        let Some(column) = volume.mask_column()? else {
+            return Ok(&scratch.ranges);
+        };
+        column.blob_into(at.vol_oid, &mut scratch.blob)?;
+        if scratch.blob.is_empty() {
+            return Ok(&scratch.ranges);
+        }
+        let Some(volume_algo) = algorithms.volume_algorithm(at.volume, algo_id) else {
+            self.check_search_masks(algo_id)?;
+            return Err(SeqDbError::Range(format!(
+                "LOSAT internal error: the volume of sequence {ordinal} has no mask algorithm {algo_id}"
+            )));
+        };
+        read_ranges_into(
+            &scratch.blob,
+            volume_algo,
+            column.data_path(),
+            &mut scratch.ranges,
+            &mut scratch.pass_starts,
+        )?;
+        Ok(&scratch.ranges)
     }
 }

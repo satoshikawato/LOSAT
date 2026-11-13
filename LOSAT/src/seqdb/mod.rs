@@ -77,9 +77,7 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 
 pub use alias::SearchPath;
 pub use header::Defline;
-#[cfg(test)]
-pub use mask::MaskAlgorithm;
-pub use mask::{MaskAlgorithms, MaskRanges};
+pub use mask::{MaskAlgorithm, MaskAlgorithms, MaskRanges};
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
 #[cfg(test)]
 pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};

@@ -1294,3 +1294,38 @@ OID at the range's end). Frozen with the release build on the developer machine 
   `db.ps.q1.in.*`.
 - `tests/fixtures/pssm/q1_tfp_id5.asn.gz`: the same PSSM with its query's `local str "Query_1"` replaced by `local id 5`
   by hand (rows `db.ps.q1.in.id5.*`).
+
+## `dbmask/`: database masks of BLASTN searches (line NP, series M, M4a-2a)
+
+Rows `db.dbmask.*` (`-db_soft_mask`, `-db_hard_mask`). The inputs are the probe inputs of the M4a-2 survey
+(`ncbi-parity-20261019/M/m4a2/probe/in`, written by its `scripts/gen.py`, seed 20261114): `subj.fna` (five subjects:
+`s1` with a 100-letter CA repeat at 1000 and a 24-letter poly-A at 2000, `s2` without low complexity, `s3` with
+repeats at both ends, `s4` all `GA`, `s5` random), the queries `q.fna` (all five), `q1.fna` (over the CA repeat of
+`s1`), `q4.fna` (over its poly-A), `q5.fna` (over `s5`), `q56.fna` (`q5` and the `s4` query of the edge cases) and the
+seqid list `ids_s1.txt`. Made with NCBI BLAST+ 2.17.0 from `dbmask/` (`BLAST_USAGE_REPORT=false`):
+
+```
+dustmasker -in subj.fna -infmt fasta -outfmt maskinfo_asn1_bin -out dust.asnb
+dustmasker -in subj.fna -infmt fasta -level 40 -window 32 -outfmt maskinfo_asn1_bin -out dust40.asnb
+windowmasker -mk_counts -in subj.fna -infmt fasta -out wm.counts
+windowmasker -ustat wm.counts -in subj.fna -infmt fasta -outfmt maskinfo_asn1_bin -out wm.asnb
+dustmasker -in subj.fna -infmt fasta -parse_seqids -outfmt maskinfo_asn1_bin -out dust_p.asnb
+makeblastdb -in subj.fna -dbtype nucl -out a5 -title "mask probe v5" -mask_data dust.asnb,dust40.asnb,wm.asnb
+makeblastdb -in subj.fna -dbtype nucl -out a4 -title "mask probe v4" -blastdb_version 4 -mask_data dust.asnb,dust40.asnb,wm.asnb
+makeblastdb -in subj.fna -dbtype nucl -out b5 -title "dust40 only" -mask_data dust40.asnb
+makeblastdb -in subj.fna -dbtype nucl -out k5 -title "mask ids v5" -mask_data dust.asnb,wm.asnb -mask_id mydust,mywm
+makeblastdb -in subj.fna -dbtype nucl -out nm5 -title "no mask v5"
+makeblastdb -in subj.fna -dbtype nucl -out p5 -title "parsed v5" -parse_seqids -mask_data dust_p.asnb
+makeblastdb -in subj.fna -dbtype nucl -out xb4 -title "big-endian mask data only" -blastdb_version 4 -mask_data dust.asnb
+rm xb4.nac
+blastdb_aliastool -dblist "a5 nm5" -dbtype nucl -out al_a_nm -title "a5 and nm5"
+blastdb_aliastool -dblist "a5 b5" -dbtype nucl -out al_a_b -title "a5 and b5"
+blastdb_aliastool -dblist "b5 a5" -dbtype nucl -out al_b_a -title "b5 and a5"
+```
+
+(`wm.counts` is not kept.) `a5` and `a4` have the algorithms 11 (dust, defaults), 12 (dust `window=32; level=40;
+linker=1`) and 30 (windowmasker, default options); `b5` has the second dust as its 11; `k5` has 100 (`mydust`) and 101
+(`mywm`); `p5` has the dust of `-parse_seqids` ids as 11; `nm5` has no mask data; `xb4` is a mask column without its
+little-endian `.nac`, which LOSAT refuses for a search (NCBI reads its ranges byte-reversed, M/DECISIONS 9). The rows
+also use `../seqdb/db/mask_nucl_colon_id` (`-mask_id c:id`, stored with 0x01 for the colon) and
+`../fasta/outfmt11/arch_empty.fna` (an empty query).

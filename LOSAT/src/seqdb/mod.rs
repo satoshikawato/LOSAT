@@ -1405,14 +1405,13 @@ impl SeqDb {
         Ok(parsed)
     }
 
-    /// `deflines` of the first sequence of volume `at` (non-empty), whether a taxid list
-    /// includes it or not.
+    /// `deflines` of the first sequence of volume `at` (non-empty), whether a list includes it
+    /// or not, and with every definition line: the check reads the header as stored, before a
+    /// taxid list's `DeflineRule` (`Volume::stored_deflines`), which would refuse a first sequence
+    /// that the list leaves out. Its messages name the sequence's OID.
     fn first_deflines(&self, at: usize) -> Result<Vec<OrdinalDefline>, SeqDbError> {
-        let ordinal = match &self.filter {
-            Some(filter) => filter.rank(self.volume_starts[at]),
-            None => self.volume_starts[at],
-        };
-        self.ordinal_deflines(at, ordinal, self.volumes[at].deflines(0))
+        let oid = self.volume_starts[at];
+        self.ordinal_deflines(at, oid, self.volumes[at].stored_deflines(0))
     }
 
     /// Whether the database is of format version 5 (its volumes' index files name an LMDB

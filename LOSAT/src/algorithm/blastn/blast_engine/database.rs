@@ -393,10 +393,9 @@ impl BlastnDatabase {
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b).
+        let parsed_seqids =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
         // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;

@@ -1241,6 +1241,14 @@ query's warning where `GetNumSeqs` is 0 (B, C, D); BLASTN and TBLASTX divide B's
 (SIGFPE: LOSAT's refusal). Frozen with the release build on the developer machine (2026-11-13; the same bytes as the
 workstation's probes p4c_dp, p4c_dn).
 
+Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
+files' counts, the formatter's reopening of each name, then the headers and the accession tables. `o_mix` and `o_mixs` are
+`multidb/na` (with the accession table) and `multidb/nnp` (without) under `NSEQ abc` / `STATS_NSEQ abc`, with `-seqidlist`
+(the list's `DB contains no accession info.` first) and `-taxids` (the alias file's error); `o_np` is `nnp` alone, `o_v4`
+the version 4 `multidb/n4a` (`Taxonomy filtering is not supported in v4 BLAST dbs` first); `o_dh` and `o_dhs` are over
+`dh`, a copy of `multidb/p4a` whose header file is 4,096 bytes of 0xff (the alias file's error, before any header is
+read). Frozen with the release build on the developer machine (the `CStringException` texts carry its path).
+
 ## psiblast's id options (line RG, series Q, Q1)
 
 - `q1_sq1` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/q1_subj_q1.faa -dbtype prot -parse_seqids

@@ -597,6 +597,22 @@ fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
 }
 
 #[test]
+fn the_first_header_check_reads_the_stored_lines() {
+    // Line RG D1a-2 (E): search programs check the first headers after the list
+    // (`common::database::restrict_database`). A seqid rule that keeps no line of OID 0 refuses
+    // the reads of that sequence, not the check of a database without parsed Seq-ids.
+    let mut db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
+    let rule = std::sync::Arc::new(super::filter::DeflineRule::Seqids(vec![
+        b"NOSUCH_1".to_vec()
+    ]));
+    for volume in &mut db.volumes {
+        volume.set_defline_rule(rule.clone());
+    }
+    assert!(db.deflines(0).is_err());
+    assert!(!db.has_parsed_seqids().unwrap());
+}
+
+#[test]
 fn databases_that_need_unread_data_are_rejected() {
     // A database with parsed Seq-ids opens and says so; the decoder of the ordinal ids
     // refuses its headers, as the reader's open did before.

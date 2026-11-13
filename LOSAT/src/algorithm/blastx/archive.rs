@@ -43,8 +43,12 @@ use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a BLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). RPSTBLASTN, whose search is BLASTX's, gives its own
+/// (`BlastxArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
+    if let Some(inputs) = &args.request_inputs {
+        return OptionInputs::clone(inputs);
+    }
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -559,8 +563,12 @@ pub(crate) fn batch_searched_space(batches: &[BatchResults]) -> Option<i64> {
 /// The requests of a run's batches (`RunRequests`): nucleotide queries, protein subjects (the
 /// `-subject` records `subjects`, `None` for `-db`), and the lower-case runs of each query in both
 /// frames of a translated query (the reader keeps them only with `-lcase_masking`,
-/// `FastaRecord::archive_lowercase_runs`).
-pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, FastaRecord> {
+/// `FastaRecord::archive_lowercase_runs`); `label` names the program (BLASTX, RPSTBLASTN) in a
+/// refusal.
+pub(crate) fn requests<'a>(
+    subjects: Option<&'a [FastaRecord]>,
+    label: &'static str,
+) -> RunRequests<'a, FastaRecord> {
     RunRequests::new(
         RequestPolicy {
             query_protein: false,
@@ -568,7 +576,7 @@ pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, Fast
             lcase: Some(LcaseFrames::PlusAndMinus),
         },
         subjects,
-        "BLASTX",
+        label,
     )
 }
 

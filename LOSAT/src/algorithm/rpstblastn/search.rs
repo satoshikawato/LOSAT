@@ -119,6 +119,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         diagnostics: &mut dyn Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut BatchRender<'_>,
+        take: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
     ) -> Result<usize> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -149,6 +150,9 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     if queries.is_empty() {
                         return Err(engine("Empty CBlastQueryVector"));
                     }
+                    // The batch's search strategy request (`SaveSearchStrategy`, quoted in the
+                    // module's header), before its search.
+                    take(queries, processed)?;
                     let mut results = vec![self
                         .search_batch(
                             queries,
@@ -182,6 +186,17 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
 
     fn merges_volumes(&self) -> bool {
         self.several_volumes
+    }
+
+    fn handle_sets(
+        &self,
+        database: Option<&BlastxDatabase>,
+        searchsp: Option<i64>,
+        dbsize: Option<i64>,
+    ) -> Vec<crate::report::archive::options::Param> {
+        database.map_or_else(Vec::new, |database| {
+            crate::algorithm::rps_search::volumes::search_sets(database.x_seqdb(), searchsp, dbsize)
+        })
     }
 }
 

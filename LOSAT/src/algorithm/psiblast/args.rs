@@ -202,6 +202,11 @@ pub struct PsiblastArgs {
     pub num_threads: usize,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// The search strategy file (`-export_search_strategy`, quoted at
+    /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
+    /// are read (with `-in_pssm` refused: item F1b-2 of line RG).
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
     // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
@@ -480,6 +485,21 @@ impl PsiblastArgs {
     /// blastp's arguments for psiblast's search, after LOSAT's refusals of what it does not run
     /// (the rounds of a range, and the output formats of the later items of the series).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:281-287
+        // ```c++
+        //         if (pssm.NotEmpty())
+        //         {
+        //             _ASSERT(queries.Empty());
+        //             if(num_iters != 0)
+        //             	retval.Reset(new blast::CExportStrategy(pssm, opts_hndl, search_db, client_id, num_iters));
+        // ```
+        // A PSSM query's request holds the PSSM as read (`queries pssm`), which item F1b-2 of line
+        // RG writes; refused before the file is made.
+        if self.export_search_strategy.is_some() && self.in_pssm.is_some() {
+            bail!(
+                "-export_search_strategy with -in_pssm is not supported by LOSAT's PSIBLAST yet (NCBI writes a PSI-BLAST request that holds the PSSM with -db and stops with \"Remote PSI-BL2SEQ is not supported\" with -subject)"
+            );
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1277-1281
         // ```c++
         //     if (m_DbTarget == eProteinDb) {
@@ -525,7 +545,7 @@ impl PsiblastArgs {
             || (self.in_pssm.is_some()
                 && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some())))
         .then(|| u32::try_from(self.num_iterations).unwrap_or(0));
-        Ok(BlastpArgs {
+        let mut args = BlastpArgs {
             query: self.query,
             subject: self.subject,
             db: self.db,
@@ -579,8 +599,9 @@ impl PsiblastArgs {
             subject_loc: self.subject_loc,
             outfmt: self.outfmt,
             archive: None,
-            export_search_strategy: None,
+            export_search_strategy: self.export_search_strategy,
             strategy: None,
+            request_inputs: None,
             app: BlastpApp::Psiblast,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
@@ -601,7 +622,20 @@ impl PsiblastArgs {
             // (`BlastpArgs::check_options`) and sort nothing (`ResolvedBlastpArgs::sort`).
             formatting: self.formatting,
             rps: None,
-        })
+        };
+        // The search strategy's recorded options (`RequestKind::Psiblast`): BLASTP's of the same
+        // arguments, with psiblast's classes and the arguments that BLASTP's do not keep as given.
+        if args.export_search_strategy.is_some() {
+            let mut inputs = crate::algorithm::blastp::archive::option_inputs(&args);
+            inputs.kind = crate::report::archive::options::RequestKind::Psiblast;
+            inputs.sum_stats = self.sum_stats;
+            inputs.inclusion_ethresh = self.inclusion_ethresh;
+            inputs.pseudocount = self.pseudocount;
+            inputs.gap_trigger = self.gap_trigger;
+            inputs.num_iterations = Some(self.num_iterations);
+            args.request_inputs = Some(Box::new(inputs));
+        }
+        Ok(args)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748

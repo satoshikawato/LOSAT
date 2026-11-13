@@ -1673,6 +1673,7 @@ mod tests {
             archive: None,
             export_search_strategy: None,
             strategy: None,
+            request_inputs: None,
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
             gap_trigger: None,

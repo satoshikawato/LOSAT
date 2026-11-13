@@ -5206,7 +5206,7 @@ pub fn run(
                     num_alignments: args.num_alignments,
                 },
                 args.db.as_deref().map(crate::seqdb::db_argument_name),
-                "BLASTP",
+                args.app.name(),
                 &options,
             )
         })
@@ -5636,6 +5636,13 @@ fn open_search_database(
                 args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
             )?;
+            // rpsblast: what the application and each batch's RPS set-up set in the options
+            // handle, which the search strategy's requests hold.
+            if let (Some(rps), Some(strategy)) =
+                (resolved.rps_search.as_deref(), args.strategy.as_ref())
+            {
+                rps_hooks::note_strategy_sets(strategy, rps, resolved, &database)?;
+            }
             Some(database)
         }
         None => None,
@@ -6471,6 +6478,7 @@ fn psiblast_stop_at_invalid_query(
         return batches;
     };
     let (input_start, searched_start) = batches.starts[batch];
+    let span = batches.searched_span(searched_start);
     let query_length = searched_queries[searched_start].seq().len();
     let error = match protein_query_split_sizes(args.app.name(), 10000) {
         _ if empty_database => crate::cli::NativeError {
@@ -6513,6 +6521,17 @@ fn psiblast_stop_at_invalid_query(
     batches.starts.truncate(batch);
     batches.input_done = input_start;
     batches.searched_done = searched_start;
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:337-339
+    // ```c++
+    //     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
+    //
+    //     SaveSearchStrategy(args, m_CmdLineArgs, query_factory, opts_hndl, pssm, kNumIterations);
+    // ```
+    // NCBI made the batch's query factory and wrote its search strategy request
+    // (`SaveSearchStrategy` at the start of `DoIterations`) before the search that fails
+    // (`QueryBatches::stop_batch`; NCBI 2.17.0 `p9.ps.err.x_pol`, `p9.ps.err.nopsq`); a refusal of
+    // LOSAT's writes none.
+    batches.stop_batch = error.is::<crate::cli::NativeError>().then_some(span);
     batches.stop = Some((warnings, error));
     batches
 }
@@ -6968,7 +6987,11 @@ fn search(
                 next,
             );
         }
-        // (psiblast: the search strategy is refused, `cli.rs`.)
+        // The search strategy's requests (`CallRequests`): the first search releases those of
+        // every batch and of the batch after the call (`next`) when no PSSM stops it; a PSSM's stop
+        // comes before the call marks its end, so the first search releases none, and the search
+        // again of the queries up to the failing one releases theirs (NCBI wrote each query's
+        // before its search, and none after the failing query's).
         let again_args = args.clone();
         match search_batches_once(
             args,
@@ -6978,7 +7001,7 @@ fn search(
             searched_done,
             epilog,
             None,
-            None,
+            next,
         ) {
             Err(error) if error.is::<crate::algorithm::psiblast::pssm::PssmStop>() => {
                 let crate::algorithm::psiblast::pssm::PssmStop {
@@ -7376,6 +7399,7 @@ fn search(
                     .is_none()
                     .then(|| subject_source.fasta_records()),
                 args.lcase_masking,
+                args.app.name(),
             )
             .write(
                 strategy,
@@ -8359,6 +8383,7 @@ impl<'a> CallRequests<'a> {
                     .is_none()
                     .then(|| subject_source.fasta_records()),
                 args.lcase_masking,
+                args.app.name(),
             ),
             records: query_records,
             placements: &ranges.query_input.placements,
@@ -15468,6 +15493,7 @@ mod tests {
             archive: None,
             export_search_strategy: None,
             strategy: None,
+            request_inputs: None,
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
             gap_trigger: None,

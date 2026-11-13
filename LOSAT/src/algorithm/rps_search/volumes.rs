@@ -59,6 +59,97 @@ impl<'a> RpsVolumeSet<'a> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:349-371,374-379
+// ```c++
+// void CLocalRPSBlast::x_AdjustDbSize(void)
+// {
+// 	if(m_opt_handle->GetOptions().GetEffectiveSearchSpace()!= 0)
+// 		return;
+//
+// 	if(m_opt_handle->GetOptions().GetDbLength()!= 0)
+// 		return;
+//
+// 	CSeqDB db(m_db_name, CSeqDB::eProtein);
+//
+// 	Uint8 db_size = db.GetTotalLengthStats();
+// 	...
+// 	if(0 == db_size)
+// 	    db_size = db.GetTotalLength();
+// 	...
+// 	m_opt_handle->SetOptions().SetDbLength(db_size);
+// 	m_opt_handle->SetOptions().SetDbSeqNum(num_seq);
+// ...
+// CRef<CSearchResultSet> CLocalRPSBlast::Run(void)
+// {
+// 	if(1 != m_num_of_dbs)
+// 	{
+// 		x_AdjustDbSize();
+// 	}
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:73-83
+// ```c++
+// CSetupFactory::CreateRpsStructures(const string& rps_dbname,
+//                                    CRef<CBlastOptions> options)
+// {
+//     ...
+//     CRef<CBlastRPSInfo> retval(new CBlastRPSInfo(rps_dbname, mode));
+//     options->SetMatrixName(retval->GetMatrixName());
+//     options->SetGapOpeningCost(retval->GetGapOpeningCost());
+//     options->SetGapExtensionCost(retval->GetGapExtensionCost());
+//     return retval;
+// }
+// ```
+/// What the set-up of each query batch of an RPS search (rpsblast, rpstblastn) writes into NCBI's
+/// options handle, in its order, which the search strategy's requests after the first hold
+/// (`report::archive::OptionsHandle::pass`; NCBI BLAST+ 2.17.0 `p9.rps.q40.f6`,
+/// `p9.rps.3v.q40.n1.f6`, `p9.rtn.c0.bound1.f6`): a database of several volumes (names) without
+/// `-searchsp` or `-dbsize` gets its length (`x_AdjustDbSize`, before the volumes; `DbSeqNum` is no
+/// remote option), then each volume's set-up the matrix and the gap costs of its `.aux`
+/// (`CreateRpsStructures`; the volumes' are the same, `RpsVolumeSetup`), also in a batch without a
+/// valid query. An `.aux` that cannot be read gives none: the batch's search fails there with
+/// NCBI's error and no request follows. NCBI's threads over the volumes set them up on clones
+/// (`RunThreadedSearch`), whose search spaces never reach the handle; LOSAT writes the requests of
+/// NCBI's `-num_threads 1` at every thread count (DECISIONS F1b-2 of line RG).
+pub(crate) fn search_sets(
+    db: &SeqDb,
+    searchsp: Option<i64>,
+    dbsize: Option<i64>,
+) -> Vec<crate::report::archive::options::Param> {
+    use crate::report::archive::options::{Param, ParamValue};
+    let volumes = RpsVolumeSet::of(db);
+    let mut sets = Vec::new();
+    if volumes.order.len() > 1 && searchsp.unwrap_or(0) == 0 && dbsize.unwrap_or(0) == 0 {
+        // `check_alias_keys` refuses `STATS_TOTLEN`, so the length is `GetTotalLength`.
+        sets.push(Param {
+            name: "DbLength",
+            value: ParamValue::BigInteger(i64::try_from(db.total_length()).unwrap_or(i64::MAX)),
+        });
+    }
+    let aux = volumes.order.first().and_then(|&index| {
+        let mut path = volumes.volumes[index].base().as_os_str().to_os_string();
+        path.push(".aux");
+        std::fs::read(std::path::PathBuf::from(path))
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .and_then(|text| crate::seqdb::rps::parse_aux(&text))
+    });
+    if let Some(aux) = aux {
+        sets.push(Param {
+            name: "MatrixName",
+            value: ParamValue::Str(aux.matrix),
+        });
+        sets.push(Param {
+            name: "GapOpeningCost",
+            value: ParamValue::Integer(aux.gap_open),
+        });
+        sets.push(Param {
+            name: "GapExtensionCost",
+            value: ParamValue::Integer(aux.gap_extend),
+        });
+    }
+    sets
+}
+
 /// Whether the volumes of an RPS search have their own effective search spaces: `-dbsize`
 /// (`dbsize` above 0) with several volumes and no `-searchsp` above 0 (`x_AdjustDbSize` returns
 /// early, so each volume's statistics read the given length and the volume's own sequence count).

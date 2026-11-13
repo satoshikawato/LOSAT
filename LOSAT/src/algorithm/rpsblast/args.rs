@@ -72,6 +72,11 @@ pub struct RpsblastArgs {
     pub db: Option<String>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// The search strategy file (`-export_search_strategy`, quoted at
+    /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
+    /// are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = rpsblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2036-2042
@@ -315,7 +320,7 @@ impl RpsblastArgs {
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         Self::check_outfmt(&self.outfmt)?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
-        Ok(BlastpArgs {
+        let mut args = BlastpArgs {
             query: self.query,
             subject: None,
             db: self.db,
@@ -386,8 +391,9 @@ impl RpsblastArgs {
             subject_loc: None,
             outfmt: self.outfmt,
             archive: None,
-            export_search_strategy: None,
+            export_search_strategy: self.export_search_strategy,
             strategy: None,
+            request_inputs: None,
             app: BlastpApp::Rpsblast,
             inclusion_ethresh: None,
             gap_trigger: None,
@@ -405,7 +411,20 @@ impl RpsblastArgs {
                 x_drop_final_bits: self.xdrop_gap_final,
                 sum_stats: self.sum_stats == Some(true),
             }),
-        })
+        };
+        // The search strategy's recorded options (`RequestKind::Rpsblast`): BLASTP's of the same
+        // arguments, with the ones that the RPS search keeps (`RpsSearch`) as given.
+        if args.export_search_strategy.is_some() {
+            let mut inputs = crate::algorithm::blastp::archive::option_inputs(&args);
+            inputs.kind = crate::report::archive::options::RequestKind::Rpsblast;
+            inputs.xdrop_gap = self.xdrop_gap;
+            inputs.xdrop_gap_final = self.xdrop_gap_final;
+            inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
+            inputs.qcov_hsp_perc = self.qcov_hsp_perc;
+            inputs.sum_stats = self.sum_stats;
+            args.request_inputs = Some(Box::new(inputs));
+        }
+        Ok(args)
     }
 
     /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its

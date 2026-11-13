@@ -41,8 +41,12 @@ use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a BLASTP run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). An application whose search is BLASTP's (psiblast,
+/// rpsblast) gives its own (`BlastpArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
+    if let Some(inputs) = &args.request_inputs {
+        return OptionInputs::clone(inputs);
+    }
     let mut inputs = OptionInputs::new(Program::Blastp, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -131,11 +135,13 @@ pub(crate) fn handle_for(
 
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
-/// mask of each query's lower-case runs (SEG is never one).
-pub(crate) fn requests(
-    subjects: Option<&[FastaRecord]>,
+/// mask of each query's lower-case runs (SEG is never one); `label` names the application
+/// (`BlastpApp::name`) in a refusal.
+pub(crate) fn requests<'a>(
+    subjects: Option<&'a [FastaRecord]>,
     lcase_masking: bool,
-) -> RunRequests<'_, FastaRecord> {
+    label: &'static str,
+) -> RunRequests<'a, FastaRecord> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -143,7 +149,7 @@ pub(crate) fn requests(
             lcase: lcase_masking.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        "BLASTP",
+        label,
     )
 }
 
@@ -273,7 +279,7 @@ pub(crate) fn for_each_batch(
     } else {
         call.spans
     };
-    let requests = requests(call.subject_records, call.lcase_masking);
+    let requests = requests(call.subject_records, call.lcase_masking, "BLASTP");
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;

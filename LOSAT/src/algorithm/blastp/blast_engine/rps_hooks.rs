@@ -142,6 +142,37 @@ pub(super) fn check_freq_ratio_file(
     Ok(())
 }
 
+/// What rpsblast sets in the options handle that the search strategy's requests hold
+/// (`report::archive::OptionsHandle::set_search_sets`): before the batches, the composition-based
+/// statistics that `check_freq_ratio_file` turned off (NCBI's `SetCompositionBasedStats` in place:
+/// `CompositionBasedStats 0` in every request, NCBI BLAST+ 2.17.0 `p9.rps.err.nofreq`); at each
+/// batch's set-up, the database's length and `.aux` costs (`rps_search::volumes::search_sets`).
+#[cold]
+#[inline(never)]
+pub(super) fn note_strategy_sets(
+    strategy: &crate::report::archive::strategy::StrategyExport,
+    rps: &RpsSearch,
+    args: &ResolvedBlastpArgs,
+    database: &database::BlastpDatabase,
+) -> Result<()> {
+    use crate::report::archive::options::{Param, ParamValue};
+    let before_batches = (rps.requested_cbs != 0 && !args.comp_based_stats.is_enabled())
+        .then_some(Param {
+            name: "CompositionBasedStats",
+            value: ParamValue::Integer(0),
+        })
+        .into_iter()
+        .collect();
+    strategy.options().set_search_sets(
+        before_batches,
+        crate::algorithm::rps_search::volumes::search_sets(
+            database.seqdb(),
+            args.searchsp,
+            Some(args.dbsize),
+        ),
+    )
+}
+
 /// The queries' contexts (their letters and `kbp_std`, the composition with BLOSUM62, and
 /// validity) and an empty lookup table: the RPS search scans with the database's prebuilt table.
 ///

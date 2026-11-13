@@ -344,7 +344,7 @@ fn run_inner(
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
-        "BLASTX",
+        program.upper,
     )?;
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
@@ -374,7 +374,7 @@ fn run_inner(
                     num_alignments: args.num_alignments,
                 },
                 args.db.as_deref().map(crate::seqdb::db_argument_name),
-                "BLASTX",
+                program.upper,
                 &options_handle,
             )
         })
@@ -1004,6 +1004,14 @@ fn run_inner(
     // run).
     if let Some(search) = options.rpstblastn.clone() {
         options.rpstblastn = Some(search.for_database(&options, database.as_ref())?);
+        // What each batch's RPS set-up writes into the options handle, which the search strategy's
+        // later requests hold (`OptionsHandle::pass`).
+        if let Some(strategy) = &strategy {
+            strategy.options().set_search_sets(
+                Vec::new(),
+                search.handle_sets(database.as_ref(), args.searchsp, args.dbsize),
+            )?;
+        }
     }
     // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked where a
     // volume is opened (`seqdb::Volume::open`).
@@ -1099,10 +1107,13 @@ fn run_inner(
     // The requests of the archives (outfmt 11), with every `-subject` record, made once for every
     // batch.
     let archive_requests = archive.as_ref().map(|_| {
-        archive::requests(match (&database, &pairwise_database) {
-            (Some(_), Some(_)) => None,
-            _ => Some(&subjects[..]),
-        })
+        archive::requests(
+            match (&database, &pairwise_database) {
+                (Some(_), Some(_)) => None,
+                _ => Some(&subjects[..]),
+            },
+            program.upper,
+        )
     });
     let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
                         diagnostics: &mut dyn Write,
@@ -1315,7 +1326,7 @@ fn run_inner(
     // search split takes it once (`StrategyExport::takes`).
     let requests = strategy
         .as_ref()
-        .map(|_| archive::requests(database.is_none().then_some(&subjects[..])));
+        .map(|_| archive::requests(database.is_none().then_some(&subjects[..]), program.upper));
     let mut take = |queries: &[FastaRecord], queries_before: usize| -> Result<()> {
         match (&strategy, &requests) {
             (Some(strategy), Some(requests)) => requests.write(
@@ -1337,6 +1348,7 @@ fn run_inner(
             &mut *stderr,
             &search_error,
             &mut render,
+            &mut take,
         ),
         None => run_query_batches(
             &options,

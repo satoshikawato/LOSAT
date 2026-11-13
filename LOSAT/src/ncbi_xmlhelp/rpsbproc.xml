@@ -1,0 +1,97 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>rpsbproc</name>
+<version>0.5.1</version>
+<description>Process output from offline rpsblast to annotate sequence with conserved domain information</description>
+<detailed_description>This utility processes domain hit data produced by local RPS-BLAST and generates domain family and/or superfamily annotations on the query sequences. Instead of retrieving domain data from database, this program processes dumped datafiles to obtain required information. All data files are downloadable from NCBI ftp site. Read README file for details</detailed_description>
+</program>
+<arguments>
+<key name="conffile" type="File_In" optional="true">
+<description>Program&apos;s configuration (registry) data file</description>
+<synopsis>File_Name</synopsis>
+</key>
+<key name="d" type="String" optional="true">
+<description>Specify directory that contains data files. By default, the program will look in &apos;data&apos; directory in current directory and the directory where the program is located</description>
+<alias>-data-path</alias>
+</key>
+<key name="e" type="Real" optional="true">
+<description>EValue cut-off. Program will only process hits with evalues better than this value.</description>
+<default>0.01</default>
+<alias>-evalue</alias>
+</key>
+<key name="i" type="String" optional="true">
+<description>Input file(s) that holds asn data produced by rpsblast with &quot;-outfmt 11&quot; switch. If omitted, default to stdin.</description>
+<alias>-infile</alias>
+</key>
+<key name="logfile" type="File_Out" optional="true">
+<description>File to which the program log should be redirected</description>
+<synopsis>File_Name</synopsis>
+</key>
+<key name="m" type="String" optional="true">
+<description>Select redundancy level of domain hit data. Valid options are &quot;rep&quot; (concise), &quot;std&quot;(standard) and &quot;full&quot; (all hits). Default to &quot;rep&quot;</description>
+<constraint>
+<description>`full&apos;, `rep&apos;, `std&apos;</description>
+<Strings case_sensitive="true">
+<value>full</value>
+<value>rep</value>
+<value>std</value>
+</Strings>
+</constraint>
+<default>rep</default>
+<alias>-data-mode</alias>
+</key>
+<key name="o" type="String" optional="true">
+<description>Output file to write the processed result. If omitted, default to stdout.</description>
+<alias>-outfile</alias>
+</key>
+<key name="t" type="String" optional="true">
+<description>Target data: Select desired (target) data. Valid options are &quot;doms&quot;, &quot;feats&quot; or &quot;both&quot;. . If omitted, default to &quot;both&quot;</description>
+<constraint>
+<description>`both&apos;, `doms&apos;, `feats&apos;</description>
+<Strings case_sensitive="true">
+<value>both</value>
+<value>doms</value>
+<value>feats</value>
+</Strings>
+</constraint>
+<default>both</default>
+<alias>-target-data</alias>
+</key>
+<flag name="dryrun" optional="true">
+<description>Dry run the application: do nothing, only test all preconditions</description>
+</flag>
+<flag name="f" optional="true">
+<description>When specified, show corresponding superfamily information for domain hits.</description>
+<alias>-show-families</alias>
+</flag>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="q" optional="true">
+<description>Quiet mode -- do not display program information and progress on stderr</description>
+<alias>-quiet</alias>
+</flag>
+<flag name="version" optional="true">
+<description>Print version number;  ignore other arguments</description>
+</flag>
+<flag name="version-full" optional="true">
+<description>Print extended version data;  ignore other arguments</description>
+</flag>
+<flag name="version-full-json" optional="true">
+<description>Print extended version data in JSON format;  ignore other arguments</description>
+</flag>
+<flag name="version-full-xml" optional="true">
+<description>Print extended version data in XML format;  ignore other arguments</description>
+</flag>
+<flag name="xmlhelp" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS in XML format; ignore all other parameters</description>
+</flag>
+</arguments>
+</ncbi_application>

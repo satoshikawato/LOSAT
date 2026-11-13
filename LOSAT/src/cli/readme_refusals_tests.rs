@@ -3,7 +3,7 @@
 //! LOSAT does not provide.
 //!
 //! The README is read at compile time. The lists under test are the ones that
-//! `unknown_option_error` consults (`UNPORTED_*_ARGS`, `NCBI_TOOLKIT_ARGS`) and
+//! `unknown_option_error` consults (`UNPORTED_*_ARGS`) and
 //! `crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS`. Refusals of a value (`-word_size 4`) or
 //! of an input (a database sequence) are in no list and are not checked here.
 //!
@@ -34,7 +34,7 @@ const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tbla
 /// The programs whose README paragraph is their own.
 const OWN_PARAGRAPHS: [&str; 4] = ["psiblast", "rpsblast", "rpsbproc", "makeblastdb"];
 
-/// The programs that refuse the NCBI C++ Toolkit options by name (`unknown_option_error`).
+/// The programs that `try_parse_from` reads, which answer the NCBI C++ Toolkit options.
 const TOOLKIT_PROGRAMS: [&str; 10] = [
     "blastn",
     "blastp",
@@ -151,7 +151,7 @@ fn every_refused_option_is_in_the_readme_for_its_program() {
         .copied()
         .filter(|name| is_unported_psiblast_arg(name))
         .collect();
-    let mut lists: Vec<(&str, Vec<&str>)> = vec![
+    let lists: Vec<(&str, Vec<&str>)> = vec![
         ("blastn", UNPORTED_BLASTN_ARGS.to_vec()),
         ("blastp", UNPORTED_BLASTP_ARGS.to_vec()),
         ("blastx", UNPORTED_BLASTX_ARGS.to_vec()),
@@ -164,9 +164,6 @@ fn every_refused_option_is_in_the_readme_for_its_program() {
             crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.to_vec(),
         ),
     ];
-    for program in TOOLKIT_PROGRAMS {
-        lists.push((program, NCBI_TOOLKIT_ARGS.to_vec()));
-    }
     let mut missing = Vec::new();
     for (program, names) in &lists {
         for name in names {
@@ -178,28 +175,6 @@ fn every_refused_option_is_in_the_readme_for_its_program() {
         }
     }
     assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
-}
-
-#[test]
-fn the_documented_toolkit_programs_refuse_the_toolkit_options() {
-    let command = Cli::command();
-    let mut wrong = Vec::new();
-    for program in TOOLKIT_PROGRAMS {
-        let scope = command
-            .find_subcommand(program)
-            .unwrap_or_else(|| panic!("{program} is a subcommand"));
-        for name in NCBI_TOOLKIT_ARGS {
-            let message = unknown_option_error(scope, name, &format!("-{name}")).to_string();
-            if !message.contains("NCBI C++ Toolkit option") {
-                wrong.push(format!("{program}: -{name} gives {message:?}"));
-            }
-        }
-    }
-    assert!(
-        wrong.is_empty(),
-        "the README says these programs refuse the NCBI C++ Toolkit options by name:\n{}",
-        wrong.join("\n")
-    );
 }
 
 // `-version` and the full versions are answered on the command line before the parser

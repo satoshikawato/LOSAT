@@ -41,6 +41,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
                 | "-h"
                 | "-help"
                 | "-help-full"
+                | "-xmlhelp"
                 | "--help"
                 | "-version"
                 | "--version"

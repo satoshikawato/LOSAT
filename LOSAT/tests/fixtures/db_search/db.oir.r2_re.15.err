@@ -1,0 +1,2 @@
+Warning: [blastp] Examining 5 or more matches is recommended
+Warning: [blastp] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist

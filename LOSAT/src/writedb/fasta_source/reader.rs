@@ -792,7 +792,7 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
-    /// `read_one_seq` returned last: the intervals of its lower case letters and of its
+    /// `read_one_seq` read last (after an error, what it had read of that record): the intervals of its lower case letters and of its
     /// interval lines (0-based, inclusive), in the order in which they were closed or read;
     /// empty otherwise. The intervals stay with the reader (not in `Record`) so that the
     /// records of the other programs, which never have any, are not made larger.
@@ -958,7 +958,8 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// `read_one_seq` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of
-    /// the other readers take no step of convert2blastmask's masks (one choice per record).
+    /// the other readers take no step of convert2blastmask's masks but `close_mask`, which has
+    /// nothing open to close for them (one choice per record).
     fn read_one_seq_of<const MASK_FROM_FASTA: bool>(
         &mut self,
         warn: ReaderWarn<'_>,
@@ -1723,8 +1724,8 @@ impl RecordState {
     /// }
     /// ```
     /// `CMaskFromFasta` keeps its own copy of each interval (`x_OpenMask`, `x_CloseMask`,
-    /// quoted at `close_mask`).
-    #[cold]
+    /// quoted at `close_mask`). Only `parse_data_line::<true>` (convert2blastmask) calls it,
+    /// once for each run of residues, so it is not cold: the other readers' instance has no call.
     fn mask_run(&mut self, run: &[u8]) {
         let base = self.current_pos_with_gaps();
         for (i, byte) in run.iter().enumerate() {

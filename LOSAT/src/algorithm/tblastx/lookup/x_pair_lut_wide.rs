@@ -70,10 +70,11 @@
 //!    each table's overflow size, longest count and used cells in the stripe; (b) each table's
 //!    cells and overflow go to the stripes in cell order (`BlastAaLookupFinalize` assigns the
 //!    overflow cursors in ascending cell order, and a compacted table keeps its cells in index
-//!    order); (c) each stripe writes its cells (`num_used`, the pv bit, the cursor of an overflow
-//!    cell; a cell without entries all zero, as after the C `calloc`), turns count_t[w] into the
-//!    first position of cell w, then walks the lists as (a) did and appends, for each s with w in
-//!    T(s), E_t(s) at the position of w in table t, advanced by the offsets written.
+//!    order); (c) each stripe, from its counts of (a) (zeroed by the stripe there, kept since),
+//!    writes its cells (`num_used`, the pv bit, the cursor of an overflow cell; a cell without
+//!    entries all zero, as after the C `calloc`), turns count_t[w] into the first position of cell
+//!    w, then walks the lists as (a) did and appends, for each s with w in T(s), E_t(s) at the
+//!    position of w in table t, advanced by the offsets written.
 //!
 //! # Why the tables are those of `x_build_group`
 //!
@@ -91,7 +92,7 @@
 //!
 //! Memory: the tables, the lists T(s) of the batch's sources by stripe (2 bytes a cell of a list
 //! and 8 a block, freed when the tables are built; no memo is kept across batches: at 4 letters the
-//! lists of a batch take tens of megabytes), the counts of step 3 (4 bytes a backbone cell and
+//! lists of a batch take tens to hundreds of megabytes), the counts of step 3 (4 bytes a backbone cell and
 //! table: TBLASTX builds at most 6 tables at once, x_pair_par.rs `X_MAX_GROUPS`, BLASTX one), and
 //! for a while the sources' words in step 1 (20 bytes a query word) and a range's lists as made
 //! before they are put by stripe (step 2). No chain is made: the reference builder holds the chains
@@ -111,7 +112,7 @@ const X_WIDE_INDEX_BITS: usize = 20;
 /// two passes over 1,024 counts for 4-letter words.
 const X_WIDE_RADIX_BITS: usize = 10;
 
-/// No NCBI counterpart: stripes of the backbone per pool thread (step 2; the pool's threads claim
+/// No NCBI counterpart: stripes of the backbone per pool thread (step 3; the pool's threads claim
 /// the stripes in turn, and the stripes' work differs with the cells' counts).
 const X_WIDE_STRIPES_PER_THREAD: usize = 2;
 
@@ -212,15 +213,18 @@ fn x_wide_exact_words(
 }
 
 /// No NCBI counterpart: the matrix rows and row maxima the lists read (`info->matrix`,
-/// `info->row_max` of s_AddWordHits), as arrays of the alphabet's size, and for each row and each
-/// least score v from `least` to `least + ladder - 1`, the letters i with `row[i] >= v`, one bit
-/// each (`x_wide_neighbors`).
+/// `info->row_max` of s_AddWordHits), as arrays of the alphabet's size, and the letters of each row
+/// that score at least a floor, one bit each (`x_wide_neighbors`): every letter for a floor up to
+/// the matrix's least score `least` (the gap letter's `BLAST_SCORE_MIN` in NCBI's matrices, far below
+/// the others), else for the floors `low + v`, v from 0 to `ladder - 1`, with `low` the least score
+/// above `least` and `low + ladder - 1` the greatest.
 struct XWideScores {
     rows: [[i32; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
     row_max: [i32; LOOKUP_ALPHABET_SIZE],
     least: i32,
+    low: i32,
     ladder: usize,
-    /// Row a's letters scoring at least `least + v`: `at_least[a * ladder + v]`.
+    /// Row a's letters scoring at least `low + v`: `at_least[a * ladder + v]`.
     at_least: Vec<u32>,
 }
 
@@ -229,8 +233,11 @@ const _: () = assert!(
     "a row's letters are bits of a u32"
 );
 
+/// No NCBI counterpart: every letter of the lookup alphabet, one bit each.
+const X_WIDE_ALL_LETTERS: u32 = ((1u64 << LOOKUP_ALPHABET_SIZE) - 1) as u32;
+
 impl XWideScores {
-    /// The rows of `matrix`, the row maxima `row_max`, and each row's letters by least score.
+    /// The rows of `matrix`, the row maxima `row_max`, and each row's letters by floor.
     fn new(matrix: ScoringMatrix, row_max: &[i32]) -> Self {
         let mut rows = [[0; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE];
         for (a, row) in rows.iter_mut().enumerate() {
@@ -238,10 +245,11 @@ impl XWideScores {
                 *score = lookup_matrix_score(matrix, a, b);
             }
         }
-        let least = rows.iter().flatten().copied().min().unwrap_or(0);
-        let most = rows.iter().flatten().copied().max().unwrap_or(0);
-        // Least scores from `least` (every letter) to `most` (the best letters); above it, none.
-        let ladder = usize::try_from(i64::from(most) - i64::from(least) + 1)
+        let scores = || rows.iter().flatten().copied();
+        let least = scores().min().unwrap_or(0);
+        let most = scores().max().unwrap_or(0);
+        let low = scores().filter(|&s| s > least).min().unwrap_or(least);
+        let ladder = usize::try_from(i64::from(most) - i64::from(low) + 1)
             .expect("a matrix's scores span a ladder");
         let mut at_least = vec![0u32; LOOKUP_ALPHABET_SIZE * ladder];
         for (a, row) in rows.iter().enumerate() {
@@ -249,7 +257,7 @@ impl XWideScores {
                 .iter_mut()
                 .enumerate()
             {
-                let floor = least + v as i32;
+                let floor = low + v as i32;
                 for (b, &score) in row.iter().enumerate() {
                     if score >= floor {
                         *letters |= 1 << b;
@@ -261,6 +269,7 @@ impl XWideScores {
             rows,
             row_max: [0; LOOKUP_ALPHABET_SIZE],
             least,
+            low,
             ladder,
             at_least,
         };
@@ -271,8 +280,12 @@ impl XWideScores {
     /// No NCBI counterpart: row a's letters i with `row[i] >= floor`, one bit each.
     #[inline(always)]
     fn letters_at_least(&self, a: usize, floor: i64) -> u32 {
-        // Below the least score every letter passes (the first rung), above the greatest none.
-        let v = (floor - i64::from(self.least)).max(0);
+        if floor <= i64::from(self.least) {
+            return X_WIDE_ALL_LETTERS;
+        }
+        // Up to `low` every letter but those of the least score passes (the first rung), above the
+        // greatest score none.
+        let v = (floor - i64::from(self.low)).max(0);
         if v >= self.ladder as i64 {
             return 0;
         }
@@ -298,9 +311,10 @@ impl XWideScores {
 // so far are carried as their index (`prefix`, ComputeTableIndex's shifts over `subject_word`), so a
 // complete word's backbone index is `(prefix << charsize) | i`. Each level takes the letters that
 // pass `score + row[i] >= threshold` from the row's bits of letters scoring at least
-// `threshold - score` (`XWideScores::letters_at_least`), lowest first: the C loop's letters, in its
-// order. The words come out in ascending order of their index (the letters are its digits, highest
-// first).
+// `threshold - score` (`XWideScores::letters_at_least`, in 64 bits), lowest first: the C loop's
+// letters, in its order. The level before the last runs the last level's loop itself (the same
+// statements, without a call per letter). The words come out in ascending order of their index (the
+// letters are its digits, highest first).
 #[allow(clippy::too_many_arguments)]
 fn x_wide_neighbors(
     query_word: &[u8],
@@ -312,11 +326,10 @@ fn x_wide_neighbors(
     prefix: u32,
     out: &mut Vec<u32>,
 ) {
+    let floor = |score: i32| i64::from(threshold) - i64::from(score);
     let query_residue = query_word[current_pos] as usize;
     let score = score - scores.row_max[query_residue];
-    // `score + row[i] >= threshold` as `row[i] >= threshold - score`, in 64 bits.
-    let mut letters =
-        scores.letters_at_least(query_residue, i64::from(threshold) - i64::from(score));
+    let mut letters = scores.letters_at_least(query_residue, floor(score));
     if current_pos == word_length - 1 {
         while letters != 0 {
             let residue = letters.trailing_zeros();
@@ -326,6 +339,23 @@ fn x_wide_neighbors(
         return;
     }
     let row = &scores.rows[query_residue];
+    if current_pos + 2 == word_length {
+        // The last level for each letter here: its `score -= row_max[...]` and loop.
+        let last = query_word[current_pos + 1] as usize;
+        let last_max = scores.row_max[last];
+        while letters != 0 {
+            let residue = letters.trailing_zeros();
+            letters &= letters - 1;
+            let at_last = score + row[residue as usize] - last_max;
+            let mut last_letters = scores.letters_at_least(last, floor(at_last));
+            let last_prefix = ((prefix << X_WIDE_CHARSIZE) | residue) << X_WIDE_CHARSIZE;
+            while last_letters != 0 {
+                out.push(last_prefix | last_letters.trailing_zeros());
+                last_letters &= last_letters - 1;
+            }
+        }
+        return;
+    }
     while letters != 0 {
         let residue = letters.trailing_zeros();
         letters &= letters - 1;
@@ -595,6 +625,29 @@ impl XWideLists {
     }
 }
 
+/// No NCBI counterpart: `visit(k, j, block)` for each list k of `targets` (list k ends at
+/// `ends[k]`) and each stripe j it reaches, with its cells in stripe j: a list is ascending
+/// (`x_wide_targets`), so they are one block.
+#[inline(always)]
+fn x_wide_blocks(
+    targets: &[u32],
+    ends: &[usize],
+    stripes: XWideStripes,
+    mut visit: impl FnMut(usize, usize, &[u32]),
+) {
+    let mut from = 0usize;
+    for (k, &end) in ends.iter().enumerate() {
+        let mut list = &targets[from..end];
+        while let Some(&w) = list.first() {
+            let j = (w >> stripes.bits) as usize;
+            let n = list.partition_point(|&w| (w >> stripes.bits) as usize == j);
+            visit(k, j, &list[..n]);
+            list = &list[n..];
+        }
+        from = end;
+    }
+}
+
 /// No NCBI counterpart (the form of step 2): the lists of the sources `range` (each T(s)
 /// ascending, `x_wide_targets`) by stripe, and their offsets' bounds by table (of `groups`).
 #[allow(clippy::too_many_arguments)]
@@ -639,25 +692,10 @@ fn x_wide_list_part(
         u32::try_from(targets.len()).is_ok(),
         "joint lookup build: a range's lists must fit 32 bits"
     );
-    // `visit(k, j, block)` for each source k of the range and each stripe j its list reaches: a list
-    // is ascending, so its cells in a stripe are one block.
-    let blocks = |visit: &mut dyn FnMut(usize, usize, &[u32])| {
-        let mut from = 0usize;
-        for (k, &end) in ends.iter().enumerate() {
-            let mut list = &targets[from..end];
-            while let Some(&w) = list.first() {
-                let j = (w >> stripes.bits) as usize;
-                let n = list.partition_point(|&w| (w >> stripes.bits) as usize == j);
-                visit(k, j, &list[..n]);
-                list = &list[n..];
-            }
-            from = end;
-        }
-    };
     // The sizes by stripe, then the cells and spans in place.
     let mut cell_starts: Vec<u32> = vec![0; stripes.count + 1];
     let mut span_starts: Vec<u32> = vec![0; stripes.count + 1];
-    blocks(&mut |_, j, block| {
+    x_wide_blocks(&targets, &ends, stripes, |_, j, block| {
         cell_starts[j + 1] += block.len() as u32;
         span_starts[j + 1] += 1;
     });
@@ -670,7 +708,7 @@ fn x_wide_list_part(
     let mut cell_at: Vec<u32> = cell_starts[..stripes.count].to_vec();
     let mut span_at: Vec<u32> = span_starts[..stripes.count].to_vec();
     let mask = (1u32 << stripes.bits) - 1;
-    blocks(&mut |k, j, block| {
+    x_wide_blocks(&targets, &ends, stripes, |k, j, block| {
         let at = cell_at[j] as usize;
         for (cell, &w) in cells[at..at + block.len()].iter_mut().zip(block) {
             *cell = (w & mask) as u16;
@@ -1014,6 +1052,9 @@ impl XPairLutQuery {
                 cursor_base += stripe[t].overflow;
             }
             debug_assert!(cells_left.is_empty() && overflow_left.is_empty());
+            // The backbone's cells are 28 more than a multiple of 32 at 1 to 4 letters, so the last
+            // stripe takes the extra word (`pv_size`); none is left past 32 cells either way.
+            debug_assert!(pv_left.len() <= 1);
         }
 
         // 3 (c). Each stripe: its cells and each cell's first position (from its counts), then the
@@ -1088,17 +1129,30 @@ impl XPairLutQuery {
                         let src = sources.offsets(run);
                         let (cells, overflow) = (&mut *cells[t], &mut *overflows[t]);
                         let positions = &mut counts[t * len..][..len];
+                        // One offset (most sources in a table) apart from several.
+                        if let [q] = *src {
+                            for &w in targets {
+                                let at = &mut positions[usize::from(w)];
+                                if *at & X_WIDE_IN_OVERFLOW == 0 {
+                                    cells[(*at >> 2) as usize].entries[(*at & 3) as usize] = q;
+                                } else {
+                                    overflow[(*at & !X_WIDE_IN_OVERFLOW) as usize].write(q);
+                                }
+                                *at += 1;
+                            }
+                            continue;
+                        }
                         for &w in targets {
                             let at = &mut positions[usize::from(w)];
                             if *at & X_WIDE_IN_OVERFLOW == 0 {
                                 let (slot, entry) = ((*at >> 2) as usize, (*at & 3) as usize);
-                                cells[slot].entries[entry..entry + src.len()].copy_from_slice(src);
+                                for (k, &q) in src.iter().enumerate() {
+                                    cells[slot].entries[entry + k] = q;
+                                }
                             } else {
                                 let from = (*at & !X_WIDE_IN_OVERFLOW) as usize;
-                                for (entry, &q) in
-                                    overflow[from..from + src.len()].iter_mut().zip(src)
-                                {
-                                    entry.write(q);
+                                for (k, &q) in src.iter().enumerate() {
+                                    overflow[from + k].write(q);
                                 }
                             }
                             *at += src.len() as u32;

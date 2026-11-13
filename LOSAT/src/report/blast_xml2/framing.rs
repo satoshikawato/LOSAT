@@ -343,10 +343,9 @@ impl<F: SideFiles> Xml2Document<F> {
     /// outfmt 15's separator `,\n` before every report but the first), then `make` formats the
     /// query's report into `report`, given where the report written now starts in `out`, and the
     /// framing appends that report to `out`; `report` is left empty. NCBI writes the separator
-    /// before it makes the report's data (`x_WriteXML2`), which loads the report's subjects, and
-    /// writes the report after it (`s_FillBlastOutput`, then the object): what those loads post
-    /// comes between the two. For a `-subject` run the report is held and the one held before it
-    /// is written. A failure of `make` returns it with the framing's bytes in `out` (the caller
+    /// (`x_WriteXML2`, blast_format.cpp:2337-2342) before `s_FillBlastOutput` loads the report's
+    /// subjects, and writes the report after those loads: what they post comes between the two.
+    /// For a `-subject` run the report is held and the one held before it is written. A failure of `make` returns it with the framing's bytes in `out` (the caller
     /// truncates `out`) and the document's count of reports unchanged.
     pub fn report(
         &mut self,

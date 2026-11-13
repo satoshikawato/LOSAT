@@ -150,7 +150,7 @@ pub trait StructuredXml {
     /// Appends the end of the document (the epilog), after the last query.
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()>;
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-368
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:361-369
     // ```c++
     //     if (m_FormatType >= CFormattingArgs::eXml) {
     //     	if(m_FormatType == CFormattingArgs::eXml2_S) {

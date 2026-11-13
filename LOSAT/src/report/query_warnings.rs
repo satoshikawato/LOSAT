@@ -237,28 +237,31 @@ impl<'a> ReadCursor<'a> {
 
 /// Writes the part `report` of query `query`'s report, formatted into a buffer, with the texts of
 /// the subjects it reads one by one at its `reads` (the buffer's length where the serial writer
-/// reads each, and the subject; `QueryWarnings::subject_read`).
+/// reads each, and the subject; `QueryWarnings::subject_read`): `write_hit_posts` of those marks
+/// alone (no texts of the writer's own).
 pub fn write_marked(
     report: &[u8],
     reads: &[(usize, u32)],
     query: usize,
     writer: &mut dyn Write,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: Option<&mut QueryWarnings<'_>>,
 ) -> io::Result<()> {
-    write_at_marks(report, reads, writer, |subject, writer| {
-        match warnings.as_deref_mut() {
-            Some(warnings) => warnings.subject_read(query, subject, writer),
-            None => Ok(()),
-        }
-    })
+    let posts = HitPosts {
+        every: true,
+        marks: reads.to_vec(),
+        ends: vec![0; reads.len()],
+        texts: Vec::new(),
+    };
+    write_hit_posts(report, &posts, query, writer, warnings)
 }
 
-/// The `Hit`s of a query's structured report (BLAST XML, XML2, JSON) that post texts, each at the
-/// place in the query's output where NCBI loads its subject (`HitSink::position`): the text of the
-/// subject's read in the program's model (`ReadCursor::subject_read`) and the texts that the
-/// report's writer makes at the `Hit` (the taxonomy database's messages of the XML2 and JSON
-/// documents, `TaxdbPrinter`). NCBI posts them on `cerr`, which flushes the report written before
-/// them (`QueryWarnings`); `write` writes them so.
+/// The places in a query's report, formatted into a buffer, where NCBI loads a subject and posts
+/// texts: a structured report's `Hit` (BLAST XML, XML2, JSON; `HitSink::position`) or a tabular
+/// row's or pairwise line's read (`write_marked`). At each, the text of the subject's read in the
+/// program's model (`ReadCursor::subject_read`) and the texts that the report's writer makes there
+/// (the taxonomy database's messages of the XML2 and JSON documents' `Hit`s, `TaxdbPrinter`).
+/// NCBI posts them on `cerr`, which flushes the report written before them (`QueryWarnings`);
+/// `write` writes them so.
 #[derive(Debug, Default)]
 pub struct HitPosts {
     /// Whether every `Hit` is marked (the model's reads of the query write texts); else only one
@@ -320,9 +323,10 @@ impl HitPosts {
     }
 }
 
-/// Writes query `query`'s structured report `report` with the posts of its `Hit`s (`HitPosts::write`):
-/// the model's reads through the warnings' cursor (`QueryWarnings::subject_read`) and the
-/// writer's texts, both to the warnings' sink. Without warnings, the report alone.
+/// Writes query `query`'s structured report `report` with the posts of its `Hit`s
+/// (`HitPosts::write`): the model's reads through the warnings' cursor
+/// (`QueryWarnings::subject_read`) and the writer's texts, both to the warnings' sink. Without
+/// warnings, the report alone.
 pub fn write_hit_posts(
     report: &[u8],
     hits: &HitPosts,

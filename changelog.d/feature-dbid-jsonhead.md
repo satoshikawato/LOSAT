@@ -2,4 +2,5 @@
   them: the taxonomy database's messages of a query's `Hit`s (a damaged `taxdb.bti` or `taxdb.btd`) now come
   after the document's start and, in outfmt 15, after the `,` before the query's report, where NCBI BLAST+
   2.17.0 writes them when standard output and standard error go to one file. LOSAT wrote them before the
-  document's start and the earlier queries' reports (standard output and standard error are each unchanged).
+  document's start and the earlier queries' reports. Outfmt 13 and 14 no longer write the taxonomy messages of
+  a report whose side file cannot be opened, as NCBI BLAST+ does not.

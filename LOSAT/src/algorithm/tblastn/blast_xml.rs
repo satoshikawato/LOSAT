@@ -415,13 +415,19 @@ impl PreparedXml {
         ranges: &ReportRanges<'_>,
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
+        // The document's start (`StructuredXml::start`), before the first query's warnings, also
+        // for a run that stops before its first report (its first batch fails) and for a run
+        // without a query.
+        let mut buf: Vec<u8> = Vec::new();
+        document.start(&mut buf);
+        writer.write_all(&buf)?;
+        buf.clear();
         let Some(positives) = &self.positives else {
             // A run without a query (with one, `prepare` refuses) and a matrix the formatting
             // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
             // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
             // line).
             if ranges.epilog {
-                let mut buf = Vec::new();
                 document.finish(&mut buf)?;
                 writer.write_all(&buf)?;
             }
@@ -445,15 +451,10 @@ impl PreparedXml {
         };
         let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
         let mut taxdb_printer = self.taxa_notes.printer();
-        let mut buf: Vec<u8> = Vec::new();
         let mut masks: Vec<QueryMask> = Vec::new();
         let mut x_window: Vec<u8> = Vec::new();
         let mut qrow = String::new();
         let mut srow = String::new();
-        // The document's start (`StructuredXml::start`), before the first query's warnings.
-        document.start(&mut buf);
-        writer.write_all(&buf)?;
-        buf.clear();
         for (q_idx, (query, hitlist)) in query_records.iter().zip(hitlists).enumerate() {
             // The query's warnings come before its document (`QueryWarnings`).
             if let Some(warnings) = warnings.as_deref_mut() {

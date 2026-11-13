@@ -54,25 +54,26 @@
 //!    run, E_t(s), in its order (x_pair_lut.rs item 2: each location is indexed on its own, so the
 //!    loop over L_t adds exactly the words of L_t, in L_t's order).
 //! 2. Lists. T(s) of each source, once for all tables, on the pool over ranges of sources: the
-//!    statements of `x_target_list` (the exact cell when s_AddWordHits adds it, and the neighbours
-//!    of the `s_AddWordHitsCore` recursion, found in another order: `x_wide_neighbors`) with 32-bit
-//!    indices. T(s) reads only the residues of s, the matrix, the threshold and the word length
-//!    (x_lut_direct.rs header), so it is read at s's first offset, as the reference reads it
-//!    (blast_aalookup.c:490). The cells of T(s) are distinct, so the order of a list changes no
-//!    chain. A range keeps its lists by stripe of the backbone (2^b cells, a multiple of 32: step
-//!    3): for stripe j, its sources ascending, each with its cells in stripe j, one `u32` a cell
-//!    (the source's index in the range above bit b, the cell's index in the stripe below). A range
-//!    also takes, by table, the least and greatest offset of its sources with a target.
+//!    statements of `x_target_list` (the neighbours of the `s_AddWordHitsCore` recursion, in its
+//!    order, which is ascending: `x_wide_neighbors`; and the exact cell when s_AddWordHits adds it,
+//!    where its index falls among them) with 32-bit indices. T(s) reads only the residues of s, the
+//!    matrix, the threshold and the word length (x_lut_direct.rs header), so it is read at s's first
+//!    offset, as the reference reads it (blast_aalookup.c:490). The cells of T(s) are distinct, so
+//!    the place of the exact cell changes no chain. A range keeps its lists by stripe of the backbone
+//!    (2^b cells, 32 to 2^16; step 3): for stripe j, its sources with cells in the stripe, ascending,
+//!    each with those cells (their index in the stripe, a `u16`), one block of T(s) since T(s) is
+//!    ascending. A range also takes, by table, the least and greatest offset of its sources with a
+//!    target.
 //! 3. The tables, all of them at once, by stripe (the stripes side by side): (a) each stripe counts
 //!    the appends to each of its cells in each table, count_t[w] = sum of |E_t(s)| over the s with
-//!    w in T(s) (the reference's chain length), from every range's list for the stripe, and sums
+//!    w in T(s) (the reference's chain length), from every range's lists for the stripe, and sums
 //!    each table's overflow size, longest count and used cells in the stripe; (b) each table's
 //!    cells and overflow go to the stripes in cell order (`BlastAaLookupFinalize` assigns the
 //!    overflow cursors in ascending cell order, and a compacted table keeps its cells in index
-//!    order); (c) each stripe counts again, writes its cells (`num_used`, the pv bit, the cursor of
-//!    an overflow cell; a cell without entries all zero, as after the C `calloc`), turns count_t[w]
-//!    into the first position of cell w, then walks the lists as (a) did and appends, for each s
-//!    with w in T(s), E_t(s) at the position of w in table t, advanced by the offsets written.
+//!    order); (c) each stripe writes its cells (`num_used`, the pv bit, the cursor of an overflow
+//!    cell; a cell without entries all zero, as after the C `calloc`), turns count_t[w] into the
+//!    first position of cell w, then walks the lists as (a) did and appends, for each s with w in
+//!    T(s), E_t(s) at the position of w in table t, advanced by the offsets written.
 //!
 //! # Why the tables are those of `x_build_group`
 //!
@@ -88,12 +89,13 @@
 //! `x_build_group`. Only the scheduling (ranges, stripes, the pool's threads) differs, and it changes
 //! no value.
 //!
-//! Memory: the tables, the lists T(s) of the batch's sources by stripe (4 bytes a cell of a list,
-//! freed when the tables are built; no memo is kept across batches: at 4 letters the lists of a
-//! batch take tens of megabytes), and for a while: the sources' words in step 1 (20 bytes a query
-//! word), a range's lists as made before they are put by stripe (step 2), and a stripe's count for
-//! each of its cells and tables (`X_WIDE_STRIPE_COUNTS`, step 3). No chain is made: the reference
-//! builder holds the chains and the table at once.
+//! Memory: the tables, the lists T(s) of the batch's sources by stripe (2 bytes a cell of a list
+//! and 8 a block, freed when the tables are built; no memo is kept across batches: at 4 letters the
+//! lists of a batch take tens of megabytes), the counts of step 3 (4 bytes a backbone cell and
+//! table: TBLASTX builds at most 6 tables at once, x_pair_par.rs `X_MAX_GROUPS`, BLASTX one), and
+//! for a while the sources' words in step 1 (20 bytes a query word) and a range's lists as made
+//! before they are put by stripe (step 2). No chain is made: the reference builder holds the chains
+//! and the table at once.
 
 use super::*;
 
@@ -109,13 +111,13 @@ const X_WIDE_INDEX_BITS: usize = 20;
 /// two passes over 1,024 counts for 4-letter words.
 const X_WIDE_RADIX_BITS: usize = 10;
 
-/// No NCBI counterpart: stripes of the backbone per pool thread (step 3; the pool's threads claim
+/// No NCBI counterpart: stripes of the backbone per pool thread (step 2; the pool's threads claim
 /// the stripes in turn, and the stripes' work differs with the cells' counts).
-const X_WIDE_STRIPES_PER_THREAD: usize = 4;
+const X_WIDE_STRIPES_PER_THREAD: usize = 2;
 
-/// No NCBI counterpart: the most counts a stripe holds while it runs (its cells times the tables,
-/// 256 KiB), which bounds a stripe's cells (at least 32).
-const X_WIDE_STRIPE_COUNTS: usize = 1 << 16;
+/// No NCBI counterpart: the widest stripe, in bits of its cells (a cell's index in its stripe is a
+/// `u16`).
+const X_WIDE_STRIPE_BITS_MOST: u32 = 16;
 
 /// No NCBI counterpart: ranges of sources per pool thread for the lists T(s) (they differ in
 /// length; the pool's threads claim the ranges in turn).
@@ -210,37 +212,71 @@ fn x_wide_exact_words(
 }
 
 /// No NCBI counterpart: the matrix rows and row maxima the lists read (`info->matrix`,
-/// `info->row_max` of s_AddWordHits), as arrays of the alphabet's size, and each row's letters by
-/// descending score (`x_wide_neighbors`).
+/// `info->row_max` of s_AddWordHits), as arrays of the alphabet's size, and for each row and each
+/// least score v from `least` to `least + ladder - 1`, the letters i with `row[i] >= v`, one bit
+/// each (`x_wide_neighbors`).
 struct XWideScores {
     rows: [[i32; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
     row_max: [i32; LOOKUP_ALPHABET_SIZE],
-    by_score: [[(i32, u8); LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
+    least: i32,
+    ladder: usize,
+    /// Row a's letters scoring at least `least + v`: `at_least[a * ladder + v]`.
+    at_least: Vec<u32>,
 }
 
+const _: () = assert!(
+    LOOKUP_ALPHABET_SIZE <= 32,
+    "a row's letters are bits of a u32"
+);
+
 impl XWideScores {
-    /// The rows of `matrix`, the row maxima `row_max`, and each row's letters by score.
+    /// The rows of `matrix`, the row maxima `row_max`, and each row's letters by least score.
     fn new(matrix: ScoringMatrix, row_max: &[i32]) -> Self {
-        let mut scores = XWideScores {
-            rows: [[0; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
-            row_max: [0; LOOKUP_ALPHABET_SIZE],
-            by_score: [[(0, 0); LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE],
-        };
-        for (a, (row, by_score)) in scores
-            .rows
-            .iter_mut()
-            .zip(scores.by_score.iter_mut())
-            .enumerate()
-        {
-            for (b, (score, entry)) in row.iter_mut().zip(by_score.iter_mut()).enumerate() {
+        let mut rows = [[0; LOOKUP_ALPHABET_SIZE]; LOOKUP_ALPHABET_SIZE];
+        for (a, row) in rows.iter_mut().enumerate() {
+            for (b, score) in row.iter_mut().enumerate() {
                 *score = lookup_matrix_score(matrix, a, b);
-                *entry = (*score, b as u8);
             }
-            // Descending score, equal scores in letter order (any order finds the same words).
-            by_score.sort_by_key(|&(score, b)| (std::cmp::Reverse(score), b));
         }
+        let least = rows.iter().flatten().copied().min().unwrap_or(0);
+        let most = rows.iter().flatten().copied().max().unwrap_or(0);
+        // Least scores from `least` (every letter) to `most` (the best letters); above it, none.
+        let ladder = usize::try_from(i64::from(most) - i64::from(least) + 1)
+            .expect("a matrix's scores span a ladder");
+        let mut at_least = vec![0u32; LOOKUP_ALPHABET_SIZE * ladder];
+        for (a, row) in rows.iter().enumerate() {
+            for (v, letters) in at_least[a * ladder..(a + 1) * ladder]
+                .iter_mut()
+                .enumerate()
+            {
+                let floor = least + v as i32;
+                for (b, &score) in row.iter().enumerate() {
+                    if score >= floor {
+                        *letters |= 1 << b;
+                    }
+                }
+            }
+        }
+        let mut scores = XWideScores {
+            rows,
+            row_max: [0; LOOKUP_ALPHABET_SIZE],
+            least,
+            ladder,
+            at_least,
+        };
         scores.row_max.copy_from_slice(row_max);
         scores
+    }
+
+    /// No NCBI counterpart: row a's letters i with `row[i] >= floor`, one bit each.
+    #[inline(always)]
+    fn letters_at_least(&self, a: usize, floor: i64) -> u32 {
+        // Below the least score every letter passes (the first rung), above the greatest none.
+        let v = (floor - i64::from(self.least)).max(0);
+        if v >= self.ladder as i64 {
+            return 0;
+        }
+        self.at_least[a * self.ladder + v as usize]
     }
 }
 
@@ -258,12 +294,13 @@ impl XWideScores {
 //             subject_word[current_pos] = i;
 //             s_AddWordHitsCore(info, score + row[i], current_pos + 1);
 // ```
-// The recursion of `x_record_neighbors` with the same tests; the letters chosen so far are carried
-// as their index (`prefix`, ComputeTableIndex's shifts over `subject_word`), so a complete word's
-// backbone index is `(prefix << charsize) | i`. Each level takes the row's letters by descending
-// score (`XWideScores::by_score`) and stops at the first that fails `score + row[i] >= threshold`:
-// every later one fails it too. So the words are the C loops' words, in another order, which
-// changes no table (module comment, step 2).
+// The recursion of `x_record_neighbors` with the same tests in the same order; the letters chosen
+// so far are carried as their index (`prefix`, ComputeTableIndex's shifts over `subject_word`), so a
+// complete word's backbone index is `(prefix << charsize) | i`. Each level takes the letters that
+// pass `score + row[i] >= threshold` from the row's bits of letters scoring at least
+// `threshold - score` (`XWideScores::letters_at_least`), lowest first: the C loop's letters, in its
+// order. The words come out in ascending order of their index (the letters are its digits, highest
+// first).
 #[allow(clippy::too_many_arguments)]
 fn x_wide_neighbors(
     query_word: &[u8],
@@ -277,28 +314,29 @@ fn x_wide_neighbors(
 ) {
     let query_residue = query_word[current_pos] as usize;
     let score = score - scores.row_max[query_residue];
-    let by_score = &scores.by_score[query_residue];
+    // `score + row[i] >= threshold` as `row[i] >= threshold - score`, in 64 bits.
+    let mut letters =
+        scores.letters_at_least(query_residue, i64::from(threshold) - i64::from(score));
     if current_pos == word_length - 1 {
-        for &(residue_score, residue) in by_score {
-            if score + residue_score < threshold {
-                break;
-            }
-            out.push((prefix << X_WIDE_CHARSIZE) | u32::from(residue));
+        while letters != 0 {
+            let residue = letters.trailing_zeros();
+            letters &= letters - 1;
+            out.push((prefix << X_WIDE_CHARSIZE) | residue);
         }
         return;
     }
-    for &(residue_score, residue) in by_score {
-        if score + residue_score < threshold {
-            break;
-        }
+    let row = &scores.rows[query_residue];
+    while letters != 0 {
+        let residue = letters.trailing_zeros();
+        letters &= letters - 1;
         x_wide_neighbors(
             query_word,
             word_length,
             scores,
             threshold,
-            score + residue_score,
+            score + row[residue as usize],
             current_pos + 1,
-            (prefix << X_WIDE_CHARSIZE) | u32::from(residue),
+            (prefix << X_WIDE_CHARSIZE) | residue,
             out,
         );
     }
@@ -330,8 +368,11 @@ fn x_wide_neighbors(
 //
 //     s_AddWordHitsCore(&info, score, 0);
 // ```
-// The statements of `x_target_list`, appending T(s) to `out`.
-/// Appends T(s) of the word at `query_word` to `out`.
+// The statements of `x_target_list`, appending T(s) to `out` in ascending order of the cells: the
+// exact cell, which s_AddWordHits adds first, goes where its index falls among the neighbours (it
+// is none of them: they score at least the threshold, the word itself less), which changes no table
+// (the cells of T(s) are distinct; module comment, step 2).
+/// Appends T(s) of the word at `query_word` to `out`, its cells ascending.
 fn x_wide_targets(
     query_word: &[u8],
     word_length: usize,
@@ -340,14 +381,7 @@ fn x_wide_targets(
     out: &mut Vec<u32>,
 ) {
     let first = query_word[0] as usize;
-    let mut self_score = scores.rows[first][first];
-    for &residue in &query_word[1..word_length] {
-        let residue = residue as usize;
-        self_score += scores.rows[residue][residue];
-    }
-    if threshold == 0 || self_score < threshold {
-        out.push(x_wide_index(query_word, word_length));
-    }
+    let start = out.len();
     if threshold != 0 {
         let mut max_score = scores.row_max[first];
         for &residue in &query_word[1..word_length] {
@@ -363,6 +397,16 @@ fn x_wide_targets(
             0,
             out,
         );
+    }
+    let mut self_score = scores.rows[first][first];
+    for &residue in &query_word[1..word_length] {
+        let residue = residue as usize;
+        self_score += scores.rows[residue][residue];
+    }
+    if threshold == 0 || self_score < threshold {
+        let exact = x_wide_index(query_word, word_length);
+        let at = start + out[start..].partition_point(|&w| w < exact);
+        out.insert(at, exact);
     }
 }
 
@@ -489,21 +533,33 @@ impl XWideSources {
     }
 }
 
-/// No NCBI counterpart: the stripes of the backbone (step 3): `1 << bits` cells each (`bits` >= 5:
-/// a stripe's presence-vector words are its own), `count` of them.
+/// No NCBI counterpart: the stripes of the backbone (step 2): `1 << bits` cells each (`bits` from 5
+/// to 16: a stripe's presence-vector words are its own, and a cell's index in it is a `u16`), `count`
+/// of them.
 #[derive(Clone, Copy)]
 struct XWideStripes {
     bits: u32,
     count: usize,
 }
 
-/// No NCBI counterpart: a range's lists T(s) by stripe (step 2): for stripe j,
-/// `words[starts[j]..starts[j + 1]]`, for the range's sources ascending, the cells of T(s) in the
-/// stripe, each as `(source's index in the range << stripes.bits) | cell's index in the stripe`;
-/// and, by table, the least and greatest offset of the range's sources with a target.
+/// No NCBI counterpart: a source of a range with cells in a stripe (step 2): its index in the
+/// range, and the end of its cells in the range's `cells`.
+#[derive(Clone, Copy, Default)]
+struct XWideSpan {
+    i: u32,
+    end: u32,
+}
+
+/// No NCBI counterpart: a range's lists T(s) by stripe (step 2). For stripe j, the cells (their
+/// index in the stripe) of the range's lists, source by source ascending, are
+/// `cells[cell_starts[j]..cell_starts[j + 1]]`, and the sources with cells in the stripe, ascending,
+/// with where their cells end, `spans[span_starts[j]..span_starts[j + 1]]`. Also, by table, the
+/// least and greatest offset of the range's sources with a target.
 struct XWideListPart {
-    words: Vec<u32>,
-    starts: Vec<u32>,
+    cells: Vec<u16>,
+    cell_starts: Vec<u32>,
+    spans: Vec<XWideSpan>,
+    span_starts: Vec<u32>,
     q_bounds: Vec<(u32, u32)>,
 }
 
@@ -515,31 +571,123 @@ struct XWideLists {
 }
 
 impl XWideLists {
-    /// No NCBI counterpart: `visit(runs of s, cell's index in the stripe)` for each source s
-    /// ascending and each cell of T(s) in stripe `j` (in the ranges' order, which is the sources'
-    /// order).
+    /// No NCBI counterpart: `visit(runs of s, cells of T(s) in stripe j)` for each source s with
+    /// cells in stripe `j`, ascending (the ranges in order).
     #[inline(always)]
     fn for_each_in(
         &self,
         sources: &XWideSources,
-        stripes: XWideStripes,
         j: usize,
-        mut visit: impl FnMut(&[XWideRun], usize),
+        mut visit: impl FnMut(&[XWideRun], &[u16]),
     ) {
-        let mask = (1u32 << stripes.bits) - 1;
         for (part, &base) in self.parts.iter().zip(&self.bounds) {
-            let words = &part.words[part.starts[j] as usize..part.starts[j + 1] as usize];
-            let mut current = u32::MAX;
-            let mut runs: &[XWideRun] = &[];
-            for &word in words {
-                let i = word >> stripes.bits;
-                if i != current {
-                    current = i;
-                    runs = sources.runs_of(base + i as usize);
-                }
-                visit(runs, (word & mask) as usize);
+            let spans = &part.spans[part.span_starts[j] as usize..part.span_starts[j + 1] as usize];
+            let mut from = part.cell_starts[j] as usize;
+            for span in spans {
+                let end = span.end as usize;
+                visit(
+                    sources.runs_of(base + span.i as usize),
+                    &part.cells[from..end],
+                );
+                from = end;
             }
         }
+    }
+}
+
+/// No NCBI counterpart (the form of step 2): the lists of the sources `range` (each T(s)
+/// ascending, `x_wide_targets`) by stripe, and their offsets' bounds by table (of `groups`).
+#[allow(clippy::too_many_arguments)]
+fn x_wide_list_part(
+    range: std::ops::Range<usize>,
+    sources: &XWideSources,
+    query: &[u8],
+    word_length: usize,
+    scores: &XWideScores,
+    threshold: i32,
+    stripes: XWideStripes,
+    groups: usize,
+) -> XWideListPart {
+    let mut targets: Vec<u32> = Vec::new();
+    let mut ends: Vec<usize> = Vec::with_capacity(range.len());
+    let mut q_bounds = vec![(u32::MAX, 0u32); groups];
+    for i in range {
+        let runs = sources.runs_of(i);
+        // blast_aalookup.c:490: w = query + offset_list[2];
+        let first = usize::try_from(sources.offsets[runs[0].from as usize])
+            .expect("NCBI BLAST query offset must fit");
+        let before = targets.len();
+        x_wide_targets(
+            &query[first..],
+            word_length,
+            scores,
+            threshold,
+            &mut targets,
+        );
+        ends.push(targets.len());
+        if targets.len() > before {
+            for &run in runs {
+                let (q_min, q_max) = &mut q_bounds[run.t as usize];
+                for &q in sources.offsets(run) {
+                    *q_min = (*q_min).min(q as u32);
+                    *q_max = (*q_max).max(q as u32);
+                }
+            }
+        }
+    }
+    assert!(
+        u32::try_from(targets.len()).is_ok(),
+        "joint lookup build: a range's lists must fit 32 bits"
+    );
+    // `visit(k, j, block)` for each source k of the range and each stripe j its list reaches: a list
+    // is ascending, so its cells in a stripe are one block.
+    let blocks = |visit: &mut dyn FnMut(usize, usize, &[u32])| {
+        let mut from = 0usize;
+        for (k, &end) in ends.iter().enumerate() {
+            let mut list = &targets[from..end];
+            while let Some(&w) = list.first() {
+                let j = (w >> stripes.bits) as usize;
+                let n = list.partition_point(|&w| (w >> stripes.bits) as usize == j);
+                visit(k, j, &list[..n]);
+                list = &list[n..];
+            }
+            from = end;
+        }
+    };
+    // The sizes by stripe, then the cells and spans in place.
+    let mut cell_starts: Vec<u32> = vec![0; stripes.count + 1];
+    let mut span_starts: Vec<u32> = vec![0; stripes.count + 1];
+    blocks(&mut |_, j, block| {
+        cell_starts[j + 1] += block.len() as u32;
+        span_starts[j + 1] += 1;
+    });
+    for j in 0..stripes.count {
+        cell_starts[j + 1] += cell_starts[j];
+        span_starts[j + 1] += span_starts[j];
+    }
+    let mut cells: Vec<u16> = vec![0; targets.len()];
+    let mut spans: Vec<XWideSpan> = vec![XWideSpan::default(); span_starts[stripes.count] as usize];
+    let mut cell_at: Vec<u32> = cell_starts[..stripes.count].to_vec();
+    let mut span_at: Vec<u32> = span_starts[..stripes.count].to_vec();
+    let mask = (1u32 << stripes.bits) - 1;
+    blocks(&mut |k, j, block| {
+        let at = cell_at[j] as usize;
+        for (cell, &w) in cells[at..at + block.len()].iter_mut().zip(block) {
+            *cell = (w & mask) as u16;
+        }
+        cell_at[j] += block.len() as u32;
+        spans[span_at[j] as usize] = XWideSpan {
+            i: k as u32,
+            end: cell_at[j],
+        };
+        span_at[j] += 1;
+    });
+    XWideListPart {
+        cells,
+        cell_starts,
+        spans,
+        span_starts,
+        q_bounds,
     }
 }
 
@@ -595,15 +743,13 @@ fn x_wide_threads(on: XWideOn<'_, '_>) -> usize {
     }
 }
 
-/// No NCBI counterpart: `cells` as initialized cells.
+/// No NCBI counterpart: `written` as initialized elements.
 ///
 /// # Safety
-/// Every element of `cells` was written.
-unsafe fn x_wide_written(cells: &mut [std::mem::MaybeUninit<BackboneCell>]) -> &mut [BackboneCell] {
+/// Every element of `written` was written.
+unsafe fn x_wide_written<T>(written: &mut [std::mem::MaybeUninit<T>]) -> &mut [T] {
     // SAFETY: (caller) every element is initialized; `MaybeUninit<T>` has `T`'s layout.
-    unsafe {
-        std::slice::from_raw_parts_mut(cells.as_mut_ptr().cast::<BackboneCell>(), cells.len())
-    }
+    unsafe { std::slice::from_raw_parts_mut(written.as_mut_ptr().cast::<T>(), written.len()) }
 }
 
 /// No NCBI counterpart: a table's totals in a stripe of cells (step 3 (a)): overflow entries,
@@ -696,16 +842,15 @@ impl XPairLutQuery {
         // 1. The sources.
         let sources = XWideSources::new(query, tables, word_length);
 
-        // The stripes: about `X_WIDE_STRIPES_PER_THREAD` a thread, a stripe's counts over its cells
-        // and the tables at most `X_WIDE_STRIPE_COUNTS` (step 3).
+        // The stripes: about `X_WIDE_STRIPES_PER_THREAD` a thread, of 32 to 2^16 cells.
         let stripes = {
             let cells = (backbone_size / (threads * X_WIDE_STRIPES_PER_THREAD))
-                .min(X_WIDE_STRIPE_COUNTS / groups.max(1))
-                .max(1 << PV_ARRAY_BTS);
-            let bits = stripe_bits
-                .unwrap_or(cells.ilog2())
-                .max(PV_ARRAY_BTS as u32);
-            assert!(bits < 32, "joint lookup build: stripe of 2^{bits} cells");
+                .clamp(1 << PV_ARRAY_BTS, 1 << X_WIDE_STRIPE_BITS_MOST);
+            let bits = stripe_bits.unwrap_or(cells.ilog2());
+            assert!(
+                (PV_ARRAY_BTS as u32..=X_WIDE_STRIPE_BITS_MOST).contains(&bits),
+                "joint lookup build: stripes of 2^{bits} cells"
+            );
             XWideStripes {
                 bits,
                 count: backbone_size.div_ceil(1 << bits),
@@ -714,77 +859,26 @@ impl XPairLutQuery {
         let stripe_len =
             |j: usize| (1usize << stripes.bits).min(backbone_size - (j << stripes.bits));
 
-        // 2. The lists T(s) by stripe, once for every table. A range numbers its sources in the
-        // bits above a stripe's cell, so it holds fewer than 2^(32 - bits).
+        // 2. The lists T(s) by stripe, once for every table.
         let scores = XWideScores::new(self.matrix, &self.row_max);
         let n = sources.cells.len();
-        let ranges = (threads * X_WIDE_LIST_PARTS_PER_THREAD)
-            .max(n.div_ceil(1usize << (32 - stripes.bits)))
-            .min(n)
-            .max(1);
+        let ranges = (threads * X_WIDE_LIST_PARTS_PER_THREAD).min(n).max(1);
         let bounds: Vec<usize> = (0..=ranges).map(|r| n * r / ranges).collect();
         let threshold = self.threshold;
         let made = x_wide_parts(
             on,
             bounds.windows(2).map(|b| b[0]..b[1]).collect(),
             &|range: std::ops::Range<usize>| {
-                let mut targets: Vec<u32> = Vec::new();
-                let mut ends: Vec<usize> = Vec::with_capacity(range.len());
-                let mut q_bounds = vec![(u32::MAX, 0u32); groups];
-                for i in range {
-                    let runs = sources.runs_of(i);
-                    // blast_aalookup.c:490: w = query + offset_list[2];
-                    let first = usize::try_from(sources.offsets[runs[0].from as usize])
-                        .expect("NCBI BLAST query offset must fit");
-                    let before = targets.len();
-                    x_wide_targets(
-                        &query[first..],
-                        word_length,
-                        &scores,
-                        threshold,
-                        &mut targets,
-                    );
-                    ends.push(targets.len());
-                    if targets.len() > before {
-                        for &run in runs {
-                            let (q_min, q_max) = &mut q_bounds[run.t as usize];
-                            for &q in sources.offsets(run) {
-                                *q_min = (*q_min).min(q as u32);
-                                *q_max = (*q_max).max(q as u32);
-                            }
-                        }
-                    }
-                }
-                assert!(
-                    u32::try_from(targets.len()).is_ok(),
-                    "joint lookup build: a range's lists must fit 32 bits"
-                );
-                // The cells by stripe: counted, then placed, each stripe's in source order.
-                let mut starts: Vec<u32> = vec![0; stripes.count + 1];
-                for &w in &targets {
-                    starts[(w >> stripes.bits) as usize + 1] += 1;
-                }
-                for j in 0..stripes.count {
-                    starts[j + 1] += starts[j];
-                }
-                let mut at: Vec<u32> = starts[..stripes.count].to_vec();
-                let mut words: Vec<u32> = vec![0; targets.len()];
-                let mask = (1u32 << stripes.bits) - 1;
-                let mut from = 0usize;
-                for (k, &end) in ends.iter().enumerate() {
-                    let source = (k as u32) << stripes.bits;
-                    for &w in &targets[from..end] {
-                        let j = (w >> stripes.bits) as usize;
-                        words[at[j] as usize] = source | (w & mask);
-                        at[j] += 1;
-                    }
-                    from = end;
-                }
-                XWideListPart {
-                    words,
-                    starts,
-                    q_bounds,
-                }
+                x_wide_list_part(
+                    range,
+                    &sources,
+                    query,
+                    word_length,
+                    &scores,
+                    threshold,
+                    stripes,
+                    groups,
+                )
             },
         );
         let lists = XWideLists {
@@ -799,39 +893,59 @@ impl XPairLutQuery {
             }
         }
 
-        // 3 (a). The counts of stripe j's cells, table after table (`stripe_len(j)` each), and
-        // each table's totals in the stripe.
-        let count_stripe = |j: usize, counts: &mut [u32]| {
+        // 3 (a). Each stripe's counts: its cells' in each table (`groups` blocks of
+        // `stripe_len(j)`), the stripes' blocks in stripe order; and each table's totals in it.
+        let counted_len = groups * backbone_size;
+        let mut counts: Vec<u32> = Vec::with_capacity(counted_len);
+        let mut blocks: Vec<(usize, &mut [std::mem::MaybeUninit<u32>])> =
+            Vec::with_capacity(stripes.count);
+        {
+            let mut left = &mut counts.spare_capacity_mut()[..counted_len];
+            for j in 0..stripes.count {
+                let (block, rest) = std::mem::take(&mut left).split_at_mut(groups * stripe_len(j));
+                blocks.push((j, block));
+                left = rest;
+            }
+            debug_assert!(left.is_empty());
+        }
+        let totals: Vec<Vec<XWideStripe>> = x_wide_parts(on, blocks, &|(j, block): (
+            usize,
+            &mut [std::mem::MaybeUninit<u32>],
+        )| {
             let len = stripe_len(j);
-            lists.for_each_in(&sources, stripes, j, |runs, w| {
+            block.fill(std::mem::MaybeUninit::new(0));
+            // SAFETY: every element of `block` was written just above.
+            let block = unsafe { x_wide_written(block) };
+            lists.for_each_in(&sources, j, |runs, cells| {
                 for run in runs {
-                    counts[run.t as usize * len + w] += run.to - run.from;
+                    let k = run.to - run.from;
+                    let counts = &mut block[run.t as usize * len..][..len];
+                    for &w in cells {
+                        counts[usize::from(w)] += k;
+                    }
                 }
             });
-        };
-        let totals: Vec<Vec<XWideStripe>> =
-            x_wide_parts(on, (0..stripes.count).collect(), &|j: usize| {
-                let len = stripe_len(j);
-                let mut counts: Vec<u32> = vec![0; groups * len];
-                count_stripe(j, &mut counts);
-                counts
-                    .chunks(len)
-                    .map(|counts| {
-                        let mut totals = XWideStripe::default();
-                        for &count in counts {
-                            if count == 0 {
-                                continue;
-                            }
-                            totals.used += 1;
-                            if count as usize > AA_HITS_PER_CELL {
-                                totals.overflow += count as usize;
-                            }
-                            totals.longest = totals.longest.max(count);
+            block
+                .chunks(len)
+                .map(|counts| {
+                    let mut totals = XWideStripe::default();
+                    for &count in counts {
+                        if count == 0 {
+                            continue;
                         }
-                        totals
-                    })
-                    .collect()
-            });
+                        totals.used += 1;
+                        if count as usize > AA_HITS_PER_CELL {
+                            totals.overflow += count as usize;
+                        }
+                        totals.longest = totals.longest.max(count);
+                    }
+                    totals
+                })
+                .collect()
+        });
+        // SAFETY: the stripes' blocks cover the `counted_len` counts (each stripe `groups` times its
+        // cells), and each stripe wrote all of its block.
+        unsafe { counts.set_len(counted_len) };
 
         // 3 (b). Each table: its size and layout (BlastAaLookupFinalize's rule, compacted where
         // the branch-free scan takes the table: `x_scan_bf_takes`, as `x_build_group` decides),
@@ -846,7 +960,7 @@ impl XPairLutQuery {
                     longest = longest.max(stripe[t].longest);
                 }
                 // The positions in a stripe's part of the overflow are `u32`s beside the flag (2^31
-                // entries of a stripe of at most `X_WIDE_STRIPE_COUNTS` cells are 8 GiB); a cell's
+                // entries of a stripe of at most 2^16 cells are 8 GiB); a cell's
                 // cursor takes 64 bits (`set_cursor`), so the table's overflow passes 2^31 entries,
                 // where NCBI's `Int4` cursor overflows, as the other builders' do.
                 assert!(
@@ -902,15 +1016,22 @@ impl XPairLutQuery {
             debug_assert!(cells_left.is_empty() && overflow_left.is_empty());
         }
 
-        // 3 (c). Each stripe: its counts again, its cells, each cell's first position, then the
+        // 3 (c). Each stripe: its cells and each cell's first position (from its counts), then the
         // appends.
+        let mut stripe_counts: Vec<&mut [u32]> = Vec::with_capacity(stripes.count);
+        {
+            let mut left = &mut counts[..];
+            for j in 0..stripes.count {
+                let (block, rest) = std::mem::take(&mut left).split_at_mut(groups * stripe_len(j));
+                stripe_counts.push(block);
+                left = rest;
+            }
+        }
         x_wide_parts(
             on,
-            places.into_iter().enumerate().collect(),
-            &|(j, place): (usize, Vec<XWidePlace<'_>>)| {
+            places.into_iter().zip(stripe_counts).enumerate().collect(),
+            &|(j, (place, counts)): (usize, (Vec<XWidePlace<'_>>, &mut [u32]))| {
                 let len = stripe_len(j);
-                let mut counts: Vec<u32> = vec![0; groups * len];
-                count_stripe(j, &mut counts);
                 let mut cells: Vec<&mut [BackboneCell]> = Vec::with_capacity(groups);
                 let mut overflows: Vec<&mut [std::mem::MaybeUninit<i32>]> =
                     Vec::with_capacity(groups);
@@ -961,23 +1082,27 @@ impl XPairLutQuery {
                 }
                 // The appends: a cell's position advances by the offsets written, from the
                 // cell's first position, over the walk the counts took.
-                lists.for_each_in(&sources, stripes, j, |runs, w| {
+                lists.for_each_in(&sources, j, |runs, targets| {
                     for &run in runs {
                         let t = run.t as usize;
                         let src = sources.offsets(run);
-                        let at = &mut counts[t * len + w];
-                        if *at & X_WIDE_IN_OVERFLOW == 0 {
-                            let (slot, entry) = ((*at >> 2) as usize, (*at & 3) as usize);
-                            cells[t][slot].entries[entry..entry + src.len()].copy_from_slice(src);
-                        } else {
-                            let from = (*at & !X_WIDE_IN_OVERFLOW) as usize;
-                            for (entry, &q) in
-                                overflows[t][from..from + src.len()].iter_mut().zip(src)
-                            {
-                                entry.write(q);
+                        let (cells, overflow) = (&mut *cells[t], &mut *overflows[t]);
+                        let positions = &mut counts[t * len..][..len];
+                        for &w in targets {
+                            let at = &mut positions[usize::from(w)];
+                            if *at & X_WIDE_IN_OVERFLOW == 0 {
+                                let (slot, entry) = ((*at >> 2) as usize, (*at & 3) as usize);
+                                cells[slot].entries[entry..entry + src.len()].copy_from_slice(src);
+                            } else {
+                                let from = (*at & !X_WIDE_IN_OVERFLOW) as usize;
+                                for (entry, &q) in
+                                    overflow[from..from + src.len()].iter_mut().zip(src)
+                                {
+                                    entry.write(q);
+                                }
                             }
+                            *at += src.len() as u32;
                         }
-                        *at += src.len() as u32;
                     }
                 });
                 // Each cell with entries took its count of offsets from its first position (its
@@ -1177,10 +1302,9 @@ mod tests {
             .expect("every location inside one group");
         let wide = q.x_build_tables_wide(&locations, pool, true);
         assert_eq!(wide.len(), starts.len());
-        // Stripes of 32 cells (as many as the backbone holds) and, for words of up to 3 letters
-        // (a stripe's counts of 4-letter words take 3.65 MB a table), one stripe of 2^31 cells,
-        // whose ranges hold 2 sources each (the bits above a cell): the same tables.
-        let stripe_bits: &[u32] = if word <= 3 { &[5, 31] } else { &[5] };
+        // Stripes of 32 cells (as many as the backbone holds) and of 2^16 cells (one for words of up
+        // to 3 letters, 14 for 4): the same tables.
+        let stripe_bits: &[u32] = &[5, 16];
         for &bits in stripe_bits {
             let striped =
                 q.x_build_tables_wide_with(&locations, XWideOn::Pool(pool), true, Some(bits), true);
@@ -1432,7 +1556,7 @@ mod tests {
     // (`x_build_full_wide`, from a lookup query handed over, `x_from_prepared`; the query here is
     // TBLASTX's, BLASTX's own is `blastx::seed`'s test) is the reference builder's full table field by
     // field, never compacted, built on this thread and in 4 parts on pools of 1, 4 and 8 threads,
-    // also with stripes of 32 cells and with one stripe (ranges of 2 sources); with a query of SEG
+    // also with stripes of 32 and of 2^16 cells; with a query of SEG
     // masks, a context shorter than a word, an empty one and a repeated letter, three matrices and
     // thresholds 0, 11 and 13.
     #[test]
@@ -1471,7 +1595,7 @@ mod tests {
                             &table,
                             &full,
                         );
-                        for bits in [5, 31] {
+                        for bits in [5, 16] {
                             let tables = [q.prepared.lookup_locations.clone()];
                             let mut built = pool.install(|| {
                                 q.x_build_tables_wide_with(

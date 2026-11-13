@@ -153,6 +153,12 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         };
         let mut next_row = 0usize;
         let start = buf.len();
+        // Where NCBI loads the subject of each `Hit` (`HitSink::position`), for the texts of
+        // the subjects that the query's report reads one by one (`QueryWarnings::subject_read`).
+        let mut reads: Vec<(usize, u32)> = Vec::new();
+        let marks = warnings
+            .as_deref()
+            .is_some_and(|warnings| warnings.reads_with_texts(q_idx));
         let written = document.query(&xml.run, &query, &mut buf, |sink| {
             let Some(hit_list) = hit_list else {
                 return Ok(());
@@ -167,6 +173,9 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             );
             for range in ranges {
                 let s_idx = lists[range.start].hsps[0].s_idx as usize;
+                if let Some(at) = sink.position().filter(|_| marks) {
+                    reads.push((at, s_idx as u32));
+                }
                 let subject = subjects.get(s_idx, program)?;
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
@@ -209,7 +218,13 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             buf.truncate(start);
             return Err(error);
         }
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_marked(
+            &buf,
+            &reads,
+            q_idx,
+            writer,
+            warnings.as_deref_mut(),
+        )?;
         buf.clear();
     }
     if xml.epilog {

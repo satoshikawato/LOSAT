@@ -329,8 +329,9 @@ impl Rule {
 
 /// The first reading: the loop of `read_queries` (`GetNextSeqBatch` until `End()`), each record's
 /// length kept and the record dropped, and how the reading ended (with the warnings of the record
-/// whose reading failed, as `read_queries` keeps them). With `archive` (outfmt 11), also whether a
-/// record has a title that the archive cannot write (`check_titles`), which the batch loop
+/// whose reading failed, as `read_queries` keeps them). With `titles` (the encoding of the BLAST
+/// archive's or the search strategy's requests, `report::archive::request_title_encoding`), also
+/// whether a record has a title that they cannot write (`check_request_titles`), which the batch loop
 /// refuses in the batch NCBI completes with it (`run.rs` `run_in_pool`) and which keeps the
 /// reports after the loop (`x_rpt_stream::Off::ArchiveTitle`).
 ///
@@ -350,9 +351,11 @@ impl Rule {
 ///             throw;
 ///         }
 /// ```
-fn scan<R: Read>(source: &mut FastaInputSource<R>, archive: bool) -> (Vec<usize>, QueryEnd, bool) {
+fn scan<R: Read>(
+    source: &mut FastaInputSource<R>,
+    titles: Option<crate::report::archive::ArchiveEncoding>,
+) -> (Vec<usize>, QueryEnd, bool) {
     let mut lengths = Vec::new();
-    let encoding = crate::report::archive::ArchiveEncoding::from_env();
     let mut archive_title = false;
     loop {
         if source.end() {
@@ -364,7 +367,8 @@ fn scan<R: Read>(source: &mut FastaInputSource<R>, archive: bool) -> (Vec<usize>
             Ok(())
         }) {
             Ok(record) => {
-                archive_title |= archive && !encoding.writes_text(&record.title);
+                archive_title |=
+                    titles.is_some_and(|encoding| !encoding.writes_text(&record.title));
                 lengths.push(record.sequence.len());
             }
             Err(ReadError::Parse {
@@ -388,7 +392,8 @@ struct Acting {
     query_input: QueryInput,
     /// The searched length of each searched query.
     lengths: Vec<usize>,
-    /// The BLAST archive (outfmt 11): a record has a title that it cannot write (`scan`).
+    /// The BLAST archive (outfmt 11) or the search strategy: a record has a title that their
+    /// requests cannot write (`scan`).
     archive_title: bool,
     ranged: bool,
     scan: Duration,
@@ -472,8 +477,9 @@ impl Store {
         config: ReaderConfig,
         range: Option<&SequenceRange>,
         threads: usize,
+        titles: Option<crate::report::archive::ArchiveEncoding>,
     ) -> Result<(Store, QueryEnd)> {
-        Store::read_with(opening, source, config, range, |file, start| {
+        Store::read_with(opening, source, config, range, titles, |file, start| {
             super::x_query_scan_par::lengths(file, start, config, threads)
         })
     }
@@ -485,6 +491,7 @@ impl Store {
         source: &mut FastaInputSource<File>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
+        titles: Option<crate::report::archive::ArchiveEncoding>,
         in_parts: impl FnOnce(&File, u64) -> Option<super::x_query_scan_par::Scan>,
     ) -> Result<(Store, QueryEnd)> {
         let (again, start) = opening
@@ -508,7 +515,7 @@ impl Store {
         let (input_lengths, spans, end, archive_title) = match parts {
             Some(parts) => (parts.lengths, Some(parts.spans), QueryEnd::Input, false),
             None => {
-                let (lengths, end, archive_title) = scan(source, config.keep_defline);
+                let (lengths, end, archive_title) = scan(source, titles);
                 (lengths, None, end, archive_title)
             }
         };
@@ -991,14 +998,16 @@ impl<'a> Queries<'a> {
         }
     }
 
-    /// Whether an input record has a title that the BLAST archive (outfmt 11) cannot write
-    /// (`check_titles`; the records of a LOSAT_X_BNQPACK `Store` are never the archive's, whose
-    /// queries' letters the reports read: `x_query_drop::Rule`).
-    pub(super) fn archive_title(&self) -> bool {
+    /// Whether an input record has a title that the BLAST archive (outfmt 11, `archive`) or the
+    /// search strategy (`strategy`) cannot write (`check_request_titles`; the records of a
+    /// LOSAT_X_BNQPACK `Store` are never theirs, whose queries' letters the requests read:
+    /// `x_query_drop::Rule`).
+    pub(super) fn archive_title(&self, archive: bool, strategy: bool) -> bool {
         match self {
-            Queries::Records { input, .. } => {
-                crate::report::archive::check_titles(input, "query", "BLASTN").is_err()
-            }
+            Queries::Records { input, .. } => crate::report::archive::check_request_titles(
+                input, "query", "BLASTN", archive, strategy,
+            )
+            .is_err(),
             Queries::Streamed(store) => store.acting().archive_title,
             Queries::Taken(_) => false,
         }
@@ -1319,7 +1328,7 @@ mod tests {
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
-        Store::read(opening, &mut source, config(), range, 1).expect("the first reading")
+        Store::read(opening, &mut source, config(), range, 1, None).expect("the first reading")
     }
 
     /// The records as `search_cli` reads them without the switch.
@@ -1447,9 +1456,16 @@ mod tests {
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
-        Store::read_with(opening, &mut source, config(), range, |file, start| {
-            super::super::x_query_scan_par::small_lengths(file, start, config(), threads)
-        })
+        Store::read_with(
+            opening,
+            &mut source,
+            config(),
+            range,
+            None,
+            |file, start| {
+                super::super::x_query_scan_par::small_lengths(file, start, config(), threads)
+            },
+        )
         .expect("the first reading")
     }
 
@@ -1869,7 +1885,7 @@ mod tests {
             let old = old(&file.0);
             let mut source = FastaInputSource::from_file(File::open(&file.0).unwrap(), config());
             assert!(!source.stream_is_empty());
-            let (lengths, end, _) = scan(&mut source, false);
+            let (lengths, end, _) = scan(&mut source, None);
             let old_lengths: Vec<usize> = old.records.iter().map(|r| r.seq().len()).collect();
             assert_eq!(lengths, old_lengths, "seed {seed}");
             assert_eq!(end_text(&end), end_text(&old.end), "seed {seed}");

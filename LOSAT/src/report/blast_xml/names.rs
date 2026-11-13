@@ -20,7 +20,7 @@ pub enum Refusal {
 }
 
 impl Refusal {
-    /// The refusal as LOSAT's error: "<what> with <reason> is not supported by LOSAT's <PROGRAM>".
+    /// The refusal as LOSAT's error: "`<what>` with `<reason>` is not supported by LOSAT's `<PROGRAM>`".
     pub fn error(self, program: &str, what: &str) -> anyhow::Error {
         anyhow::anyhow!(
             "{what} with {} is not supported by LOSAT's {program}",

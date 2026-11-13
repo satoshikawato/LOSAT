@@ -33,11 +33,13 @@ use super::TblastnArgs;
 use crate::algorithm::common::masks::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::seq_range::Placements;
 use crate::blastinput::value_parsers::SegSpec;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::strategy::StrategyExport;
 use crate::report::archive::{
     defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
     KaBlock,
@@ -128,16 +130,43 @@ pub(crate) fn handle_for(
     ArchiveHandle::for_program(&option_inputs(args), args.database_name(), "TBLASTN").map(Some)
 }
 
-/// `report::archive::check_titles` for TBLASTN's records.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "TBLASTN")
+/// The search strategy export of a run (`-export_search_strategy`), into `file`
+/// (`strategy::create_strategy_file`), with TBLASTN's recorded options and `-db` name.
+pub(crate) fn strategy_for(
+    args: &TblastnArgs,
+    outfmt: i32,
+    file: std::fs::File,
+) -> Result<StrategyExport> {
+    let mut inputs = option_inputs(args);
+    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
+        outfmt,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    );
+    StrategyExport::for_file(file, &inputs, args.database_name(), "TBLASTN")
+}
+
+/// `report::archive::check_request_titles` for TBLASTN's records: the archive's (`archive`) and
+/// the search strategy's (`strategy`).
+pub(crate) fn check_request_titles(
+    records: &[FastaRecord],
+    role: &str,
+    archive: bool,
+    strategy: bool,
+) -> Result<()> {
+    crate::report::archive::check_request_titles(records, role, "TBLASTN", archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// What the archives of a run need besides the report's own data.
+/// What the archives and the search strategy's requests of a run need besides the report's own
+/// data.
 pub(super) struct ArchiveRender<'a> {
-    pub handle: &'a ArchiveHandle,
+    /// The archive (outfmt 11), when a format is the archive.
+    pub handle: Option<&'a ArchiveHandle>,
+    /// `-export_search_strategy`.
+    pub strategy: Option<&'a StrategyExport>,
     /// The searched queries of each batch NCBI read and searched, in order (the batches before
     /// a stop; `read_query_batches`).
     pub spans: &'a [Range<usize>],
@@ -269,87 +298,33 @@ pub(super) struct ArchiveData<'a> {
     pub ranges: &'a ReportRanges<'a>,
 }
 
-/// Writes the archive of each batch of `render` to `writer`; `warnings` writes the warnings of a
-/// batch's queries (to the diagnostics, which saves them as the batch's messages) before its
-/// archive.
-pub(super) fn write_tblastn_archives(
-    render: &ArchiveRender<'_>,
+/// Calls `each` with the queries and the request inputs of each batch of `spans`, in order
+/// (`BatchArchive`; the archive and the search strategy file write their documents from it). The
+/// results' masks are computed (SEG runs again on the batch's queries) only `with_masks`: the
+/// search strategy's requests do not hold them.
+fn for_each_batch(
     data: &ArchiveData<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
-    writer: &mut dyn Write,
+    spans: &[Range<usize>],
+    with_masks: bool,
+    mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
-    let run = RunRecord {
-        program: Program::Tblastn,
-        db_title: data.shown.db_title(),
-        gapped: true,
+    let requests = BatchRequests {
+        queries: data.queries,
+        subject_records: matches!(data.shown, ShownSubjects::Fasta { .. })
+            .then_some(data.subject_records),
+        query_placements: data.ranges.queries,
+        mask_lowercase: data.mask_lowercase,
     };
-    // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-    let sequences = matches!(data.shown, ShownSubjects::Fasta { .. });
-    let subject_deflines: Vec<Cow<'_, [u8]>> = if sequences {
-        data.subject_records.iter().map(defline_of).collect()
-    } else {
-        Vec::new()
-    };
-    let subjects_input: Vec<BioseqInput<'_>> = if sequences {
-        data.subject_records
-            .iter()
-            .zip(&subject_deflines)
-            .map(|(record, defline)| BioseqInput {
-                id: &record.local_id,
-                ids: record.believed().map(|ids| ids.ids.as_slice()),
-                seq_loc: None,
-                defline,
-                title: &record.title,
-                letters: record.archive_letters(),
-                protein: false,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    for span in render.spans.iter().cloned() {
-        if span.is_empty() {
-            continue;
-        }
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
-        }
+    requests.for_each(spans, |span, request| {
         let records = &data.queries[span.clone()];
-        let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
-        let queries: Vec<BioseqInput<'_>> = records
-            .iter()
-            .zip(&deflines)
-            .map(|(record, defline)| BioseqInput {
-                id: &record.local_id,
-                ids: record.believed().map(|ids| ids.ids.as_slice()),
-                seq_loc: record.archive_seq_loc(),
-                defline,
-                title: &record.title,
-                letters: record.archive_letters(),
-                protein: true,
-            })
-            .collect();
         let first = span.start;
         let searched = !data.query_batch_skipped[first];
-        // Only a searched batch has results masks (the search made them): they are computed per batch.
-        let masks = if searched {
+        // Only a searched batch has results masks (the search made them): they are computed per
+        // batch, and only for the archive (`with_masks`).
+        let masks = if searched && with_masks {
             query_record_masks(records, first, data.seg, data.mask_lowercase, data.ranges)
         } else {
             Vec::new()
-        };
-
-        // `RequiredStart` / `RequiredEnd`: a `-query_loc` that is not the first query's whole
-        // length.
-        let placements = data.ranges.queries;
-        let required = if placements.ranged() {
-            let placement = &placements.0[first];
-            let cut = data.queries[first].seq().len();
-            (cut != placement.length)
-                .then_some((placement.offset as i32, (placement.offset + cut) as i32 - 1))
-        } else {
-            None
         };
 
         // The results' masks are those of the search, so only a searched batch has them: one
@@ -363,22 +338,6 @@ pub(super) fn write_tblastn_archives(
                         best: records[offset].believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals,
-                    });
-                }
-            }
-        }
-        // `-lcase_masking`: the `LCaseMask` parameters of the request are the lower-case runs of
-        // each whole query record, one `notset` mask per query that has any (`SEG` is never one).
-        let mut lcase_masks: Vec<MaskEntry> = Vec::new();
-        if data.mask_lowercase {
-            for record in records {
-                let runs = lowercase_runs(record.archive_letters());
-                if !runs.is_empty() {
-                    lcase_masks.push(MaskEntry {
-                        id: record.local_id.clone(),
-                        best: record.believed().map(|ids| ids.best.clone()),
-                        frame: Frame::NotSet,
-                        intervals: runs,
                     });
                 }
             }
@@ -405,16 +364,139 @@ pub(super) fn write_tblastn_archives(
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
         let batch = BatchArchive {
-            queries: &queries,
-            subjects: &subjects_input,
-            required,
-            lcase_masks: &lcase_masks,
             masks: &results_masks,
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
             searched_space: searched.then_some(context.context0_space),
+            ..*request
         };
+        each(span, &batch)
+    })
+}
+
+/// What the requests of a call's batches read: the queries (each cut to its `-query_loc`), the
+/// `-subject` records (`None` for `-db`), the placements of the queries and `-lcase_masking`.
+struct BatchRequests<'a> {
+    queries: &'a [FastaRecord],
+    subject_records: Option<&'a [FastaRecord]>,
+    query_placements: &'a Placements,
+    mask_lowercase: bool,
+}
+
+impl BatchRequests<'_> {
+    /// Calls `each` with the request inputs of each batch of `spans`, in order: a
+    /// `BatchArchive` without the search's parts (no masks, missing blocks, no search space).
+    fn for_each(
+        &self,
+        spans: &[Range<usize>],
+        mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
+    ) -> Result<()> {
+        // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
+        let subject_records = self.subject_records.unwrap_or_default();
+        let subject_deflines: Vec<Cow<'_, [u8]>> = subject_records.iter().map(defline_of).collect();
+        let subjects_input: Vec<BioseqInput<'_>> = subject_records
+            .iter()
+            .zip(&subject_deflines)
+            .map(|(record, defline)| BioseqInput {
+                id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: None,
+                defline,
+                title: &record.title,
+                letters: record.archive_letters(),
+                protein: false,
+            })
+            .collect();
+        for span in spans.iter().cloned() {
+            if span.is_empty() {
+                continue;
+            }
+            let records = &self.queries[span.clone()];
+            let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
+            let queries: Vec<BioseqInput<'_>> = records
+                .iter()
+                .zip(&deflines)
+                .map(|(record, defline)| BioseqInput {
+                    id: &record.local_id,
+                    ids: record.believed().map(|ids| ids.ids.as_slice()),
+                    seq_loc: record.archive_seq_loc(),
+                    defline,
+                    title: &record.title,
+                    letters: record.archive_letters(),
+                    protein: true,
+                })
+                .collect();
+            let first = span.start;
+
+            // `RequiredStart` / `RequiredEnd`: a `-query_loc` that is not the first query's
+            // whole length.
+            let placements = self.query_placements;
+            let required = if placements.ranged() {
+                let placement = &placements.0[first];
+                let cut = self.queries[first].seq().len();
+                (cut != placement.length)
+                    .then_some((placement.offset as i32, (placement.offset + cut) as i32 - 1))
+            } else {
+                None
+            };
+
+            // `-lcase_masking`: the `LCaseMask` parameters of the request are the lower-case runs
+            // of each whole query record, one `notset` mask per query that has any (`SEG` is never
+            // one).
+            let mut lcase_masks: Vec<MaskEntry> = Vec::new();
+            if self.mask_lowercase {
+                for record in records {
+                    let runs = lowercase_runs(record.archive_letters());
+                    if !runs.is_empty() {
+                        lcase_masks.push(MaskEntry {
+                            id: record.local_id.clone(),
+                            best: record.believed().map(|ids| ids.best.clone()),
+                            frame: Frame::NotSet,
+                            intervals: runs,
+                        });
+                    }
+                }
+            }
+            let batch = BatchArchive {
+                queries: &queries,
+                subjects: &subjects_input,
+                required,
+                lcase_masks: &lcase_masks,
+                masks: &[],
+                ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
+                search_space: 0,
+                length_adjustment: 0,
+                searched_space: None,
+            };
+            each(span, &batch)?;
+        }
+        Ok(())
+    }
+}
+
+/// Writes the archive of each batch of `render` to `writer`; `warnings` writes the warnings of a
+/// batch's queries (to the diagnostics, which saves them as the batch's messages) before its
+/// archive.
+pub(super) fn write_tblastn_archives(
+    handle: &ArchiveHandle,
+    render: &ArchiveRender<'_>,
+    data: &ArchiveData<'_>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Tblastn,
+        db_title: data.shown.db_title(),
+        gapped: true,
+    };
+    for_each_batch(data, render.spans, true, |span, batch| {
+        if let Some(warnings) = warnings.as_deref_mut() {
+            for index in span.clone() {
+                warnings.before_query(index, &mut *writer)?;
+            }
+        }
+        let first = span.start;
         let mut aligns = TblastnAligns {
             run: RunRecord {
                 program: run.program,
@@ -429,9 +511,47 @@ pub(super) fn write_tblastn_archives(
             shown: data.shown,
             ranges: data.ranges,
         };
-        write_archive(render.handle, &batch, &mut aligns, writer)?;
-    }
-    Ok(())
+        write_archive(handle, batch, &mut aligns, &mut *writer)
+    })
+}
+
+/// Writes the search strategy's request of each batch of `render` (`StrategyExport::write_batch`;
+/// TBLASTN's `LCaseMask` parameters are the lower-case runs, the same before and after the
+/// search).
+pub(super) fn write_tblastn_strategy(
+    strategy: &StrategyExport,
+    render: &ArchiveRender<'_>,
+    data: &ArchiveData<'_>,
+) -> Result<()> {
+    for_each_batch(data, render.spans, false, |_, batch| {
+        strategy.write_batch(batch, batch.lcase_masks)
+    })
+}
+
+/// Writes the search strategy's request of the batch of the queries `span` of `queries`, whose
+/// search fails (a sequence or header file of the database that cannot be read) or whose results
+/// NCBI cannot format (the first batch's, with a matrix name that NCBI's XML data does not know):
+/// NCBI writes a batch's request before its search (tblastn_app.cpp:280), so the file holds that
+/// batch's request after those of the batches before (NCBI BLAST+ 2.17.0, probes 4 and 7 of
+/// RG-F1), and no request follows it. `subject_records` are the `-subject` records (`None` for
+/// `-db`).
+pub(super) fn write_tblastn_failed_strategy(
+    strategy: &StrategyExport,
+    queries: &[FastaRecord],
+    subject_records: Option<&[FastaRecord]>,
+    query_placements: &Placements,
+    mask_lowercase: bool,
+    span: Range<usize>,
+) -> Result<()> {
+    let requests = BatchRequests {
+        queries,
+        subject_records,
+        query_placements,
+        mask_lowercase,
+    };
+    requests.for_each(&[span], |_, batch| {
+        strategy.write_batch(batch, batch.lcase_masks)
+    })
 }
 
 #[cfg(test)]

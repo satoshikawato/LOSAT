@@ -8,7 +8,7 @@ use super::{
     preliminary::{purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
-    seed::{word_finder_bx, BxLookup, Diagonals},
+    seed::{BxLookup, Diagonals},
     split::{split_queries, split_sizes, QueryChunk},
     subjects::Subjects,
 };
@@ -192,11 +192,11 @@ pub(crate) trait PreliminarySink {
 //             Int4 prot_length = 0;
 //             if (score_options->is_ooframe) {
 // ```
-// The sink of `search_preliminary` (the tests').
+// The sink of `search_preliminary` (the tests'): it keeps nothing.
 #[cfg(test)]
-struct DiagnosticOnly;
+struct Discard;
 #[cfg(test)]
-impl PreliminarySink for DiagnosticOnly {}
+impl PreliminarySink for Discard {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-246
 // ```c++
@@ -325,15 +325,7 @@ pub(crate) fn search_preliminary(
     options: &ResolvedOptions,
 ) -> Result<()> {
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(
-            records,
-            subjects.into(),
-            options,
-            true,
-            &mut DiagnosticOnly,
-            pool,
-            None,
-        )
+        search_core(records, subjects.into(), options, &mut Discard, pool, None)
     })
 }
 
@@ -412,23 +404,12 @@ pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
     options: &ResolvedOptions,
-    diagnostics: bool,
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
 ) -> Result<()> {
     let past_head = std::cell::Cell::new(false);
-    x_search_core(
-        records,
-        subjects,
-        options,
-        diagnostics,
-        sink,
-        pool,
-        prep,
-        &past_head,
-    )
-    .map_err(|error| {
+    x_search_core(records, subjects, options, sink, pool, prep, &past_head).map_err(|error| {
         if past_head.get() {
             subjects.x_past_head(error)
         } else {
@@ -443,7 +424,6 @@ fn x_search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
     options: &ResolvedOptions,
-    diagnostics: bool,
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
@@ -478,7 +458,7 @@ fn x_search_core(
     let (db_length, db_count) = (numbers.total, numbers.count);
     // No NCBI counterpart: decides whether candidate HSPs are copied for the containment callback;
     // it does not change any value NCBI computes.
-    let x_containment = diagnostics || sink.x_wants_containment();
+    let x_containment = sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:138-150
     // ```c++
@@ -647,8 +627,7 @@ fn x_search_core(
         let x_chunks_par = super::runtime::x_bx_par_rule(|| {
             pool.enabled()
                 && chunks.len() > 1
-                && !diagnostics
-                && !x_subject_flow::chunks_in_order(pool, diagnostics, options, subjects)
+                && !x_subject_flow::chunks_in_order(pool, options, subjects)
         });
         #[cfg(feature = "parallel")]
         let chunks = if x_chunks_par {
@@ -731,13 +710,7 @@ fn x_search_core(
         // flow of tasks across the chunks; each chunk's setup is made by the loop's statements
         // below, the sink sees the chunks and subjects in the loop's order (x_subject_flow.rs).
         #[cfg(feature = "parallel")]
-        let chunks = match x_subject_flow::crosses_chunks(
-            pool,
-            diagnostics,
-            options,
-            subjects,
-            chunks.len(),
-        ) {
+        let chunks = match x_subject_flow::crosses_chunks(pool, options, subjects, chunks.len()) {
             Some(x_k) => {
                 if x_raw_params.take().is_some() {
                     crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", false);
@@ -912,7 +885,7 @@ fn x_search_core(
                 1
             };
             #[cfg(feature = "parallel")]
-            let x_flow_k = x_subject_flow::chosen(pool, diagnostics, options, subjects);
+            let x_flow_k = x_subject_flow::chosen(pool, options, subjects);
             // Dispatch point (LOSAT_X_BXDIAGKEEP, in the strict set): the flow's helpers run on the
             // tables their threads keep (x_bx_mem.rs); only where the flow searches the subjects
             // (the waves below then have nothing to do).
@@ -1064,7 +1037,6 @@ fn x_search_core(
                                                         &lookup,
                                                         scratch,
                                                         xdrop,
-                                                        diagnostics,
                                                         oid,
                                                         x_containment,
                                                     )
@@ -1105,7 +1077,6 @@ fn x_search_core(
                             &lookup,
                             &mut *diagonals,
                             xdrop,
-                            diagnostics,
                             oid,
                             x_containment,
                         );
@@ -1290,7 +1261,6 @@ fn x_compute_chunk(
             &lookup,
             &mut diagonals,
             xdrop,
-            false,
             oid,
             x_containment,
         )?;
@@ -1351,7 +1321,6 @@ fn compute_subject(
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    diagnostics: bool,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1364,7 +1333,6 @@ fn compute_subject(
         lookup,
         diagonals,
         xdrop,
-        diagnostics,
         oid,
         x_containment,
     )
@@ -1383,7 +1351,6 @@ fn compute_subject_of(
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    diagnostics: bool,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1396,7 +1363,6 @@ fn compute_subject_of(
         lookup,
         diagonals,
         xdrop,
-        diagnostics,
         oid,
         x_containment,
     )
@@ -1413,7 +1379,6 @@ fn compute_subject_any(
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    diagnostics: bool,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1426,7 +1391,6 @@ fn compute_subject_any(
             lookup,
             diagonals,
             xdrop,
-            diagnostics,
             oid,
             x_containment,
         )
@@ -1439,7 +1403,6 @@ fn compute_subject_any(
             lookup,
             diagonals,
             xdrop,
-            diagnostics,
             oid,
             x_containment,
         )
@@ -1459,7 +1422,6 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    diagnostics: bool,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1546,18 +1508,27 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
     //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
     // ```
-    // Dispatch point between the fast seed loops and the diagnostic stages: when nothing traces the
-    // seeds (not the diagnostic stages), the seed loop reads the scanner's per-thread buffer in
-    // place (x_seed_scan.rs; LOSAT_X_BXDIAG, chosen inside `x_word_finder_scan`, reads the lookup
-    // cells in place instead, x_seed_diag.rs); otherwise the reference word finder below runs and
-    // collects the seeds. A `-subject` with lower-case letters (`-lcase_masking`) is scanned over
-    // its scan ranges by the reference word finder (x_soft_subject.rs).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
+    // ```c++
+    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+    //                                    word_params, aux_struct->ewp,
+    //                                    aux_struct->offset_pairs,
+    //                                    kScanSubjectOffsetArraySize,
+    //                                    init_hitlist, ungapped_stats);
+    //
+    //             if (init_hitlist->total == 0) continue;
+    // ```
+    // The seed loop reads the scanner's per-thread buffer in place (x_seed_scan.rs;
+    // LOSAT_X_BXDIAG, chosen inside `x_word_finder_scan`, reads the lookup cells in place instead,
+    // x_seed_diag.rs). A `-subject` with lower-case letters (`-lcase_masking`) is scanned over its
+    // scan ranges by the reference word finder (x_soft_subject.rs). The tests compare both with
+    // the reference word finder (`seed::word_finder_bx`).
     let initial = if let Some(ranges) = super::x_soft_subject::x_subject_scan_ranges(subjects, oid)
     {
         super::x_soft_subject::x_word_finder(
             scoring, batch, params, options, encoded, lookup, diagonals, &ranges, None,
         )?
-    } else if !diagnostics {
+    } else {
         let x_sent = if x_lead {
             super::seed::x_ungap_sent::XSent::new(scoring, &batch.sequence_start, &x_buffer)
         } else {
@@ -1565,37 +1536,6 @@ fn compute_subject_with<S: super::seed::BxScoring>(
         };
         super::seed::x_seed_scan::x_word_finder_scan(
             scoring, batch, params, options, encoded, lookup, diagonals, x_sent,
-        )?
-    } else if !S::BLOSUM62 {
-        super::seed::word_finder_bx_of(
-            scoring,
-            batch,
-            params,
-            options,
-            encoded,
-            lookup,
-            diagonals,
-            |_| {},
-        )?
-    } else {
-        word_finder_bx(
-            batch,
-            params,
-            options,
-            encoded,
-            lookup,
-            diagonals,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
-            // ```c++
-            //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-            //                                    word_params, aux_struct->ewp,
-            //                                    aux_struct->offset_pairs,
-            //                                    kScanSubjectOffsetArraySize,
-            //                                    init_hitlist, ungapped_stats);
-            //
-            //             if (init_hitlist->total == 0) continue;
-            // ```
-            |_| {},
         )?
     };
     let raw = if options.gapped {

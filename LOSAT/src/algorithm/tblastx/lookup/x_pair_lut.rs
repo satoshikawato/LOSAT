@@ -114,7 +114,7 @@
 //!    from the full table. The stub's `longest_chain` is the maximum over the cells of the summed
 //!    group counts: the groups partition every full chain, so this is the full table's value.
 //!
-//! Corner cases: threshold 0 (T(s) = [s], no neighbours) and a threshold of INT_MIN (every word
+//! Corner cases: threshold 0 (T(s) = \[s\], no neighbours) and a threshold of INT_MIN (every word
 //! is a neighbour) are `x_target_list`'s cases, unchanged; a group without a location (contexts
 //! shorter than a word, or fully masked) has an empty exact backbone and an all-zero table, as the
 //! filter of the full table has; with more than `X_MAX_GROUPS` contexts a group holds several

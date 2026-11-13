@@ -157,9 +157,13 @@ fn error(code: ErrCode, message: String, line_number: u64) -> ParseError {
 }
 
 /// `CFastaDeflineReader::x_ProcessIDs(id_string, info, ids, listener, CSeqIdCheck)`: the
-/// ids of the token, checked. `protein` is `fAssumeProt` (else `fAssumeNuc`),
+/// ids of the token, checked. `protein` is `fAssumeProt` (the excessive data check of the
+/// nucleotides is made without it, also for convert2blastmask's reader, which sets neither;
+/// NCBI's reader without `fAssumeNuc` also makes the check of the proteins, which only posts
+/// a warning, and convert2blastmask writes no warning, so LOSAT does not make it there),
 /// `quick_id_check` `fQuickIDCheck` (makeblastdb, the BLAST programs' `-parse_deflines`;
-/// not the mask reader); `fParseRawID` is set.
+/// not the mask readers), `parse_raw_id` `fParseRawID` (set by every caller but
+/// convert2blastmask's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:333-404
 /// ```c++
@@ -252,10 +256,14 @@ pub(crate) fn process_ids(
     id_string: &[u8],
     protein: bool,
     quick_id_check: bool,
+    parse_raw_id: bool,
     line_number: u64,
     warn: ReaderWarn<'_>,
 ) -> Result<Vec<ParsedSeqId>, ParseError> {
-    let flags = parse_flags::PARTIAL_OK | parse_flags::ANY_LOCAL | parse_flags::RAW_TEXT;
+    let mut flags = parse_flags::PARTIAL_OK | parse_flags::ANY_LOCAL;
+    if parse_raw_id {
+        flags |= parse_flags::RAW_TEXT;
+    }
     let replaced;
     let mut to_parse = id_string;
     if id_string.contains(&b',') && !id_string.contains(&b'|') {
@@ -713,6 +721,7 @@ mod tests {
             id.as_bytes(),
             protein,
             quick_id_check,
+            true,
             7,
             &mut |w| match w {
                 ReaderWarning::Line(line) => {

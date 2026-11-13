@@ -422,6 +422,17 @@ pub struct BlastpArgs {
     pub mt_mode: Option<u8>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// ```c++
+    ///     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
+    ///                             "filename",
+    ///                             "File name to record the search strategy used",
+    ///                             CArgDescriptions::eOutputFile);
+    /// ```
+    /// The search strategy file (`report::archive::strategy`), created by `run` before the other
+    /// options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // An omitted value keeps the default hit list size (500) and NCBI's numbers of
     // descriptions and alignments of the pairwise report (500, 250).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
@@ -493,8 +504,8 @@ pub struct BlastpArgs {
     //     }
     // ```
     // BLASTP's X-drops in bits; `None`: the defaults of every task (`ResolvedBlastpArgs`).
-    // psiblast's parser refuses them (`cli.rs` `is_unported_psiblast_arg`); rpsblast's are its
-    // RPS engine's (`rps`).
+    // psiblast's are its parser's (`PsiblastArgs::xdrop_ungap`); rpsblast's are its RPS engine's
+    // (`rps`).
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = blastp_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
     #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = blastp_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
@@ -590,6 +601,10 @@ pub struct BlastpArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`archive::strategy_for`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The application whose search this is: psiblast's command line sets it
     /// (`algorithm/psiblast`).
     #[arg(skip)]
@@ -604,6 +619,19 @@ pub struct BlastpArgs {
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
     #[arg(skip)]
     pub inclusion_ethresh: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:584-591
+    // ```c
+    //    if (Blast_ProgramIsNucleotide(program_number)) {
+    //       ...
+    //    } else {
+    //       ...
+    //       (*options)->gap_trigger = BLAST_GAP_TRIGGER_PROT;
+    // ```
+    /// psiblast's `-gap_trigger` in bits (`CGapTriggerArgs`); `None` keeps the options' default
+    /// (`BLAST_GAP_TRIGGER_PROT`, 22 bits), the only value of blastp and rpsblast, which have no
+    /// such argument.
+    #[arg(skip)]
+    pub gap_trigger: Option<f64>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -815,6 +843,10 @@ pub struct ResolvedBlastpArgs {
     pub x_drop_ungapped_bits: f64,
     pub x_drop_gapped_bits: f64,
     pub x_drop_final_bits: f64,
+    /// The gap trigger in bits (`kOptions->gap_trigger`): psiblast's `-gap_trigger`, or
+    /// `BLAST_GAP_TRIGGER_PROT`. Every round converts it with the query's ungapped block
+    /// (`kbp_std`) into the cutoff of the ungapped alignments that a gapped extension starts from.
+    pub gap_trigger_bits: f64,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
@@ -843,6 +875,8 @@ pub struct ResolvedBlastpArgs {
     pub outfmt: String,
     /// The run's BLAST archive (outfmt 11), shared by the blocks and batches of the run.
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`BlastpArgs::strategy`), shared as the archive is.
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The application whose search this is (`BlastpArgs::app`).
     pub app: BlastpApp,
     /// The inclusion threshold (`psi_options->inclusion_ethresh`): psiblast's
@@ -1265,7 +1299,7 @@ impl BlastpArgs {
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
             psi_tblastn: false,
-            // blastp's `-xdrop_ungap`, or rpsblast's (`RpsSearch`); psiblast's parser refuses it.
+            // blastp's and psiblast's `-xdrop_ungap`, or rpsblast's (`RpsSearch`).
             x_dropoff: self
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
@@ -1401,6 +1435,9 @@ impl BlastpArgs {
             x_drop_final_bits: self.xdrop_gap_final.unwrap_or(f64::from(
                 crate::algorithm::tblastx::constants::X_DROP_GAPPED_FINAL,
             )),
+            gap_trigger_bits: self
+                .gap_trigger
+                .unwrap_or(crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE),
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
             scoring: ProteinScoringSpec {
@@ -1434,6 +1471,7 @@ impl BlastpArgs {
             query_range,
             outfmt: self.outfmt.clone(),
             archive: self.archive.clone(),
+            strategy: self.strategy.clone(),
             first_query_ordinal: self.first_query_ordinal,
             psi_pssm,
             psi_search,

@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 13] = [
+const PROGRAMS: [&str; 14] = [
     "blastn",
     "blastp",
     "blastx",
@@ -59,6 +59,7 @@ const PROGRAMS: [&str; 13] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
+    "convert2blastmask",
     "rpsbproc",
 ];
 

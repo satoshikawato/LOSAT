@@ -58,12 +58,13 @@
 //! with the same rule: `lookup` holds the batch's lookup table (the full table of the reference
 //! frame loop, or the stub of PAIRLUT), `units` the unit path with its group tables.
 //! Every call of `process_subject` opens one stage of each (`enter`) as its first statements. It
-//! ends the units stage (`XSeedStage::end`) when the subject's units have run, before their lists
-//! are merged, and the lookup stage after the seed stage (`subject_link::end_subject_seed_stage`),
-//! before the first linking call; a stage dropped without `end` (the return for a subject too short
-//! to search, an unwinding panic) ends in `Drop`. Each state counts its stages that have not ended,
-//! starting from the number of subjects of the batch. The stage end that brings a count to zero
-//! takes that state's tables out of it, which frees them unless another stage still holds them.
+//! ends the units stage (`XSeedStage::end`, in `subject_prep::run_unit_path`) when the subject's
+//! units have run, before their lists are merged, and the lookup stage after the seed stage
+//! (`subject_link::end_subject_seed_stage`), before the first linking call; a stage dropped
+//! without `end` (the return for a subject too short to search, an unwinding panic) ends in
+//! `Drop`. Each state counts its stages that have not ended, starting from the number of subjects
+//! of the batch. The stage end that brings a count to zero takes that state's tables out of it,
+//! which frees them unless another stage still holds them.
 //!
 //! The worker's diagonal table (`WorkerState.diag_array`) is read and written only by the
 //! reference frame loop. (a) A batch that the unit path takes
@@ -88,13 +89,13 @@
 //! 2. The tables are reachable only through a stage. `XSeedBatch::new` takes them by value (the
 //!    batch function keeps no binding of them), each slot is private to this module, and the
 //!    only access a state hands out is `XSeedStage::tables`.
-//! 3. No read after an end in `process_subject` or in `subject_link::end_subject_seed_stage`
-//!    (the closure moves `x_seed_stage` into the call): `tables` borrows the stage and `end` takes
-//!    the stage by value, so the borrow checker rejects any use of `x_pair_par_ref` (or of
-//!    anything borrowed from it) after `x_units_stage.end()`, and any use of `lookup_ref` after
-//!    `x_seed_stage.end()`. The merge that follows the units stage is a function without `self`
-//!    (`XPairPar::merge_subject`): it gets the units' own lists by value and cannot name a group
-//!    table.
+//! 3. No read after an end in `process_subject`, `subject_prep::run_unit_path` or
+//!    `subject_link::end_subject_seed_stage` (the closure moves `x_units_stage` and `x_seed_stage`
+//!    into those calls): `tables` borrows the stage and `end` takes the stage by value, so the
+//!    borrow checker rejects any use of `x_pair_par_ref` (or of anything borrowed from it) after
+//!    `x_units_stage.end()`, and any use of `lookup_ref` after `x_seed_stage.end()`. The merge
+//!    that follows the units stage is a function without `self` (`XPairPar::merge_subject`): it
+//!    gets the units' own lists by value and cannot name a group table.
 //! 4. A stage that is still open keeps its tables alive through its own `Arc`, whatever the
 //!    count says: taking the state's `Arc` out of the slot cannot free tables another call of
 //!    `process_subject` is reading.
@@ -170,10 +171,10 @@ pub(super) struct XSeedBatch<M: TbxScore = Blosum62Score> {
 
 impl<M: TbxScore> XSeedBatch<M> {
     // No NCBI counterpart: whether the reference frame loop can run for this batch is read
-    // from the unit path before it moves into its holder (dispatch point 2 of PAIRPAR in
-    // run_impl.rs: the loop runs zero times exactly when the unit path exists). One batch is
-    // counted once, whatever the number of holders; the release of the unit path is counted only
-    // for a batch that has one.
+    // from the unit path before it moves into its holder (dispatch point 2 of PAIRPAR,
+    // `subject_prep::run_unit_path`: the loop runs zero times exactly when the unit path
+    // exists). One batch is counted once, whatever the number of holders; the release of the unit
+    // path is counted only for a batch that has one.
     /// The holders of a batch of `subjects` subjects.
     pub(super) fn new(
         lookup: BlastAaLookupTable,

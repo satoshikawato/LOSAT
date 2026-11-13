@@ -297,6 +297,40 @@ pub(crate) fn extend_one_hit_blosum62(
         .unwrap_or_else(reference)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-790,1040-1044
+// ```c
+//                 score = s_BlastAaExtendOneHit(matrix, subject, query,
+//                                               subject_offset, query_offset,
+//                                               cutoffs->x_dropoff,
+//                                               &hsp_q, &hsp_s, &hsp_len,
+//                                               wordsize, use_pssm, &s_last_off);
+// ...
+//         if (use_pssm)
+//             sum += matrix[q_off + i][s[s_off + i]];
+//         else
+//             sum += matrix[q[q_off + i]][s[s_off + i]];
+// ```
+/// `s_BlastAaExtendOneHit` with the score matrix `matrix` (not a PSSM), chosen at each call:
+/// BLOSUM62's walks (`extend_one_hit_blosum62`) or the reference walk of another matrix
+/// (`extend_one_hit_of`). The one-hit word finders of TBLASTN and TBLASTX (`-window_size 0`) call
+/// it with their matrix.
+#[inline]
+pub(crate) fn extend_one_hit_for(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    if matrix == ScoringMatrix::Blosum62 {
+        extend_one_hit_blosum62(query, subject, q_off, s_off, dropoff, word_size)
+    } else {
+        extend_one_hit_of(matrix, query, subject, q_off, s_off, dropoff, word_size)
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1020-1083
 // ```c
 // static Int4 s_BlastAaExtendOneHit(...)

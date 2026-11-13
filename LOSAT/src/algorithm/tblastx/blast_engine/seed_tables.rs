@@ -181,7 +181,10 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects,
+                || x_soft_subjects
+                // The one-hit word finder (`-window_size 0`) runs in the reference frame loop
+                // only (`scan_chunk_one_hit`).
+                || window == 0,
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,

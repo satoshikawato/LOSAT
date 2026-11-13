@@ -989,14 +989,14 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // every gap cost pair of its table, as `validate_protein_options` has checked them; the
     // threshold and window are the options' (the matrix's suggested values by default). The
     // standard table takes word sizes 2 to 4 and the compressed one 5 to 7; the word finder is
-    // the two-hit one (a window above 0).
-    let profile_supported = (2..=7).contains(&args.word_size) && window > 0;
+    // the two-hit one (a window above 0) or the one-hit one (a window of 0,
+    // `XTwoHit::x_pairs_one_hit`).
+    let profile_supported = (2..=7).contains(&args.word_size);
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(
-            "the matrix {} with word size {} and window size {} is not supported by LOSAT's TBLASTN; it implements the two-hit word finder (a window size above 0) with word sizes 2 to 7",
+            "the matrix {} with word size {} is not supported by LOSAT's TBLASTN; it implements word sizes 2 to 7",
             args.matrix_name,
-            args.word_size,
-            window
+            args.word_size
         );
     };
     Ok(SearchSettings {
@@ -1211,8 +1211,6 @@ mod tests {
         for extra in [
             &["-ungapped", "-comp_based_stats", "F"][..],
             &["-max_intron_length", "100", "-sum_stats", "true"],
-            &["-window_size", "0"],
-            &["-word_size", "5", "-window_size", "0"],
             &["-max_target_seqs", "1073741799"],
             &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
         ] {
@@ -1280,6 +1278,10 @@ mod tests {
                 "-word_size",
                 "7",
             ],
+            // The one-hit word finder (line RG, X2; aa_ungapped.c:214-224).
+            &["-window_size", "0"],
+            &["-word_size", "5", "-window_size", "0"],
+            &["-task", "tblastn-fast", "-window_size", "0"],
         ] {
             check_options(&parse(extra).unwrap()).unwrap();
         }
@@ -1340,7 +1342,7 @@ mod tests {
         }
         // NCBI api/blast_options_handle.cpp:436-447: tblastn-fast sets word size 5, the
         // compressed lookup table and BLAST_WORD_THRESHOLD_BLASTP_FAST (20); with BLOSUM62 11/1
-        // the table of word size 3, 5, 6 or 7 takes any threshold and window size above 0.
+        // the table of word size 3, 5, 6 or 7 takes any threshold and window size.
         let fast = parse(&["-task", "tblastn-fast"]).unwrap();
         let resolved = fast.resolve().unwrap();
         assert_eq!(

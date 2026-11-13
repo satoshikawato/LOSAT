@@ -453,7 +453,10 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
                 || extension_debug_enabled
                 || diag_enabled
                 || debug_hsp_saving
-                || x_soft_subjects,
+                || x_soft_subjects
+                // The one-hit word finder (`-window_size 0`) runs in the reference frame loop
+                // only (`scan_chunk_one_hit`).
+                || window == 0,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,

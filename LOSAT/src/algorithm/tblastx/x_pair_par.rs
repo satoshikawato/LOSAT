@@ -841,7 +841,9 @@ pub(super) struct XBatch<'a, M: TbxScore = Blosum62Score> {
     pub query_length: i32,
     pub diag_array_size: i32,
     pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
-    /// A trace, debug or diagnostics switch is on (they exist only in the reference loop).
+    /// A trace, debug or diagnostics switch is on, the subject has lower-case letters with
+    /// `-lcase_masking`, or the word finder is the one-hit one (`-window_size 0`): they exist only
+    /// in the reference loop.
     pub debugging: bool,
     /// LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS or the parallel-chunk path is on.
     pub chunk_switches: bool,

@@ -353,7 +353,10 @@ fn exercise(dir: &Path, name: &str, seqtype: SeqType, masks: bool, tally: &mut T
             for id in algorithms.ids().into_iter().take(8) {
                 tally.check(algorithms.details(id));
                 for ordinal in 0..ordinals {
-                    tally.check(db.mask_ranges(ordinal, id));
+                    tally.check(
+                        db.locate_oid(ordinal)
+                            .and_then(|at| db.mask_ranges_at(at, id)),
+                    );
                 }
             }
         }

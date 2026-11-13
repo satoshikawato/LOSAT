@@ -10,6 +10,11 @@ use std::path::{Path, PathBuf};
 use super::mask::ncbi_split;
 use super::*;
 
+/// `GetMaskData(oid, algo)`: the masks of NCBI's OID `oid` (`SeqDb::locate_oid`).
+fn oid_mask_ranges(db: &SeqDb, oid: u32, algo: i32) -> Result<MaskRanges, SeqDbError> {
+    db.mask_ranges_at(db.locate_oid(oid)?, algo)
+}
+
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb")
 }
@@ -164,7 +169,7 @@ fn expected_rows(name: &str) -> Vec<(i32, u32, String)> {
 
 /// Name of the volume of the sequence `ordinal`, without directory.
 fn volume_name(db: &SeqDb, ordinal: u32) -> String {
-    let (volume, _) = db.find_volume(ordinal).unwrap();
+    let volume = db.find_volume(ordinal).unwrap().volume;
     db.volumes()[volume]
         .base()
         .file_name()
@@ -182,7 +187,7 @@ fn mask_ranges_equal_ncbi_for_every_fixture_row() {
         let mut not_in_volume: Vec<(i32, String)> = Vec::new();
         let mut compared = 0;
         for (algo, oid, expected) in &rows {
-            let result = db.mask_ranges(*oid, *algo).unwrap();
+            let result = oid_mask_ranges(&db, *oid, *algo).unwrap();
             match ranges_text(&result) {
                 Some(text) => {
                     assert_eq!(&text, expected, "{name}: algorithm {algo}, sequence {oid}");
@@ -229,7 +234,7 @@ fn mask_remap_algorithm_not_in_volume_pairs() {
     );
     let mut pairs: Vec<(i32, String)> = Vec::new();
     for (algo, oid, expected) in expected_rows("mask_remap") {
-        let result = db.mask_ranges(oid, algo).unwrap();
+        let result = oid_mask_ranges(&db, oid, algo).unwrap();
         match result {
             MaskRanges::AlgorithmNotInVolume { volume } => {
                 let name = volume.file_name().unwrap().to_string_lossy().into_owned();
@@ -337,7 +342,7 @@ fn unknown_algorithm_and_names_of_algorithms() {
 
     // A sequence outside the database.
     assert!(matches!(
-        db.mask_ranges(db.num_seqs(), 100),
+        oid_mask_ranges(&db, db.num_seqs(), 100),
         Err(SeqDbError::Range(message)) if message == "OID not found"
     ));
 }
@@ -392,14 +397,14 @@ fn a_database_without_columns_has_no_masks() {
     assert_eq!(algorithms.descriptions().unwrap(), "");
     assert_eq!(algorithms.id_of("dust"), None);
     assert_eq!(
-        db.mask_ranges(0, 11).unwrap(),
+        oid_mask_ranges(&db, 0, 11).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
     // Also when opened to keep columns.
     let db = open_masked(&db_name("mask_nucl_plain")).unwrap();
     assert!(db.mask_algorithms().unwrap().ids().is_empty());
     assert_eq!(
-        db.mask_ranges(7, 30).unwrap(),
+        oid_mask_ranges(&db, 7, 30).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
     assert!(db.volumes()[0].columns().unwrap().is_empty());
@@ -600,7 +605,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
     assert!(db.mask_algorithms().unwrap().ids().is_empty());
     assert_eq!(
-        db.mask_ranges(0, 11).unwrap(),
+        oid_mask_ranges(&db, 0, 11).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
 
@@ -616,11 +621,11 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
     let column = db.volumes()[0].mask_column().unwrap().unwrap();
     assert!(column.data_path().ends_with("mask_nucl_v4.nab"));
     assert_eq!(
-        db.mask_ranges(0, 11).unwrap(),
+        oid_mask_ranges(&db, 0, 11).unwrap(),
         MaskRanges::Ranges(vec![(199u32.swap_bytes(), 281u32.swap_bytes())])
     );
     for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
-        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        let text = ranges_text(&oid_mask_ranges(&db, oid, algo).unwrap()).unwrap();
         assert_eq!(text, byte_reversed(&expected), "{algo} {oid}");
     }
 
@@ -629,7 +634,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
     assert_eq!(db.mask_algorithms().unwrap().ids(), [11, 30]);
     for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
-        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        let text = ranges_text(&oid_mask_ranges(&db, oid, algo).unwrap()).unwrap();
         assert_eq!(text, expected, "{algo} {oid}");
     }
 
@@ -643,7 +648,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
         .data_path()
         .ends_with("mask_nucl_v4.nac"));
     for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
-        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        let text = ranges_text(&oid_mask_ranges(&db, oid, algo).unwrap()).unwrap();
         assert_eq!(text, expected, "{algo} {oid}");
     }
 
@@ -657,7 +662,7 @@ fn a_column_reads_its_little_endian_data_file_or_else_the_big_endian_one() {
         .data_path()
         .ends_with("mask_prot_v4.pab"));
     for (algo, oid, expected) in expected_rows("mask_prot_v4") {
-        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        let text = ranges_text(&oid_mask_ranges(&db, oid, algo).unwrap()).unwrap();
         assert_eq!(text, byte_reversed(&expected), "{algo} {oid}");
     }
 }
@@ -742,7 +747,7 @@ fn a_user_column_beside_the_masks_reads_its_big_endian_data_file() {
         read_expected("mask_nucl_v4.algorithms.txt")
     );
     for (algo, oid, expected) in expected_rows("mask_nucl_v4") {
-        let text = ranges_text(&db.mask_ranges(oid, algo).unwrap()).unwrap();
+        let text = ranges_text(&oid_mask_ranges(&db, oid, algo).unwrap()).unwrap();
         assert_eq!(text, expected, "{algo} {oid}");
     }
 }
@@ -786,8 +791,8 @@ fn damaged_index_and_data_files_are_format_errors() {
     truncate(&dir.path("mask_nucl_v4.naa"), 0x78 + 4 * 8);
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
     assert!(db.mask_algorithms().is_ok());
-    assert!(db.mask_ranges(6, 11).is_ok());
-    let error = db.mask_ranges(7, 11).unwrap_err();
+    assert!(oid_mask_ranges(&db, 6, 11).is_ok());
+    let error = oid_mask_ranges(&db, 7, 11).unwrap_err();
     assert!(
         format_message(&error)
             .contains("offset array of the column ends before the entry of sequence 7"),
@@ -800,8 +805,8 @@ fn damaged_index_and_data_files_are_format_errors() {
     let len = std::fs::metadata(&data).unwrap().len() as usize;
     truncate(&data, len - 4);
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
-    assert!(db.mask_ranges(0, 11).is_ok());
-    let error = db.mask_ranges(7, 11).unwrap_err();
+    assert!(oid_mask_ranges(&db, 0, 11).is_ok());
+    let error = oid_mask_ranges(&db, 7, 11).unwrap_err();
     assert!(
         format_message(&error).contains("passes the end of the file"),
         "{error}"
@@ -815,7 +820,7 @@ fn damaged_index_and_data_files_are_format_errors() {
         &0x1000i32.to_be_bytes(),
     );
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
-    let error = db.mask_ranges(3, 11).unwrap_err();
+    let error = oid_mask_ranges(&db, 3, 11).unwrap_err();
     assert!(
         format_message(&error).contains("ends (140) before it starts (4096)"),
         "{error}"
@@ -826,7 +831,7 @@ fn damaged_index_and_data_files_are_format_errors() {
         &(-4i32).to_be_bytes(),
     );
     let db = open_masked(&dir.name("mask_nucl_v4")).unwrap();
-    let error = db.mask_ranges(3, 11).unwrap_err();
+    let error = oid_mask_ranges(&db, 3, 11).unwrap_err();
     assert!(format_message(&error).contains("starts at -4"), "{error}");
 
     // Data for no sequences; a negative, zero or too small start of the metadata or of the
@@ -975,33 +980,33 @@ fn a_made_column_reads_like_a_fixture() {
     let algorithms = db.mask_algorithms().unwrap();
     assert_eq!(algorithms.ids(), [7, 8]);
     assert_eq!(
-        db.mask_ranges(2, 7).unwrap(),
+        oid_mask_ranges(&db, 2, 7).unwrap(),
         MaskRanges::Ranges(vec![(3, 9), (20, 25)])
     );
     assert_eq!(
-        db.mask_ranges(2, 8).unwrap(),
+        oid_mask_ranges(&db, 2, 8).unwrap(),
         MaskRanges::Ranges(vec![(1, 2)])
     );
     assert_eq!(
-        db.mask_ranges(5, 7).unwrap(),
+        oid_mask_ranges(&db, 5, 7).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
     assert_eq!(
-        db.mask_ranges(5, 8).unwrap(),
+        oid_mask_ranges(&db, 5, 8).unwrap(),
         MaskRanges::Ranges(vec![(10, 11)])
     );
     // An empty blob: no ranges, whatever the algorithm.
     assert_eq!(
-        db.mask_ranges(0, 7).unwrap(),
+        oid_mask_ranges(&db, 0, 7).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
     assert_eq!(
-        db.mask_ranges(0, 99).unwrap(),
+        oid_mask_ranges(&db, 0, 99).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
     // A blob with data in a volume that does not know the algorithm.
     assert!(matches!(
-        db.mask_ranges(2, 99).unwrap(),
+        oid_mask_ranges(&db, 2, 99).unwrap(),
         MaskRanges::AlgorithmNotInVolume { .. }
     ));
     let text = algorithms.descriptions().unwrap();
@@ -1161,7 +1166,7 @@ fn a_backwards_skip_ends_the_pass_loop_at_once() {
     let (_dir, name) = made_column(&[("4", "10:opts")], &blobs);
     let db = open_masked(&name).unwrap();
     assert_eq!(
-        db.mask_ranges(0, 4).unwrap(),
+        oid_mask_ranges(&db, 0, 4).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
 }
@@ -1193,15 +1198,15 @@ fn mask_blobs_that_end_early_are_format_errors() {
     let db = open_masked(&name).unwrap();
     let end = "CBlastDbBlob::x_ReadRaw: hit end of data";
     for oid in [0, 1, 2, 4, 6] {
-        let error = db.mask_ranges(oid, 7).unwrap_err();
+        let error = oid_mask_ranges(&db, oid, 7).unwrap_err();
         assert_eq!(format_message(&error), end, "sequence {oid}");
     }
     assert_eq!(
-        db.mask_ranges(3, 7).unwrap(),
+        oid_mask_ranges(&db, 3, 7).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
     assert_eq!(
-        db.mask_ranges(5, 7).unwrap(),
+        oid_mask_ranges(&db, 5, 7).unwrap(),
         MaskRanges::Ranges(Vec::new())
     );
 }
@@ -1240,21 +1245,21 @@ fn volumes_with_different_ids_for_one_algorithm_are_remapped() {
     assert_eq!(algorithms.ids(), [30, 100]);
     assert_eq!(algorithms.details(100).unwrap().program_name, "dust");
     assert_eq!(
-        db.mask_ranges(1, 30).unwrap(),
+        oid_mask_ranges(&db, 1, 30).unwrap(),
         MaskRanges::Ranges(vec![(1, 2)])
     );
     // The first volume has 4 sequences: sequence 4 is the first of the second volume.
     assert_eq!(
-        db.mask_ranges(4, 30).unwrap(),
+        oid_mask_ranges(&db, 4, 30).unwrap(),
         MaskRanges::Ranges(vec![(7, 8)])
     );
     assert_eq!(
-        db.mask_ranges(4, 100).unwrap(),
+        oid_mask_ranges(&db, 4, 100).unwrap(),
         MaskRanges::Ranges(vec![(5, 6)])
     );
     // The first volume does not know 100.
     assert!(matches!(
-        db.mask_ranges(1, 100).unwrap(),
+        oid_mask_ranges(&db, 1, 100).unwrap(),
         MaskRanges::AlgorithmNotInVolume { .. }
     ));
 }
@@ -1270,7 +1275,7 @@ fn the_other_volumes_columns_are_opened_first() {
     copy_files("mask_nucl_mv", &["nal"], &dir);
     patch(&dir.path("mask_nucl_mv.01.naa"), 3, &[9]);
     let db = open_masked(&dir.name("mask_nucl_mv")).unwrap();
-    let error = db.mask_ranges(0, 30).unwrap_err();
+    let error = oid_mask_ranges(&db, 0, 30).unwrap_err();
     assert_eq!(
         format_message(&error),
         "Column file uses unknown format_version."

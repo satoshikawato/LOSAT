@@ -311,7 +311,7 @@ impl FormatSpec {
                 b'a' => line.extend_from_slice(&fields.accession),
                 b'i' => line.extend_from_slice(&fields.seq_id),
                 b'g' => line.extend_from_slice(fields.gi.as_bytes()),
-                b'o' => line.extend_from_slice(source.db.oid(oid).to_string().as_bytes()),
+                b'o' => line.extend_from_slice(oid.to_string().as_bytes()),
                 b't' => line.extend_from_slice(&fields.title),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
                 b'l' => line.extend_from_slice(length.to_string().as_bytes()),
@@ -469,9 +469,8 @@ fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop
                     |&(first, second): &(u32, u32)| first > second || second as usize > seq.len();
                 if masks.iter().any(outside) {
                     return Err(Stop::refused(format!(
-                        "-outfmt %s with a stored mask outside the sequence at OID {} \
-                         (NCBI writes past the letters)",
-                        source.db.oid(oid)
+                        "-outfmt %s with a stored mask outside the sequence at OID {oid} \
+                         (NCBI writes past the letters)"
                     )));
                 }
                 &masks[..]

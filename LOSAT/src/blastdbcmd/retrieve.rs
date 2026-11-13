@@ -16,7 +16,7 @@ use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
 use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
-use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqLocation, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
 use crate::seqid::parse::seq_id_from_text;
@@ -115,12 +115,37 @@ impl<'a> Source<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:411-425
+    // ```c++
+    // int CSeqDBImpl::x_GetSeqLength(int oid) const
+    // {
+    //     int vol_oid = 0;
+    //
+    //     if ('p' == m_SeqType) {
+    //         if (const CSeqDBVol * vol = m_VolSet.FindVol(oid, vol_oid)) {
+    //             return vol->GetSeqLengthProt(vol_oid);
+    //         }
+    //     ...
+    //     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
+    // ```
+    // Every read of the formatters finds the sequence by NCBI's OID (`FindVol`), not by the
+    // OID list: the OID of a PIG that an alias file's range leaves out is read as any other
+    // (`-ipg`, probe p4c_c of line RG D1a-2).
+    /// The place of the OID `oid` (`SeqDb::locate_oid`; NCBI's `OID not found` past the
+    /// volumes, which the lookups never give).
+    fn at(&self, oid: u32) -> Result<SeqLocation, Stop> {
+        self.db
+            .locate_oid(oid)
+            .map_err(|_| Stop::Ncbi(OID_NOT_FOUND.to_string()))
+    }
+
     /// `GetSeqLength(oid)`.
     pub fn length(&self, oid: u32) -> Result<u32, Stop> {
+        let at = self.at(oid)?;
         if self.protein {
-            Ok(self.db.protein_length(oid)?)
+            Ok(self.db.protein_length_at(at)?)
         } else {
-            let length = self.db.nucleotide_length(oid)?;
+            let length = self.db.nucleotide_length_at(at)?;
             u32::try_from(length)
                 .map_err(|_| Stop::refused(format!("sequence {oid} is longer than 32 bits")))
         }
@@ -128,7 +153,7 @@ impl<'a> Source<'a> {
 
     /// `GetHdr(oid)`: the definition lines with their Seq-ids.
     pub fn deflines(&self, oid: u32) -> Result<DeflineSet, Stop> {
-        let set = self.db.defline_set(oid)?;
+        let set = self.db.defline_set_at(self.at(oid)?)?;
         if set
             .deflines
             .iter()
@@ -146,7 +171,7 @@ impl<'a> Source<'a> {
     /// with the byte 255 for a gap or stop, or the IUPAC letters of a nucleotide.
     pub fn string_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
         if self.protein {
-            let block = self.db.read_sequence(oid)?;
+            let block = self.db.read_sequence_at(self.at(oid)?)?;
             Ok(protein_string_letters(slice(block.protein(0), range)))
         } else {
             self.nucleotide_letters(oid, range)
@@ -156,7 +181,7 @@ impl<'a> Source<'a> {
     /// The letters of the FASTA path (`CSeqVector` in `Ncbieaa` or `Iupacna`).
     pub fn fasta_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
         if self.protein {
-            let block = self.db.read_sequence(oid)?;
+            let block = self.db.read_sequence_at(self.at(oid)?)?;
             Ok(protein_fasta_letters(slice(block.protein(0), range)))
         } else {
             self.nucleotide_letters(oid, range)
@@ -164,11 +189,12 @@ impl<'a> Source<'a> {
     }
 
     fn nucleotide_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
+        let at = self.at(oid)?;
         let (from, to) = match range {
             Some((from, to)) => (from as usize, to as usize + 1),
-            None => (0, self.db.nucleotide_length(oid)?),
+            None => (0, self.db.nucleotide_length_at(at)?),
         };
-        Ok(self.db.nucleotide_iupac_range(oid, from, to)?)
+        Ok(self.db.nucleotide_iupac_range_at(at, from, to)?)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242
@@ -189,7 +215,7 @@ impl<'a> Source<'a> {
     /// `GetMaskData(oid, algo)`: the stored ranges of the sequence, or the refusal of a volume
     /// that has masks but not this algorithm (line NP's M/DECISIONS 9).
     pub fn masks(&self, oid: u32, algo: i32) -> Result<Vec<(u32, u32)>, Stop> {
-        match self.db.mask_ranges(oid, algo)? {
+        match self.db.mask_ranges_at(self.at(oid)?, algo)? {
             MaskRanges::Ranges(ranges) => Ok(ranges),
             MaskRanges::AlgorithmNotInVolume { volume } => Err(Stop::refused(format!(
                 "filtering algorithm {algo} in {}, a volume of an alias or a list of names with \
@@ -1047,16 +1073,16 @@ impl Run<'_, '_, '_> {
     fn write(&mut self, oid: u32, config: &Config, target: Option<&str>) -> Result<(), Stop> {
         if config.strand_minus && self.source.protein && self.formatter.reads_letters() {
             return Err(Stop::refused(
-                "-strand minus on a protein database read with a taxid list and -dbtype                  guess (NCBI writes the protein letters reversed)"
+                "-strand minus on a protein database read with a taxid list and -dbtype guess \
+                 (NCBI writes the protein letters reversed)"
                     .to_string(),
             ));
         }
-        // `oid` is NCBI's OID, one the database includes (the lookups keep only those:
-        // `IdLookup::visible`); the formatters read ordinal ids, which differ from the OIDs
-        // where an alias file's range or a list leaves OIDs out.
-        let ordinal = self.source.db.ordinal_of(oid);
+        // `oid` is NCBI's OID, which the formatters read as NCBI's do (`Source::at`): one the
+        // database includes (the lookups keep only those: `IdLookup::visible`), or, for
+        // `-ipg`, the OID of a PIG whose volume holds it (`PigToOid`), included or not.
         self.formatter
-            .write(self.source, ordinal, config, target, self.out)
+            .write(self.source, oid, config, target, self.out)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416
@@ -1339,38 +1365,40 @@ impl Run<'_, '_, '_> {
         Ok(err_found)
     }
 
-    /// The OID lookup of a PIG (`PigToOid`): `Ok(None)` for NCBI's -1, a refusal where NCBI's
-    /// OID stays uninitialised (no volume has PIG files: probes J204, J205, J212, J214 of line
-    /// BDC, where the stack's value happened to be no OID).
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1111-1123
+    // ```c++
+    // bool CSeqDBImpl::PigToOid(int pig, int & oid) const
+    // {
+    //     CHECK_MARKER();
+    //
+    //     for(int i = 0; i < m_VolSet.GetNumVols(); i++) {
+    //         if (m_VolSet.GetVol(i)->PigToOid(pig, oid)) {
+    //             oid += m_VolSet.GetVolOIDStart(i);
+    //             return true;
+    //         }
+    //     }
+    //
+    //     return false;
+    // }
+    // ```
+    /// The OID lookup of a PIG (`PigToOid`, which asks the volumes, not the OID list: the OID of
+    /// a PIG that an alias file's range leaves out is written as any other, probe p4c_c of line
+    /// RG D1a-2): `Ok(None)` for NCBI's -1, a refusal where NCBI's OID stays uninitialised (no
+    /// volume has PIG files: probes J204, J205, J212, J214 of line BDC, where the stack's value
+    /// happened to be no OID).
     fn pig_to_oid(&self, pig: i32) -> Result<Option<u32>, Stop> {
         let lookup = self
             .ids
             .lookup
             .as_ref()
             .expect("an IPG request looks ids up");
-        lookup
-            .pig_to_oid(pig)?
-            .ok_or_else(|| {
-                Stop::refused(
-                    "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
+        lookup.pig_to_oid(pig)?.ok_or_else(|| {
+            Stop::refused(
+                "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
                  writes an OID it never set"
-                        .to_string(),
-                )
-            })
-            .and_then(|oid| {
-                match oid {
-            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:
-            // 1110-1121 (`PigToOid` asks the volumes, not the OID list): NCBI writes the
-            // sequence of an OID that an alias file's range leaves out, which LOSAT's formatters
-            // (by ordinal id) do not read.
-            Some(oid) if !self.source.db.includes_oid(oid) => Err(Stop::refused(
-                "-ipg and -ipg_batch for a PIG whose OID an alias file's FIRST_OID or LAST_OID \
-                 leaves out (NCBI writes it)"
                     .to_string(),
-            )),
-            other => Ok(other),
-        }
-            })
+            )
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:219-222
@@ -1476,10 +1504,9 @@ impl Run<'_, '_, '_> {
     // }
     // ```
     // With `-target_only` the database was opened with the list (`SeqDb::restrict_taxids`):
-    // its OIDs are those of the list and its definition lines those with one of the list's
-    // taxids; the formatters read the ordinal ids `0..n`, whose OIDs (`%o`) `SeqDb::oid`
-    // gives. Without it every definition line of a sequence is written (probes T01-T09,
-    // J101-J139, S33-S37 of line BDC).
+    // its OIDs are those of the list (the OIDs of its ordinal ids `0..n`, `SeqDb::oid`) and its
+    // definition lines those with one of the list's taxids. Without it every definition line
+    // of a sequence is written (probes T01-T09, J101-J139, S33-S37 of line BDC).
     /// `-taxids` / `-taxidlist`: the sequences of the taxids `tax_ids`, by OID.
     fn tax_id_list(&mut self, tax_ids: &BTreeSet<i32>, config: &Config) -> Result<bool, Stop> {
         let db = self.source.db;

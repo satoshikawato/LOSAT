@@ -1813,15 +1813,6 @@ impl SeqDb {
         }
     }
 
-    /// Whether the database includes the OID `oid` of its volumes (the alias files' ranges and
-    /// a list leave the others out).
-    pub fn includes_oid(&self, oid: u32) -> bool {
-        match &self.filter {
-            Some(filter) => filter.contains(oid),
-            None => oid < self.num_oids(),
-        }
-    }
-
     /// Whether the database is restricted by a list ([`SeqDb::restrict`]); the alias files'
     /// ranges alone do not make it so.
     pub fn is_restricted(&self) -> bool {

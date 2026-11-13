@@ -297,10 +297,23 @@ pub fn acc_first_oid<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Opt
 /// `memcmp` order of the 4 LE bytes, so {1, 256, 512} come as 256, 512, 1. Empty when absent.
 /// Works for keys with a sub-database (more than about 500 OIDs), where NCBI fails.
 pub fn acc_oids<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Vec<u32>, String> {
-    let db = ndb
-        .open_db(b"acc2oid")?
-        .ok_or_else(|| NO_ACCESSION_INFO.to_string())?;
-    ndb.values(&db, acc)?
+    acc_oids_of(ndb, &acc2oid(ndb)?, acc)
+}
+
+/// The `acc2oid` database of `ndb` (`mdb_dbi_open`; `NO_ACCESSION_INFO` where it has none), for
+/// `acc_oids_of` and `acc_case_variant_oids`.
+pub fn acc2oid<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<crate::seqdb::lmdb_read::Db, String> {
+    ndb.open_db(b"acc2oid")?
+        .ok_or_else(|| NO_ACCESSION_INFO.to_string())
+}
+
+/// `acc_oids` in the `acc2oid` database `db` of `ndb` (`acc2oid`).
+pub fn acc_oids_of<R: ReadAt + ?Sized>(
+    ndb: &Env<R>,
+    db: &crate::seqdb::lmdb_read::Db,
+    acc: &[u8],
+) -> Result<Vec<u32>, String> {
+    ndb.values(db, acc)?
         .iter()
         .map(|v| le_u32(v, "acc2oid"))
         .collect()
@@ -310,72 +323,94 @@ pub fn acc_oids<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Vec<u32>
 // takes text Seq-ids that differ in the case of their letters for one
 // (`seqid::defline_set::scope_keys`); LOSAT lists the other keys to find the sequences that hold
 // such an id (`seqdb::lookup::SeqidLookup::case_folded_oids`).
+/// How many bytes after the fixed `from` bytes a prefix that `acc_case_variant_oids` keeps in its
+/// map may have: at most 2 letters' worth, a few thousand prefixes.
+const KEPT_CASE_PREFIX: usize = 2;
+
 /// The OIDs of the keys of `acc2oid` other than `acc` that differ from it only in the case of
 /// ASCII letters at or after byte `from`, in key order, each key's in LMDB duplicate order
-/// (`acc_oids`). The keys are searched letter by letter: a letter of the other case is followed
-/// only where a key starts with what is built so far (`MDB_SET_RANGE`), so where no key differs
-/// in case the search costs one range lookup for each letter.
+/// (`acc_oids_of`, of the `acc2oid` database `db`), with the answers of `MDB_SET_RANGE` to whether
+/// a key starts with a prefix of at most `KEPT_CASE_PREFIX` bytes after `from` kept in `prefixes`
+/// for the next calls (`case_variant_keys`).
 pub fn acc_case_variant_oids<R: ReadAt + ?Sized>(
     ndb: &Env<R>,
+    db: &crate::seqdb::lmdb_read::Db,
     acc: &[u8],
     from: usize,
+    prefixes: &mut rustc_hash::FxHashMap<Vec<u8>, bool>,
 ) -> Result<Vec<u32>, String> {
-    let db = ndb
-        .open_db(b"acc2oid")?
-        .ok_or_else(|| NO_ACCESSION_INFO.to_string())?;
-    let from = from.min(acc.len());
-    let mut keys = Vec::new();
-    let mut prefix = acc[..from].to_vec();
-    case_variants(ndb, &db, acc, &mut prefix, false, &mut keys)?;
+    // Only the short prefixes recur from one name to the next (`pir||a` for every `pir||A12345`);
+    // keeping the longer ones, which each name asks alone, would only grow the map.
+    let kept_up_to = from.saturating_add(KEPT_CASE_PREFIX);
+    let keys = case_variant_keys(acc, from, |prefix| -> Result<bool, String> {
+        if prefix.len() > kept_up_to {
+            return ndb.has_key_starting_with(db, prefix);
+        }
+        if let Some(&known) = prefixes.get(prefix) {
+            return Ok(known);
+        }
+        let found = ndb.has_key_starting_with(db, prefix)?;
+        prefixes.insert(prefix.to_vec(), found);
+        Ok(found)
+    })?;
     let mut oids = Vec::new();
     for key in keys {
-        for v in ndb.values(&db, &key)? {
-            oids.push(le_u32(&v, "acc2oid")?);
-        }
+        oids.extend(acc_oids_of(ndb, db, &key)?);
     }
     Ok(oids)
 }
 
-/// `acc_case_variant_oids`' search: extends `prefix` (a prefix of a variant of `acc`, `flipped`
-/// where a letter's case differs) by the next byte of `acc` in each case, and adds to `keys` each
-/// whole key that differs. On `acc`'s own letters (`flipped` false) no key is looked up: only the
-/// paths that leave them must exist.
-fn case_variants<R: ReadAt + ?Sized>(
-    ndb: &Env<R>,
-    db: &crate::seqdb::lmdb_read::Db,
+/// The strings other than `acc` that differ from it only in the case of ASCII letters at or after
+/// byte `from` and whose every prefix that leaves `acc`'s letters `has_prefix` finds (a key
+/// starts with it), in byte order: the candidates for keys of a case variant of `acc`, built
+/// letter by letter, a letter of the other case followed only where `has_prefix` finds what is
+/// built so far. On `acc`'s own letters nothing is asked, so where no key differs in case it is
+/// asked once for each letter.
+pub fn case_variant_keys<E>(
     acc: &[u8],
-    prefix: &mut Vec<u8>,
-    flipped: bool,
-    keys: &mut Vec<Vec<u8>>,
-) -> Result<(), String> {
-    let at = prefix.len();
-    let Some(&byte) = acc.get(at) else {
-        if flipped && ndb.first_key_at_least(db, prefix)?.as_deref() == Some(prefix.as_slice()) {
-            keys.push(prefix.clone());
+    from: usize,
+    mut has_prefix: impl FnMut(&[u8]) -> Result<bool, E>,
+) -> Result<Vec<Vec<u8>>, E> {
+    fn walk<E>(
+        acc: &[u8],
+        prefix: &mut Vec<u8>,
+        flipped: bool,
+        has_prefix: &mut dyn FnMut(&[u8]) -> Result<bool, E>,
+        keys: &mut Vec<Vec<u8>>,
+    ) -> Result<(), E> {
+        let Some(&byte) = acc.get(prefix.len()) else {
+            if flipped {
+                keys.push(prefix.clone());
+            }
+            return Ok(());
+        };
+        let other = if byte.is_ascii_uppercase() {
+            Some(byte.to_ascii_lowercase())
+        } else if byte.is_ascii_lowercase() {
+            Some(byte.to_ascii_uppercase())
+        } else {
+            None
+        };
+        // Byte order: the upper-case letter first.
+        let cases = match other {
+            Some(other) if other < byte => [Some((other, true)), Some((byte, flipped))],
+            Some(other) => [Some((byte, flipped)), Some((other, true))],
+            None => [Some((byte, flipped)), None],
+        };
+        for (byte, flipped) in cases.into_iter().flatten() {
+            prefix.push(byte);
+            if !flipped || has_prefix(prefix)? {
+                walk(acc, prefix, flipped, has_prefix, keys)?;
+            }
+            prefix.pop();
         }
-        return Ok(());
-    };
-    let other = if byte.is_ascii_uppercase() {
-        Some(byte.to_ascii_lowercase())
-    } else if byte.is_ascii_lowercase() {
-        Some(byte.to_ascii_uppercase())
-    } else {
-        None
-    };
-    let mut cases = vec![(byte, flipped)];
-    if let Some(other) = other {
-        cases.push((other, true));
+        Ok(())
     }
-    // Key order is byte order: the upper-case letter's keys come first.
-    cases.sort_unstable();
-    for (byte, flipped) in cases {
-        prefix.push(byte);
-        if !flipped || ndb.has_key_starting_with(db, prefix)? {
-            case_variants(ndb, db, acc, prefix, flipped, keys)?;
-        }
-        prefix.pop();
-    }
-    Ok(())
+    let from = from.min(acc.len());
+    let mut keys = Vec::new();
+    let mut prefix = acc[..from].to_vec();
+    walk(acc, &mut prefix, false, &mut has_prefix, &mut keys)?;
+    Ok(keys)
 }
 
 /// Failure of a taxid lookup, with the pieces for NCBI's message.
@@ -1238,42 +1273,64 @@ mod tests {
 
     /// `acc_case_variant_oids`: the other keys that differ only in the case of letters (p5's
     /// `lcl|myprot9` and the upper-case copy makeblastdb writes, OID 4), none for a key alone in
-    /// its letters, and none before byte `from`.
+    /// its letters, and none before byte `from`; the answers kept in the map give the same.
     #[test]
     fn accession_case_variants() {
         let f = File::open(format!("{FX}/p5.pdb")).unwrap();
         let env = Env::open(&f).unwrap();
-        assert_eq!(acc_case_variant_oids(&env, b"myprot9", 0).unwrap(), vec![4]);
-        assert_eq!(acc_case_variant_oids(&env, b"MYPROT9", 0).unwrap(), vec![4]);
+        for _ in 0..2 {
+            let mut known = rustc_hash::FxHashMap::default();
+            let db = acc2oid(&env).unwrap();
+            for (acc, from, want) in [
+                (&b"myprot9"[..], 0, vec![4]),
+                (b"MYPROT9", 0, vec![4]),
+                (b"MyProt9", 0, vec![4, 4]),
+                (b"MyProt9", 2, vec![]),
+                (b"MyProt9", 1, vec![4]),
+                (b"aaa00001", 0, vec![2, 3]),
+                (b"AAA00001", 0, vec![]),
+                (b"np_000002.1", 0, vec![1]),
+                (b"zzz", 0, vec![]),
+                (b"", 0, vec![]),
+            ] {
+                let got = acc_case_variant_oids(&env, &db, acc, from, &mut known).unwrap();
+                assert_eq!(got, want, "{}", String::from_utf8_lossy(acc));
+            }
+        }
+    }
+
+    /// `case_variant_keys` asks once for each letter where nothing differs in case, follows a
+    /// letter of the other case only where a prefix is found, and gives the variants in byte order.
+    #[test]
+    fn case_variant_keys_follow_found_prefixes_only() {
+        let keys: Vec<&[u8]> = vec![b"pir||ABc1", b"pir||AbC1", b"pir||Abc1", b"pir||abc1"];
+        let mut asked = Vec::new();
+        let found = case_variant_keys(b"pir||Abc1", 4, |prefix: &[u8]| {
+            asked.push(prefix.to_vec());
+            Ok::<_, ()>(keys.iter().any(|key| key.starts_with(prefix)))
+        })
+        .unwrap();
         assert_eq!(
-            acc_case_variant_oids(&env, b"MyProt9", 0).unwrap(),
-            vec![4, 4]
+            found,
+            vec![
+                b"pir||ABc1".to_vec(),
+                b"pir||AbC1".to_vec(),
+                b"pir||abc1".to_vec()
+            ]
         );
-        assert_eq!(
-            acc_case_variant_oids(&env, b"MyProt9", 2).unwrap(),
-            Vec::<u32>::new()
-        );
-        assert_eq!(acc_case_variant_oids(&env, b"MyProt9", 1).unwrap(), vec![4]);
-        assert_eq!(
-            acc_case_variant_oids(&env, b"aaa00001", 0).unwrap(),
-            vec![2, 3]
-        );
-        assert_eq!(
-            acc_case_variant_oids(&env, b"AAA00001", 0).unwrap(),
-            Vec::<u32>::new()
-        );
-        assert_eq!(
-            acc_case_variant_oids(&env, b"np_000002.1", 0).unwrap(),
-            vec![1]
-        );
-        assert_eq!(
-            acc_case_variant_oids(&env, b"zzz", 0).unwrap(),
-            Vec::<u32>::new()
-        );
-        assert_eq!(
-            acc_case_variant_oids(&env, b"", 0).unwrap(),
-            Vec::<u32>::new()
-        );
+        // Never the own letters' prefixes, nor beyond a prefix not found.
+        assert!(!asked.iter().any(|prefix| prefix.as_slice() == b"pir||Ab"));
+        assert!(!asked
+            .iter()
+            .any(|prefix| prefix.starts_with(b"pir||aB") && prefix.len() > b"pir||aB".len()));
+        let mut asked = 0;
+        let none = case_variant_keys(b"gb_LOCUS9", 0, |_: &[u8]| {
+            asked += 1;
+            Ok::<_, ()>(false)
+        })
+        .unwrap();
+        assert!(none.is_empty());
+        assert_eq!(asked, 7, "one question for each letter");
     }
 
     /// Every acc2oid key of the dump of `path` (`name` names the `expected` file).

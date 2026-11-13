@@ -912,6 +912,17 @@ fn user_ids_that_are_numbers() {
         ti_error(b"gnl|ti|12x"),
         "Cannot convert string '12x' to Int8"
     );
+    // The digits end at a NUL (`while (char ch = str[pos])`, ncbistr.cpp:841) and the end check
+    // reads the NUL: the tag `5\0x` is the trace id 5.
+    let simplified = seqdb_simplify_accession(b"gnl|ti|5\0x").unwrap();
+    assert_eq!(
+        (simplified.id_type, simplified.num_id),
+        (SeqDbIdType::Ti, 5)
+    );
+    assert_eq!(
+        ti_error(b"gnl|ti|99999999999999999999\0"),
+        "Cannot convert string '99999999999999999999\\0' to Int8, overflow"
+    );
     assert_eq!(
         seqdb_simplify_accession(b"gnl|ti|-9223372036854775808")
             .unwrap()
@@ -961,25 +972,12 @@ fn version_check_drops_other_versions() {
     assert!(!found.version_check);
 }
 
+// The `NStr` conversions of this module are tested with `crate::ncbi_str`.
 #[test]
-fn string_to_int_with_trailing_symbols() {
-    assert_eq!(string_to_int_trailing(b"12"), 12);
-    assert_eq!(string_to_int_trailing(b"12|HBA_HUMAN"), 12);
-    assert_eq!(string_to_int_trailing(b"-5x"), -5);
-    assert_eq!(string_to_int_trailing(b"+7"), 7);
-    assert_eq!(string_to_int_trailing(b""), 0);
-    assert_eq!(string_to_int_trailing(b"x1"), 0);
-    assert_eq!(string_to_int_trailing(b"2147483647"), i32::MAX);
-    assert_eq!(string_to_int_trailing(b"2147483648"), 0);
-    assert_eq!(string_to_int_trailing(b"-2147483648"), i32::MIN);
-    assert_eq!(string_to_int_trailing(b"99999999999999999999"), 0);
-    assert_eq!(atoi(b" 42xyz"), 42);
-    assert_eq!(atoi(b"-3"), -3);
-    assert_eq!(atoi(b""), 0);
-    assert_eq!(string_to_uint(b"+5"), Some(5));
-    assert_eq!(string_to_uint(b"-5"), None);
-    assert_eq!(string_to_uint(b"4294967296"), None);
-    assert_eq!(string_to_uint(b""), None);
+fn atoi_reads_as_the_c_library() {
+    assert_eq!(crate::ncbi_str::c_atoi(b" 42xyz"), 42);
+    assert_eq!(crate::ncbi_str::c_atoi(b"-3"), -3);
+    assert_eq!(crate::ncbi_str::c_atoi(b""), 0);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1002,6 +1000,9 @@ fn simplified_keys_of_the_id_forms() {
     assert_eq!(simplify("lcl|MyProt"), "myprot");
     assert_eq!(simplify("lcl|123"), "lcl|123");
     assert_eq!(simplify("123"), "lcl|123");
+    // `StringToNumeric<Int8>` reads up to a NUL (ncbistr.cpp:841), so the bare number before
+    // it makes the key local (seqdbcommon.cpp:2592).
+    assert_eq!(simplify("12\u{0}x"), "lcl|12\u{0}x");
     assert_eq!(simplify("myprot_13"), "myprot_13");
     // pdb
     assert_eq!(simplify("1ABC_A"), "pdb|1abc|a");

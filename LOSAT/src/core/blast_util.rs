@@ -43,6 +43,40 @@ pub fn ncbi_int4_from_double(value: f64) -> i32 {
     }
 }
 
+/// `BLAST_FrameToContext`: the context of a frame of a translated sequence (+1, +2, +3 are 0, 1,
+/// 2; -1, -2, -3 are 3, 4, 5), and context 0 for frame 0 of a protein sequence.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1211-1228
+/// ```c
+/// Int4 BLAST_FrameToContext(Int2 frame, EBlastProgramType program)
+/// {
+///     if (Blast_QueryIsTranslated(program) ||
+///         Blast_SubjectIsTranslated(program)) {
+///         ASSERT(frame >= -3 && frame <= 3 && frame != 0);
+///         if (frame > 0) {
+///             return frame - 1;
+///         } else {
+///             return 2 - frame;
+///         }
+///     } else if (Blast_QueryIsNucleotide(program) ||
+///                Blast_SubjectIsNucleotide(program)) {
+///         ASSERT(frame == 1 || frame == -1);
+///         return frame == 1 ? 0 : 1;
+///     } else {
+///         ASSERT(frame == 0);
+///         return 0;
+///     }
+/// }
+/// ```
+pub(crate) fn frame_to_context(frame: i32) -> usize {
+    debug_assert!((-3..=3).contains(&frame));
+    match frame {
+        0 => 0,
+        f if f > 0 => (f - 1) as usize,
+        f => (2 - f) as usize,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

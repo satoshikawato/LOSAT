@@ -1,0 +1,28 @@
+>lead_n
+0 - 9
+440 - 490
+>trail_n
+430 - 480
+750 - 759
+>mid_short_n
+300 - 319
+450 - 500
+>mid_eq_window_n
+300 - 363
+494 - 544
+>mid_long_n
+300 - 364
+495 - 545
+>mid_vlong_n
+300 - 499
+630 - 680
+950 - 1049
+>all_n
+0 - 149
+>lowc_then_long_n
+80 - 159
+>n_adjacent_lowc
+0 - 189
+>ns_scattered
+432 - 463
+465 - 480

@@ -4,6 +4,7 @@
 // NCBI BLAST's two-sequence page (docs/web/ncbi_ui_mapping.md §1). Defaults, choices and
 // help text come from the engine (`describe`), not from here (plan §5.3, DW-4); a field whose
 // flag the engine does not describe is not shown.
+import { WINDOW_MASKER_TAXID_FLAG } from './counts';
 import type { FastaParserKind } from './dataset';
 
 export type ProgramId = 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
@@ -24,8 +25,20 @@ export type InputRole = 'query' | 'subject';
  *   `subject_gencodes`) gives the choices.
  * - `filter`: a low complexity filter (`no`, `yes` or the filter's arguments): NCBI's "Low
  *   complexity regions" checkbox, with the value in a text box while it is checked.
+ * - `file`: an option whose value is the name of a file that the user chooses (BLASTN's
+ *   WindowMasker counts): a checkbox, as NCBI's "Species-specific repeats" has, with the file
+ *   chosen beside it. The value is `true` while the box is checked and no file is chosen
+ *   (the argv writes nothing, and the search cannot start), and the file's name once it is.
+ *   The same row may offer the other way to name the counts, a taxonomy ID (`file.taxid`, line WW2).
+ * - `taxid`: the taxonomy ID of a `file` field's row (BLASTN's `-window_masker_taxid`), shown in
+ *   the row of its `file` field and not as a field of its own. The value is `true` while the
+ *   box is checked and the ID is not typed (the argv writes nothing, and the search cannot start),
+ *   and the ID as typed once it is.
  */
-export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter';
+export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter' | 'file' | 'taxid';
+
+/** BLASTN's option for the WindowMasker unit counts file, the one field of the form with the kind `file`. */
+export const WINDOW_MASKER_FLAG = '-window_masker_db';
 
 export interface ParameterField {
   readonly flag: string;
@@ -44,6 +57,12 @@ export interface ParameterField {
   readonly list?: readonly string[] | Readonly<Record<string, readonly string[]>>;
   /** NCBI's sentence beside the control ("Select the maximum number of aligned sequences to display"). */
   readonly hint?: string;
+  /**
+   * For `file` fields: the name of the file ("WindowMasker counts"), and the sentence that asks for it
+   * while the box is checked without one; and the `taxid` field that names the counts by a taxonomy
+   * ID instead (its flag, and the sentence that asks for the ID).
+   */
+  readonly file?: { readonly label: string; readonly missing: string; readonly taxid?: { readonly flag: string; readonly missing: string } };
   /**
    * The name of a row that shows this field with its neighbours of the same row (NCBI's
    * "Match/Mismatch Scores", "Gap Costs", "Filter" and "Mask").
@@ -225,16 +244,73 @@ const compBasedStats: ParameterField = {
 const seg: ParameterField = { flag: '-seg', label: 'Low complexity regions', kind: 'filter', row: 'Filter' };
 // NCBI's "Mask" row: two checkboxes.
 const softMasking: ParameterField = { flag: '-soft_masking', label: 'Mask for lookup table only', kind: 'boolean', row: 'Mask' };
+// NCBI's "Species-specific repeats filter for:" (a select of organisms) is, here, the WindowMasker counts of
+// a taxonomy ID (-window_masker_taxid, downloaded from NCBI when the user asks) or a counts file of the
+// user's own (-window_masker_db); NCBI's list of organisms is not offered.
+const windowMasker: ParameterField = {
+  flag: WINDOW_MASKER_FLAG,
+  label: 'Species-specific repeats filter for:',
+  kind: 'file',
+  row: 'Filter',
+  file: {
+    label: 'WindowMasker counts',
+    missing: 'Choose the WindowMasker counts file.',
+    taxid: { flag: WINDOW_MASKER_TAXID_FLAG, missing: 'Enter a taxonomy ID.' },
+  },
+  hint: "wmasker.obinary from NCBI's windowmasker_files, or an obinary or binary file made by windowmasker -mk_counts",
+};
+// The taxonomy ID of the same row: it names the counts that the user downloads from NCBI (WW2).
+// Its label is the row's: "Additional options" refuses the flag as set in the form under that name.
+const windowMaskerTaxid: ParameterField = {
+  flag: WINDOW_MASKER_TAXID_FLAG,
+  label: 'Species-specific repeats filter for:',
+  kind: 'taxid',
+  row: 'Filter',
+  inputMode: 'numeric',
+};
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
 const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit window size', ...integer };
+const xdropUngap: ParameterField = { flag: '-xdrop_ungap', label: 'X-dropoff, ungapped (bits)', ...decimal };
+const xdropGap: ParameterField = { flag: '-xdrop_gap', label: 'X-dropoff, preliminary gapped (bits)', ...decimal };
+const xdropGapFinal: ParameterField = { flag: '-xdrop_gap_final', label: 'X-dropoff, final gapped (bits)', ...decimal };
 
 // BLAST+'s -num_descriptions / -num_alignments (NCBI's page has them as "Descriptions" / "Alignments" of its
 // display settings; they also set the hit list sizes, so a run may search twice, abi_v2.md §7).
 const numDescriptions: ParameterField = { flag: '-num_descriptions', label: 'Number of descriptions', ...integer };
 const numAlignments: ParameterField = { flag: '-num_alignments', label: 'Number of alignments', ...integer };
+// BLAST+'s options of the pairwise report (outfmt 0), which NCBI's page offers among the formatting
+// options of its results. `describe` lists the sort orders only in its help text; the names are its words.
+const lineLength: ParameterField = { flag: '-line_length', label: 'Alignment line length', ...integer };
+const SORT_ORDERS: readonly string[] = ['0', '1', '2', '3', '4'];
+const sortHits: ParameterField = {
+  flag: '-sorthits',
+  label: 'Sort hits by',
+  kind: 'choice',
+  choices: SORT_ORDERS,
+  choiceLabels: {
+    '0': '0: Sort by evalue',
+    '1': '1: Sort by bit score',
+    '2': '2: Sort by total score',
+    '3': '3: Sort by percent identity',
+    '4': '4: Sort by query coverage',
+  },
+};
+const sortHsps: ParameterField = {
+  flag: '-sorthsps',
+  label: 'Sort HSPs by',
+  kind: 'choice',
+  choices: SORT_ORDERS,
+  choiceLabels: {
+    '0': '0: Sort by hsp evalue',
+    '1': '1: Sort by hsp score',
+    '2': '2: Sort by hsp query start',
+    '3': '3: Sort by hsp percent identity',
+    '4': '4: Sort by hsp subject start',
+  },
+};
 
 const OTHER = 'Other Parameters';
 
@@ -306,6 +382,8 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         placement: 'algorithm',
         fields: [
           { flag: '-dust', label: 'Low complexity regions', kind: 'filter', row: 'Filter' },
+          windowMasker,
+          windowMaskerTaxid,
           softMasking,
           lcaseMasking,
         ],
@@ -328,6 +406,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         fields: [
           numDescriptions,
           numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
           { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' },
@@ -369,7 +450,23 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         ...PROTEIN_SCORING,
       },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
-      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
+      {
+        title: OTHER,
+        placement: 'algorithm',
+        fields: [
+          numDescriptions,
+          numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
+          threshold,
+          windowSize,
+          xdropUngap,
+          xdropGap,
+          xdropGapFinal,
+          maxHsps,
+        ],
+      },
     ],
   },
   {
@@ -386,13 +483,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: 'General Parameters',
         placement: 'algorithm',
-        // LOSAT's BLASTX reads word sizes 3 and 5 only.
-        fields: [
-          maxTargetSeqs,
-          evalue,
-          { ...wordSize, list: ['3', '5'] },
-          cullingLimit,
-        ],
+        fields: [maxTargetSeqs, evalue, wordSize, cullingLimit],
       },
       {
         title: 'Scoring Parameters',
@@ -407,8 +498,14 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         fields: [
           numDescriptions,
           numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
           threshold,
           windowSize,
+          xdropUngap,
+          xdropGap,
+          xdropGapFinal,
           maxHsps,
           { flag: '-strand', label: 'Query strand', kind: 'choice' },
           { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
@@ -445,10 +542,14 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         fields: [
           numDescriptions,
           numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
           threshold,
           windowSize,
-          { flag: '-xdrop_gap', label: 'X-dropoff, preliminary gapped (bits)', ...decimal },
-          { flag: '-xdrop_gap_final', label: 'X-dropoff, final gapped (bits)', ...decimal },
+          xdropUngap,
+          xdropGap,
+          xdropGapFinal,
           { flag: '-sum_stats', label: 'Sum statistics', kind: 'boolean' },
         ],
       },
@@ -479,7 +580,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
-      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize] },
+      {
+        title: OTHER,
+        placement: 'algorithm',
+        fields: [numDescriptions, numAlignments, lineLength, sortHits, sortHsps, threshold, windowSize, xdropUngap],
+      },
     ],
   },
 ] satisfies ProgramDescriptor[]);

@@ -1,0 +1,15 @@
+USAGE
+  segmasker [-h] [-help] [-xmlhelp] [-in input_file_name]
+    [-out output_file_name] [-infmt input_format] [-parse_seqids]
+    [-outfmt output_format] [-window integer_value] [-locut float_value]
+    [-hicut float_value] [-version-full] [-version-full-xml]
+    [-version-full-json]
+
+DESCRIPTION
+   Low complexity region masker based on the SEG algorithm
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Argument "window". Integer value is out of range:  `-2147483649'
+Error:  (CArgException::eConvert) Argument "window". Integer value is out of range:  `-2147483649'

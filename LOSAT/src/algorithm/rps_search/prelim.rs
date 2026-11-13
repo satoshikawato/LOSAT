@@ -12,11 +12,12 @@ use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, Tr
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
+use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::gapalign::{
     pssm_get_start_for_gapped_alignment, pssm_score_only_gapped_alignment, PssmGapScratch,
 };
 use crate::algorithm::pssm_search::prelim::{purge_hsps_with_common_endpoints, score_compare};
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::KarlinParams;
 
 /// What the preliminary stage of every query of a volume reads besides the query.
 pub(crate) struct RpsPrelim<'a> {
@@ -35,13 +36,17 @@ pub(crate) struct RpsPrelim<'a> {
     /// The first gapped Karlin block of the batch (`kbp_gap_std`, BLOSUM62 11/1's table values)
     /// with its Lambda divided by the scale, as `Blast_HSPListGetEvalues` divides it.
     pub(crate) karlin: KarlinParams,
-    pub(crate) gumbel: &'a BlastGumbelBlk,
+    /// The Gumbel block, if any, and the query's search space (`EvalueStats`): the e-values and
+    /// the reap by `prelim_evalue` run with the block only.
+    pub(crate) stats: EvalueStats<'a>,
     /// `hit_params->prelim_evalue`.
     pub(crate) prelim_evalue: f64,
     /// `prelim_hitlist_size` of the collector.
     pub(crate) prelim_hitlist_size: usize,
     /// The query's index (the lists' `query_index`).
     pub(crate) query_index: u32,
+    /// The program of LOSAT's refusals.
+    pub(crate) program: &'static str,
 }
 
 /// The memory of one worker's preliminary stage, kept from query to query.
@@ -51,6 +56,8 @@ pub(crate) struct RpsPrelimScratch {
     tree: BlastIntervalTree,
     hsps: Vec<BlastpPreliminaryHsp>,
     gap: PssmGapScratch,
+    /// The query's HSPs of its contexts so far (`finish`).
+    combined: Vec<BlastpPreliminaryHsp>,
 }
 
 impl RpsPrelimScratch {
@@ -61,6 +68,7 @@ impl RpsPrelimScratch {
             tree: BlastIntervalTree::new(0, 1, 0, 1),
             hsps: Vec::new(),
             gap: PssmGapScratch::new(),
+            combined: Vec::new(),
         }
     }
 }
@@ -137,14 +145,16 @@ fn sort_init_hsps_by_score(init_hsps: &mut [RpsInitHsp]) {
 }
 
 impl RpsPrelim<'_> {
-    /// The query's preliminary hit list on this volume (`subject_seq`: the query's letters and
-    /// the trailing sentinel, `subject->sequence`), or `None` when it has no HSP. The lists' oids
-    /// are the profiles' local ordinal ids.
-    pub(crate) fn search_query(
+    /// The preliminary HSPs of one context of the query on this volume (`subject_seq`: its
+    /// letters and the trailing sentinel, `subject->sequence`; `frame`: its frame, 0 for a protein
+    /// query), sorted by score, after those of the query's earlier contexts in `scratch`
+    /// (`finish`), as `s_BlastSearchEngineOneContext` gives them to `Blast_HSPListAppend`.
+    pub(crate) fn search_frame(
         &self,
         scratch: &mut RpsPrelimScratch,
         subject_seq: &[u8],
-    ) -> Result<Option<BlastpHitList<XPrelimHsp>>> {
+        frame: i8,
+    ) -> Result<()> {
         let subject_len = subject_seq.len() - 1;
         let subject = &subject_seq[..subject_len];
         let RpsPrelimScratch {
@@ -153,6 +163,7 @@ impl RpsPrelim<'_> {
             tree,
             hsps,
             gap,
+            combined,
         } = scratch;
         init_hsps.clear();
         word_finder(&self.word, word, subject, init_hsps);
@@ -161,7 +172,7 @@ impl RpsPrelim<'_> {
         //             if (init_hitlist->total == 0) continue;
         // ```
         if init_hsps.is_empty() {
-            return Ok(None);
+            return Ok(());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:282
         // ```c
@@ -184,8 +195,31 @@ impl RpsPrelim<'_> {
         {
             hsps.sort_by(score_compare);
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
+        // ```c
+        //                 Blast_HSPListAppend(&hsp_list, &hsp_list_out, kHspNumMax);
+        // ```
+        // Without a cap (`hsp_num_max` 0: `INT4_MAX`, blast_hits.c:213-226) the lists of the
+        // frames are concatenated in the frame order (`s_BlastHSPListsCombineByScore`).
+        combined.extend(hsps.iter().map(|hsp| BlastpPreliminaryHsp {
+            subject_frame: frame.into(),
+            ..*hsp
+        }));
+        Ok(())
+    }
+
+    /// The query's preliminary hit list on this volume from the HSPs of its contexts
+    /// (`search_frame`; emptied here), with the e-values of the length `stat_length`
+    /// (`RpsQuery::stat_length`), or `None` when it has no HSP. The lists' oids are the profiles'
+    /// local ordinal ids.
+    pub(crate) fn finish(
+        &self,
+        scratch: &mut RpsPrelimScratch,
+        stat_length: usize,
+    ) -> Option<BlastpHitList<XPrelimHsp>> {
+        let hsps = &mut scratch.combined;
         if hsps.is_empty() {
-            return Ok(None);
+            return None;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:882-899
         // ```c
@@ -212,23 +246,42 @@ impl RpsPrelim<'_> {
         // ```
         // `subject_length` is the user query's length (`stat_length`), the context's length the
         // profile's.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:874-880
+        // ```c
+        //     } else if (!Blast_ProgramIsPhiBlast(program_number)
+        //            && !(isRPS && !sbp->gbp)
+        //            /* do not calculate E-values for mapping */
+        //            && program_number != eBlastTypeMapping ) {
+        //         /* Calculate e-values for all HSPs. Skip this step
+        //            for PHI or RPS with old FSC, since calculating the E values
+        //            requires precomputation that has not been done yet */
+        // ```
+        // Without the Gumbel block (`-searchsp` at any value, `OLD_FSC`) the HSPs keep their
+        // e-value of 0; the reap by `prelim_evalue` (blast_engine.c:896-899, outside that branch)
+        // then keeps every one, and the hit list orders its lists by score, then ordinal id
+        // (every best e-value is equal).
         let mut evalued: Vec<XPrelimHsp> = Vec::with_capacity(hsps.len());
         for hsp in hsps.iter() {
-            let e_value = blast_spouge_stoe(
-                hsp.raw_score,
-                &self.karlin,
-                self.gumbel,
-                subject_len as i32,
-                hsp.query_length as i32,
-            );
+            let e_value = if self.stats.gumbel.is_some() {
+                self.stats.e_value(
+                    hsp.raw_score,
+                    &self.karlin,
+                    stat_length as i32,
+                    hsp.query_length as i32,
+                )
+            } else {
+                0.0
+            };
             if e_value <= self.prelim_evalue {
                 evalued.push(XPrelimHsp { hsp: *hsp, e_value });
             }
         }
+        hsps.clear();
         if evalued.is_empty() {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(self.collect(evalued)))
+        Some(self.collect(evalued))
     }
 
     /// `s_BlastHSPCollectorRun_RPS`: the HSPs sorted by context, then by score, one list per
@@ -394,7 +447,8 @@ impl RpsPrelim<'_> {
                 || (ungapped.q_start + ungapped.length) as usize > profile_length
             {
                 bail!(
-                    "a profile database whose scores extend an ungapped alignment across two profiles (NCBI BLAST+ asserts against it) is not supported by LOSAT's RPSBLAST"
+                    "a profile database whose scores extend an ungapped alignment across two profiles (NCBI BLAST+ asserts against it) is not supported by LOSAT's {}",
+                    self.program
                 );
             }
             let candidate = TreeHsp {
@@ -478,6 +532,135 @@ impl RpsPrelim<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
+
+    fn prelim_list(oid: u32, score: i32, e_value: f64) -> BlastpHspList<XPrelimHsp> {
+        BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![XPrelimHsp {
+                hsp: BlastpPreliminaryHsp {
+                    query_start: 0,
+                    query_end: 10,
+                    subject_start: 0,
+                    subject_end: 10,
+                    gapped_query_start: 0,
+                    gapped_subject_start: 0,
+                    raw_score: score,
+                    query_context: 0,
+                    query_frame: 0,
+                    subject_frame: 0,
+                    query_length: 100,
+                    q_idx: 0,
+                    s_idx: oid,
+                },
+                e_value,
+            }],
+            best_evalue: f64::MAX,
+        }
+    }
+
+    // blast_engine.c:874-899, blast_hits.c (`Blast_HitListUpdate`, `s_EvalueCompareHSPLists`):
+    // without the Gumbel block every preliminary HSP has the e-value 0, so the lists are ordered
+    // by the first HSP's score (down), then the ordinal id (down), which is the order of the
+    // composition-based redo's reads: the last list read is the lowest, and its profile's K is
+    // the batch's (`RpsTraceback::trace_query_redo`).
+    #[test]
+    fn lists_of_e_value_zero_are_ordered_by_score_then_ordinal_id() {
+        let mut hit_list = BlastpHitList::new(10);
+        for (oid, score) in [(0, 50), (1, 80), (2, 80), (3, 65)] {
+            hit_list.update(prelim_list(oid, score, 0.0));
+        }
+        hit_list.sort_by_evalue();
+        let oids: Vec<u32> = hit_list.hsplist_array[..hit_list.hsplist_count]
+            .iter()
+            .map(|list| list.oid)
+            .collect();
+        assert_eq!(oids, vec![2, 1, 3, 0]);
+        // With e-values the best e-value decides first.
+        let mut hit_list = BlastpHitList::new(10);
+        for (oid, score, e_value) in [(0, 50, 1e-5), (1, 80, 1e-2), (2, 80, 1e-9)] {
+            hit_list.update(prelim_list(oid, score, e_value));
+        }
+        hit_list.sort_by_evalue();
+        let oids: Vec<u32> = hit_list.hsplist_array[..hit_list.hsplist_count]
+            .iter()
+            .map(|list| list.oid)
+            .collect();
+        assert_eq!(oids, vec![2, 0, 1]);
+    }
+
+    fn kept_oids(lists: &[(u32, i32, f64)]) -> Vec<u32> {
+        let size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(1, false, true);
+        assert_eq!(size, 10);
+        let mut hit_list = BlastpHitList::new(size as usize);
+        for &(oid, score, e_value) in lists {
+            hit_list.update(prelim_list(oid, score, e_value));
+        }
+        hit_list.sort_by_evalue();
+        hit_list.hsplist_array[..hit_list.hsplist_count]
+            .iter()
+            .map(|list| list.oid)
+            .collect()
+    }
+
+    // The prelim hit list holds `min(max(2*size, 10), size + 50)` lists, 10 for `-max_target_seqs`
+    // 1 to 5 (blast_hits.c:68), and a list past that capacity goes through
+    // `Blast_HitListUpdate` (blast_hits.c:3243-3297) into the heap whose root is the worst list:
+    // ```c
+    //       evalue_order = s_EvalueCompareHSPLists(&(hit_list->hsplist_array[0]), &hsp_list);
+    //       if (evalue_order < 0) { Blast_HSPListFree(hsp_list); }  /* new is worse: discard */
+    //       else { s_BlastHitListInsertHSPListInHeap(hit_list, hsp_list); } /* replaces the root */
+    // ```
+    // with `s_EvalueCompareHSPLists` (blast_hits.c:3078-3106) ordering by best E-value (up), then
+    // the first HSP's score (down), then `BLAST_CMP(h2->oid, h1->oid)`: of two lists equal in
+    // E-value and score the one of the higher ordinal id is the better, so the root is the lowest
+    // id of the worst tie and a new list of a higher id replaces it ("newer hits with score and
+    // e-value both equal to the current worst will be saved"), one of a lower id is discarded.
+    // The kept lists are therefore the best 10 of the total order whatever the insertion order,
+    // and sorted they read best first.
+    #[test]
+    fn a_full_prelim_list_of_equal_e_values_keeps_the_best_ten_of_the_total_order() {
+        let ascending: Vec<u32> = (0..18).collect();
+        let descending: Vec<u32> = (0..18).rev().collect();
+        let shuffled = [
+            9u32, 3, 17, 0, 12, 5, 16, 1, 8, 14, 2, 11, 6, 15, 4, 13, 7, 10,
+        ];
+        for order in [ascending.as_slice(), descending.as_slice(), &shuffled] {
+            // Equal e-value 0 and equal score: the ten highest ordinal ids, highest first.
+            let equal: Vec<(u32, i32, f64)> = order.iter().map(|&oid| (oid, 100, 0.0)).collect();
+            assert_eq!(
+                kept_oids(&equal),
+                vec![17, 16, 15, 14, 13, 12, 11, 10, 9, 8],
+                "order {order:?}"
+            );
+            // Even ids score 90 and odd ids 70: the nine of score 90 (high id first), then
+            // the highest id of score 70.
+            let mixed: Vec<(u32, i32, f64)> = order
+                .iter()
+                .map(|&oid| (oid, if oid % 2 == 0 { 90 } else { 70 }, 0.0))
+                .collect();
+            assert_eq!(
+                kept_oids(&mixed),
+                vec![16, 14, 12, 10, 8, 6, 4, 2, 0, 17],
+                "order {order:?}"
+            );
+            // The E-value decides before the score and the id: the ten lists of E-value 0 and
+            // score 10 (ids 8 to 17) beat the eight of E-value 1e-30 and score 100 (ids 0 to 7).
+            let with_e: Vec<(u32, i32, f64)> = order
+                .iter()
+                .map(|&oid| {
+                    if oid < 8 {
+                        (oid, 100, 1e-30)
+                    } else {
+                        (oid, 10, 0.0)
+                    }
+                })
+                .collect();
+            let expected = vec![17, 16, 15, 14, 13, 12, 11, 10, 9, 8];
+            assert_eq!(kept_oids(&with_e), expected, "order {order:?}");
+        }
+    }
 
     #[test]
     fn the_context_of_an_offset_is_the_profile_that_holds_it() {

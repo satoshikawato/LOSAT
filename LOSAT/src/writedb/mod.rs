@@ -41,6 +41,7 @@ pub mod makeblastdb;
 #[allow(dead_code)]
 pub(crate) mod mdb;
 pub(crate) mod metadata;
+pub(crate) mod ofstream;
 pub mod platform;
 pub mod taxid_set;
 pub mod time;
@@ -84,8 +85,9 @@ pub enum WriteDbError {
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".
     OutOfMemory,
-    /// The operating system failed to create or write a file of the
-    /// database, or to open the input file.
+    /// The operating system failed to open an input file, or to write a data file of
+    /// LMDB (`mdb`). The other output files of the database are not tested, as in
+    /// makeblastdb (`ofstream`).
     Io {
         path: PathBuf,
         source: std::io::Error,
@@ -107,11 +109,12 @@ pub enum WriteDbError {
 //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
 //     }                                                                       \
 // ```
-// NCBI's writer does not test whether a file opened, a write succeeded or a
-// rename took place, so makeblastdb has no message for these failures. LOSAT
-// reports them in the form of makeblastdb's "other" errors ("Error: " and
-// exit status 255, `makeblastdb::MakedbError::exit_code`), with the path and
-// the system's message; they are not errors of the database's contents
+// NCBI's writer does not test whether an output file opened, a write succeeded or a
+// rename took place, so makeblastdb has no message for these failures, and LOSAT's writer
+// does not test them either (`ofstream`, `dir_entry`). An input file that cannot be opened
+// or read, and an error of LMDB's own writes, LOSAT reports in the form of makeblastdb's
+// "other" errors ("Error: " and exit status 255, `makeblastdb::MakedbError::exit_code`),
+// with the path and the system's message; they are not errors of the database's contents
 // ("BLAST Database creation error").
 impl std::fmt::Display for WriteDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

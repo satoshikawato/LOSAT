@@ -1,0 +1,198 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          156     3e-44
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       23.4    2.1  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       22.1    5.1  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       22.1    5.2  
+BDT63581.1 hypothetical protein [Pasiphaea japonica whispovirus]      21.3    8.1  
+BDT63555.1 wsv442-like protein [Pasiphaea japonica whispovirus]       21.3    9.1  
+BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]       21.3    9.2  
+BDT63563.1 hypothetical protein [Pasiphaea japonica whispovirus]      21.3    9.3  
+
+
+>BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]
+Length=197
+
+ Score = 156 bits (366),  Expect = 3e-44
+ Identities = 82/194 (42%), Positives = 107/194 (55%), Gaps = 21/194 (11%)
+
+Query  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+            T  G++ LV GPMFAGKS+ +  IYQ+     K C F+KH  + RYGC     VTH+G+ 
+Sbjct  4    TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+
+Query  70   IEGCTTVSSIKELISVLPEV----VDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDG  124
+            I  C          SVL  V     D I IDEGQFF+DL       A KGKR+ +AALDG
+Sbjct  64   IRDCVA-------TSVLSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDG  116
+
+Query  125  TSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRF------GNDNDNNV-IC  177
+              +QQ+F  + KL+P  + I KL++ CMIC  +  EA  T ++      G+D+     +C
+Sbjct  117  NYEQQLFPSVIKLIPICDKIEKLSAVCMIC--NKNEASLTKKYLPYNNTGDDDHHKYDMC  174
+
+Query  178  VGGAEMYAAACRDC  191
+            VGG E Y A C  C
+Sbjct  175  VGGTETYCAVCIGC  188
+
+
+>BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]
+Length=1243
+
+ Score = 23.4 bits (47),  Expect = 2.1
+ Identities = 13/29 (45%), Positives = 15/29 (52%), Gaps = 5/29 (17%)
+
+Query  201  KGKLVVLEGGDRCGKSTQ-----AKLLLT  224
+            K K  VL  GD+CG S +     A L LT
+Sbjct  484  KFKVNVLPDGDQCGNSGEYESMTAHLFLT  512
+
+
+>BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]
+Length=1039
+
+ Score = 22.1 bits (44),  Expect = 5.1
+ Identities = 8/12 (67%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  305  RGVDTVEWCSAS  316
+            RG +T EWCS S
+Sbjct  100  RGNNTDEWCSLS  111
+
+
+
+Lambda      K        H        a         alpha
+   0.340    0.194    0.770    0.443     1.38 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.290   0.0750    0.280     1.04     11.5     12.3 
+
+Effective search space used: 23038404
+Results from round 2
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          364     3e-122
+
+Sequences not found previously or not previously below threshold:
+
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       25.5    0.49 
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       23.4    2.1  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       22.5    3.8  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       22.1    5.2  
+BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]       21.7    6.1  
+BDT63581.1 hypothetical protein [Pasiphaea japonica whispovirus]      21.3    8.2  
+BDT63555.1 wsv442-like protein [Pasiphaea japonica whispovirus]       21.3    9.2  
+BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]       21.3    9.3  
+BDT63515.1 wsv139-like protein [Pasiphaea japonica whispovirus]       21.3    9.3  
+BDT63563.1 hypothetical protein [Pasiphaea japonica whispovirus]      21.3    9.4  
+
+
+>BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]
+Length=197
+
+ Score = 364 bits (863),  Expect = 3e-122
+ Identities = 82/194 (42%), Positives = 107/194 (55%), Gaps = 21/194 (11%)
+
+Query  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+            T  G++ LV GPMFAGKS+ +  IYQ+     K C F+KH  + RYGC     VTH+G+ 
+Sbjct  4    TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+
+Query  70   IEGCTTVSSIKELISVLPEV----VDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDG  124
+            I  C          SVL  V     D I IDEGQFF+DL       A KGKR+ +AALDG
+Sbjct  64   IRDCVA-------TSVLSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDG  116
+
+Query  125  TSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRF------GNDNDNNV-IC  177
+              +QQ+F  + KL+P  + I KL++ CMIC  +  EA  T ++      G+D+     +C
+Sbjct  117  NYEQQLFPSVIKLIPICDKIEKLSAVCMIC--NKNEASLTKKYLPYNNTGDDDHHKYDMC  174
+
+Query  178  VGGAEMYAAACRDC  191
+            VGG E Y A C  C
+Sbjct  175  VGGTETYCAVCIGC  188
+
+
+>BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]
+Length=1023
+
+ Score = 25.5 bits (52),  Expect = 0.49
+ Identities = 10/24 (42%), Positives = 15/24 (63%), Gaps = 3/24 (13%)
+
+Query  135  HKLLPYTNSIVKLASKCMICKIDT  158
+            HK + Y + + KL + CM+  IDT
+Sbjct  375  HKKI-YNDKLEKLIAECMV--IDT  395
+
+
+>BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]
+Length=1243
+
+ Score = 23.4 bits (47),  Expect = 2.1
+ Identities = 13/29 (45%), Positives = 15/29 (52%), Gaps = 5/29 (17%)
+
+Query  201  KGKLVVLEGGDRCGKSTQ-----AKLLLT  224
+            K K  VL  GD+CG S +     A L LT
+Sbjct  484  KFKVNVLPDGDQCGNSGEYESMTAHLFLT  512
+
+
+
+Lambda      K        H        a         alpha
+   0.337    0.192    0.736    0.443     1.38 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.290   0.0759    0.280     1.04     11.5     12.3 
+
+Effective search space used: 23038404
+
+Search has CONVERGED!
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM90
+Gap Penalties: Existence: 10, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -18,7 +18,7 @@ use super::{
     runtime::BatchResults,
     subjects::Subjects,
 };
-use crate::algorithm::common::database::{database_id_scope, library_subject};
+use crate::algorithm::common::database::library_subject;
 use crate::api::local_blast::{FormatProbe, ReportOutputs, ReportedSubject};
 use crate::blastinput::app::{self, Program};
 use crate::blastinput::fasta_reader;
@@ -212,6 +212,7 @@ fn search_records(
             shown,
             search_subjects: Subjects::Fasta(&subjects),
             serial_batches: args.parse_deflines,
+            parse_deflines: args.parse_deflines,
             database: None,
             archive,
             out: args.out.as_deref(),
@@ -245,6 +246,8 @@ struct RunReports<'a> {
     search_subjects: Subjects<'a>,
     /// `run_query_batches`.
     serial_batches: bool,
+    /// `-parse_deflines` (`query_batch::QueryScopes`).
+    parse_deflines: bool,
     database: Option<DatabaseReports<'a>>,
     /// The BLAST archive (outfmt 11), when it is requested.
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
@@ -379,17 +382,14 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         query_records,
         query_range,
         batch_size,
-        choices,
         resolved,
         subjects,
         shown,
-        search_subjects,
-        serial_batches,
         ref database,
         archive,
         out,
-        search_error,
         ref xml_scan,
+        ..
     } = run;
     let ReportOutputs {
         formats,
@@ -428,12 +428,21 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
     // holds every format in order, as the archive's titles do and as the command line holds its
-    // document (`blast_xml::HeldOutput`), so that the refusal follows no byte.
+    // document (`blast_xml::HeldOutput`), so that the refusal follows no byte. So does a `-db` run
+    // in which a later batch could still refuse the taxonomy database or a subject with parsed
+    // Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
+    // XML2 and JSON documents).
+    let writes_names = resolved
+        .iter()
+        .any(|options| matches!(options.outfmt, 13..=16));
     let xml_may_refuse = resolved
         .iter()
         .any(|options| matches!(options.outfmt, 5 | 13..=16))
         && (xml_scan.messages_may_be_refused
-            || (database.is_none() && super::blast_xml::subjects_may_be_refused(subjects)));
+            || match database {
+                Some(run) => run.database.later_batch_may_refuse(writes_names),
+                None => super::blast_xml::subjects_may_be_refused(subjects),
+            });
     let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
     let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
         Some(hold) => {
@@ -454,10 +463,111 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .map(|(options, sink)| {
             super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
                 let files = crate::report::blast_xml2::run_side_files(kind, out, sink.as_ref());
+                // A run that holds its formats holds the side files of 13 and 14 too.
+                let files = match &hold {
+                    Some(hold) => hold.side_files(files),
+                    None => files,
+                };
                 super::blast_xml::xml2_writer(kind, options, subjects, &shown, files)
             })
         })
         .collect();
+    let wants_hits = hits_sink.is_some();
+    let written = write_run(
+        run,
+        &mut writers,
+        &mut documents,
+        titles_may_refuse,
+        wants_hits,
+        diagnostics,
+        observer,
+    );
+    // What the hold kept. A run that ends: every format, in order. A run that stops with an
+    // error: when the archive's titles are what it held for (`titles_may_refuse`), NCBI's bytes
+    // if the error is NCBI's own (its error archive follows where NCBI writes one,
+    // `ReportOutputs::finish_archive`) and nothing after LOSAT's refusal (`ArchiveHold::end_with`);
+    // when only the documents are, nothing after one of their refusals and the bytes of the
+    // batches before after any other error (`ArchiveHold::end_document_with`), as the command line.
+    // The observer's events of a held run come before its bytes reach their sinks, so a position
+    // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
+    // hold of this function, a `-subject` run's too.
+    match (&hold, &written) {
+        (Some(hold), Ok(_)) => hold.release()?,
+        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error),
+        (Some(hold), Err(error)) => hold.end_document_with(error),
+        (None, _) => {}
+    }
+    let (run_hits, run_subjects) = written?;
+    if let Some(sink) = hits_sink {
+        sink(std::sync::Arc::new(run_hits));
+        if let (true, Some(observer)) = (database.is_some(), observer.as_deref_mut()) {
+            observer.database_subjects(run_subjects);
+        }
+    }
+    Ok(())
+}
+
+/// `report_batches` from the prologs to the epilogs, into `writers` (each format's, behind the
+/// hold of a run that holds its formats) and `documents` (the writer of each XML2 or JSON
+/// document): whatever ends it, `report_batches` then ends the hold. `titles_may_refuse`: a batch
+/// that the search may write has a title the archive cannot write. Returns the run's hit list
+/// (`wants_hits`) and the database sequences it names.
+fn write_run(
+    run: &RunReports<'_>,
+    writers: &mut [Box<dyn Write + '_>],
+    documents: &mut [Option<super::blast_xml::RunXml2>],
+    titles_may_refuse: bool,
+    wants_hits: bool,
+    diagnostics: &mut &mut (dyn Write + Send),
+    observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
+) -> Result<(
+    Vec<crate::report::pairwise::PairwiseHit>,
+    Vec<ReportedSubject>,
+)> {
+    let &RunReports {
+        lowercase,
+        query_records,
+        query_range,
+        batch_size,
+        choices,
+        resolved,
+        subjects,
+        shown,
+        search_subjects,
+        serial_batches,
+        parse_deflines,
+        ref database,
+        archive,
+        search_error,
+        ref xml_scan,
+        ..
+    } = run;
+    // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with `-subject`
+    // or outfmt 5 one scope of every record in memory, made before the search so that its refusal
+    // comes before any byte (`QueryScopes::read_ahead`); else the batches add theirs as they come.
+    let xml = choices.iter().any(|choice| choice.number == 5);
+    let query_scopes = std::cell::RefCell::new(
+        match crate::blastinput::query_batch::QueryScopes::of_search(
+            parse_deflines,
+            database.is_none(),
+            xml,
+            "BLASTX",
+        ) {
+            Some(scopes)
+                if scopes.span() == crate::blastinput::query_batch::QueryScopeSpan::Run =>
+            {
+                Some(
+                    crate::blastinput::query_batch::QueryScopes::of_records(
+                        crate::blastinput::query_batch::QueryScopeSpan::Run,
+                        "BLASTX",
+                        query_records,
+                    )?
+                    .read_ahead(),
+                )
+            }
+            scopes => scopes,
+        },
+    );
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
@@ -512,7 +622,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     if let Some(observer) = observer.as_deref_mut() {
         observer.queries_begin();
     }
-    let made_hits = hits_sink.is_some() || choices.iter().any(|choice| choice.number == 0);
+    let made_hits = wants_hits || choices.iter().any(|choice| choice.number == 0);
     let mut run_hits = Vec::new();
     // A database's sequences that the run's hit list names (`FormatObserver::database_subjects`),
     // and the place in them of each ordinal id: a batch names them by its own ranks.
@@ -525,6 +635,12 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                       results: &mut Vec<BatchResults>,
                       queries_before: usize|
      -> Result<()> {
+        if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
+            scopes.add_batch_ids(
+                queries.iter().filter_map(|record| record.believed()),
+                queries_before,
+            )?;
+        }
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
         // A database: the batch's reported sequences, and its hit lists named by their ranks.
@@ -535,16 +651,19 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 search_options,
                 asks,
                 results,
+                query_scopes
+                    .borrow()
+                    .as_ref()
+                    .map(|scopes| scopes.numbered_from(queries_before)),
                 &mut *diagnostics,
-                None,
             )?),
             None => None,
         };
         // The archive (outfmt 11) of this batch, which NCBI writes once its search and the read of
         // its definition lines have not failed: the titles it cannot write are refused before any
-        // format of the batch (`archive::check_batch_titles`; the outputs are the caller's, so the
-        // batches before are written); only a run whose read before the search found such a
-        // title can refuse (`titles_may_refuse`).
+        // format of the batch (`archive::check_batch_titles`; the run holds its formats, so the
+        // refusal follows no byte of the batches before); only a run whose read before the search
+        // found such a title can refuse (`titles_may_refuse`).
         if titles_may_refuse {
             archive::check_batch_titles(
                 queries,
@@ -677,7 +796,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         };
         // The run's hit list numbers the queries of the run, and a database's sequences in the
         // order that it first names them.
-        if hits_sink.is_some() {
+        if wants_hits {
             for mut hit in hits.into_iter().flatten() {
                 hit.hit.q_idx = u32::try_from(queries_before + hit.hit.q_idx as usize)?;
                 if let (Some(run), Some(reported)) = (database, reported.as_ref()) {
@@ -713,14 +832,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         // The library and LOSAT Web write no search strategy (`api::search::file_options`).
         &mut |_, _| Ok(()),
     )
-    .map_err(input_error)
-    .inspect_err(|error| {
-        // What the hold kept: NCBI's when one of its own errors stops the run (the error
-        // archive follows, `ReportOutputs::finish_archive`), dropped after LOSAT's refusal.
-        if let Some(hold) = &hold {
-            hold.end_with(error);
-        }
-    })?;
+    .map_err(input_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
     // ```c++
     //         formatter.PrintEpilog(opt);
@@ -744,17 +856,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .map_err(report_error)?;
         writer.flush().map_err(output_error)?;
     }
-    // What the hold kept: every format of the run, in order.
-    if let Some(hold) = &hold {
-        hold.release().map_err(output_error)?;
-    }
-    if let Some(sink) = hits_sink {
-        sink(std::sync::Arc::new(run_hits));
-        if let (true, Some(observer)) = (database.is_some(), observer.as_deref_mut()) {
-            observer.database_subjects(run_subjects);
-        }
-    }
-    Ok(())
+    Ok((run_hits, run_subjects))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
@@ -770,8 +872,9 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 /// writes every requested output format from the same result (the library API's entry; the
 /// command line's is `native::run`). `settings` are the NCBI application settings, which find the
 /// database. The steps are `native::run_inner`'s, in its order; what differs is what they read:
-/// the records are read already, and the outputs are the caller's, so nothing is held for a
-/// refusal. An archive (outfmt 11) ends as the command line's does
+/// the records are read already, and the outputs are the caller's: where the command line holds
+/// its output for a refusal that a later batch can still make, every format of the call is held
+/// in order (`report_batches`). An archive (outfmt 11) ends as the command line's does
 /// (`ReportOutputs::finish_archive`).
 pub fn run_local_database(
     mut args: BlastxArgs,
@@ -835,20 +938,20 @@ fn search_database(
     let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
-    let database =
-        BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut *outputs.diagnostics)?
-            .showing_gis(args.show_gis)
-            .in_id_scope(database_id_scope(
-                args.parse_deflines,
-                query_records,
-                "BLASTX",
-            )?);
+    let database = BlastxDatabase::open_restricted(
+        name,
+        &settings,
+        list.as_ref(),
+        &mut *outputs.diagnostics,
+        super::args::ProgramName::BLASTX.upper,
+    )?
+    .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         None,
         &args.db_filter,
         database.list_taxids(),
-        database.filtered_empty(),
+        database.statistics_length_is_empty(),
         args.searchsp.is_some_and(|space| space > 0),
         args.dbsize.is_some_and(|size| size > 0),
         "BLASTX",
@@ -933,6 +1036,7 @@ fn search_database(
             shown,
             search_subjects,
             serial_batches: args.parse_deflines,
+            parse_deflines: args.parse_deflines,
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,
@@ -1104,12 +1208,13 @@ fn check_resolutions(
         app::formatting_handler_check(choice, Program::Blastx)?;
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
-    let (_, warnings) = crate::blastinput::report_counts::run_report_counts(
+    let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
         &outfmts,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
+        &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
     resolutions

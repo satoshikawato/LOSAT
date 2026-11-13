@@ -1,0 +1,12 @@
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+RPSBlast session 0 start...
+Error: (CInvalidChoiceSelection::eFail) CBlast4_cutoff::GetE_value(): Invalid choice selection: NCBI-Blast4::Blast4-cutoff.raw-score
+Error: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) CBlast4_cutoff::GetE_value(): Invalid choice selection: NCBI-Blast4::Blast4-cutoff.raw-score

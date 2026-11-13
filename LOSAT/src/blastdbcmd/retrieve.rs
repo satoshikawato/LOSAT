@@ -9,6 +9,9 @@
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
+use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds, Ostream};
+use crate::ncbi_str::string_to_non_negative_int;
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
@@ -16,15 +19,15 @@ use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
 use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
-use crate::seqid::parse::{seq_id_from_text, string_to_non_negative_int};
+use crate::seqid::parse::seq_id_from_text;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
-use super::args::{self, Args};
+use super::args;
 use super::fasta::FastaFormatter;
 use super::format::FormatSpec;
-use super::letters::{protein_fasta_letters, protein_string_letters};
 use super::range::{parse_sequence_range_open_end, SeqRange, NO_RANGE};
 use super::Diag;
+use crate::sequence::stdaa_letters::{protein_fasta_letters, protein_string_letters};
 
 /// What ends the retrieval before its last sequence.
 #[derive(Debug)]
@@ -37,14 +40,16 @@ pub(super) enum Stop {
     NcbiBytes(Vec<u8>),
     /// LOSAT's refusal: a diagnostic line, exit status 1.
     Refused(String),
-    /// A write to the output failed. NCBI's stream has no exceptions enabled: the run ends
-    /// as if nothing had happened, exit status 0.
-    Io,
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`):
+    /// the retrieval ends at once, exit status 0, no message. Any other failed write is
+    /// dropped by the `Ostream` and the retrieval goes on.
+    ClosedPipe,
 }
 
 impl Stop {
-    pub fn io(_: std::io::Error) -> Stop {
-        Stop::Io
+    /// The error of a write to the retrieval's `Ostream`, which fails only on a closed pipe.
+    pub fn write(_: std::io::Error) -> Stop {
+        Stop::ClosedPipe
     }
 
     pub fn refused(reason: String) -> Stop {
@@ -289,19 +294,35 @@ pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
 /// Runs the retrieval of `args` on the open database `db` (`x_ProcessSearchRequest`), the
 /// output to `out`, the diagnostics through `diag`; the exit status. `tax_ids` is the list of
 /// `-taxids` / `-taxidlist` (`m_TaxIdList`; with `-target_only` the database is restricted to
-/// it), `dbtype_protein` NCBI's `m_DbIsProtein`.
+/// it), `dbtype_protein` NCBI's `m_DbIsProtein`, `stdin` what a batch file `-` reads.
+///
+/// A failed write leaves NCBI's `ostream` bad and the run goes on (`Ostream`): the later
+/// entries are still looked up and their errors posted, and the exit status is theirs (NCBI
+/// 2.17.0 with `-out /dev/full` and an id that is not found after it: `Skipped`, exit status 1;
+/// review 2 of line RG item K1, F3). A closed pipe ends the retrieval at once, with exit
+/// status 0 and no message, where SIGPIPE ends NCBI's (`Stop::ClosedPipe`): the output is
+/// flushed before each diagnostic (`Run::post`, `cerr`'s tie to `cout`), so a closed pipe is
+/// met before any message is written.
 pub(super) fn process(
     db: &SeqDb,
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
-    out: &mut dyn Write,
+    stdin: &mut Cin<'_>,
+    out: &mut Ostream<'_>,
     tax_ids: Option<&BTreeSet<i32>>,
     dbtype_protein: bool,
 ) -> i32 {
     let source = Source::new(db, path, dbtype_protein);
-    let mut sink = BufWriter::new(out);
-    let status = match request(args, &source, tax_ids, diag, &mut sink) {
+    let mut sink = BufWriter::new(&mut *out);
+    let result = request(args, &source, tax_ids, diag, stdin, &mut sink);
+    // The output is flushed before the last diagnostic, as `cerr`'s tie flushes NCBI's.
+    let _ = sink.flush();
+    drop(sink);
+    if out.closed() {
+        return 0;
+    }
+    match result {
         Ok(false) => 0,
         Ok(true) => 1,
         Err(Stop::Ncbi(message)) => {
@@ -313,10 +334,8 @@ pub(super) fn process(
             1
         }
         Err(Stop::Refused(reason)) => diag.refuse(&reason),
-        Err(Stop::Io) => 0,
-    };
-    let _ = sink.flush();
-    status
+        Err(Stop::ClosedPipe) => 0,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:869-896
@@ -359,12 +378,13 @@ fn request(
     source: &Source,
     tax_ids: Option<&BTreeSet<i32>>,
     diag: &mut Diag,
+    stdin: &mut Cin<'_>,
     out: &mut dyn Write,
 ) -> Result<bool, Stop> {
     let (mut config, kind) = init_search_request(args, source, diag)?;
     let line_length = args
-        .value("line_length")
-        .and_then(|value| value.parse::<u32>().ok())
+        .integer("line_length")
+        .and_then(|value| u32::try_from(value).ok())
         .unwrap_or(80);
     let mut formatter = match kind {
         OutputKind::Fasta => {
@@ -389,6 +409,7 @@ fn request(
         formatter: &mut formatter,
         target_only,
         diag,
+        stdin,
         out,
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:819-846
@@ -437,9 +458,9 @@ fn request(
         (None, None) => {
             if let Some(pig) = args.value("ipg") {
                 // The reader took a value of `int` (`AsInteger`).
-                let pig = pig
-                    .parse::<i32>()
-                    .map_err(|_| Stop::refused(format!("-ipg {pig} is not a number of 32 bits")))?;
+                let pig = args.integer("ipg").ok_or_else(|| {
+                    Stop::refused(format!("-ipg {pig} is not a number of 32 bits"))
+                })?;
                 run.ipg(pig, &config)
             } else if let Some(file) = args.value("ipg_batch") {
                 run.batch_pig(file, &mut config)
@@ -564,14 +585,26 @@ enum OutputKind {
 // 	return true;
 // }
 // ```
-/// `s_IsMaskAlgoIdValid`: whether the database has the algorithm `id` (a negative id is not
-/// looked up), with NCBI's error line for one it does not have.
+/// `s_IsMaskAlgoIdValid` before the retrieval writes anything: whether the database has the
+/// algorithm `id` (a negative id is not looked up), with NCBI's error line for one it does not
+/// have.
 fn is_mask_algo_id_valid(source: &Source, id: i32, diag: &mut Diag) -> Result<bool, Stop> {
-    if id < 0 || source.db.mask_algorithms()?.ids().contains(&id) {
-        return Ok(true);
+    match invalid_mask_algo_id(source, id)? {
+        Some(line) => {
+            diag.err_post(&line);
+            Ok(false)
+        }
+        None => Ok(true),
     }
-    diag.err_post(&format!("Invalid filtering algorithm ID: {id}"));
-    Ok(false)
+}
+
+/// NCBI's error line of `s_IsMaskAlgoIdValid` for the algorithm `id`, or `None` when the
+/// database has it (or `id` is negative).
+fn invalid_mask_algo_id(source: &Source, id: i32) -> Result<Option<String>, Stop> {
+    if id < 0 || source.db.mask_algorithms()?.ids().contains(&id) {
+        return Ok(None);
+    }
+    Ok(Some(format!("Invalid filtering algorithm ID: {id}")))
 }
 
 /// The number of the digits at `at` of `outfmt` (`None` without a digit), which it removes.
@@ -949,12 +982,16 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
 /// rest of the line (`NStr::SplitInTwo(line, " \t", id, format, fSplit_MergeDelimiters |
 /// fSplit_Truncate)`), lines without an id left out. A `\r` that the platform's reading leaves
 /// in a line stays (Linux: every `\r`), as in NCBI's reading.
-fn read_batch(argument: &str, file: &str) -> Result<Vec<(String, String)>, Stop> {
-    let bytes = args::read_input_file(argument, file).map_err(Stop::Ncbi)?;
+fn read_batch(
+    argument: &str,
+    file: &str,
+    stdin: &mut Cin<'_>,
+) -> Result<Vec<(String, String)>, Stop> {
+    let bytes = read_input_file(argument, file, stdin).map_err(Stop::Ncbi)?;
     let not_text = || Stop::refused(format!("{file}: a batch file that is not UTF-8 text"));
     let delimiter = |c: char| c == ' ' || c == '\t';
     let mut lines = Vec::new();
-    for line in args::input_lines(&bytes, args::LineEnds::HOST) {
+    for line in input_lines(&bytes, LineEnds::HOST) {
         let line = std::str::from_utf8(line).map_err(|_| not_text())?;
         let trimmed = line.trim_matches(delimiter);
         if trimmed.is_empty() {
@@ -970,16 +1007,29 @@ fn read_batch(argument: &str, file: &str) -> Result<Vec<(String, String)>, Stop>
 }
 
 /// The retrieval in progress.
-struct Run<'a, 'b> {
+struct Run<'a, 'b, 'c> {
     source: &'a Source<'a>,
     ids: &'a DbIds<'a>,
     formatter: &'a mut Formatter,
     target_only: bool,
     diag: &'a mut Diag<'b>,
+    /// The standard input, which a batch file `-` reads.
+    stdin: &'a mut Cin<'c>,
     out: &'a mut dyn Write,
 }
 
-impl Run<'_, '_> {
+// NCBI's `cerr` is tied to `cout` (the C++ standard's `cerr.tie()`): before each line of
+// diagnostics NCBI's stream flushes the output, so the two come out in the order they were
+// written, and on a closed pipe SIGPIPE ends NCBI's process before the line is written.
+impl Run<'_, '_, '_> {
+    /// `ERR_POST(Error << message)` of the retrieval: the output is flushed first (to the file
+    /// or the pipe, `cerr`'s tie), and a closed pipe ends the retrieval without the line.
+    fn post(&mut self, message: &str) -> Result<(), Stop> {
+        self.out.flush().map_err(Stop::write)?;
+        self.diag.err_post(message);
+        Ok(())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:457-462
     // ```c++
     // 	if(config.m_Strand == eNa_strand_minus) {
@@ -1001,8 +1051,12 @@ impl Run<'_, '_> {
                     .to_string(),
             ));
         }
+        // `oid` is NCBI's OID, one the database includes (the lookups keep only those:
+        // `IdLookup::visible`); the formatters read ordinal ids, which differ from the OIDs
+        // where an alias file's range or a list leaves OIDs out.
+        let ordinal = self.source.db.ordinal_of(oid);
         self.formatter
-            .write(self.source, oid, config, target, self.out)
+            .write(self.source, ordinal, config, target, self.out)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416
@@ -1014,10 +1068,10 @@ impl Run<'_, '_> {
     // 	}
     // }
     // ```
-    /// `-entry all`: every sequence in the order of its ordinal id.
+    /// `-entry all`: every included sequence in the order of its OID.
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
-        for oid in 0..self.ids.num_seqs {
-            self.write(oid, config, None)?;
+        for ordinal in 0..self.ids.num_seqs {
+            self.write(self.source.db.oid(ordinal), config, None)?;
         }
         Ok(())
     }
@@ -1074,7 +1128,7 @@ impl Run<'_, '_> {
                     }
                 }
                 Lookup::NotFound(acc) => {
-                    self.diag.err_post(&format!("Entry not found: {acc}"));
+                    self.post(&format!("Entry not found: {acc}"))?;
                     err_found += 1;
                 }
                 Lookup::Stop(stop) => return Err(stop),
@@ -1151,7 +1205,7 @@ impl Run<'_, '_> {
     /// the ids keep what the LMDB files before it answered; in a version 4 database the first
     /// OID of each id), a GI after that.
     fn batch_entry_no_dup(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
-        let lines = read_batch("entry_batch", file)?;
+        let lines = read_batch("entry_batch", file, self.stdin)?;
         let ids: Vec<String> = lines
             .iter()
             .map(|(id, _)| {
@@ -1204,12 +1258,12 @@ impl Run<'_, '_> {
             }
             let Some(oid) = oid else {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped {id}"));
+                self.post(&format!("Skipped {id}"))?;
                 continue;
             };
             if self.modify_config_for_batch_entry(&lines[i].1, config)? != 0 {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped {id}"));
+                self.post(&format!("Skipped {id}"))?;
                 continue;
             }
             self.write(oid, config, self.target_only.then_some(id))?;
@@ -1260,12 +1314,12 @@ impl Run<'_, '_> {
     // ```
     /// `-entry_batch -get_dups`: line by line, every sequence of each id.
     fn batch_entry(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
-        let lines = read_batch("entry_batch", file)?;
+        let lines = read_batch("entry_batch", file, self.stdin)?;
         let mut err_found = false;
         for (id, format) in &lines {
             if self.modify_config_for_batch_entry(format, config)? != 0 {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped {id}"));
+                self.post(&format!("Skipped {id}"))?;
                 continue;
             }
             match get_oids(self.ids, id) {
@@ -1275,9 +1329,9 @@ impl Run<'_, '_> {
                     }
                 }
                 Lookup::NotFound(acc) => {
-                    self.diag.err_post(&format!("Entry not found: {acc}"));
+                    self.post(&format!("Entry not found: {acc}"))?;
                     err_found = true;
-                    self.diag.err_post(&format!("Skipped {id}"));
+                    self.post(&format!("Skipped {id}"))?;
                 }
                 Lookup::Stop(stop) => return Err(stop),
             }
@@ -1294,13 +1348,29 @@ impl Run<'_, '_> {
             .lookup
             .as_ref()
             .expect("an IPG request looks ids up");
-        lookup.pig_to_oid(pig)?.ok_or_else(|| {
-            Stop::refused(
-                "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
+        lookup
+            .pig_to_oid(pig)?
+            .ok_or_else(|| {
+                Stop::refused(
+                    "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
                  writes an OID it never set"
+                        .to_string(),
+                )
+            })
+            .and_then(|oid| {
+                match oid {
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:
+            // 1110-1121 (`PigToOid` asks the volumes, not the OID list): NCBI writes the
+            // sequence of an OID that an alias file's range leaves out, which LOSAT's formatters
+            // (by ordinal id) do not read.
+            Some(oid) if !self.source.db.includes_oid(oid) => Err(Stop::refused(
+                "-ipg and -ipg_batch for a PIG whose OID an alias file's FIRST_OID or LAST_OID \
+                 leaves out (NCBI writes it)"
                     .to_string(),
-            )
-        })
+            )),
+            other => Ok(other),
+        }
+            })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:219-222
@@ -1365,12 +1435,12 @@ impl Run<'_, '_> {
                 "-ipg_batch with -target_only and a taxid list".to_string(),
             ));
         }
-        let lines = read_batch("ipg_batch", file)?;
+        let lines = read_batch("ipg_batch", file, self.stdin)?;
         let mut err_found = false;
         for (id, format) in &lines {
             if self.modify_config_for_batch_entry(format, config)? != 0 {
                 err_found = true;
-                self.diag.err_post(&format!("Skipped IPG : {id}"));
+                self.post(&format!("Skipped IPG : {id}"))?;
                 continue;
             }
             let pig = args::string_to_int8_message(id)
@@ -1381,7 +1451,7 @@ impl Run<'_, '_> {
                 Some(oid) => self.write(oid, config, None)?,
                 None => {
                     err_found = true;
-                    self.diag.err_post(&format!("Skipped IPG: {id}"));
+                    self.post(&format!("Skipped IPG: {id}"))?;
                 }
             }
         }
@@ -1414,12 +1484,12 @@ impl Run<'_, '_> {
     fn tax_id_list(&mut self, tax_ids: &BTreeSet<i32>, config: &Config) -> Result<bool, Stop> {
         let db = self.source.db;
         let oids: Vec<u32> = if db.is_restricted() {
-            (0..db.num_seqs()).collect()
+            (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect()
         } else {
             db.tax_id_lookup()?.tax_ids_to_oids(tax_ids)?
         };
         if oids.is_empty() {
-            self.diag.err_post("No seq found in db for taxonomy list");
+            self.post("No seq found in db for taxonomy list")?;
             return Ok(true);
         }
         for oid in oids {
@@ -1485,7 +1555,10 @@ impl Run<'_, '_> {
                 config.strand_minus = true;
             } else {
                 config.filt_algo = string_to_non_negative_int(token.as_bytes());
-                if !is_mask_algo_id_valid(self.source, config.filt_algo, self.diag)? {
+                // A batch line comes after the output of the lines before it: the line goes
+                // through `post` (`cerr`'s tie).
+                if let Some(line) = invalid_mask_algo_id(self.source, config.filt_algo)? {
+                    self.post(&line)?;
                     status = 1;
                 }
             }
@@ -1578,11 +1651,16 @@ mod tests {
             "gnl|BL_ORD_ID|3\n  gnl|BL_ORD_ID|4\t3-\t\n\n   \nx 1-5 21\r\n",
         )
         .unwrap();
-        let lines = read_batch("entry_batch", file.to_str().unwrap()).unwrap();
+        let lines = read_batch(
+            "entry_batch",
+            file.to_str().unwrap(),
+            &mut Cin::new(&mut std::io::empty()),
+        )
+        .unwrap();
         // The `\r` of `\r\n` stays on Linux and goes on Windows and macOS (`NcbiGetlineEOL`).
-        let crlf_rest = match args::LineEnds::HOST {
-            args::LineEnds::Unix => "1-5 21\r",
-            args::LineEnds::Windows | args::LineEnds::Darwin => "1-5 21",
+        let crlf_rest = match LineEnds::HOST {
+            LineEnds::Unix => "1-5 21\r",
+            LineEnds::Windows | LineEnds::Darwin => "1-5 21",
         };
         assert_eq!(
             lines,
@@ -1594,7 +1672,8 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(
-            matches!(read_batch("entry_batch", "in/nosuch.txt"), Err(Stop::Ncbi(message))
+            matches!(read_batch("entry_batch", "in/nosuch.txt", &mut Cin::new(&mut std::io::empty())),
+                Err(Stop::Ncbi(message))
             if message == "Argument \"entry_batch\". File is not accessible:  `in/nosuch.txt'")
         );
     }

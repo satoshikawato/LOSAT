@@ -437,7 +437,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 | 共有 | データベースを開く塊を `open_search_database` に切り出し、`search_cli` と共有する。BLASTX は `reported_batch`、`database_search_error`、`ReportedAsks` を `native.rs` に切り出す | 重ねて書くと CLI との差が生まれる |
 | BLASTX の複数形式 | `report_batches`：`-subject` と `-db` が同じ batch loop を通る。1 回の検索で全形式を書き、`for_batch` の引数は全形式の和（`ReportedAsks::or`） | CLI の `run_inner` は 1 形式で、ライブラリは 1 回の検索で全形式を書く |
 | HSP の subject | `FormatObserver::database_subjects`（`ReportedSubject`：OID、`saccver`、長さ）。`HspRecord::s_idx` は database の順序 ID（`gnl\|BL_ORD_ID\|n` の n） | engine の `Hit::s_idx` は報告の rank で、バッチごとに意味が変わる。ID は表形式の報告が拒否するときも検索を失敗させない（`library_subject`） |
-| `-parse_deflines` | `read_inputs(&search, query, b"")`。query の id からスコープを作り直す（`database_id_scope`） | データベースはスコープに query の id を尋ねるだけで、読み手は要らない |
+| `-parse_deflines` | `read_inputs(&search, query, b"")`。query の id のスコープは各 program が batch を切る所で作る（`query_batch::QueryScopes`、線 RG の Q1c） | NCBI は batch ごとにスコープを空にする（outfmt 5 と `-subject` は空にしない）。データベースの配列は報告する batch のスコープに query の id を尋ねるだけ |
 | 読み手 | `read_fasta` と `read_inputs` は defline を保持する（`with_defline`）。範囲の拒否は outfmt 11 を求める検索で行う（`check_archive_inputs`） | 読むときに形式が分からない。archive は defline をそのまま書く |
 | BLASTN のバッチ | `QueryBatchSizes::of_database`：全体の文字数（リストがあっても全体）で `CBatchSizeMixer` を始める | `run_in_pool` と同じ値 |
 | archive | `ReportOutputs::finish_archive`：失敗と、どの archive にも載らなかったメッセージの error archive を CLI と同じく書く | `PrintErrorArchive` |
@@ -483,10 +483,12 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 | 項目 | 実装 |
 |---|---|
 | `run_makeblastdb(argv, input, output, diagnostics)` | CLI の語をそのまま parser に渡し、`run_with` を呼ぶ。`input` は CLI の標準入力で、`-in -` か `-in` なしのときに読むので、メモリ上の FASTA から database を作れる。データベースの書き先は `-out` |
-| `run_blastdbcmd(argv, output, diagnostics)` | NCBI の引数読み（`blastdbcmd::args`）をそのまま使う `run_with`。`output` は CLI の標準出力 |
-| 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。parser の拒否は `Error::Argv` |
+| `run_blastdbcmd(argv, input, output, diagnostics)` | NCBI の引数読み（`ncbi_app::args`）をそのまま使う `run_with`。`input` は CLI の標準入力（`-entry_batch -`、`-ipg_batch -`、`-taxidlist -`）、`output` は CLI の標準出力 |
+| `run_dustmasker(argv, input, output, diagnostics)` | blastdbcmd と同じ殻（`ncbi_app`）の `dustmasker::run_with`。`input` は CLI の標準入力（`-in -` と `-in` なし）、`output` は CLI の標準出力。`-conffile`・`-dryrun` は CLI の application start が読むので断る |
+| `run_segmasker(argv, input, output, diagnostics)` | `run_dustmasker` と同じ殻の `segmasker::run_with`（線 RG の K2）。標準入力・出力・`-conffile`・`-dryrun` の扱いは `run_dustmasker` と同じ |
+| 失敗 | `Error::Search` で、文言は CLI が標準エラーに書いたものそのまま（`diagnostics` にも書く）。`run_makeblastdb` の clap の parser の拒否は `Error::Argv`。`run_blastdbcmd`・`run_dustmasker`・`run_segmasker` は NCBI の引数読みの拒否も CLI と同じ usage と報告を書くので `Error::Search` |
 
-CLI の `run_with` はもとから writer を取っていたので、engine の変更は無い。
+CLI の `run_with` はもとから writer を取っていたので、`run_makeblastdb` と `run_blastdbcmd` を足した時は engine の変更は無かった。標準入力は 2026-11-13（線 RG の K1b）に共有の殻 `ncbi_app` の 1 か所（`files::Cin`）にし、CLI は process の stdin を、library は呼び手の reader を渡す。
 
 検証：`dropin_corpus.py check` を example で走らせて、210 行のうち 191 行が一致（`makeblastdb` と `blastdbcmd` の行を含む）。残り 19 行は example が持たない経路（標準入力の query、`-version`、`-help`）で、API の差ではない。`library_api.rs` はメモリ上の FASTA から database を作り、`-info` と `-entry all` を CLI と比べ、同じ database を検索する。
 

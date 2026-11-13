@@ -1,0 +1,51 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Warning: NCBI C++ Exception: T0 ""/home/cor
+emake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18
+.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src
+/corelib/ncbistr.cpp"", line 973: Error: (CStringException::eConvert)
+ ncbi::NStr::StringToUInt8() - Cannot convert string 'abc' to Uint8 (m_Pos =
+ 0) T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_0
+1_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compil
+ers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"", line 358:
+ Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() -
+ could not create a unit counts container Warning: NCBI C++ Exception: T0 ""/h
+ome/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_13
+0.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/..
+/../src/corelib/ncbistr.cpp"", line 973: Error: (CStringException::eConvert)
+ ncbi::NStr::StringToUInt8() - Cannot convert string 'abc' to Uint8 (m_Pos =
+ 0) T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_0
+1_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compil
+ers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"", line 358:
+ Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() -
+ could not create a unit counts container Warning: NCBI C++ Exception: T0 ""/h
+ome/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_13
+0.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/..
+/../src/corelib/ncbistr.cpp"", line 973: Error: (CStringException::eConvert)
+ ncbi::NStr::StringToUInt8() - Cannot convert string 'abc' to Uint8 (m_Pos =
+ 0) T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_0
+1_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compil
+ers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"", line 358:
+ Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() -
+ could not create a unit counts container Warning: NCBI C++ Exception: T0 ""/h
+ome/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_13
+0.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/..
+/../src/corelib/ncbistr.cpp"", line 973: Error: (CStringException::eConvert)
+ ncbi::NStr::StringToUInt8() - Cannot convert string 'abc' to Uint8 (m_Pos =
+ 0) T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_0
+1_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compil
+ers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"", line 358:
+ Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() -
+ could not create a unit counts container"
+    }
+  }
+}

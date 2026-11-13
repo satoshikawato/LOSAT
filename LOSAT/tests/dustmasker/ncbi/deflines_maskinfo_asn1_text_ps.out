@@ -1,0 +1,285 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id gi 123
+        },
+        {
+          from 430,
+          to 480,
+          id gi 123
+        },
+        {
+          from 578,
+          to 670,
+          id gi 123
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local str "myid"
+        },
+        {
+          from 430,
+          to 480,
+          id local str "myid"
+        },
+        {
+          from 578,
+          to 670,
+          id local str "myid"
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id swissprot {
+            name "NAME_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id swissprot {
+            name "NAME_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id swissprot {
+            name "NAME_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local str "plainid"
+        },
+        {
+          from 430,
+          to 480,
+          id local str "plainid"
+        },
+        {
+          from 578,
+          to 670,
+          id local str "plainid"
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local str "id_trailing_period"
+        },
+        {
+          from 430,
+          to 480,
+          id local str "id_trailing_period"
+        },
+        {
+          from 578,
+          to 670,
+          id local str "id_trailing_period"
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local str "id_tab"
+        },
+        {
+          from 430,
+          to 480,
+          id local str "id_tab"
+        },
+        {
+          from 578,
+          to 670,
+          id local str "id_tab"
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id general {
+            db "db",
+            tag id 123
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local str "id_only"
+        },
+        {
+          from 430,
+          to 480,
+          id local str "id_only"
+        },
+        {
+          from 578,
+          to 670,
+          id local str "id_only"
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local id 123456
+        },
+        {
+          from 430,
+          to 480,
+          id local id 123456
+        },
+        {
+          from 578,
+          to 670,
+          id local id 123456
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local str "id"
+        },
+        {
+          from 430,
+          to 480,
+          id local str "id"
+        },
+        {
+          from 578,
+          to 670,
+          id local str "id"
+        }
+      }
+    },
+    more FALSE
+  }
+}

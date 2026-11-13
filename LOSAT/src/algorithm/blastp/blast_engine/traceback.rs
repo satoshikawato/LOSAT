@@ -32,16 +32,16 @@ use super::super::x_redo_subjects::XRedoSubjects;
 // `purge_preliminary_hits_with_common_endpoints` or `kappa::recompute_num_identities`, whose one
 // caller each inlines them (a second caller would change the default path's machine code).
 use super::{
-    blastp_standard_score, preliminary_hits_share_query_end_endpoint,
-    preliminary_hits_share_query_offset_endpoint, preliminary_query_end_compare,
-    preliminary_query_offset_compare, preliminary_score_compare, preliminary_tree_hsp,
-    query_nomask_sequence,
+    preliminary_hits_share_query_end_endpoint, preliminary_hits_share_query_offset_endpoint,
+    preliminary_query_end_compare, preliminary_query_offset_compare, preliminary_score_compare,
+    preliminary_tree_hsp, query_nomask_sequence,
 };
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod};
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::utils::matrix::standard_score;
 
 /// What the traceback of every list reads: the search's queries, subjects, scoring and
 /// hit-saving options.
@@ -556,7 +556,7 @@ fn final_hsp(
                     if ql == sl {
                         num_ident += 1;
                         num_positives += 1;
-                    } else if blastp_standard_score(matrix, ql, sl) > 0 {
+                    } else if standard_score(matrix, ql, sl) > 0 {
                         num_positives += 1;
                     }
                 }
@@ -665,7 +665,7 @@ fn get_offsets_for_gapped_alignment(
     let score_at = |q: i32, s: i32| -> Option<i32> {
         let q = query.get(usize::try_from(q).ok()?)?;
         let s = subject.get(usize::try_from(s).ok()?)?;
-        Some(blastp_standard_score(matrix, *q, *s))
+        Some(standard_score(matrix, *q, *s))
     };
     let mut score = 0;
     for i in 0..HSP_MAX_WINDOW {

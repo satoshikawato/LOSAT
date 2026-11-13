@@ -27,6 +27,11 @@ export function formatDuration(ms: number): string {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
 
+/** A short time span with its unit, for example "420 ms" or "2.6 s" (a step of a run, which `formatDuration` rounds down to the second). */
+export function formatMillis(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
 /**
  * A time in ISO 8601 form in local time, date and time of day with a space between them, for
  * example "2026-10-09 21:49:30" (S13 screen review L5).

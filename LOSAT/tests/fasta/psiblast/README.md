@@ -54,3 +54,16 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   batch); `ps5c_qx_tk.faa`: `ps5c_qx.faa`, then `tk.faa`. With `BATCH_SIZE=1` and a search that fails in its
   setup (here the empty database `tests/seqdb/db/empty`), NCBI reports the first batch, then the error of the
   second (blastp rows `db.empty.unsearched.*`).
+- `ps7_mixed.fna` (PS7, tblastn `-in_pssm` with `-subject`, rows `ps7.subj.*` of `tests/outfmt0_manifest.tsv`): the
+  first record of `tests/db_search/tslice.fna`, an empty record (`Subject sequence contains no data`) and the second
+  record in lower case.
+- `q1_*.faa` (line RG, series Q, Q1: psiblast's filters, `-show_gis`, `-parse_deflines` and `-lcase_masking` in
+  its rounds; rows `db.ps.q1.*` and `ps.q1.*`): `q1_lc.faa` is `tests/db_search/taxfilter/q.faa` (P69905.2, 142
+  letters) with letters 30-60 in lower case; `q1_tfp_lc.faa` is `tests/db_search/taxfilter/tfp.faa` with letters
+  20-70 of records 2, 5 and 9 in lower case; `q1_subj_ids.faa` holds the first 8 records of `tfp.faa` under the ids
+  `gi|4504347|ref|NP_000549.1|`, `sp|P01942.2|HBA_MOUSE`, `lcl|my_seq1`, `gnl|db|tag7`, `P01966.2`, `pdb|1ABC|A`,
+  `gb|AAA12345.1|`, `emb|CAA01234.1|` and the first title of each; `q1_gi.faa`, `q1_pdb.faa`, `q1_lclnum.faa`,
+  `q1_gnlid.faa`, `q1_word.faa` and `q1_ref.faa` are the letters of `q.faa` under `gi|4504347|ref|NP_000549.1|`,
+  `pdb|1A3N|A`, `lcl|123`, `gnl|mydb|42`, `myquery` and `ref|NP_000549.1|` (with `-parse_deflines` the PSSM's query
+  takes that Seq-id); `q1_subj_q1.faa` is `q1_subj_ids.faa` after a first record `lcl|Query_1` (the letters of
+  `q.faa` with W at position 71), the local id of an `-in_pssm` query (`tests/db_search/q1_sq1` is its database).

@@ -1,0 +1,246 @@
+Seq-loc ::= packed-int {
+  {
+    from 0,
+    to 9,
+    id general {
+      db "BL_ORD_ID",
+      tag id 0
+    }
+  },
+  {
+    from 209,
+    to 289,
+    id general {
+      db "BL_ORD_ID",
+      tag id 0
+    }
+  },
+  {
+    from 440,
+    to 490,
+    id general {
+      db "BL_ORD_ID",
+      tag id 0
+    }
+  },
+  {
+    from 588,
+    to 680,
+    id general {
+      db "BL_ORD_ID",
+      tag id 0
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  },
+  {
+    from 430,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  },
+  {
+    from 750,
+    to 759,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 2
+    }
+  },
+  {
+    from 450,
+    to 500,
+    id general {
+      db "BL_ORD_ID",
+      tag id 2
+    }
+  },
+  {
+    from 598,
+    to 690,
+    id general {
+      db "BL_ORD_ID",
+      tag id 2
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  },
+  {
+    from 494,
+    to 544,
+    id general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  },
+  {
+    from 642,
+    to 734,
+    id general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  },
+  {
+    from 300,
+    to 364,
+    id general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  },
+  {
+    from 495,
+    to 545,
+    id general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  },
+  {
+    from 643,
+    to 735,
+    id general {
+      db "BL_ORD_ID",
+      tag id 4
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  },
+  {
+    from 300,
+    to 499,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  },
+  {
+    from 630,
+    to 680,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  },
+  {
+    from 778,
+    to 870,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  },
+  {
+    from 950,
+    to 1109,
+    id general {
+      db "BL_ORD_ID",
+      tag id 5
+    }
+  }
+}
+Seq-loc ::= int {
+  from 0,
+  to 149,
+  id general {
+    db "BL_ORD_ID",
+    tag id 6
+  }
+}
+Seq-loc ::= int {
+  from 0,
+  to 239,
+  id general {
+    db "BL_ORD_ID",
+    tag id 7
+  }
+}
+Seq-loc ::= int {
+  from 0,
+  to 189,
+  id general {
+    db "BL_ORD_ID",
+    tag id 8
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id general {
+      db "BL_ORD_ID",
+      tag id 9
+    }
+  },
+  {
+    from 432,
+    to 480,
+    id general {
+      db "BL_ORD_ID",
+      tag id 9
+    }
+  },
+  {
+    from 578,
+    to 670,
+    id general {
+      db "BL_ORD_ID",
+      tag id 9
+    }
+  }
+}

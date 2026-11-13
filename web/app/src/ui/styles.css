@@ -1264,6 +1264,54 @@ textarea {
   color: var(--muted);
 }
 
+/* A checkbox of a row with a file chosen beside it (BLASTN's WindowMasker counts): the box and its
+   name, the button with the file's name or the sentence that asks for it, and the hint, which
+   wraps under them where the row is narrow. */
+.parameter-form .param-inline[data-kind='file'] .param-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.parameter-form .param-inline[data-kind='file'] .param-hint {
+  flex: 1 1 24em;
+}
+
+.file-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.file-name,
+.file-missing {
+  overflow-wrap: anywhere;
+}
+
+/* WW2: under a row's taxonomy ID box, the line that downloads its WindowMasker counts, in the
+   Example line's sentences (.example-line). */
+.counts-line {
+  position: relative;
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.counts-line > .error,
+.counts-line > .muted {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.file-missing {
+  color: var(--error);
+}
+
 @media (min-width: 801px) {
   .parameter-form {
     grid-template-columns: minmax(10em, max-content) minmax(0, 1fr);

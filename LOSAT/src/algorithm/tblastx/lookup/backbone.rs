@@ -2418,6 +2418,7 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
 ) -> XBxTable {
     build_ncbi_lookup_with(
         ScoringMatrix::Blosum62,
+        LOOKUP_WORD_LENGTH,
         concat_query,
         lookup_locations,
         contexts,
@@ -2429,14 +2430,18 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
 }
 
 /// [`build_ncbi_lookup_from_prepared`] with another matrix than BLOSUM62 (BLASTX's other matrices,
-/// items SC6 and SC6b of line NP): the same builds with the matrix's scores (the neighbour lists
-/// of the pooled build and of a thread's builds are kept per matrix, the key of `x_lut_direct.rs`'s
-/// memos). Not inlined, so that BLOSUM62's build keeps its code.
+/// items SC6 and SC6b of line NP) or another word length than 3 (BLASTX's `-word_size` 2 and 4,
+/// item SC9): the same builds with the matrix's scores and the words of `word_length` letters (the
+/// neighbour lists of the pooled build and of a thread's builds are kept per matrix and word
+/// length, the key of `x_lut_direct.rs`'s memos; a backbone index wider than 16 bits, word length
+/// 4, is built by the joint builder, `x_pair_lut_wide.rs`, whose table is the reference builder's).
+/// Not inlined, so that BLOSUM62's build keeps its code.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_ncbi_lookup_from_prepared_of(
     matrix: ScoringMatrix,
+    word_length: usize,
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
@@ -2445,9 +2450,10 @@ pub(crate) fn build_ncbi_lookup_from_prepared_of(
     parts: usize,
     narrow_cutoff: Option<u64>,
 ) -> XBxTable {
-    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+    debug_assert!(matrix != ScoringMatrix::Blosum62 || word_length != LOOKUP_WORD_LENGTH);
     build_ncbi_lookup_with(
         matrix,
+        word_length,
         concat_query,
         lookup_locations,
         contexts,
@@ -2458,11 +2464,13 @@ pub(crate) fn build_ncbi_lookup_from_prepared_of(
     )
 }
 
-/// The body of [`build_ncbi_lookup_from_prepared`] with the matrix `matrix`.
+/// The body of [`build_ncbi_lookup_from_prepared`] with the matrix `matrix` and words of
+/// `word_length` letters.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn build_ncbi_lookup_with(
     matrix: ScoringMatrix,
+    word_length: usize,
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
@@ -2490,21 +2498,68 @@ fn build_ncbi_lookup_with(
     //     }
     // ```
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
-    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
-    // mode, or a backbone index wider than 16 bits) the reference builder below runs. With `pooled`
+    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines, a backbone index
+    // wider than 16 bits takes the joint builder below and diagnostics mode the reference builder
+    // below. With `pooled`
     // (the pooled build, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
     // kept vectors; the caller gives them back (`x_give_back_pooled`, `x_give_back_pooled16`) when
     // it drops the table, or the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, matrix, 3, parts, narrow_cutoff)
+        x_lut_direct::x_build_direct_pooled(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            parts,
+            narrow_cutoff,
+        )
     } else {
-        x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, 3, narrow_cutoff)
+        x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, word_length, narrow_cutoff)
     };
     let prepared = match built {
         Ok(table) => return table,
         Err(prepared) => prepared,
     };
-    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, 3).0)
+    // A backbone index wider than the direct builder's 16 bits (`-word_size 4`, item SC9 of line
+    // NP; for BLOSUM62's 3 letters a constant false): the joint builder of 32-bit indices
+    // (`x_pair_lut_wide.rs`) with the batch's lookup locations as its one table, which is the
+    // reference builder's table, on `parts` tasks. Diagnostics mode keeps the reference builder.
+    if !x_pair_lut::x_direct_covers(word_length)
+        && x_pair_lut::x_pair_lut_wide::x_wide_covers(word_length)
+        && !diagnostics_enabled()
+    {
+        return XBxTable::Wide(
+            x_pair_lut::XPairLutQuery::x_from_prepared(prepared, threshold, matrix, word_length)
+                .x_build_full_wide(parts),
+        );
+    }
+    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+}
+
+/// The reference builder's table of a BLASTX lookup query (the inputs `build_ncbi_lookup_with`
+/// takes), for the tests of `blastx::seed` (item SC9 of line NP, a test of threaded builds).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_reference_table_from_prepared(
+    matrix: ScoringMatrix,
+    word_length: usize,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+) -> BlastAaLookupTable {
+    let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
+    let prepared = PreparedLookupQuery {
+        concat_query,
+        lookup_locations,
+        contexts,
+        frame_bases,
+        skipped_seg_mask: 0,
+    };
+    build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245

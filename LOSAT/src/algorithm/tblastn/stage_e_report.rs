@@ -191,6 +191,7 @@ pub(super) fn render(
     scoring: LocalStageDScoring,
     matrix_name: &str,
     report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
@@ -201,11 +202,23 @@ pub(super) fn render(
     out: Option<&std::path::Path>,
     archive: Option<&super::archive::ArchiveRender<'_>>,
     tabular: &super::tabular::TabularInputs,
+    // `-in_pssm` (PSI-TBLASTN): the query's PSSM, whose reports (outfmt 0, 6, 7 and 10) name the
+    // program PSITBLASTN, show no query masks and print the PSSM's gapped Karlin-Altschul values.
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
         "TBLASTN report query count mismatch"
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
+    // ```c++
+    //     m_Program = Blast_ProgramNameFromType(opts.GetProgramType());
+    // ```
+    let program = if pssm.is_some() {
+        super::in_pssm::PROGRAM
+    } else {
+        "TBLASTN"
+    };
     // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // Blast_HSPListSortByEvalue(hsp_list); /* during Seq-align conversion */
     for hitlist in hitlists.iter_mut() {
@@ -318,6 +331,7 @@ pub(super) fn render(
             seg,
             mask_lowercase,
             ranges,
+            pssm.is_none(),
         )?))
     } else {
         None
@@ -404,9 +418,11 @@ pub(super) fn render(
             || custom_tabular
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::checks_taxdb))
-        .then(|| crate::report::query_warnings::QueryWarnings {
-            before: warning_lines.take().unwrap_or(&[]),
-            sink: &mut *outputs.diagnostics,
+        .then(|| {
+            crate::report::query_warnings::QueryWarnings::new(
+                warning_lines.take().unwrap_or(&[]),
+                &mut *outputs.diagnostics,
+            )
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
@@ -426,6 +442,7 @@ pub(super) fn render(
                     ranges,
                     genetic_code,
                     matrix: scoring.matrix,
+                    program_version: super::tabular::program_version(pssm.is_some()),
                 },
                 hitlists,
                 &mut writer,
@@ -434,6 +451,7 @@ pub(super) fn render(
             )?,
             6 | 7 => write_tabular(
                 &mut writer,
+                program,
                 format_number(format.outfmt) == 7,
                 query_records,
                 subject_records,
@@ -463,9 +481,11 @@ pub(super) fn render(
                 scoring,
                 matrix_name,
                 report_counts,
+                formatting,
                 ranges,
                 probe.as_mut(),
                 warnings.as_mut(),
+                pssm,
             )?,
             // BLAST XML: one document per run, a header before the first query and a
             // trailer after the last (`blast_xml`).
@@ -584,6 +604,8 @@ pub(super) fn render(
 #[allow(clippy::too_many_arguments)]
 fn write_tabular(
     writer: &mut impl Write,
+    // The program of outfmt 7's first line (`TBLASTN`, `PSITBLASTN`).
+    program: &str,
     comments: bool,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
@@ -621,7 +643,7 @@ fn write_tabular(
             .map(|list| list.hsps.hsps.len())
             .sum();
         if comments {
-            writeln!(writer, "# TBLASTN {}", crate::NCBI_BLAST_VERSION)?;
+            writeln!(writer, "# {program} {}", crate::NCBI_BLAST_VERSION)?;
             // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
             // ```c
             //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
@@ -873,6 +895,8 @@ fn pairwise_hits(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     ranges: &ReportRanges<'_>,
+    // Whether the alignments show the query's masks (not a PSSM query's).
+    query_masks: bool,
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
@@ -883,7 +907,17 @@ fn pairwise_hits(
         // results.GetMaskedQueryRegions(masklocs);
         // CDisplaySeqalign(..., &masklocs, ...);
         // display.SetSeqLocChar(CDisplaySeqalign::eLowerCase);
-        let report_masks = encode_tblastn_lookup_query(query, seg, mask_lowercase).seg_masks;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:294
+        // ```c++
+        //     retval->SetFilteredQueryRegions(m_PrelimSearch->GetFilteredQueryRegions());
+        // ```
+        // A PSSM query's search (`CPsiBlastImpl::Run`, psiblast_impl.cpp:120-170) never sets the
+        // filtered regions: its alignments show no masks.
+        let report_masks = if query_masks {
+            encode_tblastn_lookup_query(query, seg, mask_lowercase).seg_masks
+        } else {
+            Vec::new()
+        };
         for list in hitlist.lists() {
             let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
             let subject = subject_records
@@ -1053,6 +1087,27 @@ fn pairwise_hits(
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
                     subject_stored_gaps: Vec::new(),
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:519-531
+                    // ```c
+                    //             query = query_blk->sequence +
+                    //                 query_info->contexts[hsp->context].query_offset;
+                    //             query_nomask = query_blk->sequence_nomask +
+                    //                 query_info->contexts[hsp->context].query_offset;
+                    //         }
+                    //
+                    //         /* Translate subject if needed. */
+                    //         if (program_number == eBlastTypeTblastn) {
+                    //             const Uint1* target_sequence = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+                    //             status = Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp, scoring_options, 0, sbp);
+                    //         }
+                    //         else
+                    //             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
+                    // ```
+                    // The Seq-align's `num_ident` (`tabular.rs`, the outfmt 8 / 11 / 12
+                    // writers): the engine's identities, counted on the masked query, so that a
+                    // SEG-masked letter is a mismatch there and an identity in the rows
+                    // (`report_num_ident`).
+                    seqalign_num_ident: usize::try_from(payload.num_ident)?,
                 });
             }
         }
@@ -1079,9 +1134,11 @@ fn write_pairwise(
     scoring: LocalStageDScoring,
     matrix_name: &str,
     report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
     ranges: &ReportRanges<'_>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -1119,7 +1176,18 @@ fn write_pairwise(
         gap_extend: scoring.gap_extend,
         word_threshold: scoring.threshold,
         window_size: scoring.window,
-        gapped_karlin: lookup_protein_params(&spec),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:101-103
+        // ```c++
+        //     if (sbp->kbp_gap) {
+        //         s_InitializeKarlinBlk(sbp->kbp_gap[ctx_index], &m_GappedKarlinBlk);
+        //     }
+        // ```
+        // `kbp_gap`: a PSSM query's `kbp_gap_psi` (the PSSM's gapped values; the Gumbel values
+        // stay the matrix's).
+        gapped_karlin: match pssm {
+            Some(psi) => psi.gapped_karlin(&lookup_protein_params(&spec)),
+            None => lookup_protein_params(&spec),
+        },
         gumbel,
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927
         // ```c
@@ -1167,12 +1235,25 @@ fn write_pairwise(
         .iter()
         .map(|record| Arc::from(record.title()))
         .collect();
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
     let config = PairwiseConfig {
         program: "tblastn".into(),
         protein_matrix: scoring.matrix,
+        line_length: formatting.line_length(),
+        sort: formatting.report_sort(),
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(
+        if pssm.is_some() {
+            super::in_pssm::PROGRAM
+        } else {
+            "TBLASTN"
+        },
         hits,
         writer,
         &config,
@@ -1551,6 +1632,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    pssm: None,
                 },
                 if mode == 2 {
                     BlastCompoAdjustMode::CompositionMatrixAdjust
@@ -1595,6 +1677,7 @@ mod tests {
                 LocalStageDScoring::default(),
                 "BLOSUM62",
                 Default::default(),
+                Default::default(),
                 1,
                 Some(&seg),
                 false,
@@ -1617,6 +1700,7 @@ mod tests {
                 None,
                 None,
                 &Default::default(),
+                None,
             )
             .unwrap();
             drop(outputs);

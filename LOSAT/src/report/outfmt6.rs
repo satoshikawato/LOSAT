@@ -266,6 +266,30 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
     }
 }
 
+/// The total bit score of a description table row (`total_bit_string`), which `GetScoreString`
+/// formats as the bit score but with `%2.1lf` below 99.9.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:994-1003
+/// ```c++
+///     if (total_bit_score > 99999){
+///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%5.3le",
+///             total_bit_score);
+///     } else if (total_bit_score > 99.9){
+///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%3.0ld",
+///             (long)total_bit_score);
+///     } else {
+///         snprintf(total_bit_score_buf, sizeof(total_bit_score_buf), "%2.1lf",
+///             total_bit_score);
+///     }
+/// ```
+pub fn format_total_bitscore_ncbi(total_bit_score: f64) -> String {
+    if total_bit_score > 99.9 {
+        format_bitscore_ncbi(total_bit_score)
+    } else {
+        format!("{:2.1}", total_bit_score)
+    }
+}
+
 /// Format percent identity exactly as NCBI tabular output does.
 ///
 /// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441

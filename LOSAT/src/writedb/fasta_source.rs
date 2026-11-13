@@ -15,8 +15,8 @@
 
 pub(crate) mod defline_ids;
 mod line_reader;
-mod pack;
-mod reader;
+pub(crate) mod pack;
+pub(crate) mod reader;
 #[cfg(test)]
 mod tests;
 mod title;
@@ -27,7 +27,7 @@ pub(crate) use title::fasta_reader_fasta;
 use std::io::Read;
 
 use super::bioseq::{Bioseq, ParsedIds, SeqData};
-use reader::{DeltaSeq, FastaReader, ReadError, SeqInst};
+use reader::{DeltaSeq, FastaReader, ReadError, ReaderFlags, ReaderWarning, SeqInst};
 
 /// An error that ends the reading: the message makeblastdb prints after
 /// "BLAST Database creation error: ".
@@ -83,38 +83,14 @@ impl<R: Read> FastaBioseqSource<R> {
     ///     : m_FastaReader(NULL)
     /// {
     ///     m_LineReader.Reset(new CBufferedLineReader(fasta_file));
-    ///     typedef CFastaReader::EFlags TFlags;
-    ///
-    ///     int iflags = CFastaReader::fForceType;
-    ///
-    ///     if (is_protein) {
-    ///         iflags |= CFastaReader::fAssumeProt;
-    ///     } else {
-    ///         iflags |= CFastaReader::fAssumeNuc;
-    ///         iflags |=  CFastaReader::fParseGaps;
-    ///     }
-    ///
-    ///     if (parse_ids) {
-    ///         iflags |= CFastaReader::fRequireID;
-    ///         // parse bare accessions
-    ///         if (!long_ids) {
-    ///             iflags |= CFastaReader::fParseRawID;
-    ///         }
-    ///     } else {
-    ///         iflags |= CFastaReader::fNoParseID;
-    ///     }
-    ///
-    ///     iflags |= CFastaReader::fQuickIDCheck;
-    ///     iflags |= CFastaReader::fDisableNoResidues;
-    ///
-    ///     TFlags flags = (TFlags) iflags;
-    ///
-    ///     m_FastaReader = new CFastaReader(*m_LineReader, flags);
     /// ```
-    /// The flags are those of `reader`.
+    /// The flags are quoted at `reader::ReaderFlags::fasta_bioseq_source`.
     pub fn with_parse_ids(input: R, is_protein: bool, parse_ids: bool) -> Self {
         Self {
-            reader: Some(FastaReader::new(input, is_protein, parse_ids)),
+            reader: Some(FastaReader::new(
+                input,
+                ReaderFlags::fasta_bioseq_source(is_protein, parse_ids),
+            )),
         }
     }
 
@@ -198,16 +174,21 @@ impl<R: Read> FastaBioseqSource<R> {
         let Some(reader) = &mut self.reader else {
             return Ok(None);
         };
-        if reader.lines.at_eof() {
-            let read_error = reader.lines.take_read_error();
+        if reader.at_eof() {
+            let read_error = reader.take_read_error();
             self.reader = None;
             return match read_error {
                 Some(error) => Err(read_error_message(&error)),
                 None => Ok(None),
             };
         }
-        let record = reader.read_one_seq(warn);
-        if let Some(error) = reader.lines.take_read_error() {
+        // makeblastdb writes a warning of the reader as its line, and a warning of the
+        // Seq-id parser with its prefix.
+        let record = reader.read_one_seq(&mut |warning| match warning {
+            ReaderWarning::Line(line) => warn(line),
+            ReaderWarning::SeqId(warning) => post_seq_id_warning(warning, &mut *warn),
+        });
+        if let Some(error) = reader.take_read_error() {
             self.reader = None;
             return Err(read_error_message(&error));
         }

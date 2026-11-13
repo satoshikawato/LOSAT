@@ -349,9 +349,27 @@ fn remove_dir(path: &Path) -> bool {
 // `CWriteDB_File::RenameSingle` and `RenameFileIndex` call it with `fRF_Overwrite` alone (no
 // `fRF_FollowLinks`, `fRF_EqualTypes`, `fRF_Update` or `fRF_Backup`) and ignore the result.
 // The `LOG_ERROR` macros print only with `FileAPILogging`, whose default is false
-// (ncbifile.cpp:176-180, 193-198). The type of an entry (`GetType`, `Exists`, ncbifile.hpp:3961)
-// is that of `stat`, which follows a link: a source that is a dangling link does not exist, and
-// a destination that is one does not exist either.
+// (ncbifile.cpp:176-180, 193-198).
+// NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:851,3958-3964
+// ```c++
+//     EType GetType(EFollowLinks follow = eIgnoreLinks) const;
+// ...
+// #if !defined(NCBI_OS_MSWIN)
+// // Default implementation. See Windows-specific implementation in the .cpp file
+// inline
+// bool CDirEntry::Exists(void) const
+// {
+//     return GetType() != eUnknown;
+// }
+// #endif
+// ```
+// The type of an entry (`GetType()`, `Exists()`) is that of `lstat` on Unix (`GetType`,
+// ncbifile.cpp:2203-2241, quoted at `is_dir_ignore_links`): a link is an entry of its own, so a
+// source that is a link (to a file, to a device, to nothing) is not a file, skips the hard
+// link and is renamed as the link, and a destination that is a link is removed (makeblastdb
+// 2.17.0 renamed `db.00.pni -> /nonexistent/x` to `db.pni`; probe of 2026-11-12). On Windows
+// `GetType` calls `stat`, and `Exists` opens the entry; LOSAT asks `stat` for both there (not
+// compared with a makeblastdb run on Windows).
 // A source that is a file reaches the hard-link branch first (Unix); its failure, because the
 // destination exists, is what sends an existing destination to the removal below. The two
 // names of a volume file are in one directory, so a cross-device `rename()` is not expected;
@@ -361,18 +379,18 @@ fn remove_dir(path: &Path) -> bool {
 /// `dst`. An existing destination is removed first (`remove`, a directory with its contents);
 /// one that stays makes the rename fail, and `src` keeps its name.
 pub(crate) fn rename_overwrite(src: &Path, dst: &Path) -> bool {
-    let Ok(src_meta) = std::fs::metadata(src) else {
+    let Some(src_type) = entry_type(src) else {
         return false;
     };
     #[cfg(unix)]
-    if src_meta.is_file() && std::fs::hard_link(src, dst).is_ok() && remove_entry(src) {
+    if src_type.is_file() && std::fs::hard_link(src, dst).is_ok() && remove_entry(src) {
         return true;
     }
-    if std::fs::metadata(dst).is_ok() {
+    if entry_type(dst).is_some() {
         // `dst.Exists()` asks what the `GetType()` above asked.
         let _ = remove(dst);
     }
-    if std::fs::metadata(dst).is_ok() {
+    if entry_type(dst).is_some() {
         return false;
     }
     let Err(error) = std::fs::rename(src, dst) else {
@@ -385,11 +403,21 @@ pub(crate) fn rename_overwrite(src: &Path, dst: &Path) -> bool {
     if !cross_device {
         return false;
     }
-    if !src_meta.is_file() || std::fs::copy(src, dst).is_err() {
+    if !src_type.is_file() || std::fs::copy(src, dst).is_err() {
         let _ = remove(dst);
         return false;
     }
     remove(src)
+}
+
+/// `CDirEntry(path).GetType()` (`eIgnoreLinks`) when it is not `eUnknown`: `lstat` on Unix,
+/// `stat` elsewhere.
+fn entry_type(path: &Path) -> Option<std::fs::Metadata> {
+    #[cfg(unix)]
+    let meta = std::fs::symlink_metadata(path);
+    #[cfg(not(unix))]
+    let meta = std::fs::metadata(path);
+    meta.ok()
 }
 
 #[cfg(test)]
@@ -568,21 +596,27 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn links_are_judged_by_what_they_point_to() {
+    fn links_are_entries_of_their_own() {
         let dir = TempDir::new("rename-link");
-        // A source that is a link to nothing does not exist.
+        // A source that is a link to nothing is renamed as the link (makeblastdb 2.17.0 renamed
+        // `db.00.pni -> /nonexistent/x` to `db.pni`).
         let (src, dst) = (dir.0.join("db.00.pog"), dir.0.join("db.pog"));
         std::os::unix::fs::symlink("/nonexistent/target", &src).unwrap();
-        assert!(!rename_overwrite(&src, &dst));
-        assert!(
-            std::fs::symlink_metadata(&src).is_ok() && std::fs::symlink_metadata(&dst).is_err()
+        assert!(rename_overwrite(&src, &dst));
+        assert!(std::fs::symlink_metadata(&src).is_err());
+        assert_eq!(
+            std::fs::read_link(&dst).unwrap(),
+            Path::new("/nonexistent/target")
         );
-        // A destination that is a link to nothing does not exist either: the rename replaces it.
-        std::fs::remove_file(&src).unwrap();
+        // A destination that is a link to nothing exists: it is removed, then the rename goes on.
         std::fs::write(&src, b"s").unwrap();
-        std::os::unix::fs::symlink("/nonexistent/target", &dst).unwrap();
         assert!(rename_overwrite(&src, &dst));
         assert_eq!(std::fs::read(&dst).unwrap(), b"s");
+        // A source that is a link to a device moves as the link.
+        let (full, to) = (dir.0.join("db.00.pin"), dir.0.join("db.pin"));
+        std::os::unix::fs::symlink("/dev/null", &full).unwrap();
+        assert!(rename_overwrite(&full, &to));
+        assert_eq!(std::fs::read_link(&to).unwrap(), Path::new("/dev/null"));
         // A source that is a link to a file moves as the link.
         let (link, new) = (dir.0.join("db.00.nog"), dir.0.join("db.nog"));
         std::os::unix::fs::symlink("db.pog", &link).unwrap();

@@ -1,0 +1,39 @@
+>gnl|BL_ORD_ID|0 lead_n
+0 - 9
+209 - 289
+440 - 490
+588 - 680
+>gnl|BL_ORD_ID|1 trail_n
+199 - 279
+430 - 480
+578 - 670
+750 - 759
+>gnl|BL_ORD_ID|2 mid_short_n
+199 - 279
+450 - 500
+598 - 690
+>gnl|BL_ORD_ID|3 mid_eq_window_n
+199 - 279
+494 - 544
+642 - 734
+>gnl|BL_ORD_ID|4 mid_long_n
+199 - 279
+300 - 364
+495 - 545
+643 - 735
+>gnl|BL_ORD_ID|5 mid_vlong_n
+199 - 279
+300 - 499
+630 - 680
+778 - 870
+950 - 1109
+>gnl|BL_ORD_ID|6 all_n
+0 - 149
+>gnl|BL_ORD_ID|7 lowc_then_long_n
+0 - 239
+>gnl|BL_ORD_ID|8 n_adjacent_lowc
+0 - 189
+>gnl|BL_ORD_ID|9 ns_scattered
+199 - 279
+432 - 480
+578 - 670

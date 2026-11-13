@@ -166,6 +166,12 @@ impl NcbiException {
         self.site
     }
 
+    /// Whether LOSAT knows the place of every throw of the chain, which `what()` names (a
+    /// [`ThrowSite::generated`] names none).
+    pub fn places_known(&self) -> bool {
+        self.chain().iter().all(|e| !e.site.file.is_empty())
+    }
+
     /// `GetMsg()`: the message, without the place or the extra text.
     pub fn get_msg(&self) -> &str {
         &self.message
@@ -229,8 +235,9 @@ impl NcbiException {
     //     return text;
     // }
     // ```
-    /// `s_GetExceptionText`: the message and the extra text of the class.
-    fn text(&self) -> String {
+    /// `s_GetExceptionText`: the message and the extra text of the class (the text of each
+    /// exception of a chain that NCBI's diagnostics post, `ncbi_app::args`).
+    pub(crate) fn text(&self) -> String {
         match &self.extra {
             Some(extra) => format!("{} ({extra})", self.message),
             None => self.message.clone(),
@@ -367,7 +374,16 @@ impl NcbiException {
 /// as an application with NCBI's default diagnostic flags writes it (`SDiagMessage::x_OldWrite`,
 /// quoted at [`NcbiException::report_default_ex`]): `Error: (<id>) <message>` and a line feed.
 fn post_error(id: &str, message: &str) -> String {
-    format!("Error: ({id}) {message}\n")
+    String::from_utf8(post_error_bytes(id, message.as_bytes()))
+        .expect("the text of UTF-8 parts is UTF-8")
+}
+
+/// `post_error` of a message that is bytes: NCBI's diagnostic stream writes them as they are.
+fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
+    let mut line = format!("Error: ({id}) ").into_bytes();
+    line.extend_from_slice(message);
+    line.push(b'\n');
+    line
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567
@@ -403,6 +419,12 @@ fn post_error(id: &str, message: &str) -> String {
 /// (ncbiapp.cpp:675-679: rpsbproc's data loader).
 pub fn err_post_x(err_code: u32, err_subcode: u32, message: &str) -> String {
     post_error(&format!("{err_code}.{err_subcode}"), message)
+}
+
+/// `err_post_x` of a message that is bytes (a `std::exception`'s `what()` that quotes data
+/// bytes, rpsbproc's motif parse error).
+pub fn err_post_x_bytes(err_code: u32, err_subcode: u32, message: &[u8]) -> Vec<u8> {
+    post_error_bytes(&format!("{err_code}.{err_subcode}"), message)
 }
 
 #[cfg(test)]
@@ -458,6 +480,35 @@ mod tests {
         assert_eq!(
             factory.what(),
             "NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp\", line 63: Error: (Exception::format error) file too short\n    T0 \"/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n"
+        );
+    }
+
+    // blastn 2.17.0 (the official Linux x64 release) with a `blastn.ini` of the line `garbage`
+    // (env parity g_reg probe `x_ini`, 2026-11-11): `NCBI_REPORT_EXCEPTION_X(15, "Application's
+    // initialization failed", e)` of the application layer (error code 106), and of a chain.
+    #[test]
+    fn a_report_with_a_title_has_a_line_per_exception_then_the_title() {
+        let site = ThrowSite {
+            file: "src/corelib/ncbireg.cpp",
+            line: 722,
+            kind: "CRegistryException::eEntry",
+            function: Some("ncbi::IRWRegistry::x_Read"),
+        };
+        let e = NcbiException::with_pos(site, "Invalid registry entry format: 'garbage'", 1);
+        assert_eq!(
+            e.report_default_ex(106, 15, "Application's initialization failed"),
+            "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n"
+        );
+        let outer = NcbiException::new(site, "first").rethrow(
+            ThrowSite {
+                kind: "CAppException::eSetupDiag",
+                ..site
+            },
+            "second",
+        );
+        assert_eq!(
+            outer.report_default_ex(106, 15, "T"),
+            "Error: (CRegistryException::eEntry) first\nError: (CAppException::eSetupDiag) second\nError: (106.15) T (CAppException::eSetupDiag) second\n"
         );
     }
 

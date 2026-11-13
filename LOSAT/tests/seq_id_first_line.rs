@@ -209,7 +209,10 @@ fn with_the_data_loaders_off_the_line_is_read_as_ncbi_reads_it() {
     let dir = temp_dir("off");
     let rc_dir = dir.join("rc");
     std::fs::create_dir_all(&rc_dir).unwrap();
-    std::fs::write(rc_dir.join(".ncbirc"), "[BLAST]\nDATA_LOADERS = none\n").unwrap();
+    // The registry file NCBI (and LOSAT) reads in the current directory: `ncbi.ini` on Windows
+    // (ncbi_environment.rs `SYSTEM_WIDE_REGISTRY`).
+    let rc_name = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+    std::fs::write(rc_dir.join(rc_name), "[BLAST]\nDATA_LOADERS = none\n").unwrap();
     let off: [(&Path, &[(&str, &str)]); 2] = [
         (&dir, &[("NCBI_CONFIG__BLAST__DATA_LOADERS", "")]),
         (&rc_dir, &[]),

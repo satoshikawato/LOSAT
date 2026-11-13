@@ -22,12 +22,13 @@ mod retrieve;
 mod taxonomy;
 
 use std::ffi::OsString;
-use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 
+use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::ncbi_app::args::Args;
+use crate::ncbi_app::files::{Cin, Ostream};
+use crate::ncbi_app::{Diag, Tool};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
-
-use args::ArgsError;
 
 /// The name in LOSAT's refusals.
 const PROGRAM: &str = "BLASTDBCMD";
@@ -42,431 +43,53 @@ const PROGRAM: &str = "BLASTDBCMD";
 /// argument errors print.
 const HELP: &str = include_str!("help.txt");
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
 // ```c++
-//     if (detailed) {
-//         x.AddDetails(arr);
-//     } else {
-//         arr.push_back(kEmptyStr);
-//         arr.push_back("Use '-help' to print detailed descriptions of command line arguments");
-//     }
+//     SetDiagPostLevel(eDiag_Warning);
+//     SetDiagPostPrefix("blastdbcmd");
 // ```
-/// The text of `blastdbcmd -h`: the usage and the description, then NCBI's pointer to `-help`.
-fn short_usage() -> String {
-    let end = HELP.find("OPTIONAL ARGUMENTS").unwrap_or(HELP.len());
-    format!(
-        "{}Use '-help' to print detailed descriptions of command line arguments\n",
-        &HELP[..end]
-    )
-}
+/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` is that of BLAST+
+/// (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the prefix `[blastdbcmd]`.
+static TOOL: Tool = Tool {
+    program: "blastdbcmd",
+    refusal_name: PROGRAM,
+    version: crate::NCBI_BLAST_VERSION,
+    help: HELP,
+    descs: args::DESCS,
+    dependencies: args::dependencies,
+    post_prefix: Some("blastdbcmd"),
+};
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`) on the process's
 /// standard streams; the exit status.
 pub fn run(words: &[OsString]) -> i32 {
-    let stdout = std::io::stdout();
-    let stderr = std::io::stderr();
-    let mut out = stdout.lock();
-    let mut err = stderr.lock();
-    let status = run_with(words, &mut out, &mut err);
-    let _ = out.flush();
-    let _ = err.flush();
-    status
+    crate::ncbi_app::run(&TOOL, words, run_body)
 }
 
-/// Where NCBI's diagnostics go (`SetLogFile` of the `-logfile` value).
-enum DiagTarget {
-    /// The standard stream `cerr`: no `-logfile`, `-logfile -`, or a file that cannot be
-    /// opened.
-    Stderr,
-    /// The file of `-logfile`, appended to.
-    File(File),
-    /// Nowhere: `-logfile ""` and `-logfile /dev/null` (a stream handler without a stream).
-    Discard,
+/// The run of one command line with `input` as its standard input (a batch file `-`), its
+/// output on `out` and its errors on `err`; the exit status (NCBI's application around
+/// blastdbcmd's `Run`: `ncbi_app::run_with`).
+pub(crate) fn run_with(
+    words: &[OsString],
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_with(&TOOL, words, input, out, err, run_body)
 }
 
-struct Diag<'a> {
-    target: DiagTarget,
-    stderr: &'a mut dyn Write,
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608
-// ```c++
-//     // Check if a non-existing dir is specified
-//     if ( !s_IsSpecialLogName(file_name) ) {
-//         string dir = CFile(file_name).GetDir();
-//         if ( !dir.empty()  &&  !CDir(dir).Exists() ) {
-//             return false;
-//         }
-//     }
-//     ...
-//         // Check special filenames
-//         if ( file_name.empty()  ||  file_name == "/dev/null" ) {
-//             // no output
-//             SetDiagStream(0, quick_flush, 0, 0, kLogName_None);
-//         }
-//         else if (file_name == "-") {
-//             // output to stderr
-//             SetDiagStream(&NcbiCerr, quick_flush, 0, 0, kLogName_Stderr);
-//         }
-//         else {
-//             // output to file
-//             unique_ptr<CFileDiagHandler> fhandler(new CFileDiagHandler());
-//             if ( !fhandler->SetLogFile(file_name, eDiagFile_All, quick_flush) ) {
-//                 ERR_POST_X(9, Info << "Failed to initialize log: " << file_name);
-//                 return false;
-//             }
-// ```
-/// The target of the `-logfile` value `name` (a file NCBI fails to open leaves `cerr`).
-fn diag_target(name: Option<&str>) -> DiagTarget {
-    match name {
-        None | Some("-") => DiagTarget::Stderr,
-        Some("" | "/dev/null") => DiagTarget::Discard,
-        Some(name) => match OpenOptions::new().create(true).append(true).open(name) {
-            Ok(file) => DiagTarget::File(file),
-            Err(_) => DiagTarget::Stderr,
-        },
-    }
-}
-
-impl Diag<'_> {
-    /// Posts one diagnostic line (`LOG_POST`, `ERR_POST`).
-    fn post(&mut self, line: &str) {
-        match &mut self.target {
-            DiagTarget::File(file) => {
-                let _ = writeln!(file, "{line}");
-            }
-            DiagTarget::Stderr => {
-                let _ = writeln!(self.stderr, "{line}");
-                let _ = self.stderr.flush();
-            }
-            DiagTarget::Discard => {}
-        }
-    }
-
-    /// LOSAT's refusal: a diagnostic line, exit status 1.
-    fn refuse(&mut self, reason: &str) -> i32 {
-        self.post(&format!("Error: {reason}"));
-        1
-    }
-
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-    // ```c++
-    //     SetDiagPostLevel(eDiag_Warning);
-    //     SetDiagPostPrefix("blastdbcmd");
-    // ```
-    /// `ERR_POST(Error << message)` inside `Run`: the severity, the prefix of the
-    /// application, the message.
-    fn err_post(&mut self, message: &str) {
-        self.post(&format!("Error: [blastdbcmd] {message}"));
-    }
-
-    /// `err_post` of a message that is not UTF-8.
-    fn err_post_bytes(&mut self, message: &[u8]) {
-        let mut line = b"Error: [blastdbcmd] ".to_vec();
-        line.extend_from_slice(message);
-        self.post_bytes(&line);
-    }
-
-    /// `post` of a line that is not UTF-8.
-    fn post_bytes(&mut self, message: &[u8]) {
-        let mut line = message.to_vec();
-        line.push(b'\n');
-        match &mut self.target {
-            DiagTarget::File(file) => {
-                let _ = file.write_all(&line);
-            }
-            DiagTarget::Stderr => {
-                let _ = self.stderr.write_all(&line);
-                let _ = self.stderr.flush();
-            }
-            DiagTarget::Discard => {}
-        }
-    }
-}
-
-/// What NCBI's application reads before the arguments (`CNcbiApplicationAPI::AppMain`).
-enum Preparsed {
-    /// `-version`: print the version, exit status 0.
-    Version,
-    /// The words left for the argument reader, and whether there were words that LOSAT
-    /// refuses although NCBI goes on reading: `-conffile FILE` (NCBI reads that registry file
-    /// before the arguments) and `-dryrun` (NCBI reads the arguments, then runs nothing).
-    Words {
-        words: Vec<String>,
-        conffile: bool,
-        dryrun: bool,
-    },
-    /// A word LOSAT refuses where NCBI stops reading (`-version-full`, ...).
-    Refused(&'static str),
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:844-866
-// ```c++
-//     // Check if logfile is set in the args.
-//     m_LogFile = 0;
-//     if (!m_DisableArgDesc && argc > 1  &&  argv  &&  diag != eDS_User) {
-//         for (int i = 1;  i < argc;  i++) {
-//             if ( !argv[i] ) {
-//                 continue;
-//             }
-//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
-//                 break;
-//             }
-//             if ( NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 m_LogFile = argv[i];
-//             } else if (NStr::StartsWith(argv[i], s_ArgLogFile)) {
-//                 const char *a = argv[i] + strlen(s_ArgLogFile);
-//                 if (*a == '=') {
-//                     m_LogFile = ++a;
-//                 }
-//             }
-//         }
-//     }
-// ```
-/// The file of `-logfile` (`m_LogFile`): the value of its last `-logfile FILE` or
-/// `-logfile=FILE` before `--`.
-fn log_file(words: &[String]) -> Option<&str> {
-    let mut log = None;
-    let mut at = 0;
-    while at < words.len() {
-        let word = words[at].as_str();
-        if word == "--" {
-            break;
-        }
-        if word == "-logfile" {
-            at += 1;
-            if let Some(name) = words.get(at) {
-                log = Some(name.as_str());
-            }
-        } else if let Some(name) = word.strip_prefix("-logfile=") {
-            log = Some(name);
-        }
-        at += 1;
-    }
-    log
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015
-// ```c++
-//         for (int i = 1;  i < argc;  i++) {
-//             if ( !argv[i] ) {
-//                 continue;
-//             }
-//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
-//                 skip = true;
-//             }
-//             if (skip) {
-//                 v[real_arg_index++] = argv[i];
-//                 continue;
-//             }
-//             // Log file - ignore if diag is eDS_User - the user wants to
-//             // take care about logging.
-//             if ( diag != eDS_User  &&
-//                 NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 v[real_arg_index++] = argv[i - 1];
-//                 v[real_arg_index++] = argv[i];
-//                 // Configuration file
-//             } else if ( NStr::strcmp(argv[i], s_ArgCfgFile) == 0 ) {
-//                 if (!argv[++i]) {
-//                     continue;
-//                 }
-//                 v[real_arg_index++] = argv[i - 1];
-//                 v[real_arg_index++] = argv[i];
-//                 conf_arg = argv[i];
-//
-//             }
-//             else if (NStr::StartsWith(argv[i], s_ArgCfgFile)) {
-//                 v[real_arg_index++] = argv[i];
-//                 const char* a = argv[i] + strlen(s_ArgCfgFile);
-//                 if (*a == '=') {
-//                     conf_arg = ++a;
-//                 }
-//
-//                 // Version
-//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
-//                 delete[] v;
-//                 // Print VERSION
-//                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-//
-//                 // Full version
-//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
-//                 ...
-//             } else if ( NStr::strcmp(argv[i], s_ArgDryRun) == 0 ) {
-//                 m_DryRun = true;
-//
-//                 // Save real argument
-//             } else {
-//                 v[real_arg_index++] = argv[i];
-//             }
-//         }
-// ```
-/// The words NCBI's application takes before its argument reader: `-version` anywhere before
-/// `--` (but not as the value of `-logfile` or `-conffile`), the full versions, `-dryrun` and
-/// `-conffile`. A `-logfile` or `-conffile` without a value is dropped. LOSAT refuses
-/// `-conffile` (another registry file) and `-dryrun` (NCBI then runs nothing), as the search
-/// programs do (line CLI DECISIONS 4), and the full versions (NCBI's build details).
-fn preparse(words: &[String]) -> Preparsed {
-    let mut kept = Vec::with_capacity(words.len());
-    let mut conffile = false;
-    let mut dryrun = false;
-    let mut skip = false;
-    let mut at = 0;
-    while at < words.len() {
-        let word = words[at].as_str();
-        if word == "--" {
-            skip = true;
-        }
-        if skip {
-            kept.push(words[at].clone());
-            at += 1;
-            continue;
-        }
-        match word {
-            "-logfile" | "-conffile" => {
-                at += 1;
-                if let Some(value) = words.get(at) {
-                    kept.push(word.to_string());
-                    kept.push(value.clone());
-                    conffile |= word == "-conffile";
-                }
-            }
-            "-version" => return Preparsed::Version,
-            "-version-full" => return Preparsed::Refused("-version-full"),
-            "-version-full-xml" => return Preparsed::Refused("-version-full-xml"),
-            "-version-full-json" => return Preparsed::Refused("-version-full-json"),
-            "-dryrun" => dryrun = true,
-            _ => {
-                conffile |= word.starts_with("-conffile=");
-                kept.push(words[at].clone());
-            }
-        }
-        at += 1;
-    }
-    Preparsed::Words {
-        words: kept,
-        conffile,
-        dryrun,
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112
-// ```c++
-//     catch (const CArgException& e) {
-//         // Print USAGE and the exception error message
-//         if ( e.GetErrCode() != CArgException::eNoValue &&  m_ArgDesc.get() ) {
-//             x_AddDefaultArgs();
-//             string str;
-//             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fNoUsage) ) {
-//                 m_ArgDesc->PrintUsage(str);
-//                 cerr << str;
-//             }
-//             if ( !m_ArgDesc->IsSetMiscFlag(CArgDescriptions::fDupErrToCerr) ) {
-//                 CStreamDiagHandler* errh =
-//                     dynamic_cast<CStreamDiagHandler*>(GetDiagHandler());
-//                 if (!errh  ||  errh->GetStream() != &cerr) {
-//                     cerr << "Error in command-line arguments. "
-//                         "See error logs for more details." << endl;
-//                 }
-//             }
-//             ...
-//             cerr << string(72, '=') << endl << endl;
-//         }
-//         SetDiagPostAllFlags(eDPF_Severity);
-//         NCBI_REPORT_EXCEPTION_X(18, "", e);
-//         got_exception = true;
-//         exit_code = 1;
-//     }
-// ```
-/// The run of one command line, its output on `out` and its errors on `err`; the exit status.
+/// blastdbcmd's `Run` (`CBlastDBCmdApp::Run`) on the arguments that NCBI's reader read.
 ///
-/// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
-/// it cannot be opened), then `-version` is read, then the arguments; an argument error prints
-/// the usage and a line of `=` on stderr and NCBI's report of the exception as diagnostics.
 /// LOSAT's refusals come where NCBI would start the work they stand for, and before anything is
 /// written: the program's other uses after the arguments are read, the database where it is
 /// opened (after `-out` is opened, as NCBI's `Run` opens it first).
-pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    let Some(words) = words
-        .iter()
-        .map(|word| word.to_str().map(str::to_string))
-        .collect::<Option<Vec<String>>>()
-    else {
-        let _ = writeln!(
-            err,
-            "Error: a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, which \
-             is not supported by LOSAT's {PROGRAM}"
-        );
-        return 1;
-    };
-    let mut diag = Diag {
-        target: diag_target(log_file(&words)),
-        stderr: err,
-    };
-    let (words, dryrun) = match preparse(&words) {
-        Preparsed::Version => {
-            let _ = write!(
-                out,
-                "blastdbcmd: {}\n Package: LOSAT {}, output compatible with blast {}\n",
-                crate::NCBI_BLAST_VERSION,
-                env!("CARGO_PKG_VERSION"),
-                crate::NCBI_BLAST_RELEASE
-            );
-            return 0;
-        }
-        Preparsed::Refused(word) => return diag.refuse(&unsupported_option(word)),
-        Preparsed::Words { conffile: true, .. } => {
-            return diag.refuse(&unsupported_option("-conffile"))
-        }
-        Preparsed::Words { words, dryrun, .. } => (words, dryrun),
-    };
-    let args = match args::parse(&words) {
-        Ok(args) => args,
-        Err(ArgsError::Usage) => {
-            let _ = out.write_all(short_usage().as_bytes());
-            return 0;
-        }
-        Err(ArgsError::Help) => {
-            let _ = out.write_all(HELP.as_bytes());
-            return 0;
-        }
-        Err(ArgsError::Invalid { code, messages }) => {
-            // `eNoValue` (which prints no usage) is not raised by this reader. The diagnostics
-            // of a `-logfile` go to a stream that is not `cerr`: NCBI then says where they are.
-            let _ = diag.stderr.write_all(short_usage().as_bytes());
-            if !matches!(diag.target, DiagTarget::Stderr) {
-                let _ = writeln!(
-                    diag.stderr,
-                    "Error in command-line arguments. See error logs for more details."
-                );
-            }
-            let _ = write!(diag.stderr, "{}\n\n", "=".repeat(72));
-            let _ = diag.stderr.flush();
-            for message in &messages {
-                diag.post(&format!("Error: {message}"));
-            }
-            if let Some(last) = messages.last() {
-                diag.post(&format!("Error:  (CArgException::{code}) {last}"));
-            }
-            return 1;
-        }
-        Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
-    };
-    if dryrun {
-        return diag.refuse(&unsupported_option("-dryrun"));
-    }
-    let settings =
-        match crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastdbcmd") {
-            Ok(settings) => settings,
-            Err(reason) => return diag.refuse(&reason),
-        };
+fn run_body(
+    args: &Args,
+    settings: &ApplicationSettings,
+    stdin: &mut Cin<'_>,
+    out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
     let registry = match &settings.blastdb {
         Ok(value) => value.as_deref(),
         Err(reason) => return diag.refuse(&refusal(reason)),
@@ -476,43 +99,26 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
     //     try {
     //         CNcbiOstream& out = args["out"].AsOutputFile();
     // ```
-    let mut file;
-    let out: &mut dyn Write = match args.value("out").unwrap_or("-") {
-        "-" => out,
-        name => match File::create(name) {
-            Ok(created) => {
-                file = created;
-                &mut file
-            }
-            Err(_) => {
-                // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-620
-                // ```c++
-                // void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-                // {
-                //     if ( !m_Ios ) {
-                //         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-                //             "File is not accessible",AsString()));
-                //     }
-                // }
-                // ```
-                // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-                // ```c++
-                //     catch (const CArgException& e) {                                        \
-                //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-                //         exit_code = BLAST_INPUT_ERROR;                                      \
-                //     }                                                                       \
-                // ```
-                diag.post(&format!(
-                    "Command line argument error: {}",
-                    args::arg_message("out", "File is not accessible", name)
-                ));
-                return 1;
-            }
-        },
+    let mut out = match args.output_file("out", out) {
+        Ok(out) => out,
+        Err(error) => {
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
+            // ```c++
+            //     catch (const CArgException& e) {                                        \
+            //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
+            //         exit_code = BLAST_INPUT_ERROR;                                      \
+            //     }                                                                       \
+            // ```
+            diag.post(&format!("Command line argument error: {}", error.message()));
+            return 1;
+        }
     };
+    // NCBI's `ostream` of `-out` for every mode: a failed write drops the later ones, and a
+    // closed pipe ends the program where SIGPIPE ends NCBI's (`files::Ostream`).
+    let mut out = Ostream::new(&mut out);
     let path = match SearchPath::from_environment(registry) {
         Ok(path) => path,
-        Err(error) => return database_error(&mut diag, error),
+        Err(error) => return database_error(diag, error),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
     // ```c++
@@ -526,7 +132,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         return 0;
     }
     if args.given("list") {
-        return list::list(&args, &path, &mut diag, out);
+        return list::list(args, &path, diag, &mut out);
     }
     let name = args.value("db").unwrap_or("nr");
     let dbtype = args.value("dbtype").unwrap_or("guess");
@@ -552,7 +158,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         // of the type: a protein database the list fails on is then looked for as a
         // nucleotide one (probe J111 of line BDC: `No alias or index file found for
         // nucleotide database [db/p4]`).
-        let tax_ids = match taxonomy::tax_id_list(&args, &path, &mut diag) {
+        let tax_ids = match taxonomy::tax_id_list(args, &path, diag, stdin) {
             Ok(tax_ids) => tax_ids,
             Err(taxonomy::Ended(status)) => return status,
         };
@@ -566,32 +172,33 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         };
         let (db, _) = match open_database(name, dbtype, &path, &restrict) {
             Ok(opened) => opened,
-            Err(error) => return database_error(&mut diag, error),
+            Err(error) => return database_error(diag, error),
         };
         let dbtype_protein = dbtype == "prot";
         return retrieve::process(
             &db,
-            &args,
+            args,
             &path,
-            &mut diag,
-            out,
+            diag,
+            stdin,
+            &mut out,
             Some(&tax_ids),
             dbtype_protein,
         );
     }
     let (db, volumes) = match open_database(name, dbtype, &path, &|_| Ok(())) {
         Ok(opened) => opened,
-        Err(error) => return database_error(&mut diag, error),
+        Err(error) => return database_error(diag, error),
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, &args, &path, &mut diag, out);
+            return metadata::metadata(&db, name, args, &path, diag, &mut out);
         }
         if args.given("tax_info") {
-            return taxonomy::tax_info(&db, &args, &path, &mut diag, out);
+            return taxonomy::tax_info(&db, args, &path, diag, &mut out);
         }
         let protein = db.seqtype() == SeqType::Protein;
-        return retrieve::process(&db, &args, &path, &mut diag, out, None, protein);
+        return retrieve::process(&db, args, &path, diag, stdin, &mut out, None, protein);
     }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
@@ -618,16 +225,15 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
     if tail.is_none_or(|error| error.ncbi_message().is_some()) {
         let _ = out.write_all(&text);
         let _ = out.flush();
+        // `cerr`'s tie flushed the output before the error: a closed pipe ends the program.
+        if out.closed() {
+            return 0;
+        }
     }
     match masks {
         Ok(_) => 0,
-        Err(error) => database_error(&mut diag, error),
+        Err(error) => database_error(diag, error),
     }
-}
-
-/// LOSAT's refusal of the option `word`.
-fn unsupported_option(word: &str) -> String {
-    format!("the NCBI BLAST+ option {word} is not supported by LOSAT's {PROGRAM}")
 }
 
 /// LOSAT's refusal of a database (`algorithm::common::database::refusal`).
@@ -687,9 +293,12 @@ fn open_database(
         let Some(&seqtype) = types.next() else {
             unreachable!("at least one sequence type is tried");
         };
-        let opened = SeqDb::open_in(name, seqtype, path).and_then(|mut db| {
+        // The alias files' counts fail where NCBI's constructor reaches them, which the list of
+        // `-target_only` moves (`SeqDb::check_alias_values`).
+        let opened = SeqDb::open_search_in(name, seqtype, path).and_then(|mut db| {
             let volumes = SeqDb::info_volumes(name, seqtype, path)?;
             prepare(&mut db)?;
+            db.check_alias_values()?;
             Ok((db, volumes))
         });
         match opened {
@@ -709,9 +318,22 @@ fn open_database(
 //         }                                                                   \
 //     }                                                                       \
 // ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
+// ```c++
+//     catch (const CException& e) {                                           \
+//         LOG_POST(Error << "Error: " << e.what());                           \
+//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+//     }                                                                       \
+// ```
 /// A reader error: NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>`
-/// with exit status 2, else LOSAT's refusal.
+/// with exit status 2, another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias
+/// file's value that does not convert) as `Error: <what()>` with exit status 255, else LOSAT's
+/// refusal.
 fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
+    if let Some(exception) = error.ncbi_exception() {
+        diag.post(&format!("Error: {}", exception.what()));
+        return 255;
+    }
     match error.ncbi_message() {
         Some(text) => {
             diag.post(&format!("BLAST Database error: {text}"));
@@ -778,9 +400,12 @@ fn with_commas(n: u64) -> String {
 // ```
 /// The text of `-info` for `db` up to its filtering algorithms.
 ///
-/// `-exact_length` changes nothing here: NCBI's exact total differs from the total only when
-/// its totals are counted over a filtered list of sequences (an alias file with `GILIST`,
-/// `SEQIDLIST`, `OIDLIST`, ..., seqdbimpl.cpp:104-131), which LOSAT's reader refuses.
+/// The counts are `GetNumSeqs` and `GetTotalLength` of the database opened without a list:
+/// the walks of the alias tree (`SeqDb::printed_num_seqs`). `-exact_length` changes nothing
+/// here: NCBI's exact total differs from the total only when its totals are counted over a
+/// filtered list of sequences (an alias file with `GILIST`, `SEQIDLIST`, `OIDLIST`, ...,
+/// seqdbimpl.cpp:104-131), which LOSAT's reader refuses; the OID ranges (`FIRST_OID`,
+/// `LAST_OID`) do not make NCBI scan.
 fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
     let letters = match db.seqtype() {
         SeqType::Protein => "residues",
@@ -793,8 +418,8 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
         out,
         "\t{} sequences; {} total {letters}\n\nDate: {}\tLongest sequence: {} {letters}\n\n\
          BLASTDB Version: {}\n",
-        with_commas(u64::from(db.num_seqs())),
-        with_commas(db.total_length()),
+        with_commas(u64::from(db.printed_num_seqs())),
+        with_commas(db.printed_total_length()),
         db.date(),
         with_commas(u64::from(db.max_length())),
         if db.is_version5() { "5" } else { "4" },
@@ -812,10 +437,6 @@ fn write_info_volumes(out: &mut Vec<u8>, volumes: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn words(line: &[&str]) -> Vec<String> {
-        line.iter().map(|word| word.to_string()).collect()
-    }
 
     #[test]
     fn commas_group_three_digits() {
@@ -837,7 +458,7 @@ mod tests {
 
     #[test]
     fn the_short_usage_is_the_head_of_the_help() {
-        let usage = short_usage();
+        let usage = crate::ncbi_app::short_usage(HELP);
         assert_eq!(usage.len(), 780);
         assert!(usage.starts_with("USAGE\n  blastdbcmd [-h] [-help] [-db dbname]"));
         assert!(usage.ends_with(
@@ -847,49 +468,172 @@ mod tests {
         assert_eq!(HELP.len(), 9450);
     }
 
-    #[test]
-    fn the_log_file_is_the_last_one_before_the_delimiter() {
-        assert_eq!(
-            log_file(&words(&["-logfile", "a", "-logfile=b"])),
-            Some("b")
-        );
-        assert_eq!(log_file(&words(&["-logfile"])), None);
-        assert_eq!(log_file(&words(&["--", "-logfile", "a"])), None);
-        assert_eq!(log_file(&words(&["-logfilex", "a"])), None);
+    /// An output whose every write fails (a full disk).
+    struct FullDisk;
+
+    impl Write for FullDisk {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("no space left"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("no space left"))
+        }
     }
 
+    /// A pipe whose reader has closed.
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The exit status and the diagnostics of `words` run with `input` as the standard input
+    /// and `out` as the standard output.
+    fn run_on(words: &[&str], input: &str, out: &mut dyn Write) -> (i32, String) {
+        let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let mut err = Vec::new();
+        let status = run_with(&words, &mut input.as_bytes(), out, &mut err);
+        (status, String::from_utf8(err).unwrap())
+    }
+
+    fn fixture_db(name: &str) -> String {
+        format!("{}/tests/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    // NCBI 2.17.0 with `-out /dev/full` (review 2 of line RG item K1, F3): a failed write leaves
+    // the retrieval going on, so an id that is not found after it is reported as without the
+    // failure (`Skipped NOSUCHID`, exit status 1). The batch is the standard input (`-`).
     #[test]
-    fn preparse_takes_ncbi_s_words() {
-        let kept = |line: &[&str]| match preparse(&words(line)) {
-            Preparsed::Words {
-                words,
-                conffile,
-                dryrun,
-            } => (words, conffile, dryrun),
-            Preparsed::Version => panic!("version"),
-            Preparsed::Refused(word) => panic!("refused {word}"),
+    fn a_failed_write_leaves_the_later_entries_of_a_batch_and_their_errors() {
+        let db = fixture_db("blastdbcmd/db/p5");
+        let words = ["-db", db.as_str(), "-entry_batch", "-"];
+        let batch = "XP_000001.1\nnosuchid\nP99999.2\n";
+        let mut written = Vec::new();
+        let expected = run_on(&words, batch, &mut written);
+        assert_eq!(
+            expected,
+            (1, "Error: [blastdbcmd] Skipped NOSUCHID\n".to_string())
+        );
+        assert!(written.starts_with(b">"));
+        assert_eq!(run_on(&words, batch, &mut FullDisk), expected);
+        // A closed pipe ends NCBI's process by SIGPIPE (exit status 141) outside Windows before
+        // the `Skipped` line, as `cerr`'s tie flushes the output first: the retrieval ends with
+        // exit status 0 and no message (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). On
+        // Windows it is a failed write like the others.
+        let closed = if cfg!(windows) {
+            expected
+        } else {
+            (0, String::new())
         };
-        assert!(matches!(
-            preparse(&words(&["-db", "-version"])),
-            Preparsed::Version
-        ));
-        // The value of `-logfile` is not read as `-version`; a last `-logfile` is dropped.
-        assert_eq!(
-            kept(&["-info", "-logfile", "-version"]).0,
-            words(&["-info", "-logfile", "-version"])
+        assert_eq!(run_on(&words, batch, &mut ClosedPipe), closed);
+    }
+
+    /// Standard output and standard error into one file (`2>&1`).
+    #[derive(Clone)]
+    struct Merged(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+    impl Write for Merged {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // `cerr` is tied to `cout`: NCBI flushes the output before each diagnostic, so with `2>&1`
+    // the sequences of the entries before a missing id come before its `Skipped` line, and an
+    // unfinished line before an `-outfmt` error (review of line RG item K1b, R2-F1).
+    #[test]
+    fn diagnostics_come_after_the_output_written_before_them() {
+        let db = fixture_db("blastdbcmd/db/p5");
+        for (words, batch, error) in [
+            (
+                vec!["-db", db.as_str(), "-entry_batch", "-", "-outfmt", "%a"],
+                "XP_000001.1\nnosuchid\n",
+                "Error: [blastdbcmd] Skipped NOSUCHID\n",
+            ),
+            (
+                vec![
+                    "-db",
+                    db.as_str(),
+                    "-entry",
+                    "XP_000001.1",
+                    "-outfmt",
+                    "%a %Z",
+                ],
+                "",
+                "Error: [blastdbcmd] Unrecognized format specification: '%Z'\n",
+            ),
+        ] {
+            let mut alone = Vec::new();
+            let (status, err) = run_on(&words, batch, &mut alone);
+            assert_eq!(err, error, "{words:?}");
+            let merged = Merged(Default::default());
+            let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let status_merged = run_with(
+                &words,
+                &mut batch.as_bytes(),
+                &mut merged.clone(),
+                &mut merged.clone(),
+            );
+            assert_eq!(status_merged, status);
+            let mut expected = alone;
+            expected.extend_from_slice(error.as_bytes());
+            assert_eq!(*merged.0.borrow(), expected, "{words:?}");
+        }
+        // A bad mask algorithm id of a batch line, between the outputs of its neighbours
+        // (NCBI 2.17.0 `-ipg_batch - -outfmt "%a %g" 2>&1`, review of K1b, R3-F1).
+        let db = fixture_db("blastdbcmd/db/m/pmg");
+        let words: Vec<OsString> = ["-db", db.as_str(), "-ipg_batch", "-", "-outfmt", "%a %g"]
+            .iter()
+            .map(OsString::from)
+            .collect();
+        let merged = Merged(Default::default());
+        let status = run_with(
+            &words,
+            &mut &b"1001 21\n1002 99\n1003 21\n"[..],
+            &mut merged.clone(),
+            &mut merged.clone(),
         );
-        assert_eq!(kept(&["-info", "-logfile"]).0, words(&["-info"]));
-        assert_eq!(kept(&["--", "-version"]).0, words(&["--", "-version"]));
+        assert_eq!(status, 1);
         assert_eq!(
-            kept(&["-info", "-dryrun"]),
-            (words(&["-info"]), false, true)
+            String::from_utf8(merged.0.borrow().clone()).unwrap(),
+            "XP_1001.1 1001\nError: [blastdbcmd] Invalid filtering algorithm ID: 99\nError: \
+             [blastdbcmd] Skipped IPG : 1002\nXP_1003.1 1003\n"
         );
-        assert!(kept(&["-dryrun", "-conffile", "x"]).1);
-        assert!(kept(&["-conffile=x"]).1);
-        assert!(!kept(&["-info", "-conffile"]).1);
-        assert!(matches!(
-            preparse(&words(&["-version-full", "-version"])),
-            Preparsed::Refused("-version-full")
-        ));
+    }
+
+    // NCBI 2.17.0 with `-out /dev/full` (F2): the serial stream of `-metadata` reports the
+    // failed write (five lines, exit status 6), which LOSAT refuses.
+    #[test]
+    fn a_failed_write_of_the_metadata_is_refused() {
+        let db = fixture_db("dustmasker/db/basic");
+        let words = ["-db", db.as_str(), "-metadata"];
+        let mut written = Vec::new();
+        assert_eq!(run_on(&words, "", &mut written), (0, String::new()));
+        assert!(written.ends_with(b"}\n"));
+        assert_eq!(
+            run_on(&words, "", &mut FullDisk),
+            (
+                1,
+                "Error: a failed write of the -metadata output (NCBI's serial stream reports it) \
+                 is not supported by LOSAT's BLASTDBCMD\n"
+                    .to_string()
+            )
+        );
+        // A closed pipe ends the program silently outside Windows, where SIGPIPE ends NCBI's.
+        if !cfg!(windows) {
+            assert_eq!(run_on(&words, "", &mut ClosedPipe), (0, String::new()));
+        }
     }
 }

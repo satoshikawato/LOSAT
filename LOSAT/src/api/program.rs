@@ -13,8 +13,9 @@ use std::fmt;
 
 use super::error::Error;
 
-/// A search program of the library API. `makeblastdb` and `blastdbcmd` are not searches: they have
-/// functions of their own (`run_makeblastdb`, `run_blastdbcmd`).
+/// A search program of the library API. `makeblastdb`, `blastdbcmd`, `dustmasker` and
+/// `segmasker` are not searches: they have functions of their own (`run_makeblastdb`,
+/// `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Program {
@@ -59,7 +60,8 @@ impl Program {
     }
 
     /// The program of a command-line name. A program that the command line runs and the API
-    /// does not search with (`makeblastdb`, `makedb`, `blastdbcmd`) is named in the error.
+    /// does not search with (`makeblastdb`, `makedb`, `blastdbcmd`, `dustmasker`, `segmasker`)
+    /// is named in the error.
     pub fn parse(name: &str) -> Result<Self, Error> {
         match name {
             "blastn" => Ok(Program::Blastn),
@@ -74,10 +76,20 @@ impl Program {
             "blastdbcmd" => Err(Error::Argv(
                 "blastdbcmd is not a search program: run_blastdbcmd runs it".to_string(),
             )),
+            "dustmasker" => Err(Error::Argv(
+                "dustmasker is not a search program: run_dustmasker runs it".to_string(),
+            )),
+            "segmasker" => Err(Error::Argv(
+                "segmasker is not a search program: run_segmasker runs it".to_string(),
+            )),
             // rpsblast (series PR, item PS11a) runs on the command line; the API has no program
             // for it yet (its results and options are those of a later item).
             "rpsblast" => Err(Error::Argv(
                 "rpsblast is not available through the library API".to_string(),
+            )),
+            // rpstblastn (series PR, item PS12a) likewise.
+            "rpstblastn" => Err(Error::Argv(
+                "rpstblastn is not available through the library API".to_string(),
             )),
             other => Err(Error::Argv(format!("unknown program '{other}'"))),
         }
@@ -134,14 +146,16 @@ mod tests {
             let error = Program::parse(tool).unwrap_err();
             assert!(error.message().contains("not a search program"), "{error}");
         }
-        // rpsblast runs on the command line only (line PS, PS11a).
-        let error = Program::parse("rpsblast").unwrap_err();
-        assert!(
-            error
-                .message()
-                .contains("rpsblast is not available through the library API"),
-            "{error}"
-        );
+        // rpsblast and rpstblastn run on the command line only (line PS, PS11a, PS12a).
+        for program in ["rpsblast", "rpstblastn"] {
+            let error = Program::parse(program).unwrap_err();
+            assert!(
+                error.message().contains(&format!(
+                    "{program} is not available through the library API"
+                )),
+                "{error}"
+            );
+        }
         assert_eq!(
             Program::parse("nosuch"),
             Err(Error::Argv("unknown program 'nosuch'".to_string()))

@@ -1,0 +1,105 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucleotide slices of two shrimp viruses
+           5 sequences; 33,385 total letters
+
+
+
+Query= BDT61857.1 innexin [Penaeus monodon majanivirus A]
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block       415     7e-122
+
+
+>m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block
+Length=8000
+
+ Score = 415 bits (1067),  Expect = 7e-122
+ Identities = 146/230 (63%), Positives = 163/230 (71%), Gaps = 0/230 (0%)
+ Frame = +2
+
+Query  125   GLLFYAPHYIWKTWEGGRMQSITADLSVPILNKEDQRKRVNQLADYLQNSLWNNNTYALK  184
+             GL+FYAPHY WKT EGGR+Q I  D S PI N E+ RKR+ QLADYLQNSLW NNTY  K
+Sbjct  1640  GLMFYAPHYFWKTLEGGRLQXIVTDFSTPIFNSEERRKRIKQLADYLQNSLWXNNTYVIK  1819
+
+Query  185   YLFCQCLSLVNCIVNMVLMNKFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPRVTKC  244
+             YL C+ L L NCI+N VL +KFLNG F TYG DV SY E  D+E    PMI  FPR  KC
+Sbjct  1820  YLICEFLYLLNCIINIVLIDKFLNGMFITYGTDVLSYNEVTDHENKIHPMIALFPRMXKC  1999
+
+Query  245   SMSMFGSSGTLQKHDFLCVLAVNVINEKIYLAMWLWFILLISLSILVFFFHLAVFAVPVI  304
+             SM M+GSSG  + HDFLCVLAVNV+NEKI L MW W   LIS+SILV  F L VF  P+ 
+Sbjct  2000  SMNMYGSSGSIERHDFLCVLAVNVVNEKIXLIMWFWLFFLISMSILVCIFYLIVFIFPIM  2179
+
+Query  305   RRLYLVYLLGSGDKARIVARTFNQMGDVFLLYLLKKNVECQSLNLLLTEL  354
+             RRLYL  LLGS  K  +V  TFNQMGD+F L LL KN++ Q L LL TEL
+Sbjct  2180  RRLYLLILLGSNKKVNVVIQTFNQMGDIFILSLLXKNIDSQYLELLVTEL  2329
+
+
+ Score = 129 bits (325),  Expect = 2e-33
+ Identities = 46/111 (41%), Positives = 50/111 (45%), Gaps = 33/111 (30%)
+ Frame = +1
+
+Query  56    SCVYDSGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAI---------------------  94
+             SC+ D   PKL DKV+NTYCWIHTTFT PNR Y +                         
+Sbjct  1243  SCIVDRTNPKLSDKVINTYCWIHTTFTIPNRIYKERGKLSFTFIFLCIYKTFDVFYFAVV  1422
+
+Query  95    ------------SSPGIGTHNLSDPVTYHAYYQWVPFMLFIQGLLFYAPHY  133
+                           PGI   N  D +TYHAYYQWVPFMLF Q       HY
+Sbjct  1423  YIIFVLFLILDTHFPGISNYNRVDTITYHAYYQWVPFMLFLQVIISL**HY  1575
+
+
+ Score = 111 bits (278),  Expect = 7e-28
+ Identities = 50/63 (79%), Positives = 51/63 (81%), Gaps = 4/63 (6%)
+ Frame = +3
+
+Query  1     MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPI----S  56
+             MASLGLLSTLRGILQGKRNADIEN  SKLHYRVTTT  F FCL VTTNTLVGDPI     
+Sbjct  933   MASLGLLSTLRGILQGKRNADIENIMSKLHYRVTTTVLFSFCLIVTTNTLVGDPIR*ELR  1112
+
+Query  57    CVY  59
+             C+ 
+Sbjct  1113  CII  1121
+
+
+ Score = 19.6 bits (39),  Expect = 5.2
+ Identities = 10/37 (27%), Positives = 13/37 (35%), Gaps = 7/37 (19%)
+ Frame = +3
+
+Query  164   VNQLADYLQNSLWNNNTYALKYLFCQCLSLVNCIVNM  200
+             +N L     N   NN T       C C   +NC   +
+Sbjct  6669  INRLYAKVNNKDINNVT-------CDCNFVINCRLSL  6758
+
+
+
+Lambda      K        H        a         alpha
+   0.338    0.283     1.80    0.194    0.162 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140    0.480     2.46     3.19 
+
+Effective search space used: 4012239
+
+
+  Database: nucleotide slices of two shrimp viruses
+    Posted date:  Oct 15, 2026  10:35 PM
+  Number of letters in database: 33,385
+  Number of sequences in database:  5
+
+
+
+Matrix: PAM30
+Gap Penalties: Existence: 9, Extension: 1
+Neighboring words threshold: 18
+Window for multiple hits: 15

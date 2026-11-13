@@ -53,6 +53,10 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
     inputs.matrix = args.matrix.clone();
+    // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
+    // `-xdrop_ungap` has no entry (NCBI records none).
+    inputs.xdrop_gap = args.xdrop_gap;
+    inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps;
@@ -290,13 +294,15 @@ pub(crate) fn batches_may_refuse(
     found
 }
 
-/// No NCBI counterpart: the output streams of a run whose archive may still refuse the title of a
-/// later batch (`batches_may_refuse`), held in the order in which they are written: each write keeps
+/// No NCBI counterpart: the output streams of a run in which a later batch may still be refused,
+/// by the archive for a title (`batches_may_refuse`) or, in a library call, by a BLAST XML, XML2 or
+/// JSON document (`local::report_batches`), held in the order in which they are written: each write keeps
 /// its bytes with the index of its stream (`writer`), so that `release` writes them in that order
 /// (the archives of the batches and the messages between them, as a stream that both go to reads
 /// them from NCBI) and `discard` drops them. Outside `hold` the bytes pass through. Shared, so that
 /// the diagnostics stream behind the archive's message log (`report::archive::DiagTee`) can be one
-/// of its streams.
+/// of its streams. The side files of an outfmt 13 or 14 document of the run follow it
+/// (`side_files`): held, written before the streams and dropped as they are.
 pub(crate) struct ArchiveHold<S: Write>(std::sync::Arc<std::sync::Mutex<HoldState<S>>>);
 
 struct HoldState<S> {
@@ -304,6 +310,8 @@ struct HoldState<S> {
     discarded: bool,
     sinks: Vec<S>,
     held: Vec<(usize, Vec<u8>)>,
+    /// The side files of the run's outfmt 13 and 14 documents.
+    sides: Vec<super::blast_xml::HeldSideFiles>,
 }
 
 /// A stream of an `ArchiveHold`.
@@ -325,6 +333,7 @@ impl<S: Write> ArchiveHold<S> {
             discarded: false,
             sinks: Vec::new(),
             held: Vec::new(),
+            sides: Vec::new(),
         })))
     }
 
@@ -344,24 +353,63 @@ impl<S: Write> ArchiveHold<S> {
         }
     }
 
-    /// Keeps everything written from now on.
-    pub(crate) fn hold(&self) {
-        self.state().holding = true;
+    /// The side files `files` of an outfmt 13 or 14 document of the run, which follow this hold
+    /// (`blast_xml::HeldSideFiles`): the command line holds its document's side files the same way
+    /// (`blast_xml::HeldOutput`).
+    pub(crate) fn side_files(
+        &self,
+        files: crate::report::blast_xml2::RunSideFiles,
+    ) -> crate::report::blast_xml2::RunSideFiles {
+        let side = super::blast_xml::HeldSideFiles::new(files);
+        let mut state = self.state();
+        if state.discarded {
+            side.discard();
+        } else if state.holding {
+            side.hold();
+        }
+        state.sides.push(side.clone());
+        Box::new(side)
     }
 
-    /// Writes what is held, in order, and passes the bytes on again.
-    pub(crate) fn release(&self) -> std::io::Result<()> {
+    /// Keeps everything written from now on.
+    pub(crate) fn hold(&self) {
+        let mut state = self.state();
+        state.holding = true;
+        for side in &state.sides {
+            side.hold();
+        }
+    }
+
+    /// Writes what is held and passes the bytes on again: the side files first (in order), then
+    /// the streams in the order of their writes. A side file that cannot be opened stops the run
+    /// there, as NCBI's does (`Cannot open output file`, exit status 1): the side files before it
+    /// stay, and the streams and the side files of the later documents get nothing of what was
+    /// held.
+    pub(crate) fn release(&self) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
         let held = std::mem::take(&mut state.held);
         if state.discarded {
             return Ok(());
         }
+        for (index, side) in state.sides.iter().enumerate() {
+            if let Err(error) = side.release() {
+                // Nothing more of what was held is written: neither the streams, nor the side
+                // files of the documents after this one.
+                for later in &state.sides[index + 1..] {
+                    later.discard();
+                }
+                state.discarded = true;
+                return Err(error);
+            }
+        }
         for (sink, bytes) in held {
-            state.sinks[sink].write_all(&bytes)?;
+            state.sinks[sink]
+                .write_all(&bytes)
+                .map_err(super::native::output_error)?;
         }
         for sink in &mut state.sinks {
-            sink.flush()?;
+            sink.flush().map_err(super::native::output_error)?;
         }
         Ok(())
     }
@@ -371,17 +419,35 @@ impl<S: Write> ArchiveHold<S> {
         let mut state = self.state();
         state.discarded = true;
         state.held.clear();
+        for side in &state.sides {
+            side.discard();
+        }
     }
 
-    /// The end of a run that stopped with `error`: one of NCBI's own errors, after which NCBI
-    /// writes its error archive (`error_lines`), follows the archives of the batches before it,
-    /// which NCBI wrote (released); LOSAT's refusal (the title of the batch, or another) follows
-    /// no byte (dropped).
+    /// The end of a run that stopped with `error` and held its output for the archive's titles
+    /// (`batches_may_refuse`): one of NCBI's own errors (`NativeError`: the errors after which NCBI
+    /// writes its error archive, `error_lines`, and, in a library call that writes other formats
+    /// too, a side file that cannot be opened or an output that cannot be written) follows the
+    /// bytes of the batches before it, which NCBI wrote (released); LOSAT's refusal (the title of
+    /// the batch, or another) follows no byte (dropped).
     pub(crate) fn end_with(&self, error: &anyhow::Error) {
-        if error_lines(error, false).is_some() {
+        if error.is::<crate::cli::NativeError>() {
             let _ = self.release();
         } else {
             self.discard();
+        }
+    }
+
+    /// The end of a run that stopped with `error` and held its output only for its BLAST XML, XML2
+    /// or JSON documents: dropped after one of the refusals that such a hold is for
+    /// (`blast_xml::drops_held_document`), written after any other error (the bytes of the batches
+    /// before it, as the run without a hold writes them), as the command line's document
+    /// (`blast_xml::HeldOutput`).
+    pub(crate) fn end_document_with(&self, error: &anyhow::Error) {
+        if super::blast_xml::drops_held_document(error) {
+            self.discard();
+        } else {
+            let _ = self.release();
         }
     }
 }
@@ -822,6 +888,209 @@ pub(crate) fn write_blastx_strategy(strategy: &StrategyExport, call: &CallBatch<
 }
 
 #[cfg(test)]
+mod hold_tests {
+    //! `ArchiveHold`: what a run that held its output writes when it ends, by what it held for
+    //! (`end_with`: the archive's titles; `end_document_with`: the XML, XML2 and JSON documents),
+    //! and the side files of outfmt 13 and 14 that follow it (`side_files`).
+    use super::*;
+    use crate::cli::NativeError;
+    use crate::report::blast_xml2::SideFiles;
+    use crate::seqdb::SeqDbError;
+    use std::sync::{Arc, Mutex};
+
+    /// A stream that the test reads after the hold wrote to it.
+    #[derive(Clone, Default)]
+    struct Shared(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Shared {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Shared {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    /// Side files that record each file as `<n>:<bytes>;`.
+    struct Recorded(Shared);
+
+    impl SideFiles for Recorded {
+        fn create(&mut self, _n: u32) -> std::io::Result<Box<dyn Write + '_>> {
+            Err(std::io::Error::other("a run writes through write_file"))
+        }
+
+        fn listed(&self, n: u32) -> Vec<u8> {
+            format!("f{n}").into_bytes()
+        }
+
+        fn write_file(&mut self, n: u32, report: &[u8]) -> Result<()> {
+            write!(self.0, "{n}:{};", String::from_utf8_lossy(report))?;
+            Ok(())
+        }
+    }
+
+    /// A run that holds two streams and its side files, wrote `a1 b1 a2` and two side files, and
+    /// has not ended.
+    fn held_run() -> (ArchiveHold<Shared>, [Shared; 3]) {
+        let (a, b, files) = (Shared::default(), Shared::default(), Shared::default());
+        let hold = ArchiveHold::new();
+        let (mut first, mut second) = (hold.writer(a.clone()), hold.writer(b.clone()));
+        hold.hold();
+        let mut side = hold.side_files(Box::new(Recorded(files.clone())));
+        first.write_all(b"a1 ").unwrap();
+        side.write_file(1, b"one").unwrap();
+        second.write_all(b"b1 ").unwrap();
+        first.write_all(b"a2 ").unwrap();
+        side.write_file(2, b"two").unwrap();
+        assert_eq!(side.listed(2), b"f2");
+        for stream in [&a, &b, &files] {
+            assert_eq!(stream.text(), "", "nothing passes a hold");
+        }
+        (hold, [a, b, files])
+    }
+
+    fn written(streams: &[Shared; 3]) -> [String; 3] {
+        [streams[0].text(), streams[1].text(), streams[2].text()]
+    }
+
+    const ALL: [&str; 3] = ["a1 a2 ", "b1 ", "1:one;2:two;"];
+    const NOTHING: [&str; 3] = ["", "", ""];
+
+    fn ncbis_error() -> anyhow::Error {
+        NativeError {
+            exit: 3,
+            message: "BLAST engine error: Warning: Sequence contains no data\n".into(),
+        }
+        .into()
+    }
+
+    /// A refusal of the taxonomy database as the XML2 and JSON documents meet it (`XmlRefusal`,
+    /// made of the reader's `TaxonomyRefusal`, which outfmt 5's prefetch returns as it is).
+    fn document_refusal() -> anyhow::Error {
+        super::super::blast_xml::XmlRefusal::of_taxonomy(
+            crate::algorithm::common::database::taxdb_error_for_tests(SeqDbError::Unsupported {
+                path: "taxdb.btd".into(),
+                message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
+            }),
+        )
+    }
+
+    #[test]
+    fn a_release_writes_the_side_files_and_every_stream_in_order() {
+        let (hold, streams) = held_run();
+        hold.release().unwrap();
+        assert_eq!(written(&streams), ALL);
+    }
+
+    /// NCBI's error of a side file that it cannot open (`CArgException`, exit status 1): no
+    /// error archive follows it (`error_lines`), and NCBI wrote the bytes before it all the same.
+    fn side_file_error() -> anyhow::Error {
+        crate::report::blast_xml2::framing::side_file_open_error()
+    }
+
+    #[test]
+    fn the_archives_hold_writes_after_ncbis_error_and_drops_after_any_refusal() {
+        for ncbis in [ncbis_error(), side_file_error()] {
+            let (hold, streams) = held_run();
+            hold.end_with(&ncbis);
+            assert_eq!(written(&streams), ALL, "{ncbis}");
+        }
+        for refusal in [
+            document_refusal(),
+            anyhow::anyhow!("this is not supported by LOSAT's BLASTX"),
+        ] {
+            let (hold, streams) = held_run();
+            hold.end_with(&refusal);
+            assert_eq!(written(&streams), NOTHING, "{refusal}");
+        }
+    }
+
+    #[test]
+    fn the_documents_hold_drops_after_their_refusal_and_writes_after_any_other_error() {
+        let (hold, streams) = held_run();
+        hold.end_document_with(&document_refusal());
+        assert_eq!(written(&streams), NOTHING);
+        // The taxonomy database's refusal of the prefetch (outfmt 5) is one of them.
+        let (hold, streams) = held_run();
+        let prefetch =
+            crate::algorithm::common::database::taxdb_error_for_tests(SeqDbError::Unsupported {
+                path: "taxdb.btd".into(),
+                message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
+            });
+        hold.end_document_with(&prefetch);
+        assert_eq!(written(&streams), NOTHING);
+        for other in [
+            ncbis_error(),
+            side_file_error(),
+            anyhow::anyhow!("taxdb.btd: Input/output error; this database is not supported"),
+        ] {
+            let (hold, streams) = held_run();
+            hold.end_document_with(&other);
+            assert_eq!(written(&streams), ALL, "{other}");
+        }
+    }
+
+    /// Side files whose every file cannot be opened.
+    struct Blocked;
+
+    impl SideFiles for Blocked {
+        fn create(&mut self, _n: u32) -> std::io::Result<Box<dyn Write + '_>> {
+            Err(std::io::Error::other("blocked"))
+        }
+
+        fn listed(&self, _n: u32) -> Vec<u8> {
+            Vec::new()
+        }
+    }
+
+    /// The side files of one document cannot be opened at the release (they could when their
+    /// reports were made): NCBI's error ends the run, and neither the streams nor the side files
+    /// of the document after it get what was held, then or when the run's writers are dropped.
+    #[test]
+    fn a_side_file_error_at_the_release_writes_nothing_after_it() {
+        let (a, files) = (Shared::default(), Shared::default());
+        let hold = ArchiveHold::new();
+        let mut stream = hold.writer(a.clone());
+        hold.hold();
+        let mut first = hold.side_files(Box::new(Recorded(files.clone())));
+        let mut blocked = hold.side_files(Box::new(Blocked));
+        let mut last = hold.side_files(Box::new(Recorded(files.clone())));
+        stream.write_all(b"a1 ").unwrap();
+        first.write_file(1, b"one").unwrap();
+        blocked.write_file(1, b"x").unwrap();
+        last.write_file(1, b"late").unwrap();
+        let error = hold.release().unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(
+            native.message,
+            "Command line argument error: Cannot open output file\n"
+        );
+        drop((first, blocked, last, stream, hold));
+        assert_eq!([a.text(), files.text()], ["", "1:one;"].map(String::from));
+    }
+
+    #[test]
+    fn after_a_discard_nothing_more_is_written() {
+        let (hold, streams) = held_run();
+        let mut late = hold.writer(streams[0].clone());
+        let mut side = hold.side_files(Box::new(Recorded(streams[2].clone())));
+        hold.discard();
+        late.write_all(b"late").unwrap();
+        side.write_file(3, b"three").unwrap();
+        hold.release().unwrap();
+        assert_eq!(written(&streams), NOTHING);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::cli::{try_parse_from, Cli, Commands};
@@ -952,20 +1221,18 @@ mod tests {
         }
     }
 
-    /// The inputs of a command line that LOSAT's `blastx` parser refuses (an X-dropoff or
-    /// `-use_sw_tback`, which it does not search with): the options model must still write the list NCBI
+    /// The inputs of a command line that LOSAT's `blastx` parser refuses (`-use_sw_tback`, which it
+    /// does not search with): the options model must still write the list NCBI
     /// wrote for it. The options LOSAT takes come from its arguments, the refused ones are set by
     /// hand.
     fn refused_inputs(extra: &[&str]) -> OptionInputs {
-        const REFUSED: [&str; 8] = [
+        const REFUSED: [&str; 6] = [
             "-task",
             "-matrix",
             "-word_size",
             "-gapopen",
             "-gapextend",
             "-comp_based_stats",
-            "-xdrop_gap",
-            "-xdrop_gap_final",
         ];
         let mut kept = Vec::new();
         let mut refused: Vec<(&str, &str)> = Vec::new();
@@ -975,9 +1242,9 @@ mod tests {
             if REFUSED.contains(&flag) {
                 refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
                 index += 2;
-            } else if matches!(flag, "-use_sw_tback" | "-xdrop_ungap") {
-                refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
-                index += if flag == "-use_sw_tback" { 1 } else { 2 };
+            } else if flag == "-use_sw_tback" {
+                refused.push((flag, ""));
+                index += 1;
             } else {
                 kept.push(flag);
                 index += 1;
@@ -991,8 +1258,6 @@ mod tests {
                 "-word_size" => inputs.word_size = value.parse().ok(),
                 "-gapopen" => inputs.gapopen = value.parse().ok(),
                 "-gapextend" => inputs.gapextend = value.parse().ok(),
-                "-xdrop_gap" => inputs.xdrop_gap = value.parse().ok(),
-                "-xdrop_gap_final" => inputs.xdrop_gap_final = value.parse().ok(),
                 "-comp_based_stats" => {
                     inputs.comp_based_stats =
                         i32::from(crate::algorithm::blastx::args::composition_mode(value));
@@ -1057,8 +1322,8 @@ mod tests {
         // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
         // matrix and composition mode since series SC, SC6; the word sizes LOSAT does not search
         // with since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them):
-        // 4 of the 80 are refused (`-xdrop_*`, `-use_sw_tback`).
-        assert!(refused >= 4 && CASES.len() - refused > 60, "{refused}");
+        // 2 of the 80 are refused (`-use_sw_tback`; the X-drop cases parse since line RG X1).
+        assert!(refused == 2 && CASES.len() - refused > 60, "{refused}");
     }
 
     #[test]

@@ -141,6 +141,10 @@ pub trait Encoder {
     fn big_int(&mut self, value: i64);
     /// `WriteEnum` of an ENUMERATED value: its name and number.
     fn enumerated(&mut self, name: &str, value: i32);
+    /// `WriteEnum` of an INTEGER with named values (`CEnumeratedTypeValues::IsInteger`, as
+    /// `Blast-filter-program`): the name `name` of the value `value` in ASN.1 text and JSON,
+    /// an INTEGER in BER, `<Type value="name">value</Type>` in XML (inside `begin_named`).
+    fn named_int(&mut self, name: &str, value: i32);
     /// `WriteBool`.
     fn boolean(&mut self, value: bool);
     /// `WriteString` of a VisibleString.

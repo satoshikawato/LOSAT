@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "prd_tc",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_tc (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-11T22:46:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 50042,
+  "bytes-to-cache": 623,
+  "files": [
+    "prd_tc.pdb",
+    "prd_tc.phr",
+    "prd_tc.pin",
+    "prd_tc.pog",
+    "prd_tc.pos",
+    "prd_tc.pot",
+    "prd_tc.psq",
+    "prd_tc.ptf",
+    "prd_tc.pto"
+  ]
+}

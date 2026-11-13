@@ -18,6 +18,14 @@
 # makeprofiledb writes the build date into the index files, so a rebuild differs from the
 # committed files: the committed .gz files are the fixtures, this script records how they were made.
 #
+# Not a fixture (the fixture budget is tight), but how the review of PS11c-2 (REVIEW_ps11c2 S2) filled the
+# preliminary hit list past its capacity of 10 (`-max_target_seqs` 1 to 5): a database of 18 profiles, copies of 6
+# of these PSSMs saved by psiblast (`-out_pssm`, as above) under 18 Seq-ids gnl|CDD|300..317 (p0.smp .. p17.smp, the
+# query id rewritten as above, the scores dropped), made by makeprofiledb -in list.txt once as one volume (big18) and
+# once as four volumes plus a .pal (big18v), so that one query hits up to 15 profiles. NCBI and LOSAT
+# agreed on every run (`-max_target_seqs` 1, 2, 5, 10, 11, 30, `-searchsp`, `OLD_FSC`, CBS 0/1/3); the unit test
+# `a_full_prelim_list_of_equal_e_values_keeps_the_best_ten_of_the_total_order` (rps_search/prelim.rs) holds the order.
+#
 # Usage: build.sh NCBI_BIN OUT_DIR    (then: gzip -9 -n OUT_DIR/rps_mini*.* and copy the .gz files here)
 set -euo pipefail
 N=$1

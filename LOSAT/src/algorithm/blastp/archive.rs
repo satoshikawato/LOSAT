@@ -54,6 +54,10 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
     inputs.matrix = args.matrix.clone();
+    // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
+    // `-xdrop_ungap` has no entry (NCBI records none, `tblastn/archive.rs` `opt_xdropu`).
+    inputs.xdrop_gap = args.xdrop_gap;
+    inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);

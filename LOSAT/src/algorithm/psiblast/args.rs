@@ -115,6 +115,11 @@ pub struct PsiblastArgs {
         help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`,
+    /// `-negative_seqidlist` and `-no_taxid_expansion`: blastp's (line DI-8), which hold in every
+    /// round (NCBI's `CLocalDbAdapter` of the first round searches every later one too).
+    #[command(flatten)]
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     if (!m_IsMapper) {
@@ -126,6 +131,28 @@ pub struct PsiblastArgs {
     // ```
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1961-1962
+    // (`CQueryOptionsArgs`, psiblast_args.cpp:86)
+    // ```c++
+    //     arg_desc.AddFlag(kArgParseDeflines,
+    //                  "Should the query and subject defline(s) be parsed?", true);
+    // ```
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
     // ```c++
     //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
@@ -164,6 +191,10 @@ pub struct PsiblastArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
     #[arg(long = "qcov_hsp_perc", value_parser = psiblast_query_coverage, help = "Percent query coverage per hsp")]
@@ -201,6 +232,14 @@ pub struct PsiblastArgs {
     // psiblast's filtering handler is blastp's (`CFilteringArgs`, psiblast_args.cpp:70).
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1940-1942
+    // ```c++
+    //     // lowercase masking
+    //     arg_desc.AddFlag(kArgUseLCaseMasking,
+    //          "Use lower case filtering in query and subject sequence(s)?", true);
+    // ```
+    #[arg(long)]
+    pub lcase_masking: bool,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
     // ```c
     //     arg_desc.AddFlag(kArgUseSWTraceback,
@@ -232,6 +271,7 @@ pub struct PsiblastArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -426,15 +466,14 @@ impl PsiblastArgs {
             query: self.query,
             subject: self.subject,
             db: self.db,
-            // PSIBLAST's parser refuses the taxid options (line DI-8 ported them to BLASTP).
-            db_filter: Default::default(),
+            // blastp's database filters (line DI-8), which every round searches with.
+            db_filter: self.db_filter,
             dbsize: self.dbsize,
-            show_gis: false,
-            parse_deflines: false,
+            show_gis: self.show_gis,
+            parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,
-            // PSIBLAST's parser refuses `-lcase_masking` (line NP ported it to BLASTP).
-            lcase_masking: false,
+            lcase_masking: self.lcase_masking,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
             // ```c++
             // CPSIBlastOptionsHandle::CPSIBlastOptionsHandle(EAPILocality locality)
@@ -461,6 +500,10 @@ impl PsiblastArgs {
             // psiblast has no -culling_limit (rejected above).
             culling_limit: None,
             ungapped: false,
+            // psiblast's parser refuses the X-drops (`cli.rs` `is_unported_psiblast_arg`).
+            xdrop_ungap: None,
+            xdrop_gap: None,
+            xdrop_gap_final: None,
             window_size: self.window_size,
             matrix: self.matrix,
             gap_open: self.gap_open,
@@ -487,7 +530,13 @@ impl PsiblastArgs {
                 rounds,
                 in_pssm: self.in_pssm,
             }),
-            formatting: Default::default(),
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
+            // ```c++
+            //         formatter.SetLineLength(fmt_args->GetLineLength());
+            // ```
+            // The line length only: `-sorthits` and `-sorthsps` are read with their warnings
+            // (`BlastpArgs::check_options`) and sort nothing (`ResolvedBlastpArgs::sort`).
+            formatting: self.formatting,
             rps: None,
         })
     }
@@ -707,6 +756,56 @@ mod tests {
     }
 
     #[test]
+    fn blastps_database_filters_and_id_options_reach_the_search() {
+        let db = |extra: &[&str]| {
+            let mut argv = vec!["losat", "psiblast", "-query", "q.faa", "-db", "d"];
+            argv.extend_from_slice(extra);
+            match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+                Ok(Cli {
+                    command: Commands::Psiblast(args),
+                }) => Ok(args.into_blastp_args().unwrap()),
+                Ok(other) => panic!("not psiblast: {other:?}"),
+                Err(error) => Err(crate::cli::render_message(&error)),
+            }
+        };
+        let blastp = db(&[
+            "-taxids",
+            "9606",
+            "-no_taxid_expansion",
+            "-show_gis",
+            "-parse_deflines",
+            "-lcase_masking",
+            "-num_iterations",
+            "3",
+        ])
+        .unwrap();
+        assert_eq!(blastp.db_filter.taxids.as_deref(), Some("9606"));
+        assert!(blastp.db_filter.no_taxid_expansion);
+        assert!(blastp.show_gis && blastp.parse_deflines && blastp.lcase_masking);
+        let blastp = db(&["-negative_seqidlist", "l.txt"]).unwrap();
+        assert_eq!(
+            blastp.db_filter.negative_seqidlist.as_deref(),
+            Some("l.txt")
+        );
+        let blastp = db(&[]).unwrap();
+        assert!(!blastp.show_gis && !blastp.parse_deflines && !blastp.lcase_masking);
+        assert!(blastp.db_filter.taxids.is_none() && blastp.db_filter.seqidlist.is_none());
+        // The filters exclude `-subject` and `-subject_loc`, as blastp's do.
+        for extra in [
+            &["-subject", "s.faa", "-taxids", "9606"][..],
+            &["-subject_loc", "1-10", "-seqidlist", "l.txt"][..],
+        ] {
+            let mut argv = vec!["losat", "psiblast", "-query", "q.faa"];
+            argv.extend_from_slice(extra);
+            let error = crate::cli::try_parse_from::<Cli, _, _>(argv).unwrap_err();
+            assert!(
+                crate::cli::render_message(&error).contains("cannot be used with"),
+                "{extra:?}"
+            );
+        }
+    }
+
+    #[test]
     fn psiblasts_arguments_that_losat_does_not_run_are_named() {
         for (option, value) in [
             ("-in_msa", Some("x")),
@@ -717,7 +816,6 @@ mod tests {
             ("-sum_stats", Some("false")),
             ("-culling_limit", Some("1")),
             ("-html", None),
-            ("-parse_deflines", None),
         ] {
             let mut extra = vec![option];
             extra.extend(value);

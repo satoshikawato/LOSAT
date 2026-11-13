@@ -1,0 +1,356 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tfn
+           16 sequences; 10,937 total letters
+
+
+
+Query= ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1
+gene:ENSG00000206172.10 gene_biotype:protein_coding
+transcript_biotype:protein_coding gene_symbol:HBA1
+description:hemoglobin subunit alpha 1 [Source:HGNC
+Symbol;Acc:HGNC:4823]
+
+Length=577
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:...  1041    0.0  
+ENST00000251595.11 cdna chromosome:GRCh38:16:172876:173710:1 gene...  948     0.0  
+ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1...  77.0    1e-14
+ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-...  65.3    7e-11
+ENST00000652335.1 cdna chromosome:GRCh38:16:142728:153964:1 gene:...  62.6    2e-10
+ENST00000336906.6 cdna chromosome:GRCh38:11:5253188:5254781:-1 ge...  58.1    1e-08
+ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1...  54.5    1e-07
+ENST00000396895.3 cdna chromosome:GRCh38:11:5268345:5269945:-1 ge...  48.2    5e-06
+ENST00000292901.8 cdna chromosome:GRCh38:11:5232678:5234658:-1 ge...  30.1    1.4  
+
+
+>ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBA1 description:hemoglobin subunit alpha 
+1 [Source:HGNC Symbol;Acc:HGNC:4823]
+ ENSDART00000101734.5 cdna chromosome:GRCz11:3:55127549:55128258:-1 gene:ENSDARG00000088330.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.2 description:hemoglobin, alpha 
+embryonic 1.2 [Source:ZFIN;Acc:ZDB-GENE-170302-1]
+Length=577
+
+ Score = 1041 bits (1154),  Expect = 0.0
+ Identities = 577/577 (100%), Gaps = 0/577 (0%)
+ Strand=Plus/Plus
+
+Query  1    ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAA  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAA  60
+
+Query  61   GACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   GACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGA  120
+
+Query  121  GGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGA  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  GGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGA  180
+
+Query  181  CCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGAC  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  CCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGAC  240
+
+Query  241  CAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCA  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCA  300
+
+Query  301  CGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGT  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  CGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGT  360
+
+Query  361  GACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAA  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAA  420
+
+Query  421  GTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGT  480
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  421  GTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGT  480
+
+Query  481  GGCCATGCTTCTTGccccttgggcctccccccagcccctcctccccttcctgcacccgta  540
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  481  GGCCATGCTTCTTGCCCCTTGGGCCTCCCCCCAGCCCCTCCTCCCCTTCCTGCACCCGTA  540
+
+Query  541  cccccGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA  577
+            |||||||||||||||||||||||||||||||||||||
+Sbjct  541  CCCCCGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA  577
+
+
+>ENST00000251595.11 cdna chromosome:GRCh38:16:172876:173710:1 gene:ENSG00000188536.15 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBA2 description:hemoglobin subunit alpha 
+2 [Source:HGNC Symbol;Acc:HGNC:4824]
+Length=576
+
+ Score = 948 bits (1050),  Expect = 0.0
+ Identities = 557/577 (97%), Gaps = 1/577 (0%)
+ Strand=Plus/Plus
+
+Query  1    ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAA  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAA  60
+
+Query  61   GACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   GACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGA  120
+
+Query  121  GGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGA  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  GGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGA  180
+
+Query  181  CCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGAC  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  CCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGAC  240
+
+Query  241  CAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCA  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCA  300
+
+Query  301  CGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGT  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  CGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGT  360
+
+Query  361  GACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAA  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  GACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAA  420
+
+Query  421  GTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGT  480
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  421  GTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGT  480
+
+Query  481  GGCCATGCTTCTTGccccttgggcctccccccagcccctcctccccttcctgcacccgta  540
+             ||| | | || |||||  ||||||||||  | | |||||||||||| | |||| |||  
+Sbjct  481  AGCCGTTCCTCCTGCCCGCTGGGCCTCCCAACGGGCCCTCCTCCCCTCCTTGCA-CCGGC  539
+
+Query  541  cccccGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA  577
+            ||  | ||||||||||||||||||||||||||| |||
+Sbjct  540  CCTTCCTGGTCTTTGAATAAAGTCTGAGTGGGCAGCA  576
+
+
+>ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1 gene:ENSDARG00000097011.3 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa1 description:hemoglobin, alpha 
+adult 1 [Source:ZFIN;Acc:ZDB-GENE-980526-79]
+ FBtr0337025 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 gene:FBgn0250846 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob2 description:globin 2
+Length=651
+
+ Score = 77.0 bits (84),  Expect = 1e-14
+ Identities = 105/147 (71%), Gaps = 0/147 (0%)
+ Strand=Plus/Plus
+
+Query  278  CTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAG  337
+            ||| ||||||||||||| || || ||   |||||| || || ||||||| ||||||||||
+Sbjct  359  CTGGCCGCCCTGAGCGAACTCCATGCCTTCAAGCTGCGTGTTGACCCGGCCAACTTCAAG  418
+
+Query  338  CTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCT  397
+             ||||    |||    |  | |||  | | |||   | | |||| || || |||||||||
+Sbjct  419  ATCCTGTCACACAATGTCATTGTGGTCATCGCCATGCTCTTCCCTGCAGACTTCACCCCT  478
+
+Query  398  GCGGTGCACGCCTCCCTGGACAAGTTC  424
+            | ||| ||||  ||  | |||||||||
+Sbjct  479  GAGGTTCACGTGTCAGTCGACAAGTTC  505
+
+
+ Score = 41.0 bits (44),  Expect = 8e-04
+ Identities = 107/160 (67%), Gaps = 9/160 (6%)
+ Strand=Plus/Plus
+
+Query  68   GTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTG  127
+            || ||||||  ||||| |||| || || |  | || |  ||   |||||| || ||||| 
+Sbjct  146  GTTAAGGCCATCTGGGCTAAGATCAGCCCCAAGGCCGATGAAATTGGTGCTGAAGCCCTC  205
+
+Query  128  GAGAGGATGTTCCTGTCCTTC--CCCACCA-CCAAGACCTACTTCCCGCACT---TCGAC  181
+            |  || |||   ||| || ||  ||| | | |||||||||||||  | ||||     |||
+Sbjct  206  GCCAGAATG---CTGACCGTCTACCCTCAAACCAAGACCTACTTTTCTCACTGGGCTGAC  262
+
+Query  182  CTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGA  221
+             ||||||  || ||||  |  || |||   ||||| ||||
+Sbjct  263  TTGAGCCCTGGGTCTGGTCCCGTGAAGAAGCACGGAAAGA  302
+
+
+>ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-1 gene:ENSDARG00000089475.6 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.1 description:hemoglobin, alpha 
+embryonic 1.1 [Source:ZFIN;Acc:ZDB-GENE-980526-80]
+Length=633
+
+ Score = 65.3 bits (71),  Expect = 7e-11
+ Identities = 200/304 (66%), Gaps = 13/304 (4%)
+ Strand=Plus/Plus
+
+Query  131  AGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTC---GACCTGAGC  187
+            ||||||||  |   || ||||   ||||||||||||||| | ||||     |||||||||
+Sbjct  185  AGGATGTTGATTGTCTACCCCCAGACCAAGACCTACTTCTCTCACTGGAAAGACCTGAGC  244
+
+Query  188  CACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCG-ACGCGCTGACCAACGC  246
+            |  ||||||||||  || | |   ||||||||||  |||   | | ||| || |  | ||
+Sbjct  245  CCAGGCTCTGCCCCAGTGAGGAAACACGGCAAGACTGTGATGGGAGGCGTTG-CTGAGGC  303
+
+Query  247  CGTGGCGCACGTGGACGAC----ATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACG  302
+             ||     |  | || |||    |||||  || | |||  |   || || || || || |
+Sbjct  304  TGTCAGCAAAATCGATGACCTTAATGCCGGACTC-CTGAAC---CTCAGTGAGCTCCATG  359
+
+Query  303  CGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGA  362
+            |   | |||| || |||||||| | ||| |||||| | ||   ||||  | | || ||| 
+Sbjct  360  CTTTCCAGCTGCGTGTGGACCCCGCCAATTTCAAGATTCTGTCCCACAACATCCTCGTGG  419
+
+Query  363  CCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGT  422
+              |||||| |     |||||||||| ||||| |||| ||  || |   |  |||||||||
+Sbjct  420  TTCTGGCCACTTTGTTCCCCGCCGATTTCACTCCTGAGGCTCATGTTGCAATGGACAAGT  479
+
+Query  423  TCCT  426
+            ||||
+Sbjct  480  TCCT  483
+
+
+>ENST00000652335.1 cdna chromosome:GRCh38:16:142728:153964:1 gene:ENSG00000130656.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBZ description:hemoglobin subunit zeta [Source:HGNC 
+Symbol;Acc:HGNC:4835]
+Length=547
+
+ Score = 62.6 bits (68),  Expect = 2e-10
+ Identities = 64/84 (76%), Gaps = 0/84 (0%)
+ Strand=Plus/Plus
+
+Query  119  GAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTC  178
+            ||| | ||||||||| | |||||   |  |||    ||||||||||||||||||||||||
+Sbjct  461  GAGACTCTGGAGAGGCTCTTCCTCAGCCACCCGCAGACCAAGACCTACTTCCCGCACTTC  520
+
+Query  179  GACCTGAGCCACGGCTCTGCCCAG  202
+            ||||||  ||  || || || |||
+Sbjct  521  GACCTGCACCCGGGGTCCGCGCAG  544
+
+
+>ENST00000336906.6 cdna chromosome:GRCh38:11:5253188:5254781:-1 gene:ENSG00000196565.16 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBG2 description:hemoglobin subunit gamma 
+2 [Source:HGNC Symbol;Acc:HGNC:4832]
+Length=586
+
+ Score = 58.1 bits (63),  Expect = 1e-08
+ Identities = 126/186 (68%), Gaps = 6/186 (3%)
+ Strand=Plus/Plus
+
+Query  287  CTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGC  346
+            ||||| || ||||||    ||||||| |  ||||| || |  ||||||||||||||  | 
+Sbjct  318  CTGAGTGAACTGCACTGTGACAAGCTGCATGTGGATCCTGAGAACTTCAAGCTCCT-GGG  376
+
+Query  347  CACTGCCTGCTGGTGACC---CTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTG  403
+             | ||  |||||||||||    ||||   |||  ||  |   || |||||||||| ||||
+Sbjct  377  AAATG--TGCTGGTGACCGTTTTGGCAATCCATTTCGGCAAAGAATTCACCCCTGAGGTG  434
+
+Query  404  CACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGT  463
+            || || |||  | | ||| |  || ||   |||  ||  |  ||| |||||| |||||  
+Sbjct  435  CAGGCTTCCTGGCAGAAGATGGTGACTGGAGTGGCCAGTGCCCTGTCCTCCAGATACCAC  494
+
+Query  464  TAAGCT  469
+            | ||||
+Sbjct  495  TGAGCT  500
+
+
+>ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1 gene:ENSDARG00000069735.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa2 description:hemoglobin, alpha 
+adult 2 [Source:ZFIN;Acc:ZDB-GENE-081104-38]
+Length=564
+
+ Score = 54.5 bits (59),  Expect = 1e-07
+ Identities = 103/152 (68%), Gaps = 0/152 (0%)
+ Strand=Plus/Plus
+
+Query  285  CCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAA  344
+            || |||| || || || ||   ||| || || || ||||| |  ||||||||| |  |  
+Sbjct  292  CCTTGAGTGATCTCCATGCCACCAAACTCCGCGTAGACCCTGGAAACTTCAAGATTTTGT  351
+
+Query  345  GCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGC  404
+             |||   | | || ||||| || || |  ||  ||||||| || |||||| | |  || |
+Sbjct  352  CCCATAACATCCTCGTGACACTTGCAGTTCATTTCCCCGCTGACTTCACCGCAGAAGTAC  411
+
+Query  405  ACGCCTCCCTGGACAAGTTCCTGGCTTCTGTG  436
+            |||   |  ||||||||||||| ||| || ||
+Sbjct  412  ACGTGGCTGTGGACAAGTTCCTCGCTGCTTTG  443
+
+
+>ENST00000396895.3 cdna chromosome:GRCh38:11:5268345:5269945:-1 gene:ENSG00000213931.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBE1 description:hemoglobin subunit epsilon 
+1 [Source:HGNC Symbol;Acc:HGNC:4830]
+Length=623
+
+ Score = 48.2 bits (52),  Expect = 5e-06
+ Identities = 102/150 (68%), Gaps = 2/150 (1%)
+ Strand=Plus/Plus
+
+Query  287  CTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGC  346
+            ||||| || ||||||    ||||||| |  ||||| || |  ||||||||||||||  | 
+Sbjct  320  CTGAGTGAGCTGCACTGTGACAAGCTGCATGTGGATCCTGAGAACTTCAAGCTCCTGGGT  379
+
+Query  347  CACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCAC  406
+             ||    || || | |  |||||  | ||| |   |   |||||||||||||  ||||| 
+Sbjct  380  AACGTGATGGTGATTATTCTGGCTACTCACTTTGGCAAGGAGTTCACCCCTGAAGTGCA-  438
+
+Query  407  GCCTCCCTGG-ACAAGTTCCTGGCTTCTGT  435
+            | || ||||| | ||| |  || || ||||
+Sbjct  439  GGCTGCCTGGCAGAAGCTGGTGTCTGCTGT  468
+
+
+ Score = 35.6 bits (38),  Expect = 0.033
+ Identities = 25/29 (86%), Gaps = 0/29 (0%)
+ Strand=Plus/Plus
+
+Query  198  CCCAGGTTAAGGGCCACGGCAAGAAGGTG  226
+            || |||| |||| ||| ||||||||||||
+Sbjct  231  CCAAGGTCAAGGCCCATGGCAAGAAGGTG  259
+
+
+>ENST00000292901.8 cdna chromosome:GRCh38:11:5232678:5234658:-1 gene:ENSG00000223609.12 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBD description:hemoglobin subunit delta 
+[Source:HGNC Symbol;Acc:HGNC:4829]
+Length=661
+
+ Score = 30.1 bits (32),  Expect = 1.4
+ Identities = 22/26 (85%), Gaps = 0/26 (0%)
+ Strand=Plus/Plus
+
+Query  201  AGGTTAAGGGCCACGGCAAGAAGGTG  226
+            |||| ||||  || ||||||||||||
+Sbjct  404  AGGTGAAGGCTCATGGCAAGAAGGTG  429
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1645728000
+
+
+  Database: tfn
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 10,937
+  Number of sequences in database:  16
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

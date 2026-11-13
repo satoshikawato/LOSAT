@@ -456,10 +456,36 @@ def makeblastdb(*words: str, input: bytes | str = b"") -> ToolOutput:
     return ToolOutput(*_pylosat.makeblastdb(list(words), data))
 
 
-def blastdbcmd(*words: str) -> ToolOutput:
+def blastdbcmd(*words: str, input: bytes | str = b"") -> ToolOutput:
     """Runs `blastdbcmd` with the command line's words.
 
-    A failure raises `SearchError` with what the command line writes to its standard error. The
-    GIL is released.
+    `input` is what the command line reads as standard input (`-entry_batch -`, `-ipg_batch -`,
+    `-taxidlist -`), so a batch of ids can be given from memory. A failure raises `SearchError`
+    with what the command line writes to its standard error. The GIL is released.
     """
-    return ToolOutput(*_pylosat.blastdbcmd(list(words)))
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.blastdbcmd(list(words), data))
+
+
+def dustmasker(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `dustmasker` with the command line's words, which masks the low-complexity regions
+    of nucleotide sequences.
+
+    `input` is what the command line reads as standard input (`-in -`, and without `-in`), so
+    sequences in memory can be masked. A failure raises `SearchError` with what the command line
+    writes to its standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.dustmasker(list(words), data))
+
+
+def segmasker(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `segmasker` with the command line's words, which masks the low-complexity regions
+    of protein sequences.
+
+    `input` is what the command line reads as standard input (`-in -`, and without `-in`), so
+    sequences in memory can be masked. A failure raises `SearchError` with what the command line
+    writes to its standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.segmasker(list(words), data))

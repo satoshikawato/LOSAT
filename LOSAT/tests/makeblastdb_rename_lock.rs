@@ -24,7 +24,10 @@
 //! (`CDirEntry::Rename`), c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72, 437-444
 //! (the destructors), c++/src/util/lmdb/mdb.c:4739-4915 (`mdb_env_setup_locks`).
 
-#![cfg(unix)]
+// The frozen files and messages are those of the Linux x64 release: the LMDB files follow the
+// host's page size (`Platform`), and the search path of a message is the run directory as the
+// child process sees it.
+#![cfg(target_os = "linux")]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -443,8 +446,10 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(name: &str) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("losat-mkdb-rename-{name}-{}", std::process::id()));
+        // The run directory as `getcwd` names it in the messages (`<C>`).
+        let dir = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("losat-mkdb-rename-{name}-{}", std::process::id()));
         make_writable(&dir);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("d")).unwrap();

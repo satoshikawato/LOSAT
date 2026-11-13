@@ -176,6 +176,12 @@ pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize)
     (num_chunks as usize, chunk_size as usize)
 }
 
+/// Whether NCBI splits a query batch whose queries have `concatenated_query_length` letters into
+/// chunks (`calculate_num_chunks` gives more than one; `split_query_batch` makes them).
+pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
+    calculate_num_chunks(sizes, concatenated_query_length).0 > 1
+}
+
 /// The query chunks of a batch with queries of `lengths` residues, or `None` when NCBI
 /// does not split it.
 ///

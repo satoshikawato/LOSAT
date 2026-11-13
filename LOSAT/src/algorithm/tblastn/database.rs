@@ -62,15 +62,6 @@ impl TblastnDatabase {
         self
     }
 
-    /// The ids of the queries of the search (`SeqDb::id_scope`).
-    pub(super) fn in_id_scope(
-        mut self,
-        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    ) -> Self {
-        self.db.set_id_scope(id_scope);
-        self
-    }
-
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -101,7 +92,7 @@ impl TblastnDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -155,15 +146,27 @@ impl TblastnDatabase {
         self.db.filtered_empty()
     }
 
+    /// Whether the total length of the statistics is not positive (`SeqDb::
+    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
+    pub(super) fn statistics_length_is_empty(&self) -> bool {
+        self.db.statistics_length_is_empty()
+    }
+
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
     }
 
-    /// The number of sequences of the volumes (`SeqDb::printed_num_seqs`): none is the database
-    /// whose first query batch fails, also with a list.
-    pub(super) fn printed_num_seqs(&self) -> u32 {
-        self.db.printed_num_seqs()
+    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
+    /// batch fails, also with a list or an alias file's range or `NSEQ`.
+    pub(super) fn num_oids(&self) -> u32 {
+        self.db.num_oids()
+    }
+
+    /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
+    /// (`shared::check_statistics_count`).
+    pub(super) fn check_statistics_count(&self) -> Result<()> {
+        shared::check_statistics_count(&self.db, PROGRAM)
     }
 
     /// What the `Database:` lines of the pairwise report show

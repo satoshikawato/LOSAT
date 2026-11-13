@@ -715,6 +715,10 @@ fn write_tabular_rows<const RPS: bool>(
     //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
     //         return;
     // ```
+    // The warnings after the last query's report (`QueryWarnings::after_last_query`).
+    if let Some(warnings) = warnings.as_deref_mut() {
+        warnings.after_last_query(hit_lists.len(), &mut *writer)?;
+    }
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
@@ -901,10 +905,8 @@ mod tests {
             names: None,
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let mut warnings = QueryWarnings {
-            before: &[b"Warning: q1\n".to_vec()],
-            sink: &mut err,
-        };
+        let before = [b"Warning: q1\n".to_vec()];
+        let mut warnings = QueryWarnings::new(&before, &mut err);
         write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
         (
             String::from_utf8(out).unwrap(),

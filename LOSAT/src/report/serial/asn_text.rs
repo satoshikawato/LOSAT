@@ -488,6 +488,18 @@ impl Encoder for AsnTextEncoder<'_> {
         self.put(name.as_bytes());
     }
 
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:127-131
+    /// ```c++
+    /// void CObjectOStreamAsn::WriteEnum(const CEnumeratedTypeValues& values,
+    ///                                   TEnumValueType value)
+    /// {
+    ///     WriteEnum(values,value,values.FindNameEx(value, values.IsInteger()));
+    /// }
+    /// ```
+    fn named_int(&mut self, name: &str, _value: i32) {
+        self.put(name.as_bytes());
+    }
+
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:140-146
     /// ```c++
     /// void CObjectOStreamAsn::WriteBool(bool data)

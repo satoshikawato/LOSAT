@@ -28,7 +28,9 @@ from ._api import (
     ToolOutput,
     blastdbcmd,
     describe,
+    dustmasker,
     makeblastdb,
+    segmasker,
 )
 from ._pylosat import (
     ENGINE_VERSION,
@@ -70,5 +72,7 @@ __all__ = [
     "__version__",
     "blastdbcmd",
     "describe",
+    "dustmasker",
     "makeblastdb",
+    "segmasker",
 ]

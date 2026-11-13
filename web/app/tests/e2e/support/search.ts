@@ -149,3 +149,21 @@ export async function result(page: Page, run: number, format: 0 | 6 | 7): Promis
   await page.getByTestId('tab-search').click();
   return { command, output };
 }
+
+/**
+ * The stored outputs of run `run` (outfmt 0, 6 and 7), saved from "Download All" as the bytes the
+ * application stores, and the run's warnings (empty when the engine wrote none).
+ */
+export async function storedOutputs(page: Page, run: number): Promise<{ outputs: Record<0 | 6 | 7, Buffer>; warnings: string }> {
+  await chooseRun(page, run);
+  const outputs: Partial<Record<0 | 6 | 7, Buffer>> = {};
+  for (const format of [0, 6, 7] as const) {
+    await page.getByTestId('results-download-all').click();
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId(`results-download-${format}`).click()]);
+    outputs[format] = readFileSync((await download.path())!);
+  }
+  await page.getByTestId('results-view-details').click();
+  const none = await page.getByTestId('run-diagnostics-none').count();
+  const warnings = none > 0 ? '' : ((await page.getByTestId('run-diagnostics').textContent()) ?? '');
+  return { outputs: outputs as Record<0 | 6 | 7, Buffer>, warnings };
+}

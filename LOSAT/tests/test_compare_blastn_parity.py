@@ -8,6 +8,7 @@ import csv
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -203,7 +204,9 @@ class CompareBlastnParityTests(unittest.TestCase):
                     output = Path(args[args.index(output_flag) + 1])
                     output.write_bytes(b"query\\tsubject\\t100.000\\t11\\t0\\t0\\t1\\t11\\t1\\t11\\t1e-05\\t20.0\\n")
                     Path(str(output) + ".invocation.json").write_text(
-                        json.dumps({"cwd": os.getcwd(), "args": args}), encoding="utf-8"
+                        json.dumps({"cwd": os.getcwd(), "args": args,
+                                    "usage_report": os.environ.get("BLAST_USAGE_REPORT")}),
+                        encoding="utf-8",
                     )
                     """
                 ),
@@ -240,6 +243,7 @@ class CompareBlastnParityTests(unittest.TestCase):
                 check=False,
                 capture_output=True,
                 text=True,
+                env={k: v for k, v in os.environ.items() if k != "BLAST_USAGE_REPORT"},
             )
 
             self.assertEqual(
@@ -258,6 +262,10 @@ class CompareBlastnParityTests(unittest.TestCase):
 
         self.assertEqual(ncbi_invocation["cwd"], str(root))
         self.assertEqual(losat_invocation["cwd"], str(root))
+        # NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+        # (blast_usage_report.cpp:195-220): NCBI's run has it, LOSAT's keeps the caller's environment.
+        self.assertEqual(ncbi_invocation["usage_report"], "false")
+        self.assertIsNone(losat_invocation["usage_report"])
         self.assertEqual(
             ncbi_invocation["args"][ncbi_invocation["args"].index("-query") + 1],
             row["query"],

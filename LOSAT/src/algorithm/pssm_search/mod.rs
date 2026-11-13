@@ -26,6 +26,7 @@
 
 pub(crate) mod evalue;
 pub(crate) mod gapalign;
+pub(crate) mod in_pssm;
 pub(crate) mod lookup;
 pub(crate) mod prelim;
 pub(crate) mod redo1;
@@ -79,14 +80,14 @@ pub struct PsiSearch {
     /// line carries (`algorithm::psiblast::in_pssm::setup_messages`).
     pub(crate) setup_messages: Vec<String>,
     /// The title of the query's warning label when it is not the record's: a PSSM query's
-    /// (`CBlastQuerySourceBioseqSet::GetTitle`, `algorithm::psiblast::in_pssm`); `None` for a FASTA
+    /// (`CBlastQuerySourceBioseqSet::GetTitle`, `algorithm::pssm_search::in_pssm`); `None` for a FASTA
     /// query's later rounds, whose label keeps the record's title.
     pub(crate) warning_title: Option<Vec<u8>>,
 }
 
 impl PsiSearch {
     /// `kbp_psi[0]`: the file's ungapped values, or those of `kbp_std` (the query's composition
-    /// with BLOSUM62, which NCBI also computes for `kbp_psi` before it overwrites them).
+    /// with the search's matrix, which NCBI also computes for `kbp_psi` before it overwrites them).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:89-107
     /// ```c++
@@ -121,8 +122,28 @@ impl PsiSearch {
         }
     }
 
+    /// Whether `kbp_psi[0]` (`ungapped_karlin`) is valid: a file's negative ungapped value makes
+    /// it invalid, and the search's setup then stops with NCBI's engine error of an invalid query
+    /// (`s_BlastFindValidKarlinBlk` over `sbp->kbp = kbp_psi`, blast_stat.c:2826).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
+    /// ```c
+    /// static Boolean s_BlastKarlinBlkIsValid(const Blast_KarlinBlk* kbp)
+    /// {
+    ///     if ( !kbp ) {
+    ///         return FALSE;
+    ///     } else {
+    ///         return (kbp->Lambda > 0 && kbp->K > 0 && kbp->H > 0);
+    ///     }
+    /// }
+    /// ```
+    pub(crate) fn ungapped_karlin_valid(&self, kbp_std: &KarlinParams) -> bool {
+        let kbp = self.ungapped_karlin(kbp_std);
+        kbp.lambda > 0.0 && kbp.k > 0.0 && kbp.h > 0.0
+    }
+
     /// `kbp_gap_psi[0]`: the file's gapped values, or those of `kbp_gap_std` (the table's values
-    /// of BLOSUM62 with the search's gap costs, which `kbp_gap_psi` is a copy of).
+    /// of the search's matrix and gap costs, which `kbp_gap_psi` is a copy of).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:109-127
     /// ```c++

@@ -57,17 +57,21 @@ const PSSM_FILES: &[&str] = &[
 /// it, item F1b).
 const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 
+/// tblastn's `-in_pssm` (PSI-TBLASTN, line PS item PS7), refused for the same reason as psiblast's,
+/// and its search strategy file.
+const TBLASTN_FILES: &[&str] = &["in_pssm", "export_search_strategy"];
+
 /// The options of `program`'s command line that write a file the library API does not write (a
 /// PSSM, `PSSM_FILES`, or the search strategy, `STRATEGY_FILES`) or read the query from one: they
 /// are not in an argv that `validate` accepts, and `describe` leaves them out.
-pub(super) fn file_options(program: Program) -> &'static [&'static str] {
+/// The searches of records of LOSAT Web take none of them either (the browser refuses `-in_pssm`
+/// until line PS's PSW1), and its `describe` leaves them out through the same list
+/// (`web_adapter::records_refused_options`).
+pub(crate) fn file_options(program: Program) -> &'static [&'static str] {
     match program {
         Program::Psiblast => PSSM_FILES,
-        Program::Blastn
-        | Program::Blastp
-        | Program::Blastx
-        | Program::Tblastn
-        | Program::Tblastx => STRATEGY_FILES,
+        Program::Tblastn => TBLASTN_FILES,
+        Program::Blastn | Program::Blastp | Program::Blastx | Program::Tblastx => STRATEGY_FILES,
     }
 }
 
@@ -107,8 +111,9 @@ impl Search {
             Commands::Blastn(args) => args.parse_deflines,
             Commands::Tblastx(args) => args.parse_deflines,
             Commands::Blastx(args) => args.parse_deflines,
-            Commands::Psiblast(_)
-            | Commands::Rpsblast(_)
+            Commands::Psiblast(args) => args.parse_deflines,
+            Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => false,
         }
@@ -320,7 +325,7 @@ mod tests {
             );
             assert!(error.message().starts_with(key(word)), "{word}: {error}");
         }
-        for program in [Program::Blastp, Program::Blastx] {
+        for program in [Program::Blastp, Program::Blastx, Program::Psiblast] {
             assert!(validate(program, &["-parse_deflines"])
                 .unwrap()
                 .parse_deflines());

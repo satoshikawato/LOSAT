@@ -94,6 +94,8 @@ pub(crate) struct PssmRedo1<'a> {
     /// The gap costs of the search, before the scaling.
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
+    /// The matrix of the search (`sbp->matrix`), for the positives.
+    pub(crate) matrix: crate::config::ScoringMatrix,
     /// `kbp_gap_psi[0]`, the PSSM file's gapped block (`sbp->kbp_gap` before the scaling).
     pub(crate) karlin: &'a KarlinParams,
     /// `extendParams->gap_x_dropoff_final`, the final gapped X-drop of the search (raw score).
@@ -489,6 +491,7 @@ impl PssmRedo1<'_> {
             expect_value: self.expect_value,
             query_length: self.context.aa_len as i32,
             rps_roles: false,
+            matrix: self.matrix,
         }
         .redo_match(run, oid, hsps, subject_read.residues()))
     }
@@ -504,6 +507,8 @@ pub(crate) struct RedoMatch<'a> {
     pub(crate) expect_value: f64,
     pub(crate) query_length: i32,
     pub(crate) rps_roles: bool,
+    /// The matrix of the search (`sbp->matrix`), for the positives.
+    pub(crate) matrix: crate::config::ScoringMatrix,
 }
 
 impl RedoMatch<'_> {
@@ -628,7 +633,13 @@ impl RedoMatch<'_> {
                 q_idx: template.q_idx,
                 s_idx: template.s_idx,
             };
-            let mut hsp = final_hsp(&traced, align.edit_script, run.query_nomask, subject);
+            let mut hsp = final_hsp(
+                &traced,
+                align.edit_script,
+                run.query_nomask,
+                subject,
+                self.matrix,
+            );
             hsp.e_value = e_value;
             hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
                 / std::f64::consts::LN_2;

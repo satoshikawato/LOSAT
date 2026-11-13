@@ -34,6 +34,10 @@ pub(crate) struct ReaderBatchShape {
     pub(crate) word_cutoff_min: Option<i32>,
     /// `hit_params->cutoff_score_min` of the batch (the composition redo).
     pub(crate) redo_cutoff_min: Option<i32>,
+    /// Each context of the batch, in order: its length, whether it is valid and its ungapped
+    /// Karlin block, of which the statistics of each subject take the batch's word cutoff minimum
+    /// (`parameters::subject_word_cutoff_min`; empty before the units are prepared).
+    pub(crate) batch_contexts: Vec<(usize, bool, KarlinParams)>,
     /// NCBI's error of the batch's set-up when the score block cannot load the `-matrix` of an
     /// ungapped search: the message of each query of the batch (`query_setup::unknown_matrix_message`),
     /// which every unit's preparation raises (`query_setup::prepare_unit_queries`).
@@ -155,6 +159,7 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: options
                 .unknown_matrix
                 .then(|| super::query_setup::matrix_error_message(records, options).into()),
@@ -182,9 +187,17 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: layout.matrix_error.clone(),
         };
         for unit in units {
+            shape.batch_contexts.extend(
+                unit.prepared
+                    .contexts
+                    .iter()
+                    .zip(&unit.params)
+                    .map(|(context, p)| (context.length, p.valid, p.ungapped)),
+            );
             for p in unit.params.iter().filter(|p| p.valid) {
                 if p.ungapped.lambda > 0.0
                     && shape
@@ -502,6 +515,7 @@ mod tests {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: None,
         }));
         assert_eq!(

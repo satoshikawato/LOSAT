@@ -114,6 +114,7 @@ pub(crate) fn cutoffs(
     params: &[ContextParameters],
     subject_length: i32,
     db_length: i64,
+    subject_cutoff_min: Option<i32>,
 ) -> ([i32; 2], f64) {
     // The smallest lambda, the average query length and `cutoff_score_min` are those of the
     // query batch: the reader batch when the unit is a part of one (`reader_batch.rs`).
@@ -147,15 +148,18 @@ pub(crate) fn cutoffs(
         let big = (x.ln() / ka.lambda).floor() as i32 + 1;
         x = y * (50 * 50) as f64;
         x /= 0.5 + 1.0e-9;
-        let cutoff_score_min = match shape.and_then(|shape| shape.word_cutoff_min) {
-            Some(batch_min) => batch_min,
-            None => params
-                .iter()
-                .filter(|p| p.valid)
-                .map(|p| p.word_cutoff)
-                .min()
-                .unwrap(),
-        };
+        // `subject_cutoff_min`: the batch's minimum of the statistics of each subject
+        // (`parameters::subject_word_cutoff_min`), else the batch's setup minimum.
+        let cutoff_score_min =
+            match subject_cutoff_min.or(shape.and_then(|shape| shape.word_cutoff_min)) {
+                Some(batch_min) => batch_min,
+                None => params
+                    .iter()
+                    .filter(|p| p.valid)
+                    .map(|p| p.word_cutoff)
+                    .min()
+                    .unwrap(),
+            };
         let small = ((x.ln() / ka.lambda).floor() as i32 + 1).max(cutoff_score_min);
         ([small, big], 0.5)
     } else {
@@ -1396,7 +1400,7 @@ mod cutoff_boundary_tests {
                 None,
             )
             .unwrap();
-            let (scores, prob) = cutoffs(&batch, &parameters, length, db);
+            let (scores, prob) = cutoffs(&batch, &parameters, length, db, None);
             assert_eq!(
                 scores,
                 [f[4].parse().unwrap(), f[5].parse().unwrap()],

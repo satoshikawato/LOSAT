@@ -711,30 +711,25 @@ pub(crate) fn preliminary_spaces(
 /// (`Subjects::per_subject`, a database length of 0): the chunk's preliminary parameters
 /// `preliminary` with the effective lengths of the subject's length (`numbers.count` sequences,
 /// `-dbsize`, the options' spaces of the preliminary stage), the hit-saving and word cutoffs of
-/// the subject's length without the stretch of a composition-based statistics. The options' spaces
-/// are set where the preliminary stage set them (`-searchsp`, `-dbsize` or `STATS_TOTLEN`:
-/// `stats::setup::preliminary_option_space`), and then they are the chunk's preliminary spaces.
+/// the subject's length without the stretch of a composition-based statistics. `option_spaces` are
+/// the whole query's options' spaces of the preliminary stage (`PreparedQueryBatch::
+/// subject_option_spaces`), which a chunk reads by its own context index.
 pub(crate) fn subject_update(
     batch: &PreparedQueryBatch,
     preliminary: &[ContextParameters],
     options: &ResolvedOptions,
     numbers: SubjectNumbers,
     subject_length: usize,
+    option_spaces: &[i64],
 ) -> Result<Vec<ContextParameters>> {
     let mut parameters = preliminary.to_vec();
-    let spaces_set =
-        options.effective_search_space != 0 || numbers.gumbel_total != 0 || options.db_length > 0;
-    let option_spaces: Vec<i64> = preliminary
-        .iter()
-        .map(|p| if spaces_set { p.search_space } else { 0 })
-        .collect();
     effective_lengths(
         batch,
         &mut parameters,
         options,
         subject_length as i64,
         numbers.count,
-        Some(&option_spaces),
+        Some(option_spaces),
     )?;
     let gumbel = gumbel_block(options, numbers.gumbel_total);
     let length = i32::try_from(subject_length)?;
@@ -748,6 +743,124 @@ pub(crate) fn subject_update(
         false,
     )?;
     Ok(parameters)
+}
+
+/// The gap decay rate of the hit-saving and word cutoffs (`BlastLinkHSPParametersNew`, quoted at
+/// `even_gap`), 0 without linking: no sum statistics, or a gapped search whose intron length links
+/// nothing (blast_parameters.c:793-805).
+fn gap_decay_rate(options: &ResolvedOptions) -> f64 {
+    if options.sum_stats
+        && (!options.gapped
+            || options.max_intron_length == 0
+            || (options.max_intron_length - 2) / 3 > 0)
+    {
+        if options.gapped {
+            0.1
+        } else {
+            0.5
+        }
+    } else {
+        0.0
+    }
+}
+
+/// The word cutoff of a valid context of `length` residues (`BlastInitialWordParametersUpdate`,
+/// quoted above `SubjectNumbers`): the gap trigger of its ungapped block, below it an ungapped
+/// search's `BLAST_Cutoffs` at the subject length `average`, at most the hit-saving cutoff
+/// `p.hit_cutoff_max`.
+fn word_cutoff(
+    options: &ResolvedOptions,
+    length: usize,
+    average: i32,
+    decay: f64,
+    p: &ContextParameters,
+) -> i32 {
+    let trigger = gap_trigger_raw_score(options.gap_trigger, &p.ungapped);
+    if options.gapped {
+        trigger
+    } else {
+        // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
+        // c++/include/algo/blast/core/blast_parameters.h:78:
+        // #define CUTOFF_E_BLASTX 1.0
+        cutoff_score_sum_stats(length as i32, average, decay, &p.ungapped)
+            .max(1)
+            .min(trigger)
+    }
+    .min(p.hit_cutoff_max)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:396-416
+// ```c
+//       if (new_cutoff < cutoff_min) {
+//          cutoff_min = new_cutoff;
+//       }
+//       ...
+//    parameters->cutoff_score_min = cutoff_min;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (quoted at
+// `search::compute_subject_with`): the link cutoffs read it (`even_gap::cutoffs`).
+// NCBI's query batch is the reader batch (`reader_batch.rs`): the statistics of each subject update
+// the word cutoffs of all its contexts, also those of the units LOSAT searches apart.
+/// The smallest word cutoff over the contexts `contexts` of a reader batch (`ReaderBatchShape::
+/// batch_contexts`: length, validity, ungapped block) for the subject of `subject_length` residues,
+/// where NCBI computes the statistics of each subject: each context's effective lengths with its
+/// preliminary option space (`stats::setup::preliminary_option_space`: the spaces `x_search_core`
+/// gives the batch), its hit-saving cutoff (an ungapped search has no Gumbel block) and its word
+/// cutoff, as `subject_update` computes them. `None` without a valid context. Only an ungapped
+/// search with sum statistics reads it.
+pub(crate) fn subject_word_cutoff_min(
+    contexts: &[(usize, bool, KarlinParams)],
+    options: &ResolvedOptions,
+    numbers: SubjectNumbers,
+    subject_length: usize,
+) -> Result<Option<i32>> {
+    let decay = gap_decay_rate(options);
+    let average = i32::try_from(subject_length)?;
+    let mut minimum: Option<i32> = None;
+    for &(query_length, valid, ungapped) in contexts {
+        if !valid || query_length == 0 {
+            continue;
+        }
+        let option_space = crate::stats::setup::preliminary_option_space(
+            query_length as i64,
+            numbers.gumbel_total,
+            numbers.request_count,
+            options.db_length,
+            options.effective_search_space,
+            false,
+            &ungapped,
+            options.program().upper,
+        )?;
+        let lengths = crate::stats::setup::subject_eff_lengths(
+            query_length as i64,
+            subject_length as i64,
+            numbers.count,
+            options.db_length,
+            option_space,
+            false,
+            &ungapped,
+            options.program().upper,
+        )?;
+        let p = ContextParameters {
+            valid,
+            ungapped,
+            search_space: lengths.eff_searchsp,
+            length_adjustment: lengths.length_adjustment,
+            word_cutoff: 0,
+            word_xdrop_init: 0,
+            word_xdrop: 0,
+            hit_cutoff: 0,
+            hit_cutoff_max: cutoff_score_from_evalue(
+                options.evalue,
+                lengths.eff_searchsp,
+                &ungapped,
+            )
+            .max(1),
+        };
+        let cutoff = word_cutoff(options, query_length, average, decay, &p);
+        minimum = Some(minimum.map_or(cutoff, |m| m.min(cutoff)));
+    }
+    Ok(minimum)
 }
 
 /// The cutoffs of each valid context (`BlastHitSavingParametersNew`/`Update`,
@@ -767,19 +880,7 @@ fn context_cutoffs(
     stretch: bool,
 ) -> Result<()> {
     let gapped = gapped_karlin(options);
-    let decay = if options.sum_stats
-        && (!options.gapped
-            || options.max_intron_length == 0
-            || (options.max_intron_length - 2) / 3 > 0)
-    {
-        if options.gapped {
-            0.1
-        } else {
-            0.5
-        }
-    } else {
-        0.0
-    };
+    let decay = gap_decay_rate(options);
     // The average context length is that of the query batch (a reader batch searched in several
     // units has one: `reader_batch.rs`, c++/src/algo/blast/core/blast_parameters.c:954-957).
     let avg_q = i32::try_from(batch.batch_concatenated_length() / batch.batch_context_count())?;
@@ -809,18 +910,7 @@ fn context_cutoffs(
                 .hit_cutoff
                 .min(cutoff_score_sum_stats(avg_q, n, decay, &ka).max(1));
         }
-        let trigger = gap_trigger_raw_score(options.gap_trigger, &p.ungapped);
-        p.word_cutoff = if options.gapped {
-            trigger
-        } else {
-            // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
-            // c++/include/algo/blast/core/blast_parameters.h:78:
-            // #define CUTOFF_E_BLASTX 1.0
-            cutoff_score_sum_stats(c.length as i32, average, decay, &ka)
-                .max(1)
-                .min(trigger)
-        }
-        .min(p.hit_cutoff_max);
+        p.word_cutoff = word_cutoff(options, c.length, average, decay, p);
         p.word_xdrop_init = x_drop_raw_score(options.x_dropoff, &p.ungapped, 1.0);
         p.word_xdrop = if p.word_xdrop_init == 0 {
             p.word_cutoff

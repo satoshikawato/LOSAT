@@ -68,6 +68,11 @@ pub struct PreparedQueryBatch {
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62
     /// `query_fits_of`; false with the switch off).
     pub(crate) x_ungap_sent: bool,
+    /// The options' search spaces that NCBI's preliminary stage sets for the contexts of the query
+    /// batch (`SplitQuery_SetEffectiveSearchSpace`, the whole query's, by context index; a query
+    /// chunk reads them by its own index), which the statistics of each subject read
+    /// (`parameters::subject_update`); `None` where the search has none (`search::x_search_core`).
+    pub(crate) subject_option_spaces: Option<std::sync::Arc<[i64]>>,
 }
 impl PreparedQueryBatch {
     /// EXPERIMENT (LOSAT_X_BXENDMEM): what the results of a searched batch keep: the batch without
@@ -87,6 +92,7 @@ impl PreparedQueryBatch {
             lookup_segments: Vec::new(),
             reader_shape: self.reader_shape.clone(),
             x_ungap_sent: self.x_ungap_sent,
+            subject_option_spaces: self.subject_option_spaces.clone(),
         }
     }
 }
@@ -622,6 +628,7 @@ pub(crate) fn prepare_unit_queries(
         lookup_segments,
         reader_shape: None,
         x_ungap_sent,
+        subject_option_spaces: None,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929

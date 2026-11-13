@@ -592,7 +592,15 @@ fn x_search_core(
         //     int retval = 0;
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
-        let chunks = split_queries(queries, &full, options, sizes)?;
+        let mut chunks = split_queries(queries, &full, options, sizes)?;
+        // The statistics of each subject read the options' spaces of the whole query by each
+        // chunk's context index (`s_GetEffectiveSearchSpaceForContext`, blast_setup.c:676-697).
+        if subjects.per_subject() {
+            let option_spaces: std::sync::Arc<[i64]> = spaces.clone().into();
+            for chunk in &mut chunks {
+                chunk.prepared.subject_option_spaces = Some(option_spaces.clone());
+            }
+        }
         super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
@@ -1347,6 +1355,7 @@ fn compute_subject(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
+    word_cutoff_min: Option<i32>,
 ) -> Result<SubjectComputation> {
     compute_subject_with(
         super::seed::Blosum62Bx,
@@ -1359,6 +1368,7 @@ fn compute_subject(
         xdrop,
         oid,
         x_containment,
+        word_cutoff_min,
     )
 }
 
@@ -1377,6 +1387,7 @@ fn compute_subject_of(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
+    word_cutoff_min: Option<i32>,
 ) -> Result<SubjectComputation> {
     compute_subject_with(
         super::seed::MatrixBx::of(options.scoring),
@@ -1389,6 +1400,7 @@ fn compute_subject_of(
         xdrop,
         oid,
         x_containment,
+        word_cutoff_min,
     )
 }
 
@@ -1410,16 +1422,37 @@ fn compute_subject_any(
     // `search_preliminary`): a subject that NCBI searches (BLASTX's subject is not translated: it
     // has a residue) gets its own statistics when the database length is 0, before its scan
     // (`parameters::subject_update`); the sink reads them too (`SubjectComputation`).
-    let subject_parameters = if subjects.per_subject() && subjects.length(oid) > 0 {
-        Some(super::parameters::subject_update(
-            batch,
-            params,
-            options,
-            subjects.numbers()?,
-            subjects.length(oid),
-        )?)
-    } else {
-        None
+    let (subject_parameters, word_cutoff_min) = match batch.subject_option_spaces.as_deref() {
+        Some(option_spaces) if subjects.length(oid) > 0 => {
+            let numbers = subjects.numbers()?;
+            let length = subjects.length(oid);
+            // A reader batch searched in units (`reader_batch.rs`): `cutoff_score_min` of the
+            // word parameters is the minimum over the batch's contexts (blast_parameters.c:401-416,
+            // `parameters::subject_word_cutoff_min`), which the link cutoffs read.
+            let word_cutoff_min = match batch.reader_shape.as_deref() {
+                Some(shape) if !options.gapped && options.sum_stats => {
+                    super::parameters::subject_word_cutoff_min(
+                        &shape.batch_contexts,
+                        options,
+                        numbers,
+                        length,
+                    )?
+                }
+                _ => None,
+            };
+            (
+                Some(super::parameters::subject_update(
+                    batch,
+                    params,
+                    options,
+                    numbers,
+                    length,
+                    option_spaces,
+                )?),
+                word_cutoff_min,
+            )
+        }
+        _ => (None, None),
     };
     let params = subject_parameters.as_deref().unwrap_or(params);
     let mut computed = if options.scoring == crate::config::ScoringMatrix::Blosum62 {
@@ -1433,6 +1466,7 @@ fn compute_subject_any(
             xdrop,
             oid,
             x_containment,
+            word_cutoff_min,
         )
     } else {
         compute_subject_of(
@@ -1445,6 +1479,7 @@ fn compute_subject_any(
             xdrop,
             oid,
             x_containment,
+            word_cutoff_min,
         )
     }?;
     computed.subject_parameters = subject_parameters;
@@ -1466,6 +1501,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
+    word_cutoff_min: Option<i32>,
 ) -> Result<SubjectComputation> {
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
@@ -1501,6 +1537,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
             params,
             subject_length as i32,
             subjects.total_length()?,
+            word_cutoff_min,
         ))
     } else {
         None

@@ -1213,3 +1213,34 @@ fn an_error_is_final() {
     assert!(r.next_info().unwrap().is_none());
     assert!(r.next_info().unwrap().is_none());
 }
+
+/// A text file is read in blocks as its objects are read (`StreamSource`), as NCBI's object
+/// stream reads it: the reader keeps a few blocks, not the file.
+#[test]
+fn a_text_file_is_read_in_blocks() {
+    let count = 100_000u32;
+    let mut text = b"Blast-db-mask-info ::= { algo-id 0, algo-program windowmasker, \
+        algo-options \"x\", masks { masks { "
+        .to_vec();
+    for i in 0..count {
+        if i > 0 {
+            text.extend_from_slice(b",\n ");
+        }
+        text.extend_from_slice(
+            format!("int {{ from {i}, to {}, id local id 3 }}", i + 1).as_bytes(),
+        );
+    }
+    text.extend_from_slice(b" }, more FALSE } }\n");
+    let size = text.len();
+    let mut r = MaskFileReader::from_bytes(Path::new("big.asnt"), text).unwrap();
+    assert_eq!(r.format(), MaskFileFormat::TextAsn);
+    let info = r.next_info().unwrap().unwrap();
+    assert_eq!(info.masks.masks.len(), count as usize);
+    assert_eq!(info.masks.masks[7].intervals(), vec![interval(7, 8)]);
+    assert!(
+        r.buffered() < size / 4,
+        "{} of {size} bytes kept",
+        r.buffered()
+    );
+    assert!(r.next_info().unwrap().is_none());
+}

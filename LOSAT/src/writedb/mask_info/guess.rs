@@ -8,6 +8,8 @@
 //! gets one more test, `TestFormatNewick`, whose answer `eNewick` is just as unusable for
 //! `s_ReadObject` as `eUnknown`: "Unknown encoding".
 
+use std::io::Read;
+
 use super::MaskFileFormat;
 use crate::writedb::format_guess::{c_isspace, ensure_test_buffer, split_tokenize};
 
@@ -69,15 +71,15 @@ use crate::writedb::format_guess::{c_isspace, ensure_test_buffer, split_tokenize
 //     ...
 // };
 // ```
-/// The format of a mask file, `None` for `eUnknown` (and `eNewick`).
-pub(super) fn guess_format(data: &[u8]) -> Option<MaskFileFormat> {
-    let mut input = data;
-    let sample = ensure_test_buffer(&mut input)?;
+/// The format of the mask file `input`, `None` for `eUnknown` (and `eNewick`), with the bytes
+/// taken from `input` for the guess (the start of the file; NCBI gives them back to the stream).
+pub(super) fn guess_format<R: Read>(input: &mut R) -> Option<(MaskFileFormat, Vec<u8>)> {
+    let sample = ensure_test_buffer(input)?;
     if test_format_text_asn(&sample) {
-        return Some(MaskFileFormat::TextAsn);
+        return Some((MaskFileFormat::TextAsn, sample));
     }
     if test_format_binary_asn(&sample) {
-        return Some(MaskFileFormat::BinaryAsn);
+        return Some((MaskFileFormat::BinaryAsn, sample));
     }
     None
 }

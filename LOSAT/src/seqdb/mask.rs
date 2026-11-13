@@ -121,18 +121,59 @@ pub(super) fn ncbi_split(s: &str) -> Vec<&str> {
     }
 }
 
-/// The name of a `Blast-filter-program` value (`blastdb.asn:51-59`).
+// NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:51-59
+// ```text
+// Blast-filter-program ::= INTEGER {
+//     not-set             (0),
+//     dust                (10),
+//     seg                 (20),
+//     windowmasker        (30),
+//     repeat              (40),
+//     other               (100),
+//     max                 (255)
+// }
+// ```
+/// The named values of `Blast-filter-program`, with their names as NCBI prints them: the one
+/// table of LOSAT (the mask writers of the masking tools, makeblastdb's mask reader and
+/// registry, and this reader of the column).
+pub(crate) const FILTER_PROGRAMS: [(&str, i32); 7] = [
+    ("not-set", 0),
+    ("dust", 10),
+    ("seg", 20),
+    ("windowmasker", 30),
+    ("repeat", 40),
+    ("other", 100),
+    ("max", 255),
+];
+
+/// A named value of `Blast-filter-program`, in the order of [`FILTER_PROGRAMS`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FilterProgram {
+    NotSet,
+    Dust,
+    Seg,
+    Windowmasker,
+    Repeat,
+    Other,
+    Max,
+}
+
+impl FilterProgram {
+    pub(crate) const fn name(self) -> &'static str {
+        FILTER_PROGRAMS[self as usize].0
+    }
+
+    pub(crate) const fn value(self) -> i32 {
+        FILTER_PROGRAMS[self as usize].1
+    }
+}
+
+/// The name of a `Blast-filter-program` value.
 fn filter_program_name(value: i32) -> Option<&'static str> {
-    Some(match value {
-        0 => "not-set",
-        10 => "dust",
-        20 => "seg",
-        30 => "windowmasker",
-        40 => "repeat",
-        100 => "other",
-        255 => "max",
-        _ => return None,
-    })
+    FILTER_PROGRAMS
+        .iter()
+        .find(|&&(_, number)| number == value)
+        .map(|&(name, _)| name)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2143-2165

@@ -19,6 +19,7 @@ use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use super::ber::BerIn;
 use super::guess::guess_format;
 use super::schema::{
     ChoiceDef, ClassDef, EnumDef, Ty, BLAST_DB_MASK_INFO, BLAST_FILTER_PROGRAM, BLAST_MASK_LIST,
@@ -28,7 +29,9 @@ use super::schema::{
     SEQ_LOC_INT, SEQ_LOC_MIX, SEQ_LOC_NULL, SEQ_LOC_PACKED_INT, SEQ_LOC_PACKED_PNT, SEQ_LOC_PNT,
     SEQ_LOC_WHOLE, SEQ_POINT, TEXTSEQ_ID, T_OBJECT_ID,
 };
+use super::text::{TextIn, TextSource};
 use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart};
+use crate::report::serial::asn_text_reader::StreamSource;
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -129,8 +132,6 @@ pub(super) trait Input {
     /// binary file gave it the tag of a UTF8String.
     fn read_string(&mut self) -> R<(Vec<u8>, bool)>;
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32>;
-    /// Bytes read so far (for the "file is not at its end" decisions of the caller).
-    fn offset(&self) -> usize;
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/objistr.hpp:1160-1163
@@ -1139,7 +1140,16 @@ impl<I: Input> Rd<I> {
 /// compares it with `seqid::ber::decode_seq_id` (DECISIONS 35).
 #[cfg(test)]
 pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
-    let mut rd = Rd::new(super::ber::BerIn::new(data));
+    let mut rd = Rd::new(BerIn::new(data));
+    rd.frame(|s| s.read_seq_id())
+}
+
+/// [`seq_id_from_binary`] for ASN.1 text, for the test that compares the builder with
+/// `seqid::asn_text`.
+#[cfg(test)]
+pub(super) fn seq_id_from_text(data: &[u8]) -> R<ParsedSeqId> {
+    use crate::report::serial::asn_text_reader::SliceSource;
+    let mut rd = Rd::new(TextIn::new(SliceSource::new(data)));
     rd.frame(|s| s.read_seq_id())
 }
 
@@ -1162,26 +1172,36 @@ fn unknown_encoding(name: &Path) -> MaskFileError {
     )))
 }
 
+/// Where the objects of a mask file come from.
+enum Source {
+    /// ASN.1 text, read from the file in blocks by one reader for all objects (`text.rs`): only
+    /// the bytes of the object being read are kept.
+    Text(Box<Rd<TextIn<TextSource>>>),
+    /// ASN.1 binary: the bytes of the file and the offset of the next object (`ber.rs` reads a
+    /// slice).
+    Binary { data: Vec<u8>, offset: usize },
+}
+
 /// A mask file read from the disk.
 pub(crate) struct MaskFileReader {
     path: PathBuf,
-    format: MaskFileFormat,
-    data: Vec<u8>,
-    /// The offset of the next object; `data.len()` once the file is over.
-    offset: usize,
+    source: Source,
     /// Set by the first error or end of file (NCBI stops reading the file there).
     state: State,
 }
 
 impl fmt::Debug for MaskFileReader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MaskFileReader")
-            .field("path", &self.path)
-            .field("format", &self.format)
-            .field("bytes", &self.data.len())
-            .field("offset", &self.offset)
-            .field("state", &self.state)
-            .finish()
+        let mut debug = f.debug_struct("MaskFileReader");
+        debug.field("path", &self.path);
+        match &self.source {
+            Source::Text(_) => debug.field("format", &MaskFileFormat::TextAsn),
+            Source::Binary { data, offset } => debug
+                .field("format", &MaskFileFormat::BinaryAsn)
+                .field("bytes", &data.len())
+                .field("offset", offset),
+        };
+        debug.field("state", &self.state).finish()
     }
 }
 
@@ -1205,9 +1225,11 @@ impl MaskFileReader {
     //     default:
     //         NCBI_THROW(CInvalidDataException, eInvalidInput, string("Unknown encoding for ") + msg);
     // ```
-    /// Reads the file and guesses its format. The text of the error for a file in neither
-    /// format is NCBI's. A file that cannot be opened or read is a failed stream for the format
-    /// guess (`x_TestInput`), which answers `eUnknown`: the same error.
+    /// Opens the file and guesses its format from its first bytes. The text of the error for a
+    /// file in neither format is NCBI's. A file that cannot be opened or read is a failed stream
+    /// for the format guess (`x_TestInput`), which answers `eUnknown`: the same error. A text
+    /// file is then read in blocks as its objects are read; a binary file is read whole (a read
+    /// error there is the same error).
     #[cfg(test)]
     pub(crate) fn open(path: &Path) -> Result<Self, MaskFileError> {
         Self::open_named(path, path)
@@ -1216,58 +1238,78 @@ impl MaskFileReader {
     /// [`open`](Self::open) for a file that messages call `name` (the name on makeblastdb's
     /// command line).
     pub(crate) fn open_named(path: &Path, name: &Path) -> Result<Self, MaskFileError> {
-        let mut data = Vec::new();
-        if std::fs::File::open(path)
-            .and_then(|mut f| f.read_to_end(&mut data))
-            .is_err()
-        {
-            // A read that fails half way leaves the bytes read; NCBI's sample would have them.
-            // An empty or unreadable file has no sample at all.
-            return Err(unknown_encoding(name));
+        match std::fs::File::open(path) {
+            Ok(file) => Self::from_reader(name, Box::new(file)),
+            Err(_) => Err(unknown_encoding(name)),
         }
-        Self::from_bytes(name, data)
     }
 
     /// The reader of a file whose bytes are `data`; `path` is only used in messages.
+    #[cfg(test)]
     pub(crate) fn from_bytes(path: &Path, data: Vec<u8>) -> Result<Self, MaskFileError> {
-        let Some(format) = guess_format(&data) else {
+        Self::from_reader(path, Box::new(std::io::Cursor::new(data)))
+    }
+
+    /// The reader of the file `input`; `path` is only used in messages.
+    fn from_reader(path: &Path, mut input: Box<dyn Read>) -> Result<Self, MaskFileError> {
+        let Some((format, sample)) = guess_format(&mut input) else {
             return Err(unknown_encoding(path));
+        };
+        let source = match format {
+            MaskFileFormat::TextAsn => Source::Text(Box::new(Rd::new(TextIn::new(
+                StreamSource::new(input, &sample),
+            )))),
+            MaskFileFormat::BinaryAsn => {
+                let mut data = sample;
+                if input.read_to_end(&mut data).is_err() {
+                    return Err(unknown_encoding(path));
+                }
+                Source::Binary { data, offset: 0 }
+            }
         };
         Ok(MaskFileReader {
             path: path.to_path_buf(),
-            format,
-            data,
-            offset: 0,
+            source,
             state: State::Open,
         })
     }
 
+    /// The bytes of the file that the reader keeps: the stream's buffer of a text file, the
+    /// whole of a binary one.
+    #[cfg(test)]
+    pub(crate) fn buffered(&self) -> usize {
+        match &self.source {
+            Source::Text(rd) => rd.inp.buffered(),
+            Source::Binary { data, .. } => data.len(),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn format(&self) -> MaskFileFormat {
-        self.format
+        match self.source {
+            Source::Text(_) => MaskFileFormat::TextAsn,
+            Source::Binary { .. } => MaskFileFormat::BinaryAsn,
+        }
     }
 
     fn run<T>(
         &mut self,
-        text: impl FnOnce(&mut Rd<super::text::TextIn<'_>>) -> R<T>,
-        binary: impl FnOnce(&mut Rd<super::ber::BerIn<'_>>) -> R<T>,
+        text: impl FnOnce(&mut Rd<TextIn<TextSource>>) -> R<T>,
+        binary: impl FnOnce(&mut Rd<BerIn<'_>>) -> R<T>,
     ) -> R<T> {
-        let start = self.offset.min(self.data.len());
-        let data = &self.data[start..];
-        let (result, used) = match self.format {
-            MaskFileFormat::TextAsn => {
-                let mut rd = Rd::new(super::text::TextIn::new(data));
-                let result = text(&mut rd);
-                (result, rd.inp.offset())
+        match &mut self.source {
+            Source::Text(rd) => {
+                rd.inp.new_object();
+                text(rd)
             }
-            MaskFileFormat::BinaryAsn => {
-                let mut rd = Rd::new(super::ber::BerIn::new(data));
+            Source::Binary { data, offset } => {
+                let start = (*offset).min(data.len());
+                let mut rd = Rd::new(BerIn::new(&data[start..]));
                 let result = binary(&mut rd);
-                (result, rd.inp.offset())
+                *offset = start + rd.inp.offset();
+                result
             }
-        };
-        self.offset = start + used;
-        result
+        }
     }
 
     fn stopped(&self) -> MaskFileError {

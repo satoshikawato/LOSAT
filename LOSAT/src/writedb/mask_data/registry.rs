@@ -5,32 +5,17 @@
 
 use std::collections::BTreeSet;
 
+use crate::seqdb::mask::FilterProgram;
 use crate::writedb::WriteDbError;
 
-// NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:51-59
-// ```asn
-// Blast-filter-program ::= INTEGER {
-//     not-set             (0),
-//     dust                (10),
-//     seg                 (20),
-//     windowmasker        (30),
-//     repeat              (40),
-//     other               (100),
-//     max                 (255)
-// }
-// ```
-/// `eBlast_filter_program_dust`.
-pub(crate) const FILTER_PROGRAM_DUST: i32 = 10;
-/// `eBlast_filter_program_seg`.
-pub(crate) const FILTER_PROGRAM_SEG: i32 = 20;
-/// `eBlast_filter_program_windowmasker`.
-pub(crate) const FILTER_PROGRAM_WINDOWMASKER: i32 = 30;
-/// `eBlast_filter_program_repeat`.
-pub(crate) const FILTER_PROGRAM_REPEAT: i32 = 40;
-/// `eBlast_filter_program_other`.
-pub(crate) const FILTER_PROGRAM_OTHER: i32 = 100;
-/// `eBlast_filter_program_max`.
-pub(crate) const FILTER_PROGRAM_MAX: i32 = 255;
+/// The `Blast-filter-program` values the registry assigns ids from
+/// (`crate::seqdb::mask::FILTER_PROGRAMS`).
+pub(crate) const FILTER_PROGRAM_DUST: i32 = FilterProgram::Dust.value();
+pub(crate) const FILTER_PROGRAM_SEG: i32 = FilterProgram::Seg.value();
+pub(crate) const FILTER_PROGRAM_WINDOWMASKER: i32 = FilterProgram::Windowmasker.value();
+pub(crate) const FILTER_PROGRAM_REPEAT: i32 = FilterProgram::Repeat.value();
+pub(crate) const FILTER_PROGRAM_OTHER: i32 = FilterProgram::Other.value();
+pub(crate) const FILTER_PROGRAM_MAX: i32 = FilterProgram::Max.value();
 
 /// `CMaskInfoRegistry`: the algorithms registered so far and the ids in use.
 #[derive(Debug, Default)]

@@ -54,6 +54,11 @@ const TAG_SET: i32 = 17;
 const LONG_TAG: u8 = 0x1f;
 
 impl<'a> BerIn<'a> {
+    /// Bytes read so far (where the next object of the file starts).
+    pub(super) fn offset(&self) -> usize {
+        self.pos
+    }
+
     pub(super) fn new(data: &'a [u8]) -> Self {
         BerIn {
             data,
@@ -894,9 +899,5 @@ impl Input for BerIn<'_> {
             return format_err(format!("invalid value of enumerated type: {value}"));
         }
         Ok(value)
-    }
-
-    fn offset(&self) -> usize {
-        self.pos
     }
 }

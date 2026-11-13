@@ -1,10 +1,14 @@
 //! The mask reader builds a `Seq-id` in its own walk (text and binary share one builder,
-//! `reader::read_seq_id`) and `seqid::ber::decode_seq_id` builds one for the defline of a
-//! database: two readers of the same type. For a valid binary `Seq-id` of every alternative
-//! they must give the same `ParsedSeqId`, so that a mask id and a database id compare as NCBI's
-//! one `CSeq_id` does.
+//! `reader::read_seq_id`, over the frames of the reader), `seqid::ber::decode_seq_id` builds one
+//! for the defline of a database and `seqid::asn_text` one for the PSSM and rpsbproc readers:
+//! three readers of the same type. For a valid `Seq-id` of every alternative they must give the
+//! same `ParsedSeqId`, so that a mask id and a database id compare as NCBI's one `CSeq_id` does.
 
-use super::reader::seq_id_from_binary;
+use super::reader::{seq_id_from_binary, seq_id_from_text};
+use crate::report::seqid::SeqId;
+use crate::report::serial::asn_text::AsnTextEncoder;
+use crate::report::serial::asn_text_reader::{Reader as TextReader, SliceSource};
+use crate::report::serial::encoder::Encoder;
 use crate::seqid::ber::{decode_seq_id, Reader};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
@@ -356,4 +360,38 @@ fn the_mask_reader_and_the_database_decoder_build_the_same_seq_id() {
         .collect();
     assert_eq!(alternatives.len(), 20);
     assert_eq!(compared, 2 * seq_ids().len());
+}
+
+/// A Seq-id in ASN.1 text as NCBI writes it (`Seq-id ::= ...`).
+fn text_seq_id(id: &ParsedSeqId) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut enc = AsnTextEncoder::new(&mut out);
+    enc.begin_document("Seq-id");
+    SeqId::Db(id).write(&mut enc);
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let value = out
+        .strip_prefix(b"Seq-id ::= ")
+        .expect("a document")
+        .to_vec();
+    value
+}
+
+#[test]
+fn the_mask_reader_and_the_text_reader_build_the_same_seq_id() {
+    let mut alternatives = std::collections::BTreeSet::new();
+    for id in seq_ids() {
+        let data = text_seq_id(&id);
+        let shown = String::from_utf8_lossy(&data).into_owned();
+        let from_mask = seq_id_from_text(&data).unwrap_or_else(|fail| panic!("{shown}: {fail:?}"));
+        let mut reader = TextReader::new(SliceSource::new(&data), "Seq-id", "test reader");
+        let from_text = reader
+            .seq_id()
+            .unwrap_or_else(|error| panic!("{shown}: {error}"));
+        assert_eq!(from_mask, from_text, "{shown}");
+        assert_eq!(from_mask, id, "{shown}");
+        alternatives.insert(id.alternative());
+    }
+    // Every alternative of the CHOICE is among the ids.
+    assert_eq!(alternatives.len(), 20);
 }

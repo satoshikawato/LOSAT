@@ -107,15 +107,7 @@ const fn var(name: &'static str, ty: &'static Ty) -> Variant {
 // }
 // ```
 pub(super) static BLAST_FILTER_PROGRAM: EnumDef = EnumDef {
-    values: &[
-        ("not-set", 0),
-        ("dust", 10),
-        ("seg", 20),
-        ("windowmasker", 30),
-        ("repeat", 40),
-        ("other", 100),
-        ("max", 255),
-    ],
+    values: &crate::seqdb::mask::FILTER_PROGRAMS,
     integer: true,
 };
 static T_FILTER_PROGRAM: Ty = Ty::Enum(&BLAST_FILTER_PROGRAM);

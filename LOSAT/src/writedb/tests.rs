@@ -167,6 +167,7 @@ fn protein_bioseqs(path: &Path) -> Vec<Bioseq> {
             // The reader hands over capital letters.
             seq_data: Some(SeqData::Ncbieaa(residues.to_ascii_uppercase())),
             parsed: None,
+            past_seq_pos: None,
         })
         .collect()
 }
@@ -1343,6 +1344,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
             length: 2,
             seq_data: Some(SeqData::Ncbieaa(b"MK".to_vec())),
             parsed: None,
+            past_seq_pos: None,
         };
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();

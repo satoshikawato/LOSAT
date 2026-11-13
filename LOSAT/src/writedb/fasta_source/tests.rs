@@ -650,6 +650,66 @@ fn record_above_the_length_limit() {
     );
 }
 
+/// A record of 4,294,967,296 residues or more (gaps included) comes with NCBI's length, its
+/// count modulo 2^32, and no data (line RG DECISIONS K3-6, K3-8): makeblastdb's checks
+/// test that length, and `s_FixBioseqDeltas` throws for a protein whose gaps stayed a
+/// delta, leaves a delta that starts with `Seq-loc null` without data, and builds the rest,
+/// which LOSAT refuses.
+#[test]
+fn record_past_32_bits() {
+    for (input, protein, length, past) in [
+        // Nucleotide gaps are parsed: a delta whose first piece is a literal.
+        (
+            &b">a\nA\n>?4294967295\n"[..],
+            false,
+            0,
+            Some(PastSeqPos::Refused {
+                length: 4_294_967_296,
+            }),
+        ),
+        (
+            b">a\nACGT\n>?4294967295\n>?4294967295\nAC\n",
+            false,
+            4,
+            Some(PastSeqPos::Refused {
+                length: 8_589_934_596,
+            }),
+        ),
+        // A lone hyphen first: `Seq-loc null`, no data.
+        (b">a\n-\n>?4294967295\n>?1\nA\n", false, 1, None),
+        // Protein gaps that sum to 2^32 are kept (`m_TotalGapLength` is 0): a protein delta.
+        (
+            b">a\nM\n>?4294967295\n>?1\nK\n",
+            true,
+            2,
+            Some(PastSeqPos::ProteinDelta),
+        ),
+        // Other sums are runs of `X` in NCBI, longer than the length.
+        (
+            b">a\nM\n>?4294967295\n>?2\nK\n",
+            true,
+            3,
+            Some(PastSeqPos::Refused {
+                length: 4_294_967_299,
+            }),
+        ),
+    ] {
+        let bioseq = one(input, protein);
+        assert_eq!(
+            (bioseq.length, bioseq.seq_data, bioseq.past_seq_pos),
+            (length, None, past),
+            "{}",
+            String::from_utf8_lossy(input)
+        );
+    }
+    // NCBI's length 4,294,967,294 is above the limit: its error, as without the wrap.
+    let bioseq = one(b">a\n>?4294967295\n>?4294967295\n", false);
+    assert_eq!(
+        (bioseq.length, bioseq.seq_data, bioseq.past_seq_pos),
+        (4_294_967_294, None, None)
+    );
+}
+
 /// A reader that fails after its bytes.
 struct FailingRead<'a>(&'a [u8]);
 
@@ -674,7 +734,7 @@ fn read_error_ends_the_reading() {
         first,
         Err(SourceError {
             message: "Read error: the disk is gone".to_string(),
-            out_of_memory: false,
+            kind: SourceErrorKind::Creation,
         })
     );
     assert_eq!(source.next_bioseq(&mut |_| ()), Ok(None));
@@ -703,7 +763,7 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
     );
     assert!(fix_bioseq_deltas(delta(u64::MAX - 1)).is_err());
     let error = SourceError::out_of_memory();
-    assert!(error.out_of_memory);
+    assert_eq!(error.kind, SourceErrorKind::OutOfMemory);
     assert_eq!(error.message, "BLAST ran out of memory");
 }
 

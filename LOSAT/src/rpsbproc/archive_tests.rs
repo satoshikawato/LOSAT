@@ -269,3 +269,165 @@ fn delta_literals_are_read() {
     let no_length = text.replacen("                  length 100,\n", "", 1);
     assert!(read_all(no_length.as_bytes()).is_empty());
 }
+
+// The `Std-seg`s of an rpstblastn archive (seqalign.asn:236-241, seqloc.asn:79-107): ids,
+// `int` and `pnt` locations with their strands, `empty`, `null` (`NULL`) and `whole`; a mask
+// with its frame; a nucleotide query's `ncbi2na` data.
+#[test]
+fn std_segs_of_a_translated_search() {
+    let text = br#"Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id { local str "Query_1" },
+            descr { title "q" },
+            inst { repr raw, mol na, length 8, seq-data ncbi2na '1BE4'H }
+          }
+        }
+      },
+      subject database "Cdd"
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score { { id str "e_value", value real { 1, 10, -5 } } },
+        segs std {
+          {
+            dim 2,
+            ids { local str "Query_1", general { db "CDD", tag id 5 } },
+            loc {
+              int { from 3, to 8, strand minus, id local str "Query_1" },
+              int { from 0, to 1, strand unknown, id general { db "CDD", tag id 5 } }
+            }
+          },
+          { loc { pnt { point 2, strand plus, id local str "Query_1" }, empty general { db "CDD", tag id 5 } } },
+          { loc { null NULL, whole general { db "CDD", tag id 5 } } }
+        }
+      }
+    },
+    masks { { locations { packed-int { { from 0, to 2, id local str "Query_1" } } }, frame plus1 } }
+  }
+}
+"#;
+    let archives = read_all(text);
+    assert_eq!(archives.len(), 1);
+    let archive = archives[0].as_ref().unwrap();
+    let RequestBody::QueueSearch(search) = &archive.body else {
+        panic!("queue-search");
+    };
+    assert_eq!(search.program, b"tblastn");
+    let Queries::BioseqSet(entries) = &search.queries else {
+        panic!("bioseq-set");
+    };
+    let SeqEntry::Seq(query) = &entries[0] else {
+        panic!("seq");
+    };
+    assert_eq!(query.mol, 4);
+    assert_eq!(query.seq_data, Some(("ncbi2na", vec![0x1b, 0xe4])));
+    let aligns = archive.results.alignments.as_ref().unwrap();
+    let Segs::Std(std) = &aligns[0].segs else {
+        panic!("std");
+    };
+    assert!(matches!(
+        &std.query_id,
+        QueryRowId::Id(ParsedSeqId::Local(ObjectId::Str(name))) if name == b"Query_1"
+    ));
+    assert!(matches!(&std.hit_id, Some(ParsedSeqId::General(tag)) if tag.db == b"CDD"));
+    assert_eq!(
+        std.segs,
+        vec![
+            StdPair {
+                query: StdLoc::Int {
+                    from: 3,
+                    to: 8,
+                    strand: Some(2)
+                },
+                hit: StdLoc::Int {
+                    from: 0,
+                    to: 1,
+                    strand: Some(0)
+                },
+            },
+            StdPair {
+                query: StdLoc::Pnt {
+                    point: 2,
+                    strand: Some(1)
+                },
+                hit: StdLoc::Empty,
+            },
+            StdPair {
+                query: StdLoc::Null,
+                hit: StdLoc::Whole,
+            },
+        ]
+    );
+    let masks = archive.results.masks.as_ref().unwrap();
+    assert!(matches!(masks[0].first, Some(MaskLocation::PackedInt(_))));
+}
+
+// `CSeq_align::GetSeq_id(0)` (Seq_align.cpp:339-358, quoted at `std_segs`) as read: segments
+// without ids give the id of their first location, `null` going on to the next segment; a first
+// location of another variant is named; no id at all is `Missing`.
+#[test]
+fn query_row_id_of_std_segs_without_ids() {
+    let archive = |locs: &str| {
+        format!(
+            r#"Blast4-archive ::= {{
+  request {{
+    body queue-search {{
+      program "tblastn",
+      service "rpsblast",
+      queries bioseq-set {{ seq-set {{ }} }},
+      subject database "Cdd"
+    }}
+  }},
+  results {{
+    alignments {{
+      {{
+        type partial,
+        segs std {{
+          {locs}
+        }}
+      }}
+    }}
+  }}
+}}
+"#
+        )
+    };
+    let read = |locs: &str| {
+        let text = archive(locs);
+        let mut archives = read_all(text.as_bytes());
+        let archive = archives.remove(0).unwrap();
+        let Segs::Std(std) = archive.results.alignments.unwrap().remove(0).segs else {
+            panic!("std");
+        };
+        std
+    };
+    let std = read(
+        r#"{ loc { null NULL, empty local str "x" } },
+          { loc { int { from 1, to 3, id local str "Q2" }, empty local str "x" } },
+          { ids { local str "Q3", local str "H" }, loc { null NULL, null NULL } }"#,
+    );
+    assert!(matches!(
+        &std.query_id,
+        QueryRowId::Id(ParsedSeqId::Local(ObjectId::Str(name))) if name == b"Q2"
+    ));
+    assert!(std.hit_id.is_none());
+    let std = read(
+        r#"{ loc { packed-int { { from 1, to 3, id local str "Q" } }, empty local str "x" } }"#,
+    );
+    assert!(matches!(std.query_id, QueryRowId::Location("packed-int")));
+    assert_eq!(std.segs[0].query, StdLoc::Other);
+    let std = read(r#"{ loc { null NULL } }"#);
+    assert!(matches!(std.query_id, QueryRowId::Missing));
+    assert_eq!(std.segs[0].hit, StdLoc::Missing);
+}

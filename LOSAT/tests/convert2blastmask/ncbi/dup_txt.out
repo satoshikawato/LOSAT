@@ -1,0 +1,20 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "o",
+  masks {
+    masks {
+      int {
+        from 0,
+        to 3,
+        id local id 1
+      },
+      int {
+        from 0,
+        to 3,
+        id local id 2
+      }
+    },
+    more FALSE
+  }
+}

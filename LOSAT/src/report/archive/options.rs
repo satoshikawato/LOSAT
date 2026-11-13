@@ -166,10 +166,19 @@ impl OptionInputs {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:257-260
+// ```c++
+//     int gap_open=0, gap_extend=0;
+//     if (args.Exist(kArgMatrixName) && args[kArgMatrixName])
+//          BLAST_GetProteinGapExistenceExtendParams
+//              (args[kArgMatrixName].AsString().c_str(), &gap_open, &gap_extend);
+// ```
 /// The `(gap open, gap extend)` that `-matrix` implies (`BLAST_GetProteinGapExistenceExtendParams`:
-/// the matrix's default row, which BLOSUM45 puts at 14 / 2).
+/// the matrix's default row, which BLOSUM45 puts at 14 / 2). A matrix that NCBI does not know
+/// leaves both at 0 (blast_stat.c:3383-3384), which NCBI BLAST+ 2.17.0 records in the search
+/// strategy of a tblastx run whose search then fails on that matrix (RG-F1 probe 5 `mat`).
 fn matrix_gaps(matrix: &str) -> (i32, i32) {
-    crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((11, 1))
+    crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((0, 0))
 }
 
 /// The word threshold the matrix suggests before the program's addition
@@ -719,6 +728,8 @@ mod tests {
             ("BLOSUM90", (10, 1)),
             ("PAM250", (15, 2)),
             ("pam250", (15, 2)),
+            // A matrix that NCBI does not know: both costs stay 0.
+            ("BLOSUM99", (0, 0)),
         ] {
             assert_eq!(matrix_gaps(matrix), want, "{matrix}");
         }

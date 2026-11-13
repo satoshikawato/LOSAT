@@ -275,6 +275,31 @@ impl TblastnDatabase {
         shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
+    /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the
+    /// first read of each subject that writes one, with its rank, where a query's report reads
+    /// its subjects one by one.
+    pub(super) fn subject_read_texts(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+        rows: SubjectFetch,
+        rows_open: bool,
+    ) -> Result<crate::report::query_warnings::QueryReads> {
+        let subjects = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| reads_subject(list, rows))
+            .map(|list| {
+                let rank = list.oid as usize;
+                (
+                    rank as u32,
+                    reported.ordinals[rank],
+                    reported.parsed_subject(rank),
+                )
+            });
+        shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
+    }
+
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
     /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
     /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a

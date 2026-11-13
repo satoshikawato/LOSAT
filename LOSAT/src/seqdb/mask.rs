@@ -606,7 +606,7 @@ impl MaskAlgorithms {
     // }
     // ```
     /// `GetMaskAlgorithmDetails`. An id the database does not have gives NCBI's text
-    /// ("Filtering algorithm ID <id> is not supported." and the list of algorithms) in
+    /// ("Filtering algorithm ID `<id>` is not supported." and the list of algorithms) in
     /// [`SeqDbError::Range`].
     pub fn details(&self, id: i32) -> Result<MaskAlgorithm, SeqDbError> {
         let Some((description, source)) = self.id_to_desc.get(&id) else {

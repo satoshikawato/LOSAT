@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.17
+- Version: 1.18
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -28,7 +28,9 @@
   rpsbproc 0.5.1, line RG item E1c, the ask of 2026-11-12); 1.16 2026-11-13 (`losat segmasker`
   in the scope and in exception 10; line RG, item K2, RG DECISIONS K2-5; Owner-delegated, the
   same standing instruction); 1.17 2026-11-13 (`-help-full` runs in every program as `-help`, and
-  the reader stops at a help flag as NCBI's; line RG item E2, the ask of 2026-11-12)
+  the reader stops at a help flag as NCBI's; line RG item E2, the ask of 2026-11-12);
+  1.18 2026-11-13 (`losat convert2blastmask` in the scope and in exception 10; line RG, item K3;
+  Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -40,7 +42,8 @@
 The command-line behaviour of every LOSAT program (BLASTN, BLASTP, TBLASTN, TBLASTX,
 BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report takes the
 place of a search result, since version 1.13 `losat blastdbcmd` and `losat dustmasker`, and
-since version 1.16 `losat segmasker`, whose outputs do) that is not part of a search result: argument parsing, help text, thread
+since version 1.16 `losat segmasker` and since version 1.18 `losat convert2blastmask`, whose
+outputs do) that is not part of a search result: argument parsing, help text, thread
 warnings, output-write failures and memory exhaustion. Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
 those errors remain under the root [`AGENTS.md`](../../AGENTS.md) bit-perfect rule.
@@ -173,10 +176,11 @@ BLAST+.
    (`LOSAT/src/rpsbproc/mod.rs`, `Report`). Release-notes sentence: If `losat rpsbproc` cannot
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
-10. **Closed pipe in blastdbcmd's, dustmasker's and segmasker's output** (version 1.13,
-   2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14 the same day,
-   item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5). A write of
-   NCBI's blastdbcmd 2.17.0, dustmasker 1.0.0 or segmasker 1.0.0 to a pipe whose
+10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's and convert2blastmask's output**
+   (version 1.13, 2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14
+   the same day, item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5;
+   version 1.18 the same day, convert2blastmask, item K3). A write of NCBI's blastdbcmd 2.17.0,
+   dustmasker 1.0.0, segmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
    reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
    sees the failed write and ends the program at once, with exit status 0 and no message, in
@@ -187,21 +191,22 @@ BLAST+.
    On Windows, where NCBI's write fails without a signal, a closed pipe is a failed write like
    a full disk. A failed write that is not a closed pipe (`-out /dev/full`) is NCBI's: where
    NCBI writes to the `ostream` itself (dustmasker's `interval`, `acclist` and `fasta`,
-   segmasker's `interval` and `fasta`,
+   segmasker's `interval` and `fasta`, convert2blastmask's `interval`,
    blastdbcmd's retrieval, `-info`, `-list`, `-tax_info`) the later writes are dropped and the
    run goes on to its end with its exit status (0, or the error of a later input or entry, such
    as blastdbcmd's `Skipped` of an id that is not found, exit status 1); where NCBI writes
    through its serial stream, which reports a failed write (dustmasker's `seqloc_*` and
    `maskinfo_*`: exit status 3, 0 or 134 by the case; segmasker's: 1 or 134, the local official
-   release with `-out /dev/full`; blastdbcmd's `-metadata`: exit status 6),
-   LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
+   release with `-out /dev/full`; convert2blastmask's `maskinfo_*`; blastdbcmd's `-metadata`:
+   exit status 6), LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
    is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
    `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
-   (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
+   (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `convert2blastmask::work::run_masks`
+   (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
    `blastdbcmd/metadata.rs`,
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
-   blastdbcmd`'s, `losat dustmasker`'s or `losat segmasker`'s output closes the pipe early, LOSAT stops at once with
+   blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
 
 ## Decided handling that is not an exception

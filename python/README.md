@@ -81,13 +81,15 @@ pylosat.makeblastdb("-dbtype", "prot", "-out", "proteins", input=fasta_text)
 print(pylosat.blastdbcmd("-db", "proteins", "-info").text)
 print(pylosat.dustmasker("-outfmt", "fasta", input=nucleotide_fasta).text)
 print(pylosat.segmasker("-outfmt", "fasta", input=protein_fasta).text)
+print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options", "mine",
+                                input=lowercase_masked_fasta).text)
 ```
 
-`makeblastdb`, `blastdbcmd`, `dustmasker` and `segmasker` take the command line's words and return a
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a
 `ToolOutput`, what it writes to standard output (`bytes`, `text`) and to standard error
 (`diagnostics`). `input` is what the command line reads as standard input, so a database can be
-built from FASTA in memory, ids given to `blastdbcmd -entry_batch -`, and sequences in memory
-masked. A failure raises `SearchError` with what the command line writes to its standard error.
+built from FASTA in memory, ids given to `blastdbcmd -entry_batch -`, sequences in memory
+masked, and the lower case letters of FASTA in memory turned into masking information. A failure raises `SearchError` with what the command line writes to its standard error.
 
 ## Long searches
 

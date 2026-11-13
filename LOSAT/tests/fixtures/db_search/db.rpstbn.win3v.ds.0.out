@@ -1,0 +1,915 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini3v
+           3 sequences; 560 total letters
+
+
+
+Query= w0 rnd
+
+Length=126
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499575
+
+
+Query= w1 rnd
+
+Length=169
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499225
+
+
+Query= w2 rnd
+
+Length=212
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2498875
+
+
+Query= w3 long
+
+Length=250
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2998410
+
+
+Query= w3n nrun
+
+Length=110
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= w4 rnd
+
+Length=149
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499400
+
+
+Query= w5 rnd
+
+Length=167
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499250
+
+
+Query= w6 rnd
+
+Length=137
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499500
+
+
+Query= w7 rnd
+
+Length=152
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.1    4.0  
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 18.1 bits (35),  Expect = 4.0
+ Identities = 6/20 (30%), Positives = 13/20 (65%), Gaps = 0/20 (0%)
+ Frame = -3
+
+Query  87   DIGPIRAKPLNTNLLLYQES  28
+            ++G I++  L T ++ Y +S
+Sbjct  142  NVGIIKSSNLCTEIVQYSDS  161
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499375
+
+
+Query= w8 rnd
+
+Length=113
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  18.5    1.9  
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 18.5 bits (36),  Expect = 1.9
+ Identities = 3/16 (19%), Positives = 8/16 (50%), Gaps = 0/16 (0%)
+ Frame = +1
+
+Query  58   DQRVSNNLPPRLHVSV  105
+            ++    N  P ++V+ 
+Sbjct  84   NKTWCTNTSPNMNVTA  99
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499700
+
+
+Query= w9 rnd
+
+Length=88
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499900
+
+
+Query= w10 rnd
+
+Length=195
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499000
+
+
+Query= w11 rnd
+
+Length=97
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499825
+
+
+Query= w12 hit 0 61-98
+
+Length=114
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  65.9    7e-18
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 65.9 bits (159),  Expect = 7e-18
+ Identities = 38/38 (100%), Positives = 38/38 (100%), Gaps = 0/38 (0%)
+ Frame = +1
+
+Query  1    TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEG  114
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEG
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEG  98
+
+
+
+Lambda      K        H        a         alpha
+   0.316    0.137    0.367    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499675
+
+
+Query= w13 rnd
+
+Length=161
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499300
+
+
+Query= w14 rnd
+
+Length=140
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499475
+
+
+Query= w15 hit 1 60-107
+
+Length=156
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  102     2e-33
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 102 bits (254),  Expect = 2e-33
+ Identities = 48/49 (98%), Positives = 49/49 (100%), Gaps = 0/49 (0%)
+ Frame = -2
+
+Query  152  LFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVQ  6
+            LFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVV+
+Sbjct  60   LFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVK  108
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499325
+
+
+Query= w16 rnd
+
+Length=226
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2498750
+
+
+Query= w17 rnd
+
+Length=200
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2498975
+
+
+Query= w18 hit 2 88-156
+
+Length=211
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  144     1e-49
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 144 bits (363),  Expect = 1e-49
+ Identities = 69/70 (99%), Positives = 70/70 (100%), Gaps = 0/70 (0%)
+ Frame = +2
+
+Query  2    FCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKVNDDMHIAPASLEYMLQVLPIMLIDRP  181
+            +CTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKVNDDMHIAPASLEYMLQVLPIMLIDRP
+Sbjct  87   WCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKVNDDMHIAPASLEYMLQVLPIMLIDRP  146
+
+Query  182  YIGAHITAGK  211
+            YIGAHITAGK
+Sbjct  147  YIGAHITAGK  156
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2498875
+
+
+Query= w19 rnd
+
+Length=66
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  18.5    0.80 
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 18.5 bits (36),  Expect = 0.80
+ Identities = 6/10 (60%), Positives = 8/10 (80%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  19  YRPIRVSVDS  48
+           YRPI ++V S
+Sbjct  41  YRPIDIAVAS  50
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2200000
+
+
+Query= w20 rnd
+
+Length=72
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2400000
+
+
+Query= w21 hit 0 37-80
+
+Length=149
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  85.1    1e-26
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 85.1 bits (209),  Expect = 1e-26
+ Identities = 44/46 (96%), Positives = 45/46 (98%), Gaps = 0/46 (0%)
+ Frame = -1
+
+Query  140  ENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKPI  3
+            ENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIK +
+Sbjct  37   ENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKEL  82
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499400
+
+
+Query= w22 rnd
+
+Length=75
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2500000
+
+
+Query= w23 rnd
+
+Length=102
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499775
+
+
+Query= w24 long
+
+Length=250
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2998410
+
+
+Query= w24n nrun
+
+Length=110
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= w25 rnd
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  17.7    1.2  
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 17.7 bits (34),  Expect = 1.2
+ Identities = 7/15 (47%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+ Frame = -3
+
+Query  66   PVIRLSPYVVLIVSL  22
+            P+ +L PY   IV L
+Sbjct  133  PIHKLLPYTNSIVKL  147
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499975
+
+
+Query= w26 rnd
+
+Length=235
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2598648
+
+
+Query= w27 hit 1 48-93
+
+Length=143
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  102     4e-32
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 102 bits (254),  Expect = 4e-32
+ Identities = 46/46 (100%), Positives = 46/46 (100%), Gaps = 0/46 (0%)
+ Frame = +1
+
+Query  1    TRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKAL  138
+            TRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKAL
+Sbjct  48   TRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKAL  93
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499450
+
+
+Query= w28 rnd
+
+Length=143
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499450
+
+
+Query= w29 rnd
+
+Length=98
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499825
+
+
+Query= w30 hit 2 66-121
+
+Length=176
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  110     2e-36
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 110 bits (275),  Expect = 2e-36
+ Identities = 56/56 (100%), Positives = 56/56 (100%), Gaps = 0/56 (0%)
+ Frame = -1
+
+Query  176  EESLGLRFIENLDAEKTNNKTWCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKVN  9
+            EESLGLRFIENLDAEKTNNKTWCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKVN
+Sbjct  66   EESLGLRFIENLDAEKTNNKTWCTNTSPNMNVTAAGMDYFPEIVCDINMQFAAKVN  121
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499175
+
+
+Query= w31 rnd
+
+Length=182
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499125
+
+
+Query= w32 rnd
+
+Length=176
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  17.7    8.5  
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 17.7 bits (34),  Expect = 8.5
+ Identities = 11/46 (24%), Positives = 19/46 (41%), Gaps = 18/46 (39%)
+ Frame = +1
+
+Query  52   SPRKCLKATKCPRRIRHRISYRYESSSNH-----LRSSGPCNELIK  174
+            +P  C K T         I+ +    SN      ++SS  C E+++
+Sbjct  125  TPYVCFKDT---------INRK----SNQENVGIIKSSNLCTEIVQ  157
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499175
+
+
+Query= w33 hit 0 93-142
+
+Length=153
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  96.3    5e-31
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 96.3 bits (238),  Expect = 5e-31
+ Identities = 50/50 (100%), Positives = 50/50 (100%), Gaps = 0/50 (0%)
+ Frame = +3
+
+Query  3    ILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTN  152
+            ILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTN
+Sbjct  93   ILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499350
+
+
+Query= w34 rnd
+
+Length=186
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2499075
+
+
+Query= w35 rnd
+
+Length=214
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2498850
+
+
+  Database: rps_mini3v
+    Posted date:  Nov 8, 2026  9:56 AM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

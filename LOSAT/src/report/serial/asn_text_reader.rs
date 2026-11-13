@@ -21,7 +21,8 @@
 //! and those of the value being read are kept). The readers are generic over the source, so the
 //! slice reader is what it was before the stream existed.
 
-use super::visible::{good_visible_char, BadChar, Position, SUBST};
+use super::object_stack::ObjectStack;
+use super::visible::{good_visible_char, BadChars, Position, Shown, SUBST};
 use crate::ncbi_str::is_space;
 use crate::utils::x87::X87;
 use std::io::Read;
@@ -233,15 +234,16 @@ pub(crate) struct Reader<S: AsnSource> {
     document: &'static str,
     /// The reader, for the refusals ("... is not supported by LOSAT's PSSM reader").
     reader: &'static str,
-    /// The bytes of VisibleStrings that `string` replaced, for the reader to post or refuse
-    /// (`take_bad_chars`; `report::serial::visible`).
-    pub(crate) bad_chars: Vec<BadChar>,
-    /// `GetStackTraceASN` of NCBI's reader at the value being read: the type's name
+    /// The bytes of VisibleStrings that `string` replaced, one entry per chunk, for the reader to
+    /// post or refuse (`take_bad_chars`; `report::serial::visible`).
+    pub(crate) bad_chars: Vec<BadChars>,
+    /// NCBI's object stack at the value being read (`object_stack`): the type's name
     /// (`set_root`), then the name of each member and variant being read and `E` for each
     /// element. `begin_members`, `next_member`, `choice` and `each` keep it; a reader that reads
-    /// a variant itself (`variant_frame`) names it. A frame left by a value is dropped by the
+    /// a variant itself (`variant_frame`) names it, and a reader that keeps its own frames (the
+    /// mask reader's `Rd`) pushes and pops them here. A frame left by a value is dropped by the
     /// next member or element of its container, so a reader keeps no balance.
-    frames: Vec<&'static str>,
+    pub(crate) stack: ObjectStack,
     /// Whether the refusals of the lexical layer (a REAL or a string that LOSAT does not read)
     /// are noted in `refusal` and the reading goes on (a reader that must know whether NCBI's
     /// reader would read the whole object before it refuses), rather than returned at once.
@@ -258,7 +260,7 @@ pub(crate) enum MemberId {
 
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
 pub(crate) struct Members {
-    /// The place of this SEQUENCE's member frame in `Reader::frames`.
+    /// The place of this SEQUENCE's member frame in `Reader::stack`.
     depth: usize,
     block_start: bool,
     /// The position in the module of the last member read.
@@ -277,7 +279,7 @@ impl<S: AsnSource> Reader<S> {
             document,
             reader,
             bad_chars: Vec::new(),
-            frames: Vec::new(),
+            stack: ObjectStack::default(),
             defer_refusals: false,
             refusal: None,
         }
@@ -285,23 +287,12 @@ impl<S: AsnSource> Reader<S> {
 
     /// The type that the document is read as, the bottom of the trace (`GetStackTraceASN`).
     pub(crate) fn set_root(&mut self, name: &'static str) {
-        self.frames.clear();
-        self.frames.push(name);
+        self.stack.set_root(name);
     }
 
     /// A choice variant that the reader read by itself (`member_id`), as `choice` notes its own.
     pub(crate) fn variant_frame(&mut self, name: &'static str) {
-        self.frames.push(name);
-    }
-
-    /// The trace of the value being read.
-    fn trace(&self) -> String {
-        self.frames
-            .iter()
-            .filter(|name| !name.is_empty())
-            .copied()
-            .collect::<Vec<_>>()
-            .join(".")
+        self.stack.push(name);
     }
 
     /// Note the refusals of the lexical layer in `refusal` and go on (`defer_refusals`).
@@ -714,7 +705,7 @@ impl<S: AsnSource> Reader<S> {
         let text = self.bytes(id);
         match names.iter().position(|name| name.as_bytes() == text) {
             Some(index) => {
-                self.frames.push(names[index]);
+                self.stack.push(names[index]);
                 Ok(index)
             }
             None => {
@@ -774,9 +765,9 @@ impl<S: AsnSource> Reader<S> {
     }
 
     pub(crate) fn begin_members(&mut self) -> Result<Members> {
-        let depth = self.frames.len();
+        let depth = self.stack.depth();
         let block_start = self.start_block()?;
-        self.frames.push("");
+        self.stack.push("");
         Ok(Members {
             depth,
             block_start,
@@ -794,7 +785,7 @@ impl<S: AsnSource> Reader<S> {
     ) -> Result<Option<usize>> {
         if !self.next_element(&mut members.block_start)? {
             self.end_block()?;
-            self.frames.truncate(members.depth);
+            self.stack.truncate(members.depth);
             return Ok(None);
         }
         let id = self.member_id_range()?;
@@ -808,8 +799,8 @@ impl<S: AsnSource> Reader<S> {
             return Err(self.error(message));
         }
         members.last = Some(index);
-        self.frames.truncate(members.depth + 1);
-        self.frames[members.depth] = names[index];
+        self.stack.truncate(members.depth + 1);
+        self.stack.rename(members.depth, names[index]);
         Ok(Some(index))
     }
 
@@ -828,15 +819,15 @@ impl<S: AsnSource> Reader<S> {
 
     /// The elements of a SEQUENCE OF or SET OF, each read by `element` and kept by it.
     pub(crate) fn each(&mut self, mut element: impl FnMut(&mut Self) -> Result<()>) -> Result<()> {
-        let depth = self.frames.len();
+        let depth = self.stack.depth();
         let mut block_start = self.start_block()?;
         while self.next_element(&mut block_start)? {
-            self.frames.truncate(depth);
-            self.frames.push("E");
+            self.stack.truncate(depth);
+            self.stack.push("E");
             element(self)?;
         }
         self.end_block()?;
-        self.frames.truncate(depth);
+        self.stack.truncate(depth);
         Ok(())
     }
 
@@ -1115,8 +1106,8 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadString` of a VisibleString (`ReadStringValue` with `eFNP_ReplaceAndWarn`): a quoted
     /// string, its lines joined, `""` read as one quote, each byte outside `' '..='~'` stored as
-    /// `#` and noted in `bad_chars` (the reader that knows its frames posts NCBI's message for
-    /// it). The string is appended in NCBI's chunks, which the messages show: a chunk ends at a
+    /// `#` and noted in `bad_chars` with the reader's trace (the reader posts NCBI's message for
+    /// it, or refuses). The string is appended in NCBI's chunks, which the messages show: a chunk ends at a
     /// line end, at a quote, and after 128 bytes; the second quote of `""` starts the next one.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986
     // ```c++
@@ -1185,7 +1176,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// The bad bytes noted by `string` since the last call (in the order read).
-    pub(crate) fn take_bad_chars(&mut self) -> Vec<BadChar> {
+    pub(crate) fn take_bad_chars(&mut self) -> Vec<BadChars> {
         std::mem::take(&mut self.bad_chars)
     }
 
@@ -1230,7 +1221,8 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `AppendStringData`: the `count` bytes at `pos` appended to `out` and taken; a VisibleString
-    /// stores `#` for a bad byte and notes it with the line and the chunk.
+    /// stores `#` for a bad byte; the chunk's bad bytes are noted once, with the trace, the line
+    /// and the chunk (`BadChars`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:876-918
     // ```c++
     //     const char* data = m_Input.GetCurrentPos();
@@ -1268,17 +1260,13 @@ impl<S: AsnSource> Reader<S> {
         let data = self.src.bytes(self.pos..self.pos + count);
         let start = out.len();
         out.extend_from_slice(data);
-        if visible {
-            for k in start..out.len() {
-                let byte = out[k];
-                if !good_visible_char(byte) {
-                    self.bad_chars.push(BadChar {
-                        byte,
-                        at: Position::Line(self.line),
-                        chunk: data.to_vec(),
-                        trace: self.trace(),
-                    });
-                    out[k] = SUBST;
+        if visible && !out[start..].iter().all(|&c| good_visible_char(c)) {
+            let at = Position::Line(self.line);
+            self.bad_chars
+                .extend(BadChars::find(self.stack.trace(), data, Shown::AsIs, at));
+            for c in &mut out[start..] {
+                if !good_visible_char(*c) {
+                    *c = SUBST;
                 }
             }
         }

@@ -50,7 +50,7 @@ mod tests;
 #[cfg(test)]
 mod tests_cli;
 #[cfg(test)]
-mod tests_e2e;
+pub(crate) mod tests_e2e;
 #[cfg(test)]
 mod tests_ids;
 #[cfg(test)]

@@ -332,10 +332,9 @@ pub(crate) fn read_in_pssm(
     // / the chunk, once per byte, after the formatting handler's warnings, before the PSSM
     // search's own messages, status 0; tblastn the same with `[tblastn]`).
     for bad in &bad_chars {
-        let mut line = format!("Error: (803.7) [{}] ", reader.ncbi_name).into_bytes();
-        line.extend_from_slice(&bad.traced_message());
-        line.push(b'\n');
-        diagnostics.write_all(&line)?;
+        let mut lines = Vec::new();
+        bad.post(reader.ncbi_name, &mut lines);
+        diagnostics.write_all(&lines)?;
     }
     let read = match read {
         Ok(read) => read,

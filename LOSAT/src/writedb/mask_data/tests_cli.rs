@@ -7,7 +7,7 @@
 //! * `the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures`: the 36 cases of
 //!   `tests/seqdb/mask_writer` (`expected/<case>.{rc,stderr,stdout}`), and the database each one
 //!   writes (files, algorithms and ranges as NCBI's `blastdbcmd` reads them back).
-//! * `the_command_line_matches_makeblastdb_on_every_mask_parse_file`: the 128 runs of
+//! * `the_command_line_matches_makeblastdb_on_every_mask_parse_file`: the 176 runs of
 //!   `tests/seqdb/mask_parse` (`expected.tsv`, `expected_stdout.tsv`).
 //! * `the_command_line_reaches_the_sequences_that_ncbi_reaches_with_parse_seqids`: a few of the
 //!   cases of `tests/seqdb/mask_ids`, with `-parse_seqids`, in the default format version 5.
@@ -24,8 +24,8 @@ use std::path::Path;
 use super::tests::column_date;
 use super::tests_e2e::{
     assert_database, assert_reads_back, assert_same_files, classify, option_root, ranges_text,
-    read, read_expected, stored_title, unescape, volume_bases, writer_cases, Class,
-    DESTRUCTOR_MESSAGE,
+    read, read_expected, split_serial_stderr, stored_title, unescape, volume_bases, writer_cases,
+    Class, DESTRUCTOR_MESSAGE,
 };
 use super::tests_ids::{masked_rows, rows, Row};
 use crate::seqdb::{SeqDb, SeqType};
@@ -313,10 +313,16 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
             }
             Class::Serial | Class::OutOfMemory => {
                 assert_eq!(run.status, 255, "{context}");
+                let posted = if class == Class::Serial {
+                    split_serial_stderr(&ncbi.stderr).unwrap().0
+                } else {
+                    ""
+                };
                 assert!(
                     run.stderr
-                        .starts_with(&format!("Error: mask data in '{file}': ")),
-                    "{context}"
+                        .starts_with(&format!("{posted}Error: mask data in '{file}': ")),
+                    "{context}\nNCBI: {}",
+                    ncbi.stderr
                 );
                 assert_eq!(
                     run.stderr.ends_with(DESTRUCTOR_MESSAGE),
@@ -329,8 +335,8 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
         }
     }
     assert!(compared > 300, "{compared} rows compared");
-    assert_eq!(classes["Equal"], 122);
-    assert_eq!(classes.values().sum::<usize>(), 172);
+    assert_eq!(classes["Equal"], 123);
+    assert_eq!(classes.values().sum::<usize>(), 176);
 }
 
 #[test]

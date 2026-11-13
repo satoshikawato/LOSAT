@@ -32,6 +32,7 @@
 
 use super::encoder::{Encoder, SerialError};
 use super::real::write_asn_text_double;
+use super::visible::good_visible_char;
 
 /// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
 const STRING_WRAP: usize = 78;
@@ -553,7 +554,7 @@ impl Encoder for AsnTextEncoder<'_> {
     fn visible_str(&mut self, value: &[u8]) {
         self.put(b"\"");
         for &byte in value {
-            if !(0x20..=0x7e).contains(&byte) {
+            if !good_visible_char(byte) {
                 if self.error.is_none() {
                     self.error = Some(SerialError::NonVisibleChar(byte));
                 }

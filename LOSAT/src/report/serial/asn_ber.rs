@@ -34,6 +34,7 @@
 
 use super::encoder::{Encoder, SerialError};
 use super::real::double_to_string_posix;
+use super::visible::good_visible_char;
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2(data, DBL_DIG)`).
 const DBL_DIG: u32 = 15;
@@ -287,7 +288,7 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.out.push(TAG_VISIBLE_STRING);
         self.length(value.len());
         for &byte in value {
-            if (0x20..=0x7e).contains(&byte) {
+            if good_visible_char(byte) {
                 self.out.push(byte);
             } else {
                 if self.error.is_none() {

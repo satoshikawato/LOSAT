@@ -23,6 +23,7 @@ Files written into `<out>/mask_parse/`:
                            the script also makes, is the lower-case input of the c2m_ps files)
   h_*.asnt                 hand-written text cases
   b_*.asnb                 damaged binary files (made from dust.asnb)
+                           (b_utf8_two_files_*.asnb are run together, see `JOINED`)
   expected.tsv             what makeblastdb does with each file
   expected_stdout.tsv      `<file> <log>`: makeblastdb's log (standard output) of each RUN, escaped as
                            below, with the build time as <T>, the database path as <OUT> and the
@@ -32,7 +33,10 @@ expected.tsv: lines starting with '#' are comments. `RUN <file> <dbtype> <fasta>
 exit status and the standard error (all of it) of
 `makeblastdb -in <fasta> -dbtype <dbtype> -out db -mask_data <file>` (no -parse_seqids; `<fasta>` is in
 LOSAT/tests/seqdb or mask_parse), run in a directory that holds the file, so that its messages
-name the file without a path. The last field of RUN is the options of the algorithm as `blastdbcmd -info`
+name the file without a path. `<file>` of a run that reads several mask files is the comma-joined
+list that `-mask_data` takes (`b_utf8_two_files_1.asnb,b_utf8_two_files_2.asnb`: the UTF8String
+warning is posted once per run, not per file); the MASK, NODB and expected_stdout.tsv rows of that
+run carry the same list in their file field. The last field of RUN is the options of the algorithm as `blastdbcmd -info`
 prints them (the fixed-width table, "default options used" for none; empty when no database was
 written or it has several algorithms). `NODB <file>` follows a RUN with status 0 that wrote no database (makeblastdb gave up
 without an error status). When the database was written, one `MASK <file> <algorithm> <oid>
@@ -286,6 +290,11 @@ def hand_cases():
         'Blast-mask-list ::= { masks { packed-int { { from 20, to 24, id local str "c\td" } } }, more FALSE }\n')
     c["bad_char_second_object_same_line"] = ok.replace("{ algo-id", "{\n algo-id").replace(
         '"x", masks', '"x",\n masks').rstrip("\n") + " " + ok.replace('"x"', '"u\tv"')
+    # A bad byte, then a read error in the same object (the errors of the repair stay, the exception
+    # follows them), and a bad byte in a chunk that was flushed before the string never ends.
+    c["bad_char_then_error"] = obj(f"packed-int {{ {iv(5, 14)} }}", options='"x\x01"', more="MAYBE")
+    c["bad_char_unclosed"] = ('Blast-db-mask-info ::= { algo-id 0, algo-program windowmasker, '
+                              'algo-options "x\x01\ny\x02')
     # Files that makeblastdb takes for neither format ("Unknown encoding for mask data in ...").
     c["not_asn_fasta.fna"] = ">seq1 not a mask file\nACGTACGTACGT\nACGT\n"
     c["not_asn_text.txt"] = "hello\n"
@@ -337,10 +346,15 @@ def ber_interval(a, b, i, strand=None, extra=b""):
     return ber_seq(*members, *([extra] if extra else []))
 
 
-def ber_info(locs, more=False, options="x", program=30, algo_id=0):
+def ber_info(locs, more=False, options="x", program=30, algo_id=0, options_tag=0x1A):
     masks = ber_seq(ber_mem(0, ber_seq(*locs)), ber_mem(1, b"\x01\x01" + (b"\xff" if more else b"\x00")))
-    return ber_seq(ber_mem(0, ber_int(algo_id)), ber_mem(1, ber_int(program)), ber_mem(2, ber_str(options)),
+    return ber_seq(ber_mem(0, ber_int(algo_id)), ber_mem(1, ber_int(program)), ber_mem(2, ber_str(options, options_tag)),
                    ber_mem(3, masks))
+
+
+# Binary files that one run reads together (`-mask_data first,second`): the RUN row is named by the
+# comma-joined list, the files are written singly.
+JOINED = [("utf8_two_files_1", "utf8_two_files_2")]
 
 
 def damaged_binary(dust):
@@ -370,6 +384,13 @@ def damaged_binary(dust):
     c["bad_chars_options"] = bytes(bad)
     c["bad_chars_two_objects"] = bytes(bad) + bytes(bad)
     c["utf8_options_two_objects"] = c["utf8_options"] * 2
+    # A bad byte, then the object is cut after the string (a read error follows the repair).
+    full = ber_info([ber_mem(3, ber_interval(5, 14, 3))], options="z\x03", program=10)
+    c["bad_char_then_cut"] = full[:-12]
+    # Two files with a UTF8String tag each, read by one run (`-mask_data a,b`): one warning (JOINED).
+    for n, options in ((1, "x"), (2, "y")):
+        c[f"utf8_two_files_{n}"] = ber_info([ber_mem(3, ber_interval(5, 14, 3))], options=options,
+                                            program=10, options_tag=0x0C)
     c["bad_options_tag"] = dust.replace(b"\x1a\x1d", b"\x13\x1d", 1)
     c["wrong_first_tag"] = b"\x31" + dust[1:]
     c["swapped_members"] = dust.replace(b"\xa0\x80\x02\x01\x02\x00\x00\xa1\x80\x02\x01\x0a\x00\x00",
@@ -483,7 +504,8 @@ def masked_log(text):
 
 
 def expected_rows(bin_dir, work, committed, files):
-    """files: [(file name, fasta, dbtype)] with the mask files in `work/mask_parse`."""
+    """files: [(file name or comma-joined list of names, fasta, dbtype)] with the mask files in
+    `work/mask_parse`."""
     rows = ["# RUN\tfile\tdbtype\tfasta\trc\tstderr\toptions", "# NODB\tfile",
             "# MASK\tfile\talgorithm\toid\tranges"]
     runs = work / "runs"
@@ -491,7 +513,8 @@ def expected_rows(bin_dir, work, committed, files):
     for name, fasta, dbtype in files:
         run_dir = runs / name
         run_dir.mkdir(parents=True)
-        shutil.copyfile(work / "mask_parse" / name, run_dir / name)
+        for single in name.split(","):
+            shutil.copyfile(work / "mask_parse" / single, run_dir / single)
         fasta_path = work / fasta if (work / fasta).exists() else Path(committed) / fasta
         shutil.copyfile(fasta_path, run_dir / fasta)
         result = run([bin_dir / "makeblastdb", "-in", fasta, "-dbtype", dbtype, "-out", "db",
@@ -540,10 +563,14 @@ def main():
         (work / "mask_parse" / file).write_bytes(content.encode("latin-1"))
         files.append((file, "mask_nucl.fna", "nucl"))
     dust = (work / "mask_parse" / "dust.asnb").read_bytes()
+    joined = {n: ",".join(f"b_{m}.asnb" for m in group) for group in JOINED for n in group}
     for name, content in damaged_binary(dust).items():
         file = f"b_{name}.asnb"
         (work / "mask_parse" / file).write_bytes(content)
-        files.append((file, "mask_nucl.fna", "nucl"))
+        if name not in joined:
+            files.append((file, "mask_nucl.fna", "nucl"))
+    for group in JOINED:
+        files.append((joined[group[0]], "mask_nucl.fna", "nucl"))
     rows, stdout_rows = expected_rows(bin_dir, work, out, files)
 
     target = out / "mask_parse"

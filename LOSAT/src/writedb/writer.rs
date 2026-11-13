@@ -11,7 +11,7 @@ use super::bioseq::Bioseq;
 use super::convert::{seq_data_to_binary, sequence_hash, BinarySequence};
 pub use super::files::DbVersion;
 use super::files::OffsetArrays;
-use super::header::{defline_set, encode_defline_set, BadChar, BadTitleChar};
+use super::header::{defline_set, encode_defline_set};
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
@@ -21,6 +21,7 @@ use super::platform::Platform;
 pub use super::volume::Indices;
 use super::volume::{IndexScratch, Volume};
 use super::WriteDbError;
+use crate::report::serial::visible::BadChars;
 use crate::seqid::model::{Dbtag, ObjectId};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
@@ -120,41 +121,15 @@ impl std::fmt::Debug for WriteDb {
 //             ERR_POST_X(7, message);
 // #endif
 // ```
-// makeblastdb prints, for each byte of a title that a VisibleString cannot
-// hold and each time the definition line is serialized (`post_bad_chars`: of any
-// string of a parsed definition line, under the path of its member):
-// "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title", "Bad char [0xC3]
-// in string at byte 21" and the title.
-fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitleChar]) {
-    for bad_char in bad {
-        diagnostics.extend_from_slice(
-            format!(
-                "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title\nBad char [0x{:X}] in \
-                 string at byte {}\n",
-                bad_char.byte, bad_char.stream_offset
-            )
-            .as_bytes(),
-        );
-        diagnostics.extend_from_slice(title);
-        diagnostics.push(b'\n');
-    }
-}
-
-/// `post_bad_title_chars` for the strings of definition lines with parsed Seq-ids:
-/// `Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str`, `Bad char
-/// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
-/// p23_nonascii; the member paths of the other alternatives from the S3a probes).
-fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
-    for bad_char in bad {
-        diagnostics.extend_from_slice(
-            format!(
-                "Error: (803.7) [makeblastdb] {}\nBad char [0x{:X}] in string at byte {}\n",
-                bad_char.path, bad_char.byte, bad_char.stream_offset
-            )
-            .as_bytes(),
-        );
-        diagnostics.extend_from_slice(&bad_char.string);
-        diagnostics.push(b'\n');
+// makeblastdb prints, for each byte of a string of a definition line that a
+// VisibleString cannot hold and each time the definition line is serialized, the
+// message of `report::serial::visible::BadChars` (the trace of the writer's object
+// stack, such as `Blast-def-line-set.E.title` or `Blast-def-line-set.E.seqid.E.local.str`,
+// "Bad char [0xC3] in string at byte 21" and the string): makeblastdb 2.17.0, survey B
+// fixture p23_nonascii and the S3a probes.
+fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChars]) {
+    for bad_chars in bad {
+        bad_chars.post("makeblastdb", diagnostics);
     }
 }
 
@@ -244,7 +219,7 @@ impl WriteDb {
     pub fn extract_bioseq_deflines(&mut self, bioseq: &Bioseq) {
         let mut bad = Vec::new();
         defline_set(&bioseq.title, 0, 0, &mut bad);
-        post_bad_title_chars(&mut self.diagnostics, &bioseq.title, &bad);
+        post_bad_chars(&mut self.diagnostics, &bad);
     }
 
     /// The serialization of `ExtractBioseqDeflines` with `-parse_seqids`: the
@@ -436,7 +411,7 @@ impl WriteDb {
         let oid = self.volumes.last().map_or(0, Volume::oid);
         let mut bad = Vec::new();
         let binhdr = defline_set(title, oid, self.pending_taxid, &mut bad);
-        post_bad_title_chars(&mut self.diagnostics, title, &bad);
+        post_bad_chars(&mut self.diagnostics, &bad);
         if self.tax_ids.is_empty() {
             self.tax_ids.push(self.pending_taxid);
         }

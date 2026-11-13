@@ -622,10 +622,34 @@ pub(super) enum Class {
     Equal,
 }
 
+/// What NCBI's standard error of a failed serial read is made of: the diagnostics of the reader
+/// (`Error: (803.` and `Warning: (803.` blocks: the first line and the lines that follow it up to
+/// the next line that starts a diagnostic, such as `Bad char [0x1] ...` and the chunk) and then
+/// `Error: NCBI C++ Exception:`. Returns the diagnostics (empty when the exception comes first)
+/// and the rest; `None` when the text is not of that form.
+pub(crate) fn split_serial_stderr(stderr: &str) -> Option<(&str, &str)> {
+    const EXCEPTION: &str = "Error: NCBI C++ Exception:";
+    let mut position = 0;
+    let mut in_block = false;
+    for line in stderr.split_inclusive('\n') {
+        if line.starts_with(EXCEPTION) {
+            return Some(stderr.split_at(position));
+        }
+        if line.starts_with("Error: (803.") || line.starts_with("Warning: (803.") {
+            in_block = true;
+        } else if !in_block || line.starts_with("Error: ") || line.starts_with("Warning: ") {
+            // not from the serial reader (a block goes on until the next diagnostic starts)
+            return None;
+        }
+        position += line.len();
+    }
+    None
+}
+
 pub(super) fn classify(file: &str, run: &Expected) -> Class {
     if run.rc == 1 && run.stderr.contains("Unknown encoding for mask data in '") {
         Class::UnknownEncoding
-    } else if run.rc == 255 && run.stderr.starts_with("Error: NCBI C++ Exception:") {
+    } else if run.rc == 255 && split_serial_stderr(&run.stderr).is_some() {
         Class::Serial
     } else if run.rc == 4 {
         assert!(
@@ -706,9 +730,17 @@ fn every_mask_parse_file_runs_end_to_end() {
             }
             Class::Serial | Class::OutOfMemory => {
                 assert_eq!(run.status, 255, "{file}: {stderr}");
+                // The diagnostics that NCBI's reader posted before it threw (none for most
+                // files), byte for byte, then LOSAT's own text.
+                let posted = if class == Class::Serial {
+                    split_serial_stderr(&ncbi.stderr).unwrap().0
+                } else {
+                    ""
+                };
                 assert!(
-                    stderr.starts_with(&format!("Error: mask data in '{file}': ")),
-                    "{file}: {stderr}"
+                    stderr.starts_with(&format!("{posted}Error: mask data in '{file}': ")),
+                    "{file}: {stderr}\nNCBI: {}",
+                    ncbi.stderr
                 );
                 if class == Class::OutOfMemory {
                     assert_eq!(ncbi.rc, 4, "{file}");
@@ -738,10 +770,10 @@ fn every_mask_parse_file_runs_end_to_end() {
     assert_eq!(
         tally,
         [
-            ("Equal".to_string(), 122),
+            ("Equal".to_string(), 123),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 1),
-            ("Serial".to_string(), 39),
+            ("Serial".to_string(), 42),
             ("UnknownEncoding".to_string(), 7),
         ]
     );

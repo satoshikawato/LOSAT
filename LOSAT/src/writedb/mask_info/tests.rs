@@ -10,6 +10,8 @@
 
 use super::*;
 use crate::seqid::model::{Dbtag, IdPat, ObjectId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId};
+use crate::writedb::mask_data::process::post_diagnostics;
+use crate::writedb::mask_data::tests_e2e::split_serial_stderr;
 use crate::writedb::WriteDbError;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -128,6 +130,16 @@ fn read_all(reader: &mut MaskFileReader) -> Result<Vec<(MaskInfo, Vec<MaskList>)
 
 fn open_all(path: &Path) -> Result<Vec<(MaskInfo, Vec<MaskList>)>, MaskFileError> {
     read_all(&mut MaskFileReader::open(path)?)
+}
+
+/// `open_all` for the files of one run (`-mask_data a,b`: a comma-joined list), in order; the
+/// first error ends it.
+fn open_all_list(list: &str) -> Result<Vec<(MaskInfo, Vec<MaskList>)>, MaskFileError> {
+    let mut all = Vec::new();
+    for file in list.split(',') {
+        all.extend(open_all(&parse_dir().join(file))?);
+    }
+    Ok(all)
 }
 
 fn infos(path: &Path) -> Vec<MaskInfo> {
@@ -401,7 +413,7 @@ fn masks_equal_what_blastdbcmd_prints() {
             .split(|&c| c == b'\n')
             .filter(|l| l.starts_with(b">"))
             .count() as u32;
-        let objects = match open_all(&parse_dir().join(file)) {
+        let objects = match open_all_list(file) {
             // NCBI reads these; the rows are not checked
             Err(MaskFileError::Unsupported(_)) => continue,
             other => other.unwrap(),
@@ -459,7 +471,7 @@ enum Outcome {
 fn outcome(run: &Run) -> Outcome {
     if run.rc == 1 && run.stderr.contains("Unknown encoding for mask data in '") {
         Outcome::Unknown
-    } else if run.rc == 255 && run.stderr.starts_with("Error: NCBI C++ Exception:") {
+    } else if run.rc == 255 && split_serial_stderr(&run.stderr).is_some() {
         Outcome::Serial
     } else if run.rc == 4 {
         Outcome::OutOfMemory
@@ -486,7 +498,7 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
         let path = parse_dir().join(file);
         let outcome = outcome(run);
         *seen.entry(format!("{outcome:?}")).or_insert(0) += 1;
-        let result = open_all(&path);
+        let result = open_all_list(file);
         match outcome {
             Outcome::Unknown => {
                 let Err(MaskFileError::Ncbi(WriteDbError::Options(text))) =
@@ -533,59 +545,59 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
 /// The diagnostics that the reader hands out for every file are the first lines of makeblastdb's
 /// standard error, byte for byte, and no other line of it comes from the serial reader (`(803.`):
 /// the byte stored as `#` with its stack trace, line or byte and chunk (`Bad char`), and the
-/// UTF8String warning once per run. The objects are read as `x_ProcessMaskData` reads them: up to
-/// the first error, or the first mask without a Seq-id ("Cannot get masked range Seq-id").
+/// UTF8String warning once per run (a run of several files, `-mask_data a,b`, has one flag). The
+/// objects are read as `x_ProcessMaskData` reads them (`post_diagnostics` posts): up to the first
+/// error, or the first mask without a Seq-id ("Cannot get masked range Seq-id").
 #[test]
 fn diagnostics_equal_what_makeblastdb_posts() {
     let text = String::from_utf8(read_file(&parse_dir().join("expected.tsv"))).unwrap();
     let mut posting = 0;
     for line in text.lines().filter(|l| l.starts_with("RUN\t")) {
         let f: Vec<&str> = line.split('\t').collect();
-        let (file, ncbi) = (f[1], unescape_bytes(f[5]));
+        let (list, ncbi) = (f[1], unescape_bytes(f[5]));
         let mut posted = Vec::new();
-        if let Ok(mut reader) = MaskFileReader::open(&parse_dir().join(file)) {
-            let mut warned = false;
-            let mut post = |reader: &mut MaskFileReader| {
-                for diagnostic in reader.take_diagnostics() {
-                    if matches!(diagnostic, MaskDiagnostic::Utf8Tag(_)) {
-                        if warned {
-                            continue;
-                        }
-                        warned = true;
-                    }
-                    posted.extend_from_slice(&diagnostic.text("makeblastdb"));
-                    posted.push(b'\n');
-                }
+        let mut warn = |line: &[u8]| {
+            posted.extend_from_slice(line);
+            posted.push(b'\n');
+        };
+        let mut utf8_warned = false;
+        let complete = |list: &MaskList| list.masks.iter().all(|mask| mask.id.is_some());
+        'files: for file in list.split(',') {
+            let Ok(mut reader) = MaskFileReader::open(&parse_dir().join(file)) else {
+                break;
             };
-            let complete = |list: &MaskList| list.masks.iter().all(|mask| mask.id.is_some());
             loop {
                 let next = reader.next_info();
-                post(&mut reader);
-                let Ok(Some(info)) = next else { break };
+                post_diagnostics(&mut reader, &mut utf8_warned, &mut warn);
+                let info = match next {
+                    Ok(Some(info)) => info,
+                    Ok(None) => break,
+                    Err(_) => break 'files,
+                };
                 let (mut more, mut go_on) = (info.masks.more, complete(&info.masks));
                 while go_on && more {
                     let next = reader.next_list();
-                    post(&mut reader);
+                    post_diagnostics(&mut reader, &mut utf8_warned, &mut warn);
                     (more, go_on) = match &next {
                         Ok(list) => (list.more, complete(list)),
                         Err(_) => (false, false),
                     };
                 }
                 if !go_on {
-                    break;
+                    break 'files;
                 }
             }
         }
         assert!(
             ncbi.starts_with(&posted),
-            "{file}: {}",
+            "{list}: {}",
             String::from_utf8_lossy(&posted)
         );
         let rest = String::from_utf8_lossy(&ncbi[posted.len()..]).into_owned();
-        assert!(!rest.contains("(803."), "{file}: {rest}");
+        assert!(!rest.contains("(803."), "{list}: {rest}");
         posting += usize::from(!posted.is_empty());
     }
-    assert_eq!(posting, 13);
+    assert_eq!(posting, 17);
 }
 
 #[test]
@@ -1163,12 +1175,12 @@ fn text_edits_never_panic() {
 #[test]
 fn visible_strings_replace_what_is_not_printable() {
     let mut s = *b"a\tb\xe9 \x7f~\x00";
-    let mut notes = Vec::new();
-    crate::report::serial::visible::fix_visible_chars(
+    let notes = crate::report::serial::visible::fix_visible_chars(
         &mut s,
+        String::new(),
         crate::report::serial::visible::Position::Byte(0),
-        &mut notes,
-    );
+    )
+    .unwrap();
     assert_eq!(&s, b"a#b# #~#");
     assert_eq!(notes.len(), 4);
 }
@@ -1182,7 +1194,7 @@ fn algorithm_options_equal_what_blastdbcmd_prints() {
         if run.options.is_empty() {
             continue;
         }
-        let objects = open_all(&parse_dir().join(&file));
+        let objects = open_all_list(&file);
         if matches!(objects, Err(MaskFileError::Unsupported(_))) {
             continue; // what LOSAT does not read
         }

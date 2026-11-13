@@ -32,7 +32,8 @@ use super::schema::{
 use super::text::{TextIn, TextSource};
 use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart};
 use crate::report::serial::asn_text_reader::StreamSource;
-use crate::report::serial::visible::BadChar;
+use crate::report::serial::object_stack::ObjectStack;
+use crate::report::serial::visible::BadChars;
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -134,6 +135,9 @@ pub(super) trait Input {
     /// fails): a UTF8String tag of a binary file, then each replaced byte.
     fn read_string(&mut self, notes: &mut Vec<StringNote>) -> R<Vec<u8>>;
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32>;
+    /// The stream's object stack (`CObjectIStream` is a `CObjectStack`), whose frames `Rd`
+    /// keeps and whose trace goes into the notes of `read_string`.
+    fn stack(&mut self) -> &mut ObjectStack;
 }
 
 /// What a string read posts in NCBI (`Input::read_string`).
@@ -141,18 +145,19 @@ pub(super) trait Input {
 pub(super) enum StringNote {
     /// A binary file gave a VisibleString member the tag of a UTF8String.
     Utf8Tag,
-    /// A byte stored as `#` (`report::serial::visible`).
-    Bad(BadChar),
+    /// The bytes of a string (or of a text chunk) stored as `#`, with the stream's trace
+    /// (`report::serial::visible`).
+    Bad(BadChars),
 }
 
 /// A diagnostic that NCBI's reader posts while it reads a mask file (with `ERR_POST`, standard
 /// error, in the order read; the status stays 0). `process_mask_data` writes them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MaskDiagnostic {
-    /// `ReplaceVisibleChar`'s message for a byte stored as `#` in a VisibleString (`ERR_POST_X(7,
-    /// ...)`, an error): the trace, "Bad char [0x..] in string at line N" (text) or "at byte N"
-    /// (binary), the chunk.
-    BadChar(Vec<u8>),
+    /// `ReplaceVisibleChar`'s messages for the bytes stored as `#` in a VisibleString (or a chunk
+    /// of it; `ERR_POST_X(7, ...)`, an error each): the trace, "Bad char [0x..] in string at line
+    /// N" (text) or "at byte N" (binary), the chunk.
+    BadChars(BadChars),
     /// A UTF8String tag for the VisibleString member whose trace this is (`ERR_POST_X_ONCE(10,
     /// Warning << ...)`, once per process); the string is still read as a VisibleString.
     Utf8Tag(String),
@@ -171,9 +176,10 @@ impl MaskDiagnostic {
     /// The lines NCBI's application `program` posts (without the final newline).
     pub(crate) fn text(&self, program: &str) -> Vec<u8> {
         match self {
-            MaskDiagnostic::BadChar(message) => {
-                let mut text = format!("Error: (803.7) [{program}] ").into_bytes();
-                text.extend_from_slice(message);
+            MaskDiagnostic::BadChars(bad) => {
+                let mut text = Vec::new();
+                bad.post(program, &mut text);
+                text.pop();
                 text
             }
             MaskDiagnostic::Utf8Tag(trace) => format!(
@@ -191,9 +197,6 @@ const MAX_DEPTH: usize = 400;
 pub(super) struct Rd<I: Input> {
     pub(super) inp: I,
     depth: usize,
-    /// The names of `GetStackTraceASN`: the root type, then a name per class-member and
-    /// choice-variant frame (the member or variant being read) and `E` per array-element frame.
-    trace: Vec<&'static str>,
     /// What NCBI posted while the object was read, in order.
     pub(super) diagnostics: Vec<MaskDiagnostic>,
 }
@@ -203,7 +206,6 @@ impl<I: Input> Rd<I> {
         Rd {
             inp,
             depth: 0,
-            trace: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -233,16 +235,12 @@ impl<I: Input> Rd<I> {
     //         default:
     //             break;
     // ```
-    /// `GetStackTraceASN`.
-    fn stack_trace(&self) -> String {
-        self.trace.join(".")
-    }
-
-    /// `read` with `name` on the trace (a member, a variant or `E`).
+    /// `read` with the frame `name` on the stream's object stack (a member, a variant or `E`;
+    /// `report::serial::object_stack`, whose `trace` is `GetStackTraceASN`).
     fn named<T>(&mut self, name: &'static str, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
-        self.trace.push(name);
+        self.inp.stack().push(name);
         let result = read(self);
-        self.trace.pop();
+        self.inp.stack().pop();
         result
     }
 
@@ -473,18 +471,16 @@ impl<I: Input> Rd<I> {
     }
 
     /// A `VisibleString`, with each byte outside `' '..='~'` stored as `#`; what NCBI posts for
-    /// it goes to `diagnostics` with the trace of the frames.
+    /// it goes to `diagnostics` (the notes carry the stream's trace).
     fn read_str(&mut self) -> R<Vec<u8>> {
         let mut notes = Vec::new();
         let result = self.inp.read_string(&mut notes);
-        if !notes.is_empty() {
-            let trace = self.stack_trace();
-            for note in notes {
-                self.diagnostics.push(match note {
-                    StringNote::Utf8Tag => MaskDiagnostic::Utf8Tag(trace.clone()),
-                    StringNote::Bad(bad) => MaskDiagnostic::BadChar(bad.message(&trace)),
-                });
-            }
+        for note in notes {
+            let diagnostic = match note {
+                StringNote::Utf8Tag => MaskDiagnostic::Utf8Tag(self.inp.stack().trace()),
+                StringNote::Bad(bad) => MaskDiagnostic::BadChars(bad),
+            };
+            self.diagnostics.push(diagnostic);
         }
         result
     }
@@ -1132,8 +1128,7 @@ impl<I: Input> Rd<I> {
         read: impl FnOnce(&mut Self) -> R<()>,
     ) -> R<()> {
         self.depth = 0;
-        self.trace.clear();
-        self.trace.push(type_name);
+        self.inp.stack().set_root(type_name);
         if let Some(name) = self.frame(|s| s.inp.read_file_header())? {
             if !name.is_empty() && name != type_name.as_bytes() {
                 return format_err(format!(

@@ -64,6 +64,7 @@ use super::asn_ber::AsnBinaryEncoder;
 use super::asn_text::AsnTextEncoder;
 use super::encoder::{Encoder, SerialError};
 use super::json::JsonEncoder;
+use super::visible::good_visible_char;
 
 /// The serialized formats of a Seq-annot of Seq-aligns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -826,7 +827,7 @@ pub fn check_database(
         );
     }
     if matches!(format, SerialFormat::AsnText | SerialFormat::AsnBinary)
-        && title.iter().any(|byte| !(0x20..=0x7e).contains(byte))
+        && title.iter().any(|&byte| !good_visible_char(byte))
     {
         anyhow::bail!(
             "a database title with a character outside the visible ASCII range (which NCBI BLAST+ replaces by '#' with an error message in output format {number}) is not supported by LOSAT's {}",

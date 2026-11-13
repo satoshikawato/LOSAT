@@ -1,6 +1,7 @@
 //! The reader of the Seq-id of NCBI's ASN.1 text (`CObjectIStreamAsn` of a `CSeq_id`), every
-//! alternative, as `ber` is its BER reader: the rpsbproc archive reader and the PSSM reader
-//! (`blastinput::pssm_text`, psiblast and tblastn `-in_pssm`) read their Seq-ids with it.
+//! alternative, as `ber` is its BER reader, and of the other types of `general.asn` that the
+//! readers share (`Object-id`, `Dbtag`, `Date`, `User-object`): the rpsbproc archive reader and
+//! the PSSM reader (`blastinput::pssm_text`, psiblast and tblastn `-in_pssm`) read them with it.
 
 use crate::report::serial::asn_text_reader::{AsnSource, Reader, Result};
 use crate::seqid::model::{
@@ -42,6 +43,135 @@ impl<S: AsnSource> Reader<S> {
             (Some(db), Some(tag)) => Ok(Dbtag { db, tag }),
             _ => Err(self.error("a mandatory member is missing")),
         }
+    }
+
+    /// A `User-object`, read as the module has it (a `str` or `strs` field is a UTF8String,
+    /// which NCBI reads with any byte: `utf8_string`; the other strings are VisibleStrings).
+    /// `top`: the object is a descriptor's, whose `CFastaReader` DefLine rpsbproc reads. Returns
+    /// whether it is a `CFastaReader` object with a `DefLine` field whose value is not a string
+    /// (rpsbproc's refusal; the PSSM reader reads the object and keeps nothing of it).
+    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:128-148
+    // ```text
+    // User-object ::= SEQUENCE {
+    //     class VisibleString OPTIONAL ,   -- endeavor which designed this object
+    //     type Object-id ,                 -- type of object within class
+    //     data SEQUENCE OF User-field }    -- the object itself
+    //
+    // User-field ::= SEQUENCE {
+    //     label Object-id ,                -- field label
+    //     num INTEGER OPTIONAL ,           -- required for strs, ints, reals, oss
+    //     data CHOICE {                    -- field contents
+    //         str UTF8String ,
+    //         int INTEGER ,
+    //         real REAL ,
+    //         bool BOOLEAN ,
+    //         os OCTET STRING ,
+    //         object User-object ,         -- for using other definitions
+    //         strs SEQUENCE OF UTF8String ,
+    //         ints SEQUENCE OF INTEGER ,
+    //         reals SEQUENCE OF REAL ,
+    //         oss SEQUENCE OF OCTET STRING ,
+    //         fields SEQUENCE OF User-field ,
+    //         objects SEQUENCE OF User-object } }
+    // ```
+    // rpsbproc's use (rpsbproc 0.5.1, the descriptor's DefLine):
+    // ```c++
+    // 					const CObject_id& typeId = rUsrDescr.GetType();
+    // 					if (typeId.Which() == CObject_id::e_Str && NStr::EqualCase(typeId.GetStr(), "CFastaReader"))
+    // 					{
+    // 						...
+    // 							const CObject_id& label = (*iterUsrField)->GetLabel();
+    // 							if (label.Which() == CObject_id::e_Str && NStr::EqualCase(label.GetStr(), "DefLine"))
+    // 							{
+    // 								const CUser_field::TData& fieldValue = (*iterUsrField)->GetData();
+    // 								const string& fieldStrVal = fieldValue.GetStr();
+    // ```
+    pub(crate) fn user_object(&mut self, top: bool) -> Result<bool> {
+        let mut members = self.begin_members()?;
+        let (mut fasta_reader, mut type_seen, mut data_seen, mut bad_defline) =
+            (false, false, false, false);
+        while let Some(index) = self.next_member(&mut members, &["class", "type", "data"])? {
+            match index {
+                0 => {
+                    self.string()?;
+                }
+                1 => {
+                    type_seen = true;
+                    let id = self.object_id()?;
+                    fasta_reader =
+                        top && matches!(id, ObjectId::Str(text) if text == b"CFastaReader");
+                }
+                _ => {
+                    data_seen = true;
+                    self.each(|reader| {
+                        bad_defline |= reader.user_field(fasta_reader)?;
+                        Ok(())
+                    })?;
+                }
+            }
+        }
+        if !(type_seen && data_seen) {
+            return Err(self.error("a mandatory member is missing"));
+        }
+        Ok(bad_defline)
+    }
+
+    /// A `User-field` (`user_object`); `fasta_reader`: the field is one of a descriptor's
+    /// `CFastaReader` object. Returns whether it is a `DefLine` field whose value is not a string.
+    fn user_field(&mut self, fasta_reader: bool) -> Result<bool> {
+        const FIELD_DATA: [&str; 12] = [
+            "str", "int", "real", "bool", "os", "object", "strs", "ints", "reals", "oss", "fields",
+            "objects",
+        ];
+        let mut members = self.begin_members()?;
+        let (mut defline, mut label, mut data, mut bad_defline) = (false, false, false, false);
+        while let Some(index) = self.next_member(&mut members, &["label", "num", "data"])? {
+            match index {
+                0 => {
+                    label = true;
+                    defline =
+                        matches!(self.object_id()?, ObjectId::Str(text) if text == b"DefLine");
+                }
+                1 => {
+                    self.int4()?;
+                }
+                _ => {
+                    data = true;
+                    let variant = self.choice(&FIELD_DATA)?;
+                    bad_defline = fasta_reader && defline && variant != 0;
+                    match FIELD_DATA[variant] {
+                        "str" => {
+                            self.utf8_string()?;
+                        }
+                        "int" => {
+                            self.int4()?;
+                        }
+                        "real" => {
+                            self.real()?;
+                        }
+                        "bool" => {
+                            self.boolean()?;
+                        }
+                        "os" => {
+                            self.octets()?;
+                        }
+                        "object" => {
+                            self.user_object(false)?;
+                        }
+                        "strs" => self.each(|reader| reader.utf8_string().map(drop))?,
+                        "ints" => self.each(|reader| reader.int4().map(drop))?,
+                        "reals" => self.each(|reader| reader.real().map(drop))?,
+                        "oss" => self.each(|reader| reader.octets().map(drop))?,
+                        "fields" => self.each(|reader| reader.user_field(false).map(drop))?,
+                        _ => self.each(|reader| reader.user_object(false).map(drop))?,
+                    }
+                }
+            }
+        }
+        if !(label && data) {
+            return Err(self.error("a mandatory member is missing"));
+        }
+        Ok(bad_defline)
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-65

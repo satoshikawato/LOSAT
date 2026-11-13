@@ -8,6 +8,7 @@
 
 use super::reader::{format_err, Fail, Input, StringNote, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
+use crate::report::serial::object_stack::ObjectStack;
 use crate::report::serial::visible::{fix_visible_chars, Position};
 
 pub(super) struct BerIn<'a> {
@@ -20,6 +21,8 @@ pub(super) struct BerIn<'a> {
     limit: i64,
     /// `m_DataLimits`
     limits: Vec<i64>,
+    /// The stream's object stack (`Rd` keeps its frames).
+    stack: ObjectStack,
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:60-130
@@ -67,6 +70,7 @@ impl<'a> BerIn<'a> {
             tag_len: 0,
             limit: 0,
             limits: Vec::new(),
+            stack: ObjectStack::default(),
         }
     }
 
@@ -890,9 +894,10 @@ impl Input for BerIn<'_> {
         let length = length as usize;
         let mut s = self.data[self.pos..self.pos + length].to_vec();
         self.pos += length;
-        let mut bad = Vec::new();
-        fix_visible_chars(&mut s, Position::Byte(self.pos), &mut bad);
-        notes.extend(bad.into_iter().map(StringNote::Bad));
+        let trace = self.stack.trace();
+        notes.extend(
+            fix_visible_chars(&mut s, trace, Position::Byte(self.pos)).map(StringNote::Bad),
+        );
         Ok(s)
     }
 
@@ -927,5 +932,9 @@ impl Input for BerIn<'_> {
             return format_err(format!("invalid value of enumerated type: {value}"));
         }
         Ok(value)
+    }
+
+    fn stack(&mut self) -> &mut ObjectStack {
+        &mut self.stack
     }
 }

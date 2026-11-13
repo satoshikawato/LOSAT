@@ -596,7 +596,11 @@ pub(crate) fn process_mask_data(
 /// Posts what NCBI's serial reader posted while `reader` read its last object (before its error
 /// too): an error per byte stored as `#`, and the UTF8String warning, which NCBI posts once per
 /// process (`ERR_POST_X_ONCE`; `utf8_warned` is the run's).
-fn post_diagnostics(reader: &mut MaskFileReader, utf8_warned: &mut bool, warn: Warn<'_>) {
+pub(crate) fn post_diagnostics(
+    reader: &mut MaskFileReader,
+    utf8_warned: &mut bool,
+    warn: Warn<'_>,
+) {
     for diagnostic in reader.take_diagnostics() {
         if matches!(diagnostic, MaskDiagnostic::Utf8Tag(_)) {
             if *utf8_warned {

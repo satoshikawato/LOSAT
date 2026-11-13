@@ -138,6 +138,49 @@ fn refusals_wait_for_the_whole_object() {
     assert!(read[0].as_ref().unwrap_err().message.contains("byte 0xc3"));
 }
 
+// A bad byte in a string that the shared readers read (here a Dbtag's `db` in an alignment's
+// Seq-id, line 131: `db "C\xE9D"`) is refused as one in a title is: NCBI stores `#` and posts
+// `Error: (803.7) [...] Blast4-archive...general.db` / `Bad char [0xE9] in string at line 131` /
+// the chunk (review M4a-1b F1; the file is `one.asn` with that byte and without
+// `search-stats`). The refusal names the line and the chunk.
+#[test]
+fn a_bad_byte_in_any_string_is_refused_where_it_is() {
+    let text = include_bytes!("../../tests/fixtures/rpsbproc/arch/bad/bad_db_nostats.asn");
+    let read = read_all(text);
+    assert_eq!(read.len(), 1);
+    let error = read[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, AsnTextErrorKind::Unsupported);
+    assert_eq!(error.line, 131);
+    assert!(
+        error.message.contains("byte 0xe9 (\"C\\xe9D\""),
+        "{}",
+        error.message
+    );
+    // The same with `search-stats`; with another refusal of the object (a long REAL, line 102)
+    // the first one in the text is named.
+    let with_stats =
+        String::from_utf8(ONE.to_vec())
+            .unwrap()
+            .replacen("db \"CDD\",", "db \"C\u{1}D\",", 1);
+    let read = read_all(with_stats.as_bytes());
+    assert!(read[0].as_ref().unwrap_err().message.contains("byte 0x1"));
+    let then_real = with_stats.replace(
+        "{ 504742318164089, 10, -57 }",
+        "{ 5047423181640891234, 10, -61 }",
+    );
+    let read = read_all(then_real.as_bytes());
+    let error = read[0].as_ref().unwrap_err();
+    assert_eq!(error.line, 102, "{error}");
+    assert!(error.message.contains("18 significant digits"), "{error}");
+    // A bad byte in an object that NCBI's reader then fails to read: NCBI has posted the error,
+    // which LOSAT's rpsbproc does not, so it is refused too.
+    let then_bad = with_stats.replace("gapped FALSE", "gapped MAYBE");
+    assert_ne!(then_bad, with_stats);
+    let read = read_all(then_bad.as_bytes());
+    assert_eq!(read.len(), 1);
+    assert!(read[0].as_ref().unwrap_err().message.contains("byte 0x1"));
+}
+
 // The `CFastaReader` DefLine is a UTF8String, which NCBI reads with any byte (PS16a review
 // S2-4, oracles O3-4 and O3-5): a TAB or UTF-8 there is read, and so are the other values of a
 // User-field by their types.

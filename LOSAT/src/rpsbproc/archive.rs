@@ -45,6 +45,7 @@ use crate::report::serial::asn_text_reader::{
     AsnTextError, AsnTextErrorKind, Reader, Result, StreamSource,
 };
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
+use crate::report::serial::visible::{BadChars, Position};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// One `Blast4-archive`, with what rpsbproc takes from it.
@@ -661,6 +662,32 @@ const SEQ_ALIGN_TYPE: [(&str, i32); 6] = [
     ("other", 255),
 ];
 
+/// The refusal of the first byte of `bad` (a string with a byte outside the visible range,
+/// named by its line and the chunk that holds it).
+fn bad_char_refusal(bad: &BadChars) -> AsnTextError {
+    let (byte, at) = bad.byte(0);
+    let line = match at {
+        Position::Line(line) | Position::Byte(line) => line,
+    };
+    let chunk = bad.shown(0);
+    AsnTextError {
+        line,
+        message: format!(
+            "a string with the byte 0x{byte:x} (\"{}\"; NCBI replaces it by '#' and posts an error) is not supported by LOSAT's rpsbproc",
+            chunk.escape_ascii()
+        ),
+        kind: AsnTextErrorKind::Unsupported,
+    }
+}
+
+/// The refusal at the earlier line (the first when both are on one line).
+fn earliest(a: Option<AsnTextError>, b: Option<AsnTextError>) -> Option<AsnTextError> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if b.line < a.line { b } else { a }),
+        (a, b) => a.or(b),
+    }
+}
+
 impl<R: Read> ArchiveStream<R> {
     /// The objects of `input`, whose first bytes `first` were already taken from it (the bytes
     /// after the white space that rpsbproc skips to tell ASN.1 from XML).
@@ -685,41 +712,42 @@ impl<R: Read> ArchiveStream<R> {
             return Ok(None);
         }
         self.reader.refusal = None;
-        match self.archive_object() {
-            Ok(archive) => match self.reader.refusal.take() {
-                Some(refusal) => {
-                    self.done = true;
-                    Err(refusal)
-                }
-                None => Ok(Some(archive)),
+        self.reader.bad_chars.clear();
+        let result = self.archive_object();
+        // NCBI's reader stores `#` for a byte of a VisibleString outside the visible range and
+        // posts an error for it as it reads it (`report::serial::visible`), also in an object it
+        // then fails to read; LOSAT's rpsbproc does not post those (there is no rpsbproc binary
+        // to check its lines against), so the object is refused at the first such string,
+        // whichever value holds it (Seq-id, Object-id, Dbtag, Date, title ...).
+        let bad = self.reader.take_bad_chars().first().map(bad_char_refusal);
+        let refusal = match result {
+            Ok(archive) => match earliest(self.reader.refusal.take(), bad) {
+                Some(refusal) => refusal,
+                None => return Ok(Some(archive)),
             },
-            Err(error) => {
-                self.done = true;
-                match error.kind {
-                    AsnTextErrorKind::Format | AsnTextErrorKind::Eof => Ok(None),
-                    AsnTextErrorKind::Unsupported => Err(error),
+            Err(error) => match (error.kind, bad) {
+                (AsnTextErrorKind::Format | AsnTextErrorKind::Eof, None) => {
+                    self.done = true;
+                    return Ok(None);
                 }
-            }
-        }
+                (AsnTextErrorKind::Format | AsnTextErrorKind::Eof, Some(bad)) => bad,
+                (AsnTextErrorKind::Unsupported, bad) => {
+                    earliest(Some(error), bad).expect("a refusal")
+                }
+            },
+        };
+        self.done = true;
+        Err(refusal)
     }
 
     fn real(&mut self) -> Result<f64> {
         self.reader.real()
     }
 
-    /// A VisibleString. NCBI's reader stores `#` for a byte outside `' '..='~'` and posts an
-    /// error with its stack trace through the archive's frames (`report::serial::visible`), which
-    /// this reader does not follow: such a byte is a refusal (deferred to the object's end).
+    /// A VisibleString, with a byte outside `' '..='~'` stored as `#` and noted by the reader
+    /// (refused at the object's end, `next_archive`, as every string the shared readers read).
     fn string(&mut self) -> Result<Vec<u8>> {
-        let s = self.reader.string()?;
-        if let Some(bad) = self.reader.take_bad_chars().first() {
-            let error = self.reader.not_supported(&format!(
-                "a string with the byte 0x{:x} (NCBI replaces it by '#' and posts an error)",
-                bad.byte
-            ));
-            self.reader.refuse(error, ())?;
-        }
-        Ok(s)
+        self.reader.string()
     }
 
     fn skip_value(&mut self) -> Result<()> {
@@ -1574,7 +1602,7 @@ impl<R: Read> ArchiveStream<R> {
                     }
                 }
                 "user" => {
-                    if self.user_object(true)? && query.unread_descriptor.is_none() {
+                    if self.reader.user_object(true)? && query.unread_descriptor.is_none() {
                         query.unread_descriptor =
                             Some("a CFastaReader user object whose DefLine is not a string");
                     }
@@ -1587,160 +1615,6 @@ impl<R: Read> ArchiveStream<R> {
             return Err(self.reader.error("empty Seq-descr is not allowed"));
         }
         Ok(())
-    }
-
-    /// A `User-object`: whether it is a `CFastaReader` object with a `DefLine` field whose
-    /// value is not a string.
-    // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:128-148
-    // ```text
-    // User-object ::= SEQUENCE {
-    //     class VisibleString OPTIONAL ,   -- endeavor which designed this object
-    //     type Object-id ,                 -- type of object within class
-    //     data SEQUENCE OF User-field }    -- the object itself
-    //
-    // User-field ::= SEQUENCE {
-    //     label Object-id ,                -- field label
-    //     num INTEGER OPTIONAL ,           -- required for strs, ints, reals, oss
-    //     data CHOICE {                    -- field contents
-    //         str UTF8String ,
-    //         int INTEGER ,
-    //         real REAL ,
-    //         bool BOOLEAN ,
-    //         os OCTET STRING ,
-    //         object User-object ,         -- for using other definitions
-    //         strs SEQUENCE OF UTF8String ,
-    //         ints SEQUENCE OF INTEGER ,
-    //         reals SEQUENCE OF REAL ,
-    //         oss SEQUENCE OF OCTET STRING ,
-    //         fields SEQUENCE OF User-field ,
-    //         objects SEQUENCE OF User-object } }
-    // ```
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:504-523
-    // ```c++
-    // 			if ((*iterSeqDesc)->Which() == CSeqdesc::e_User)
-    // 			{
-    // 				const CUser_object & rUsrDescr = (*iterSeqDesc)->GetUser();
-    // 				if (rUsrDescr.CanGetType())
-    // 				{
-    // 					const CObject_id& typeId = rUsrDescr.GetType();
-    // 					if (typeId.Which() == CObject_id::e_Str && NStr::EqualCase(typeId.GetStr(), "CFastaReader"))
-    // 					{
-    // 						...
-    // 							const CObject_id& label = (*iterUsrField)->GetLabel();
-    // 							if (label.Which() == CObject_id::e_Str && NStr::EqualCase(label.GetStr(), "DefLine"))
-    // 							{
-    // 								const CUser_field::TData& fieldValue = (*iterUsrField)->GetData();
-    // 								const string& fieldStrVal = fieldValue.GetStr();
-    // ```
-    // The fields are read as the module has them; a `str` or `strs` is a UTF8String, which NCBI
-    // reads with any byte (`Reader::utf8_string`).
-    //
-    // `top`: the object is a descriptor's (whose `CFastaReader` DefLine rpsbproc reads). Returns
-    // whether it is a `CFastaReader` object with a `DefLine` field whose value is not a string.
-    fn user_object(&mut self, top: bool) -> Result<bool> {
-        let mut members = self.reader.begin_members()?;
-        let (mut fasta_reader, mut type_seen, mut data_seen, mut bad_defline) =
-            (false, false, false, false);
-        while let Some(index) = self
-            .reader
-            .next_member(&mut members, &["class", "type", "data"])?
-        {
-            match index {
-                0 => {
-                    self.string()?;
-                }
-                1 => {
-                    type_seen = true;
-                    let id = self.reader.object_id()?;
-                    fasta_reader =
-                        top && matches!(id, ObjectId::Str(text) if text == b"CFastaReader");
-                }
-                _ => {
-                    data_seen = true;
-                    let mut block_start = self.reader.start_block()?;
-                    while self.reader.next_element(&mut block_start)? {
-                        bad_defline |= self.user_field(fasta_reader)?;
-                    }
-                    self.reader.end_block()?;
-                }
-            }
-        }
-        if !(type_seen && data_seen) {
-            return Err(self.reader.error("a mandatory member is missing"));
-        }
-        Ok(bad_defline)
-    }
-
-    /// A `User-field` (`User-object` above); `fasta_reader`: the field is one of a descriptor's
-    /// `CFastaReader` object. Returns whether it is a `DefLine` field whose value is not a string.
-    fn user_field(&mut self, fasta_reader: bool) -> Result<bool> {
-        const FIELD_DATA: [&str; 12] = [
-            "str", "int", "real", "bool", "os", "object", "strs", "ints", "reals", "oss", "fields",
-            "objects",
-        ];
-        let mut members = self.reader.begin_members()?;
-        let (mut defline, mut label, mut data, mut bad_defline) = (false, false, false, false);
-        while let Some(index) = self
-            .reader
-            .next_member(&mut members, &["label", "num", "data"])?
-        {
-            match index {
-                0 => {
-                    label = true;
-                    defline = matches!(self.reader.object_id()?, ObjectId::Str(text) if text == b"DefLine");
-                }
-                1 => {
-                    self.reader.int4()?;
-                }
-                _ => {
-                    data = true;
-                    let variant = self.reader.choice(&FIELD_DATA)?;
-                    bad_defline = fasta_reader && defline && variant != 0;
-                    match FIELD_DATA[variant] {
-                        "str" => {
-                            self.reader.utf8_string()?;
-                        }
-                        "int" => {
-                            self.reader.int4()?;
-                        }
-                        "real" => {
-                            self.real()?;
-                        }
-                        "bool" => {
-                            self.reader.boolean()?;
-                        }
-                        "os" => {
-                            self.reader.octets()?;
-                        }
-                        "object" => {
-                            self.user_object(false)?;
-                        }
-                        "strs" => self.reader.each(|reader| reader.utf8_string().map(drop))?,
-                        "ints" => self.reader.each(|reader| reader.int4().map(drop))?,
-                        "reals" => self.reader.each(|reader| reader.real().map(drop))?,
-                        "oss" => self.reader.each(|reader| reader.octets().map(drop))?,
-                        "fields" => {
-                            let mut block_start = self.reader.start_block()?;
-                            while self.reader.next_element(&mut block_start)? {
-                                self.user_field(false)?;
-                            }
-                            self.reader.end_block()?;
-                        }
-                        _ => {
-                            let mut block_start = self.reader.start_block()?;
-                            while self.reader.next_element(&mut block_start)? {
-                                self.user_object(false)?;
-                            }
-                            self.reader.end_block()?;
-                        }
-                    }
-                }
-            }
-        }
-        if !(label && data) {
-            return Err(self.reader.error("a mandatory member is missing"));
-        }
-        Ok(bad_defline)
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297

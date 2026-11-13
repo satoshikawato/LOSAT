@@ -32,6 +32,8 @@ const TAG_SEQUENCE: u8 = (1 << 5) | 16;
 const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 
+use crate::report::serial::object_stack::ObjectStack;
+use crate::report::serial::visible::{good_visible_char, BadChars, Position, SUBST};
 use crate::seqid::model::{Date, ObjectId, ParsedSeqId, PatentNumber, TextseqId};
 use crate::seqid::DeflineSet;
 
@@ -45,17 +47,6 @@ const SEQID_GENERAL: u8 = 10;
 const DBTAG_DB: u8 = 0;
 const DBTAG_TAG: u8 = 1;
 const OBJECT_ID_ID: u8 = 0;
-
-/// A byte of a title that a VisibleString cannot hold, as NCBI's serializer
-/// reports it ("Bad char \[0xC3\] in string at byte 21").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BadTitleChar {
-    /// The byte of the title.
-    pub byte: u8,
-    /// Its position in the header record (`CObjectStack::GetPosition`: the
-    /// stream offset at which the replacement is written).
-    pub stream_offset: usize,
-}
 
 fn open(out: &mut Vec<u8>, tag: u8) {
     out.push(tag);
@@ -188,22 +179,29 @@ fn write_int4(out: &mut Vec<u8>, data: i32) {
 //     }
 // ```
 // makeblastdb runs with the default method (replace and warn) and the
-// substitute '#': every byte outside ' '..'~' is written as '#' and reported
-// with the stream position of the replacement.
-fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleChar>) {
+// substitute '#': every byte outside ' '..'~' is written as '#' and noted with
+// the stream position of the replacement, the stream's trace and the original
+// string (`report::serial::visible::BadChars`).
+fn write_visible_string(
+    out: &mut Vec<u8>,
+    text: &[u8],
+    stack: &ObjectStack,
+    bad: &mut Vec<BadChars>,
+) {
     out.push(TAG_VISIBLE_STRING);
     write_length(out, text.len());
-    for &byte in text {
-        if (b' '..=b'~').contains(&byte) {
+    let mut noted: Option<BadChars> = None;
+    for (index, &byte) in text.iter().enumerate() {
+        if good_visible_char(byte) {
             out.push(byte);
         } else {
-            bad.push(BadTitleChar {
-                byte,
-                stream_offset: out.len(),
-            });
-            out.push(b'#');
+            noted
+                .get_or_insert_with(|| BadChars::written(stack.trace(), text))
+                .note(index, Position::Byte(out.len()));
+            out.push(SUBST);
         }
     }
+    bad.extend(noted);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
@@ -243,16 +241,19 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
 /// The header record of the sequence number `oid` of its volume: the
 /// definition line with `title`, `gnl|BL_ORD_ID|oid` and `taxid`. Bytes of
 /// the title that a VisibleString cannot hold are written as `#` and
-/// appended to `bad`.
-pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleChar>) -> Vec<u8> {
+/// noted in `bad` (under `Blast-def-line-set.E.title`).
+pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadChars>) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + title.len());
+    let mut stack = ObjectStack::with_root("Blast-def-line-set");
+    stack.push("E");
+    stack.push("title");
     // Blast-def-line-set ::= SEQUENCE OF Blast-def-line
     open(&mut out, TAG_SEQUENCE);
     // Blast-def-line ::= SEQUENCE
     open(&mut out, TAG_SEQUENCE);
     // title VisibleString OPTIONAL
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TITLE);
-    write_visible_string(&mut out, title, bad);
+    write_visible_string(&mut out, title, &stack, bad);
     close(&mut out);
     // seqid SEQUENCE OF Seq-id
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_SEQID);
@@ -262,7 +263,7 @@ pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleCha
     // Dbtag ::= SEQUENCE { db VisibleString, tag Object-id }
     open(&mut out, TAG_SEQUENCE);
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DBTAG_DB);
-    write_visible_string(&mut out, b"BL_ORD_ID", &mut Vec::new());
+    write_visible_string(&mut out, b"BL_ORD_ID", &stack, &mut Vec::new());
     close(&mut out);
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DBTAG_TAG);
     // Object-id ::= CHOICE { id INTEGER, str VisibleString }
@@ -281,21 +282,6 @@ pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleCha
     close(&mut out);
     close(&mut out);
     out
-}
-
-/// A byte of a VisibleString of a parsed definition line that the serializer replaces
-/// (`ReplaceVisibleChar` posts "Bad char \[0xE9\] in string at byte 38", the member's
-/// stack path before it and the whole string after it).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BadChar {
-    /// `CObjectStack::GetStackTrace()`: the path of the member, as
-    /// `Blast-def-line-set.E.seqid.E.local.str`.
-    pub path: String,
-    pub byte: u8,
-    /// The stream offset of the replacement (`GetPosition`).
-    pub stream_offset: usize,
-    /// The string that holds it.
-    pub string: Vec<u8>,
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:556-597
@@ -340,11 +326,11 @@ fn write_int8(out: &mut Vec<u8>, data: i64) {
 }
 
 /// The BER writer of a whole `Blast-def-line-set` (`oss << MSerial_AsnBinary <<
-/// *deflines`), with the member path of each string for the serializer's diagnostics.
+/// *deflines`), with the stream's object stack for the serializer's diagnostics.
 struct SetWriter<'a> {
     out: Vec<u8>,
-    path: Vec<&'static str>,
-    bad: &'a mut Vec<BadChar>,
+    stack: ObjectStack,
+    bad: &'a mut Vec<BadChars>,
 }
 
 impl SetWriter<'_> {
@@ -358,24 +344,15 @@ impl SetWriter<'_> {
 
     /// A member or an alternative `[number]` around `body`, named `name` in the path.
     fn context(&mut self, number: u8, name: &'static str, body: impl FnOnce(&mut Self)) {
-        self.path.push(name);
+        self.stack.push(name);
         self.open(TAG_CONTEXT_CONSTRUCTED | number);
         body(self);
         self.close();
-        self.path.pop();
+        self.stack.pop();
     }
 
     fn string(&mut self, text: &[u8]) {
-        let mut bad = Vec::new();
-        write_visible_string(&mut self.out, text, &mut bad);
-        for bad_char in bad {
-            self.bad.push(BadChar {
-                path: self.path.join("."),
-                byte: bad_char.byte,
-                stream_offset: bad_char.stream_offset,
-                string: text.to_vec(),
-            });
-        }
+        write_visible_string(&mut self.out, text, &self.stack, self.bad);
     }
 
     fn string_member(&mut self, number: u8, name: &'static str, text: &[u8]) {
@@ -533,15 +510,15 @@ impl SetWriter<'_> {
 /// The header record of a sequence whose definition lines carry parsed Seq-ids
 /// (`-parse_seqids`): `set` as makeblastdb serializes it. Bytes of the strings that a
 /// VisibleString cannot hold are written as `#` and appended to `bad`.
-pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
+pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChars>) -> Vec<u8> {
     let mut w = SetWriter {
         out: Vec::with_capacity(64),
-        path: vec!["Blast-def-line-set"],
+        stack: ObjectStack::with_root("Blast-def-line-set"),
         bad,
     };
     w.open(TAG_SEQUENCE);
     for defline in &set.deflines {
-        w.path.push("E");
+        w.stack.push("E");
         w.open(TAG_SEQUENCE);
         if let Some(title) = &defline.title {
             w.string_member(DEFLINE_TITLE, "title", title);
@@ -549,9 +526,9 @@ pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
         w.context(DEFLINE_SEQID, "seqid", |w| {
             w.open(TAG_SEQUENCE);
             for id in &defline.ids {
-                w.path.push("E");
+                w.stack.push("E");
                 w.seq_id(id);
-                w.path.pop();
+                w.stack.pop();
             }
             w.close();
         });
@@ -568,7 +545,7 @@ pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
             w.int_list(5, "other-info", values);
         }
         w.close();
-        w.path.pop();
+        w.stack.pop();
     }
     w.close();
     w.out
@@ -615,8 +592,16 @@ mod tests {
             "30803080a0801a1e61202020746162202063746c20232320757466382023686920232064656c0000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a280020100000000000000"
         );
         // "Bad char [0xC3] in string at byte 21", [0xA9] 22, [0x80] 29, [0x7F] 33
-        let reported: Vec<(u8, usize)> = bad.iter().map(|b| (b.byte, b.stream_offset)).collect();
-        assert_eq!(reported, [(0xC3, 21), (0xA9, 22), (0x80, 29), (0x7F, 33)]);
+        assert_eq!(bad.len(), 1);
+        let reported: Vec<(u8, Position)> = (0..bad[0].len()).map(|k| bad[0].byte(k)).collect();
+        assert_eq!(
+            reported,
+            [0xC3, 0xA9, 0x80, 0x7F]
+                .into_iter()
+                .zip([21, 22, 29, 33].map(Position::Byte))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(bad[0].trace(), "Blast-def-line-set.E.title");
     }
 
     #[test]
@@ -898,14 +883,10 @@ mod tests {
                 vec![ParsedSeqId::Local(ObjectId::Str(b"\xe9abc".to_vec()))],
             );
             let record = encode_defline_set(&set, &mut bad);
+            assert_eq!(bad.len(), 1);
             assert_eq!(
-                bad,
-                [BadChar {
-                    path: "Blast-def-line-set.E.seqid.E.local.str".to_string(),
-                    byte: 0xe9,
-                    stream_offset: 38,
-                    string: b"\xe9abc".to_vec(),
-                }]
+                bad[0].message(0),
+                b"Blast-def-line-set.E.seqid.E.local.str\nBad char [0xE9] in string at byte 38\n\xe9abc"
             );
             assert_eq!(record[38], b'#');
             bad.clear();
@@ -922,8 +903,8 @@ mod tests {
             encode_defline_set(&set, &mut bad);
             assert_eq!(bad.len(), 1);
             assert_eq!(
-                (bad[0].path.as_str(), bad[0].stream_offset),
-                ("Blast-def-line-set.E.title", 19)
+                (bad[0].trace(), bad[0].byte(0).1),
+                ("Blast-def-line-set.E.title", Position::Byte(19))
             );
         }
     }

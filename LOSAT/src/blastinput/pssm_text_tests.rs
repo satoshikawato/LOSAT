@@ -526,7 +526,10 @@ fn a_bad_byte_of_a_pssm_is_noted_as_ncbi_posts_it() {
     ] {
         let mut bad_chars = Vec::new();
         read_pssm_with_parameters_and_skips(&gunzip(name), &mut bad_chars).unwrap();
-        let messages: Vec<Vec<u8>> = bad_chars.iter().map(BadChar::traced_message).collect();
+        let messages: Vec<Vec<u8>> = bad_chars
+            .iter()
+            .flat_map(|bad| (0..bad.len()).map(|k| bad.message(k)))
+            .collect();
         let expected: Vec<Vec<u8>> = ["C3", "A9"]
             .iter()
             .map(|byte| {
@@ -537,7 +540,9 @@ fn a_bad_byte_of_a_pssm_is_noted_as_ncbi_posts_it() {
             })
             .collect();
         assert_eq!(messages, expected, "{name}");
-        assert!(bad_chars.iter().all(|bad| bad.at == Position::Line(line)));
+        assert!(bad_chars
+            .iter()
+            .all(|bad| (0..bad.len()).all(|k| bad.byte(k).1 == Position::Line(line))));
     }
     let read =
         read_pssm_with_parameters_and_skips(&gunzip("pssm/ps4_rnd_ctrl.asn.gz"), &mut Vec::new())
@@ -686,17 +691,28 @@ fn the_trace_of_a_bad_byte_names_the_members_read() {
             )][..],
         ),
     ] {
+        let text = gunzip(name);
+        let lines: Vec<&[u8]> = text.split(|&c| c == b'\n').collect();
         let mut bad_chars = Vec::new();
-        read_pssm_with_parameters_and_skips(&gunzip(name), &mut bad_chars).unwrap();
-        let found: Vec<(&str, u8, usize)> = bad_chars
-            .iter()
-            .map(|bad| {
-                let Position::Line(line) = bad.at else {
+        read_pssm_with_parameters_and_skips(&text, &mut bad_chars).unwrap();
+        let mut found: Vec<(&str, u8, usize)> = Vec::new();
+        for bad in &bad_chars {
+            for k in 0..bad.len() {
+                let (byte, Position::Line(line)) = bad.byte(k) else {
                     panic!("{name}: a binary position")
                 };
-                (bad.trace.as_str(), bad.byte, line)
-            })
-            .collect();
+                found.push((bad.trace(), byte, line));
+                // The chunk shown is the bytes of that line that the string holds, the bad
+                // byte among them (NCBI's `CTempString(data, count)` at the byte).
+                let message = bad.message(k);
+                let chunk = message.splitn(3, |&c| c == b'\n').nth(2).unwrap();
+                assert!(chunk.contains(&byte), "{name}: {k}");
+                assert!(
+                    lines[line - 1].windows(chunk.len()).any(|w| w == chunk),
+                    "{name}: the chunk of byte {k} is not on line {line}"
+                );
+            }
+        }
         assert_eq!(found, expected, "{name}");
     }
 }

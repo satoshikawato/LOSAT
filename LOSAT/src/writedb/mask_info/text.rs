@@ -18,6 +18,7 @@ use super::schema::{ChoiceDef, ClassDef, EnumDef};
 use crate::report::serial::asn_text_reader::{
     AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, StreamSource,
 };
+use crate::report::serial::object_stack::ObjectStack;
 
 /// The text of a mask file.
 pub(super) type TextSource = StreamSource<Box<dyn Read>>;
@@ -294,5 +295,9 @@ impl<S: AsnSource> Input for TextIn<S> {
         } else {
             self.r.enumerated(def.values)?.1
         })
+    }
+
+    fn stack(&mut self) -> &mut ObjectStack {
+        &mut self.r.stack
     }
 }

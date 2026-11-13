@@ -19,19 +19,23 @@
 //! the end of the line; the members of a SEQUENCE come in the order of the module; a REAL is
 //! `{ mantissa, base, exponent }` or a word (`ReadDouble`, `read_real`); a VisibleString joins its
 //! lines (an end of line inside it is dropped) and `""` is one quote; an OCTET STRING is hex digits
-//! across lines. The members and variants that LOSAT does not keep are skipped as values
-//! (`skip_value`): the descriptors of the query other than its titles, its `annot`, the members
-//! of its `Seq-inst` other than `repr`, `mol`, `length` and `seq-data`, and the `constraints` and
-//! `annotatedSites` of the parameters; `read_pssm_with_parameters_and_skips` names them, since NCBI
+//! across lines. The members and variants that LOSAT does not keep are not kept: the descriptors
+//! `name`, `comment`, `region`, `het`, `maploc`, `dbxref`, `create-date`, `update-date` and `user`
+//! are read by their types (`seqdesc_title`; the shared `Dbtag`, `Date` and `User-object` readers
+//! of `seqid::asn_text`), and the other descriptors, the query's `annot`, the members of its
+//! `Seq-inst` other than `repr`, `mol`, `length` and `seq-data`, and the `constraints` and
+//! `annotatedSites` of the parameters are skipped as values (`skip_value`);
+//! `read_pssm_with_parameters_and_skips` names all of them, since NCBI
 //! writes them back where it writes the PSSM it read (psiblast `-in_pssm` with `-out_pssm`, item
 //! PS5b). An empty `descr` is NCBI's error (`CSeq_descr::PostRead`). A VisibleString stores `#` for
 //! a byte outside the visible range, as NCBI's reader does, and the reader notes each such byte
 //! with its trace (the type and the members, variants and elements read, as the reader's frames
 //! give them: `PssmWithParameters.pssm.query.seq.descr.E.title`), line and chunk
-//! (`report::serial::visible::BadChar`); `algorithm::pssm_search::in_pssm::read_in_pssm` posts
+//! (`report::serial::visible::BadChars`); `algorithm::pssm_search::in_pssm::read_in_pssm` posts
 //! NCBI's error for it. A PSSM that LOSAT writes has none (`algorithm::psiblast::pssm`). A bad
-//! byte in a value that the reader skips is its refusal (the type is not known). LOSAT reads the forms below and refuses the others with an error
-//! naming its line: a query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa`
+//! byte in a value that the reader skips is its refusal (its type, and so whether NCBI posts an
+//! error and with which trace, is not known). LOSAT reads the forms below and refuses the others
+//! with an error naming its line: a query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa`
 //! and `ncbistdaa`, and a REAL mantissa of more than 18 digits. The query's Seq-ids, of every
 //! alternative, are read by the shared Seq-id reader (`seqid::asn_text`).
 
@@ -40,7 +44,7 @@ use crate::report::serial::pssm::{
     FormatRpsDbParameters, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters, PssmQuery,
     PssmWithParameters, SeqData, SeqInst, SEQ_INST_MOL, SEQ_INST_REPR,
 };
-use crate::report::serial::visible::BadChar;
+use crate::report::serial::visible::BadChars;
 
 /// A PSSM that the reader cannot read: the line (from 1) where it stopped and why (the error of
 /// the shared ASN.1 text reader, `report::serial::asn_text_reader`).
@@ -83,10 +87,10 @@ pub(crate) struct PssmRead {
 /// `read_pssm_with_parameters`, with the members skipped (`PssmRead`). `bad_chars` gets the
 /// bytes of VisibleStrings that the reader stored as `#`, in the order read, also when the
 /// document then fails (NCBI posts an error for each byte as it reads it, and its message is
-/// `BadChar::traced_message`).
+/// `BadChars::post`).
 pub(crate) fn read_pssm_with_parameters_and_skips(
     text: &[u8],
-    bad_chars: &mut Vec<BadChar>,
+    bad_chars: &mut Vec<BadChars>,
 ) -> Result<PssmRead> {
     let mut reader = Reader::new(SliceSource::new(text), "PSSM", "PSSM reader");
     let result = read_document(&mut reader);
@@ -234,15 +238,72 @@ impl<'a> Reader<SliceSource<'a>> {
         })
     }
 
-    /// One `Seqdesc`: its text when it is a `title`; another variant is skipped.
+    /// One `Seqdesc`: its text when it is a `title`. The variants whose strings the shared
+    /// readers type (a VisibleString, `Dbtag`, `Date`, `User-object`) are read, so that a bad
+    /// byte in them is stored as `#` and posted as NCBI does, and noted as skipped (LOSAT keeps
+    /// nothing of them); another variant is skipped as a value (`skip_value`).
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:47-73
+    // ```text
+    // Seqdesc ::= CHOICE {
+    //     mol-type GIBB-mol ,          -- type of molecule
+    //     modif SET OF GIBB-mod ,             -- modifiers
+    //     method GIBB-method ,         -- sequencing method
+    //     name VisibleString ,         -- a name for this sequence
+    //     title VisibleString ,        -- a title for this sequence
+    //     org Org-ref ,                -- if all from one organism
+    //     comment VisibleString ,      -- a more extensive comment
+    //     num Numbering ,              -- a numbering system
+    //     maploc Dbtag ,               -- map location of this sequence
+    //     pir PIR-block ,              -- PIR specific info
+    //     genbank GB-block ,           -- GenBank specific info
+    //     pub Pubdesc ,                -- a reference to the publication
+    //     region VisibleString ,       -- overall region (globin locus)
+    //     user User-object ,           -- user defined object
+    //     sp SP-block ,                -- SWISSPROT specific info
+    //     dbxref Dbtag ,               -- xref to other databases
+    //     embl EMBL-block ,            -- EMBL specific information
+    //     create-date Date ,           -- date entry first created/released
+    //     update-date Date ,           -- date of last update
+    //     prf PRF-block ,              -- PRF specific information
+    //     pdb PDB-block ,              -- PDB specific information
+    //     het Heterogen ,              -- cofactor, etc associated but not bound
+    //     source BioSource ,           -- source of materials, includes Org-ref
+    //     molinfo MolInfo ,            -- info on the molecule and techniques
+    //     modelev ModelEvidenceSupport -- model evidence for XM records
+    // }
+    // ```
+    // (`Heterogen ::= VisibleString`, seq.asn:257.)
     fn seqdesc_title(&mut self) -> Result<Option<Vec<u8>>> {
         let variant = self.member_id()?;
         if variant.is_empty() {
             return Err(self.error("choice variant id expected"));
         }
-        if variant == b"title" {
-            self.variant_frame("title");
-            return Ok(Some(self.string()?));
+        let typed: Option<&'static str> = match variant {
+            b"title" => {
+                self.variant_frame("title");
+                return Ok(Some(self.string()?));
+            }
+            b"name" => Some("name"),
+            b"comment" => Some("comment"),
+            b"region" => Some("region"),
+            b"het" => Some("het"),
+            b"maploc" => Some("maploc"),
+            b"dbxref" => Some("dbxref"),
+            b"create-date" => Some("create-date"),
+            b"update-date" => Some("update-date"),
+            b"user" => Some("user"),
+            _ => None,
+        };
+        if let Some(name) = typed {
+            self.variant_frame(name);
+            match name {
+                "maploc" | "dbxref" => drop(self.dbtag()?),
+                "create-date" | "update-date" => drop(self.date()?),
+                "user" => drop(self.user_object(false)?),
+                _ => drop(self.string()?),
+            }
+            self.skipped.push("Seqdesc");
+            return Ok(None);
         }
         // A `molinfo` descriptor takes the title out of the query's warning label
         // (`CBlastQuerySourceBioseqSet::GetTitle`, quoted at `algorithm::psiblast::in_pssm`).

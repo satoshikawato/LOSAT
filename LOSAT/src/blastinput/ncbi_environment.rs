@@ -2057,8 +2057,9 @@ pub fn log_file<S: AsRef<OsStr>>(words: &[S]) -> Option<&OsStr> {
 /// (`CNcbiApplicationAPI::AppMain`, `preparse`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum Preparsed<S> {
-    /// `-version`: print the version, exit status 0.
-    Version,
+    /// `-version` or a full version (`-version-full`, `-version-full-xml`,
+    /// `-version-full-json`): print it, exit status 0 (`ncbi_version::print`).
+    Version(crate::ncbi_version::VersionRequest),
     /// The words left for the argument reader, the registry file of the last `-conffile FILE`
     /// or `-conffile=FILE` (`conf_arg`, which NCBI loads in place of `<program>.ini`), and
     /// whether there was `-dryrun` (NCBI reads the arguments, then runs nothing: the command
@@ -2069,8 +2070,6 @@ pub enum Preparsed<S> {
         conffile: Option<OsString>,
         dryrun: bool,
     },
-    /// A word LOSAT refuses where NCBI stops reading (`-version-full`, ...).
-    Refused(&'static str),
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015
@@ -2132,17 +2131,16 @@ pub enum Preparsed<S> {
 //             }
 //         }
 // ```
-/// The words NCBI's application takes before its argument reader: `-version` anywhere before
-/// `--` (but not as the value of `-logfile` or `-conffile`), the full versions, `-dryrun` and
-/// `-conffile`. A `-logfile` or `-conffile` without a value is dropped. `-dryrun` ends the run
-/// after the arguments (`cli::main_entry`; rpsbproc's after its `Init`, `rpsbproc::dry_run`),
-/// LOSAT refuses the full versions (NCBI's build
-/// details); the file of the last
-/// `-conffile` is the application start's configuration (`start_application`, line RG item E1).
+/// The words NCBI's application takes before its argument reader: `-version` and the full
+/// versions anywhere before `--` (but not as the value of `-logfile` or `-conffile`; the first
+/// one is printed, line RG item E3), `-dryrun` and `-conffile`. A `-logfile` or `-conffile`
+/// without a value is dropped. `-dryrun` ends the run after the arguments (`cli::main_entry`;
+/// rpsbproc's after its `Init`, `rpsbproc::dry_run`); the file of the last `-conffile` is the
+/// application start's configuration (`start_application`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
-/// the command line's entry (`-version`, the full versions before the configuration load, and
-/// the words that the argument reader gets, `cli::try_parse_from`), `start_application`,
-/// `cli::ncbi_version_request` and blastdbcmd read them here, and `log_file` is NCBI's first scan
+/// the command line's entry (the versions, before the configuration load, and the words that
+/// the argument reader gets, `cli::try_parse_from`), `start_application`,
+/// `cli::ncbi_version_request` and `ncbi_app` read them here, and `log_file` is NCBI's first scan
 /// of `-logfile`.
 pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
     let mut kept = Vec::with_capacity(words.len());
@@ -2171,12 +2169,11 @@ pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
                     }
                 }
             }
-            b"-version" => return Preparsed::Version,
-            b"-version-full" => return Preparsed::Refused("-version-full"),
-            b"-version-full-xml" => return Preparsed::Refused("-version-full-xml"),
-            b"-version-full-json" => return Preparsed::Refused("-version-full-json"),
             b"-dryrun" => dryrun = true,
             _ => {
+                if let Some(request) = crate::ncbi_version::VersionRequest::of_word(word) {
+                    return Preparsed::Version(request);
+                }
                 if let Some(name) = word.strip_prefix(b"-conffile=") {
                     // SAFETY: `name` is the rest of the word after an ASCII prefix, so it starts
                     // at a boundary of the platform's encoding and ends where the word ends.
@@ -2303,7 +2300,7 @@ pub fn start_application<S: AsRef<OsStr> + Clone>(
     APPLICATION_START.get_or_init(|| {
         let conffile = match preparse(words) {
             Preparsed::Words { conffile, .. } => conffile,
-            Preparsed::Version | Preparsed::Refused(_) => None,
+            Preparsed::Version(_) => None,
         };
         application_start(
             program,
@@ -4599,10 +4596,13 @@ mod tests {
                 conffile,
                 dryrun,
             } => (words, conffile, dryrun),
-            Preparsed::Version => panic!("version"),
-            Preparsed::Refused(word) => panic!("refused {word}"),
+            Preparsed::Version(request) => panic!("version {request:?}"),
         };
-        assert_eq!(preparse(&words(&["-db", "-version"])), Preparsed::Version);
+        use crate::ncbi_version::VersionRequest;
+        assert_eq!(
+            preparse(&words(&["-db", "-version"])),
+            Preparsed::Version(VersionRequest::Version)
+        );
         // The value of `-logfile` or `-conffile` is not read as `-version`; a last `-logfile`
         // is dropped.
         assert_eq!(
@@ -4619,14 +4619,28 @@ mod tests {
         assert_eq!(kept(&["-conffile=x"]).1, Some("x".into()));
         assert_eq!(kept(&["-conffilex"]).1, None);
         assert_eq!(kept(&["-info", "-conffile"]).1, None);
+        // The first version word is the one printed (line RG item E3).
         assert_eq!(
             preparse(&words(&["-version-full", "-version"])),
-            Preparsed::Refused("-version-full")
+            Preparsed::Version(VersionRequest::Full)
+        );
+        assert_eq!(
+            preparse(&words(&["-out", "-version-full-json", "-version-full-xml"])),
+            Preparsed::Version(VersionRequest::FullJson)
+        );
+        assert_eq!(kept(&["-version-full=1"]).0, words(&["-version-full=1"]));
+        assert_eq!(
+            kept(&["--", "-version-full-xml"]).0,
+            words(&["--", "-version-full-xml"])
+        );
+        assert_eq!(
+            kept(&["-logfile", "-version-full"]).0,
+            words(&["-logfile", "-version-full"])
         );
         // `-version` comes before a `-conffile` NCBI would check after its scan.
         assert_eq!(
             preparse(&words(&["-conffile", "x", "-version"])),
-            Preparsed::Version
+            Preparsed::Version(VersionRequest::Version)
         );
         // The words of the command line's entry.
         let os = [OsString::from("-logfile"), OsString::from("-version")];

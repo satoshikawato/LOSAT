@@ -1120,7 +1120,9 @@ impl<'a> BuildDatabase<'a> {
                     let mut headers = deflines::extract_bioseq_deflines(&bioseq, &mut *warn);
                     self.output_db.post_extracted_deflines(&headers);
                     self.taxids.fix_tax_id(&mut headers);
-                    self.past_seq_pos(&bioseq, &bioseq_id, &mut *warn)?;
+                    if let Some(past) = bioseq.past_seq_pos {
+                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    }
                     if bioseq.seq_data.is_some() {
                         // `bs->GetId()`: the ids after `AddSequences`' edit of the ones of the
                         // other molecule type (`localize_other_molecule`, above).
@@ -1140,7 +1142,9 @@ impl<'a> BuildDatabase<'a> {
                     // The definition line without `-parse_seqids` gets the global taxid
                     // of `-taxid` (or 0); `-taxid_map` requires `-parse_seqids`.
                     self.output_db.extract_bioseq_deflines(&bioseq);
-                    self.past_seq_pos(&bioseq, &bioseq_id, &mut *warn)?;
+                    if let Some(past) = bioseq.past_seq_pos {
+                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    }
                     if bioseq.seq_data.is_some() {
                         // `bs->GetId()` is the `local id N` that `CFastaReader` numbers the
                         // sequences by (`CSeqIdGenerator::GenerateID` without a prefix); a
@@ -1292,17 +1296,16 @@ impl<'a> BuildDatabase<'a> {
     ///         NCBI_THROW(CMultisourceException, eArg, msg);
     ///     }
     /// ```
+    #[cold]
     fn past_seq_pos(
         &mut self,
+        past: PastSeqPos,
         bioseq: &Bioseq,
         bioseq_id: &str,
         warn: Warn<'_>,
-    ) -> Result<(), WriteDbError> {
-        let Some(past) = bioseq.past_seq_pos else {
-            return Ok(());
-        };
+    ) -> WriteDbError {
         self.post_diagnostics(warn);
-        Err(match past {
+        match past {
             PastSeqPos::ProteinDelta => {
                 let best_id = match &bioseq.parsed {
                     Some(parsed) => {
@@ -1323,7 +1326,7 @@ impl<'a> BuildDatabase<'a> {
                 "{} is not supported by LOSAT's makeblastdb",
                 past_seq_pos_refusal(bioseq_id, length)
             )),
-        })
+        }
     }
 
     fn post_diagnostics(&mut self, warn: Warn<'_>) {

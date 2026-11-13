@@ -142,7 +142,7 @@ impl MaskWriter {
                 // ```
                 let mut text = id_to_string(seq, parsed_id)?;
                 text.push(b'\n');
-                text.extend_from_slice(&interval_lines(mask));
+                interval_lines(mask, &mut text);
                 out.write_all(&text)?;
             }
             MaskWriter::Tabular => {
@@ -294,7 +294,9 @@ impl MaskInfoWriter {
             return Ok(());
         }
         if self.serial.is_none() {
-            out.write_all(&interval_lines(mask))?;
+            let mut text = Vec::new();
+            interval_lines(mask, &mut text);
+            out.write_all(&text)?;
             return Ok(());
         }
         self.masks.push((id.clone(), mask.to_vec()));
@@ -313,12 +315,12 @@ impl MaskInfoWriter {
 ///     }
 /// }
 /// ```
-fn interval_lines(mask: &[(u32, u32)]) -> Vec<u8> {
-    let mut text = Vec::new();
+/// The lines are added to `text`.
+fn interval_lines(mask: &[(u32, u32)], text: &mut Vec<u8>) {
     for &(from, to) in mask {
-        text.extend_from_slice(format!("{from} - {to}\n").as_bytes());
+        // Writing to a `Vec<u8>` does not fail.
+        let _ = writeln!(text, "{from} - {to}");
     }
-    text
 }
 
 /// `bsh.GetSeqId()`: the first Seq-id of the sequence.

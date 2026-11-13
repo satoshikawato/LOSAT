@@ -123,10 +123,17 @@ fn cases() -> Vec<[String; 5]> {
 /// the directory `<b>/` holding the data files with those of `data_with/<a>/` and then of
 /// `data_with/<b>/` in their place; `data-without:<file>`, `data_missing/` without that file;
 /// `conf:<file>`, `conf/<file>` as `c.ini` (for `-conffile c.ini`); `ini:<file>`, `conf/<file>`
-/// as `rpsbproc.ini`; `ncbirc:<file>`, `conf/<file>` as `.ncbirc`. The files that a run makes
-/// and the registry files of the case before are removed first.
+/// as `rpsbproc.ini`; `ncbirc:<file>`, `conf/<file>` as the system-wide registry file that NCBI's
+/// application reads on the platform (`SYSTEM_WIDE_REGISTRY`). The files that a run makes and the
+/// registry files of the case before are removed first.
 fn set_up(dir: &Path, setup: &str) {
-    for made in ["out.txt", "log.txt", "c.ini", "rpsbproc.ini", ".ncbirc"] {
+    for made in [
+        "out.txt",
+        "log.txt",
+        "c.ini",
+        "rpsbproc.ini",
+        SYSTEM_WIDE_REGISTRY,
+    ] {
         let _ = fs::remove_file(dir.join(made));
     }
     let _ = fs::remove_dir_all(dir.join("data_missing"));
@@ -135,12 +142,18 @@ fn set_up(dir: &Path, setup: &str) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:284-303 (quoted at
+// `ncbi_environment::SYSTEM_WIDE_REGISTRY`): the registry file that NCBI's application reads in
+// the current directory is `.ncbirc`, and `ncbi.ini` on Windows (`eName_RcOrIni`). The fixtures were frozen on Linux
+// with `.ncbirc`; a Windows run gives the file the name its NCBI reads.
+const SYSTEM_WIDE_REGISTRY: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
+
 /// One part of `set_up`.
 fn set_up_part(dir: &Path, setup: &str) {
     for (kind, name) in [
         ("conf:", "c.ini"),
         ("ini:", "rpsbproc.ini"),
-        ("ncbirc:", ".ncbirc"),
+        ("ncbirc:", SYSTEM_WIDE_REGISTRY),
     ] {
         if let Some(file) = setup.strip_prefix(kind) {
             fs::copy(fixtures().join("conf").join(file), dir.join(name)).unwrap();
@@ -274,9 +287,9 @@ fn rpsbproc_refuses_what_it_does_not_give() {
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
-// prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), `-help` LOSAT's help, NCBI's toolkit
-// words that LOSAT does not run (`-version-full`) are refused with the other programs'
-// message, `-dryrun=1` is an unknown word as in NCBI (`-dryrun` is not an argument), an
+// prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), so does `-version-full` in NCBI's form
+// with LOSAT's values (line RG item E3), `-help` LOSAT's help,
+// `-dryrun=1` is an unknown word as in NCBI (`-dryrun` is not an argument), an
 // unknown word is named as it was given, and a file name that is not UTF-8 is refused before
 // anything is written.
 #[test]
@@ -298,14 +311,12 @@ fn rpsbproc_command_line() {
         &["-i", "arch/one.asn", "-d", "data", "-version-full"],
         None,
     );
-    assert!(out.is_empty());
-    let err = String::from_utf8(err).unwrap();
-    assert_eq!(status, 2, "{err}");
+    assert_eq!((status, err), (0, Vec::new()));
+    let out = String::from_utf8(out).unwrap();
     assert!(
-        err.contains(
-            "the NCBI C++ Toolkit option -version-full is not supported by LOSAT's rpsbproc"
-        ),
-        "{err}"
+        out.starts_with("rpsbproc: 0.5.1\n Package: LOSAT ")
+            && out.ends_with(" Package-Config:  \n GI-64bit:  TRUE\n"),
+        "{out}"
     );
     let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-dryrun=1"], None);
     assert!(out.is_empty());

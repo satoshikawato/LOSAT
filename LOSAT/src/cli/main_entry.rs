@@ -206,28 +206,17 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = start {
         start.write_log_setup(&mut target);
     }
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` is read
-    // before the program's arguments, `cli::ncbi_version_request`).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
+    // versions are read before the program's arguments and before the configuration load,
+    // `cli::ncbi_version_request`).
     let argv_is_rpsbproc = argv.get(1).is_some_and(|word| word == "rpsbproc");
     if let Some(text) = crate::cli::ncbi_version_request(argv.iter().cloned()) {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);
         } else {
-            print!("{text}");
+            write_dropping_errors(&mut std::io::stdout(), &text);
         }
         return Ok(());
-    }
-    // NCBI reads the other words of that scan there too (`ncbi_environment::preparse`): a full
-    // version is printed, which LOSAT refuses (`cli::ncbi_toolkit_word_error`) before the
-    // configuration load. The file of `-conffile` is that load's (`start_application`).
-    if let Some(program) = program {
-        use crate::blastinput::ncbi_environment::{preparse, Preparsed};
-        if let Preparsed::Refused(word) = preparse(&argv[2..]) {
-            exit_on_parse_error(
-                &crate::cli::ncbi_toolkit_word_error(program, word),
-                argv_is_rpsbproc,
-            );
-        }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`: the
     // configuration is loaded before the arguments are read; quoted at
@@ -550,7 +539,7 @@ fn run_main_entry() -> Result<()> {
         Commands::Rpstblastn(args) => {
             // NCBI's `-help` and `-h` texts, which its reader writes before the application runs.
             if let Some(text) = args.ncbi_help_text() {
-                print!("{text}");
+                write_dropping_errors(&mut std::io::stdout(), text);
                 return Ok(());
             }
             // rpstblastn is an NCBI application as blastx: its application layer reads its
@@ -652,8 +641,18 @@ fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
 }
 
 /// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
-/// refusals (`cli::ncbi_toolkit_word_error`), written as clap writes it, and its exit status.
+/// refusals, written as clap writes it, and its exit status. The help that stopped the parser is
+/// written as its error's text is, but the XML of `-xmlhelp`, which `cli::xml_help_text` writes
+/// (NCBI's `PrintUsageXml(cout)`, exit status 0: ncbiapp.cpp:685-697, quoted at `ncbi_xmlhelp`).
 fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
+    if let Some(text) = crate::cli::xml_help_program(error).and_then(crate::cli::xml_help_text) {
+        if argv_is_rpsbproc {
+            crate::rpsbproc::write_stdout(&text);
+        } else {
+            write_dropping_errors(&mut std::io::stdout(), &text);
+        }
+        std::process::exit(0);
+    }
     // rpsbproc's arguments are not the single-dash words of the BLAST programs.
     let message = if argv_is_rpsbproc {
         crate::cli::render_rpsbproc_message(error)
@@ -669,9 +668,22 @@ fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
             crate::rpsbproc::write_stdout(&message);
         }
     } else if error.use_stderr() {
-        eprint!("{message}");
+        write_dropping_errors(&mut std::io::stderr(), &message);
     } else {
-        print!("{message}");
+        write_dropping_errors(&mut std::io::stdout(), &message);
     }
     std::process::exit(error.exit_code());
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977 (quoted at
+// `ncbi_version::print`: the version is written to `cout`, whose failure NCBI never checks)
+/// Writes `text` (a version, a help text, a message of LOSAT's argument parser) to `stream` as
+/// NCBI writes its version, help and usage to `cout` and `cerr`: a write that fails is dropped
+/// and the program ends with its exit status (NCBI BLAST+ 2.17.0 `blastn -version > /dev/full`,
+/// `-version-full`, `-h`, `-help`: exit status 0 and no message, line RG item E3), where `print!`
+/// panics (exit status 134). A pipe whose reader has closed ends NCBI's programs by SIGPIPE, which
+/// LOSAT's runtime ignores (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exceptions 5 and 10).
+fn write_dropping_errors(stream: &mut dyn std::io::Write, text: &str) {
+    let _ = stream.write_all(text.as_bytes());
+    let _ = stream.flush();
 }

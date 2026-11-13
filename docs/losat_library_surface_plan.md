@@ -420,6 +420,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 ### 12.4 残ること
 
 - 公開（段階 4）：wheel のマトリクス、release workflow、`cargo-semver-checks` と `cargo-public-api`。
+  → 2026-11-13 wheel のマトリクスは CI に入った（P-W1、`.github/workflows/python-wheels.yml`）：release の 5 つの runner と toolchain、release profile で abi3 の wheel を 1 つずつ作り、CPython 3.10 と 3.14 の新しい環境に入れて blastp の報告 1 件を凍結 hash と比べる。dispatch、main への push、毎週の dev、`python/` を変える PR（Linux x86_64 だけ）で走り、wheel は 7 日の artifact。PyPI への公開は保守者。
 - gbdraw の製品判断：`pylosat` を runtime に入れるか、その順番と記録の形。
 - `panic = "unwind"` の経路はテストしていない（公開の API から panic を起こす手段が無い）。release profile の build は通り、`python/tests` と gbdraw の比較はその build でも通る。
 

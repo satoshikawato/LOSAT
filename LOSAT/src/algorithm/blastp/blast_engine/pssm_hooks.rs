@@ -43,6 +43,8 @@ use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
+use crate::core::link_hsps::{EvenGapLinkParams, LinkContext};
+use crate::stats::search_space::SearchSpace;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 /// The lookup table of the PSSM and the query's contexts ([`psi_contexts`]).
@@ -171,6 +173,10 @@ pub(super) struct PssmPrelimRun<'a> {
     pub(super) gumbel: Option<&'a BlastGumbelBlk>,
     /// Each context's effective search space where it is exact (`psi_stats`).
     pub(super) exact_search_spaces: &'a [Option<i64>],
+    /// Each context's length adjustment and effective search space (`query_info->contexts`,
+    /// computed with `kbp_gap_std`), which psiblast's `-sum_stats true` links with
+    /// (`psi_link_context`).
+    pub(super) search_spaces: &'a [SearchSpace],
     pub(super) cutoff_subject_length: i32,
     pub(super) prelim_evalue: f64,
     pub(super) window: i32,
@@ -192,6 +198,53 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
         args.x_drop_final_bits,
         karlin.gapped.lambda,
     )
+}
+
+/// The hit-saving cutoff of a PSSM search's context (`hit_params->cutoffs[0]`): `cutoff_score_max`
+/// from `-evalue` (the preliminary e-value) with `kbp_gap_psi`, which the initial words' cutoff
+/// reads, and `cutoff_score`, which psiblast's `-sum_stats true` lowers to the sum statistics'
+/// cutoff where that is smaller (`blast_engine::sum_stats_hit_cutoff` with `kbp_gap_psi`: NCBI's
+/// `kbp_array` is `sbp->kbp_gap`); without sum statistics the two are the same. The traceback's
+/// hit-saving parameters are made again from the same options (`BLAST_GapAlignSetUp`), so its
+/// `cutoff_score_min` is this `cutoff_score` (one context).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (quoted at
+/// `blast_engine::sum_stats_hit_cutoff`)
+fn psi_hit_cutoffs(
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    karlin: &PsiKarlin,
+    stats: &EvalueStats<'_>,
+    cutoff_subject_length: i32,
+    prelim_evalue: f64,
+) -> (i32, i32) {
+    let cutoff_score_max = stats.hit_cutoff(
+        prelim_evalue,
+        &karlin.gapped,
+        contexts[0].aa_len as i32,
+        cutoff_subject_length,
+    );
+    let cutoff_score = if args.sum_stats {
+        cutoff_score_max.min(super::sum_stats_hit_cutoff(
+            contexts,
+            cutoff_subject_length,
+            &karlin.gapped,
+        ))
+    } else {
+        cutoff_score_max
+    };
+    (cutoff_score_max, cutoff_score)
+}
+
+/// The query's context as psiblast's `-sum_stats true` links it in a PSSM search: `kbp_gap_psi`
+/// (`sbp->kbp_gap`) and the context's length adjustment and effective search space, which NCBI
+/// computed with `kbp_gap_std` (blast_setup.c:766-768) as for the matrix's rounds.
+fn psi_link_context(
+    karlin: &PsiKarlin,
+    context: &QueryContext,
+    search_space: &SearchSpace,
+) -> LinkContext {
+    super::blastp_link_context(&karlin.gapped, context.aa_len, search_space)
 }
 
 /// The preliminary search of a PSSM query over the database `database` or the subject set
@@ -294,14 +347,25 @@ pub(super) fn pssm_prelim(
     let stats = psi_stats(run.gumbel, run.exact_search_spaces);
     // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_resolved_in_pool`,
     // blast_parameters.c:931-939).
-    let hit_cutoff = stats.hit_cutoff(
-        run.prelim_evalue,
-        &karlin.gapped,
-        ctx.aa_len as i32,
+    let (cutoff_score_max, hit_cutoff) = psi_hit_cutoffs(
+        args,
+        run.contexts,
+        &karlin,
+        &stats,
         run.cutoff_subject_length,
+        run.prelim_evalue,
     );
     let word_cutoff =
-        gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(hit_cutoff);
+        gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(cutoff_score_max);
+    // psiblast's `-sum_stats true`: the preliminary stage links each subject's HSPs, with the
+    // small gaps' cutoff of the initial words' smallest cutoff (`word_params->cutoff_score_min`,
+    // one context: `EvenGapLinkParams::preliminary`).
+    let link = args.sum_stats.then(|| {
+        (
+            EvenGapLinkParams::preliminary(word_cutoff),
+            psi_link_context(&karlin, ctx, &run.search_spaces[0]),
+        )
+    });
     let window = run.window;
     let prelim = PssmPrelim {
         rows: &psi.pssm,
@@ -317,6 +381,7 @@ pub(super) fn pssm_prelim(
         karlin: &karlin.gapped,
         stats,
         prelim_evalue: run.prelim_evalue,
+        link,
     };
     let diag_mask = run.diag_mask;
     let process_subject = |scratch: &mut BlastpSubjectScratch,
@@ -412,7 +477,11 @@ pub(super) fn pssm_prelim(
 
 /// The traceback of a PSSM search: mode 0's (`pssm_search::traceback0`), or the position-based
 /// redo of modes 1 to 3 (`pssm_redo`). The final hit lists of the preliminary lists, which it
-/// takes. The final gapped X-drop and the e-values read `kbp_gap_psi`.
+/// takes. The final gapped X-drop and the e-values read `kbp_gap_psi`. With psiblast's
+/// `-sum_stats true` both link each list's HSPs with large gaps only
+/// (`EvenGapLinkParams::traceback`), and the redo keeps the alignments that score at least the
+/// traceback's hit-saving cutoff (`psi_hit_cutoffs`, `redo1::RedoLink`), whose `-evalue`
+/// and subject length (`cutoff_subject_length`) are the preliminary stage's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:464-467
 /// ```c
@@ -430,6 +499,8 @@ pub(super) fn pssm_traceback(
     gapped_params: &KarlinParams,
     gumbel: Option<&BlastGumbelBlk>,
     exact_search_spaces: &[Option<i64>],
+    search_spaces: &[SearchSpace],
+    (cutoff_subject_length, prelim_evalue): (i32, f64),
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -446,7 +517,21 @@ pub(super) fn pssm_traceback(
     let stats = psi_stats(gumbel, exact_search_spaces);
     let karlin = psi_karlin(psi, contexts, gapped_params);
     let (_, x_drop_final) = psi_gapped_x_dropoffs(args, &karlin);
+    let link_context = args
+        .sum_stats
+        .then(|| psi_link_context(&karlin, &contexts[0], &search_spaces[0]));
     if args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats {
+        let link = link_context.map(|context| {
+            let (_, cutoff_score_min) = psi_hit_cutoffs(
+                args,
+                contexts,
+                &karlin,
+                &stats,
+                cutoff_subject_length,
+                prelim_evalue,
+            );
+            redo1::RedoLink::new(cutoff_score_min, context)
+        });
         return pssm_redo(
             args,
             psi,
@@ -456,6 +541,7 @@ pub(super) fn pssm_traceback(
             &karlin,
             x_drop_final,
             stats,
+            link,
             preliminary_hit_lists,
             compact_hit_lists,
         );
@@ -473,6 +559,7 @@ pub(super) fn pssm_traceback(
         stats,
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),
+        link: link_context.map(|context| (EvenGapLinkParams::traceback(), context)),
     }
     .run(preliminary_hit_lists, compact_hit_lists, pool)
 }
@@ -511,6 +598,7 @@ fn pssm_redo(
     karlin: &PsiKarlin,
     x_drop_final: i32,
     stats: EvalueStats<'_>,
+    link: Option<redo1::RedoLink>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
 ) -> Result<Vec<Option<BlastpHitList>>> {
@@ -567,6 +655,7 @@ fn pssm_redo(
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),
         inclusion_ethresh: args.inclusion_ethresh,
+        link,
     }
     .run(preliminary_hit_lists, compact_hit_lists)
 }

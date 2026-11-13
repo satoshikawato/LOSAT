@@ -138,8 +138,7 @@ impl BlastpDatabase {
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids (line DBID): BLASTP (ID2a) and psiblast read it.
-        shared::check_seqids(&db, settings, program)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, program)?;
+        shared::restrict_database(&mut db, name, list, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -200,6 +199,15 @@ impl BlastpDatabase {
         self.db.statistics_numbers().0
     }
 
+    /// The length of the included sequences (`SeqDb::included_length`), which the schedules read.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(super) fn included_letters(&self) -> Result<u64, crate::seqdb::SeqDbError> {
+        self.db.included_length()
+    }
+
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(super) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()
@@ -227,10 +235,10 @@ impl BlastpDatabase {
         shared::check_statistics_count(&self.db, program)
     }
 
-    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
-    /// batch fails, also with a list or an alias file's range or `NSEQ`.
-    pub(super) fn num_oids(&self) -> u32 {
-        self.db.num_oids()
+    /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
+    /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
+    pub(super) fn first_oid_read_fails(&self) -> bool {
+        self.db.first_oid_read_fails()
     }
 
     /// The total length as the engine holds it.
@@ -2702,6 +2710,7 @@ mod tests {
 
     fn test_hsp(s_idx: u32, raw_score: i32) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 100.0,
             length: 10,
             mismatch: 0,

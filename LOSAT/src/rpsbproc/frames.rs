@@ -70,6 +70,64 @@ pub(crate) fn minus_pr_to_plus_na(pr: i32, rfidx: u32, na_len: u32) -> Option<i3
     )
 }
 
+/// `PlusId2PlusRFIdx`: the plus-strand frame index of a plus frame (1 to 3; any positive
+/// frame, `int` converted to `unsigned int`).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:205-209
+// ```c++
+// 	static TFRAMEINDEX PlusId2PlusRFIdx(TFRAMEID rf, SeqLen_t na_len)
+// 	{
+// 		return rf - 1;
+// 	}
+// ```
+pub(crate) fn plus_id_to_plus_rf_idx(rf: i32) -> u32 {
+    rf.wrapping_sub(1) as u32
+}
+
+/// `MinusId2PlusRFIdx`: the plus-strand frame index of the bases of a minus frame (-1 to -3;
+/// any negative frame, in `unsigned int` arithmetic).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:211-215
+// ```c++
+// 	static TFRAMEINDEX MinusId2PlusRFIdx(TFRAMEID rf, SeqLen_t na_len)
+// 	{
+// 		return (na_len + rf + 1) % READINGFRAME::RF_SIZE;
+// 	}
+// ```
+pub(crate) fn minus_id_to_plus_rf_idx(rf: i32, na_len: u32) -> u32 {
+    na_len.wrapping_add(rf as u32).wrapping_add(1) % RF_SIZE
+}
+
+/// `PlusNA2PlusPr`: the residue of a plus-strand frame whose codon holds base `na`
+/// (`unsigned int` arithmetic, stored in an `int`).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:251-254
+// ```c++
+// 	static SeqPos_t PlusNA2PlusPr(SeqPos_t na, TFRAMEINDEX rfidx, SeqLen_t na_len)
+// 	{
+// 		return (na - rfidx) / READINGFRAME::RF_SIZE;
+// 	}
+// ```
+pub(crate) fn plus_na_to_plus_pr(na: i32, rfidx: u32) -> i32 {
+    ((na as u32).wrapping_sub(rfidx) / RF_SIZE) as i32
+}
+
+/// `PlusNA2MinusPr`: the residue of a minus-strand frame whose codon holds base `na` of the
+/// plus strand (`unsigned int` arithmetic, stored in an `int`).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:256-261
+// ```c++
+// 	// -- assume READINGFRAME::RF_SIZE <= rfidx < READINGFRAME::TOTAL_RFS
+// 	// -- the +2 is due to the reverse of na in a codon of minus strand.
+// 	static SeqPos_t PlusNA2MinusPr(SeqPos_t na, TFRAMEINDEX rfidx, SeqLen_t na_len)
+// 	{
+// 		return (na_len - na - rfidx + 2) / READINGFRAME::RF_SIZE;
+// 	}
+// ```
+pub(crate) fn plus_na_to_minus_pr(na: i32, rfidx: u32, na_len: u32) -> i32 {
+    (na_len
+        .wrapping_sub(na as u32)
+        .wrapping_sub(rfidx)
+        .wrapping_add(2)
+        / RF_SIZE) as i32
+}
+
 /// The `ncbieaa` string of genetic code 1 (`gc.prt`, "Standard"), in TCAG order.
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/gc.inc:40-44
 // ```c++

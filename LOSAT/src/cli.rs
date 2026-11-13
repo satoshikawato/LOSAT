@@ -280,10 +280,8 @@ where
         .and_then(|text| command.find_subcommand(text))
         .filter(|program| TOOLKIT_PROGRAMS.contains(&program.get_name()))
     {
-        if let Some(word) = ncbi_preparsed_toolkit_word(&tokens[2..]) {
-            let name = word.trim_start_matches('-');
-            let name = name.split_once('=').map_or(name, |(key, _)| key);
-            return Err(unknown_option_error(program, name, word));
+        if let Some(word) = ncbi_version_word(&tokens[2..]) {
+            return Err(toolkit_file_word_error(program.get_name(), word));
         }
         if crate::blastinput::ncbi_environment::application_start_of_process().is_none() {
             if let Some(word) = toolkit_file_word(&tokens[2..]) {
@@ -302,6 +300,9 @@ where
         // and `-dryrun` (NCBI BLAST+ 2.17.0, probes `makeblastdb.log_noval`,
         // `makeblastdb.conf_noval`: rc 0).
         use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+        if let Some(word) = ncbi_version_word(&tokens[2..]) {
+            return Err(toolkit_file_word_error("makeblastdb", word));
+        }
         if let Preparsed::Words {
             words,
             conffile,
@@ -334,6 +335,8 @@ where
     // The first option of the NCBI search programs whose value is not UTF-8, rejected once the
     // command line parses (`non_utf8_value_error`).
     let mut non_utf8_value: Option<(&clap::Command, String)> = None;
+    // The program whose `-xmlhelp` stopped the reader.
+    let mut xml_help: Option<String> = None;
     while let Some(token) = input.next() {
         // In the NCBI search programs a word that is not UTF-8 keeps its key readable
         // (`-name=value` with a value that is not UTF-8 is read below).
@@ -384,6 +387,18 @@ where
         // exception 1), so its text is `-help`'s, as NCBI's other programs write the bytes of
         // `-help` (in every place: line RG, `E/SURVEY_E2.md`).
         let stops_at_help = !std::ptr::eq(scope, &command);
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (quoted at
+        // `ncbi_xmlhelp`)
+        // `-xmlhelp` (`s_AutoHelpXml`) stops the reader as `-help` does, the words before it
+        // read: the command line's entry prints the program's arguments in NCBI's XML
+        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x). The library API and the
+        // Web engine, which write no help of NCBI's, refuse it there, after the words before it
+        // (`xml_help_refusal`).
+        if stops_at_help && text == "-xmlhelp" {
+            translated.push("--help".into());
+            xml_help = Some(scope.get_name().to_string());
+            break;
+        }
         if matches!(text, "-help" | "--help") || (stops_at_help && text == "-help-full") {
             translated.push("--help".into());
             if stops_at_help {
@@ -512,6 +527,19 @@ where
         }
     }
     let mut matches = match command.clone().try_get_matches_from(&translated) {
+        // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
+        Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
+            let program = xml_help.unwrap_or_default();
+            return Err(
+                match crate::blastinput::ncbi_environment::application_start_of_process() {
+                    Some(_) => xml_help_request(program),
+                    None => clap::Error::raw(
+                        ErrorKind::InvalidValue,
+                        xml_help_refusal(&refusal_program_name(&program)),
+                    ),
+                },
+            );
+        }
         // The parser stopped at rpstblastn's help flag, the words before it read (NCBI's
         // order): the program writes NCBI's text (`RpstblastnArgs::ncbi_help_text`), and the
         // words before the flag, read, are not used (NCBI checks their dependencies after).
@@ -708,7 +736,6 @@ const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "index_name",
     "negative_gilist",
     "remote",
-    "version",
 ];
 
 fn is_unported_blastn_arg(name: &str) -> bool {
@@ -741,7 +768,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "negative_ipglist",
     "remote",
     "subject_besthit",
-    "version",
 ];
 
 fn is_unported_blastp_arg(name: &str) -> bool {
@@ -766,8 +792,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), the search strategy file (item F1b of line
 /// RG), and the arguments that blastp's engine does not run either (`is_unported_blastp_arg`;
-/// psiblast has no database masks and no `-mt_mode`). `-sum_stats true` is refused with the
-/// options (`PsiblastArgs::into_blastp_args`).
+/// psiblast has no database masks and no `-mt_mode`).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
     // Line RG-F1 ported it to BLASTP's search, not to PSIBLAST's (item F1b).
     "export_search_strategy",
@@ -811,52 +836,76 @@ fn is_unported_rpstblastn_arg(name: &str) -> bool {
     )
 }
 
-/// LOSAT's refusal of the NCBI C++ Toolkit option `-name` in `program` (decision D9).
-fn toolkit_option_error(program: &str, name: &str) -> clap::Error {
-    // The BLAST programs are named in capitals; makeblastdb and rpsbproc as in their other
-    // refusals.
-    let shown = match program {
-        "makeblastdb" | "rpsbproc" => program.to_string(),
-        _ => program.to_ascii_uppercase(),
-    };
-    clap::Error::raw(
-        ErrorKind::InvalidValue,
-        format!("the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {shown}"),
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-1022 (the full versions are printed,
-// and a `-conffile` file is checked and later loaded in place of `<program>.ini`, before the
-// configuration load)
-// ```c++
-//             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
-//                 delete[] v;
-//                 // Print full VERSION
-//                 cout << GetFullVersion().Print( appname );
-//                 diag_context.DiscardMessages();
-//                 return 0;
-//     ...
-//         if (conf_arg) {
-//             if (CFile(conf_arg).Exists()) {
-//                 conf = conf_arg;
-//             }
-//             else {
-//                 ERR_POST_X(23, Critical << "Registry file \"" << conf_arg << "\" not found, aborting.");
-//                 Abort();
-//             }
-//         }
-// ```
-/// LOSAT's refusal of `word` (`-conffile`, or a full version word: `ncbi_environment::preparse`)
-/// in `program`, which the command line's entry gives before the configuration load, where NCBI
-/// reads another registry file or prints its build details (NCBI BLAST+ 2.17.0 `blastn -conffile
-/// other.ini` with a malformed `blastn.ini`: rc 0, the `.ini` never read; env parity review G F2).
-pub fn ncbi_toolkit_word_error(program: &str, word: &str) -> clap::Error {
-    let name = word.trim_start_matches('-');
-    let name = name.split_once('=').map_or(name, |(key, _)| key);
-    toolkit_option_error(program, name)
-}
-
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
+    named_refusal(scope.get_name(), name).unwrap_or_else(|| {
+        clap::Error::raw(
+            ErrorKind::UnknownArgument,
+            format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
+        )
+    })
+}
+
+/// Whether the reader of the program `scope` (of `with_toolkit_file_args(Cli::command())`)
+/// refuses NCBI's argument `-name` by name (`named_refusal`, for a name the program does not
+/// define): the arguments that its `-xmlhelp` leaves out of NCBI's XML (`xml_help_text`).
+fn refuses_option(scope: &clap::Command, name: &str) -> bool {
+    let program = scope.get_name();
+    (!scope
+        .get_arguments()
+        .any(|arg| arg.get_long() == Some(name))
+        && named_refusal(program, name).is_some())
+        || RUN_REFUSALS
+            .iter()
+            .any(|refusal| refusal.0 == program && refusal.1 == name)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (quoted at
+// blastp's check, `validate_requested_blastp_support`)
+// ```c++
+//     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
+// ```
+/// NCBI's arguments that a program's parser reads, so that NCBI's own errors about them and the
+/// other arguments come first (blastp's `-ungapped` with composition-based statistics:
+/// `Composition-adjusted searched are not supported with an ungapped search`), and whose run LOSAT
+/// refuses whatever their value, by name, where NCBI starts the search: the program, the name and
+/// what the refusal says the argument is (`run_refusal`). `-xmlhelp` leaves them out of NCBI's XML
+/// as it leaves the parser's refusals (`refuses_option`).
+pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
+    ("blastp", "ungapped", "an ungapped search"),
+    ("blastp", "use_sw_tback", "the Smith-Waterman traceback"),
+    ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
+    ("tblastn", "ungapped", "an ungapped search"),
+    (
+        "rpstblastn",
+        "ungapped",
+        "NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search",
+    ),
+];
+
+/// LOSAT's refusal of the run of `-name` in `program` (its name in LOSAT's refusals, `BLASTP`):
+/// the entry of `RUN_REFUSALS`.
+pub(crate) fn run_refusal(program: &str, name: &str) -> String {
+    let entry = RUN_REFUSALS
+        .iter()
+        .find(|refusal| refusal.0.eq_ignore_ascii_case(program) && refusal.1 == name);
+    debug_assert!(entry.is_some(), "{program} -{name} is not in RUN_REFUSALS");
+    match entry {
+        Some((_, _, what)) => {
+            format!("-{name} ({what}) is not supported by LOSAT's {program}")
+        }
+        None => format!("-{name} is not supported by LOSAT's {program}"),
+    }
+}
+
+/// LOSAT's refusal of NCBI's argument `-name`, which `program` does not define, by name; `None`
+/// for a name that LOSAT does not refuse by name (an unknown option, as NCBI's).
+fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
+    let refusal = |shown: &str| {
+        Some(clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
+        ))
+    };
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
     // The named NCBI options below have no Stage B Rust behavior.
@@ -869,11 +918,11 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     //     m_Args.push_back(arg);
     // ```
     // Product scope explicitly refuses unported NCBI capabilities.
-    if scope.get_name() == "blastx" && is_unported_blastx_arg(name) {
-        return clap::Error::raw(
+    if program == "blastx" && is_unported_blastx_arg(name) {
+        return Some(clap::Error::raw(
             ErrorKind::InvalidValue,
             format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope"),
-        );
+        ));
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-250
     // ```c++
@@ -884,83 +933,46 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     // ```
     // makeblastdb's options that LOSAT's makeblastdb does not serve are named in
     // its refusal (AGENTS.md rule 2: explicit unsupported errors).
-    if scope.get_name() == "makeblastdb"
-        && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
+    if program == "makeblastdb" && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
     {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makeblastdb"),
-        );
+        return refusal("makeblastdb");
     }
-    if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTN"),
-        );
+    if program == "blastn" && is_unported_blastn_arg(name) {
+        return refusal("BLASTN");
     }
-    if scope.get_name() == "blastp" && is_unported_blastp_arg(name) {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTP"),
-        );
+    if program == "blastp" && is_unported_blastp_arg(name) {
+        return refusal("BLASTP");
     }
-    if scope.get_name() == "psiblast" && is_unported_psiblast_arg(name) {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's PSIBLAST"),
-        );
+    if program == "psiblast" && is_unported_psiblast_arg(name) {
+        return refusal("PSIBLAST");
     }
-    if scope.get_name() == "rpsblast" && is_unported_rpsblast_arg(name) {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSBLAST"),
-        );
+    if program == "rpsblast" && is_unported_rpsblast_arg(name) {
+        return refusal("RPSBLAST");
     }
-    if scope.get_name() == "rpstblastn" && is_unported_rpstblastn_arg(name) {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's RPSTBLASTN"),
-        );
+    if program == "rpstblastn" && is_unported_rpstblastn_arg(name) {
+        return refusal("RPSTBLASTN");
     }
-    // makeblastdb reads the toolkit's words with its own branch of `try_parse_from`, and refuses
-    // the words left as the others do (`-xmlhelp`; a full version in the library API).
-    if let Some(program) = TOOLKIT_PROGRAMS
-        .iter()
-        .chain(&["makeblastdb"])
-        .copied()
-        .find(|program| scope.get_name() == *program)
-        .filter(|_| is_ncbi_toolkit_arg(name))
-    {
-        return toolkit_option_error(program, name);
+    if program == "tblastx" && is_unported_tblastx_arg(name) {
+        return refusal("TBLASTX");
     }
-    if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTX"),
-        );
+    if program == "tblastn" && is_unported_tblastn_arg(name) {
+        return refusal("TBLASTN");
     }
-    if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
-        return clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTN"),
-        );
-    }
-    clap::Error::raw(
-        ErrorKind::UnknownArgument,
-        format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
-    )
+    None
 }
 
-/// The text `-version` prints for `argv` (`losat <program> ... -version ...`), or `None` when
+/// The text that `-version` or a full version (`-version-full`, `-version-full-xml`,
+/// `-version-full-json`) prints for `argv` (`losat <program> ... -version ...`), or `None` when
 /// `argv` has no such request.
 ///
-/// NCBI's application reads `-version` before its arguments (`ncbi_environment::preparse`,
+/// NCBI's application reads these words before its arguments (`ncbi_environment::preparse`,
 /// ncbiapp.cpp:926-1001): anywhere before `--`, in an option's value place too
 /// (`blastn -out -version` prints the version) but not as the value of `-logfile` or
-/// `-conffile`, and also when other arguments are invalid.
-/// The text is the two lines of `fVersionInfo | fPackageShort`:
-/// the program name and version, then the package. NCBI's second line names its own
-/// package and build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
+/// `-conffile`, and also when other arguments are invalid; the first one is printed.
+/// `-version` prints the two lines of `fVersionInfo | fPackageShort`: the program name and
+/// version, then the package. NCBI's second line names its own package and build date; LOSAT's
+/// names LOSAT and the BLAST+ release its output follows. The full versions are NCBI's forms
+/// with LOSAT's values (`ncbi_version::print`, line RG item E3).
 /// `makeblastdb` prints `makeblastdb`, as NCBI's program does. `main` prints the
 /// text on stdout and exits 0, before any argument is parsed. The top level `losat --version`
 /// is clap's and is not read here.
@@ -999,7 +1011,7 @@ where
     // after `--`, nor as the value of `-logfile` or `-conffile` (`blastn -logfile -version`
     // logs to the file `-version`).
     match crate::blastinput::ncbi_environment::preparse(&tokens[2..]) {
-        crate::blastinput::ncbi_environment::Preparsed::Version => {
+        crate::blastinput::ncbi_environment::Preparsed::Version(request) => {
             // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
             // ```c++
             // 	SetVersion(CVersionInfo(VER.major, VER.minor, VER.patch_level));
@@ -1012,11 +1024,7 @@ where
             } else {
                 crate::NCBI_BLAST_VERSION
             };
-            Some(format!(
-                "{name}: {version}\n Package: LOSAT {}, output compatible with blast {}\n",
-                env!("CARGO_PKG_VERSION"),
-                crate::NCBI_BLAST_RELEASE
-            ))
+            Some(crate::ncbi_version::print(request, name, version))
         }
         _ => None,
     }
@@ -1037,24 +1045,18 @@ const TOOLKIT_PROGRAMS: &[&str] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
-// `ncbi_environment::preparse`: `-version`, the full versions and `-dryrun` are read before the
+// `ncbi_environment::preparse`: `-version` and the full versions are read before the
 // arguments, anywhere before `--`, also where another option expects its value, but not as the
 // value of `-logfile` or `-conffile`)
-/// The first word before the arguments that LOSAT refuses, where NCBI's application reads it (`ncbi_environment::preparse`): a full version (NCBI's build details), in an
-/// option's value too. The command line never brings `-version` here: `main` prints the version
-/// before parsing (`ncbi_version_request`). The Web engine, which parses its options here and
-/// has no version to print, refuses it.
-fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
+/// The version word (`-version` or a full version) that NCBI's application prints for `tokens`
+/// (`ncbi_environment::preparse`), in an option's value too. The command line never brings one
+/// here: `main` prints the version before parsing (`ncbi_version_request`). The library API and
+/// the Web engine, which parse their options here and run no application start, refuse it
+/// (`toolkit_file_word_error`).
+fn ncbi_version_word(tokens: &[OsString]) -> Option<&'static str> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
-    let exact = |word: &str| {
-        tokens
-            .iter()
-            .filter_map(|token| token.to_str())
-            .find(|text| *text == word)
-    };
     match preparse(tokens) {
-        Preparsed::Version => exact("-version"),
-        Preparsed::Refused(word) => exact(word),
+        Preparsed::Version(request) => Some(request.word()),
         Preparsed::Words { .. } => None,
     }
 }
@@ -1095,11 +1097,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
 
 // No NCBI counterpart: NCBI has no library API. The application start of the command line
 // (`cli::main_entry`, `ncbi_environment::start_application`) reads `-logfile` and `-conffile`
-// before the arguments, and the entry ends a `-dryrun` after them; LOSAT's library and the Web
-// engine run none, so they do not take them (as the library takes no PSSM file, `api::search`).
-/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile` or `-dryrun`) in
-/// `program` when the parser's caller ran no application start: the library API and the Web
-/// engine.
+// before the arguments and prints the versions, and the entry ends a `-dryrun` after them;
+// LOSAT's library and the Web engine run none, so they do not take them (as the library takes
+// no PSSM file, `api::search`).
+/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`, `-version`
+/// or a full version) in `program` when the parser's caller ran no application start: the
+/// library API and the Web engine.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidValue,
@@ -1111,13 +1114,61 @@ fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
 pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
     let name = word.trim_start_matches('-');
     let name = name.split_once('=').map_or(name, |(key, _)| key);
-    let shown = match program {
-        "makeblastdb" => program.to_string(),
-        _ => program.to_ascii_uppercase(),
-    };
+    let shown = refusal_program_name(program);
     format!(
         "the NCBI C++ Toolkit option -{name} runs on the command line of LOSAT's {shown} only: the library API and the Web engine run no NCBI application start, which reads it"
     )
+}
+
+/// `program` as the refusals of the toolkit's words name it: the BLAST programs in capitals,
+/// makeblastdb as its other refusals do.
+fn refusal_program_name(program: &str) -> String {
+    match program {
+        "makeblastdb" => program.to_string(),
+        _ => program.to_ascii_uppercase(),
+    }
+}
+
+// No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
+// (ncbiapp.cpp:685-690, quoted at `ncbi_xmlhelp`); LOSAT's library and the Web engine refuse it
+// (line RG DECISIONS E2x-1, the Owner's choice of 2026-11-13). Only the command line's entries
+// reach the XML (`xml_help_text`, `ncbi_app::run`), so the library and the Web engine do not carry
+// it (E2x-2).
+/// LOSAT's refusal of `-xmlhelp` where no command line's entry prints it: the library API and the
+/// Web engine of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
+pub(crate) fn xml_help_refusal(shown: &str) -> String {
+    format!(
+        "the NCBI C++ Toolkit option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
+    )
+}
+
+/// The help request that `try_parse_from` returns where `-xmlhelp` stopped the reader of
+/// `program`: a `DisplayHelp` error that names the program (`xml_help_program`).
+fn xml_help_request(program: String) -> clap::Error {
+    use clap::error::{ContextKind, ContextValue};
+    let mut error = clap::Error::new(ErrorKind::DisplayHelp);
+    error.insert(ContextKind::Custom, ContextValue::String(program));
+    error
+}
+
+/// The program whose `-xmlhelp` the parser's `error` is (`try_parse_from`): the command line's
+/// entry prints its XML (`xml_help_text`) in place of the error, exit status 0.
+pub(crate) fn xml_help_program(error: &clap::Error) -> Option<&str> {
+    use clap::error::{ContextKind, ContextValue};
+    match error.get(ContextKind::Custom) {
+        Some(ContextValue::String(program)) if error.kind() == ErrorKind::DisplayHelp => {
+            Some(program)
+        }
+        _ => None,
+    }
+}
+
+/// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that its
+/// reader refuses by name (`refuses_option`, `ncbi_xmlhelp::print`).
+pub(crate) fn xml_help_text(program: &str) -> Option<String> {
+    let command = with_toolkit_file_args(Cli::command());
+    let scope = command.find_subcommand(program)?;
+    crate::ncbi_xmlhelp::print(program, |name| refuses_option(scope, name))
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2337-2357 (`AddDefaultFileArguments`:
@@ -1191,17 +1242,8 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
 // makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b), the three in
 // rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`), `-help-full` in every program (item
-// E2, `try_parse_from`). The words left are refused by name, in makeblastdb too.
-const NCBI_TOOLKIT_ARGS: &[&str] = &[
-    "xmlhelp",
-    "version-full",
-    "version-full-xml",
-    "version-full-json",
-];
-
-fn is_ncbi_toolkit_arg(name: &str) -> bool {
-    NCBI_TOOLKIT_ARGS.contains(&name)
-}
+// E2, `try_parse_from`), the full versions in every program (item E3, `ncbi_version_request`),
+// `-xmlhelp` in every program on the command line (item E2x, `xml_help_program`).
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
 // ```c++
@@ -1227,7 +1269,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "remote",
     "subject_besthit",
     "use_sw_tback",
-    "version",
 ];
 
 fn is_unported_tblastn_arg(name: &str) -> bool {
@@ -1261,7 +1302,6 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "strand",
     "subject_besthit",
     "sum_stats",
-    "version",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {

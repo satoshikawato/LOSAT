@@ -7,14 +7,7 @@
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
-import { countsName, parseTaxid, WINDOW_MASKER_TAXID_FLAG, type CountsOrigin } from '../domain/counts';
-import type { FastaParserKind } from '../domain/dataset';
-import { outputFileName, outputMediaType, runOutputs, type RunOutput } from '../domain/output-format';
-import { fastaParser, programById, WINDOW_MASKER_FLAG, type ProgramId } from '../domain/programs';
-import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
-import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
-import type { Downloader } from '../ports/download';
+import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunOutput } from 'losat/domain';
 import {
   RunCancelledError,
   type EngineGateway,
@@ -22,7 +15,14 @@ import {
   type EnginePhase,
   type HspRecord,
   type ValidationResult,
-} from '../ports/engine';
+} from 'losat/ports';
+import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
+import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
+import { outputFileName, outputMediaType, runOutputs } from '../domain/output-format';
+import { fastaParser, programById } from '../domain/programs';
+import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
+import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
+import type { Downloader } from '../ports/download';
 import { taskOf } from './results';
 import { Store } from './store';
 

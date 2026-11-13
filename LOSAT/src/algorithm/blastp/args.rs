@@ -602,7 +602,7 @@ pub struct BlastpArgs {
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
     /// The run's search strategy export (`-export_search_strategy`), made by `run`
-    /// (`archive::strategy_for`).
+    /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The application whose search this is: psiblast's command line sets it
@@ -632,6 +632,13 @@ pub struct BlastpArgs {
     /// such argument.
     #[arg(skip)]
     pub gap_trigger: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1460-1471 (quoted at
+    // `ResolvedBlastpArgs::sum_stats`)
+    /// psiblast's `-sum_stats true` (`CGenericSearchArgs`): every round links the HSPs of each
+    /// subject with sum statistics (`core::link_hsps`). blastp and rpsblast have no such argument
+    /// (NCBI's rpsblast's `-sum_stats true` is refused, `rps_hooks`).
+    #[arg(skip)]
+    pub sum_stats: bool,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -847,6 +854,19 @@ pub struct ResolvedBlastpArgs {
     /// `BLAST_GAP_TRIGGER_PROT`. Every round converts it with the query's ungapped block
     /// (`kbp_std`) into the cutoff of the ungapped alignments that a gapped extension starts from.
     pub gap_trigger_bits: f64,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:777-784
+    // ```c
+    //    params->do_sum_stats = options->do_sum_stats;
+    // ...
+    //    if (params->do_sum_stats) {
+    //       BlastLinkHSPParametersNew(program_number, gapped_calculation,
+    //                                 &params->link_hsp_params);
+    // ```
+    /// `hit_params->do_sum_stats`: psiblast's `-sum_stats true`. The search links the HSPs of each
+    /// subject (`core::link_hsps`) in the preliminary stage, the traceback and the
+    /// composition-based redo, and lowers the cutoff scores of the HSPs it keeps
+    /// (`BlastHitSavingParametersUpdate`).
+    pub sum_stats: bool,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
@@ -1438,6 +1458,7 @@ impl BlastpArgs {
             gap_trigger_bits: self
                 .gap_trigger
                 .unwrap_or(crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE),
+            sum_stats: self.sum_stats,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
             scoring: ProteinScoringSpec {

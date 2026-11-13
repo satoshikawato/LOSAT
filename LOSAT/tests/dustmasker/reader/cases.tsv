@@ -142,10 +142,10 @@ gaponly_fasta	dustmasker	-in in/gaponly.fa -outfmt fasta
 gaponly_int_ps	dustmasker	-in in/gaponly.fa -parse_seqids
 gaponly_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/gaponly.fa
 gaponly_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/gaponly.fa -parse_seqids
-nul_fasta	dustmasker	-in in/nul.fa -outfmt fasta
-nul_int_ps	dustmasker	-in in/nul.fa -parse_seqids
-nul_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/nul.fa
-nul_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/nul.fa -parse_seqids
+nul_fasta	dustmasker	-in in/nul_bytes.fa -outfmt fasta
+nul_int_ps	dustmasker	-in in/nul_bytes.fa -parse_seqids
+nul_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/nul_bytes.fa
+nul_warn_ps	dustmasker	DIAG_POST_LEVEL=Warning -in in/nul_bytes.fa -parse_seqids
 hibytes_fasta	dustmasker	-in in/hibytes.fa -outfmt fasta
 hibytes_int_ps	dustmasker	-in in/hibytes.fa -parse_seqids
 hibytes_warn	dustmasker	DIAG_POST_LEVEL=Warning -in in/hibytes.fa

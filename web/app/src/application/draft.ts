@@ -18,6 +18,16 @@
 // An Example (useExample, line WF-2) replaces both roles: its query becomes the query box's
 // text and its subject set the only subject source.
 import {
+  REGION_FLAG,
+  WINDOW_MASKER_FLAG,
+  WINDOW_MASKER_TAXID_FLAG,
+  type FastaParserKind,
+  type InputRole,
+  type ProgramId,
+  type SequenceKind,
+} from 'losat/domain';
+import type { EngineGateway, InputCheck, ProgramDescription } from 'losat/ports';
+import {
   accessionLines,
   accessionsOnALine,
   FETCH_ACCESSION_LIMIT,
@@ -33,26 +43,15 @@ import {
   type FetchSourceId,
 } from '../domain/accession';
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES, splitOptions } from '../domain/argv';
-import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
-import { parseTaxid, WINDOW_MASKER_TAXID_FLAG, type CountsOrigin } from '../domain/counts';
+import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
+import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
 import { inputLead, type InputLead } from '../domain/input-format';
 import { describedSections, formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
-import {
-  fastaParser,
-  PROGRAMS,
-  programById,
-  sequenceKind,
-  WINDOW_MASKER_FLAG,
-  type InputRole,
-  type ProgramId,
-  type SequenceKind,
-} from '../domain/programs';
-import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
+import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
+import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
-import type { EngineGateway, ProgramDescription } from '../ports/engine';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
-import type { InputCheck } from '../ports/input-check';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
 import { SourceRace, type RaceStanding } from './source-race';
 import { SourceRefs } from './source-refs';
@@ -60,7 +59,7 @@ import { Store } from './store';
 
 export type InputMode = 'combined' | 'separate';
 
-/** The engine's verdict on a source (ports/input-check.ts). */
+/** The engine's verdict on a source (losat/ports: input-check.ts). */
 export type SourceCheck =
   | { readonly state: 'pending' }
   | { readonly state: 'ok'; readonly records: number }

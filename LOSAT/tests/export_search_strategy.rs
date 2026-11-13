@@ -90,6 +90,25 @@ fn frozen(name: &str, ext: &str) -> Option<Vec<u8>> {
 
 /// One run of the case from `LOSAT/` in a clean environment plus the case's and `extra_env`;
 /// `{ss}` is `ss`. Standard input is empty.
+/// NCBI's messages were frozen on Linux. On Windows LOSAT writes the platform's separators, as
+/// NCBI's Windows build does: `\` in paths and `;` between the directories of a search path
+/// (`in search path [{ENGINE};;]` for Linux's `[{ENGINE}::]`).
+fn unix_separators(text: &str) -> String {
+    let text = text.replace('\\', "/");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    const MARK: &str = "in search path [";
+    while let Some(at) = rest.find(MARK) {
+        let (head, tail) = rest.split_at(at + MARK.len());
+        out.push_str(head);
+        let end = tail.find(']').unwrap_or(tail.len());
+        out.push_str(&tail[..end].replace(';', ":"));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn run(case: &Case, ss: &Path, extra_env: &[(&str, &str)], threads: &str) -> Output {
     let ss = ss.to_str().expect("UTF-8 path");
     let mut command = Command::new(BIN);
@@ -176,6 +195,11 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                 );
                 let engine = engine();
                 let stderr = stderr.replace(engine.to_str().unwrap(), "{ENGINE}");
+                let stderr = if cfg!(windows) {
+                    unix_separators(&stderr)
+                } else {
+                    stderr
+                };
                 let want_err = frozen(&case.name, "err").unwrap_or_default();
                 assert_eq!(
                     stderr,

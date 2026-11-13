@@ -165,7 +165,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 | 内容 | 出どころ |
 |---|---|
 | `losat-web-serial.wasm`、`losat-web-threads.wasm` | `web/adapter/tools/build_reactors.py`（同一性の記録つき） |
-| ABI v2 のホスト側 | `web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
+| ABI v2 のホスト側 | （LIB-4 で `web/packages/losat/src/` へ移した、§15。以下は移す前の場所）`web/app/src/infra/reactor/abi.ts`（`losat_web2_*` の呼び出し）、`infra/reactor/wasi.ts`（WASI shim。npm の `@bjorn3/browser_wasi_shim` に依存）、`infra/engine-worker/*`（worker、`thread-host.ts`）、`ports/engine.ts`（型と `EngineGateway`）。アプリが使う層と同じものを package にし、重複させない（切り出し方は LIB-4 で決める。`web/AGENTS.md` の規則の下） |
 | 型 | `HspRecord`、`ProgramDescription`、`ValidationResult`（`engine.ts` に既にある） |
 | README | cross-origin isolation（COOP / COEP）が threads 版に必須、メモリの候補（ABI v2 §3）、`abi_version` |
 
@@ -420,6 +420,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 ### 12.4 残ること
 
 - 公開（段階 4）：wheel のマトリクス、release workflow、`cargo-semver-checks` と `cargo-public-api`。
+  → 2026-11-13 wheel のマトリクスは CI に入った（P-W1、`.github/workflows/python-wheels.yml`）：release の 5 つの runner と toolchain、release profile で abi3 の wheel を 1 つずつ作り、CPython 3.10 と 3.14 の新しい環境に入れて blastp の報告 1 件を凍結 hash と比べる。dispatch、main への push、毎週の dev、`python/` を変える PR（Linux x86_64 だけ）で走り、wheel は 7 日の artifact。PyPI への公開は保守者。
 - gbdraw の製品判断：`pylosat` を runtime に入れるか、その順番と記録の形。
 - `panic = "unwind"` の経路はテストしていない（公開の API から panic を起こす手段が無い）。release profile の build は通り、`python/tests` と gbdraw の比較はその build でも通る。
 
@@ -537,3 +538,16 @@ binding は API が持つものを Python の形にするだけで、engine の�
 | 版の道具 | v0.2.0 の contract・workflow・`prepare_release_candidate_v020.py` は同じ commit の crate 名に従う（`losat-0.2.0.crate`、crate の root は contract の file 名から）。v0.1.0 の道具は v0.1.0 の commit を作るので `LOSAT-0.1.0.crate` のまま |
 | メタデータ | `[package.metadata.docs.rs]`（Linux x86-64、既定 feature）、死んだ `exclude` の `/matrix` を削除、`rust-version` はそのまま。crate 名のためだけだった `[lints.rust] non_snake_case = "allow"` を削除（隠していた 1 件、分割代入の局所名を直した） |
 | 確認（2026-11-13） | `cargo publish --dry-run --locked` 成功：659 file、25.7 MiB、圧縮 6.3 MiB（6,571,648 B、crates.io の上限 10 MB の内）。`cargo doc --no-deps` の crate の頁は module `api` だけ。release の binary は dev と出力・help の文字が同じ（`.text` は fat LTO の symbol 名の違いで +512 B、関数 5 つの大きさが違う）。`cargo publish --dry-run` の段は最初の公開（版 0.3.0、保守者）の release workflow に置く。v0.2.0 の workflow には足さない（v0.2.0 は crates.io に出さない） |
+
+## 15. npm の package `losat`（LIB-4、P-N1、2026-11-14）
+
+記録は `losat-baselines/library-20261031/`（DECISIONS 27）。§4.2 の「アプリが使う層と同じものを package にし、重複させない」をこの形にした。
+
+| 項目 | 形 |
+|---|---|
+| 置き場 | npm workspaces `web/package.json`（`packages/losat` と `app`）、lock は `web/package-lock.json` 1 つ。アプリは `"losat": "0.2.0"` で workspace の link を使い、package の source を import する |
+| 中身 | `web/packages/losat/src`：§4.2 の表の host（`infra/reactor`、`infra/engine-worker`、`ports/engine.ts`）と、host が使う ports（inflate、input-check、scan、run-output）、run output の writer と receiver、`sha256Hex`。domain は host が要る部分だけ（program の id と入力の種類、record の key と scan の型、出力形式、`describe` の解決済み既定値、入力を指す option 名、counts file の型）。form の表はアプリに残る |
+| 層 | package も `domain` → `ports` → `infra`（web/AGENTS.md 規則 5）。アプリの `domain` は `losat/domain` だけ、`ports`・`application`・`ui` は `losat/domain` と `losat/ports`、`losat`（package の infra）は `infra` と composition root だけが import する |
+| 入口 | `losat`（すべて）、`losat/domain`、`losat/ports`。内部（instance-use、protocol、thread host、memory keeper、runtime、warm-up）は出さない |
+| build（P-N1 の PR b） | `npm run build -w losat`（`LOSAT_WEB_REACTORS` が要る）が `dist/` を作る: tsc の JS と型（相対 import は `.js`、worker の URL も `.js`）、Engine worker の試験用の旗 `__LOSAT_TEST_HOOKS__` を `false` に（アプリの build の define と同じ。識別子だけを構文木で置き換える）、2 つの reactor（読み込みとガードは `build/reactors.ts`、アプリの build と同じ関数）と同一性の記録 `reactors/artifacts.json`、URL と digest の `losat/reactors`（`ENGINE_ASSETS`）、`abi.json`（package・engine の版と、serial reactor が返す `losat_web2_abi_version`）、公開用の `package.json`、README、LICENSE。版は `LOSAT/Cargo.toml` と同じでなければ build が止まる |
+| 関門 | web.yml の `v-abi` job: package を build して試験（`npm pack --dry-run` の中身が src の module ごとの JS と型・reactor・記録・README・LICENSE だけ、公開用の manifest、試験用の旗が残らない、ABI の表、reactor の digest、README の例が NCBI の凍結 bytes と同じ）、その `dist/reactors` で V-ABI quick、`npm pack` の tarball を artifact `npm-package`（7 日）に。`npm publish` は保守者（`dist/` で、または artifact の tarball で） |

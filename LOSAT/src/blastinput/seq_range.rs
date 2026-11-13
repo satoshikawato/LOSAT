@@ -254,6 +254,11 @@ impl Placements {
     pub fn ranged(&self) -> bool {
         !self.0.is_empty()
     }
+
+    /// Where record `index`'s letters lie in the record, `None` without a range.
+    pub fn get(&self, index: usize) -> Option<RecordPlacement> {
+        self.0.get(index).copied()
+    }
 }
 
 /// The subjects as NCBI searches them with `-subject_loc`: every record cut to its interval

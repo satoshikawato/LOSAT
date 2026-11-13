@@ -1,11 +1,10 @@
-// Engine input contract (plan §5.4; ports/engine.ts EngineInput): after `register`, the
+// Engine input contract (plan §5.4; losat/ports engine.ts EngineInput): after `register`, the
 // engine compares the records that its parser read with the record table of the request
 // and stops the run, before searching and before any output, if they differ. The
 // FakeEngine runs it in Vitest; S09 runs it against the real EngineGateway and Engine worker
 // with real FASTA inputs.
-import type { RecordKey } from '../../src/domain/dataset';
-import type { EngineGateway, EngineRunRequest } from '../../src/ports/engine';
-import type { RunOutputMessage } from '../../src/ports/run-output';
+import type { RecordKey } from 'losat/domain';
+import type { EngineGateway, EngineRunRequest, RunOutputMessage } from 'losat/ports';
 import { check, rejects, same, type ContractCase } from './contract';
 
 export interface EngineInputEnv {

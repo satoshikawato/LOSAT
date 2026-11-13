@@ -203,26 +203,34 @@ mod tests {
         );
     }
 
-    // The NCBI C++ Toolkit options that LOSAT's dustmasker refuses, as blastdbcmd does.
+    // The library run refuses `-xmlhelp`, which the command line answers with NCBI's XML, as
+    // blastdbcmd's (line RG DECISIONS E2x-1).
     #[test]
-    fn toolkit_options_are_refused_as_blastdbcmd_refuses_them() {
-        for (line, word) in [
-            (&["-xmlhelp"][..], "-xmlhelp"),
-            (&["-version-full"], "-version-full"),
-            (&["-version-full-xml"], "-version-full-xml"),
-            (&["-version-full-json"], "-version-full-json"),
+    fn the_library_refuses_xmlhelp_as_blastdbcmd_does() {
+        assert_eq!(
+            run_words(&["-xmlhelp"]),
+            (
+                1,
+                String::new(),
+                format!("Error: {}\n", crate::cli::xml_help_refusal("DUSTMASKER"))
+            )
+        );
+    }
+
+    // The full versions are NCBI's forms with LOSAT's values, printed before the arguments are
+    // read (line RG item E3; NCBI BLAST+ 2.17.0 `dustmasker -version-full`: `dustmasker: 1.0.0`).
+    #[test]
+    fn the_full_versions_are_dustmasker_s() {
+        use crate::ncbi_version::{print, VersionRequest};
+        for (word, request) in [
+            ("-version-full", VersionRequest::Full),
+            ("-version-full-xml", VersionRequest::FullXml),
+            ("-version-full-json", VersionRequest::FullJson),
         ] {
             assert_eq!(
-                run_words(line),
-                (
-                    1,
-                    String::new(),
-                    format!(
-                        "Error: the NCBI BLAST+ option {word} is not supported by LOSAT's \
-                         DUSTMASKER\n"
-                    )
-                ),
-                "{line:?}"
+                run_words(&["-level", "x", word, "-version"]),
+                (0, print(request, "dustmasker", "1.0.0"), String::new()),
+                "{word}"
             );
         }
     }

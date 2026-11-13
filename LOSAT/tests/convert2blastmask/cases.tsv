@@ -164,9 +164,9 @@ nucE_ps	-in in/nucE.fa -masking_algorithm dust -masking_options o -parse_seqids
 nucE2_int	-in in/nucE2.fa -masking_algorithm dust -masking_options o -outfmt interval
 nucE2_txt	-in in/nucE2.fa -masking_algorithm dust -masking_options o
 nucE2_ps	-in in/nucE2.fa -masking_algorithm dust -masking_options o -parse_seqids
-nul_int	-in in/nul.fa -masking_algorithm dust -masking_options o -outfmt interval
-nul_txt	-in in/nul.fa -masking_algorithm dust -masking_options o
-nul_ps	-in in/nul.fa -masking_algorithm dust -masking_options o -parse_seqids
+nul_int	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o -outfmt interval
+nul_txt	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o
+nul_ps	-in in/nul_bytes.fa -masking_algorithm dust -masking_options o -parse_seqids
 prot_int	-in in/prot.fa -masking_algorithm dust -masking_options o -outfmt interval
 prot_txt	-in in/prot.fa -masking_algorithm dust -masking_options o
 prot_ps	-in in/prot.fa -masking_algorithm dust -masking_options o -parse_seqids

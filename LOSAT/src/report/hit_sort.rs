@@ -133,10 +133,39 @@ impl HspScores {
     /// The values of the HSP of `hit` (its 1-based coordinates as the report shows them, from
     /// <= to after `GetSeqRange`'s swap of a minus strand).
     pub(crate) fn of(hit: &PairwiseHit) -> Self {
-        let h = &hit.hit;
+        Self::of_hit(&hit.hit, hit.seqalign_num_ident)
+    }
+
+    /// The values of the HSP `h` of a report's hit list whose Seq-align carries the identities
+    /// `seqalign_num_ident` (`PairwiseHit::seqalign_num_ident`): [`Self::of`] of the report's row
+    /// of it, which the models of the reads read before the rows are made
+    /// (`x_pairwise_par::QueryGroup::read_order`).
+    pub(crate) fn of_hit(h: &crate::common::Hit, seqalign_num_ident: usize) -> Self {
+        Self::of_values(
+            h.bit_score,
+            h.e_value,
+            seqalign_num_ident,
+            h.length,
+            (h.q_start, h.q_end),
+            (h.s_start, h.s_end),
+        )
+    }
+
+    /// The values of an HSP of the report whose row has the bit score `bits`, the E-value
+    /// `e_value`, the Seq-align identities `seqalign_num_ident`, `length` columns and the 1-based
+    /// coordinates `query` and `subject` (start, end) as the row's `Hit` holds them
+    /// ([`Self::of_hit`]).
+    pub(crate) fn of_values(
+        bits: f64,
+        e_value: f64,
+        seqalign_num_ident: usize,
+        length: usize,
+        query: (usize, usize),
+        subject: (usize, usize),
+    ) -> Self {
         let zero_based = |position: usize| (position as u64).saturating_sub(1);
         Self {
-            bits: h.bit_score,
+            bits,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1190
             // ```c++
             //     // Set the E-Value
@@ -148,12 +177,12 @@ impl HspScores {
             // ```
             // The comparators read the Seq-align's E-value (`GetAlnScores`), 0 below 1e-180:
             // two HSPs below it tie.
-            evalue: crate::report::serial::seqalign::seqalign_evalue(h.e_value),
-            num_ident: hit.seqalign_num_ident as i64,
-            length: h.length as i64,
-            query_from: zero_based(h.q_start.min(h.q_end)),
-            query_to: zero_based(h.q_start.max(h.q_end)),
-            subject_from: zero_based(h.s_start.min(h.s_end)),
+            evalue: crate::report::serial::seqalign::seqalign_evalue(e_value),
+            num_ident: seqalign_num_ident as i64,
+            length: length as i64,
+            query_from: zero_based(query.0.min(query.1)),
+            query_to: zero_based(query.0.max(query.1)),
+            subject_from: zero_based(subject.0.min(subject.1)),
         }
     }
 

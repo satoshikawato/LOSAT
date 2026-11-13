@@ -3384,6 +3384,17 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).places_subject_reads());
+    // The pairwise report reads its subjects in the order of its `-sorthits`.
+    let pairwise = outputs
+        .formats
+        .first()
+        .is_some_and(|format| {
+            matches!(
+                report::output_format(format.outfmt),
+                report::TblastxOutputFormat::Pairwise
+            )
+        })
+        .then(|| args.formatting.report_sort());
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
     // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
     // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -3873,6 +3884,7 @@ fn run_batch_loop(
                                     shown,
                                     &reports.titles.borrow(),
                                     plural_names,
+                                    pairwise,
                                 )?;
                                 let mut reads = reports.reads.borrow_mut();
                                 let index = start + query as usize;

@@ -891,12 +891,12 @@ impl<'a> XTwoHit<'a> {
         subject_sequence: &[u8],
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
-    ) {
+    ) -> anyhow::Result<()> {
         debug_assert_eq!(self.window, 0);
         // The cells are taken out for the loop over them and put back (a move of the vector).
         let mut entries =
             std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
-        match &mut entries {
+        let done = match &mut entries {
             XDiagCells::Packed(cells) => self.one_hit_on(
                 score,
                 cells,
@@ -915,8 +915,9 @@ impl<'a> XTwoHit<'a> {
                 pairs,
                 hits,
             ),
-        }
+        };
         self.diagonals.entries = entries;
+        done
     }
 
     /// `x_pairs_one_hit` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
@@ -930,7 +931,7 @@ impl<'a> XTwoHit<'a> {
         subject_sequence: &[u8],
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
-    ) {
+    ) -> anyhow::Result<()> {
         let word_size = self.word_size;
         let word_size_i32 = word_size as i32;
         let diagonals = &self.diagonals;
@@ -958,7 +959,11 @@ impl<'a> XTwoHit<'a> {
                 word_size,
                 self.matrix,
             ) else {
-                continue;
+                anyhow::bail!(
+                    "TBLASTN -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                    pair.q_off,
+                    pair.s_off
+                );
             };
             if result.ungapped_data.score >= self.cutoff_scores[context] {
                 hits.push(InitHsp {
@@ -974,6 +979,7 @@ impl<'a> XTwoHit<'a> {
             }
             cell.set_last_hit(result.s_last_off - (word_size_i32 - 1) + diagonals.offset);
         }
+        Ok(())
     }
 
     /// NCBI c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's

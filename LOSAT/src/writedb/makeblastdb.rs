@@ -1192,13 +1192,12 @@ fn add_input_and_close(
                     }
                     None => add_fasta(db, &mut file, err)?,
                 },
-                // A file that exists and cannot be opened. makeblastdb does
-                // not test the stream it opened: `AddFasta` skips a stream
-                // that is not good and adds nothing from it (a build of that
-                // file alone ends with "No volumes were created." and exit
-                // status 0). LOSAT does not reproduce that: it reports the
-                // file, with the exit status of its file-system errors, and
-                // removes what earlier files added.
+                // A file that exists and cannot be opened (`x_VerifyInputFilesType` has warned that
+                // it does "NOT appear to be FASTA"). makeblastdb does not test the stream it
+                // opened: `AddFasta` skips a stream that is not good and adds nothing from it, not
+                // even its "Adding sequences" line; a build of such files alone ends with "No
+                // volumes were created." and exit status 0 (makeblastdb 2.17.0, a compressed name
+                // too). A deterministic NCBI result, reproduced.
                 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
                 // ```c++
                 // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
@@ -1213,14 +1212,7 @@ fn add_input_and_close(
                 //                                m_LongIDs);
                 //
                 // ```
-                Err(source) => {
-                    let mut warn = warn_to(err);
-                    let _ = db.end_build(true, &mut warn);
-                    return Err(MakedbError::Build(WriteDbError::Io {
-                        path: name.into(),
-                        source,
-                    }));
-                }
+                Err(_) => {}
             }
         }
     }

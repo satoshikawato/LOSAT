@@ -1547,31 +1547,40 @@ fn the_metadata_files_of_version_5_are_makeblastdb_s() {
     run_v5_cases("J_");
 }
 
-/// One of several `-in` files that exists and cannot be opened: LOSAT stops the build with
-/// exit status 255 and removes what the earlier files added, as for a late error (makeblastdb
-/// reads nothing from it and goes on; PD-LOSAT-DATABASE-SEARCH, DECISIONS 20 of the makedb-v5
-/// line).
+/// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed
+/// name, sw8 probe 2026-11-13): after the warning that the file does "NOT appear to be FASTA",
+/// the build skips it, without its "Adding sequences" line, and ends with exit status 0; a build
+/// of such files alone ends with "No volumes were created." and writes no file.
 #[cfg(unix)]
 #[test]
-fn an_input_file_that_cannot_be_opened_stops_the_build() {
+fn input_files_that_cannot_be_opened_are_skipped() {
     use std::os::unix::fs::PermissionsExt;
     let tmp = TempDir::new("unreadable");
     let locked = tmp.base("locked.fa");
-    std::fs::write(&locked, b">l\nMKV\n").unwrap();
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let locked_gz = tmp.base("locked.fa.gz");
+    for path in [&locked, &locked_gz] {
+        std::fs::write(path, b">l\nMKV\n").unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
     if std::fs::File::open(&locked).is_ok() {
         // A user who reads every file (root): there is no file that cannot be opened.
         return;
     }
-    let base = tmp.base("db");
-    for version in ["4", "5"] {
+    let warning = |name: &str| {
+        format!(
+            "Warning: [makeblastdb] \nInput file {name} does NOT appear to be FASTA (processing \
+             anyway).\nAdvise validating database with 'blastdbcheck -dbtype [prot|nucl] -db \
+             ${{DBNAME}}'\n\n"
+        )
+    };
+    let build = |input: &str, dir: &TempDir, version: &str| {
         let words: Vec<String> = [
             "-in",
-            &format!("tests/writedb_v5/a.fa {locked}"),
+            input,
             "-dbtype",
             "prot",
             "-out",
-            &base,
+            &dir.base("db"),
             "-title",
             "t",
             "-blastdb_version",
@@ -1591,35 +1600,59 @@ fn an_input_file_that_cannot_be_opened_stops_the_build() {
             &mut out,
             &mut err,
         );
-        let err = String::from_utf8_lossy(&err).into_owned();
         let out = String::from_utf8_lossy(&out).into_owned();
-        assert_eq!(status, 255, "v{version}: {err}");
+        (status, out, String::from_utf8_lossy(&err).into_owned())
+    };
+    for version in ["4", "5"] {
+        // Read after the readable file and before it: the database is that file's.
+        let alone = TempDir::new("unreadable-alone");
+        let (status, out, err) = build("tests/writedb_v5/a.fa", &alone, version);
+        assert_eq!((status, err.as_str()), (0, ""), "v{version}");
+        let expected = files_named(&alone.0, "db.");
+        for (input, skipped) in [
+            (format!("tests/writedb_v5/a.fa {locked}"), &locked),
+            (format!("{locked_gz} tests/writedb_v5/a.fa"), &locked_gz),
+        ] {
+            let dir = TempDir::new("unreadable-mixed");
+            let (status, out_mixed, err) = build(&input, &dir, version);
+            assert_eq!(status, 0, "v{version} {input}: {err}");
+            assert_eq!(err, warning(skipped), "v{version} {input}");
+            assert_eq!(
+                out_mixed
+                    .matches("Adding sequences from FASTA; added 2 sequences in ")
+                    .count(),
+                1,
+                "v{version} {input}: {out_mixed}"
+            );
+            assert_eq!(
+                out_mixed.lines().count(),
+                out.lines().count(),
+                "v{version} {input}"
+            );
+            assert_eq!(files_named(&dir.0, "db."), expected, "v{version} {input}");
+            for name in &expected {
+                assert!(
+                    std::fs::read(dir.0.join(name)).unwrap()
+                        == std::fs::read(alone.0.join(name)).unwrap(),
+                    "v{version} {input}: {name}"
+                );
+            }
+        }
+        // Only files that cannot be opened.
+        let dir = TempDir::new("unreadable-only");
+        let (status, out, err) = build(&format!("{locked} {locked_gz}"), &dir, version);
+        assert_eq!(status, 0, "v{version}: {err}");
+        assert_eq!(err, warning(&locked) + &warning(&locked_gz), "v{version}");
         assert!(
-            err.starts_with(&format!(
-                "Warning: [makeblastdb] \nInput file {locked} does NOT appear to be FASTA \
-                 (processing anyway).\n"
-            )),
-            "v{version}: {err}"
-        );
-        assert!(
-            err.ends_with("\n") && err.contains(&format!("\nError: {locked}: ")),
-            "v{version}: {err}"
-        );
-        // The first file was read into the database before the second failed.
-        assert!(
-            out.contains("Adding sequences from FASTA; added 2 sequences in "),
+            out.ends_with("Maximum file size: 3000000000B\n\nNo volumes were created.\n\n"),
             "v{version}: {out}"
         );
-        // The volumes and the LMDB file are removed. Of version 5 the tax-id lookup files and
-        // the `.ptf` stay, as after makeblastdb's own late errors (`ListFiles` names the `.pdb`
-        // only; the late-error cases E_late and E_late1 of the makedb-v5 S2 gate).
-        let left: Vec<String> = files_named(&tmp.0, "db.");
-        let expected: &[&str] = if version == "4" {
-            &[]
-        } else {
-            &["db.pot", "db.ptf", "db.pto"]
-        };
-        assert_eq!(left, expected, "v{version}");
+        assert!(!out.contains("Adding sequences"), "v{version}: {out}");
+        assert_eq!(
+            files_named(&dir.0, "db."),
+            Vec::<String>::new(),
+            "v{version}"
+        );
     }
 }
 

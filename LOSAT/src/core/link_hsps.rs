@@ -455,14 +455,9 @@ fn rev_compare_tbn(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering
 // 		return -1;
 // 	return 0;
 // ```
-/// `s_RevCompareHSPs`, and with a `strand_factor` of 3 `s_RevCompareHSPsTransl`
-/// (link_hsps.c:226-262: `context / (NUM_FRAMES / 2)`).
-fn rev_compare(h1: &LinkHsp, h2: &LinkHsp, strand_factor: usize) -> Ordering {
-    (h1.context / strand_factor)
-        .cmp(&(h2.context / strand_factor))
-        .then(h2.query_offset.cmp(&h1.query_offset))
-        .then(h2.subject_offset.cmp(&h1.subject_offset))
-}
+// `s_RevCompareHSPs` (and `s_RevCompareHSPsTransl`, link_hsps.c:226-262) compares the fields that
+// `s_FwdCompareHSPs` compares, in the other direction; `even_gap_link_hsps` explains why the stable
+// sort by `fwd_compare` alone gives the order of the two sorts.
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:119-144
 // ```c
@@ -573,9 +568,11 @@ pub(crate) fn even_gap_link_hsps(
     // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn` (`Tbx`).
     let mut order: Vec<usize> = (0..total_number_of_hsps).collect();
     order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], &hsps[b], strand_factor));
-    // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`.
+    // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`, read from a copy in that
+    // order (one load where `hsps[order[i]]` takes two).
+    let sorted: Vec<LinkHsp> = order.iter().map(|&i| hsps[i]).collect();
     let mut nodes: Vec<Node> = vec![Node::default(); total_number_of_hsps + 1];
-    let hsp_of = |slot: usize| -> &LinkHsp { &hsps[order[slot - 1]] };
+    let hsp_of = |slot: usize| -> &LinkHsp { &sorted[slot - 1] };
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:510-536
     // ```c
@@ -693,8 +690,11 @@ pub(crate) fn even_gap_link_hsps(
     //             s_FwdCompareHSPs);
     //    }
     // ```
+    // The two sorts compare the same fields (the query frame, `query.offset`, `subject.offset`), the
+    // first in decreasing and the second in increasing order. As stable sorts, the first keeps HSPs
+    // with equal fields in the slots' order and the second keeps that order among them, so the
+    // second alone, on the slots' order, gives the same list.
     let mut array: Vec<usize> = (1..=total_number_of_hsps).collect();
-    array.sort_by(|&a, &b| rev_compare(hsp_of(a), hsp_of(b), strand_factor));
     array.sort_by(|&a, &b| fwd_compare(hsp_of(a), hsp_of(b), strand_factor));
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1006-1080

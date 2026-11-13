@@ -182,6 +182,23 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    // No NCBI counterpart: the schedules (`x_subject_flow.rs`); it changes no value NCBI computes.
+    /// The length of the searched sequences: the sum of the records' lengths, or the length of
+    /// the database's included sequences (`SeqDb::included_length`); `None` when it cannot be
+    /// read.
+    pub(crate) fn included_length(&self) -> Option<u64> {
+        match self {
+            Subjects::Fasta(records) => Some(
+                records
+                    .iter()
+                    .map(|s| s.sequence.len() as u64)
+                    .fold(0u64, u64::saturating_add),
+            ),
+            Subjects::Stream(stream) => stream.db.included_length().ok(),
+            Subjects::Unreadable => None,
+        }
+    }
+
     /// The total length (Int8, `BlastSeqSrcGetTotLen`): the sum of the records' lengths, or the
     /// database's `GetTotalLength` (`SeqDb::total_length`: the walk of `LENGTH`, not
     /// `STATS_TOTLEN`), which the linking of an ungapped search reads (blast_engine.c:1407).

@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use super::file::DbFile;
 use super::isam;
@@ -2625,6 +2625,8 @@ impl SeqDb {
         };
         self.list_applied = true;
         self.filter = Some(Box::new(filter));
+        // The scan is that of `included_length`.
+        self.included_length = OnceLock::from(total_length);
         self.update_first_oid_length()
     }
 
@@ -2698,6 +2700,23 @@ impl SeqDb {
     // A protein's length is exact (`GetSeqLengthProt`: the bytes up to the next sequence
     // less the NUL between them); a nucleotide's is approximate, from its bytes and the
     // volume-relative OID, not from the count in its last byte.
+    // No NCBI counterpart: the schedules of the searches; it changes no value NCBI computes.
+    /// The length of the included sequences ([`SeqDb::num_seqs`] of them), which the searches'
+    /// schedules read: the volumes' total length when every OID is included, else the total of
+    /// NCBI's scan of the included OIDs (`scan_totals`, made at the first call). NCBI's
+    /// `GetTotalLength` ([`SeqDb::total_length`]) is the walk of the alias files' `LENGTH`
+    /// without a list, which can differ from it (an OID range, a `LENGTH` key).
+    pub fn included_length(&self) -> Result<u64, SeqDbError> {
+        let Some(filter) = &self.filter else {
+            return Ok(self.volume_set_length);
+        };
+        if let Some(&length) = self.included_length.get() {
+            return Ok(length);
+        }
+        let (length, _, _) = self.scan_totals(filter)?;
+        Ok(*self.included_length.get_or_init(|| length))
+    }
+
     /// NCBI's totals of the included OIDs: the total length, the longest length and the
     /// shortest (`INT4_MAX` when no OID is included, as `min_count` starts).
     fn scan_totals(&self, filter: &OidFilter) -> Result<(u64, u32, u32), SeqDbError> {

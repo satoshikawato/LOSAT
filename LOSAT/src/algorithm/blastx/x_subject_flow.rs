@@ -110,8 +110,8 @@ impl XTasks {
         if n == 0 || u32::try_from(n).is_err() {
             return None;
         }
-        let total = match subjects.total_length() {
-            Ok(total) if total > 0 => total as u128,
+        let total = match subjects.included_length() {
+            Some(total) if total > 0 => u128::from(total),
             _ => return None,
         };
         // `k` times the mean length, rounded up.

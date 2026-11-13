@@ -637,6 +637,12 @@ impl BlastnDatabase {
         self.db.list_taxids()
     }
 
+    /// The number of sequences the search reads: the included ones (`SeqDb::num_seqs`), which
+    /// the schedules count; the statistics' number (`metadata`) can be another.
+    pub(super) fn num_subjects(&self) -> usize {
+        self.db.num_seqs() as usize
+    }
+
     /// The number of sequences and the total length that the statistics read
     /// (`SeqDb::statistics_numbers`): the real numbers, also with `-dbsize`.
     pub(super) fn metadata(&self) -> &SubjectMetadata {

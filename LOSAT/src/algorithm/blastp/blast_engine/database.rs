@@ -200,6 +200,11 @@ impl BlastpDatabase {
         self.db.statistics_numbers().0
     }
 
+    /// The length of the included sequences (`SeqDb::included_length`), which the schedules read.
+    pub(super) fn included_letters(&self) -> Result<u64, crate::seqdb::SeqDbError> {
+        self.db.included_length()
+    }
+
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(super) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()

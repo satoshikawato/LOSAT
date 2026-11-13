@@ -134,9 +134,13 @@ pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize, largest: u6
 /// The bytes of the database's sequences in its sequence files without their ambiguity data: four
 /// letters per byte and the last byte of each sequence, which holds the count of its letters
 /// (seqdbvol.cpp:1805-1838, quoted above `block_subject`). A sequence of `n` letters takes
-/// `n / 4 + 1` bytes, so this is the sum up to 3 / 4 byte per sequence.
+/// `n / 4 + 1` bytes, so this is the sum up to 3 / 4 byte per sequence. The sequences are the
+/// included ones (`SeqDb::included_length`); an index that cannot be read counts as the largest
+/// database, whose blocks are those of one thread (the search then meets the error in the order
+/// of one thread).
 pub(super) fn x_sequence_bytes(db: &SeqDb) -> u64 {
-    (db.total_length() / 4).saturating_add(u64::from(db.num_seqs()))
+    let length = db.included_length().unwrap_or(u64::MAX);
+    (length / 4).saturating_add(u64::from(db.num_seqs()))
 }
 
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
@@ -144,6 +148,9 @@ pub(super) fn x_sequence_bytes(db: &SeqDb) -> u64 {
 /// rounds on the pool (`parallel`), else `BLOCK_BYTES`.
 pub(super) fn x_db_cut_block_bytes(db: &SeqDb, pool: &SearchPool<'_>, parallel: bool) -> u64 {
     let threads = if parallel { pool.threads() } else { 1 };
+    if threads <= 1 {
+        return BLOCK_BYTES;
+    }
     let sequence_bytes = x_sequence_bytes(db);
     let cut = x_cut_block_bytes(sequence_bytes, threads, BLOCK_BYTES);
     let small = x_bn_db_small().then_some(X_BNDBSMALL_BLOCK_BYTES);

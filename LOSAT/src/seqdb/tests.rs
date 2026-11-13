@@ -878,6 +878,15 @@ fn alias_oid_ranges_select_ncbis_oids() {
     assert_eq!(oids(&db), [2, 3, 4, 5, 6]);
     assert_eq!((db.ncbi_num_seqs(), db.total_length()), (10, 801));
     assert!(!db.is_restricted());
+    // The schedules read the length of the included sequences, not NCBI's walk.
+    let lengths = |db: &SeqDb| {
+        (0..db.num_seqs())
+            .map(|at| u64::from(db.protein_length(at).unwrap()))
+            .sum::<u64>()
+    };
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    assert!(lengths(&db) < 801);
+    assert_eq!(open("prot_v4").unwrap().included_length().unwrap(), 801);
     // Nested ranges: the intersection.
     write("n.pal", "DBLIST r\nFIRST_OID 5\n");
     assert_eq!(oids(&open("n").unwrap()), [4, 5, 6]);
@@ -905,6 +914,7 @@ fn alias_oid_ranges_select_ncbis_oids() {
     db.x_keep_oids(|oid| oid % 2 == 0);
     assert_eq!(oids(&db), [2, 4, 6]);
     assert_eq!(db.ncbi_num_seqs(), 3);
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
     // The range of the only alias file of the -db with another name: NCBI's search and
     // blastdbcmd read the OIDs outside the range differently (D1a-2).
     let error = SeqDb::open(

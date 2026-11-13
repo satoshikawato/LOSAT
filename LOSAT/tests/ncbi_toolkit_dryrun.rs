@@ -4,7 +4,7 @@
 //! probe's `dry*` cases and the sweep of every argument definition of NCBI's `-xmlhelp`).
 //!
 //! The library API runs the same dry run in each call (line RG item E1w-2): the same words
-//! through `examples/library_command_line` (`LOSAT::api::run`, `run_to_file`,
+//! through `examples/library_command_line` (`losat::api::run`, `run_to_file`,
 //! `run_makeblastdb`, `run_blastdbcmd`) in the same directory and environment write nothing, make
 //! no file but the `-logfile` file and read no input; a failure's message is the text that the
 //! command line writes to its standard error (the example ends every failure with exit status

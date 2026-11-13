@@ -416,10 +416,10 @@ LOSAT can be built as a standalone WASI module or embedded into web browsers:
 cd LOSAT
 
 # Build single-threaded WASI command
-cargo build --release --target wasm32-wasip1 --no-default-features
+cargo build --release --bin losat --target wasm32-wasip1 --no-default-features
 
 # Build multithreaded WASI command (requires shared-memory runtime)
-cargo build --release --target wasm32-wasip1-threads --features wasm-threads
+cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads
 ```
 
 LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](https://github.com/satoshikawato/gbdraw), enabling interactive circular and linear genome visualization without any backend server requirements.
@@ -428,10 +428,10 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ## Library use (Rust)
 
-The crate's public surface is the module `LOSAT::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
+The library is the crate `losat` (not on crates.io yet; until then, depend on this repository's `LOSAT/` directory by path or git). The crate's public surface is the module `losat::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
 
 ```rust
-use LOSAT::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
+use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 
 let query = read_fasta(Program::Blastp, Role::Query, &std::fs::read("query.faa")?)?;
 let subject = read_fasta(Program::Blastp, Role::Subject, &std::fs::read("subject.faa")?)?;
@@ -448,7 +448,7 @@ let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
 
 ## Library use (Python)
 
-[`python/`](python/README.md) holds `pylosat`, a binding of `LOSAT::api` built with PyO3: a search runs in the Python process, with the command line's options and report bytes, its HSPs as an Arrow table, and Ctrl-C between query batches. It is not published yet; build it from the repository with `maturin develop`.
+[`python/`](python/README.md) holds `pylosat`, a binding of `losat::api` built with PyO3: a search runs in the Python process, with the command line's options and report bytes, its HSPs as an Arrow table, and Ctrl-C between query batches. It is not published yet; build it from the repository with `maturin develop`.
 
 ---
 
@@ -553,7 +553,7 @@ LOSAT stops with an error for each option and value below; it does not run somet
 
 **segmasker** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); refused: what dustmasker refuses above (titles, database sequences and definition lines, the serial writer, a failed write of a `seqloc_*` or `maskinfo_*` output and a FASTA record of 4,294,967,296 letters or more), a `-locut` or `-hicut` value that ends in `e` or `E` after more than 18 significant digits or 15 places (NCBI computes it in x87 extended precision; refused when the run reads it, so `-h`, `-dryrun` and the errors of other arguments are NCBI's), a protein database whose residue bytes are above 127 (makeblastdb writes 0 to 27; NCBI's SEG reads them as negative characters), and a database error that LOSAT reports without the place in NCBI's source that NCBI's report names (a missing database or volume, an alias file without `DBLIST`, an empty database name and an alias value that NCBI cannot convert are reported as NCBI reports them).
 
-**convert2blastmask** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); refused: a `-masking_options` byte outside the visible ASCII range with `-outfmt maskinfo_asn1_text` or `maskinfo_asn1_bin` (NCBI writes `#` for it and posts an error; LOSAT stops), a `Blast-db-mask-info` that LOSAT's serial writer cannot write as NCBI does, and a failed write of a `maskinfo_*` output (NCBI's serial stream reports it; `interval` goes on silently, as NCBI's, as for dustmasker and segmasker).
+**convert2blastmask** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); a byte outside the visible ASCII range in `-masking_options` or in a `-parse_seqids` id (DEL) is written as NCBI writes it (`#` with NCBI's error message for each such byte in `maskinfo_asn1_text` and `maskinfo_asn1_bin`, and for each control character other than TAB, LF and CR in `maskinfo_xml`; as in dustmasker's and segmasker's `seqloc_*` and `maskinfo_*` outputs); refused: a command-line word that is not UTF-8, a `Blast-db-mask-info` that LOSAT's serial writer cannot write as NCBI does, and a failed write of a `maskinfo_*` output (NCBI's serial stream reports it; `interval` goes on silently, as NCBI's, as for dustmasker and segmasker).
 
 **makeblastdb**
 - `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix`.

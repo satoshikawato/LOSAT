@@ -909,7 +909,7 @@ pub fn run(
     use crate::blastinput::input_files;
     // The diagnostics stream: with the archive it also saves what it writes as the messages of
     // the next archive.
-    let mut stderr = crate::cli::CliStderr;
+    let mut stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
     let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
         Some(handle) => {
@@ -2459,7 +2459,7 @@ fn write_tblastx_outputs(
         let prolog = !prolog_before_search(&format.sink);
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        let mut writer = format.sink.open()?;
+        let mut writer = format.sink.ostream()?;
         match output_format {
             report::TblastxOutputFormat::Pairwise => {
                 let queries: Vec<crate::report::pairwise::TblastxPairwiseQuery> = run
@@ -2765,7 +2765,7 @@ fn write_tblastx_outputs(
                 )?,
             },
         }
-        writer.flush()?;
+        std::io::Write::flush(&mut writer)?;
     }
     if let Some(handle) = &run.args.archive {
         handle.set_muted(false);
@@ -3401,7 +3401,8 @@ fn run_batch_loop(
     let result_warnings = outputs
         .formats
         .first()
-        .is_none_or(|format| report::output_format(format.outfmt).writes_query_warnings());
+        .and_then(crate::api::local_blast::FormatOutput::report_format)
+        .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings);
     // Whether the batches' prefetch of a `-db` search writes the taxonomy database's messages
     // with the query warnings: the first format is outfmt 0, 5, 6 or 7, or with
     // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12 (`TblastxOutputFormat::prefetches_subjects`;

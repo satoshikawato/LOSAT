@@ -13,8 +13,8 @@
 
 mod run_local_support;
 
+use losat::api::{Outcome, Program};
 use run_local_support::{fixture_sequence, Files, TempFasta};
-use LOSAT::api::{Outcome, Program};
 
 fn search(
     query: &TempFasta,

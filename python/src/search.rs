@@ -1,6 +1,6 @@
 //! A search from Python: the inputs are read and the search runs with the GIL released.
 //!
-//! Python cannot stop a thread inside its process, so a search stops where `LOSAT::api` lets a
+//! Python cannot stop a thread inside its process, so a search stops where `losat::api` lets a
 //! caller stop: between two of NCBI's query batches. `Batches` returns to Python after each
 //! batch, and `run` without reports looks for a signal between them (Ctrl-C).
 
@@ -10,11 +10,11 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use arrow_array::RecordBatch;
+use losat::api::{self, FastaRecord, HspRecord, Inputs, Program, Role, Search};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::types::{PyBytes, PyList, PySlice, PyTuple};
 use self_cell::self_cell;
-use LOSAT::api::{self, FastaRecord, HspRecord, Inputs, Program, Role, Search};
 
 use crate::exception;
 use crate::table::{of_records, HspTable};

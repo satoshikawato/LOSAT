@@ -291,7 +291,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
 fn run_inner(
     args: &BlastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-    output: &mut Option<BufWriter<Box<dyn Write>>>,
+    output: &mut Option<crate::cli::NcbiOstream<'static>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
     hold_slot: &mut Option<archive::ArchiveHold<Box<dyn Write + Send>>>,
 ) -> Result<()> {
@@ -463,17 +463,24 @@ fn run_inner(
     // With the BLAST archive the diagnostics also go to its message log (`DiagTee`): the
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr: Box<dyn Write + Send> = match &hold {
-        Some(hold) => Box::new(hold.writer(Box::new(crate::cli::CliStderr))),
-        None => Box::new(crate::cli::CliStderr),
+        Some(hold) => Box::new(hold.writer(Box::new(crate::cli::CliStderr::process()))),
+        None => Box::new(crate::cli::CliStderr::process()),
     };
     let mut archive_tee;
-    let mut stderr: Box<dyn Write + '_> = match &archive {
-        Some(handle) => {
+    let tax_report = choice.number == 18;
+    let mut stderr: Box<dyn Write + '_> = match (&archive, &hold) {
+        (Some(handle), _) => {
             archive_tee =
                 crate::report::archive::DiagTee::new(&mut *archive_stderr, handle.clone());
             Box::new(&mut archive_tee)
         }
-        None => Box::new(crate::cli::CliStderr),
+        // The organism report's texts go through the hold with the report (`destination` below),
+        // its standard output written before each text where the text is made (`cli::CliStderr`,
+        // `cerr`'s tie), so that a held run keeps NCBI's order (review 4 D1 of line RG T2).
+        (None, Some(hold)) if tax_report => Box::new(crate::cli::CliStderr::through(
+            hold.writer(Box::new(io::stderr())),
+        )),
+        (None, _) => Box::new(crate::cli::CliStderr::process()),
     };
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
@@ -578,25 +585,32 @@ fn run_inner(
     let query_file =
         crate::blastinput::input_files::open_input(&args.query, "query", program.upper)
             .map_err(early_archive_error)?;
-    let tax_report = choice.number == 18;
     let destination: Box<dyn Write> =
         match (args.out.as_deref().filter(|p| *p != Path::new("-")), &hold) {
-            (Some(path), Some(hold)) => Box::new(hold.writer(Box::new(
-                File::create(path).map_err(|_| inaccessible("out", path))?,
-            ))),
-            (None, Some(hold)) => Box::new(hold.writer(Box::new(io::stdout()))),
-            (None, None) if !tax_report => Box::new(io::stdout().lock()),
-            // The `-out` file, and the organism report's file or standard output as NCBI's
-            // buffer writes it (`cli::report_destination`).
-            (path, None) => crate::cli::report_destination(
+            // The organism report's file or standard output as NCBI's buffer writes it
+            // (`cli::report_destination_through`), with the hold after the buffer: what the hold
+            // keeps is what the buffer writes, where the buffer writes it.
+            (path, hold) if tax_report => crate::cli::report_destination_through(
                 path.map(|path| {
                     File::create(path)
                         .map(|file| Box::new(file) as Box<dyn Write + Send>)
                         .map_err(|_| inaccessible("out", path))
                 })
                 .transpose()?,
-                tax_report,
+                true,
+                |device| match hold {
+                    Some(hold) => Box::new(hold.writer(device)),
+                    None => device,
+                },
             ),
+            (Some(path), Some(hold)) => Box::new(hold.writer(Box::new(
+                File::create(path).map_err(|_| inaccessible("out", path))?,
+            ))),
+            (None, Some(hold)) => Box::new(hold.writer(Box::new(io::stdout()))),
+            (None, None) => Box::new(io::stdout().lock()),
+            (Some(path), None) => {
+                Box::new(File::create(path).map_err(|_| inaccessible("out", path))?)
+            }
         };
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
     // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
@@ -630,12 +644,13 @@ fn run_inner(
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
-    // The organism report's stream is NCBI's buffer (`cli::report_destination`), which takes each
-    // write as one of NCBI's insertions (`cli::insert`): no buffer of LOSAT's comes before it.
-    let writer = output.insert(match (tax_report, &hold) {
-        (true, None) => BufWriter::with_capacity(0, destination),
-        _ => BufWriter::new(destination),
-    });
+    // The organism report's stream is NCBI's buffer (`cli::report_destination_through`), which
+    // takes each write as one of NCBI's insertions (`cli::NcbiOstream`): no buffer of LOSAT's
+    // comes before it.
+    let writer = output.insert(crate::cli::NcbiOstream::new(match tax_report {
+        true => destination,
+        false => Box::new(BufWriter::new(destination)),
+    }));
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // ```c++
     //     if(hitlist_size < 5){
@@ -1125,7 +1140,7 @@ fn run_inner(
             _ => Some(&subjects[..]),
         })
     });
-    let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
+    let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
                         results: &mut Vec<BatchResults>,
@@ -2262,7 +2277,7 @@ pub fn run(
     args: &BlastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    let mut output: Option<BufWriter<Box<dyn Write>>> = None;
+    let mut output: Option<crate::cli::NcbiOstream<'static>> = None;
     let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
     let mut hold: Option<archive::ArchiveHold<Box<dyn Write + Send>>> = None;
     let result = run_inner(args, settings, &mut output, &mut archive, &mut hold);

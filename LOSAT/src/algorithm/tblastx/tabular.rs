@@ -157,7 +157,7 @@ pub(super) struct TblastxTabular<'a, 'r> {
 /// `run.epilog`. `probe` marks each row (the format observer).
 pub(super) fn write_tblastx_tabular(
     tab: &TblastxTabular<'_, '_>,
-    writer: &mut dyn Write,
+    writer: &mut crate::cli::NcbiOstream<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {

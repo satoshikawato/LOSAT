@@ -3,7 +3,7 @@
 //! `remaining-gaps-20261112/E/SURVEY_E1.md`, run with `env -i` in a fresh directory).
 //!
 //! The library API runs the same start in each call (line RG item E1w-2): the same words through
-//! `examples/library_command_line` (`LOSAT::api::run`, `run_to_file`) in the same directory and
+//! `examples/library_command_line` (`losat::api::run`, `run_to_file`) in the same directory and
 //! environment give the command line's standard output, standard error and `-logfile` file; a
 //! failure's message is the text that the command line writes to its standard error without
 //! `-logfile` (the example ends every failure with exit status 1).

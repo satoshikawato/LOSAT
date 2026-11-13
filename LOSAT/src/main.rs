@@ -2,5 +2,5 @@
 //! cites NCBI's application entries (`blastn_app.cpp`'s `NcbiSys_main` -> `AppMain`).
 
 fn main() -> anyhow::Result<()> {
-    LOSAT::main_entry()
+    losat::main_entry()
 }

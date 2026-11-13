@@ -136,19 +136,6 @@ impl BlastnOutputFormat {
         }
     }
 
-    /// Whether NCBI writes a query's result warnings with its report
-    /// (`ReportFormat::writes_query_warnings`): not for the structured formats.
-    pub(crate) fn writes_query_warnings(self) -> bool {
-        !matches!(
-            self,
-            BlastnOutputFormat::Seqalign(_)
-                | BlastnOutputFormat::Xml
-                | BlastnOutputFormat::Xml2(_)
-                | BlastnOutputFormat::Archive
-                | BlastnOutputFormat::Sam(_)
-        )
-    }
-
     /// The SAM document of outfmt 17.
     pub(crate) fn sam_spec(self) -> Option<crate::report::sam::SamSpec> {
         match self {

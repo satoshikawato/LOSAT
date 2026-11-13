@@ -137,14 +137,19 @@ pub(crate) fn strategy_for(
     outfmt: i32,
     file: std::fs::File,
 ) -> Result<StrategyExport> {
-    let mut inputs = option_inputs(args);
-    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
+    StrategyExport::for_run(
+        file,
+        option_inputs(args),
         outfmt,
-        args.max_target_seqs,
-        args.num_descriptions,
-        args.num_alignments,
-    );
-    StrategyExport::for_file(file, &inputs, args.database_name(), "TBLASTN")
+        crate::report::archive::strategy::HitlistArgs {
+            max_target_seqs: args.max_target_seqs,
+            num_descriptions: args.num_descriptions,
+            num_alignments: args.num_alignments,
+        },
+        args.database_name(),
+        "TBLASTN",
+        args.archive.as_ref(),
+    )
 }
 
 /// `report::archive::check_request_titles` for TBLASTN's records: the archive's (`archive`) and
@@ -459,10 +464,12 @@ impl BatchRequests<'_> {
                 }
             }
             let batch = BatchArchive {
-                queries: &queries,
-                subjects: &subjects_input,
-                required,
-                lcase_masks: &lcase_masks,
+                request: crate::report::archive::RequestInputs {
+                    queries: &queries,
+                    subjects: &subjects_input,
+                    required,
+                    lcase_masks: &lcase_masks,
+                },
                 masks: &[],
                 ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
                 search_space: 0,
@@ -524,7 +531,7 @@ pub(super) fn write_tblastn_strategy(
     data: &ArchiveData<'_>,
 ) -> Result<()> {
     for_each_batch(data, render.spans, false, |_, batch| {
-        strategy.write_batch(batch, batch.lcase_masks)
+        strategy.write_unkeyed(&batch.request, batch.searched_space)
     })
 }
 
@@ -550,7 +557,7 @@ pub(super) fn write_tblastn_failed_strategy(
         mask_lowercase,
     };
     requests.for_each(&[span], |_, batch| {
-        strategy.write_batch(batch, batch.lcase_masks)
+        strategy.write_unkeyed(&batch.request, batch.searched_space)
     })
 }
 

@@ -126,16 +126,22 @@ pub(crate) fn strategy_for(
     args: &BlastxArgs,
     outfmt: i32,
     file: std::fs::File,
+    archive: Option<&ArchiveHandle>,
 ) -> Result<StrategyExport> {
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    let mut inputs = option_inputs(args);
-    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
+    StrategyExport::for_run(
+        file,
+        option_inputs(args),
         outfmt,
-        args.max_target_seqs.map(|count| count as usize),
-        args.num_descriptions,
-        args.num_alignments,
-    );
-    StrategyExport::for_file(file, &inputs, database, "BLASTX")
+        crate::report::archive::strategy::HitlistArgs {
+            max_target_seqs: args.max_target_seqs.map(|count| count as usize),
+            num_descriptions: args.num_descriptions,
+            num_alignments: args.num_alignments,
+        },
+        database,
+        "BLASTX",
+        archive,
+    )
 }
 
 /// The refusal of a title that the archive cannot write as NCBI does
@@ -835,10 +841,12 @@ fn with_batch(
         (cut != place.length).then_some((place.offset as i32, (place.offset + cut) as i32 - 1))
     });
     let batch = BatchArchive {
-        queries: &queries,
-        subjects: &subjects_input,
-        required,
-        lcase_masks: &lcase,
+        request: crate::report::archive::RequestInputs {
+            queries: &queries,
+            subjects: &subjects_input,
+            required,
+            lcase_masks: &lcase,
+        },
         masks: &masks,
         ka_blocks,
         search_space: first.search_space,
@@ -883,7 +891,7 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
 /// then holds no results, and the request after it none).
 pub(crate) fn write_blastx_strategy(strategy: &StrategyExport, call: &CallBatch<'_>) -> Result<()> {
     with_batch(call, true, |batch| {
-        strategy.write_batch(batch, batch.lcase_masks)
+        strategy.write_unkeyed(&batch.request, batch.searched_space)
     })
 }
 

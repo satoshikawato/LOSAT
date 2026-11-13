@@ -127,14 +127,19 @@ pub(crate) fn strategy_for(
     outfmt: i32,
     file: std::fs::File,
 ) -> Result<StrategyExport> {
-    let mut inputs = option_inputs(args, dust);
-    inputs.hitlist_size = crate::report::archive::strategy::hitlist_size(
+    StrategyExport::for_run(
+        file,
+        option_inputs(args, dust),
         outfmt,
-        args.max_target_seqs,
-        args.num_descriptions,
-        args.num_alignments,
-    );
-    StrategyExport::for_file(file, &inputs, args.database_name(), "BLASTN")
+        crate::report::archive::strategy::HitlistArgs {
+            max_target_seqs: args.max_target_seqs,
+            num_descriptions: args.num_descriptions,
+            num_alignments: args.num_alignments,
+        },
+        args.database_name(),
+        "BLASTN",
+        args.archive.as_ref(),
+    )
 }
 
 /// `report::archive::check_request_titles` for BLASTN's records: the archive's (`archive`) and
@@ -471,10 +476,12 @@ pub(crate) fn for_each_batch(
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
         let batch = BatchArchive {
-            queries: &queries,
-            subjects: &subjects_input,
-            required,
-            lcase_masks: &lcase_masks,
+            request: crate::report::archive::RequestInputs {
+                queries: &queries,
+                subjects: &subjects_input,
+                required,
+                lcase_masks: &lcase_masks,
+            },
             masks: &masks,
             ka_blocks,
             search_space: context.search_space,
@@ -532,7 +539,7 @@ pub(crate) fn write_blastn_strategy(
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
 ) -> Result<()> {
     for_each_batch(call, first_context, true, |_, batch| {
-        strategy.write_batch(batch, batch.lcase_masks)
+        strategy.write_unkeyed(&batch.request, batch.searched_space)
     })
 }
 

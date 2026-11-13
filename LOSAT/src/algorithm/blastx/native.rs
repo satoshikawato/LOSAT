@@ -369,7 +369,7 @@ fn run_inner(
     archive_slot.clone_from(&archive);
     // The search strategy's request, with the refusals of the archive's.
     let strategy = strategy_file
-        .map(|file| archive::strategy_for(args, choice.number, file))
+        .map(|file| archive::strategy_for(args, choice.number, file, archive.as_ref()))
         .transpose()?;
     // The run's output and diagnostics with the archive or the search strategy, which it holds in
     // order while a later batch's title may still be refused (`archive::ArchiveHold`,

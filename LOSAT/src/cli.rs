@@ -1421,76 +1421,210 @@ impl std::io::Write for ReportStream {
 //
 // 	  if (__n >= __bufavail)
 // ```
-/// The `-out` file of the organism report (outfmt 18) as NCBI's `ofstream` writes it: its
-/// `basic_filebuf` of `BUFSIZ` (8192) bytes keeps the report until it holds 8191 bytes, NCBI's
-/// formatter never flushes it, and `~CBlastFormat` turns the stream's exceptions off before its
-/// last flush. So a write that fails where NCBI's first write to the file comes (a report of 8191
-/// bytes or more) is "BLAST failed to write output" (`ReportStream::failed`), and a report that
-/// fits is written when the run ends, a failure then unreported (NCBI BLAST+ 2.17.0, probe
-/// `T/t2/fix1` `f1.d5.*`: `-out /dev/full`, exit 0 for 2 KB, 6 for 90 KB). LOSAT's flushes of
-/// the report before its first write do nothing (no `cerr` is tied to a file).
-pub struct TaxReportFile<W: std::io::Write> {
-    inner: W,
-    held: Vec<u8>,
-    written: bool,
+// NCBI reference (glibc 2.17 to 2.39): libio/filedoalloc.c `_IO_file_doallocate`
+// ```c
+//   size = BUFSIZ;
+//   if (fp->_fileno >= 0 && __builtin_expect (_IO_SYSSTAT (fp, &st), 0) >= 0)
+//     {
+//       if (S_ISCHR (st.st_mode))
+// 	{
+// 	  /* Possibly a tty.  */
+// 	  if (
+// #ifdef DEV_TTY_P
+// 	      DEV_TTY_P (&st) ||
+// #endif
+// 	      local_isatty (fp->_fileno))
+// 	    fp->_flags |= _IO_LINE_BUF;
+// 	}
+// #if defined _STATBUF_ST_BLKSIZE
+//       if (st.st_blksize > 0 && st.st_blksize < BUFSIZ)
+// 	size = st.st_blksize;
+// #endif
+//     }
+// ```
+/// The size of glibc's buffer of standard output (`cout` writes into it, synchronized with C's
+/// `stdout`): `st_blksize` of the standard output where it is below `BUFSIZ`, else `BUFSIZ` (4096
+/// for a pipe and for most files); 4096 where LOSAT cannot ask.
+pub fn stdio_buffer_size() -> usize {
+    #[cfg(unix)]
+    let block = rustix::fs::fstat(std::io::stdout())
+        .ok()
+        .and_then(|stat| usize::try_from(stat.st_blksize).ok())
+        .filter(|&size| size > 0 && size < NCBI_BUFSIZ)
+        .unwrap_or(NCBI_BUFSIZ);
+    #[cfg(not(unix))]
+    let block = 4096;
+    block
 }
 
-/// `BUFSIZ - 1`: the bytes that NCBI's file buffer keeps before its first write.
-const NCBI_FILE_HELD: usize = 8191;
+/// glibc's and libstdc++'s `BUFSIZ`.
+pub const NCBI_BUFSIZ: usize = 8192;
 
-impl<W: std::io::Write> TaxReportFile<W> {
-    pub fn new(inner: W) -> Self {
-        TaxReportFile {
-            inner,
-            held: Vec::new(),
-            written: false,
-        }
+/// The stream of the organism report (outfmt 18) as NCBI's buffer writes it: NCBI's formatter
+/// never flushes it, a write to the file or device comes only where the buffer cannot hold the
+/// report any more, and `~CBlastFormat` turns the stream's exceptions off before its last flush
+/// (the exit flushes C's `stdout` without a check). So a write that fails where NCBI's buffer
+/// writes is "BLAST failed to write output" (`ReportStream::failed`; a reader that closed the
+/// pipe: NCBI is ended by SIGPIPE there), and the bytes still held are written when the run ends,
+/// a failure then unreported (NCBI BLAST+ 2.17.0, probe `T/t2/fix1` `f1.d5.*`: `-out /dev/full`
+/// exit 0 for 2 KB, 6 for 90 KB). One type for both streams; they differ in the bytes held
+/// (`capacity`): the `-out` file's `basic_filebuf` of `BUFSIZ` bytes writes at its 8191st
+/// (`file`), standard output's glibc buffer when a write passes `stdio_buffer_size` (a terminal's
+/// at each write, line by line), and `cerr` is tied to `cout`: a write to standard error writes
+/// what standard output holds first (`tie_standard_output`, `CliStderr`), where NCBI aborts if
+/// that write fails (LOSAT: its error, non-zero exit). LOSAT's flushes of the report hold.
+pub struct NcbiReportBuffer(std::sync::Arc<std::sync::Mutex<HeldReport>>);
+
+/// What `NcbiReportBuffer` holds.
+struct HeldReport {
+    inner: Box<dyn std::io::Write + Send>,
+    held: Vec<u8>,
+    capacity: usize,
+}
+
+impl HeldReport {
+    /// NCBI's buffer writes what it holds.
+    fn write_held(&mut self) -> std::io::Result<()> {
+        let held = std::mem::take(&mut self.held);
+        self.inner.write_all(&held)?;
+        self.inner.flush()
     }
 }
 
-impl<W: std::io::Write> std::io::Write for TaxReportFile<W> {
+impl Drop for HeldReport {
+    fn drop(&mut self) {
+        let _ = self.inner.write_all(&self.held);
+        let _ = self.inner.flush();
+    }
+}
+
+/// The organism report's standard output of the run, which a write to standard error writes
+/// first (`tie_standard_output`): standard output is the process's.
+static TIED_STANDARD_OUTPUT: std::sync::Mutex<
+    Option<std::sync::Weak<std::sync::Mutex<HeldReport>>>,
+> = std::sync::Mutex::new(None);
+
+fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:317-323
+// ```c++
+// CBlastFormat::~CBlastFormat()
+// {
+//     try {
+//         m_Outfile.exceptions(m_OrigExceptionMask);
+//     } catch (...) {/*ignore exceptions*/}
+//     m_Outfile.flush();
+// }
+// ```
+// NCBI reference (GCC 13 libstdc++): include/c++/13/bits/fstream.tcc:766-778
+// (`basic_filebuf::xsputn`)
+// ```c++
+// 	  streamsize __bufavail = this->epptr() - this->pptr();
+//
+// 	  // Don't mistake 'uncommitted' mode buffered with unbuffered.
+// 	  if (!_M_writing && _M_buf_size > 1)
+// 	    __bufavail = _M_buf_size - 1;
+//
+// 	  if (__n >= __bufavail)
+// ```
+// NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
+// ```c
+//   if (to_do + must_flush > 0)
+//     {
+//       size_t block_size, do_write;
+//       /* Next flush the (full) buffer. */
+//       if (_IO_OVERFLOW (f, EOF) == EOF)
+// ```
+impl NcbiReportBuffer {
+    fn new(inner: Box<dyn std::io::Write + Send>, capacity: usize) -> Self {
+        NcbiReportBuffer(std::sync::Arc::new(std::sync::Mutex::new(HeldReport {
+            inner,
+            held: Vec::new(),
+            capacity,
+        })))
+    }
+
+    /// The `-out` file `inner`: `BUFSIZ - 2` bytes held, the 8191st written with them.
+    pub fn file(inner: Box<dyn std::io::Write + Send>) -> Self {
+        Self::new(inner, NCBI_BUFSIZ - 2)
+    }
+
+    /// Standard output, glibc's buffer (`stdio_buffer_size`; a terminal's lines are written at
+    /// once), tied to standard error (`tie_standard_output`).
+    pub fn standard_output() -> Self {
+        use std::io::IsTerminal;
+        let capacity = if std::io::stdout().is_terminal() {
+            0
+        } else {
+            stdio_buffer_size()
+        };
+        let buffer = Self::new(
+            Box::new(std::io::BufWriter::new(std::io::stdout())),
+            capacity,
+        );
+        *lock(&TIED_STANDARD_OUTPUT) = Some(std::sync::Arc::downgrade(&buffer.0));
+        buffer
+    }
+}
+
+impl std::io::Write for NcbiReportBuffer {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.written {
-            return self.inner.write(buf);
-        }
-        self.held.extend_from_slice(buf);
-        if self.held.len() >= NCBI_FILE_HELD {
-            self.written = true;
-            let held = std::mem::take(&mut self.held);
-            self.inner.write_all(&held)?;
-            self.inner.flush()?;
+        let mut report = lock(&self.0);
+        report.held.extend_from_slice(buf);
+        if report.held.len() > report.capacity {
+            report.write_held()?;
         }
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        if self.written {
-            self.inner.flush()
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 }
 
-impl<W: std::io::Write> Drop for TaxReportFile<W> {
-    fn drop(&mut self) {
-        if !self.written {
-            let _ = self.inner.write_all(&self.held);
-            let _ = self.inner.flush();
-        }
+/// `cerr.tie()`: before a write to standard error, the organism report's standard output writes
+/// what it holds (`NcbiReportBuffer::standard_output`); nothing for every other report.
+pub fn tie_standard_output() -> std::io::Result<()> {
+    let tied = lock(&TIED_STANDARD_OUTPUT)
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade);
+    match tied {
+        Some(report) => lock(&report).write_held(),
+        None => Ok(()),
     }
 }
 
-/// The `-out` file `file` of a run whose report is `outfmt` (the command line's one format):
-/// the organism report's behind NCBI's file buffer (`TaxReportFile`), any other as it is.
-pub fn report_out_file(
-    file: Box<dyn std::io::Write + Send>,
+/// The command line's standard error, tied to the organism report's standard output
+/// (`tie_standard_output`).
+pub struct CliStderr;
+
+impl std::io::Write for CliStderr {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        tie_standard_output()?;
+        std::io::stderr().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::stderr().flush()
+    }
+}
+
+/// The report stream's writer of a run whose report is `outfmt` (the command line's one
+/// format): the `-out` file `file` (`None`: standard output), behind NCBI's buffer for the
+/// organism report (`NcbiReportBuffer`).
+pub fn report_destination(
+    file: Option<Box<dyn std::io::Write + Send>>,
     outfmt: Option<i32>,
 ) -> Box<dyn std::io::Write + Send> {
-    if outfmt == Some(18) {
-        Box::new(TaxReportFile::new(file))
-    } else {
-        file
+    match (file, outfmt == Some(18)) {
+        (Some(file), true) => Box::new(NcbiReportBuffer::file(file)),
+        (Some(file), false) => file,
+        (None, true) => Box::new(NcbiReportBuffer::standard_output()),
+        (None, false) => report_standard_output(),
     }
 }
 
@@ -1651,6 +1785,41 @@ mod readme_refusals_tests;
 mod tests {
     use super::*;
     use std::os::unix::ffi::OsStringExt;
+
+    /// A device that takes nothing (`/dev/full`), counting the bytes offered to it.
+    struct Full(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl std::io::Write for Full {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .fetch_add(buf.len(), std::sync::atomic::Ordering::Relaxed);
+            Err(std::io::Error::other("full"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_organism_reports_file_buffer_writes_at_its_8191st_byte() {
+        // probe `T/t2/fix1` `f1.d5.*` and `stdout_probe.sh`: NCBI exits 0 for a report that its
+        // buffer holds to the end, 6 where the buffer writes.
+        use std::io::Write;
+        let offered = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut buffer = NcbiReportBuffer::file(Box::new(Full(offered.clone())));
+        buffer.write_all(&[b'x'; 8190]).unwrap();
+        buffer.flush().unwrap();
+        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert!(buffer.write_all(b"x").is_err());
+        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 8191);
+        // What a buffer holds at the end is written, a failure unreported.
+        let quiet = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut buffer = NcbiReportBuffer::file(Box::new(Full(quiet.clone())));
+        buffer.write_all(b"held").unwrap();
+        drop(buffer);
+        assert_eq!(quiet.load(std::sync::atomic::Ordering::Relaxed), 4);
+    }
 
     fn blastn_argv(words: Vec<OsString>) -> Vec<OsString> {
         let mut argv = vec![

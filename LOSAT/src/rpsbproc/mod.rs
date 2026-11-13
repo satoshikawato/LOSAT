@@ -169,17 +169,9 @@ const REPORT_BLOCK: usize = 1 << 16;
 impl NcbiStream {
     /// The stream of a report on standard output: glibc's buffer of it.
     fn cout() -> Self {
-        // No NCBI counterpart: `st_blksize` as glibc's `fstat` gives it (4096 for a pipe and
-        // for most files); 4096 where LOSAT cannot ask.
-        #[cfg(unix)]
-        let block = rustix::fs::fstat(std::io::stdout())
-            .ok()
-            .and_then(|stat| usize::try_from(stat.st_blksize).ok())
-            .filter(|&size| size > 0 && size < BUFSIZ)
-            .unwrap_or(BUFSIZ);
-        #[cfg(not(unix))]
-        let block = 4096;
-        NcbiStream::Cout { block }
+        NcbiStream::Cout {
+            block: crate::cli::stdio_buffer_size(),
+        }
     }
 
     /// How many bytes the stream keeps after the insertion of `bytes`, when it kept `held`.

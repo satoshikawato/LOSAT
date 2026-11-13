@@ -4986,7 +4986,7 @@ pub fn run(
     // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
-    let mut stderr = std::io::stderr();
+    let mut stderr = crate::cli::CliStderr;
     let mut archive_tee;
     let diagnostics: &mut (dyn Write + Send) = match &archive {
         Some(handle) => {
@@ -5134,7 +5134,7 @@ pub fn run(
     //     }                                                                       \
     // ```
     // The outfmt 0 formatter's stream throws when a write fails, as the organism report's
-    // where NCBI writes it (`cli::TaxReportFile`); for outfmt 6/7 NCBI aborts and LOSAT reports
+    // where NCBI's buffer writes it (`cli::NcbiReportBuffer`); for outfmt 6/7 NCBI aborts and LOSAT reports
     // the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
     if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
@@ -5192,17 +5192,17 @@ fn open_out_file(args: &BlastpArgs) -> Result<Option<std::io::BufWriter<std::fs:
     )
 }
 
-/// The report stream of the command line: the `-out` file (`tax_report`: the organism report's,
-/// `cli::TaxReportFile`), or standard output.
+/// The report stream of the command line: the `-out` file, or standard output (`tax_report`:
+/// the organism report's, `cli::NcbiReportBuffer`).
 fn cli_report_stream(
     out_file: Option<std::io::BufWriter<std::fs::File>>,
     tax_report: bool,
 ) -> crate::cli::ReportStream {
     crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => crate::cli::report_out_file(Box::new(file), tax_report.then_some(18)),
-            None => crate::cli::report_standard_output(),
-        },
+        inner: crate::cli::report_destination(
+            out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
+            tax_report.then_some(18),
+        ),
         failed: false,
     }
 }

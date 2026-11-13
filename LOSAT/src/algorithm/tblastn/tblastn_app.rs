@@ -125,7 +125,7 @@ impl TblastnArgs {
         crate::utils::threading::validate_threads(args.num_threads)?;
         // The diagnostics stream: with the archive it also saves what it writes as the
         // messages of the next archive.
-        let mut stderr = std::io::stderr();
+        let mut stderr = crate::cli::CliStderr;
         let mut archive_tee;
         let diagnostics: &mut (dyn Write + Send) = match &archive {
             Some(handle) => {
@@ -582,11 +582,12 @@ fn cli_report_stream(
     tax_report: bool,
 ) -> crate::cli::ReportStream {
     crate::cli::ReportStream {
-        inner: match out_file {
-            // The organism report's file as NCBI's buffer writes it (`cli::TaxReportFile`).
-            Some(file) => crate::cli::report_out_file(Box::new(file), tax_report.then_some(18)),
-            None => crate::cli::report_standard_output(),
-        },
+        // The organism report's file or standard output as NCBI's buffer writes it
+        // (`cli::NcbiReportBuffer`).
+        inner: crate::cli::report_destination(
+            out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
+            tax_report.then_some(18),
+        ),
         failed: false,
     }
 }

@@ -7416,7 +7416,7 @@ pub fn run(
     // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
-    let mut stderr = std::io::stderr();
+    let mut stderr = crate::cli::CliStderr;
     let mut archive_tee;
     let diagnostics: &mut (dyn std::io::Write + Send) = match &archive {
         Some(handle) => {
@@ -7625,11 +7625,12 @@ fn cli_report_stream(
     tax_report: bool,
 ) -> crate::cli::ReportStream {
     crate::cli::ReportStream {
-        inner: match out_file {
-            // The organism report's file as NCBI's buffer writes it (`cli::TaxReportFile`).
-            Some(file) => crate::cli::report_out_file(Box::new(file), tax_report.then_some(18)),
-            None => crate::cli::report_standard_output(),
-        },
+        // The organism report's file or standard output as NCBI's buffer writes it
+        // (`cli::NcbiReportBuffer`).
+        inner: crate::cli::report_destination(
+            out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
+            tax_report.then_some(18),
+        ),
         failed: false,
     }
 }

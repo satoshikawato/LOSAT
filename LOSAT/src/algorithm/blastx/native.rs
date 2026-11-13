@@ -437,8 +437,8 @@ fn run_inner(
     // With the BLAST archive the diagnostics also go to its message log (`DiagTee`): the
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr: Box<dyn Write + Send> = match &hold {
-        Some(hold) => Box::new(hold.writer(Box::new(io::stderr()))),
-        None => Box::new(io::stderr()),
+        Some(hold) => Box::new(hold.writer(Box::new(crate::cli::CliStderr))),
+        None => Box::new(crate::cli::CliStderr),
     };
     let mut archive_tee;
     let mut stderr: Box<dyn Write + '_> = match &archive {
@@ -447,7 +447,7 @@ fn run_inner(
                 crate::report::archive::DiagTee::new(&mut *archive_stderr, handle.clone());
             Box::new(&mut archive_tee)
         }
-        None => Box::new(io::stderr()),
+        None => Box::new(crate::cli::CliStderr),
     };
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
@@ -557,10 +557,16 @@ fn run_inner(
                 File::create(path).map_err(|_| inaccessible("out", path))?,
             ))),
             (None, Some(hold)) => Box::new(hold.writer(Box::new(io::stdout()))),
-            // The organism report's file as NCBI's buffer writes it (`cli::TaxReportFile`).
-            (Some(path), None) if choice.number == 18 => Box::new(crate::cli::TaxReportFile::new(
-                File::create(path).map_err(|_| inaccessible("out", path))?,
-            )),
+            // The organism report's file or standard output as NCBI's buffer writes it
+            // (`cli::NcbiReportBuffer`).
+            (Some(path), None) if choice.number == 18 => {
+                Box::new(crate::cli::NcbiReportBuffer::file(Box::new(
+                    File::create(path).map_err(|_| inaccessible("out", path))?,
+                )))
+            }
+            (None, None) if choice.number == 18 => {
+                Box::new(crate::cli::NcbiReportBuffer::standard_output())
+            }
             (Some(path), None) => {
                 Box::new(File::create(path).map_err(|_| inaccessible("out", path))?)
             }

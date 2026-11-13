@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.15
+- Version: 1.16
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -25,7 +25,9 @@
   1.14 2026-11-12 (exception 10, the `losat rpsbproc` exception: a motif check that reads past
   the stored positions, line PS item PS16b; decided 2026-11-11, numbered after 1.13);
   1.15 2026-11-12 (the explicit rejections of `losat rpsbproc`, rule 3, line PS items PS16a and
-  PS16b)
+  PS16b);
+  1.16 2026-11-13 (the explicit rejections of `losat rpsbproc` for nucleotide queries, rule 3,
+  line PS item PS16c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -468,6 +470,19 @@ of exception 9 (PS16a) did.
   - A site or motif position outside the query's residues other than their end, also a query
     without residues: NCBI reads memory outside the string (its two 0.5.1 builds print different
     bytes for a query without `seq-data`).
+  - Nucleotide queries (rpstblastn's archives; version 1.16, 2026-11-13, line PS item PS16c,
+    `DECISIONS.md` 37 and 40): a first `Std-seg` with fewer than 2 ids or a `Std-seg` with fewer
+    than 2 locations (`ParseAlignSegs` reads past them; PS16c oracle `noids1`: segmentation fault
+    in both 0.5.1 builds), a minus-strand alignment with a subject location other than `int` or
+    `pnt` (its loop reads `m_vecLens` past its end); a query with sites to print whose bases, or
+    the IUPACna letters of their reverse complement, are fewer than 3 (`TranslateAll` erases the
+    first byte of an empty string, and libstdc++ moves `SIZE_MAX` bytes: oracle `short2`,
+    segmentation fault); a site at a residue outside its reading frame's translation other than
+    its end (`operator[]` past the string; oracles `nostrand` and `natoprot`, where the two builds
+    print different bytes); and arithmetic of the coordinates that overflows NCBI's `int`
+    (undefined: a subject interval's length, `m_iTo + 1` of an alignment that ends at 2^31 - 1,
+    `pr - 1` of a residue at `INT_MIN`, `xres + 1` of a site's or motif's base). Every case is
+    made by hand; none occurs in the rpstblastn archives of PS16c probe 1 (891 jobs).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

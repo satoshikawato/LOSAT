@@ -91,6 +91,8 @@
 //! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`: its first round, and the formats
 //!   it writes. The API writes no PSSM file, so it refuses `-out_pssm`, `-out_ascii_pssm`,
 //!   `-save_pssm_after_last_round` and `-save_each_pssm` ([`validate`]).
+//! - The API writes no search strategy file either: every program refuses
+//!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
 //!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
 //!   protein) and [`run_convert2blastmask`] the converter of lower case masks: the command
@@ -131,7 +133,7 @@ pub use error::Error;
 pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
 pub use run::{run, run_collect, run_to_file, HspRecord, Outcome, QueryStats, Report, Strand};
-pub(crate) use search::pssm_file_options;
+pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{
     run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_segmasker,

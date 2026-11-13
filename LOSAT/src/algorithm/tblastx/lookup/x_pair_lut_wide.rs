@@ -58,14 +58,14 @@
 //!    only the residues of s, the matrix, the threshold and the word length (x_lut_direct.rs header),
 //!    so it is read at s's first offset, as the reference reads it (blast_aalookup.c:490).
 //! 3. Each table on its own, its sources cut into P contiguous ranges (of about equal work):
-//!    (a) each range counts its appends per cell, c_p[w] = sum of |E_t(s)| over its s with w in
-//!    T(s); (b) each stripe of cells (a multiple of 32 cells) sums them, count[w] = sum over p of
-//!    c_p[w], the reference's chain length, with its cells' overflow size, longest count and used
+//!    (a) each range counts its appends per cell, `c_p[w]` = sum of |E_t(s)| over its s with w in
+//!    T(s); (b) each stripe of cells (a multiple of 32 cells) sums them, `count[w]` = sum over p of
+//!    `c_p[w]`, the reference's chain length, with its cells' overflow size, longest count and used
 //!    cells; (c) each stripe, after the overflow and the kept cells of the stripes before it (cells
 //!    ascending: `BlastAaLookupFinalize` assigns the overflow cursors in ascending cell order, and a
 //!    compacted table keeps its cells in index order), writes its cells (`num_used`, the pv bit,
 //!    the cursor of an overflow cell; a cell without entries all zero, as after the C `calloc`) and
-//!    turns c_p[w] into range p's first position in cell w: the cell's start plus the counts of
+//!    turns `c_p[w]` into range p's first position in cell w: the cell's start plus the counts of
 //!    the ranges before p; (d) each range appends, for s ascending and w in T(s) in list order,
 //!    E_t(s) at its position for w, advanced by the offsets written.
 //!
@@ -436,7 +436,7 @@ impl XWideSources {
 
 /// No NCBI counterpart: the lists T(s) of the sources (step 2), made by ranges of sources: range
 /// r holds the sources `bounds[r]..bounds[r + 1]`, source i's list
-/// `targets[ends[j - 1]..ends[j]]` of its range (j = i - bounds[r], `ends[-1]` = 0).
+/// `targets[ends[j - 1]..ends[j]]` of its range (j = i - `bounds[r]`, `ends[-1]` = 0).
 struct XWideLists {
     bounds: Vec<usize>,
     parts: Vec<(Vec<u32>, Vec<usize>)>,

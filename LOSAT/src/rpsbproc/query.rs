@@ -1,11 +1,14 @@
 //! The queries of one archive with their domain hits: `CNcbiCdAlignProcessor::ProcessBlastResults`
-//! for protein queries (each query `Bioseq` with the alignments that follow it in the list), the
-//! query's label, title and length (`FillSequenceFromBioseq`), and the masks of the results
+//! (each query `Bioseq` with the alignments that follow it in the list; a nucleotide query's
+//! hits classified per reading frame), the query's label, title, length and residues
+//! (`FillSequenceFromBioseq`), and the masks of the results
 //! (`ConvertBlastMaskListToSeqLocInfoVector`, which rpsbproc reads but does not print).
 
-use super::archive::{Align, Mask, MaskLocation, Query, Segs, SeqEntry};
+use super::archive::{Align, Mask, MaskLocation, Query, QueryRowId, Segs, SeqEntry};
 use super::data::{compute_pseudo_pssm_id, CddData};
-use super::domains::{calculate, parse_align, AlignIndex, DomAlign};
+use super::domains::{
+    calculate, parse_align, parse_std_align, sort_reading_frames, AlignIndex, DomAlign,
+};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
@@ -18,6 +21,9 @@ pub(crate) enum ProcessError {
     /// `CUnassignedMember::eGet` from a getter of an unset member; rpsbproc: two `Error:` lines,
     /// exit 3).
     Exception(NcbiException),
+    /// A `std::exception` that leaves `Run` (`CSimpleException` of `THROW_SIMPLE`): its
+    /// `what()`, which NCBI's application layer reports (exit 3).
+    Std(String),
     /// What LOSAT does not reproduce (an explicit refusal).
     Unsupported(String),
 }
@@ -174,7 +180,7 @@ const UNASSIGNED_MEMBER: ThrowSite = ThrowSite {
     function: None,
 };
 
-/// A protein query of the output (`TDomQuery`) with its hits.
+/// A query of the output (`TDomQuery`) with its hits.
 #[derive(Debug)]
 pub(crate) struct DomQuery {
     /// `m_strAccession`: the label of the query's best id.
@@ -183,11 +189,15 @@ pub(crate) struct DomQuery {
     pub(crate) title: Vec<u8>,
     /// `m_uiSeqLen`.
     pub(crate) length: u32,
-    /// `m_strSeqData`: the residues as one-letter codes (`Get1LetterSeqData`); empty when the
-    /// query has neither `seq-data` nor literals of `ext delta` with data.
+    /// `m_bIsNa`: `inst.mol` is not `aa`.
+    pub(crate) is_na: bool,
+    /// `m_strSeqData`: the residues (or bases) as one-letter codes (`Get1LetterSeqData`); empty
+    /// when the query has neither `seq-data` nor literals of `ext delta` with data.
     pub(crate) residues: Vec<u8>,
     pub(crate) aligns: Vec<DomAlign>,
-    pub(crate) index: AlignIndex,
+    /// `m_dimSplitAligns`: the classification of the hits of each reading frame (index 0 only
+    /// for a protein query).
+    pub(crate) frames: [AlignIndex; 6],
 }
 
 /// `ConvertBlastMaskListToSeqLocInfoVector` as far as it can fail: the first location of each
@@ -334,8 +344,8 @@ fn query_accession(query: &Query) -> Vec<u8> {
     label
 }
 
-/// `FillSequenceFromBioseq` for the members that rpsbproc prints: the label, the title and the
-/// length of a protein query.
+/// `FillSequenceFromBioseq` for the members that rpsbproc prints: the label, the title, the
+/// length and the residues (or bases) of a query.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:952-983
 // ```c++
 // void FillSequenceFromBioseq(const CBioseq &bioseq, TSequence &dst)
@@ -393,37 +403,26 @@ fn query_accession(query: &Query) -> Vec<u8> {
 // ```
 // `Get1LetterSeqData` converts the residues, then asks for `inst.length` whether it is set or
 // not: `GetLength` of an unset member throws `CUnassignedMember`, which ends rpsbproc as NCBI's
-// does (exit 3, after the `SESSION` line). The residues serve the site output of item PS16b. A
+// does (exit 3, after the `SESSION` line). The residues serve the site output (PS16b; a
+// nucleotide query's are translated, PS16c). A
 // query without a title descriptor but with `annot` takes its title from a feature (refused),
 // and a `CFastaReader` DefLine that is not a string is refused (`Query::unread_descriptor`).
 // `GetTaxId` (biodata_core.cpp:977) reads the `org` and `source` descriptors but never throws,
 // and the taxid is not printed, so those descriptors are only read past.
 fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), ProcessError> {
-    // `SeqDataTo1LtrSeq` (biodata_core.cpp:149-197) converts the protein encodings with
-    // `CSeqportUtil::Convert`; LOSAT reads the one-letter ones and NCBIstdaa's 28 codes and
-    // refuses the others (before the length, as the conversion comes first), for the
-    // `seq-data` and for each literal of `ext delta` (`Get1LetterSeqData` converts each).
-    let refuse = |what: &str, name: &str| {
-        Err(ProcessError::Unsupported(format!(
-            "a protein query whose {what} is {name} is not supported by LOSAT's rpsbproc"
-        )))
-    };
-    match &query.seq_data {
-        Some(data) => {
-            if !one_letter_encoding(data) {
-                return refuse("Seq-data", data.0);
-            }
+    // `SeqDataTo1LtrSeq` (biodata_core.cpp:149-197) converts the encodings with
+    // `CSeqportUtil::Convert`, which LOSAT ports for every encoding but NCBI8aa and NCBIstdaa
+    // codes from 28 (refused, before the length, as the conversion comes first; NCBIpaa and
+    // NCBIpna throw NCBI's exception), for the `seq-data` and for each literal of `ext delta`
+    // (`Get1LetterSeqData` converts each, in order).
+    let residues = one_letter_residues(query).map_err(|(what, name)| {
+        if name == UNCONVERTIBLE {
+            return ProcessError::Std(UNCONVERTIBLE.to_string());
         }
-        None => {
-            if let Some(data) = query
-                .delta_literals
-                .iter()
-                .find(|data| !one_letter_encoding(data))
-            {
-                return refuse("Seq-data of a delta literal", data.0);
-            }
-        }
-    }
+        ProcessError::Unsupported(format!(
+            "a query whose {what} is {name} is not supported by LOSAT's rpsbproc"
+        ))
+    })?;
     let Some(length) = query.length else {
         return Err(unassigned_member("NCBI-Sequence", "Seq-inst", "length"));
     };
@@ -448,26 +447,197 @@ fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), Proc
         }
         None => Vec::new(),
     };
-    Ok((
-        query_accession(query),
-        title,
-        length,
-        one_letter_residues(query, length),
-    ))
+    let mut residues = residues;
+    // `Get1LetterSeqData` cuts the letters to `inst.length` (`GetLength`).
+    residues.truncate(length as usize);
+    Ok((query_accession(query), title, length, residues))
 }
 
-/// Whether `fill_sequence` reads a `Seq-data` of this variant and these codes.
-fn one_letter_encoding(data: &(&'static str, Vec<u8>)) -> bool {
-    match data {
-        ("ncbieaa" | "iupacaa", _) => true,
-        ("ncbistdaa", codes) => codes.iter().all(|&code| code < 28),
-        _ => false,
-    }
+/// The kind of a `Seq-data` after `SeqDataTo1LtrSeq`: 0 for the protein encodings, 1 for the
+/// nucleotide ones.
+type LetterType = u8;
+
+/// `SeqDataTo1LtrSeq`: the letters and their kind, or the name of an encoding that LOSAT does
+/// not convert. (`gap` data, type -1, is refused as a `seq-data`, as in PS16a: the reader does
+/// not check its grammar; the archive reader leaves the literals of `gap` data out.)
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:149-197
+// ```c++
+// int SeqDataTo1LtrSeq(const CSeq_data &rSeqData, string &dst)
+// {
+// 	dst.clear();
+// 	int iDataType = rSeqData.Which();
+//
+// 	switch (iDataType)
+// 	{
+// 	case CSeq_data::e_Ncbieaa:
+//
+// 		dst = rSeqData.GetNcbieaa().Get();
+//
+// 		iDataType = 0;
+// 		break;
+// 	case CSeq_data::e_Ncbi8aa:
+// 	case CSeq_data::e_Ncbipaa:
+// 	case CSeq_data::e_Iupacaa:
+// 	case CSeq_data::e_Ncbistdaa:	//all other aa format
+// 		{
+// 			CSeq_data objEaaData;
+// 			CSeqportUtil::Convert(rSeqData, &objEaaData, CSeq_data::e_Ncbieaa);
+// 			dst = objEaaData.GetNcbieaa().Get();
+// 		}
+// 		iDataType = 0;
+// 		break;
+// 	case CSeq_data::e_Iupacna:
+// 		dst = rSeqData.GetIupacna().Get();
+//
+//
+// 		iDataType = 1;
+// 		break;
+// 	case CSeq_data::e_Ncbi2na:
+// 	case CSeq_data::e_Ncbi4na:
+// 	case CSeq_data::e_Ncbi8na:
+// 	case CSeq_data::e_Ncbipna:
+// 		{
+// 			CSeq_data objIupacData;
+// 			CSeqportUtil::Convert(rSeqData, &objIupacData, CSeq_data::e_Iupacna);
+//
+//
+// 			dst = objIupacData.GetIupacna().Get();
+//
+// 		}
+// 		iDataType = 1;
+// 		break;
+// 	default:
+// 		iDataType = -1;
+// 	}
+// 	return iDataType;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:367-374,651-658,777-784
+// ```c++
+// SIZE_TYPE CSeqConvert_imp::x_Convert2naToIupacna
+// ...
+//     return convert_1_to_4(src, pos, length, dst, C2naToIupacna::GetTable());
+// ...
+// SIZE_TYPE CSeqConvert_imp::x_Convert4naToIupacna
+// ...
+//     return convert_1_to_2(src, pos, length, dst, C4naToIupacna::GetTable());
+// ...
+// SIZE_TYPE CSeqConvert_imp::x_Convert8naToIupacna
+// ...
+//     return convert_1_to_1(src, pos, length, dst, C8naToIupacna::GetTable());
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1504-1507
+// ```c++
+// const Uint1 C8naToIupacna::scm_Table[256] = {
+//     0x4e, 0x41, 0x43, 0x4d, 0x47, 0x52, 0x53, 0x56,
+//     0x54, 0x57, 0x59, 0x48, 0x4b, 0x44, 0x42, 0x4e,
+//     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:886-893,950-958
+// ```c++
+// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacaaToEaa(...)
+// {
+//     return Subseq(src, CSeqUtil::e_Iupacaa, pos, length, dst);
+// }
+// ...
+//     return convert_1_to_1(src, pos, length, dst, CStdaaToEaa::GetTable());
+// ```
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1826
+// ```c++
+// const Uint1 CStdaaToEaa::scm_Table[256] = {
+//     0x2d, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+//     0x48, 0x49, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
+//     0x52, 0x53, 0x54, 0x56, 0x57, 0x58, 0x59, 0x5a,
+//     0x55, 0x2a, 0x4f, 0x4a, 0xff, 0xff, 0xff, 0xff,
+// ```
+// The tables `C2naToIupacna` and `C4naToIupacna` (sequtil_tables.cpp:498, 1094) spell the
+// bases of each byte from its high bits: NCBI2na codes 0 to 3 are `ACGT`, NCBI4na codes 0 to
+// 15 are `NACMGRSVTWYHKDBN` (code 0, a gap, is `N`); NCBI8na codes 16 and up are the byte
+// 0xff. A whole number of bytes is converted (`AdjustLength` keeps every base of the data), and
+// `Get1LetterSeqData` cuts the result to `inst.length`. iupacaa to ncbieaa copies the letters;
+// ncbistdaa codes 0 to 27 are the characters `-ABCDEFGHIKLMNPQRSTVWXYZU*OJ` and the other
+// codes, 0xff, are refused as in PS16a, and so is NCBI8aa (PS16a). NCBIpaa and NCBIpna have no
+// conversion in `CSeqportUtil`: NCBI's `runtime_error` (`UNCONVERTIBLE`).
+fn one_letter(data: &(&'static str, Vec<u8>)) -> Result<(LetterType, Vec<u8>), &'static str> {
+    const STDAA_TO_EAA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+    const NA2: &[u8; 4] = b"ACGT";
+    const NA4: &[u8; 16] = b"NACMGRSVTWYHKDBN";
+    let (name, bytes) = data;
+    Ok(match *name {
+        "ncbieaa" | "iupacaa" => (0, bytes.clone()),
+        "ncbistdaa" => {
+            if bytes.iter().any(|&code| code >= 28) {
+                return Err(name);
+            }
+            (
+                0,
+                bytes
+                    .iter()
+                    .map(|&code| STDAA_TO_EAA[code as usize])
+                    .collect(),
+            )
+        }
+        "iupacna" => (1, bytes.clone()),
+        "ncbi2na" => (
+            1,
+            bytes
+                .iter()
+                .flat_map(|&b| [6u8, 4, 2, 0].map(|shift| NA2[usize::from((b >> shift) & 3)]))
+                .collect(),
+        ),
+        "ncbi4na" => (
+            1,
+            bytes
+                .iter()
+                .flat_map(|&b| [NA4[usize::from(b >> 4)], NA4[usize::from(b & 15)]])
+                .collect(),
+        ),
+        "ncbi8na" => (
+            1,
+            bytes
+                .iter()
+                .map(|&b| if b < 16 { NA4[usize::from(b)] } else { 0xff })
+                .collect(),
+        ),
+        "ncbipna" | "ncbipaa" => return Err(UNCONVERTIBLE),
+        _ => return Err(name),
+    })
 }
 
-/// `Get1LetterSeqData` with `SeqDataTo1LtrSeq` for the protein encodings `fill_sequence`
-/// accepts: the `seq-data`, else the literals of `ext delta` one after another, cut to
-/// `inst.length`.
+/// `CSeqportUtil`'s exception for an encoding without a conversion (NCBIpna, NCBIpaa): a
+/// `std::runtime_error`, reported by `CNcbiApplication` (oracle `pna` of PS16c: `Error: (106.7)
+/// Application's execution failed: Requested conversion not implemented`, exit 3).
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:2029-2035
+// ```c++
+//     if(to_code == CSeq_data::e_not_set || from_code == CSeq_data::e_not_set) {
+//         throw std::runtime_error("to_code or from_code not set");
+//     }
+//     if ( s_SeqDataToSeqUtil[to_code]  == CSeqUtil::e_not_set  ||
+//          s_SeqDataToSeqUtil[from_code] == CSeqUtil::e_not_set ) {
+//         throw runtime_error("Requested conversion not implemented");
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:1947-1959
+// ```c++
+// static CSeqUtil::TCoding s_SeqDataToSeqUtil[] = {
+//     CSeqUtil::e_not_set,
+//     CSeqUtil::e_Iupacna,
+//     CSeqUtil::e_Iupacaa,
+//     CSeqUtil::e_Ncbi2na,
+//     CSeqUtil::e_Ncbi4na,
+//     CSeqUtil::e_Ncbi8na,
+//     CSeqUtil::e_not_set,
+//     CSeqUtil::e_Ncbi8aa,
+//     CSeqUtil::e_Ncbieaa,
+//     CSeqUtil::e_not_set,
+//     CSeqUtil::e_Ncbistdaa
+// };
+// ```
+const UNCONVERTIBLE: &str = "Requested conversion not implemented";
+
+/// `Get1LetterSeqData` before its cut to `inst.length`: the `seq-data`, else the literals of
+/// `ext delta` of the kind of the first one with letters, one after another; or what to refuse
+/// (the place and the encoding).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:199-246
 // ```c++
 // string Get1LetterSeqData(const CSeq_inst& rSeqInst)
@@ -519,67 +689,29 @@ fn one_letter_encoding(data: &(&'static str, Vec<u8>)) -> bool {
 // 		}
 // 	}
 // ```
-// (Every encoding that LOSAT reads is a protein one, type 0: each literal is appended.)
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:149-197,248-253
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:248-253
 // ```c++
-// 	case CSeq_data::e_Ncbieaa:
-// 		dst = rSeqData.GetNcbieaa().Get();
-// 		iDataType = 0;
-// 		break;
-// 	case CSeq_data::e_Ncbi8aa:
-// 	case CSeq_data::e_Ncbipaa:
-// 	case CSeq_data::e_Iupacaa:
-// 	case CSeq_data::e_Ncbistdaa:	//all other aa format
-// 		{
-// 			CSeq_data objEaaData;
-// 			CSeqportUtil::Convert(rSeqData, &objEaaData, CSeq_data::e_Ncbieaa);
-// 			dst = objEaaData.GetNcbieaa().Get();
-// 		}
-// 	...
+// 	// -- somehow the CSeqportUtil::Convert may append an extra residue to the result (bug?), so check
 // 	SeqLen_t ori_len = rSeqInst.GetLength(), end_len = dst.size();
 // 	if (ori_len < end_len)
 // 	{
 // 		dst.erase(ori_len);
 // 	}
 // ```
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:886-893,950-958
-// ```c++
-// SIZE_TYPE CSeqConvert_imp::x_ConvertIupacaaToEaa(...)
-// {
-//     return Subseq(src, CSeqUtil::e_Iupacaa, pos, length, dst);
-// }
-// ...
-//     return convert_1_to_1(src, pos, length, dst, CStdaaToEaa::GetTable());
-// ```
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1826
-// ```c++
-// const Uint1 CStdaaToEaa::scm_Table[256] = {
-//     0x2d, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
-//     0x48, 0x49, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51,
-//     0x52, 0x53, 0x54, 0x56, 0x57, 0x58, 0x59, 0x5a,
-//     0x55, 0x2a, 0x4f, 0x4a, 0xff, 0xff, 0xff, 0xff,
-// ```
-// (iupacaa to ncbieaa copies the letters; ncbistdaa codes 0 to 27 are the characters
-// `-ABCDEFGHIKLMNPQRSTVWXYZU*OJ`; the other codes, 0xff, are refused by `fill_sequence`.)
-fn one_letter_residues(query: &Query, length: u32) -> Vec<u8> {
-    const STDAA_TO_EAA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+fn one_letter_residues(query: &Query) -> Result<Vec<u8>, (&'static str, &'static str)> {
+    if let Some(data) = &query.seq_data {
+        return Ok(one_letter(data).map_err(|name| ("Seq-data", name))?.1);
+    }
     let mut residues = Vec::new();
-    let convert = |residues: &mut Vec<u8>, data: &(&'static str, Vec<u8>)| match data {
-        ("ncbistdaa", codes) => {
-            residues.extend(codes.iter().map(|&code| STDAA_TO_EAA[code as usize]))
-        }
-        (_, letters) => residues.extend_from_slice(letters),
-    };
-    match &query.seq_data {
-        Some(data) => convert(&mut residues, data),
-        None => {
-            for data in &query.delta_literals {
-                convert(&mut residues, data);
-            }
+    let mut literal_type = None;
+    for data in &query.delta_literals {
+        let (kind, letters) =
+            one_letter(data).map_err(|name| ("Seq-data of a delta literal", name))?;
+        if *literal_type.get_or_insert(kind) == kind {
+            residues.extend_from_slice(&letters);
         }
     }
-    residues.truncate(length as usize);
-    residues
+    Ok(residues)
 }
 
 /// `x_GetPssmId`: the PSSM-ID of a subject id (`ProcessCDAlign` keeps the hits whose PSSM-ID
@@ -620,7 +752,8 @@ fn pssm_id(id: &ParsedSeqId) -> Result<u32, ProcessError> {
     })
 }
 
-/// `ProcessCDQuery` of a protein query: its hits (`ProcessCDAlign`) and their classification.
+/// `ProcessCDQuery`: the query's hits (`ProcessCDAlign`) and their classification, of all of
+/// them for a protein query, of each reading frame's for a nucleotide query.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:195-232
 // ```c++
 // void CNcbiCdAlignProcessor::ProcessCDAlign(const list<CRef<CSeq_align> > &rAligns, vector<TDomSeqAlignment> &dst) const
@@ -658,23 +791,60 @@ fn pssm_id(id: &ParsedSeqId) -> Result<u32, ProcessError> {
 // 	{
 // 		Calculate(dst.m_vecAlignments, dst.m_dimSplitAligns[0], missed_pssmids);
 // 	}
+// 	else
+// 	{
+// 		vector<size_t> rfIndice[READINGFRAME::TOTAL_RFS];
+// 		CCdAlignProcessor::SortReadingFrames(dst.m_vecAlignments, rfIndice, dst.m_uiSeqLen);
+// 		for (int i = 0; i < READINGFRAME::TOTAL_RFS; ++i)
+// 		{
+//
+// 			if (!rfIndice[i].empty())
+// 			{
+// 				vecMissed.clear();
+//
+// 				Calculate(dst.m_vecAlignments, rfIndice[i], dst.m_dimSplitAligns[i], missed_pssmids);
+//
+// 			}
+// 		}
+// 	}
+// }
 // ```
+// (`ParseAlignSegs` is `domains::parse_align` and `domains::parse_std_align`; it takes the
+// hit's id from the second id of a Dense-seg or of the first Std-seg, and reads past `ids` when
+// there are fewer: refused. The reading frames of a nucleotide query's hits are the classes of
+// `domains::sort_reading_frames`; its exception for a query of length 0 is NCBI's, after the
+// hits are read.)
 fn process_cd_query(
     aligns: &[Align],
     query: &mut DomQuery,
     data: &CddData,
 ) -> Result<(), ProcessError> {
     for align in aligns {
-        let Segs::Denseg(seg) = &align.segs else {
-            unreachable!("the caller refuses other segments");
+        let (dom, hit) = match &align.segs {
+            Segs::Denseg(seg) => {
+                // (`process_blast_results` refuses a Dense-seg without ids before this.)
+                if seg.ids.len() < 2 || seg.starts.len() < 2 * seg.lens.len() {
+                    return Err(ProcessError::Unsupported(
+                        "a Dense-seg with fewer than 2 ids or fewer starts than 2 per segment (NCBI reads past them) is not supported by LOSAT's rpsbproc".to_string(),
+                    ));
+                }
+                (None, &seg.ids[1])
+            }
+            Segs::Std(std) => {
+                // (`process_blast_results` finds a first id in the segments before this, so
+                // there is at least one.)
+                let Some(hit) = &std.hit_id else {
+                    return Err(ProcessError::Unsupported(
+                        "a Seq-align whose first Std-seg has fewer than 2 ids (NCBI reads past them) is not supported by LOSAT's rpsbproc".to_string(),
+                    ));
+                };
+                let dom =
+                    parse_std_align(&std.segs, align, 0).map_err(ProcessError::Unsupported)?;
+                (Some(dom), hit)
+            }
+            Segs::Other(_) => unreachable!("the caller refuses other segments"),
         };
-        // (`process_blast_results` refuses a Dense-seg without ids before this.)
-        if seg.ids.len() < 2 || seg.starts.len() < 2 * seg.lens.len() {
-            return Err(ProcessError::Unsupported(
-                "a Dense-seg with fewer than 2 ids or fewer starts than 2 per segment (NCBI reads past them) is not supported by LOSAT's rpsbproc".to_string(),
-            ));
-        }
-        let pssm_id = pssm_id(&seg.ids[1])?;
+        let pssm_id = pssm_id(hit)?;
         if pssm_id == 0 {
             continue;
         }
@@ -694,14 +864,144 @@ fn process_cd_query(
                 "a Seq-align whose e_value or bit_score is not a number is not supported by LOSAT's rpsbproc".to_string(),
             ));
         }
-        query.aligns.push(parse_align(seg, align, pssm_id));
+        let dom = match (dom, &align.segs) {
+            (Some(mut dom), _) => {
+                dom.pssm_id = pssm_id;
+                dom
+            }
+            (None, Segs::Denseg(seg)) => parse_align(seg, align, pssm_id),
+            (None, _) => unreachable!("a Dense-seg"),
+        };
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1809,1836
+        // ```c++
+        // 	(*m_ostream) << pType << DELIMIT << (rec.pAlign->m_uiPssmId >= INVALIDPSSMID ? 0 : rec.pAlign->m_uiPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << ...
+        // 	(*m_ostream) << HITTYPE_CLUSTER << DELIMIT << (rec.pCdInfo->m_uiClusterPssmId >= INVALIDPSSMID ? 0 : rec.pCdInfo->m_uiClusterPssmId) << DELIMIT << rec.pAlign->m_iFrom + COORDSBASE << DELIMIT << rec.pAlign->m_iTo + COORDSBASE << DELIMIT << ...
+        // ```
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:205-206
+        // ```c++
+        // 			CSegSet thisSegs;
+        // 			thisSegs.AddSeg(iter->pAlign->m_iFrom, iter->pAlign->m_iTo);
+        // ```
+        // A kept hit of a nucleotide query whose range starts or ends at 2^31 - 1: the `int`
+        // sums of its DOMAINS and SUPERFAMILIES lines overflow (undefined; PS16c review oracle
+        // `plusmax`: both 0.5.1 builds print -2147483648), and so may the overlap sets of
+        // `Calculate` that start from the range (`GetTotalResidues`' `to - from + 1`, the
+        // `+ 1` of `Cross` and `Merge`): refused, whatever the strand (PD-LOSAT-NCBI-DEFECTS
+        // 1.16). A protein query's hit keeps PS16a's widened sums (`print_dom_line`).
+        if query.is_na && (dom.from == i32::MAX || dom.to == i32::MAX) {
+            return Err(ProcessError::Unsupported(
+                "a hit of a nucleotide query that starts or ends at position 2147483647 (NCBI's int overflows) is not supported by LOSAT's rpsbproc".to_string(),
+            ));
+        }
+        query.aligns.push(dom);
     }
-    query.index = calculate(&mut query.aligns, data);
+    if !query.is_na {
+        let all: Vec<usize> = (0..query.aligns.len()).collect();
+        query.frames[0] = calculate(&mut query.aligns, &all, data);
+        return Ok(());
+    }
+    let frames = sort_reading_frames(&query.aligns, query.length)
+        .map_err(|what| ProcessError::Std(what.to_string()))?;
+    for (frame, selected) in frames.iter().enumerate() {
+        if !selected.is_empty() {
+            query.frames[frame] = calculate(&mut query.aligns, selected, data);
+        }
+    }
     Ok(())
 }
 
-/// `ProcessBlastResults` of protein queries: each query with the alignments that follow in the
-/// list while their first id matches the query's local id (else its first id).
+/// `CSeq_align::GetSeq_id(0)`: the id of the query row of an alignment, or what LOSAT refuses
+/// (NCBI's exceptions when no segment names one, and the location variants whose id LOSAT does
+/// not look up).
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:317-358
+// ```c++
+// const CSeq_id& CSeq_align::GetSeq_id(TDim row) const
+// {
+//     switch (GetSegs().Which()) {
+//     case C_Segs::e_Denseg:
+//         return GetSegs().GetDenseg().GetSeq_id(row);
+//     ...
+//     case C_Segs::e_Std:
+//         {{
+//             // If segments have different number of rows, this will try
+//             // to find the segment with enough rows to get the id.
+//             ITERATE(CSeq_align::C_Segs::TStd, seg, GetSegs().GetStd()) {
+//                 if ( (*seg)->IsSetIds()  &&
+//                      (size_t)row < (*seg)->GetIds().size()) {
+//                     return *((*seg)->GetIds()[row]);
+//                 }
+//                 else if ( (*seg)->IsSetLoc()  &&
+//                      (size_t)row < (*seg)->GetLoc().size() ) {
+//                     const CSeq_loc& loc = *(*seg)->GetLoc()[row];
+//                     CConstRef<CSeq_id> id(loc.GetId());
+//                     if (id) {
+//                         return *id;
+//                     }
+//                 }
+//             }
+//         }}
+//         break;
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:390-398
+// ```c++
+//     default:
+//         NCBI_THROW(CSeqalignException, eUnsupported,
+//                    "CSeq_align::GetSeq_id() currently does not handle "
+//                    "this type of alignment.");
+//     }
+//
+//     NCBI_THROW(CSeqalignException, eInvalidRowNumber,
+//                "CSeq_align::GetSeq_id(): "
+//                "can not get seq-id for the row requested.");
+// ```
+// (A `null` location has no id; `empty`, `whole`, `int` and `pnt` have theirs. The exceptions
+// end rpsbproc as its other `CException`s of a session do: PS16c oracles `noids2` and
+// `packed`, the two `Error:` lines, exit 3. `GetSeq_id` is a `const` method, so the report names
+// no function, as `UNASSIGNED_MEMBER`'s. The `packed` segments are read for their grammar only:
+// NCBI's `ParseAlignSegs` has a branch for them, which this exception keeps it from reaching.
+// `dendiag`, `disc`, `spliced` and `sparse` segments, which `GetSeq_id` reads, are refused.)
+fn query_row_id(align: &Align) -> Result<&ParsedSeqId, ProcessError> {
+    let seqalign_exception = |line: u32, kind: &'static str, message: &str| {
+        ProcessError::Exception(NcbiException::new(
+            ThrowSite {
+                file: "src/objects/seqalign/Seq_align.cpp",
+                line,
+                kind,
+                function: None,
+            },
+            message.to_string(),
+        ))
+    };
+    match &align.segs {
+        Segs::Denseg(seg) => seg.ids.first().ok_or_else(|| {
+            ProcessError::Unsupported(
+                "a Dense-seg without ids (NCBI's CSeq_align::GetSeq_id throws) is not supported by LOSAT's rpsbproc".to_string(),
+            )
+        }),
+        Segs::Std(std) => match &std.query_id {
+            QueryRowId::Id(id) => Ok(id),
+            QueryRowId::Location(name) => Err(ProcessError::Unsupported(format!(
+                "a Std-seg without ids whose first location is a {name} is not supported by LOSAT's rpsbproc"
+            ))),
+            QueryRowId::Missing => Err(seqalign_exception(
+                396,
+                "CSeqalignException::eInvalidRowNumber",
+                "CSeq_align::GetSeq_id(): can not get seq-id for the row requested.",
+            )),
+        },
+        Segs::Other("packed") => Err(seqalign_exception(
+            391,
+            "CSeqalignException::eUnsupported",
+            "CSeq_align::GetSeq_id() currently does not handle this type of alignment.",
+        )),
+        Segs::Other(name) => Err(ProcessError::Unsupported(format!(
+            "a Seq-align with {name} segments is not supported by LOSAT's rpsbproc"
+        ))),
+    }
+}
+
+/// `ProcessBlastResults`: each query with the alignments that follow in the list while their
+/// first id matches the query's local id (else its first id).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:308-366
 // ```c++
 // void CNcbiCdAlignProcessor::ProcessBlastResults(list<TDomQuery> &dst, const list<CRef<CSeq_entry> > &qseqs, const TSeqLocInfoVector & masks, const list< CRef<CSeq_align > > &aligns, int gcode, vector<PssmId_t> *missed) const
@@ -748,8 +1048,9 @@ fn process_cd_query(
 // 		}
 // ```
 // (`CSeq_id::Match` is `Compare(...) == e_YES`, `seqid::defline_set::compare`. The masks of
-// each query are not printed. A Seq-align other than a `Dense-seg` comes from a nucleotide
-// search, item PS16c: refused.)
+// each query are not printed. `query_row_id` is `GetSeq_id(0)` of a `Dense-seg`, of the
+// `Std-seg`s of a translated search and of a `Packed-seg` (NCBI's exception); the other
+// segments are refused there.)
 pub(crate) fn process_blast_results(
     entries: &[SeqEntry],
     aligns: &[Align],
@@ -766,9 +1067,10 @@ pub(crate) fn process_blast_results(
             accession,
             title,
             length,
+            is_na: query.mol != 3,
             residues,
             aligns: Vec::new(),
-            index: AlignIndex::default(),
+            frames: Default::default(),
         };
         // NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:271-279,327-343
         // ```c++
@@ -809,19 +1111,7 @@ pub(crate) fn process_blast_results(
         .or(query.ids.first());
         let start = next;
         while next < aligns.len() {
-            let Segs::Denseg(seg) = &aligns[next].segs else {
-                let Segs::Other(name) = &aligns[next].segs else {
-                    unreachable!()
-                };
-                return Err(ProcessError::Unsupported(format!(
-                    "a Seq-align with {name} segments (a nucleotide search's, item PS16c) is not supported by LOSAT's rpsbproc"
-                )));
-            };
-            let Some(aligned) = seg.ids.first() else {
-                return Err(ProcessError::Unsupported(
-                    "a Dense-seg without ids (NCBI's CSeq_align::GetSeq_id throws) is not supported by LOSAT's rpsbproc".to_string(),
-                ));
-            };
+            let aligned = query_row_id(&aligns[next])?;
             let Some(current) = current else {
                 return Err(ProcessError::Unsupported(
                     "a query Bioseq without ids (NCBI dereferences its missing id) is not supported by LOSAT's rpsbproc".to_string(),
@@ -843,7 +1133,105 @@ pub(crate) fn process_blast_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpsbproc::archive::{StdAlign, StdLoc, StdPair};
+    use crate::rpsbproc::data::DataFiles;
     use crate::seqid::model::{Dbtag, TextseqId};
+
+    /// The data files of the fixtures (`tests/fixtures/rpsbproc/data`).
+    fn fixture_data() -> CddData {
+        let file = |name: &str| {
+            format!(
+                "{}/tests/fixtures/rpsbproc/data/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            )
+        };
+        CddData::load(&DataFiles {
+            cddids: file("cddid.tbl"),
+            spfeats: file("cddannot.dat"),
+            genfeats: file("cddannot_generic.dat"),
+            bscores: file("bitscore_specific.txt"),
+            cdtrack: file("cdtrack.txt"),
+            famlinks: file("family_superfamily_links"),
+        })
+        .unwrap()
+    }
+
+    // The refusals of a nucleotide query's `Std-seg`s (cdalignproc_biodata.cpp:195-232,
+    // Seq_align.cpp:339-358 and rpsbproc_main.cpp:1809,1836, quoted at `process_cd_query` and
+    // `query_row_id`): a first segment with fewer than 2 ids is read past its end (PS16c oracle
+    // `noids1`: segmentation fault in both 0.5.1 builds); a first location of a variant whose
+    // id LOSAT does not look up; a kept hit whose range starts or ends at 2^31 - 1, whose
+    // DOMAINS line overflows `int` (review oracle `plusmax`), whatever the strand. A hit whose
+    // PSSM-ID is 0 is dropped before it is classified or printed.
+    #[test]
+    fn refusals_of_translated_hits() {
+        let data = fixture_data();
+        let local = ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()));
+        let cdd = |tag: i32| {
+            Some(ParsedSeqId::General(Dbtag {
+                db: b"CDD".to_vec(),
+                tag: ObjectId::Id(tag),
+            }))
+        };
+        let entries = [SeqEntry::Seq(Query {
+            ids: vec![local.clone()],
+            mol: 1,
+            length: Some(6),
+            seq_data: Some(("iupacna", b"ACGTAC".to_vec())),
+            ..Query::default()
+        })];
+        let run =
+            |query_id: QueryRowId, hit_id: Option<ParsedSeqId>, from: u32, to: u32, strand: i32| {
+                let align = Align {
+                    segs: Segs::Std(Box::new(StdAlign {
+                        query_id,
+                        hit_id,
+                        segs: vec![StdPair {
+                            query: StdLoc::Int {
+                                from,
+                                to,
+                                strand: Some(strand),
+                            },
+                            hit: StdLoc::Int {
+                                from: 0,
+                                to: 2,
+                                strand: None,
+                            },
+                        }],
+                    })),
+                    score: Some(10),
+                    e_value: Some(1e-5),
+                    bit_score: Some(40.5),
+                    num_ident: None,
+                    score_of_other_type: None,
+                };
+                match process_blast_results(&entries, &[align], &data) {
+                    Ok(queries) => Ok(queries[0].aligns.len()),
+                    Err(ProcessError::Unsupported(message)) => Err(message),
+                    Err(other) => panic!("{other:?}"),
+                }
+            };
+        let row = || QueryRowId::Id(local.clone());
+        let refused =
+            |message: &str| Err(format!("{message} is not supported by LOSAT's rpsbproc"));
+        assert_eq!(
+            run(row(), None, 0, 2, 1),
+            refused("a Seq-align whose first Std-seg has fewer than 2 ids (NCBI reads past them)")
+        );
+        assert_eq!(
+            run(QueryRowId::Location("packed-int"), cdd(5), 0, 2, 1),
+            refused("a Std-seg without ids whose first location is a packed-int")
+        );
+        let end = 0x7fff_ffff;
+        let overflow = refused(
+            "a hit of a nucleotide query that starts or ends at position 2147483647 (NCBI's int overflows)",
+        );
+        for strand in [0, 1, 3, 255] {
+            assert_eq!(run(row(), cdd(5), 0, end, strand), overflow);
+        }
+        assert_eq!(run(row(), cdd(5), end, end, 1), overflow);
+        assert_eq!(run(row(), cdd(0), 0, end, 1), Ok(0));
+    }
 
     // `Get1LetterSeqData` (biodata_core.cpp:199-253, quoted at `one_letter_residues`): the
     // literals of `ext delta` one after another (NCBIstdaa converted), cut to `inst.length`;
@@ -881,8 +1269,60 @@ mod tests {
         };
         assert_eq!(
             message,
-            "a protein query whose Seq-data of a delta literal is ncbi8aa is not supported by LOSAT's rpsbproc"
+            "a query whose Seq-data of a delta literal is ncbi8aa is not supported by LOSAT's rpsbproc"
         );
+    }
+
+    // `SeqDataTo1LtrSeq` of the nucleotide encodings (biodata_core.cpp:149-197 and the
+    // `CSeqportUtil` tables, quoted at `one_letter`): NCBI2na 4 bases per byte from the high
+    // bits, NCBI4na 2 (code 0 is `N`), NCBI8na 1 (codes from 16 the byte 0xff), IUPACna as it
+    // is; cut to `inst.length`; the literals of a delta of the kind of the first one only
+    // (`litType`); NCBIpna throws `CSeqportUtil`'s `runtime_error`.
+    #[test]
+    fn residues_of_nucleotide_encodings() {
+        let query = |length: u32,
+                     seq_data: Option<(&'static str, Vec<u8>)>,
+                     delta: Vec<(&'static str, Vec<u8>)>| Query {
+            ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()))],
+            mol: 1,
+            length: Some(length),
+            seq_data,
+            delta_literals: delta,
+            ..Query::default()
+        };
+        let residues = |query: Query| fill_sequence(&query).map(|(_, _, _, residues)| residues);
+        // 0x1B = 00 01 10 11, 0xE4 = 11 10 01 00.
+        assert_eq!(
+            residues(query(7, Some(("ncbi2na", vec![0x1b, 0xe4])), vec![])).ok(),
+            Some(b"ACGTTGC".to_vec())
+        );
+        assert_eq!(
+            residues(query(4, Some(("ncbi4na", vec![0x01, 0x2f])), vec![])).ok(),
+            Some(b"NACN".to_vec())
+        );
+        assert_eq!(
+            residues(query(3, Some(("ncbi8na", vec![4, 15, 16])), vec![])).ok(),
+            Some(vec![b'G', b'N', 0xff])
+        );
+        assert_eq!(
+            residues(query(9, Some(("iupacna", b"acgTUx".to_vec())), vec![])).ok(),
+            Some(b"acgTUx".to_vec())
+        );
+        let delta = vec![
+            ("iupacna", b"AC".to_vec()),
+            ("ncbieaa", b"MK".to_vec()),
+            ("ncbi2na", vec![0xff]),
+        ];
+        assert_eq!(
+            residues(query(10, None, delta)).ok(),
+            Some(b"ACTTTT".to_vec())
+        );
+        let Err(ProcessError::Std(what)) =
+            residues(query(4, Some(("ncbipna", vec![0; 5])), vec![]))
+        else {
+            panic!("NCBIpna throws");
+        };
+        assert_eq!(what, "Requested conversion not implemented");
     }
 
     // serial/exception.cpp:86-150 (quoted at `choice_selection`); NCBI's rpsbproc printed the first
@@ -891,7 +1331,9 @@ mod tests {
     fn choice_selection_messages() {
         let message = |error| match error {
             ProcessError::Exception(exception) => exception.get_msg().to_string(),
-            ProcessError::Unsupported(message) => panic!("{message}"),
+            ProcessError::Unsupported(message) | ProcessError::Std(message) => {
+                panic!("{message}")
+            }
         };
         assert_eq!(
             message(choice_selection(

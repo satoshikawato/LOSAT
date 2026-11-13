@@ -23,9 +23,9 @@
 //!
 //! - `CSeqDBIsam` constructor, `x_InitSearch`, `x_FindIndexBounds`: [`StringIsam::open`] and
 //!   [`StringIsam::from_files`]; `x_OutOfBounds(string)`: the private `out_of_bounds`;
-//!   `GetIdBounds(string)`: [`StringIsam::id_bounds`].
+//!   `GetIdBounds(string)`: `StringIsam::id_bounds`, which only the tests call.
 //! - `x_StringSearch` with `x_DiffSample`, `x_DiffCharLease`, `x_DiffChar`, `x_LoadPage`,
-//!   `x_ExtractAllData`, `x_ExtractPageData`, `x_ExtractData`: [`StringIsam::string_search`]
+//!   `x_ExtractAllData`, `x_ExtractPageData`, `x_ExtractData`: [`StringIsam::string_search_into`]
 //!   (every line of the volume that matches a term, as `(key, data)` strings).
 //! - `StringToOids`: [`StringIsam::string_to_oids`]; `CSeqDBVol::x_CheckVersions`:
 //!   [`check_versions`]; the string case of `CSeqDBVol::x_StringToOids`:
@@ -606,7 +606,7 @@ impl StringIsam {
     // }
     // ```
     /// The constructor: opens the two files. A file that cannot be opened is NCBI's "Error: Could
-    /// not open input file (<index>/<data>)".
+    /// not open input file (`<index>/<data>`)".
     pub fn open(index_path: &Path, data_path: &Path) -> Result<Self, SeqDbError> {
         let message = || {
             SeqDbError::NotFound(format!(

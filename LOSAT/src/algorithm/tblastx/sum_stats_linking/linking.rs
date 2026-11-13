@@ -1396,10 +1396,10 @@ fn link_hsp_group_incremental_slice(
 /// * `query_contexts` - Query context information
 /// * `subject_frame_bases` - Subject frame base offsets (unused, kept for API)
 /// * `length_adj_per_context` - Pre-computed length adjustment per context
-///   (NCBI: query_info->contexts[ctx].length_adjustment)
+///   (NCBI: `query_info->contexts[ctx].length_adjustment`)
 /// * `eff_searchsp_per_context` - Pre-computed effective search space per context
-///   (NCBI: query_info->contexts[ctx].eff_searchsp)
-/// * `log_k_by_ctx` - Pre-computed log(K) per context (NCBI: kbp[ctx]->logK)
+///   (NCBI: `query_info->contexts[ctx].eff_searchsp`)
+/// * `log_k_by_ctx` - Pre-computed log(K) per context (NCBI: `kbp[ctx]->logK`)
 /// * `pool_lh_helpers` - Thread-local pool for lh_helper buffer reuse
 ///   (NCBI: link_hsps.c:452-454 allocates once with MAX(1024, hspcnt+5))
 /// * `pool_hsp_links` - Thread-local pool for hsp_link buffer reuse

@@ -1,6 +1,7 @@
 {
   "name": "losat",
   "version": "0.2.0",
+  "private": true,
   "description": "LOSAT's local sequence search in the browser: the host of its two WebAssembly reactors (ABI v2).",
   "license": "MIT",
   "repository": {
@@ -9,6 +10,9 @@
     "directory": "web/packages/losat"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./domain": "./src/domain/index.ts",

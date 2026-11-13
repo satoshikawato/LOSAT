@@ -23,14 +23,17 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 |---|---|---|
 | 0.2.0 | 0.2.0 | 2 |
 
-`losat/reactors/artifacts.json` records how the two modules were built and their SHA-256.
+`losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
+and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
+added around its shared-memory operations, so its own SHA-256 is the one in `ENGINE_ASSETS` (below).
 
 ## Serving the reactors
 
-`import { ENGINE_ASSETS } from 'losat/reactors'` gives the URL, size and SHA-256 of each module.
-The URLs are `new URL('./losat-web-<serial|threads>.wasm', import.meta.url)`, which Vite, webpack
-and other bundlers copy into their build. Serve the modules as `application/wasm`. The host
-checks their SHA-256 before it runs them.
+`import { ENGINE_ASSETS } from 'losat/reactors'` gives the URL, size and SHA-256 of each module
+(`artifactSha256` is the record's, and `transform` names the guard of the threaded one). The URLs are
+`new URL('./losat-web-<serial|threads>.wasm', import.meta.url)`, a form that bundlers follow: Vite's
+production build, for one, copies both modules and the three worker modules of the host into its
+output. Serve the modules as `application/wasm`. The host checks their SHA-256 before it runs them.
 
 The threaded module needs `SharedArrayBuffer`, and the browser provides it only on a page that is
 cross-origin isolated. Serve the page and its scripts with:
@@ -40,8 +43,8 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Without isolation, `WasmEngine` runs every search on the serial module and says why in
-`RuntimeInfo.fallbackReason`.
+On a page that is not isolated, a search that asks for more than one thread runs on the serial
+module with one thread, and `RuntimeInfo.fallbackReason` says why.
 
 ## Memory
 

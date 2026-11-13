@@ -63,8 +63,6 @@ export interface ReactorBytes {
 
 export interface ReactorBuild {
   readonly dir: string;
-  /** artifacts.json of build_reactors.py, as it is. */
-  readonly record: unknown;
   readonly serial: ReactorBytes;
   readonly threads: ReactorBytes;
 }
@@ -97,7 +95,7 @@ export function readReactors(dir: string): ReactorBuild {
       transform: `shared-memory guard (${where}: ${guarded.record.fill} fills, ${guarded.record.copy} copies, ${guarded.record.grow} grows, ${guarded.record.atomic} atomics)`,
     };
   };
-  return { dir: at, record, serial: file('serial'), threads: file('threads') };
+  return { dir: at, serial: file('serial'), threads: file('threads') };
 }
 
 /** The reactors named by LOSAT_WEB_REACTORS, or undefined when it is not set. */

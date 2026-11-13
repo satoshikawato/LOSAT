@@ -36,10 +36,14 @@ interface Manifest {
 
 /** The version of the engine crate (LOSAT/Cargo.toml [package]). */
 export function engineVersion(): string {
-  const toml = readFileSync(join(REPOSITORY, 'LOSAT/Cargo.toml'), 'utf8');
-  const version = /^\[package\][^[]*?^version\s*=\s*"([^"]+)"/m.exec(toml)?.[1];
-  if (version === undefined) throw new Error('LOSAT/Cargo.toml has no [package] version');
-  return version;
+  let section = '';
+  for (const line of readFileSync(join(REPOSITORY, 'LOSAT/Cargo.toml'), 'utf8').split('\n')) {
+    const header = /^\s*\[([^\]]+)\]\s*$/.exec(line);
+    if (header !== null) section = header[1]!.trim();
+    const version = section === 'package' ? /^\s*version\s*=\s*"([^"]+)"/.exec(line)?.[1] : undefined;
+    if (version !== undefined) return version;
+  }
+  throw new Error('LOSAT/Cargo.toml has no [package] version');
 }
 
 /** The files under `dir`, relative to it, with forward slashes. */
@@ -49,13 +53,24 @@ function files(dir: string, prefix = ''): string[] {
   );
 }
 
-/** The offsets of the identifiers `name` in the JavaScript `text` (comments and strings excluded). */
+/**
+ * The offsets of the identifiers `name` in the JavaScript `text` (comments and strings excluded).
+ * Each must be a reference to the global, as `if (name)` or `name ? a : b` are: a property, a
+ * declaration or a shorthand property of that name is refused, because `false` cannot stand there.
+ */
 export function identifierOffsets(text: string, name: string): number[] {
   const ts = createRequire(import.meta.url)('typescript') as typeof import('typescript');
   const source = ts.createSourceFile('module.js', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const offsets: number[] = [];
   const visit = (node: import('typescript').Node): void => {
-    if (ts.isIdentifier(node) && node.text === name) offsets.push(node.getStart(source));
+    if (ts.isIdentifier(node) && node.text === name) {
+      const parent = node.parent;
+      const named = (ts.isPropertyAccessExpression(parent) && parent.name === node) || ts.isShorthandPropertyAssignment(parent) ||
+        ((ts.isPropertyAssignment(parent) || ts.isVariableDeclaration(parent) || ts.isFunctionDeclaration(parent) || ts.isParameter(parent) ||
+          ts.isBindingElement(parent) || ts.isMethodDeclaration(parent) || ts.isPropertyDeclaration(parent)) && parent.name === node);
+      if (named) throw new Error(`${name} at ${node.getStart(source)} is not a reference to the global flag`);
+      offsets.push(node.getStart(source));
+    }
     ts.forEachChild(node, visit);
   };
   visit(source);
@@ -108,7 +123,8 @@ export async function build(env: NodeJS.ProcessEnv = process.env): Promise<void>
   const at = join(DIST, 'reactors');
   mkdirSync(at, { recursive: true });
   for (const kind of REACTOR_KINDS) writeFileSync(join(at, `losat-web-${kind}.wasm`), reactors[kind].bytes);
-  writeFileSync(join(at, 'artifacts.json'), `${JSON.stringify(reactors.record, null, 2)}\n`);
+  // The record of build_reactors.py as it wrote it (its digests are those of the artifacts, before the guard).
+  copyFileSync(join(reactors.dir, 'artifacts.json'), join(at, 'artifacts.json'));
   writeFileSync(
     join(at, 'index.js'),
     '// The two reactors of this package (written by build/build.ts). A bundler that follows\n' +

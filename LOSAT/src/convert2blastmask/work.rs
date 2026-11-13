@@ -293,9 +293,6 @@ impl<'a> MaskFromFasta<'a> {
         } else {
             ParsedSeqId::Local(ObjectId::Id(record.local_id as i32))
         };
-        Ok(Some(MaskedRecord {
-            best_id,
-            mask,
-        }))
+        Ok(Some(MaskedRecord { best_id, mask }))
     }
 }

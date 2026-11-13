@@ -1,0 +1,6 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.general.db
+Bad char [0xE9] in string at line 9
+dé
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.general.tag.str
+Bad char [0xE9] in string at line 9
+té

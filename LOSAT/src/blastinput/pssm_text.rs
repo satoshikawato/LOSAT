@@ -25,9 +25,12 @@
 //! `annotatedSites` of the parameters; `read_pssm_with_parameters_and_skips` names them, since NCBI
 //! writes them back where it writes the PSSM it read (psiblast `-in_pssm` with `-out_pssm`, item
 //! PS5b). An empty `descr` is NCBI's error (`CSeq_descr::PostRead`). A VisibleString stores `#` for
-//! a byte outside the visible range, as NCBI's reader does, and the reader returns each such byte
-//! with its line and chunk (`report::serial::visible::BadChar`; NCBI posts an error for it; a PSSM
-//! that LOSAT writes has none, `algorithm::psiblast::pssm`). LOSAT reads the forms below and refuses the others with an error
+//! a byte outside the visible range, as NCBI's reader does, and the reader notes each such byte
+//! with its trace (the type and the members, variants and elements read, as the reader's frames
+//! give them: `PssmWithParameters.pssm.query.seq.descr.E.title`), line and chunk
+//! (`report::serial::visible::BadChar`); `algorithm::pssm_search::in_pssm::read_in_pssm` posts
+//! NCBI's error for it. A PSSM that LOSAT writes has none (`algorithm::psiblast::pssm`). A bad
+//! byte in a value that the reader skips is its refusal (the type is not known). LOSAT reads the forms below and refuses the others with an error
 //! naming its line: a query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa`
 //! and `ncbistdaa`, and a REAL mantissa of more than 18 digits. The query's Seq-ids, of every
 //! alternative, are read by the shared Seq-id reader (`seqid::asn_text`).
@@ -65,7 +68,7 @@ type Result<T> = std::result::Result<T, PssmTextError>;
 // ```
 #[cfg(test)]
 pub fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters> {
-    read_pssm_with_parameters_and_skips(text).map(|read| read.pssm)
+    read_pssm_with_parameters_and_skips(text, &mut Vec::new()).map(|read| read.pssm)
 }
 
 /// What `read_pssm_with_parameters_and_skips` read.
@@ -75,15 +78,26 @@ pub(crate) struct PssmRead {
     /// `molinfo` descriptor of the query, `"Seqdesc"` for another descriptor other than a title),
     /// which NCBI's object keeps and writes back.
     pub(crate) skipped: Vec<&'static str>,
-    /// The bytes of VisibleStrings stored as `#`, in the order read (NCBI posts an error for each).
-    pub(crate) bad_chars: Vec<BadChar>,
 }
 
-/// `read_pssm_with_parameters`, with the members skipped and the bytes replaced (`PssmRead`).
-/// A document that fails after a replaced byte is the refusal of that byte (NCBI posts its error
-/// before it fails).
-pub(crate) fn read_pssm_with_parameters_and_skips(text: &[u8]) -> Result<PssmRead> {
+/// `read_pssm_with_parameters`, with the members skipped (`PssmRead`). `bad_chars` gets the
+/// bytes of VisibleStrings that the reader stored as `#`, in the order read, also when the
+/// document then fails (NCBI posts an error for each byte as it reads it, and its message is
+/// `BadChar::traced_message`).
+pub(crate) fn read_pssm_with_parameters_and_skips(
+    text: &[u8],
+    bad_chars: &mut Vec<BadChar>,
+) -> Result<PssmRead> {
     let mut reader = Reader::new(SliceSource::new(text), "PSSM", "PSSM reader");
+    let result = read_document(&mut reader);
+    bad_chars.extend(reader.take_bad_chars());
+    result.map(|pssm| PssmRead {
+        pssm,
+        skipped: reader.skipped,
+    })
+}
+
+fn read_document(reader: &mut Reader<SliceSource<'_>>) -> Result<PssmWithParameters> {
     let c = reader.skip_white_space()?;
     let id = reader.scan_end_of_id(is_first_id_char(c))?;
     let id = reader.src.text(id);
@@ -98,21 +112,8 @@ pub(crate) fn read_pssm_with_parameters_and_skips(text: &[u8]) -> Result<PssmRea
         return Err(reader.error("'::=' expected"));
     }
     reader.pos += 3;
-    let pssm = reader.pssm_with_parameters();
-    let bad_chars = reader.take_bad_chars();
-    let pssm = match pssm {
-        Err(_) if !bad_chars.is_empty() => {
-            return Err(reader.not_supported(
-                "a PSSM that NCBI cannot read with a string that holds a byte outside the visible ASCII range (NCBI posts an error for the byte first)",
-            ))
-        }
-        pssm => pssm?,
-    };
-    Ok(PssmRead {
-        pssm,
-        skipped: reader.skipped,
-        bad_chars,
-    })
+    reader.set_root("PssmWithParameters");
+    reader.pssm_with_parameters()
 }
 
 // The grammar of `PssmWithParameters` and of the types it holds, over the shared lexical layer.
@@ -191,6 +192,7 @@ impl<'a> Reader<SliceSource<'a>> {
                 String::from_utf8_lossy(variant)
             )));
         }
+        self.variant_frame("seq");
         let mut members = self.begin_members()?;
         let (mut ids, mut titles, mut inst) = (None, None, None);
         while let Some(index) = self.next_member(&mut members, &["id", "descr", "inst", "annot"])? {
@@ -239,6 +241,7 @@ impl<'a> Reader<SliceSource<'a>> {
             return Err(self.error("choice variant id expected"));
         }
         if variant == b"title" {
+            self.variant_frame("title");
             return Ok(Some(self.string()?));
         }
         // A `molinfo` descriptor takes the title out of the query's warning label
@@ -277,8 +280,14 @@ impl<'a> Reader<SliceSource<'a>> {
     fn seq_data(&mut self) -> Result<SeqData> {
         let variant = self.member_id()?;
         match variant {
-            b"iupacaa" => Ok(SeqData::Iupacaa(self.string()?)),
-            b"ncbieaa" => Ok(SeqData::Ncbieaa(self.string()?)),
+            b"iupacaa" => {
+                self.variant_frame("iupacaa");
+                Ok(SeqData::Iupacaa(self.string()?))
+            }
+            b"ncbieaa" => {
+                self.variant_frame("ncbieaa");
+                Ok(SeqData::Ncbieaa(self.string()?))
+            }
             b"ncbistdaa" => Ok(SeqData::Ncbistdaa(self.octets()?)),
             _ => Err(self.error(format!(
                 "query Seq-data {} is not supported by LOSAT's PSSM reader",

@@ -1237,6 +1237,7 @@ impl BlastpArgs {
                 let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
                     path,
                     crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+                    diagnostics,
                 )?;
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(

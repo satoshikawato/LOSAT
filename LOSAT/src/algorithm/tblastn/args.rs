@@ -767,6 +767,7 @@ impl TblastnArgs {
             Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
                 path,
                 &matrix_name,
+                diagnostics,
             )?)),
             None => None,
         };

@@ -48,13 +48,19 @@ pub(super) const PROGRAM: &str = "PSITBLASTN";
 ///     arg.Reset(m_PsiBlastArgs);
 ///     m_Args.push_back(arg);
 /// ```
-pub(super) fn read(path: &Path, matrix_name: &str) -> Result<PsiSearch> {
+pub(super) fn read(
+    path: &Path,
+    matrix_name: &str,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<PsiSearch> {
     let (search, _file) = read_in_pssm(
         path,
         PssmReader {
             program: "TBLASTN",
+            ncbi_name: "tblastn",
             matrix_name,
         },
+        diagnostics,
     )?;
     Ok(search)
 }

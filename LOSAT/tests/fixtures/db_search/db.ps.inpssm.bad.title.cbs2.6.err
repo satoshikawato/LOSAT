@@ -1,0 +1,9 @@
+Warning: [psiblast] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output
+Warning: [psiblast] The parameter -line_length is not applicable for output formats > 4 .
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xC3] in string at line 12
+rndérandom
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xA9] in string at line 12
+rndérandom
+Warning: [psiblast] Query_1 rnd##random: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics 

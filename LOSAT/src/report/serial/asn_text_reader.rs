@@ -236,6 +236,12 @@ pub(crate) struct Reader<S: AsnSource> {
     /// The bytes of VisibleStrings that `string` replaced, for the reader to post or refuse
     /// (`take_bad_chars`; `report::serial::visible`).
     pub(crate) bad_chars: Vec<BadChar>,
+    /// `GetStackTraceASN` of NCBI's reader at the value being read: the type's name
+    /// (`set_root`), then the name of each member and variant being read and `E` for each
+    /// element. `begin_members`, `next_member`, `choice` and `each` keep it; a reader that reads
+    /// a variant itself (`variant_frame`) names it. A frame left by a value is dropped by the
+    /// next member or element of its container, so a reader keeps no balance.
+    frames: Vec<&'static str>,
     /// Whether the refusals of the lexical layer (a REAL or a string that LOSAT does not read)
     /// are noted in `refusal` and the reading goes on (a reader that must know whether NCBI's
     /// reader would read the whole object before it refuses), rather than returned at once.
@@ -252,6 +258,8 @@ pub(crate) enum MemberId {
 
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
 pub(crate) struct Members {
+    /// The place of this SEQUENCE's member frame in `Reader::frames`.
+    depth: usize,
     block_start: bool,
     /// The position in the module of the last member read.
     last: Option<usize>,
@@ -269,9 +277,31 @@ impl<S: AsnSource> Reader<S> {
             document,
             reader,
             bad_chars: Vec::new(),
+            frames: Vec::new(),
             defer_refusals: false,
             refusal: None,
         }
+    }
+
+    /// The type that the document is read as, the bottom of the trace (`GetStackTraceASN`).
+    pub(crate) fn set_root(&mut self, name: &'static str) {
+        self.frames.clear();
+        self.frames.push(name);
+    }
+
+    /// A choice variant that the reader read by itself (`member_id`), as `choice` notes its own.
+    pub(crate) fn variant_frame(&mut self, name: &'static str) {
+        self.frames.push(name);
+    }
+
+    /// The trace of the value being read.
+    fn trace(&self) -> String {
+        self.frames
+            .iter()
+            .filter(|name| !name.is_empty())
+            .copied()
+            .collect::<Vec<_>>()
+            .join(".")
     }
 
     /// Note the refusals of the lexical layer in `refusal` and go on (`defer_refusals`).
@@ -676,14 +706,17 @@ impl<S: AsnSource> Reader<S> {
     // ```
     // (`NextElement` at the choice's start fails at a `}`, which reads as no id here; the variant
     // names of the modules LOSAT reads are their ASN.1 names, `GetChoiceIndex` (:426-442).)
-    pub(crate) fn choice(&mut self, names: &[&str]) -> Result<usize> {
+    pub(crate) fn choice(&mut self, names: &[&'static str]) -> Result<usize> {
         let id = self.member_id_range()?;
         if id.is_empty() {
             return Err(self.error("choice variant id expected"));
         }
         let text = self.bytes(id);
         match names.iter().position(|name| name.as_bytes() == text) {
-            Some(index) => Ok(index),
+            Some(index) => {
+                self.frames.push(names[index]);
+                Ok(index)
+            }
             None => {
                 let message = format!("unexpected variant {}", String::from_utf8_lossy(text));
                 Err(self.error(message))
@@ -741,8 +774,12 @@ impl<S: AsnSource> Reader<S> {
     }
 
     pub(crate) fn begin_members(&mut self) -> Result<Members> {
+        let depth = self.frames.len();
+        let block_start = self.start_block()?;
+        self.frames.push("");
         Ok(Members {
-            block_start: self.start_block()?,
+            depth,
+            block_start,
             last: None,
         })
     }
@@ -753,10 +790,11 @@ impl<S: AsnSource> Reader<S> {
     pub(crate) fn next_member(
         &mut self,
         members: &mut Members,
-        names: &[&str],
+        names: &[&'static str],
     ) -> Result<Option<usize>> {
         if !self.next_element(&mut members.block_start)? {
             self.end_block()?;
+            self.frames.truncate(members.depth);
             return Ok(None);
         }
         let id = self.member_id_range()?;
@@ -770,6 +808,8 @@ impl<S: AsnSource> Reader<S> {
             return Err(self.error(message));
         }
         members.last = Some(index);
+        self.frames.truncate(members.depth + 1);
+        self.frames[members.depth] = names[index];
         Ok(Some(index))
     }
 
@@ -788,11 +828,16 @@ impl<S: AsnSource> Reader<S> {
 
     /// The elements of a SEQUENCE OF or SET OF, each read by `element` and kept by it.
     pub(crate) fn each(&mut self, mut element: impl FnMut(&mut Self) -> Result<()>) -> Result<()> {
+        let depth = self.frames.len();
         let mut block_start = self.start_block()?;
         while self.next_element(&mut block_start)? {
+            self.frames.truncate(depth);
+            self.frames.push("E");
             element(self)?;
         }
-        self.end_block()
+        self.end_block()?;
+        self.frames.truncate(depth);
+        Ok(())
     }
 
     /// `GetInt8` after `SkipWhiteSpace` (`ReadInt4` / `ReadInt8`): an optional sign and digits,
@@ -1231,6 +1276,7 @@ impl<S: AsnSource> Reader<S> {
                         byte,
                         at: Position::Line(self.line),
                         chunk: data.to_vec(),
+                        trace: self.trace(),
                     });
                     out[k] = SUBST;
                 }

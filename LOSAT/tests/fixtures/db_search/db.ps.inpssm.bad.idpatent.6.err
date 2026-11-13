@@ -1,0 +1,9 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.patent.cit.country
+Bad char [0xE9] in string at line 9
+cé
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.patent.cit.id.number
+Bad char [0xE9] in string at line 9
+né
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.patent.cit.doc-type
+Bad char [0xE9] in string at line 9
+dé

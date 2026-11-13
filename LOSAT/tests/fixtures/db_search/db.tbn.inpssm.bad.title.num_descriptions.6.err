@@ -1,0 +1,7 @@
+Warning: [tblastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output
+Error: (803.7) [tblastn] PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xC3] in string at line 12
+rndérandom
+Error: (803.7) [tblastn] PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xA9] in string at line 12
+rndérandom

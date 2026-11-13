@@ -1,0 +1,9 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.genbank.name
+Bad char [0xE9] in string at line 9
+né
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.genbank.accession
+Bad char [0xE9] in string at line 9
+aé
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.genbank.release
+Bad char [0xE9] in string at line 9
+ré

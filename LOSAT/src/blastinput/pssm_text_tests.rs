@@ -321,7 +321,7 @@ fn errors_name_their_line() {
 #[test]
 fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
     let skips = |text: &str| {
-        read_pssm_with_parameters_and_skips(text.as_bytes())
+        read_pssm_with_parameters_and_skips(text.as_bytes(), &mut Vec::new())
             .unwrap()
             .skipped
     };
@@ -336,7 +336,7 @@ fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
             "      gapExtend 1\n    }\n  }",
             "      gapExtend 1\n    },\n    constraints {\n      nblocks 0,\n      blocks {\n      },\n      loops {\n      }\n    }\n  }",
         );
-    let read = read_pssm_with_parameters_and_skips(edited.as_bytes()).unwrap();
+    let read = read_pssm_with_parameters_and_skips(edited.as_bytes(), &mut Vec::new()).unwrap();
     assert_eq!(read.skipped, ["Seqdesc", "topology", "constraints"]);
     assert_eq!(read.pssm, small_pssm(b"a \"quoted\" title"));
     let annot = SMALL_PSSM.replace(
@@ -502,8 +502,8 @@ fn pssm_files_of_a_directory_read_and_write_back() {
     assert!(!paths.is_empty());
 }
 
-/// The bytes of VisibleStrings that NCBI's reader stores as `#`, with the line and chunk that its
-/// message shows (psiblast 2.17.0 `-in_pssm`, status 0: `Error: (803.7) [psiblast]
+/// The bytes of VisibleStrings that NCBI's reader stores as `#`, with the trace, line and chunk
+/// that its message shows (psiblast 2.17.0 `-in_pssm`, status 0: `Error: (803.7) [psiblast]
 /// PssmWithParameters.pssm.query.seq.descr.E.title` / `Bad char [0xC3] in string at line 12` /
 /// `rnd\xc3\xa9random`, then the same for 0xA9; the identifier of `ps5_rnd_ident_utf8`:
 /// `PssmWithParameters.pssm.identifier.str`, line 4, `my\xc3\xa9`).
@@ -524,12 +524,9 @@ fn a_bad_byte_of_a_pssm_is_noted_as_ncbi_posts_it() {
             "PssmWithParameters.pssm.identifier.str",
         ),
     ] {
-        let read = read_pssm_with_parameters_and_skips(&gunzip(name)).unwrap();
-        let messages: Vec<Vec<u8>> = read
-            .bad_chars
-            .iter()
-            .map(|bad| bad.message(trace))
-            .collect();
+        let mut bad_chars = Vec::new();
+        read_pssm_with_parameters_and_skips(&gunzip(name), &mut bad_chars).unwrap();
+        let messages: Vec<Vec<u8>> = bad_chars.iter().map(BadChar::traced_message).collect();
         let expected: Vec<Vec<u8>> = ["C3", "A9"]
             .iter()
             .map(|byte| {
@@ -540,12 +537,166 @@ fn a_bad_byte_of_a_pssm_is_noted_as_ncbi_posts_it() {
             })
             .collect();
         assert_eq!(messages, expected, "{name}");
-        assert!(read
-            .bad_chars
-            .iter()
-            .all(|bad| bad.at == Position::Line(line)));
+        assert!(bad_chars.iter().all(|bad| bad.at == Position::Line(line)));
     }
-    let read = read_pssm_with_parameters_and_skips(&gunzip("pssm/ps4_rnd_ctrl.asn.gz")).unwrap();
+    let read =
+        read_pssm_with_parameters_and_skips(&gunzip("pssm/ps4_rnd_ctrl.asn.gz"), &mut Vec::new())
+            .unwrap();
     let titles = read.pssm.pssm.query.unwrap().titles.unwrap();
     assert_eq!(titles, [b"rnd##random".to_vec()]);
+}
+
+/// The trace of every kind of VisibleString that a PSSM holds, as NCBI 2.17.0 posts it (`psiblast
+/// -in_pssm`: `Error: (803.7) [psiblast] <trace>` / `Bad char [0xE9] in string at line N` / the
+/// string; the files are `ps4_rnd_ctrl` with its title and one string changed, and the
+/// `db.ps.inpssm.bad.*` rows of the manifest hold NCBI's whole stderr): each Seq-id variant's
+/// strings, the row labels, the matrix name, the letters of the query.
+#[test]
+fn the_trace_of_a_bad_byte_names_the_members_read() {
+    use crate::report::serial::visible::Position;
+    for (name, expected) in [
+        (
+            "pssm/ps_bad_idlocal.asn.gz",
+            &[("PssmWithParameters.pssm.query.seq.id.E.local.str", 0xE9, 9)][..],
+        ),
+        (
+            "pssm/ps_bad_idgeneral.asn.gz",
+            &[
+                ("PssmWithParameters.pssm.query.seq.id.E.general.db", 0xE9, 9),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.general.tag.str",
+                    0xE9,
+                    9,
+                ),
+            ][..],
+        ),
+        (
+            "pssm/ps_bad_idgenbank.asn.gz",
+            &[
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.genbank.name",
+                    0xE9,
+                    9,
+                ),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.genbank.accession",
+                    0xE9,
+                    9,
+                ),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.genbank.release",
+                    0xE9,
+                    9,
+                ),
+            ][..],
+        ),
+        (
+            "pssm/ps_bad_idpdb.asn.gz",
+            &[
+                ("PssmWithParameters.pssm.query.seq.id.E.pdb.mol", 0xE9, 9),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.pdb.rel.std.season",
+                    0xE9,
+                    9,
+                ),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.pdb.chain-id",
+                    0xE9,
+                    9,
+                ),
+            ][..],
+        ),
+        (
+            "pssm/ps_bad_idpdbstr.asn.gz",
+            &[(
+                "PssmWithParameters.pssm.query.seq.id.E.pdb.rel.str",
+                0xE9,
+                9,
+            )][..],
+        ),
+        (
+            "pssm/ps_bad_idpatent.asn.gz",
+            &[
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.patent.cit.country",
+                    0xE9,
+                    9,
+                ),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.patent.cit.id.number",
+                    0xE9,
+                    9,
+                ),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.patent.cit.doc-type",
+                    0xE9,
+                    9,
+                ),
+            ][..],
+        ),
+        (
+            "pssm/ps_bad_idpatentapp.asn.gz",
+            &[(
+                "PssmWithParameters.pssm.query.seq.id.E.patent.cit.id.app-number",
+                0xE9,
+                9,
+            )][..],
+        ),
+        (
+            "pssm/ps_bad_idgiim.asn.gz",
+            &[
+                ("PssmWithParameters.pssm.query.seq.id.E.giim.db", 0xE9, 9),
+                (
+                    "PssmWithParameters.pssm.query.seq.id.E.giim.release",
+                    0xE9,
+                    9,
+                ),
+            ][..],
+        ),
+        (
+            "pssm/ps_bad_idtwo.asn.gz",
+            &[("PssmWithParameters.pssm.query.seq.id.E.general.db", 0xE9, 9)][..],
+        ),
+        (
+            "pssm/ps_bad_rowlabels.asn.gz",
+            &[("PssmWithParameters.pssm.rowLabels.E", 0xE9, 6)][..],
+        ),
+        (
+            "pssm/ps_bad_matrix.asn.gz",
+            &[(
+                "PssmWithParameters.params.rpsdbparams.matrixName",
+                0xE9,
+                1720,
+            )][..],
+        ),
+        (
+            "pssm/ps_bad_ncbieaa.asn.gz",
+            &[(
+                "PssmWithParameters.pssm.query.seq.inst.seq-data.ncbieaa",
+                0xE9,
+                18,
+            )][..],
+        ),
+        (
+            "pssm/ps_bad_iupacaa.asn.gz",
+            &[(
+                "PssmWithParameters.pssm.query.seq.inst.seq-data.iupacaa",
+                0xE9,
+                18,
+            )][..],
+        ),
+    ] {
+        let mut bad_chars = Vec::new();
+        read_pssm_with_parameters_and_skips(&gunzip(name), &mut bad_chars).unwrap();
+        let found: Vec<(&str, u8, usize)> = bad_chars
+            .iter()
+            .map(|bad| {
+                let Position::Line(line) = bad.at else {
+                    panic!("{name}: a binary position")
+                };
+                (bad.trace.as_str(), bad.byte, line)
+            })
+            .collect();
+        assert_eq!(found, expected, "{name}");
+    }
 }

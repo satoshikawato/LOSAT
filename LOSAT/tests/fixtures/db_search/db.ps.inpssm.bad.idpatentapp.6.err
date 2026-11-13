@@ -1,0 +1,3 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.patent.cit.id.app-number
+Bad char [0xE9] in string at line 9
+né

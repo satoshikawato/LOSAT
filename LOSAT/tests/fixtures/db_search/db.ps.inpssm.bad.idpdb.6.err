@@ -1,0 +1,9 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.pdb.mol
+Bad char [0xE9] in string at line 9
+mé
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.pdb.rel.std.season
+Bad char [0xE9] in string at line 9
+sé
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.id.E.pdb.chain-id
+Bad char [0xE9] in string at line 9
+cé

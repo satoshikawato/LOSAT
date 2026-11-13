@@ -234,6 +234,8 @@ fn text_asn(buffer: &[u8]) -> bool {
 pub(crate) struct PssmReader<'a> {
     /// The program of LOSAT's refusals (`PSIBLAST`, `TBLASTN`).
     pub(crate) program: &'static str,
+    /// The program's name in NCBI's messages (`[psiblast]`, `[tblastn]`).
+    pub(crate) ncbi_name: &'static str,
     /// The options' matrix name (`opts.GetMatrixName()`).
     pub(crate) matrix_name: &'a str,
 }
@@ -242,6 +244,7 @@ impl PssmReader<'static> {
     /// psiblast's reader.
     pub(crate) const PSIBLAST: Self = Self {
         program: "PSIBLAST",
+        ncbi_name: "psiblast",
         matrix_name: "BLOSUM62",
     };
 }
@@ -257,7 +260,11 @@ impl PssmReader<'_> {
 /// what it does not read, then the PSSM search's query, rows and values, and the PSSM as NCBI's
 /// object holds it when the search starts (`InPssmFile`, which psiblast's rounds
 /// and PSSM files write back).
-pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSearch, InPssmFile)> {
+pub(crate) fn read_in_pssm(
+    path: &Path,
+    reader: PssmReader<'_>,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
     // ```c++
     // void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
@@ -314,7 +321,23 @@ pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSe
             )))
         }
     }
-    let read = match crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes) {
+    let mut bad_chars = Vec::new();
+    let read =
+        crate::blastinput::pssm_text::read_pssm_with_parameters_and_skips(&bytes, &mut bad_chars);
+    // NCBI's reader stores `#` for a byte of a VisibleString outside the visible range (the
+    // titles, the row labels, the identifier, the matrix name, the Seq-ids' strings, the
+    // sequence letters) and posts an error for it as it reads it, so also for a PSSM that it then
+    // fails to read (psiblast 2.17.0 `-in_pssm ps4_rnd_ctrl.asn`: `Error: (803.7) [psiblast]
+    // PssmWithParameters.pssm.query.seq.descr.E.title` / `Bad char [0xC3] in string at line 12`
+    // / the chunk, once per byte, after the formatting handler's warnings, before the PSSM
+    // search's own messages, status 0; tblastn the same with `[tblastn]`).
+    for bad in &bad_chars {
+        let mut line = format!("Error: (803.7) [{}] ", reader.ncbi_name).into_bytes();
+        line.extend_from_slice(&bad.traced_message());
+        line.push(b'\n');
+        diagnostics.write_all(&line)?;
+    }
+    let read = match read {
         Ok(read) => read,
         // The reader's own limits (a query Seq-entry set, Seq-ids and Seq-data it does not type,
         // REAL numbers NCBI computes with undefined behaviour or in `long double`): LOSAT's
@@ -335,17 +358,6 @@ pub(crate) fn read_in_pssm(path: &Path, reader: PssmReader<'_>) -> Result<(PsiSe
             )))
         }
     };
-    // NCBI's reader stores `#` for a byte of a VisibleString outside the visible range (the
-    // titles, the row labels, the identifier, the matrix name, the Seq-ids' strings) and posts an
-    // error for it, which LOSAT does not write here (NCBI 2.17.0 `psiblast -in_pssm`,
-    // `ps4_rnd_ctrl.asn.gz`: `Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title`
-    // / `Bad char [0xC3] in string at line 12` / the chunk, once per byte, status 0; PS5b: an
-    // identifier, `PssmWithParameters.pssm.identifier.str`).
-    if !read.bad_chars.is_empty() {
-        return Err(reader.refuse(
-            "a PSSM whose strings hold a byte outside the visible ASCII range (NCBI reads it as '#' with an error message)",
-        ));
-    }
     psi_search_and_object(read.pssm, read.skipped, reader)
 }
 

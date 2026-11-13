@@ -84,9 +84,18 @@ pub(crate) struct BadChar {
     /// as it is being fixed (the bytes before this one already `#`); empty for a text string that
     /// is skipped (`SkipString` passes `kEmptyStr`).
     pub(crate) chunk: Vec<u8>,
+    /// `GetStackTraceASN` of the text reader at the byte (`Reader::frames`: the type, then a
+    /// name for each member, variant and `E` for each element); empty when the reader keeps no
+    /// frames (the binary reader and the mask reader give the trace themselves).
+    pub(crate) trace: String,
 }
 
 impl BadChar {
+    /// `message` with the trace the text reader noted.
+    pub(crate) fn traced_message(&self) -> Vec<u8> {
+        self.message(&self.trace)
+    }
+
     /// The text that NCBI posts (`ERR_POST_X(7, message)`, without the prefix of the
     /// diagnostic) for the reader whose stack trace is `trace` (`GetStackTraceASN`).
     pub(crate) fn message(&self, trace: &str) -> Vec<u8> {
@@ -132,6 +141,7 @@ pub(crate) fn fix_visible_chars(s: &mut [u8], at: Position, notes: &mut Vec<BadC
                 byte,
                 at,
                 chunk: s.to_vec(),
+                trace: String::new(),
             });
             s[i] = SUBST;
         }
@@ -167,6 +177,7 @@ mod tests {
             byte: 0x7f,
             at: Position::Line(3),
             chunk: Vec::new(),
+            trace: String::new(),
         };
         assert_eq!(
             skipped.message("T.m"),

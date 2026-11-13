@@ -19,8 +19,9 @@ use crate::core::psi::{
 };
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
-    PssmQuery, PssmSeqId, PssmWithParameters, SeqData, SeqInst,
+    PssmQuery, PssmWithParameters, SeqData, SeqInst,
 };
+use crate::seqid::ParsedSeqId;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
 /// psiblast's PSSM options as given on the command line.
@@ -214,11 +215,11 @@ pub(crate) struct PssmAncillary {
 }
 
 /// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id
-/// (`fasta_query_id` of a FASTA query, or the local id of the PSSM query of `-in_pssm`, a string
-/// or an integer) and its title.
+/// (`fasta_query_id` of a FASTA query, or the first Seq-id of the PSSM query of `-in_pssm`) and
+/// its title.
 pub(crate) struct PssmQueryRecord<'a> {
     pub(crate) letters: &'a [u8],
-    pub(crate) id: &'a PssmSeqId,
+    pub(crate) id: &'a ParsedSeqId,
     pub(crate) title: &'a [u8],
 }
 
@@ -237,10 +238,10 @@ pub(crate) struct PssmQueryRecord<'a> {
 pub(crate) fn fasta_query_id(
     record: &crate::blastinput::fasta_reader::FastaRecord,
     ordinal: usize,
-) -> PssmSeqId {
+) -> ParsedSeqId {
     match record.believed() {
-        Some(ids) => PssmSeqId::Parsed(ids.best.clone()),
-        None => PssmSeqId::Local(ObjectId::Str(format!("Query_{ordinal}").into_bytes())),
+        Some(ids) => ids.best.clone(),
+        None => ParsedSeqId::Local(ObjectId::Str(format!("Query_{ordinal}").into_bytes())),
     }
 }
 

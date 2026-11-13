@@ -279,7 +279,7 @@ fn run_main_entry() -> Result<()> {
     // `[Diag]`, `[LOG]`), let it through: LOSAT refuses the settings it refuses in a run, which
     // include those, with the same check (line RG DECISIONS E1b-6). rpsbproc has its own
     // `DryRun`, after its `Init` (`rpsbproc::dry_run`, which makes the same check; item E1c).
-    // rpstblastn's `-help` and `-h` reach here as a parsed flag (`RpstblastnArgs::ncbi_help`);
+    // rpstblastn's `-help`, `-help-full` and `-h` reach here as a parsed flag (`RpstblastnArgs::ncbi_help`);
     // NCBI's reader writes their text before the application runs, `-dryrun` or not (NCBI BLAST+
     // 2.17.0, PS12a probes `dry_h`, `dry_help`), as the parser's help of the other programs.
     let help_flag =

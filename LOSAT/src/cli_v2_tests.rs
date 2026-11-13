@@ -1572,7 +1572,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("psiblast", &["-xdrop_ungap", "3"]),
         ("blastp", &["-xmlhelp"]),
         ("tblastn", &["-version-full"]),
-        ("tblastx", &["-help-full"]),
+        ("tblastx", &["-xmlhelp"]),
     ] {
         let error = crate::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
@@ -2144,6 +2144,94 @@ fn short_help_h_is_display_help_for_every_program() {
         assert!(
             parse(program, &["-out", "-h"]).is_ok() || program == "makeblastdb",
             "{program}"
+        );
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (quoted at
+// `cli::try_parse_from`)
+// NCBI's reader stops at its help flags, the words before them read; `-help-full` is `-help` with
+// the hidden arguments, of which LOSAT's programs run none (NCBI BLAST+ 2.17.0: the same bytes in
+// every place but makeblastdb's hidden `-randomize`; line RG item E2).
+#[test]
+fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
+    // The help a command line gives: clap's for LOSAT's texts, NCBI's for rpstblastn's.
+    let help = |program: &str, words: &[&str]| -> String {
+        let mut argv = vec!["losat", program];
+        argv.extend(words);
+        match try_parse_from::<Cli, _, _>(argv) {
+            Err(error) => {
+                assert_eq!(error.exit_code(), 0, "{program} {words:?}: {error}");
+                format!("{:?} {}", error.kind(), crate::cli::render_message(&error))
+            }
+            Ok(Cli {
+                command: Commands::Rpstblastn(args),
+            }) => args
+                .ncbi_help_text()
+                .unwrap_or_else(|| panic!("{program} {words:?}: no help"))
+                .to_string(),
+            Ok(_) => panic!("{program} {words:?}: no help"),
+        }
+    };
+    for (program, value_option) in [
+        ("blastn", "-out"),
+        ("blastp", "-out"),
+        ("blastx", "-out"),
+        ("tblastn", "-out"),
+        ("tblastx", "-out"),
+        ("psiblast", "-out"),
+        ("rpsblast", "-out"),
+        ("rpstblastn", "-out"),
+        ("makeblastdb", "-title"),
+        ("rpsbproc", "-o"),
+    ] {
+        let full = help(program, &["-help"]);
+        let short = help(program, &["-h"]);
+        for words in [
+            &["-help-full"][..],
+            &["-help-full", "-h"],
+            &["-help", "-h"],
+            &["-help-full", "-help-full"],
+            &["-help-full", "-xmlhelp"],
+            &["-help-full", "-bogus"],
+            &["-help", "-bogus"],
+            &["-help-full", value_option],
+            &["-help", value_option],
+            &["-help-full", "-evalue", "abc"],
+        ] {
+            assert_eq!(help(program, words), full, "{program} {words:?}");
+        }
+        for words in [
+            &["-h", "-help-full"][..],
+            &["-h", "-help"],
+            &["-h", "-xmlhelp"],
+            &["-h", "-bogus"],
+            &["-h", value_option],
+        ] {
+            assert_eq!(help(program, words), short, "{program} {words:?}");
+        }
+        // A word before the flag is read first.
+        let error = try_parse_from::<Cli, _, _>(["losat", program, "-bogus", "-help-full"])
+            .err()
+            .unwrap_or_else(|| panic!("{program}: -bogus read"));
+        assert_ne!(error.exit_code(), 0, "{program}");
+    }
+    // As an option's value, `-help-full` is the value; outside a program it is no flag.
+    assert!(parse("blastn", &["-out", "-help-full"]).is_ok());
+    assert!(try_parse_from::<Cli, _, _>(["losat", "-help-full"]).is_err());
+    assert_ne!(
+        try_parse_from::<Cli, _, _>(["losat", "-help-full"])
+            .err()
+            .map(|error| error.exit_code()),
+        Some(0)
+    );
+    // `-xmlhelp` stays refused by name (an Owner's decision, line RG item E2), in makeblastdb too.
+    for program in ["blastn", "makeblastdb", "rpsbproc"] {
+        let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
+        let text = crate::cli::render_message(&error);
+        assert!(
+            text.contains("the NCBI C++ Toolkit option -xmlhelp is not supported by LOSAT's"),
+            "{program}: {text}"
         );
     }
 }

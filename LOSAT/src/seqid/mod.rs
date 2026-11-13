@@ -8,6 +8,8 @@
 //!   `Set`).
 //! - `model`: the Seq-id value of every alternative (`ParsedSeqId`) and its serial writer
 //!   (outfmt 8, 9, 11, 12, through `report::seqid::SeqId::Db`).
+//! - `asn_text`: the reader of a Seq-id of NCBI's ASN.1 text (rpsbproc's archive, the PSSMs of
+//!   `-in_pssm`).
 //! - `ber`: the BER decoding of a header record (`decode_full_set`), whose reader
 //!   `seqdb::header` shares for the ordinal ids of a database without parsed Seq-ids.
 //! - `label`: the printings (`fasta`, `content`, `format_label`, `bare`,
@@ -25,6 +27,7 @@
 //! database with parsed Seq-ids from `seqdb::SeqDb::defline_set`.
 
 pub mod accguide;
+pub(crate) mod asn_text;
 pub mod ber;
 pub mod defline_set;
 pub mod id_scope;

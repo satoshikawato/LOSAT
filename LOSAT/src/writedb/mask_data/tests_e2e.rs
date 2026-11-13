@@ -276,7 +276,9 @@ pub(super) fn assert_reads_back(out_base: &str, protein: bool, expected_dir: &Pa
         let algo: i32 = fields.next().unwrap().parse().unwrap();
         let oid: u32 = fields.next().unwrap().parse().unwrap();
         let expected = fields.next().unwrap();
-        let result = db.mask_ranges(oid, algo).unwrap();
+        let result = db
+            .mask_ranges_at(db.locate_oid(oid).unwrap(), algo)
+            .unwrap();
         assert_eq!(
             ranges_text(&result),
             expected,
@@ -797,7 +799,9 @@ pub(super) fn assert_database(out_base: &str, protein: bool, file: &str, ncbi: &
     let mut compared = 0;
     for (algo, rows) in &ncbi.masks {
         for (oid, text) in rows {
-            let result = db.mask_ranges(*oid, *algo).unwrap();
+            let result = db
+                .mask_ranges_at(db.locate_oid(*oid).unwrap(), *algo)
+                .unwrap();
             assert_eq!(
                 ranges_text(&result),
                 *text,

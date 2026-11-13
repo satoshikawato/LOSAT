@@ -82,7 +82,12 @@ pub(super) fn masked_rows(base: &str, protein: bool, algorithms: &[i32]) -> Stri
     for oid in 0..db.num_seqs() {
         let parts: Vec<String> = algorithms
             .iter()
-            .map(|&algorithm| printed(&db.mask_ranges(oid, algorithm).unwrap()))
+            .map(|&algorithm| {
+                printed(
+                    &db.mask_ranges_at(db.locate_oid(oid).unwrap(), algorithm)
+                        .unwrap(),
+                )
+            })
             .collect();
         if parts.iter().any(|part| part != "none") {
             rows.push(format!("{oid}|{}", parts.join("|")));

@@ -219,7 +219,9 @@ fn mask_data_column() {
                     .find(|(id, _)| *id == algo)
                     .map_or_else(Vec::new, |(_, offsets)| offsets.clone());
                 assert_eq!(
-                    reader.mask_ranges(oid as u32, algo).unwrap(),
+                    reader
+                        .mask_ranges_at(reader.locate_oid(oid as u32).unwrap(), algo)
+                        .unwrap(),
                     MaskRanges::Ranges(want),
                     "{version:?} oid {oid} algorithm {algo}"
                 );

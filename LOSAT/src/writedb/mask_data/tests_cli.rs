@@ -106,7 +106,10 @@ fn assert_ranges_read_back(base: &str, protein: bool, expected_dir: &Path, name:
         let oid: u32 = fields.next().unwrap().parse().unwrap();
         let expected = fields.next().unwrap();
         assert_eq!(
-            ranges_text(&db.mask_ranges(oid, algo).unwrap()),
+            ranges_text(
+                &db.mask_ranges_at(db.locate_oid(oid).unwrap(), algo)
+                    .unwrap()
+            ),
             expected,
             "{name}: algorithm {algo}, sequence {oid}"
         );

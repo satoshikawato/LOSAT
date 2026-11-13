@@ -422,6 +422,7 @@ pub(super) fn bioseq(local_id: usize, length: usize) -> crate::writedb::bioseq::
         length: length as u64,
         seq_data: Some(crate::writedb::bioseq::SeqData::Ncbieaa(vec![b'A'; length])),
         parsed: None,
+        past_seq_pos: None,
     }
 }
 
@@ -521,7 +522,9 @@ fn algorithms_are_registered_until_the_first_volume_is_written() {
     );
     let reader = SeqDb::open(&tmp.base("db"), SeqType::Protein).unwrap();
     assert_eq!(
-        reader.mask_ranges(0, 20).unwrap(),
+        reader
+            .mask_ranges_at(reader.locate_oid(0).unwrap(), 20)
+            .unwrap(),
         MaskRanges::Ranges(vec![(2, 4)])
     );
 }
@@ -636,13 +639,17 @@ fn the_column_files_are_the_same_in_version_4_and_5() {
         let reader = SeqDb::open(&tmp.base("db"), SeqType::Protein).unwrap();
         for oid in [0, 2] {
             assert_eq!(
-                reader.mask_ranges(oid, id).unwrap(),
+                reader
+                    .mask_ranges_at(reader.locate_oid(oid).unwrap(), id)
+                    .unwrap(),
                 MaskRanges::Ranges(vec![(0, 5), (10, 20)]),
                 "{version:?}: sequence {oid}"
             );
         }
         assert_eq!(
-            reader.mask_ranges(1, id).unwrap(),
+            reader
+                .mask_ranges_at(reader.locate_oid(1).unwrap(), id)
+                .unwrap(),
             MaskRanges::Ranges(Vec::new())
         );
     }

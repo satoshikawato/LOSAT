@@ -628,7 +628,12 @@ impl ReportedSubjects {
     /// its first batch, before any byte (also where none of them does, as before).
     /// `places`: the format's writer writes each query's texts where it reads each subject
     /// (`query_reads`; outfmt 0, 5 and the tabular rows); `rows_open`: the rows look the plural
-    /// names up (`shared::subject_read_texts`).
+    /// names up (`shared::subject_read_texts`). The subjects are read in the order of the hit
+    /// lists, or, for the pairwise report (`pairwise`, its `-sorthits` and `-sorthsps`), in the
+    /// order of its sorted groups (`QueryGroup::read_order` of the rows' hits: each list's HSPs
+    /// that the reports show in the reports' order, `HspList::evalue_order`, with the values of
+    /// their rows, `report::hsp_scores`).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn fetch_by_query(
         &mut self,
         database: &BlastxDatabase,
@@ -637,6 +642,7 @@ impl ReportedSubjects {
         rows: SubjectFetch,
         places: bool,
         rows_open: bool,
+        pairwise: Option<crate::report::hit_sort::ReportSort>,
     ) -> Result<()> {
         if rows == SubjectFetch::Never && crate::algorithm::common::database::prefetch_always_off()
         {
@@ -644,20 +650,51 @@ impl ReportedSubjects {
         }
         for batch in batches {
             for (index, lists) in batch.queries.iter().enumerate() {
-                let subjects = lists
-                    .iter()
-                    .filter(|list| {
-                        list.hsps.iter().any(|hsp| {
-                            super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
-                        })
-                    })
-                    .map(|list| {
-                        (
-                            list.oid as u32,
-                            self.ordinals[list.oid],
-                            self.parsed_subject(list.oid),
+                let ranks: Vec<u32> = match pairwise {
+                    Some(sort) => {
+                        let query_length = batch.prepared.original_lengths[index];
+                        let mut hits = Vec::new();
+                        for list in lists {
+                            for hsp in list.evalue_order() {
+                                if super::report::has_seqalign(hsp, gapped) {
+                                    hits.push((
+                                        list.oid as u32,
+                                        super::report::hsp_scores(hsp, query_length)?,
+                                    ));
+                                }
+                            }
+                        }
+                        crate::report::x_pairwise_par::QueryGroup::read_order(
+                            hits,
+                            |scores| *scores,
+                            |previous, rank| {
+                                crate::report::db_subject::rank_joins_as_copy(
+                                    &self.parsed,
+                                    previous as usize,
+                                    rank as usize,
+                                )
+                            },
+                            sort,
+                            false,
                         )
-                    });
+                    }
+                    None => lists
+                        .iter()
+                        .filter(|list| {
+                            list.hsps.iter().any(|hsp| {
+                                super::report::has_seqalign(hsp, gapped) && rows.reads(hsp.identity)
+                            })
+                        })
+                        .map(|list| list.oid as u32)
+                        .collect(),
+                };
+                let subjects = ranks.into_iter().map(|rank| {
+                    (
+                        rank,
+                        self.ordinals[rank as usize],
+                        self.parsed_subject(rank as usize),
+                    )
+                });
                 let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,
@@ -1161,7 +1198,7 @@ mod tests {
                 hsp.identity = identities;
             }
             reported
-                .fetch_by_query(&database, &batches, true, rows, false, false)
+                .fetch_by_query(&database, &batches, true, rows, false, false, None)
                 .unwrap();
             [
                 reported.query_fetches(0).to_vec(),

@@ -428,21 +428,42 @@ pub(crate) fn prefetch_messages<'h>(
 
 /// [`prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the first read
 /// of each subject that writes one, with its ordinal id, where a query's report reads its
-/// subjects one by one.
+/// subjects one by one: in report order, or, for the pairwise report (`pairwise`, its
+/// `-sorthits` and `-sorthsps`), in the order of its sorted groups (`QueryGroup::read_order` of
+/// the rows' hits, `report::PairwiseRows::hit`: the HSP's hit, whose `num_ident` is the engine's
+/// that the rows' Seq-align identities copy, `report::seqalign_identities`; the rows' shift to
+/// the records of a ranged query moves every HSP of the query alike, which no sort reads, and
+/// the rows name the subjects by rank, in the order of the ordinal ids).
 pub(crate) fn subject_read_texts<'h>(
     database: &TblastxDatabase,
     ordered: impl IntoIterator<Item = &'h TblastxHsp>,
     titles: &DatabaseTitles,
     rows_open: bool,
+    pairwise: Option<crate::report::hit_sort::ReportSort>,
 ) -> Result<crate::report::query_warnings::QueryReads> {
-    let subjects = ordered.into_iter().map(|hsp| {
-        let ordinal = hsp.hit.s_idx;
-        let parsed = match titles.get(&ordinal) {
-            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
-            _ => None,
-        };
-        (ordinal, ordinal, parsed)
-    });
+    let parsed = |ordinal: u32| match titles.get(&ordinal) {
+        Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+        _ => None,
+    };
+    let ordered = ordered.into_iter();
+    let ordinals: Vec<u32> = match pairwise {
+        Some(sort) => crate::report::x_pairwise_par::QueryGroup::read_order(
+            ordered.map(|hsp| (hsp.hit.s_idx, hsp)),
+            |hsp| crate::report::hit_sort::HspScores::of_hit(&hsp.hit, hsp.hit.num_ident),
+            |previous, ordinal| match (parsed(previous), parsed(ordinal)) {
+                (Some(earlier), Some(later)) => {
+                    crate::report::db_subject::joins_as_copy(earlier, later)
+                }
+                _ => false,
+            },
+            sort,
+            true,
+        ),
+        None => ordered.map(|hsp| hsp.hit.s_idx).collect(),
+    };
+    let subjects = ordinals
+        .into_iter()
+        .map(|ordinal| (ordinal, ordinal, parsed(ordinal)));
     shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows_open, PROGRAM)
 }
 

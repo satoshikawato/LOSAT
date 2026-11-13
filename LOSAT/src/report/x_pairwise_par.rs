@@ -126,26 +126,8 @@ impl<'h> QueryGroup<'h> {
         let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
         let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
         let mut subject_order: Vec<u32> = Vec::new();
-        // The subject whose hit shows each subject's hits, asked where the subject changes.
-        let mut shown_in: HashMap<u32, u32> = HashMap::new();
-        let mut previous: Option<(u32, u32)> = None;
-        for &(hsp_index, hit) in query_hits {
-            let s_idx = hit.hit.s_idx;
-            let shown = match previous {
-                Some((same, shown)) if same == s_idx => shown,
-                _ => match shown_in.get(&s_idx) {
-                    Some(&shown) => shown,
-                    None => {
-                        let shown = match previous {
-                            Some((before, shown)) if joins(before, s_idx) => shown,
-                            _ => s_idx,
-                        };
-                        shown_in.insert(s_idx, shown);
-                        shown
-                    }
-                },
-            };
-            previous = Some((s_idx, shown));
+        let shown = shown_subjects(query_hits.iter().map(|(_, hit)| hit.hit.s_idx), joins);
+        for (&(hsp_index, hit), shown) in query_hits.iter().zip(shown) {
             if !subject_hits.contains_key(&shown) {
                 subject_order.push(shown);
             }
@@ -230,20 +212,13 @@ impl<'h> QueryGroup<'h> {
     /// `x_DisplayDeflines` and `PruneSeqalign` read the sorted Seq-align set. Nothing is done
     /// (or allocated) when `sort` sorts nothing.
     pub(crate) fn sort(&mut self, sort: super::hit_sort::ReportSort, tblastx: bool) {
-        if !sort.sorts() {
-            return;
-        }
-        let scores: Vec<Vec<super::hit_sort::HspScores>> = self
-            .subject_order
-            .iter()
-            .map(|s_idx| {
-                self.subject_hits[s_idx]
-                    .iter()
-                    .map(|hit| super::hit_sort::HspScores::of(hit))
-                    .collect()
-            })
-            .collect();
-        let Some(sorted) = super::hit_sort::sort_query_hits(sort, tblastx, &scores) else {
+        let Some(sorted) = sort_group(
+            &self.subject_order,
+            &self.subject_hits,
+            |hit| super::hit_sort::HspScores::of(hit),
+            sort,
+            tblastx,
+        ) else {
             return;
         };
         for (s_idx, hsp_order) in self.subject_order.iter().zip(&sorted.hsps) {
@@ -282,6 +257,114 @@ impl<'h> QueryGroup<'h> {
     pub(crate) fn aligned(&self, num_alignments: usize) -> &[u32] {
         &self.subject_order[..self.subject_order.len().min(num_alignments)]
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1523-1530
+    // ```c++
+    //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
+    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
+    //                                       *(const_cast<CSeq_align_set*>(aln_set.GetPointer())),
+    //                                       (m_Program == "tblastx") ? true : false,
+    //                                       m_HitsSortOption,
+    //                                       m_HspsSortOption);
+    //     }
+    // ```
+    /// The subjects of one query's pairwise report in the order its description lines and
+    /// alignment headings read them, for the models of the reads that make the texts of those
+    /// reads before the rows exist (`common::database::subject_read_texts`): `hits`, each HSP of
+    /// the query's hit list with its subject as the report's rows name it, in the order of the
+    /// rows, are grouped as [`Self::new`] groups the rows (`joins`) and the groups put in the
+    /// order of `-sorthits` (`sort`, TBLASTX's `tblastx`) as [`Self::sort`] puts them, by the
+    /// same `sort_query_hits` of the HSPs' values (`scores`, read only where `sort` sorts: the
+    /// row's `HspScores::of`). Each subject comes once, those shown in a group's hit after the
+    /// group's own subject, in the order of their first HSP.
+    pub(crate) fn read_order<T>(
+        hits: impl IntoIterator<Item = (u32, T)>,
+        scores: impl Fn(&T) -> super::hit_sort::HspScores,
+        joins: impl Fn(u32, u32) -> bool,
+        sort: super::hit_sort::ReportSort,
+        tblastx: bool,
+    ) -> Vec<u32> {
+        let hits: Vec<(u32, T)> = hits.into_iter().collect();
+        let shown = shown_subjects(hits.iter().map(|&(s_idx, _)| s_idx), joins);
+        let mut order: Vec<u32> = Vec::new();
+        let mut grouped: HashMap<u32, Vec<&T>> = HashMap::new();
+        let mut members: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for ((s_idx, hit), shown) in hits.iter().zip(shown) {
+            grouped
+                .entry(shown)
+                .or_insert_with(|| {
+                    order.push(shown);
+                    Vec::new()
+                })
+                .push(hit);
+            if seen.insert(*s_idx) {
+                members.entry(shown).or_default().push(*s_idx);
+            }
+        }
+        if let Some(sorted) = sort_group(&order, &grouped, |hit| scores(hit), sort, tblastx) {
+            order = sorted.hits.iter().map(|&group| order[group]).collect();
+        }
+        order
+            .iter()
+            .flat_map(|shown| members.remove(shown).unwrap_or_default())
+            .collect()
+    }
+}
+
+/// The subject whose hit shows each of one query's hits, whose subjects are `s_idxs` in the
+/// report's order: its own, or, for a subject whose first hit follows a hit of subject `previous`
+/// and whose hits `joins(previous, s_idx)` shows in `previous`'s hit, the subject that shows
+/// `previous`'s (asked where the subject changes, once per subject). [`QueryGroup::new`] and
+/// [`QueryGroup::read_order`] group by it.
+fn shown_subjects(
+    s_idxs: impl IntoIterator<Item = u32>,
+    joins: impl Fn(u32, u32) -> bool,
+) -> Vec<u32> {
+    let mut shown_in: HashMap<u32, u32> = HashMap::new();
+    let mut previous: Option<(u32, u32)> = None;
+    s_idxs
+        .into_iter()
+        .map(|s_idx| {
+            let shown = match previous {
+                Some((same, shown)) if same == s_idx => shown,
+                _ => match shown_in.get(&s_idx) {
+                    Some(&shown) => shown,
+                    None => {
+                        let shown = match previous {
+                            Some((before, shown)) if joins(before, s_idx) => shown,
+                            _ => s_idx,
+                        };
+                        shown_in.insert(s_idx, shown);
+                        shown
+                    }
+                },
+            };
+            previous = Some((s_idx, shown));
+            shown
+        })
+        .collect()
+}
+
+/// `hit_sort::sort_query_hits` of a group's subjects `order`, each with its hits `hits` (in the
+/// order of the rows) and the values of a hit `scores`: the subjects (indices of `order`) and
+/// each one's hits in the order of `-sorthits` and `-sorthsps`, or `None` (nothing read) where
+/// `sort` sorts nothing. [`QueryGroup::sort`] and [`QueryGroup::read_order`] sort by it.
+fn sort_group<T>(
+    order: &[u32],
+    hits: &HashMap<u32, Vec<T>>,
+    scores: impl Fn(&T) -> super::hit_sort::HspScores,
+    sort: super::hit_sort::ReportSort,
+    tblastx: bool,
+) -> Option<super::hit_sort::SortedHits> {
+    if !sort.sorts() {
+        return None;
+    }
+    let scores: Vec<Vec<super::hit_sort::HspScores>> = order
+        .iter()
+        .map(|s_idx| hits[s_idx].iter().map(&scores).collect())
+        .collect();
+    super::hit_sort::sort_query_hits(sort, tblastx, &scores)
 }
 
 /// The parts of one program's per-query report (`write`).

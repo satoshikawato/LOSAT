@@ -13362,6 +13362,10 @@ fn run_resolved_in_pool(
     let places_reads = format_plans
         .first()
         .is_some_and(|outfmt| outfmt.places_subject_reads());
+    let pairwise_first = matches!(
+        format_plans.first(),
+        Some(BlastpReport::Text(OutputFormat::Pairwise))
+    );
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
@@ -13412,13 +13416,44 @@ fn run_resolved_in_pool(
                                 // The first format writes the texts where it reads each
                                 // subject (`places_subject_reads`), else before the report.
                                 if places_reads {
+                                    // The pairwise report reads its subjects in the order of
+                                    // its sorted groups (`QueryGroup::read_order` of the rows'
+                                    // hits, `-sorthits`), the other formats in their rows' order.
+                                    let ranks: Vec<usize> = if pairwise_first {
+                                        let hits = collect_hits_and_methods_from_hit_lists(
+                                            shown,
+                                            query,
+                                            &engine_counts,
+                                        );
+                                        crate::report::x_pairwise_par::QueryGroup::read_order(
+                                            hits.into_iter().map(|(hit, _, seqalign_num_ident)| {
+                                                (hit.s_idx, (hit, seqalign_num_ident))
+                                            }),
+                                            |(hit, seqalign_num_ident)| {
+                                                crate::report::hit_sort::HspScores::of_hit(
+                                                    hit,
+                                                    *seqalign_num_ident,
+                                                )
+                                            },
+                                            |previous, s_idx| {
+                                                crate::report::db_subject::rank_joins_as_copy(
+                                                    &titles.parsed,
+                                                    previous as usize,
+                                                    s_idx as usize,
+                                                )
+                                            },
+                                            args.sort,
+                                            false,
+                                        )
+                                        .into_iter()
+                                        .map(|rank| rank as usize)
+                                        .collect()
+                                    } else {
+                                        fetched.collect()
+                                    };
                                     subject_reads.set(
                                         query,
-                                        titles.subject_read_texts(
-                                            database,
-                                            fetched,
-                                            plural_names,
-                                        )?,
+                                        titles.subject_read_texts(database, ranks, plural_names)?,
                                     );
                                 } else {
                                     let messages = titles.prefetch_messages(database, fetched)?;

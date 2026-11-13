@@ -922,6 +922,51 @@ fn tabular_subject_ids(
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
 // the formatted result contains full aligned protein strings and the
 // translated subject nucleotide endpoints.
+/// The 1-based subject coordinates of the row of `hsp` (`pairwise_hits`) in a subject of
+/// `subject_len` nucleotides: those of its frame's codons, from the end of the minus strand.
+fn subject_endpoints(
+    hsp: &super::search_gapped::GappedHsp,
+    subject_len: usize,
+) -> Result<(i32, i32)> {
+    let frame = i32::from(hsp.frame);
+    let subject_len = i32::try_from(subject_len)?;
+    Ok(if frame > 0 {
+        (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
+    } else {
+        (
+            subject_len - 3 * hsp.s_start + frame + 1,
+            subject_len - 3 * hsp.s_end + frame + 2,
+        )
+    })
+}
+
+/// The values of the outfmt 0 row of `linked` with its payload `payload` in a subject of
+/// `subject_len` nucleotides (`pairwise_hits`) that the report's sorts read (`HspScores::of`),
+/// without making the row, for the model of the reads (`TblastnDatabase::subject_read_texts`):
+/// the payload's bit score and columns, the linked E-value, the engine's identities (the row's
+/// `seqalign_num_ident`) and the row's coordinates (`subject_endpoints`). The records' offsets of
+/// a ranged query move every HSP of the query alike (a database subject has none), which no sort
+/// reads, and are left out.
+pub(super) fn hsp_scores(
+    linked: &super::stage_d_linking::LinkedHsp,
+    payload: &super::stage_d_results::KappaHspPayload,
+    subject_len: usize,
+) -> Result<crate::report::hit_sort::HspScores> {
+    let hsp = &linked.hsp;
+    let (s_start, s_end) = subject_endpoints(hsp, subject_len)?;
+    Ok(crate::report::hit_sort::HspScores::of_values(
+        payload.bit_score,
+        linked.evalue,
+        usize::try_from(payload.num_ident)?,
+        payload.align_length,
+        (
+            usize::try_from(hsp.q_start + 1)?,
+            usize::try_from(hsp.q_end)?,
+        ),
+        (usize::try_from(s_start)?, usize::try_from(s_end)?),
+    ))
+}
+
 /// The final HSP list with rendered alignments, in the order of the tabular rows.
 #[allow(clippy::too_many_arguments)]
 fn pairwise_hits(
@@ -976,15 +1021,7 @@ fn pairwise_hits(
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // translated coordinates use three nucleotide letters per
                 // residue and reverse strand endpoints run in descending order.
-                let subject_len = i32::try_from(subject_seq.len())?;
-                let (s_start, s_end) = if frame > 0 {
-                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                } else {
-                    (
-                        subject_len - 3 * hsp.s_start + frame + 1,
-                        subject_len - 3 * hsp.s_end + frame + 2,
-                    )
-                };
+                let (s_start, s_end) = subject_endpoints(hsp, subject_seq.len())?;
                 let (qseq, sseq) = aligned_sequences(
                     query,
                     subject_seq,

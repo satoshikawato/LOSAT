@@ -10369,6 +10369,9 @@ fn run_in_pool(
                 let places = output_formats
                     .first()
                     .is_some_and(|format| format.places_subject_reads());
+                // The pairwise report reads its subjects in the order of its `-sorthits`.
+                let pairwise = matches!(output_formats.first(), Some(BlastnOutputFormat::Pairwise))
+                    .then(|| args.formatting.report_sort());
                 let query_fetch = |query: usize,
                                    shown: &[Option<BlastnHitList>],
                                    reads: &mut [QueryReads]|
@@ -10376,7 +10379,8 @@ fn run_in_pool(
                     if !places {
                         return database.prefetch_messages(&titles, shown);
                     }
-                    reads[query] = database.subject_read_texts(&titles, shown, plural_names)?;
+                    reads[query] =
+                        database.subject_read_texts(&titles, shown, plural_names, pairwise)?;
                     Ok(Vec::new())
                 };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);

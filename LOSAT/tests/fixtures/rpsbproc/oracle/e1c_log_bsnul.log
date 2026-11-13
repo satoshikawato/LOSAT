@@ -1,0 +1,2 @@
+Error: (CStringException::eConvert) Cannot convert string '1x' to double (m_Pos = 1)
+Error: (106.15) Application's initialization failed (CStringException::eConvert) Cannot convert string '1x' to double (m_Pos = 1)

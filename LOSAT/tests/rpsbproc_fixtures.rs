@@ -3,7 +3,8 @@
 //! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast 2.17.0
 //! `-outfmt 11` of E. coli K-12 MG1655 proteins against CDD v3.22, the data files are CDD v3.22
 //! cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
-//! error and exit status (and the `-o` file); a `refuse` case is refused by LOSAT (exit 1, the
+//! error and exit status (and the `-o` file `out.txt` and the `-logfile` file `log.txt`); a
+//! `refuse` case is refused by LOSAT (exit 1, the
 //! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
 //! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md). NCBI is not
 //! run here.
@@ -104,12 +105,33 @@ fn cases() -> Vec<[String; 5]> {
         .collect()
 }
 
-/// Makes the data directory of a case's `setup` in `dir`: `data-with:<a>+<b>`, the directory
-/// `<b>/` holding the data files with those of `data_with/<a>/` and then of `data_with/<b>/` in
-/// their place; `data-without:<file>`, `data_missing/` without that file.
+/// Makes the files of a case's `setup` in `dir`, its parts separated by `,`: `data-with:<a>+<b>`,
+/// the directory `<b>/` holding the data files with those of `data_with/<a>/` and then of
+/// `data_with/<b>/` in their place; `data-without:<file>`, `data_missing/` without that file;
+/// `conf:<file>`, `conf/<file>` as `c.ini` (for `-conffile c.ini`); `ini:<file>`, `conf/<file>`
+/// as `rpsbproc.ini`; `ncbirc:<file>`, `conf/<file>` as `.ncbirc`. The files that a run makes
+/// and the registry files of the case before are removed first.
 fn set_up(dir: &Path, setup: &str) {
-    let _ = fs::remove_file(dir.join("out.txt"));
+    for made in ["out.txt", "log.txt", "c.ini", "rpsbproc.ini", ".ncbirc"] {
+        let _ = fs::remove_file(dir.join(made));
+    }
     let _ = fs::remove_dir_all(dir.join("data_missing"));
+    for part in setup.split(',') {
+        set_up_part(dir, part);
+    }
+}
+
+/// One part of `set_up`.
+fn set_up_part(dir: &Path, setup: &str) {
+    for (kind, name) in [
+        ("conf:", "c.ini"),
+        ("ini:", "rpsbproc.ini"),
+        ("ncbirc:", ".ncbirc"),
+    ] {
+        if let Some(file) = setup.strip_prefix(kind) {
+            fs::copy(fixtures().join("conf").join(file), dir.join(name)).unwrap();
+        }
+    }
     if let Some(with) = setup.strip_prefix("data-with:") {
         let layers: Vec<&str> = with.split('+').collect();
         let target = dir.join(layers[layers.len() - 1]);
@@ -156,14 +178,15 @@ fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
     assert_eq!(status, rc, "{case}: exit status");
 }
 
-#[test]
-fn rpsbproc_gives_ncbis_bytes() {
-    let run_dir = RunDir::new("compare");
+/// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `oracle/`: the
+/// number of rows.
+fn compare_rows(stem: &str, usage: &str) -> usize {
+    let run_dir = RunDir::new(stem);
     let dir = &run_dir.0;
     let oracle = fixtures().join("oracle");
     let mut compared = 0;
-    for [case, usage, stdin, setup, arguments] in cases() {
-        if usage != "compare" {
+    for [case, row_usage, stdin, setup, arguments] in cases() {
+        if row_usage != usage {
             continue;
         }
         set_up(dir, &setup);
@@ -171,17 +194,34 @@ fn rpsbproc_gives_ncbis_bytes() {
         let words: Vec<&str> = arguments.split(' ').collect();
         let (out, err, status) = rpsbproc(dir, &words, stdin.as_deref());
         assert_same(&oracle, &case, &out, &err, status);
-        let outfile = oracle.join(format!("{case}.outfile"));
-        if outfile.exists() {
+        for (suffix, made) in [("outfile", "out.txt"), ("log", "log.txt")] {
+            let expected = oracle.join(format!("{case}.{suffix}"));
+            let got = fs::read(dir.join(made)).ok();
             assert_eq!(
-                fs::read(dir.join("out.txt")).unwrap(),
-                fs::read(outfile).unwrap(),
-                "{case}: -o file"
+                got,
+                fs::read(&expected).ok(),
+                "{case}: the file {made} (expected {})",
+                expected.display()
             );
         }
         compared += 1;
     }
-    assert_eq!(compared, 132);
+    compared
+}
+
+#[test]
+fn rpsbproc_gives_ncbis_bytes() {
+    assert_eq!(compare_rows("compare", "compare"), 183);
+}
+
+// The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
+// standard output, where the report's part of a line that NCBI's `cout` keeps in glibc's buffer
+// (of `st_blksize`, 4096 for a pipe on Linux) comes after them (`rpsbproc::NcbiStream::Cout`).
+// NCBI's builds are Linux builds; the other platforms' buffers are not NCBI's.
+#[cfg(target_os = "linux")]
+#[test]
+fn rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux() {
+    assert_eq!(compare_rows("linux", "linux"), 1);
 }
 
 // The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and
@@ -221,9 +261,10 @@ fn rpsbproc_refuses_what_it_does_not_give() {
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
 // prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), `-help` LOSAT's help, NCBI's toolkit
-// words such as `-dryrun` are refused with the other programs' message, an unknown word is
-// named as it was given, and a file name that is not UTF-8 is refused before anything is
-// written.
+// words that LOSAT does not run (`-version-full`) are refused with the other programs'
+// message, `-dryrun=1` is an unknown word as in NCBI (`-dryrun` is not an argument), an
+// unknown word is named as it was given, and a file name that is not UTF-8 is refused before
+// anything is written.
 #[test]
 fn rpsbproc_command_line() {
     let run_dir = RunDir::new("cli");
@@ -238,12 +279,26 @@ fn rpsbproc_command_line() {
     let (out, _, status) = rpsbproc(dir, &["-help"], None);
     assert_eq!(status, 0);
     assert!(String::from_utf8(out).unwrap().contains("--infile"));
-    let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-d", "data", "-dryrun"], None);
+    let (out, err, status) = rpsbproc(
+        dir,
+        &["-i", "arch/one.asn", "-d", "data", "-version-full"],
+        None,
+    );
     assert!(out.is_empty());
     let err = String::from_utf8(err).unwrap();
     assert_eq!(status, 2, "{err}");
     assert!(
-        err.contains("the NCBI C++ Toolkit option -dryrun is not supported by LOSAT's rpsbproc"),
+        err.contains(
+            "the NCBI C++ Toolkit option -version-full is not supported by LOSAT's rpsbproc"
+        ),
+        "{err}"
+    );
+    let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-dryrun=1"], None);
+    assert!(out.is_empty());
+    let err = String::from_utf8(err).unwrap();
+    assert_eq!(status, 2, "{err}");
+    assert!(
+        err.contains("unknown option or argument '-dryrun=1'"),
         "{err}"
     );
     let (_, _, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-m", "xx"], None);
@@ -325,6 +380,20 @@ fn rpsbproc_refuses_reader_variables() {
         let (status, err) = run(name, value, input);
         assert_eq!(status, 0, "{name}={value}: {err}");
     }
+    // A dry run reads no archive (NCBI rpsbproc 0.5.1 passes with these variables: line RG E1c
+    // review 1, `r_dry_serial`).
+    let output = command(dir)
+        .env("SERIAL_VERIFY_DATA_READ", "no")
+        .args(["-i", "arch/one.asn", "-d", "data", "-dryrun"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{err}");
+    assert!(
+        err.ends_with("Dryrun passed, all resources are present and loaded successfully.\n"),
+        "{err}"
+    );
 }
 
 // `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 9: a failed write of the report stops LOSAT with

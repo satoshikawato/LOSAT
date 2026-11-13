@@ -2,7 +2,7 @@
 //! refuses by name, against the readers themselves.
 
 use super::*;
-use crate::cli::{try_parse_from, xml_help_refusal, xml_help_text, Cli};
+use crate::cli::{run_refusal, try_parse_from, xml_help_refusal, xml_help_text, Cli, RUN_REFUSALS};
 use clap::error::ErrorKind;
 use std::ffi::OsString;
 
@@ -94,9 +94,36 @@ fn the_xml_keeps_the_arguments_that_the_parser_reads() {
                         || text.contains(&format!("unsupported BLASTX option '-{name}'"))
                 }
             };
-            assert_eq!(kept, !refused, "{program} -{name}");
+            // The arguments whose run LOSAT refuses whatever their value pass the parser.
+            let run_refused = RUN_REFUSALS
+                .iter()
+                .any(|refusal| refusal.0 == program && refusal.1 == name);
+            assert!(!(refused && run_refused), "{program} -{name}");
+            assert_eq!(kept, !refused && !run_refused, "{program} -{name}");
         }
     }
+    // Each run refusal is an argument of NCBI's XML of its program.
+    for (program, name, _) in RUN_REFUSALS {
+        assert!(
+            ncbi_argument_names(program)
+                .iter()
+                .any(|(found, _)| found == name),
+            "{program} -{name}"
+        );
+    }
+}
+
+// The run refusals' texts (`run_refusal`), which the checks of the runs write.
+#[test]
+fn run_refusals_name_the_argument_and_the_program() {
+    assert_eq!(
+        run_refusal("BLASTP", "use_sw_tback"),
+        "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's BLASTP"
+    );
+    assert_eq!(
+        run_refusal("TBLASTN", "ungapped"),
+        "-ungapped (an ungapped search) is not supported by LOSAT's TBLASTN"
+    );
 }
 
 // The XML is NCBI's lines in NCBI's order, of which only whole elements of the arguments refused

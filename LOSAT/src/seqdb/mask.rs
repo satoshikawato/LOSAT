@@ -18,7 +18,7 @@ use crate::ncbi_str::string_to_int;
 
 use super::column::{Blob, MASK_DATA_TITLE};
 use super::volume::Volume;
-use super::{SeqDb, SeqDbError};
+use super::{SeqDb, SeqDbError, SeqLocation};
 
 /// A filtering algorithm of the database (`GetMaskAlgorithmDetails`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -606,7 +606,7 @@ impl MaskAlgorithms {
     // }
     // ```
     /// `GetMaskAlgorithmDetails`. An id the database does not have gives NCBI's text
-    /// ("Filtering algorithm ID <id> is not supported." and the list of algorithms) in
+    /// ("Filtering algorithm ID `<id>` is not supported." and the list of algorithms) in
     /// [`SeqDbError::Range`].
     pub fn details(&self, id: i32) -> Result<MaskAlgorithm, SeqDbError> {
         let Some((description, source)) = self.id_to_desc.get(&id) else {
@@ -920,7 +920,9 @@ impl SeqDb {
     //         int vol_algo_id = -1;
     // ```
     /// `GetMaskData`: the ranges that the algorithm `algo_id` (a database-wide id, see
-    /// [`MaskAlgorithms::ids`]) masked in the sequence `ordinal`.
+    /// [`MaskAlgorithms::ids`]) masked in the sequence at `at` (`SeqDb::locate_oid`: NCBI's
+    /// `FindVol`, whose `OID not found` NCBI throws here after it reads the algorithms, which
+    /// a caller has read before it finds an OID).
     ///
     /// No ranges are returned (as in NCBI) when the sequence's volume has no mask column or
     /// the sequence has no mask data. A sequence with mask data in a volume that does not
@@ -930,12 +932,13 @@ impl SeqDb {
     /// The ranges of a mask column read from its `.?xb` alone are byte-reversed, as NCBI
     /// reads them (line SW, SW8 DECISIONS 40): unsorted, inverted or past the sequence, so
     /// a caller that indexes letters must check them ([`MaskRanges::Ranges`]).
-    pub fn mask_ranges(&self, ordinal: u32, algo_id: i32) -> Result<MaskRanges, SeqDbError> {
+    pub fn mask_ranges_at(&self, at: SeqLocation, algo_id: i32) -> Result<MaskRanges, SeqDbError> {
         let algorithms = self.mask_algorithms()?;
-        if ordinal >= self.num_seqs() {
-            return Err(SeqDbError::Range("OID not found".to_string()));
-        }
-        let (volume_index, volume_oid) = self.find_volume(ordinal)?;
+        let SeqLocation {
+            volume: volume_index,
+            vol_oid: volume_oid,
+            ..
+        } = at;
         let volume = &self.volumes[volume_index];
         let Some(column) = volume.mask_column()? else {
             return Ok(MaskRanges::Ranges(Vec::new()));

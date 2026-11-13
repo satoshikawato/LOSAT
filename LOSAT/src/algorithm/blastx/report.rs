@@ -413,12 +413,7 @@ pub(crate) fn alignment(
     // of the rows (a stored gap character of the subject is one).
     let mut gaps = 0;
     let mut subject_stored_gaps = Vec::new();
-    let script = if hsp.edit_script.is_empty() {
-        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
-    } else {
-        hsp.edit_script.clone()
-    };
-    for op in script {
+    for op in display_script(hsp)? {
         let (count, consume_q, consume_s) = match op {
             GapEditOp::Sub(n) => (n, true, true),
             GapEditOp::Ins(n) => (n, true, false),
@@ -705,6 +700,48 @@ pub(crate) fn alignment(
         subject_stored_gaps,
     })
 }
+
+/// The operations of the display alignment of `hsp` (`alignment`, a column for each letter of an
+/// operation): its edit script, or one substitution of its query span without one.
+fn display_script(hsp: &Hsp) -> Result<Vec<GapEditOp>> {
+    let raw = &hsp.hsp;
+    Ok(if hsp.edit_script.is_empty() {
+        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
+    } else {
+        hsp.edit_script.clone()
+    })
+}
+
+/// The values of the outfmt 0 row of `hsp`, of a query of `query_length` letters
+/// (`pairwise_hits`), that the report's sorts read (`HspScores::of`), without making the row, for
+/// the model of the reads (`ReportedSubjects::fetch_by_query`): the row's columns (those of
+/// `display_script`, `alignment`'s rows), `alignment`'s coordinates (`query_endpoints` and the
+/// subject's), the engine's identities (the row's `seqalign_num_ident`). The records' offsets of
+/// a ranged query move every HSP of the query alike (a database subject has none), which no sort
+/// reads, and are left out.
+pub(crate) fn hsp_scores(
+    hsp: &Hsp,
+    query_length: usize,
+) -> Result<crate::report::hit_sort::HspScores> {
+    let raw = &hsp.hsp;
+    let length = display_script(hsp)?
+        .iter()
+        .map(|op| op.num() as usize)
+        .sum();
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    Ok(crate::report::hit_sort::HspScores::of_values(
+        hsp.bit_score,
+        hsp.evalue,
+        hsp.identity,
+        length,
+        (usize::try_from(qstart)?, usize::try_from(qend)?),
+        (
+            usize::try_from(raw.s_start + 1)?,
+            usize::try_from(raw.s_end)?,
+        ),
+    ))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
 // ```c++
 // CRef<CSeq_id> s_ReplaceLocalId(const CBioseq_Handle& bh, CConstRef<CSeq_id> sid_in, bool parse_local)
@@ -1021,6 +1058,16 @@ impl ShownSubjects<'_> {
             ShownSubjects::Fasta { .. } => &[],
         }
     }
+
+    /// The texts of the subjects that the query `ordinal`'s report reads one by one, which its
+    /// writer places where it reads each (`ReportedSubjects::query_reads`); empty otherwise.
+    pub(crate) fn query_reads(&self, ordinal: usize) -> &crate::report::query_warnings::QueryReads {
+        static NONE: crate::report::query_warnings::QueryReads = Vec::new();
+        match self {
+            ShownSubjects::Database { reported, .. } => reported.query_reads(ordinal),
+            ShownSubjects::Fasta { .. } => &NONE,
+        }
+    }
 }
 
 /// The records of a subject set whose ids `-parse_deflines` read, by subject index: as subjects
@@ -1308,6 +1355,11 @@ pub(super) fn render_queries_with(
             // ```
             stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
+            // The texts of the subjects that the query's rows read one by one, written where they
+            // read each (`ReadCursor`, the query's only).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
             // ```c++
             //               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
@@ -1443,9 +1495,21 @@ pub(super) fn render_queries_with(
                     let shown_subject = ShownSubject {
                         ids: shown.subject_ids(subject, list.oid),
                     };
+                    let mut read = false;
                     for hsp in &list.hsps {
                         if !has_seqalign(hsp, options.gapped) {
                             continue;
+                        }
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                        // ```c++
+                        //        		const CBioseq_Handle& subject_bh =
+                        //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                        // ```
+                        // The subject's first row loads it where the query's batch did not
+                        // prefetch it: the texts of its taxonomy lookups follow the rows before it.
+                        if let (Some(reads), false) = (reads.as_mut(), read) {
+                            read = true;
+                            reads.subject_read(0, list.oid as u32, &mut *writer, &mut *stderr)?;
                         }
                         let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                         let values: Vec<_> = options
@@ -1464,6 +1528,10 @@ pub(super) fn render_queries_with(
                         }
                         next_hsp += 1;
                     }
+                }
+                // A text whose read the rows did not place comes after them.
+                if let Some(reads) = reads.as_mut() {
+                    reads.before_query(1, &mut *writer, &mut *stderr)?;
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
                 // ```c++
@@ -1526,6 +1594,9 @@ fn write_pairwise(
     let mut valid = Vec::new();
     let mut skipped = Vec::new();
     let mut warnings = Vec::new();
+    // The texts of the subjects that each query's report reads one by one, which the writer
+    // places where it reads each (`ShownSubjects::query_reads`).
+    let mut reads = Vec::new();
     for batch in batches {
         for qidx in 0..batch.queries.len() {
             let absolute = batch.query_ordinal + qidx;
@@ -1575,6 +1646,7 @@ fn write_pairwise(
             let mut query_warnings = query_warning(options, query, batch.search_skipped);
             query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
             warnings.push(query_warnings);
+            reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
             valid.push(first.is_some());
             skipped.push(batch.search_skipped);
         }
@@ -1634,6 +1706,7 @@ fn write_pairwise(
         writer,
         stderr,
         &warnings,
+        &reads,
         &config,
         &qinfo,
         &valid,
@@ -1751,6 +1824,16 @@ pub(super) fn pairwise_hits(
                         // and the subject's stored gap characters make.
                         seqalign_num_ident: hsp.identity,
                     });
+                    // The model of the reads sorts by `hsp_scores` of the batch's query length
+                    // without the rows (`ReportedSubjects::fetch_by_query`): the row's values
+                    // where the records' offsets move nothing.
+                    debug_assert!(
+                        query.placement().offset != 0
+                            || subject.placement().offset != 0
+                            || hsp_scores(hsp, batch.prepared.original_lengths[qidx]).ok()
+                                == hits.last().map(crate::report::hit_sort::HspScores::of),
+                        "BLASTX hsp_scores differs from its row"
+                    );
                 }
             }
         }

@@ -425,6 +425,7 @@ pub fn LOSAT::api::run(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &mut [(&str,
 pub fn LOSAT::api::run_batches<'a>(&'a LOSAT::api::Search, LOSAT::api::Inputs<'a>) -> core::result::Result<LOSAT::api::Batches<'a>, LOSAT::api::Error>
 pub fn LOSAT::api::run_blastdbcmd(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_collect(&LOSAT::api::Search, LOSAT::api::Inputs<'_>, &[&str]) -> core::result::Result<LOSAT::api::Outcome, LOSAT::api::Error>
+pub fn LOSAT::api::run_convert2blastmask(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_dustmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_makeblastdb(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>
 pub fn LOSAT::api::run_segmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), LOSAT::api::Error>

@@ -89,10 +89,9 @@ impl TblastnDatabase {
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
-        // NCBI's choice of its Seq-ids.
-        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
-        shared::restrict_database(&mut db, name, list, diagnostics, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b).
+        let parsed_seqids =
+            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -157,10 +156,10 @@ impl TblastnDatabase {
         self.db.list_taxids()
     }
 
-    /// The OIDs of the volumes (`SeqDb::num_oids`): none is the database whose first query
-    /// batch fails, also with a list or an alias file's range or `NSEQ`.
-    pub(super) fn num_oids(&self) -> u32 {
-        self.db.num_oids()
+    /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
+    /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
+    pub(super) fn first_oid_read_fails(&self) -> bool {
+        self.db.first_oid_read_fails()
     }
 
     /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
@@ -274,6 +273,71 @@ impl TblastnDatabase {
                 (reported.ordinals[rank], reported.parsed_subject(rank))
             });
         shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
+    }
+
+    /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the
+    /// first read of each subject that writes one, with its rank, where a query's report reads
+    /// its subjects one by one: in the order of the hit lists, or, for the pairwise report
+    /// (`pairwise`, its `-sorthits` and `-sorthsps`), in the order of its sorted groups
+    /// (`QueryGroup::read_order` of the rows' hits: each list's HSPs in the reports' order,
+    /// `stage_d_results::evalue_order`, with the values of their rows,
+    /// `stage_e_report::hsp_scores`).
+    pub(super) fn subject_read_texts(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+        rows: SubjectFetch,
+        rows_open: bool,
+        pairwise: Option<crate::report::hit_sort::ReportSort>,
+    ) -> Result<crate::report::query_warnings::QueryReads> {
+        let lists = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| reads_subject(list, rows));
+        let ranks: Vec<u32> = match pairwise {
+            Some(sort) => {
+                let mut hits = Vec::new();
+                for list in lists {
+                    let rank = list.oid as usize;
+                    anyhow::ensure!(
+                        list.payloads.len() == list.hsps.hsps.len(),
+                        "TBLASTN report payload count mismatch"
+                    );
+                    for index in super::stage_d_results::evalue_order(list) {
+                        hits.push((
+                            rank as u32,
+                            super::stage_e_report::hsp_scores(
+                                &list.hsps.hsps[index],
+                                &list.payloads[index],
+                                reported.lengths[rank],
+                            )?,
+                        ));
+                    }
+                }
+                crate::report::x_pairwise_par::QueryGroup::read_order(
+                    hits,
+                    |scores| *scores,
+                    |previous, rank| {
+                        crate::report::db_subject::rank_joins_as_copy(
+                            &reported.parsed,
+                            previous as usize,
+                            rank as usize,
+                        )
+                    },
+                    sort,
+                    false,
+                )
+            }
+            None => lists.map(|list| list.oid as u32).collect(),
+        };
+        let subjects = ranks.into_iter().map(|rank| {
+            (
+                rank,
+                reported.ordinals[rank as usize],
+                reported.parsed_subject(rank as usize),
+            )
+        });
+        shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
     }
 
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by

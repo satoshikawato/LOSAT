@@ -281,6 +281,36 @@ const xdropGapFinal: ParameterField = { flag: '-xdrop_gap_final', label: 'X-drop
 // display settings; they also set the hit list sizes, so a run may search twice, abi_v2.md §7).
 const numDescriptions: ParameterField = { flag: '-num_descriptions', label: 'Number of descriptions', ...integer };
 const numAlignments: ParameterField = { flag: '-num_alignments', label: 'Number of alignments', ...integer };
+// BLAST+'s options of the pairwise report (outfmt 0), which NCBI's page offers among the formatting
+// options of its results. `describe` lists the sort orders only in its help text; the names are its words.
+const lineLength: ParameterField = { flag: '-line_length', label: 'Alignment line length', ...integer };
+const SORT_ORDERS: readonly string[] = ['0', '1', '2', '3', '4'];
+const sortHits: ParameterField = {
+  flag: '-sorthits',
+  label: 'Sort hits by',
+  kind: 'choice',
+  choices: SORT_ORDERS,
+  choiceLabels: {
+    '0': '0: Sort by evalue',
+    '1': '1: Sort by bit score',
+    '2': '2: Sort by total score',
+    '3': '3: Sort by percent identity',
+    '4': '4: Sort by query coverage',
+  },
+};
+const sortHsps: ParameterField = {
+  flag: '-sorthsps',
+  label: 'Sort HSPs by',
+  kind: 'choice',
+  choices: SORT_ORDERS,
+  choiceLabels: {
+    '0': '0: Sort by hsp evalue',
+    '1': '1: Sort by hsp score',
+    '2': '2: Sort by hsp query start',
+    '3': '3: Sort by hsp percent identity',
+    '4': '4: Sort by hsp subject start',
+  },
+};
 
 const OTHER = 'Other Parameters';
 
@@ -376,6 +406,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         fields: [
           numDescriptions,
           numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
           { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' },
@@ -420,7 +453,19 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       {
         title: OTHER,
         placement: 'algorithm',
-        fields: [numDescriptions, numAlignments, threshold, windowSize, xdropUngap, xdropGap, xdropGapFinal, maxHsps],
+        fields: [
+          numDescriptions,
+          numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
+          threshold,
+          windowSize,
+          xdropUngap,
+          xdropGap,
+          xdropGapFinal,
+          maxHsps,
+        ],
       },
     ],
   },
@@ -453,6 +498,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         fields: [
           numDescriptions,
           numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
           threshold,
           windowSize,
           xdropUngap,
@@ -494,6 +542,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         fields: [
           numDescriptions,
           numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
           threshold,
           windowSize,
           xdropUngap,
@@ -529,7 +580,11 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
       { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
-      { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, xdropUngap] },
+      {
+        title: OTHER,
+        placement: 'algorithm',
+        fields: [numDescriptions, numAlignments, lineLength, sortHits, sortHsps, threshold, windowSize, xdropUngap],
+      },
     ],
   },
 ] satisfies ProgramDescriptor[]);

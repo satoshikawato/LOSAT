@@ -520,7 +520,7 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         chunk: None,
         output: Vec::new(),
     };
-    search_core(records, subjects, options, false, &mut pipeline, pool, prep)?;
+    search_core(records, subjects, options, &mut pipeline, pool, prep)?;
     Ok(pipeline.output)
 }
 
@@ -571,7 +571,7 @@ pub(crate) fn search_internal_observed<'a>(
         output: Vec::new(),
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(records, subjects, options, false, &mut pipeline, pool, None)
+        search_core(records, subjects, options, &mut pipeline, pool, None)
     })?;
     Ok(pipeline.output)
 }

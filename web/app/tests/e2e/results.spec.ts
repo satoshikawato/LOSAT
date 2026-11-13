@@ -901,6 +901,23 @@ for (const c of PROGRAM_CASES) {
 
 // --- outfmt 0 and the limits -------------------------------------------------------------------
 
+// -sorthits orders outfmt 0's hit list by its key: the subjects it aligns are its first ones in that order.
+test('with -sorthits, outfmt 0 shows the alignments of the first subjects in its order of -sorthits', async ({ page }) => {
+  const [total, shown] = BUILD_HAS_ENGINE ? [260, 250] : [3, 2];
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-sorthits').selectOption('1');
+  await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
+  await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
+  await run(page, 1);
+  await openRun(page, 1);
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(total));
+  await expect(page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]')).toContainText(
+    `outfmt 0 shows the alignments of the first ${shown} subjects of this query in its order of -sorthits`,
+  );
+});
+
 test('an HSP that outfmt 0 does not show, and a hit list that may have reached its limit', async ({ page }) => {
   // many.blastn of the outfmt 0 manifest: 260 subjects with hits, outfmt 0 shows the alignments
   // of the first 250 (BLAST+'s -num_alignments). The FakeEngine leaves its third subject out.

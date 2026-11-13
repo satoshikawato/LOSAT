@@ -516,6 +516,8 @@ class PsiblastOptions(TypedDict, total=False):
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
+    sum_stats: bool
+    """Use sum statistics"""
     evalue: float
     """Expectation value (E) threshold for saving hits [default: 10]"""
     threshold: float
@@ -544,6 +546,17 @@ class PsiblastOptions(TypedDict, total=False):
     max_hsps: int
     qcov_hsp_perc: float
     """Percent query coverage per hsp"""
+    culling_limit: int
+    """If the query range of a hit is enveloped by that of at least this many higher-scoring
+    hits, delete the hit"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
+    gap_trigger: float
+    """Number of bits to trigger gapping"""
     window_size: int
     """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
     suggestion]"""

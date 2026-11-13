@@ -75,7 +75,14 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
         Some(id) => SeqId::Db(id),
         None => SeqId::Local(&mask.id),
     };
-    write_packed_int(enc, &id, mask.intervals.iter().copied());
+    // The intervals are positions of the query, never negative (`TSeqPos` in NCBI).
+    write_packed_int(
+        enc,
+        &id,
+        mask.intervals
+            .iter()
+            .map(|&(from, to)| (from as u32, to as u32)),
+    );
     enc.end_list();
     enc.end_member();
     enc.member("frame", 1);
@@ -105,24 +112,14 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
 pub fn write_packed_int<E: Encoder>(
     enc: &mut E,
     id: &SeqId<'_>,
-    intervals: impl IntoIterator<Item = (i32, i32)>,
+    intervals: impl IntoIterator<Item = (u32, u32)>,
 ) {
     enc.variant("Seq-loc", "packed-int", 4);
     enc.begin_named("Packed-seqint");
     enc.begin_list(false);
     for (from, to) in intervals {
         enc.element();
-        enc.begin_sequence("Seq-interval");
-        enc.member("from", 0);
-        enc.int(from);
-        enc.end_member();
-        enc.member("to", 1);
-        enc.int(to);
-        enc.end_member();
-        enc.member("id", 3);
-        id.write(enc);
-        enc.end_member();
-        enc.end_sequence();
+        write_interval(enc, id, from, to);
     }
     enc.end_list();
     enc.end_named();
@@ -145,22 +142,30 @@ pub fn write_packed_int<E: Encoder>(
 ///     }
 /// }
 /// ```
-pub fn write_ranges_seq_loc<E: Encoder>(enc: &mut E, id: &SeqId<'_>, intervals: &[(i32, i32)]) {
+pub fn write_ranges_seq_loc<E: Encoder>(enc: &mut E, id: &SeqId<'_>, intervals: &[(u32, u32)]) {
     if let [(from, to)] = *intervals {
         enc.variant("Seq-loc", "int", 3);
-        enc.begin_sequence("Seq-interval");
-        enc.member("from", 0);
-        enc.int(from);
-        enc.end_member();
-        enc.member("to", 1);
-        enc.int(to);
-        enc.end_member();
-        enc.member("id", 3);
-        id.write(enc);
-        enc.end_member();
-        enc.end_sequence();
+        write_interval(enc, id, from, to);
         enc.end_variant();
     } else {
         write_packed_int(enc, id, intervals.iter().copied());
     }
+}
+
+/// One `Seq-interval` (`from`, `to` and `id`; no `strand`). `from` and `to` are `TSeqPos`,
+/// unsigned: `CObjectOStream::WriteUint4` writes a position above 2^31 - 1 as the unsigned
+/// number (convert2blastmask 2.17.0, `4294967295 - 4294967294` in the three formats; BER
+/// `02 05 00 ff ff ff ff`), which `big_int` writes too, and a smaller one as `int` does.
+fn write_interval<E: Encoder>(enc: &mut E, id: &SeqId<'_>, from: u32, to: u32) {
+    enc.begin_sequence("Seq-interval");
+    enc.member("from", 0);
+    enc.big_int(i64::from(from));
+    enc.end_member();
+    enc.member("to", 1);
+    enc.big_int(i64::from(to));
+    enc.end_member();
+    enc.member("id", 3);
+    id.write(enc);
+    enc.end_member();
+    enc.end_sequence();
 }

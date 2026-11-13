@@ -35,8 +35,17 @@ const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tbla
 const OWN_PARAGRAPHS: [&str; 4] = ["psiblast", "rpsblast", "rpsbproc", "makeblastdb"];
 
 /// The programs that refuse the NCBI C++ Toolkit options by name (`unknown_option_error`).
-const TOOLKIT_PROGRAMS: [&str; 8] = [
-    "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast", "rpsblast", "rpsbproc",
+const TOOLKIT_PROGRAMS: [&str; 10] = [
+    "blastn",
+    "blastp",
+    "blastx",
+    "tblastn",
+    "tblastx",
+    "psiblast",
+    "rpsblast",
+    "rpstblastn",
+    "rpsbproc",
+    "makeblastdb",
 ];
 
 /// The executables in the `bin` directory of NCBI BLAST+ 2.17.0 (`ncbi-blast-2.17.0+-x64-linux`,
@@ -133,11 +142,6 @@ fn documented(lines: &[(&str, &str)], program: &str, name: &str) -> bool {
             && documented(lines, "blastp", name))
 }
 
-/// `-version` is in the `UNPORTED_*_ARGS` lists as a guard for callers that reach the parser
-/// without `main` (the Web engine). On the command line `main` answers it before the parser
-/// (`ncbi_version_request`), so it is no refusal and the README does not list it.
-const ANSWERED_NOT_REFUSED: &str = "version";
-
 #[test]
 fn every_refused_option_is_in_the_readme_for_its_program() {
     let lines = refusal_lines();
@@ -165,7 +169,7 @@ fn every_refused_option_is_in_the_readme_for_its_program() {
     }
     let mut missing = Vec::new();
     for (program, names) in &lists {
-        for name in names.iter().filter(|name| **name != ANSWERED_NOT_REFUSED) {
+        for name in names {
             if !documented(&lines, program, name) {
                 missing.push(format!(
                     "{program}: the option -{name} is refused by LOSAT but README.md's \"What LOSAT refuses\" does not name it for {program}"
@@ -198,22 +202,23 @@ fn the_documented_toolkit_programs_refuse_the_toolkit_options() {
     );
 }
 
+// `-version` and the full versions are answered on the command line before the parser
+// (`ncbi_version_request`; blastdbcmd, dustmasker and segmasker in `ncbi_app::run_with`), so
+// they are no refusal and the README lists none of them (line RG item E3).
 #[test]
-fn version_is_answered_by_every_program_that_lists_it() {
-    for program in [
-        "blastn",
-        "blastp",
-        "blastx",
-        "tblastn",
-        "tblastx",
-        "psiblast",
-        "rpsblast",
-        "makeblastdb",
-    ] {
-        assert!(
-            ncbi_version_request(["losat", program, "-version"]).is_some(),
-            "{program} -version is not answered, so -{ANSWERED_NOT_REFUSED} is a refusal that README.md must list"
-        );
+fn the_versions_are_answered_by_every_program() {
+    for program in TOOLKIT_PROGRAMS {
+        for word in [
+            "-version",
+            "-version-full",
+            "-version-full-xml",
+            "-version-full-json",
+        ] {
+            assert!(
+                ncbi_version_request(["losat", program, word]).is_some(),
+                "{program} {word} is not answered, so it is a refusal that README.md must list"
+            );
+        }
     }
 }
 

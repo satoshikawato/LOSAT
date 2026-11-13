@@ -28,6 +28,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{Cin, Ostream};
 use crate::ncbi_app::{Diag, Tool};
+use crate::ncbi_str::with_commas;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
 /// The name in LOSAT's refusals.
@@ -341,32 +342,6 @@ fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
         }
         None => diag.refuse(&refusal(&error.to_string())),
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1841-1850
-// ```c++
-//     if ((flags & NStr::fWithCommas)) {
-//         int cnt = -1;
-//         do {
-//             if (++cnt == 3) {
-//                 *--pos = ',';
-//                 cnt = 0;
-//             }
-//             *--pos = '0' + value % 10;
-//             value /= 10;
-//         } while (value);
-// ```
-/// `n` in decimal with a comma between groups of three digits (`NStr::fWithCommas`).
-fn with_commas(n: u64) -> String {
-    let digits = n.to_string();
-    let mut text = String::with_capacity(digits.len() + digits.len() / 3);
-    for (at, digit) in digits.chars().enumerate() {
-        if at > 0 && (digits.len() - at).is_multiple_of(3) {
-            text.push(',');
-        }
-        text.push(digit);
-    }
-    text
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:533-573

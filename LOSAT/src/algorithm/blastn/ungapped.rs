@@ -203,7 +203,8 @@ pub fn cutoff_context_length_supported(context_length: usize) -> bool {
 /// `BlastInitialWordParametersUpdate` for an ungapped blastn search.
 ///
 /// `avg_subject_length` is the subject length that NCBI passes (the average length of the
-/// subjects, see [`average_subject_length_subject_set`] and [`average_subject_length_database`]),
+/// subjects, see [`average_subject_length_subject_set`] and
+/// [`SeqDb::average_length`](crate::seqdb::SeqDb::average_length)),
 /// `kbp_std` the ungapped Karlin block of the context, and `cutoff_score_max` the context's
 /// `hit_params->cutoffs[context].cutoff_score_max`.
 ///

@@ -495,6 +495,13 @@ impl PreparedXml {
                 searched: self.searched[q_idx],
                 masks: &masks,
             };
+            // Where NCBI loads the subject of each `Hit` (`HitSink::position`), for the texts
+            // of the subjects that the query's report reads one by one
+            // (`QueryWarnings::subject_read`).
+            let mut reads: Vec<(usize, u32)> = Vec::new();
+            let marks = warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx));
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 let lists = hitlist.lists();
                 ensure!(
@@ -514,6 +521,9 @@ impl PreparedXml {
                 for range in hits {
                     let first = usize::try_from(lists[range.start].oid)
                         .context("negative TBLASTN subject OID")?;
+                    if let Some(at) = sink.position().filter(|_| marks) {
+                        reads.push((at, first as u32));
+                    }
                     let names = self.subject_names[first]
                         .as_ref()
                         .context("names of a subject with hits")?;
@@ -545,14 +555,8 @@ impl PreparedXml {
                                 // translated coordinates use three nucleotide letters per
                                 // residue and reverse strand endpoints run in descending order.
                                 let subject_len = i32::try_from(subject_seq.len())?;
-                                let (s_start, s_end) = if frame > 0 {
-                                    (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
-                                } else {
-                                    (
-                                        subject_len - 3 * hsp.s_start + frame + 1,
-                                        subject_len - 3 * hsp.s_end + frame + 2,
-                                    )
-                                };
+                                let (s_start, s_end) =
+                                    super::stage_e_report::subject_endpoints(hsp, subject_len);
                                 // The rows, without the lower case of the masks.
                                 aligned_sequences_into(
                                     query_letters,
@@ -609,7 +613,13 @@ impl PreparedXml {
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_marked(
+                &buf,
+                &reads,
+                q_idx,
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
         }
         if ranges.epilog {

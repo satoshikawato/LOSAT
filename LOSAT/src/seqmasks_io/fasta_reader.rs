@@ -93,7 +93,7 @@ pub(crate) enum MaskReadError {
     /// The `std::bad_alloc` of a record whose `>?` lines state more residues than can be
     /// allocated.
     OutOfMemory,
-    /// What LOSAT refuses (the text before "is not supported by LOSAT's <program>"): a record
+    /// What LOSAT refuses (the text before `is not supported by LOSAT's <program>`): a record
     /// past NCBI's `TSeqPos` (`SeqInst::PastSeqPos`).
     Refused(String),
 }

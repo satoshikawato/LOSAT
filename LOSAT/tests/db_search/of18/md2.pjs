@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "md2",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/multi_def2.faa",
+  "number-of-letters": 150,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-13T12:49:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 49787,
+  "bytes-to-cache": 256,
+  "files": [
+    "md2.pdb",
+    "md2.phr",
+    "md2.pin",
+    "md2.pog",
+    "md2.pos",
+    "md2.pot",
+    "md2.psq",
+    "md2.ptf",
+    "md2.pto"
+  ]
+}

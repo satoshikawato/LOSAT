@@ -83,10 +83,12 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `15` | Single-file BLAST JSON | all five | all five (with `-subject` and `-db`) |
 | `16` | Single-file BLAST XML2 | all five | all five (with `-subject` and `-db`) |
 | `17` | Sequence Alignment/Map (SAM) | `blastn` only | `blastn` (with `-subject` and `-db`; `SQ` and `SR` as in NCBI) |
-| `18` | Organism Report | all five | not written |
+| `18` | Organism Report | all five | all five programs (with `-subject` and `-db`) |
 | `20` | Comma-separated values with header lines | all five | all five programs |
 
 Outfmt `17` (SAM, `blastn` only) is NCBI's document byte for byte except the `CL:` tag of its `@PG` line, which holds LOSAT's own command line (every argument followed by one space, as NCBI writes its own); a run without a command line (the library) has no `CL:` tag. NCBI writes the whole document when the search ends, and so does LOSAT, which holds the records as text until then. `-outfmt "17 SQ"` writes the target's letters in SEQ and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI.
+
+Outfmt `18` (the organism report, NCBI's "Tax BLAST report") groups each query's subjects by the taxid of each definition line under the names that the taxonomy database gives for it (`taxdb.bti` and `taxdb.btd`, found as for outfmt `13` to `16` below; a `-subject` record has taxid 0). As in NCBI BLAST+, a subject whose taxid the database does not know is left out but still widens the columns, a subject whose title is in an encoding that NCBI cannot read is left out without widening them, each definition line of a database sequence is a row of its own, and without a taxonomy database the report has the headers only. Where the identifiers, scores and E-values take more than 96 columns, NCBI's unsigned column width wraps and a line is padded with about 4 GiB of spaces; LOSAT writes the same bytes, holding the spaces as a count.
 
 Outfmt `13` and `14` write the report of the n-th query to `<base>_<n>.json` / `<base>_<n>.xml` next to `-out FILE` and a master file at `FILE` that lists them, with NCBI's names: the base is `FILE` without its extension if that is `.json` (13) or `.xml` (14), and the master file always uses the `.xml` rule and drops the directory (`-out o.json` with `-outfmt 13` lists `o.json_1.json`); `blastx` holds the side files in memory, like the document of `-outfmt 5`, 15 and 16, in the rare run in which a later query batch could still be refused. Outfmt `13` to `16` with `-db` write the scientific name of a sequence's taxid (`sciname`) when `taxdb.bti` is found as NCBI finds it: in the current directory, in `BLASTDB` (the environment variable, `~/.ncbirc` or `NCBI_CONFIG__BLAST__BLASTDB`), not in the `-db` directory. The other output formats never read it.
 
@@ -326,7 +328,7 @@ losat convert2blastmask -in masked.fna -masking_algorithm other -masking_options
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` or `blastx-fast` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7`/`10`/`20` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `10`=CSV, `11`=BLAST archive, `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out`, `15`=BLAST JSON and `16`=BLAST XML2, `17`=SAM (BLASTN only), `20`=CSV with header lines; custom tabular fields and `delim=` with `6`, `7`, `10` and `20` in every program. `1` to `4` and `18` are not written |
+| `-outfmt <spec>` | Integer, or `6`/`7`/`10`/`20` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `10`=CSV, `11`=BLAST archive, `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out`, `15`=BLAST JSON and `16`=BLAST XML2, `17`=SAM (BLASTN only), `18`=organism report, `20`=CSV with header lines; custom tabular fields and `delim=` with `6`, `7`, `10` and `20` in every program. `1` to `4` are not written |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
@@ -478,8 +480,9 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them, except where an item says that NCBI BLAST+ fails there too. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 **Output**
-- `-outfmt 1`, `2`, `3`, `4` and `18`: all five programs.
+- `-outfmt 1`, `2`, `3` and `4`: all five programs.
 - `-html`: all five programs.
+- `-outfmt 18` with a taxonomy database that names a taxid of a shown group with the text `<@bl_taxid@>` (NCBI BLAST+ writes an uninitialised number there), with a `./.ncbirc` that has a syntax error (NCBI's report stops there with an exception) or `[NCBI] .Inherits` (NCBI's report reads the files it names), and with a shown row of a database sequence whose empty title NCBI makes from its taxids and the taxonomy database (as outfmt `0` refuses it): all five programs, before the query batch's first byte.
 - `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.
 
 **Scoring and search settings**

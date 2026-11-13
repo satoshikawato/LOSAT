@@ -1,0 +1,21 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                              Zero taxid sp. (zero common) [zeroblast]                              
+ s2good    two                                                                         252   2e-70   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

@@ -582,6 +582,7 @@ impl PsiblastArgs {
             export_search_strategy: None,
             strategy: None,
             app: BlastpApp::Psiblast,
+            subject_taxdb: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {

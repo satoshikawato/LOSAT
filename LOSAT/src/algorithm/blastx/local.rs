@@ -586,7 +586,7 @@ fn write_run(
         report::write_prolog(writer, warnings, options, subjects, &shown).map_err(report_error)?;
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
-            document.start(&mut start);
+            document.document_mut().start(&mut start);
             writer.write_all(&start).map_err(output_error)?;
         }
         writer.flush().map_err(output_error)?;
@@ -965,7 +965,10 @@ fn search_database(
     for options in &mut resolved {
         options.query_range = query_range;
         options.filtered_empty = database.filtered_empty();
-        if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
+        if options
+            .tabular
+            .is_some_and(|spec| spec.looks_up_every_taxid())
+        {
             options.taxdb_found = database.taxdb_found();
         }
     }

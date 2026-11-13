@@ -1,205 +1,29 @@
 name: CI
 
-# Pull requests run the fast checks (no NCBI executable); pushes run them on main
-# and on the integration branch dev only. dev-head.yml starts a run of dev's head
-# (workflow_dispatch) when it has none: a merge made with the default token starts
-# no push run. The two-hour WASI matrix and the full TBLASTX output set run in
-# nightly.yml (schedule, workflow_dispatch) and in release-readiness.yml.
+# Throwaway measurement branch of ci-rust-speed s21 (2026-11-13): cargo --timings of the test build
+# as ci.yml's `rust-tests` does it, and of its two halves. Not for merging.
 on:
-  push:
-    branches: [main, dev]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A new push to a pull request cancels the run of its older head. On dev and main a run that has
-# started ends (a newer one waits for it): each run of dev (a person's merge, or dev-head.yml's
-# dispatch every four hours) gives a verdict on its commit. Until 2026-11, 95 of 165 such runs on
-# dev were cancelled by the next one; the runs of dev are a few a day (merges by Auto-merge start
-# none), against about 50 pull request runs.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  # The checks of `rust` other than cargo test; the tests are built in `rust-tests` and run in
-  # `rust-tests-run`, the public API check in `public-api`, and `rust` (the check the rulesets
-  # require) passes when all four jobs do.
-  rust-lint:
-    name: rust lint
+  timings:
+    name: timings (${{ matrix.arm }})
     runs-on: ubuntu-latest
-    # About twice the longest of 59 passing runs (21.8 min with a cold cache, 2026-11-11).
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: 1.92.0
-          components: clippy, rustfmt
-      # Every rust-cache step saves only on dev and main: a pull request's cache can be read only
-      # by runs of that pull request, and dev's copy serves every pull request into dev. Copies
-      # saved by pull requests filled the 10 GiB of Actions cache (2026-11-12: 106 caches, 71 of
-      # them for pull requests, 49 never read again), so that a cache unread for a day or two was
-      # evicted.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: LOSAT -> target
-          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
-      # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
-      # calls qsort for HSP ordering. This fail-fast ratchet prevents LOSAT from
-      # adding another project-owned native implementation boundary.
-      - name: Pure-Rust runtime boundary
-        run: python3 LOSAT/tests/check_pure_rust_runtime_boundary.py --root .
-      - name: Pure-Rust boundary checker tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pure_rust_runtime_boundary.py'
-      # No new blanket `#![allow(warnings ...)]`: it silences the clippy `-D warnings` gate below in
-      # its crate or module (SWEBOK 2026-11-04 audit, KA4). LOSAT/tests/lint_allow_warnings.tsv only shrinks.
-      - name: Lint-allow ratchet
-        run: python3 LOSAT/tests/check_lint_allow_ratchet.py --root .
-      - name: Lint-allow ratchet tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_lint_allow_ratchet.py'
-      # No reference between the programs under LOSAT/src/algorithm/ that
-      # LOSAT/tests/program_edges.tsv does not list, and none up the layering
-      # common < blastn < tblastx < blastp < tblastn < blastx (SWEBOK 2026-11-04 audit, KA3).
-      # Rows are added only by review, for an edge down the layering; remove a row when its
-      # edge goes (fewer edges are welcome).
-      - name: Program-edge ratchet
-        run: python3 LOSAT/tests/check_program_edges.py --root .
-      - name: Program-edge ratchet tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_program_edges.py'
-      # No NCBI counterpart: LOSAT/tests/db_search_manifest/ keeps one fixture list per program; a file over
-      # 512 KiB is split by row family before it reaches the 1 MB limit on committed files.
-      - name: Manifest size check
-        run: python3 LOSAT/tests/check_manifest_sizes.py --root .
-      - name: Manifest size check tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_manifest_sizes.py'
-      # No NCBI counterpart: CI wiring. Every test_*.py and test_*.js file is named in a `run:`
-      # command of a workflow that runs on push, pull request or schedule, or one it calls (SWEBOK
-      # 2026-11-04 audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a
-      # directory in python.yml.
-      - name: Tests in CI
-        run: python3 LOSAT/tests/check_tests_in_ci.py --root .
-      - name: Tests-in-CI checker tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_tests_in_ci.py'
-      - name: Public API checker tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_public_api.py'
-      - name: Release-candidate tooling tests
-        run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
-      - name: Release-candidate v0.2.0 tooling tests
-        run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v020.py LOSAT/tests/test_verify_release_archive_v020.py
-      - name: Regression tooling tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
-      # No NCBI counterpart: the one replacement of a checkout-path prefix (Owner 2026-11-05): the
-      # Stage G runs pass a run root of the frozen prefix's length, which outputs get back as the prefix.
-      - name: Frozen path prefix tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_frozen_paths.py'
-      - name: Drop-in corpus tooling tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_dropin_corpus.py'
-      # No NCBI counterpart: the merge of the coverage shards of nightly.yml (a report).
-      - name: Coverage summary tooling tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_coverage_summary.py'
-      # NCBI reference (598d8ae6): ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-      # x_PrintField(*iter); m_Ostream << "\n";
-      # The Gate A tools compare NCBI's and LOSAT's raw outfmt 6/7 bytes (set A of
-      # docs/release/v0.2.0_certification_plan.md, Gate A of the losat-gates skill):
-      # certify_integrated_runtime_v010.py drives the other four, which
-      # certify_platform_native_v010.py also imports. Their tests use small files and stand-in
-      # programs, so no search runs (under a second in all, 2026-11-07). The integrated driver
-      # keeps its evidence under /tmp, so its test needs the temporary directory there.
-      - name: Gate A certification tooling tests
-        run: |
-          python3 -m unittest discover -s LOSAT/tests -p 'test_compare_blastn_parity.py'
-          python3 -m unittest discover -s LOSAT/tests -p 'test_certify_blastn_v010.py'
-          python3 -m unittest discover -s LOSAT/tests -p 'test_audit_blastp_v010.py'
-          python3 -m unittest discover -s LOSAT/tests -p 'test_audit_tblastx_v010.py'
-          python3 -m unittest discover -s LOSAT/tests -p 'test_certify_integrated_runtime_v010.py'
-      # No NCBI counterpart: the A/B timing tool of the WASI builds (LOSAT/tests/README.md). Its
-      # tests run stand-in runners; the tool also calls node and git (both on the runner image).
-      - name: WASI benchmark tooling tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_benchmark_wasm_threading.py'
-      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-      # result *= expl(-z * z) / z;
-      # LOSAT's one mul_add emulates that long-double line; nothing else may fuse or
-      # reassociate floating-point operations (docs/agents/diagnostics.md, "Floating-point contract").
-      - name: Floating-point contract (sources and cargo configuration)
-        run: python3 LOSAT/tests/check_fp_contract.py source
-      - name: Floating-point contract checker tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_fp_contract.py'
-      # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
-      # x_PrintField(*iter); m_Ostream << "\n";
-      # The certification driver compares these raw bytes on Windows and macOS only
-      # when dispatched; its tests also bind frozen_mismatch_allowlist.json to the
-      # Gate A plan, so an entry that does not bind to the plan fails here first.
-      - name: Platform certification driver tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_certify_platform_native_v010.py'
-      # NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1094-1099
-      # BOOST_AUTO_TEST_CASE(testHSPListSort). Ported NCBI unit-test cases are
-      # cited above their Rust tests and counted in docs/evidence/ncbi_unit_cases.
-      - name: NCBI unit-case ledger
-        run: python3 LOSAT/tests/ncbi_unit_case_ledger.py check --root .
-      - name: Ledger checker tests
-        run: python3 -m unittest discover -s LOSAT/tests -p 'test_ncbi_unit_case_ledger.py'
-      # No NCBI counterpart: release bookkeeping. Pending CHANGELOG entries are one file per pull
-      # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
-      - name: Changelog fragments
-        run: python3 scripts/changelog_fragments.py check
-      # No NCBI counterpart: maintainer bookkeeping. Line and stage IDs cited in CHANGELOG.md,
-      # changelog.d/ and docs/ that have no row in docs/decisions/LINE_IDS.md, as warnings only.
-      - name: Line IDs
-        run: python3 scripts/line_ids.py check
-      - run: cd LOSAT && cargo fmt --check
-      - run: cd LOSAT && cargo clippy --locked --all-targets --all-features -- -D warnings
-      # No NCBI counterpart: the crate's rustdoc builds without a warning (SWEBOK 2026-11-04 audit,
-      # KA2/KA11; of the 47 warnings of 2026-11-08, 43 were fixed and 4 are allowed on the two items
-      # whose doc comment clap prints as help, which keeps their text). Every feature, as built on
-      # x86_64 Linux: wasm32-only and test-only items are not documented here.
-      - name: rustdoc (no warnings)
-        run: cd LOSAT && cargo doc --locked --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: -D warnings
-      # No NCBI counterpart: supply-chain checks of the dependencies (SWEBOK 2026-11-04 audit,
-      # KA13/KA15). The licenses, sources and bans of deny.toml over the three lock files, whose
-      # result changes only with the lock files. Not --locked: whether python/Cargo.lock is current
-      # is python.yml's check, which is not required; after clippy, so the `cargo metadata` of this
-      # step cannot rewrite a stale LOSAT/Cargo.lock before clippy --locked reads it. The
-      # advisories run in nightly.yml (job `audit`).
-      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
-        with:
-          tool: cargo-deny@0.20.2
-      - name: cargo deny (bans, licenses, sources)
-        run: |
-          status=0
-          for manifest in LOSAT/Cargo.toml web/adapter/Cargo.toml python/Cargo.toml; do
-            echo "::group::$manifest"
-            cargo deny --manifest-path "$manifest" --config deny.toml check bans licenses sources || status=1
-            echo "::endgroup::"
-          done
-          exit "$status"
-
-  # cargo test --all-features: the test binaries built once (`cargo nextest archive`), then run
-  # in three shards on three runners from that archive (`--partition count:k/3`: each test
-  # binary's tests in turn to the shards). Four vCPUs shaped like a runner's (two cores and
-  # their hyperthreads) stayed busy: the tests of all binaries packed by nextest ran only 10 %
-  # faster than cargo test's one binary at a time (2026-10-22); the blastp integration tests
-  # search a proteome pair dozens of times each. Until 2026-11 each of two shards built every
-  # test binary itself (9 min of a 15 to 34 min shard).
-  #
-  # The archive holds the test binaries, the `losat` binary the integration tests run and the
-  # examples some of them run (.github/nextest.toml). The shards extract it into LOSAT/target,
-  # the path it was built in: the tests name these files by compile-time paths
-  # (`env!("CARGO_BIN_EXE_losat")`, `env!("CARGO_MANIFEST_DIR")`), the same on every runner.
-  # The job id stays `rust-tests` so that rust-cache keeps the dependencies' cache key.
-  rust-tests:
-    name: cargo test (build)
-    runs-on: ubuntu-latest
-    # About twice the longest build of 60 passing runs (9.4 min, 2026-11-11) with a cold cache.
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arm: all
+            targets: ""
+          - arm: lib-tests
+            targets: "--lib"
+          - arm: rest
+            targets: "--bins --examples --test *"
     env:
-      # Optimized test code; the test profile keeps the dev profile's debug assertions and
-      # overflow checks. Set for the job, so that rust-cache's key (it hashes the CARGO_*
-      # variables it sees) keeps the dependencies built at this level.
       CARGO_PROFILE_TEST_OPT_LEVEL: '3'
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
@@ -207,235 +31,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
-      # cache-on-failure: a red push run still saves the dependencies it built (the crate's
-      # tests run after them), so that pull request shards do not build them cold until the
-      # next green push run.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: LOSAT -> target
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
-        with:
-          tool: cargo-nextest@0.9.148
-      - name: cargo nextest archive --all-features
+      - name: dependencies (fetch, build of the dependencies only)
         run: |
-          cd LOSAT && cargo nextest archive --locked --all-features \
-            --config-file ../.github/nextest.toml --archive-file ${{ runner.temp }}/tests.tar.zst
-      # nextest runs no doc tests. The crate has none yet (`running 0 tests`, 2026-11-04): the
-      # step stays so that the first doc example is run without a change here.
-      - name: cargo test --all-features --doc
-        run: cd LOSAT && cargo test --locked --all-features --doc
+          cd LOSAT && cargo fetch --locked
+          nproc; free -g
+      - name: cargo test --no-run --timings ${{ matrix.targets }}
+        run: |
+          cd LOSAT && cargo test --locked --all-features --no-run --timings ${{ matrix.targets }} 2>&1 | tail -40
+      - name: touch the crate, build again (dependencies warm, as with the cache)
+        run: |
+          cd LOSAT && rm -rf target/cargo-timings && touch src/lib.rs src/main.rs
+          start=$(date +%s); cargo test --locked --all-features --no-run --timings ${{ matrix.targets }} 2>&1 | tail -20
+          echo "warm build seconds $(( $(date +%s) - start ))"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: nextest-archive
-          path: ${{ runner.temp }}/tests.tar.zst
-          retention-days: 1
-          compression-level: 0
-
-  rust-tests-run:
-    name: cargo test (${{ matrix.shard }}/3)
-    needs: [rust-tests]
-    runs-on: ubuntu-latest
-    # About twice the longest shard of 40 passing runs of the two-shard form (39.8 min,
-    # 2026-11-04) less its build; to be narrowed once this form has 40 runs.
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # cargo runs cargo-nextest; the tests build nothing when the archive holds the examples.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: 1.92.0
-      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
-        with:
-          tool: cargo-nextest@0.9.148
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: nextest-archive
-          path: ${{ runner.temp }}
-      # target/tmp = CARGO_TARGET_TMPDIR, which cargo makes when it builds and the archive does not hold.
-      - name: cargo nextest run --all-features (shard ${{ matrix.shard }}/3)
-        run: |
-          mkdir -p LOSAT/target/tmp
-          cd LOSAT && cargo nextest run --config-file ../.github/nextest.toml \
-            --archive-file ${{ runner.temp }}/tests.tar.zst --extract-to . --extract-overwrite \
-            --workspace-remap . --no-fail-fast --partition count:${{ matrix.shard }}/3
-        env:
-          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
-
-  # No NCBI counterpart: the library's own surface (docs/losat_library_surface_plan.md §14). The
-  # public API of `LOSAT::api`, as cargo-public-api lists it, must equal LOSAT/tests/public_api.txt,
-  # so that a change of the surface is a reviewed line of the pull request's diff. cargo-public-api
-  # builds rustdoc JSON with a nightly toolchain and reads rustdoc JSON format 57; the tool and the
-  # toolchain are pinned here and in the script (test_check_public_api.py checks that they agree).
-  public-api:
-    name: public api
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Over rust-toolchain.toml (1.92.0) for every cargo and rustc call of the job, rust-cache's too.
-    env:
-      RUSTUP_TOOLCHAIN: nightly-2026-05-24
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: nightly-2026-05-24
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: LOSAT -> target
-          key: public-api
-          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
-      # Built from its crates.io source: the release has no binaries and install-action has no
-      # manifest for it (its fallback would take a third-party binary or rebuild with --force).
-      # rust-cache keeps ~/.cargo/bin, so a cached run finds it installed.
-      - name: cargo-public-api
-        run: cargo install --locked cargo-public-api@0.52.0
-      - name: Public API of LOSAT::api
-        run: python3 LOSAT/tests/check_public_api.py check --out "$RUNNER_TEMP/public_api.txt"
-      # The listing to commit when the change is deliberate (or run the script's `update`).
-      - name: Upload the current listing
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: public-api
-          path: ${{ runner.temp }}/public_api.txt
-
-  # No NCBI counterpart. A report, not a gate, until the crate is first published: semver breaks of
-  # `LOSAT::api` against the pull request's base commit (cargo-semver-checks; same nightly as
-  # `public-api`, rustdoc JSON format 57) go to the job summary and a warning. After the first
-  # publication the baseline becomes the published version (docs/losat_library_surface_plan.md §14).
-  semver-checks:
-    name: semver checks (report)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      RUSTUP_TOOLCHAIN: nightly-2026-05-24
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Fetch the base commit
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: git fetch --no-tags --depth=1 origin "$BASE"
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: nightly-2026-05-24
-      # No rust-cache: the job runs only on pull requests, and a pull request's cache serves only
-      # that pull request (2026-11-12: 35 copies of 65 MiB; 32 of 45 runs found none). Without it
-      # the check step took 28.5 s instead of 20.
-      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
-        with:
-          tool: cargo-semver-checks@0.51.0
-      - name: Semver checks of LOSAT::api against the base
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set +e
-          cargo +nightly-2026-05-24 semver-checks --manifest-path LOSAT/Cargo.toml --baseline-rev "$BASE" \
-            --color never > "$RUNNER_TEMP/semver.txt" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/semver.txt"
-          {
-            echo "### cargo semver-checks against $BASE (report only)"
-            echo
-            echo '```'
-            grep -v -E '^ +(Building|Built|Parsing|Parsed|Cloning) ' "$RUNNER_TEMP/semver.txt" || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$status" -ne 0 ]; then
-            echo "::warning title=semver checks::cargo semver-checks exited with $status: see the job summary (a report until the first publication)"
-          fi
-
-  # The check to require in the rulesets: it always runs and fails if a job it needs failed or was
-  # cancelled (`semver checks (report)` is not one of them).
-  rust:
-    name: rust
-    if: always()
-    needs: [rust-lint, rust-tests, rust-tests-run, public-api]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Fail if any job failed or was cancelled
-        env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          echo "Job results: $RESULTS"
-          for r in $RESULTS; do
-            if [ "$r" = failure ] || [ "$r" = cancelled ]; then
-              echo "A job did not succeed." >&2
-              exit 1
-            fi
-          done
-
-  regressions:
-    name: fast output regressions
-    runs-on: ubuntu-24.04
-    # About twice the longest of 60 passing runs (16.1 min, 2026-11-11).
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Select programs from the changed paths
-        id: select
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if [[ -n "$BASE_SHA" ]]; then
-            python3 LOSAT/tests/ci_fast_regressions.py --select-only --changed-from "$BASE_SHA" | tee select.txt
-          else
-            python3 LOSAT/tests/ci_fast_regressions.py --select-only --programs all | tee select.txt
-          fi
-          echo "programs=$(sed -n 's/^selected programs: \([^ ]*\).*/\1/p' select.txt)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        if: steps.select.outputs.programs != 'none'
-        with:
-          toolchain: 1.92.0
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: steps.select.outputs.programs != 'none'
-        with:
-          workspaces: LOSAT -> target
-          save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
-      - name: Build release binary
-        if: steps.select.outputs.programs != 'none'
-        run: cd LOSAT && cargo build --release --locked --bin losat --example library_command_line
-      # FMA instructions and references to fma only where mul_add is (docs/agents/diagnostics.md,
-      # "Floating-point contract").
-      - name: Floating-point contract (release binary)
-        if: steps.select.outputs.programs != 'none'
-        run: python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/losat
-      - name: Output hashes, frozen hashes and outfmt 0 fixtures
-        if: steps.select.outputs.programs != 'none'
-        # LOSAT_X_REACH (LOSAT/src/utils/xreach.rs): every run records which side its conditional
-        # performance switches took; it changes no output.
-        env:
-          LOSAT_X_REACH: ${{ github.workspace }}/.tmp/switch-reach
-        run: |
-          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
-            --library-example LOSAT/target/release/examples/library_command_line \
-            --out .tmp/fast-regressions --programs "${{ steps.select.outputs.programs }}"
-      # Every side of a conditional switch that switch_reach_expected.tsv requires was taken by
-      # some fixture above (a switch's own path and its reference path while it is on).
-      - name: Conditional switches reached both sides
-        if: steps.select.outputs.programs != 'none'
-        run: |
-          python3 LOSAT/tests/switch_reach_check.py --dir .tmp/switch-reach \
-            --programs "${{ steps.select.outputs.programs }}"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && steps.select.outputs.programs != 'none'
-        with:
-          name: fast-regressions
-          path: |
-            .tmp/fast-regressions/summary.json
-            .tmp/fast-regressions/hashes.tsv
-            .tmp/fast-regressions/timing.tsv
-            .tmp/fast-regressions/outfmt0-fixtures-*.tsv
-            .tmp/fast-regressions/*-regression-fixtures.tsv
-            .tmp/fast-regressions/dropin-corpus.tsv
-          if-no-files-found: warn
-          retention-days: 14
+          name: timings-${{ matrix.arm }}
+          path: LOSAT/target/cargo-timings/
+          retention-days: 3

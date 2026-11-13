@@ -113,16 +113,24 @@ fn objects_follow_each_other_and_a_bad_object_ends_the_input() {
 #[test]
 fn refusals_wait_for_the_whole_object() {
     let text = String::from_utf8(ONE.to_vec()).unwrap();
-    let long_real = text.replace(
-        "{ 504742318164089, 10, -57 }",
-        "{ 5047423181640891234, 10, -61 }",
-    );
+    // A REAL whose exponent overflows NCBI's `int` arithmetic (`dot_position - digits - 2147483647`
+    // in `StringToDoublePosix`, undefined behaviour).
+    let long_real = text.replace("{ 504742318164089, 10, -57 }", "1.55e-2147483647");
     assert_ne!(long_real, text);
     let read = read_all(long_real.as_bytes());
     assert_eq!(read.len(), 1);
     let error = read[0].as_ref().unwrap_err();
     assert_eq!(error.kind, AsnTextErrorKind::Unsupported);
-    assert!(error.message.contains("18 significant digits"), "{error}");
+    assert!(error.message.contains("NCBI's int arithmetic"), "{error}");
+    // A mantissa of more than 18 digits is read as NCBI reads it (line SW, SW8).
+    let digits = text.replace(
+        "{ 504742318164089, 10, -57 }",
+        "{ 5047423181640891234, 10, -61 }",
+    );
+    assert_ne!(digits, text);
+    let read = read_all(digits.as_bytes());
+    assert_eq!(read.len(), 1);
+    assert!(read[0].is_ok());
     let then_bad = long_real.replace("gapped FALSE", "gapped MAYBE");
     assert_ne!(then_bad, long_real);
     assert!(read_all(then_bad.as_bytes()).is_empty());

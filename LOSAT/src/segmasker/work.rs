@@ -171,7 +171,7 @@ fn run_masks(
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
     // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`: a value
-    // that NCBI computes in extended precision is refused here (`Args::double`).
+    // whose `int` arithmetic overflows in NCBI is refused here (`Args::double`).
     let double = |name| {
         args.double(name)
             .expect("an eDouble key with a default")

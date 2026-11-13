@@ -213,77 +213,36 @@ pub fn ncbi_int8(value: &str) -> Result<i64, String> {
     }
 }
 
-/// A real argument as NCBI reads it (`CArg_Double`): the first character is a digit, a
-/// point or a sign, and the rest is what `strtod` reads. LOSAT reads the decimal forms,
-/// the signed infinities and NaN (`f64::from_str`) and glibc's `nan(n-char-sequence)`
-/// (letters, digits and `_`), and rejects NCBI's other forms (hexadecimal, an exponent
-/// mark without digits) with a message that names the program.
+/// A real argument as NCBI reads it (`CArg_Double`): `NStr::StringToDouble(value,
+/// fDecimalPosixOrLocal)` (`ncbi_str::string_to_double_posix_or_local`): the first byte is a
+/// digit, a point, a comma or a sign, glibc's `strtod` reads the number (decimal, hexadecimal,
+/// the infinities, NaN with its sign and `n-char-sequence`) or NCBI's own `StringToDoublePosix`
+/// where it reads further (a mantissa that ends in `e` or `E`, in x87 extended precision), and
+/// the number ends the value. LOSAT's messages: "expected a number" for NCBI's conversion error,
+/// and a refusal that names the program for a number whose `int` arithmetic in
+/// `StringToDoublePosix` overflows (a value of 2^31 bytes or more; undefined behaviour in NCBI).
 ///
-/// NCBI reference: c++/src/corelib/ncbiargs.cpp:464
-/// ```c
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
+/// ```c++
+/// inline CArg_Double::CArg_Double(const string& name, const string& value)
+///     : CArg_String(name, value)
+/// {
+///     try {
 ///         m_Double = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
-/// ```
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:1313-1318
-/// ```c
-///     // Because strtod() may just skip such symbols.
-///     if (!(flags & NStr::fAllowLeadingSymbols)) {
-///         char c = str[pos];
-///         if ( !isdigit((unsigned char)c)  &&  !s_IsDecimalPoint(c,flags)  &&  c != '-'  &&  c != '+') {
-///             S2N_CONVERT_ERROR_INVAL(double);
-///         }
+///     } catch (const CException& e) {
+///         NCBI_RETHROW(e,CArgException,eConvert,
+///             s_ArgExptMsg(GetName(),"Argument cannot be converted",value));
+///     }
+/// }
 /// ```
 pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
-    ncbi_string_to_double(value).map_err(|error| match error {
-        NcbiDoubleError::Invalid => "expected a number".into(),
-        NcbiDoubleError::Unsupported => format!("expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's {program})"),
+    use crate::ncbi_str::{string_to_double_posix_or_local, PosixOrLocalError};
+    string_to_double_posix_or_local(value.as_bytes()).map_err(|error| match error {
+        PosixOrLocalError::Ncbi(_) => "expected a number".into(),
+        PosixOrLocalError::IntOverflow => format!(
+            "a number whose digits overflow NCBI BLAST+'s int arithmetic is not supported by LOSAT's {program}"
+        ),
     })
-}
-
-/// Why `ncbi_string_to_double` does not read a value: NCBI's conversion error (the first
-/// character is not a digit, a point or a sign), or a form that LOSAT does not read
-/// (hexadecimal numbers, an exponent mark without digits).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NcbiDoubleError {
-    Invalid,
-    Unsupported,
-}
-
-/// `NStr::StringToDouble(value, fDecimalPosixOrLocal)` for the forms that LOSAT reads (see
-/// `ncbi_double`).
-///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:1313-1318
-/// ```c
-///     // Because strtod() may just skip such symbols.
-///     if (!(flags & NStr::fAllowLeadingSymbols)) {
-///         char c = str[pos];
-///         if ( !isdigit((unsigned char)c)  &&  !s_IsDecimalPoint(c,flags)  &&  c != '-'  &&  c != '+') {
-///             S2N_CONVERT_ERROR_INVAL(double);
-///         }
-/// ```
-pub fn ncbi_string_to_double(value: &str) -> Result<f64, NcbiDoubleError> {
-    if !value
-        .chars()
-        .next()
-        .is_some_and(|first| first.is_ascii_digit() || matches!(first, '.' | '-' | '+'))
-    {
-        return Err(NcbiDoubleError::Invalid);
-    }
-    // glibc's strtod reads `nan(...)` as NaN; NCBI then checks that it ended at the end of
-    // the string (ncbistr.cpp:1332-1376).
-    let unsigned = value.trim_start_matches(['+', '-']);
-    if unsigned.len() + 1 == value.len()
-        && unsigned.len() >= 5
-        && unsigned.as_bytes()[..4].eq_ignore_ascii_case(b"nan(")
-        && unsigned.ends_with(')')
-        && unsigned[4..unsigned.len() - 1]
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-    {
-        return Ok(f64::NAN);
-    }
-    value
-        .parse::<f64>()
-        .map_err(|_| NcbiDoubleError::Unsupported)
 }
 
 /// An integer argument with a constraint: after the conversion, NCBI's constraint reads the
@@ -506,6 +465,22 @@ pub fn blastn_percentage(value: &str) -> Result<f64, String> {
 ///                             CArgDescriptions::eDouble);
 ///         arg_desc.SetConstraint(kArgQueryCovHspPerc,
 ///                            new CArgAllow_Doubles(0.0, 100.0));
+/// ```
+/// The constraint reads the value with the argument's own conversion (`ncbi_double`), so it
+/// tests the argument's number (`1e` is 1, `0x10` is 16).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4821-4830
+/// ```c++
+/// bool CArgAllow_Doubles::Verify(const string& value) const
+/// {
+///     double val = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
+///     ITERATE( set< TInterval >, pi, m_MinMax) {
+///         if (pi->first <= val && val<= pi->second) {
+///             return true;
+///         }
+///     }
+///     return false;
+/// }
 /// ```
 fn percentage(value: &str, program: &str) -> Result<f64, String> {
     let n = ncbi_double(value, program)?;
@@ -746,8 +721,10 @@ pub fn blastn_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "BLASTN")
 }
 
-/// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and
-/// requires at least 0 (a NaN fails it).
+/// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and its
+/// default flags (`ncbi_str::string_to_double`: glibc's `strtod` alone, so a value that only
+/// `StringToDoublePosix` reads, such as `1e`, makes it throw), and requires at least 0 (a NaN
+/// fails it); a value that the constraint reads is the same number as the argument's.
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:578-583
 /// ```c
@@ -758,13 +735,30 @@ pub fn blastn_real(value: &str) -> Result<f64, String> {
 ///     arg_desc.SetConstraint(kArgWordScoreThreshold,
 ///                            new CArgAllowValuesGreaterThanOrEqual(0));
 /// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:110-113
+/// ```c++
+///     /// Overloaded method from CArgAllow
+///     virtual bool Verify(const string& value) const {
+///         return NStr::StringToDouble(value) >= m_MinValue;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1231-1243
+/// ```c++
+///     if ( m_Constraint ) {
+///         bool err = false;
+///         try {
+///             bool check = m_Constraint->Verify(value);
+///     ...
+///         } catch (...) {
+///             err = true;
+///         }
+/// ```
 fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
     let threshold = ncbi_double(value, program)?;
-    #[expect(
-        clippy::neg_cmp_op_on_partial_ord,
-        reason = "NCBI accepts the value when `value >= m_MinValue` (blast_input_aux.hpp:111-112), so NaN fails; `threshold < 0.0` would accept NaN"
-    )]
-    if !(threshold >= 0.0) {
+    // `value >= m_MinValue` (a NaN fails it).
+    let allowed =
+        crate::ncbi_str::string_to_double(value.as_bytes()).is_ok_and(|checked| checked >= 0.0);
+    if !allowed {
         return Err("Illegal value, expected greater or equal to 0".into());
     }
     Ok(threshold)
@@ -1081,38 +1075,108 @@ mod tests {
         }
     }
 
+    // NCBI 2.17.0's `CArg_Double`: the bits of `NStr::StringToDouble(value,
+    // fDecimalPosixOrLocal)` from NCBI's corelib (swebok-improve-20261105/sw8/nfix/probe/x87,
+    // `s2dp`), and `blastn -evalue <value>` (exit 0, or 1 with the usage for the errors).
     #[test]
-    fn reals_follow_ncbi_first_character_rule() {
-        for (value, expected) in [("1e-5", 1e-5), (".5", 0.5), ("+2", 2.0), ("-0", 0.0)] {
-            assert_eq!(ncbi_double(value, "BLASTN"), Ok(expected), "{value}");
-        }
-        assert!(ncbi_double("+inf", "BLASTN").unwrap().is_infinite());
-        assert!(ncbi_double("-nan", "BLASTN").unwrap().is_nan());
-        // NCBI 2.17.0 searches with each of these (-evalue, E2g).
-        for value in ["+nan(1)", "-NaN()", "+nan(x_9)", "+Infinity", "1e999"] {
-            let read = ncbi_double(value, "BLASTN").unwrap();
-            assert!(read.is_nan() || read.is_infinite(), "{value}");
+    fn reals_are_read_as_ncbis_carg_double() {
+        for (value, bits) in [
+            ("1e-5", 0x3ee4_f8b5_88e3_68f1),
+            (".5", 0x3fe0_0000_0000_0000),
+            ("+2", 0x4000_0000_0000_0000),
+            ("-0", 0x8000_0000_0000_0000),
+            // glibc's hexadecimal numbers
+            ("0x10", 0x4030_0000_0000_0000),
+            ("0x1p-3", 0x3fc0_0000_0000_0000),
+            ("-0x.8", 0xbfe0_0000_0000_0000),
+            // `StringToDoublePosix` reads a final exponent mark, in x87 extended precision
+            ("1e", 0x3ff0_0000_0000_0000),
+            ("2.5E", 0x4004_0000_0000_0000),
+            ("-3e", 0xc008_0000_0000_0000),
+            ("12345678901234567890e", 0x43e5_6a95_319d_63e1),
+            ("0.0000000000000001e", 0x3c9c_d2b2_97d8_89bc),
+            // the infinities, and NaN with glibc's sign and payload
+            ("1e400", 0x7ff0_0000_0000_0000),
+            ("+Infinity", 0x7ff0_0000_0000_0000),
+            ("-nan", 0xfff8_0000_0000_0000),
+            ("-nan(1)", 0xfff8_0000_0000_0001),
+            ("+nan(5)", 0x7ff8_0000_0000_0005),
+            ("-NaN()", 0xfff8_0000_0000_0000),
+            ("+nan(x_9)", 0x7ff8_0000_0000_0000),
+        ] {
+            let read = ncbi_double(value, "BLASTN").unwrap_or_else(|e| panic!("{value}: {e}"));
+            assert_eq!(read.to_bits(), bits, "{value}");
         }
         for value in [
-            "+nan(", "+nan(1", "+nan(-)", "+nan(1)x", "+-nan(1)", "nan(1)",
+            "+nan(",
+            "+nan(1",
+            "+nan(-)",
+            "+nan(1)x",
+            "+-nan(1)",
+            "nan(1)",
+            "nan(5)",
+            ",5",
+            ",",
+            "1x",
+            "1e+",
+            "1ex",
+            "--5",
+            "2,5",
+            "inf",
+            "nan",
+            " 1",
+            "",
+            "e5",
+            "0x",
+            "1.2.3",
+            // A character of several bytes across the fourth byte (S11 audit F-1).
+            "-xx€",
+            "-in\u{fffd}",
+            "+\u{fffd}\u{fffd}",
+            "-1éé",
         ] {
-            assert!(ncbi_double(value, "BLASTN").is_err(), "{value}");
-        }
-        // A character of several bytes across the fourth byte (S11 audit F-1).
-        for value in ["-xx€", "-in\u{fffd}", "+\u{fffd}\u{fffd}", "-1éé"] {
-            assert!(ncbi_double(value, "BLASTN").is_err(), "{value}");
-        }
-        for value in ["inf", "nan", " 1", "", "e5"] {
             assert_eq!(
                 ncbi_double(value, "BLASTN"),
                 Err("expected a number".into()),
                 "{value:?}"
             );
         }
-        for value in ["0x10", "0x1p-3", "1e"] {
-            assert!(ncbi_double(value, "BLASTN")
-                .unwrap_err()
-                .contains("not supported by LOSAT's BLASTN"));
+    }
+
+    // NCBI 2.17.0: `-threshold`'s constraint reads the value with the default flags (`blastp
+    // -threshold 1e` and `12345678901234567890e`: "Illegal value, expected >=0", exit 1; `0x10`
+    // searches), `-perc_identity`'s with `fDecimalPosixOrLocal` (`1e` and `0x10` search, `0x1p7`
+    // is illegal).
+    #[test]
+    fn each_constraint_reads_the_value_with_its_own_conversion() {
+        assert_eq!(blastp_threshold("0x10"), Ok(16.0));
+        assert_eq!(blastp_threshold("11"), Ok(11.0));
+        assert!(blastp_threshold("1e400").unwrap().is_infinite());
+        for value in [
+            "1e",
+            "2.5E",
+            "12345678901234567890e",
+            "-nan",
+            "+nan(5)",
+            "-1",
+            "-0x1",
+        ] {
+            assert_eq!(
+                blastp_threshold(value),
+                Err("Illegal value, expected greater or equal to 0".into()),
+                "{value}"
+            );
+        }
+        assert_eq!(blastp_threshold("1x"), Err("expected a number".into()));
+        assert_eq!(blastn_percentage("1e"), Ok(1.0));
+        assert_eq!(blastn_percentage("0x10"), Ok(16.0));
+        assert_eq!(blastp_query_coverage("99.5E"), Ok(99.5));
+        for value in ["0x1p7", "1e400", "-nan", "-0.5e"] {
+            assert_eq!(
+                blastn_percentage(value),
+                Err("expected a percentage in 0..=100".into()),
+                "{value}"
+            );
         }
     }
 }

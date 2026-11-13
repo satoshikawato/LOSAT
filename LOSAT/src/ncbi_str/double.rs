@@ -1,20 +1,24 @@
 //! `NStr::StringToDouble(str)` with its default flags (corelib/ncbistr.cpp), which rpsbproc's
 //! data loader calls (`NStr::StringToNumeric<double>`, ncbistr.hpp:3632-3637) for the bit score
 //! thresholds of `bitscore_specific.txt`, the BLAST programs' argument readers for the SEG locut
-//! and hicut (`blastinput::app::read_seg_option`) and the constraints of the integer arguments
+//! and hicut (`blastinput::app::read_seg_option`) and the constraints of the arguments
 //! (`blastinput::value_parsers`), and glibc's `strtod` that it reads the number with.
 //!
 //! Also `NStr::StringToDouble(str, NStr::fDecimalPosixOrLocal)`, which NCBI's argument reader
-//! calls for an `eDouble` key (`CArg_Double`: segmasker's `-locut` and `-hicut`,
-//! `ncbi_app::args`): [`string_to_double_posix_or_local`].
+//! calls for an `eDouble` key (`CArg_Double`: every real argument of the BLAST programs and
+//! rpsbproc, `blastinput::value_parsers::ncbi_double`, and segmasker's `-locut` and `-hicut`,
+//! `ncbi_app::args`): [`string_to_double_posix_or_local`]; and NCBI's own decimal reader
+//! `NStr::StringToDoublePosix` that it calls, which the ASN.1 text reader calls too for a REAL
+//! (`report::serial::asn_text_reader`): [`string_to_double_posix`].
 //!
-//! Only these two flag sets are ported: the leading and trailing symbols, `fMandatorySign`,
-//! `fDecimalPosix`, `fDecimalPosixFinite` and `fConvErr_NoThrow` are not (no caller passes them).
+//! Only these flag sets are ported: the leading and trailing symbols, `fMandatorySign`,
+//! `fDecimalPosix` and `fConvErr_NoThrow` of `StringToDouble` are not (no caller passes them).
 //! The decimal point of `strtod` is that of the C locale, `.` (`s_IsDecimalPoint` with no flag
 //! asks `localeconv`; NCBI's applications keep the C locale).
 
-use super::{convert_error, convert_site};
+use super::{convert_error, convert_site, is_space};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::utils::x87::X87;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1312-1319
 // ```c++
@@ -120,9 +124,9 @@ pub(crate) fn string_to_double(s: &[u8]) -> Result<f64, NcbiException> {
 pub(crate) enum PosixOrLocalError {
     /// NCBI's `CStringException` (`eConvert`).
     Ncbi(NcbiException),
-    /// A number that NCBI computes in the x87 extended precision of `long double` in a way that
-    /// LOSAT does not reproduce (see `posix_read_past_strtod`).
-    ExtendedPrecision,
+    /// A number whose `int` arithmetic in `StringToDoublePosix` overflows ([`IntOverflow`]): a
+    /// text of 2^31 bytes or more.
+    IntOverflow,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:724-737
@@ -155,10 +159,16 @@ pub(crate) enum PosixOrLocalError {
 //         }
 //     }
 // ```
+// `StringToDoublePosix` reads further than glibc's `strtod` only for a decimal mantissa followed
+// by an `e` or `E` that ends the text (`1e`, `2.5E`: it keeps the mark when nothing follows it and
+// steps back to it before a sign or another byte; an exponent with digits `strtod` reads as
+// well; a comma is never its decimal point; its `inf` and `nan` end where `strtod`'s do or
+// before). Its `errno` (`EINVAL` without digits, `ERANGE`) never turns a number of `strtod` into
+// an error: it is `EINVAL` only where `strtod` reads nothing either.
 /// `NStr::StringToDouble(str, NStr::fDecimalPosixOrLocal)`: as [`string_to_double`], but a comma
 /// passes the check of the first byte (no number then starts there, and the error is that of
-/// no number), and NCBI's own reader `StringToDoublePosix` reads the text too; its number is
-/// taken where it reads further than `strtod`.
+/// no number), and NCBI's own reader `StringToDoublePosix` ([`string_to_double_posix`]) reads the
+/// text too; its number is taken where it reads further than `strtod`.
 pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLocalError> {
     let c_string = &s[..s.iter().position(|&b| b == 0).unwrap_or(s.len())];
     let error = |site: ThrowSite, pos: usize| {
@@ -170,11 +180,12 @@ pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLo
         return Err(error(STRING_TO_DOUBLE_INVAL, 0));
     }
     let (mut value, mut used) = strtod_prefix(c_string);
-    if let Some((posix, posix_used)) = posix_read_past_strtod(c_string) {
-        if posix_used > used {
-            value = posix?;
-            used = posix_used;
-        }
+    let posix = string_to_double_posix(c_string, false);
+    if posix.end > used {
+        value = posix
+            .value
+            .map_err(|IntOverflow| PosixOrLocalError::IntOverflow)?;
+        used = posix.end;
     }
     if used == 0 {
         return Err(error(STRING_TO_DOUBLE_NO_NUMBER, 0));
@@ -185,9 +196,83 @@ pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLo
     Ok(value)
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1027-1069 (`StringToDoublePosix`, the
-// mantissa)
+/// What [`string_to_double_posix`] read: NCBI's number, and the bytes of the text that NCBI's
+/// reader took (`*endptr - ptr`), which do not depend on the number.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PosixDouble {
+    pub(crate) value: Result<f64, IntOverflow>,
+    pub(crate) end: usize,
+}
+
+/// An `int` of `StringToDoublePosix`'s arithmetic that overflows, whose result is undefined
+/// behaviour in NCBI's C++ (LOSAT refuses the number): `digits` or `dot_position` (a mantissa of
+/// 2^31 digits or leading zeros), `dot_position - digits` or the exponent `exponent - expvalue`
+/// (`1.55e-2147483647`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IntOverflow;
+
+/// NCBI's `HUGE_VAL/HUGE_VAL` (`NCBI_FAKE_WARNING`), which GCC leaves to the run time (the
+/// division raises the invalid-operation flag): `divsd` of x86-64 gives its default NaN, the
+/// "QNaN floating-point indefinite" with the sign bit set (NCBI's corelib, `nfix/probe/x87`:
+/// `nan` reads as 0xfff8000000000000).
+const HUGE_VAL_DIV_HUGE_VAL: f64 = f64::from_bits(0xfff8_0000_0000_0000);
+
+/// The x87 `long double` constant `1e<n>L` of `StringToDoublePosix` (`NCBI_CONST_LONGDOUBLE`):
+/// `1e-15` to `1e15` and the multiples of 16 up to 256 of either sign.
+fn long_double_pow10(n: i32) -> X87 {
+    crate::report::serial::real::long_double_pow10(n)
+        .expect("the long double literals of StringToDoublePosix")
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:985-1278
 // ```c++
+// double NStr::StringToDoublePosix(const char* ptr, char** endptr, TStringToNumFlags flags)
+// {
+//     S2N_CONVERT_GUARD(NStr::fConvErr_NoThrow);
+//
+//     const char* start = ptr;
+//     char c = *ptr++;
+//
+//     // skip leading whitespace
+//     while ( isspace((unsigned char)c) ) {
+//         c = *ptr++;
+//     }
+//
+//     int sign = 0;
+//     if ( c == '-' ) {
+//         sign = -1;
+//         c = *ptr++;
+//     }
+//     else if ( c == '+' ) {
+//         sign = +1;
+//         c = *ptr++;
+//     }
+//
+//     if (c == 0) {
+//         if (endptr) {
+//             *endptr = (char*)start;
+//         }
+//         err_guard.Set(EINVAL);
+//         return 0.;
+//     }
+//
+//     // short-cut - single digit
+//     if ( !*ptr && c >= '0' && c <= '9' ) {
+//         if (endptr) {
+//             *endptr = (char*)ptr;
+//         }
+//         double result = c-'0';
+//         // some compilers fail to negate zero
+//         return sign < 0 ? (c == '0' ? -0. : -result) : result;
+//     }
+//
+//     bool         dot = false, expn = false, anydigits = false;
+//     int          digits = 0, dot_position = 0;
+//     unsigned int first=0, second=0, first_mul=1;
+//     long double  second_mul = NCBI_CONST_LONGDOUBLE(1.),
+//                  third      = NCBI_CONST_LONGDOUBLE(0.);
+//
+//     // up to exponent
 //     for ( ; ; c = *ptr++ ) {
 //         if (c >= '0' && c <= '9') {
 //             // digits: accumulate
@@ -235,14 +320,70 @@ pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLo
 //             expn = true;
 //             break;
 //         }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1113-1116, 1142-1153, 1158-1169
-// ```c++
+//         else {
+//             --ptr;
+//             if (!anydigits) {
+//                 if ( !dot && (c == 'n' || c == 'N') &&
+//                      NStr::strncasecmp(ptr,"nan",3)==0) {
+//                     if (endptr) {
+//                         *endptr = (char*)(ptr+3);
+//                     }
+//                     return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
+//                 }
+//                 if ( (c == 'i' || c == 'I') ) {
+//                     if ( NStr::strncasecmp(ptr,"inf",3)==0) {
+//                         ptr += 3;
+//                         if ( NStr::strncasecmp(ptr,"inity",5)==0) {
+//                             ptr += 5;
+//                         }
+//                         if (endptr) {
+//                             *endptr = (char*)ptr;
+//                         }
+//                         return sign < 0 ? -HUGE_VAL : HUGE_VAL;
+//                     }
+//                 }
+//             }
+//             break;
+//         }
+//     }
+//     // if no digits, stop now - error
+//     if (!anydigits) {
+//         if (endptr) {
+//             *endptr = (char*)start;
+//         }
+//         err_guard.Set(EINVAL);
+//         return 0.;
+//     }
 //     int exponent = dot ? dot_position - digits : 0;
 //
 //     // read exponent
 //     if (expn && *ptr) {
-//     ...
+//         int expvalue = 0;
+//         bool expsign = false, expnegate= false;
+//         int expdigits= 0;
+//         for( ; ; ++ptr) {
+//             c = *ptr;
+//             // sign: should be no digits at this point
+//             if (c == '-' || c == '+') {
+//                 // if there was sign or digits, stop
+//                 if (expsign || expdigits) {
+//                     break;
+//                 }
+//                 expsign = true;
+//                 expnegate = c == '-';
+//             }
+//             // digits: accumulate
+//             else if (c >= '0' && c <= '9') {
+//                 ++expdigits;
+//                 int newexpvalue = expvalue*10 + (c-'0');
+//                 if (newexpvalue > expvalue) {
+//                     expvalue = newexpvalue;
+//                 }
+//             }
+//             else {
+//                 break;
+//             }
+//         }
 //         // if no digits, rollback
 //         if (!expdigits) {
 //             // rollback sign
@@ -254,120 +395,357 @@ pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, PosixOrLo
 //                 --ptr;
 //             }
 //         }
-//     ...
+//         else {
+//             exponent = expnegate ? exponent - expvalue : exponent + expvalue;
+//         }
+//     }
 //     long double ret;
 //     if ( first_mul > 1 ) {
 //         _ASSERT(first);
 //         ret = ((long double)first * first_mul + second)* second_mul + third;
 //     }
 //     else {
-//         ...
+//         _ASSERT(first_mul == 1);
+//         _ASSERT(second == 0);
+//         _ASSERT(second_mul == 1);
+//         _ASSERT(third == 0);
 //         ret = first;
 //     }
 //     // calculate exponent
 //     if ( first && exponent ) {
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1218-1237
-// ```c++
+//         // multiply by power of 10 only non-zero mantissa
+//         if (exponent > 2*DBL_MAX_10_EXP) {
+//             ret = (flags & fDecimalPosixFinite) ? DBL_MAX :  HUGE_VAL;
+//             err_guard.Set(ERANGE);
+//         } else if (exponent < 2*DBL_MIN_10_EXP) {
+//             ret = (flags & fDecimalPosixFinite) ? DBL_MIN : 0.;
+//             err_guard.Set(ERANGE);
+//         } else {
+//             if ( exponent > 0 ) {
+//                 static const double mul1[16] = {
+//                     1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7,
+//                     1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15
+//                 };
+//                 ret *= mul1[exponent&15];
+//                 if ( exponent >>= 4 ) {
+//                     static const long double mul2[16] = {
+//                         NCBI_CONST_LONGDOUBLE(1e0),
+//                         NCBI_CONST_LONGDOUBLE(1e16),
+//                         ...
+//                         NCBI_CONST_LONGDOUBLE(1e240)
+//                     };
+//                     ret *= mul2[exponent&15];
+//                     for ( exponent >>= 4; exponent; --exponent ) {
+//                         ret *= NCBI_CONST_LONGDOUBLE(1e256);
+//                     }
+//                 }
+//                 if (!finite(double(ret))) {
+//                     if (flags & fDecimalPosixFinite) {
+//                         ret = DBL_MAX;
+//                     }
+//                     err_guard.Set(ERANGE);
+//                 }
+//             }
+//             else {
 //                 exponent = -exponent;
 //                 static const long double mul1[16] = {
 //                     NCBI_CONST_LONGDOUBLE(1e-0),
-//                     NCBI_CONST_LONGDOUBLE(1e-1),
 //                     ...
+//                     NCBI_CONST_LONGDOUBLE(1e-15)
 //                 };
 //                 ret *= mul1[exponent&15];
+//                 if ( exponent >>= 4 ) {
+//                     static const long double mul2[16] = {
+//                         NCBI_CONST_LONGDOUBLE(1e-0),
+//                         NCBI_CONST_LONGDOUBLE(1e-16),
+//                         ...
+//                         NCBI_CONST_LONGDOUBLE(1e-240)
+//                     };
+//                     ret *= mul2[exponent&15];
+//                     for ( exponent >>= 4; exponent; --exponent ) {
+//                         ret *= NCBI_CONST_LONGDOUBLE(1e-256);
+//                     }
+//                 }
+//                 if ( ret < DBL_MIN ) {
+//                     if (flags & fDecimalPosixFinite) {
+//                         ret = DBL_MIN;
+//                     }
+//                     err_guard.Set(ERANGE);
+//                 }
+//             }
+//         }
+//     }
+//     if ( sign < 0 ) {
+//         ret = -ret;
+//     }
+//     // done
+//     if (endptr) {
+//         *endptr = (char*)ptr;
+//     }
+//     return (double)ret;
+// }
 // ```
-/// Where `StringToDoublePosix` reads further than glibc's `strtod`: a decimal mantissa (at least
-/// one digit, at most one point, a sign before it) followed by `e` or `E` that ends the text.
-/// `StringToDoublePosix` takes the mark into its number when nothing follows it (`*ptr` is 0),
-/// and steps back to it otherwise (an exponent with digits `strtod` reads as well); its other
-/// readings (`inf`, `nan`, a hexadecimal `0x`) end where `strtod`'s do or before. The number and
-/// the end of `StringToDoublePosix` for those texts, `None` for the others.
-///
-/// The number is `long double` arithmetic on x87 (the 64-bit mantissa of GCC's x86-64
-/// `long double`, rounded to nearest, then to the double): the digits as an integer, times the
-/// constant `1e-k` for `k` digits after the point. LOSAT computes it exactly for at most 18
-/// digits (the integer is exact) and at most 15 places (one multiplication); a longer mantissa
-/// (`third`, more roundings) or more places (`mul2`) is `ExtendedPrecision`.
-fn posix_read_past_strtod(text: &[u8]) -> Option<(Result<f64, PosixOrLocalError>, usize)> {
-    let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
-    let negative = at(0) == b'-';
-    let mut pos = usize::from(matches!(at(0), b'+' | b'-'));
-    let (mut dot, mut anydigits) = (false, false);
-    let (mut digits, mut dot_position) = (0i32, 0i32);
-    // `first * first_mul + second` while it holds every digit (at most 18 after the leading
-    // zeros); `None` once a digit goes to `third`.
-    let mut mantissa: Option<u64> = Some(0);
+/// `NStr::StringToDoublePosix(text, &endptr, flags)`, `finite` for `fDecimalPosixFinite`: NCBI's
+/// own reader of a decimal number, for the C string `text` (its first 0 byte, or its end, ends
+/// it). The `long double` arithmetic of NCBI's x86-64 build is the x87 unit's (`X87`, rounded to
+/// 64 bits each time); a mantissa of more than 18 digits goes through `third` and `second_mul`,
+/// whose x87 values pass the largest 80-bit value from some 4,900 digits on and become the
+/// infinity (`None` here). The `errno` it sets is not kept: NCBI's callers do not read it
+/// (`string_to_double_posix_or_local`, `CObjectIStreamAsn::ReadDouble`).
+pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
+    // `*p` of the NUL-terminated string.
+    let at = |p: usize| text.get(p).copied().unwrap_or(0);
+    let starts_with_ignore_case = |p: usize, name: &[u8]| {
+        text.get(p..p + name.len())
+            .is_some_and(|bytes| bytes.eq_ignore_ascii_case(name))
+    };
+    let mut ptr = 0usize;
+    let mut c = at(ptr);
+    ptr += 1;
+    while is_space(c) {
+        c = at(ptr);
+        ptr += 1;
+    }
+    let mut sign = 0;
+    if c == b'-' {
+        sign = -1;
+        c = at(ptr);
+        ptr += 1;
+    } else if c == b'+' {
+        sign = 1;
+        c = at(ptr);
+        ptr += 1;
+    }
+    if c == 0 {
+        return PosixDouble {
+            value: Ok(0.0),
+            end: 0,
+        };
+    }
+    if at(ptr) == 0 && c.is_ascii_digit() {
+        let result = f64::from(c - b'0');
+        let value = if sign < 0 {
+            if c == b'0' {
+                -0.0
+            } else {
+                -result
+            }
+        } else {
+            result
+        };
+        return PosixDouble {
+            value: Ok(value),
+            end: ptr,
+        };
+    }
+    let (mut dot, mut expn, mut anydigits) = (false, false, false);
+    let (mut digits, mut dot_position): (i32, i32) = (0, 0);
+    let (mut first, mut second, mut first_mul): (u32, u32, u32) = (0, 0, 1);
+    // `second_mul` and `third`, nonnegative; `None` is the x87 infinity.
+    let ten = X87::from_u32(10);
+    let (mut second_mul, mut third) = (Some(X87::from_u32(1)), Some(X87::ZERO));
+    // Whether an `int` overflowed (`IntOverflow`); the text is still read to NCBI's end.
+    let mut overflow = false;
     loop {
-        let c = at(pos);
         if c.is_ascii_digit() {
-            let digit = u64::from(c - b'0');
+            let d = c - b'0';
             anydigits = true;
-            digits += 1;
-            if mantissa == Some(0) {
-                mantissa = Some(digit);
-                if digit == 0 {
+            let (next, wrapped) = digits.overflowing_add(1);
+            digits = next;
+            overflow |= wrapped;
+            if overflow {
+                // The number is refused; its digits are only read.
+            } else if first == 0 {
+                first = u32::from(d);
+                if first == 0 {
                     digits -= 1;
                     if dot {
-                        dot_position -= 1;
+                        let (next, wrapped) = dot_position.overflowing_sub(1);
+                        dot_position = next;
+                        overflow |= wrapped;
                     }
                 }
+            } else if digits <= 9 {
+                first = first * 10 + u32::from(d);
             } else if digits <= 18 {
-                mantissa = mantissa.map(|m| m * 10 + digit);
+                first_mul *= 10;
+                second = second * 10 + u32::from(d);
             } else {
-                mantissa = None;
+                second_mul = second_mul.and_then(|mul| mul.checked_mul(ten));
+                third = third
+                    .and_then(|third| third.checked_mul(ten))
+                    .and_then(|third| third.checked_add(X87::from_u32(u32::from(d))));
             }
         } else if c == b'.' {
             if dot {
-                return None;
+                ptr -= 1;
+                break;
             }
             dot_position = digits;
             dot = true;
-        } else if matches!(c, b'e' | b'E') && anydigits && at(pos + 1) == 0 {
+        } else if c == b'e' || c == b'E' {
+            if !anydigits {
+                ptr -= 1;
+                break;
+            }
+            expn = true;
             break;
         } else {
-            return None;
+            ptr -= 1;
+            if !anydigits {
+                if !dot && (c == b'n' || c == b'N') && starts_with_ignore_case(ptr, b"nan") {
+                    return PosixDouble {
+                        value: Ok(HUGE_VAL_DIV_HUGE_VAL),
+                        end: ptr + 3,
+                    };
+                }
+                if (c == b'i' || c == b'I') && starts_with_ignore_case(ptr, b"inf") {
+                    let mut end = ptr + 3;
+                    if starts_with_ignore_case(end, b"inity") {
+                        end += 5;
+                    }
+                    let value = if sign < 0 {
+                        f64::NEG_INFINITY
+                    } else {
+                        f64::INFINITY
+                    };
+                    return PosixDouble {
+                        value: Ok(value),
+                        end,
+                    };
+                }
+            }
+            break;
         }
-        pos += 1;
+        c = at(ptr);
+        ptr += 1;
     }
-    let exponent = if dot { dot_position - digits } else { 0 };
-    let value = match mantissa {
-        Some(0) => Ok(0.0),
-        // The integer is exact in the 64-bit mantissa, then rounded once to the double.
-        Some(m) if exponent == 0 => Ok(m as f64),
-        Some(m) if (-15..0).contains(&exponent) => Ok(x87_scaled_down(m, exponent.unsigned_abs())),
-        _ => Err(PosixOrLocalError::ExtendedPrecision),
+    if !anydigits {
+        return PosixDouble {
+            value: Ok(0.0),
+            end: 0,
+        };
+    }
+    let mut exponent: i32 = 0;
+    if dot {
+        let (next, wrapped) = dot_position.overflowing_sub(digits);
+        exponent = next;
+        overflow |= wrapped;
+    }
+    if expn && at(ptr) != 0 {
+        let (mut expvalue, mut expsign, mut expnegate, mut expdigits) = (0i32, false, false, 0);
+        loop {
+            let c = at(ptr);
+            if c == b'-' || c == b'+' {
+                if expsign || expdigits != 0 {
+                    break;
+                }
+                expsign = true;
+                expnegate = c == b'-';
+            } else if c.is_ascii_digit() {
+                expdigits += 1;
+                // NCBI's guard against the overflow of `expvalue * 10`: the wrapped value is
+                // not taken (NCBI's corelib keeps 214748364 for `1e2147483648`).
+                let newexpvalue = expvalue.wrapping_mul(10).wrapping_add(i32::from(c - b'0'));
+                if newexpvalue > expvalue {
+                    expvalue = newexpvalue;
+                }
+            } else {
+                break;
+            }
+            ptr += 1;
+        }
+        if expdigits == 0 {
+            if expsign {
+                ptr -= 1;
+            }
+            if expn {
+                ptr -= 1;
+            }
+        } else {
+            let (next, wrapped) = if expnegate {
+                exponent.overflowing_sub(expvalue)
+            } else {
+                exponent.overflowing_add(expvalue)
+            };
+            exponent = next;
+            overflow |= wrapped;
+        }
+    }
+    if overflow {
+        return PosixDouble {
+            value: Err(IntOverflow),
+            end: ptr,
+        };
+    }
+    // `(long double)first * first_mul + second` is exact (below 10^18 < 2^64).
+    let mut ret = if first_mul > 1 {
+        let integer = X87::from_u64(u64::from(first) * u64::from(first_mul) + u64::from(second));
+        second_mul
+            .and_then(|mul| integer.checked_mul(mul))
+            .and_then(|ret| third.and_then(|third| ret.checked_add(third)))
+    } else {
+        Some(X87::from_u32(first))
     };
-    let value = value.map(|v| if negative { -v } else { v });
-    Some((value, pos + 1))
-}
-
-/// `(double)((long double)m * 1e-kL)` on x87, for `m < 10^18` and `1 <= k <= 15`: the constant
-/// `1e-kL` rounded to 64 bits (GCC rounds its constants correctly), the product rounded to 64
-/// bits, then to 53; to nearest, ties to even, each time.
-fn x87_scaled_down(m: u64, k: u32) -> f64 {
-    let power = 10u128.pow(k);
-    let bits = 128 - power.leading_zeros();
-    // 1e-k = power_mantissa * 2^-(63 + bits), power_mantissa in [2^63, 2^64]
-    let scaled = 1u128 << (63 + bits);
-    let (quotient, remainder) = (scaled / power, scaled % power);
-    // No tie: 5^k divides no power of two.
-    let power_mantissa = quotient + u128::from(2 * remainder > power);
-    let product = u128::from(m) * power_mantissa;
-    let product_bits = 128 - product.leading_zeros();
-    let mut exponent = -i64::from(63 + bits);
-    let mut kept = product;
-    if product_bits > 64 {
-        let shift = product_bits - 64;
-        let rest = product & ((1u128 << shift) - 1);
-        let half = 1u128 << (shift - 1);
-        kept = product >> shift;
-        if rest > half || (rest == half && kept & 1 == 1) {
-            kept += 1;
+    // DBL_MAX_10_EXP 308, DBL_MIN_10_EXP -307.
+    if first != 0 && exponent != 0 {
+        if exponent > 2 * 308 {
+            ret = finite.then(|| X87::from_f64(f64::MAX));
+        } else if exponent < 2 * -307 {
+            ret = Some(if finite {
+                X87::from_f64(f64::MIN_POSITIVE)
+            } else {
+                X87::ZERO
+            });
+        } else if exponent > 0 {
+            const MUL1: [f64; 16] = [
+                1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14,
+                1e15,
+            ];
+            let mut e = exponent;
+            ret = ret.and_then(|ret| ret.checked_mul(X87::from_f64(MUL1[(e & 15) as usize])));
+            e >>= 4;
+            if e != 0 {
+                ret = ret.and_then(|ret| ret.checked_mul(long_double_pow10(16 * (e & 15))));
+                e >>= 4;
+                while e != 0 {
+                    ret = ret.and_then(|ret| ret.checked_mul(long_double_pow10(256)));
+                    e -= 1;
+                }
+            }
+            // `!finite(double(ret))`
+            if finite && !ret.is_some_and(|ret| ret.to_f64().is_finite()) {
+                ret = Some(X87::from_f64(f64::MAX));
+            }
+        } else {
+            let mut e = -exponent;
+            ret = ret.and_then(|ret| ret.checked_mul(long_double_pow10(-(e & 15))));
+            e >>= 4;
+            if e != 0 {
+                ret = ret.and_then(|ret| ret.checked_mul(long_double_pow10(-16 * (e & 15))));
+                e >>= 4;
+                while e != 0 {
+                    ret = ret.and_then(|ret| ret.checked_mul(long_double_pow10(-256)));
+                    e -= 1;
+                }
+            }
+            // `ret < DBL_MIN`: the infinity is not.
+            if finite && ret.is_some_and(|ret| ret.lt(X87::from_f64(f64::MIN_POSITIVE))) {
+                ret = Some(X87::from_f64(f64::MIN_POSITIVE));
+            }
         }
-        exponent += i64::from(shift);
     }
-    round_binary(kept, exponent, false)
+    // `ret = -ret` (`fchs`) and `(double)ret` (the store to a double); the infinity keeps its sign.
+    let value = match ret {
+        Some(ret) if sign < 0 => ret.neg().to_f64(),
+        Some(ret) => ret.to_f64(),
+        None if sign < 0 => f64::NEG_INFINITY,
+        None => f64::INFINITY,
+    };
+    PosixDouble {
+        value: Ok(value),
+        end: ptr,
+    }
 }
 
 /// glibc `strtod` of the start of `text` (no leading white space here) in the C locale and the
@@ -652,12 +1030,11 @@ mod tests {
     // `NStr::StringToDouble(text, fDecimalPosixOrLocal)` (its corelib linked to a probe), for
     // the texts that end in an exponent mark (`StringToDoublePosix` reads them past `strtod`,
     // in x87 extended precision), the edges of glibc's `strtod` that `CArg_Double` reads, and
-    // the errors. LOSAT refuses only the texts whose mark follows more than 18 digits or 15
-    // places (`ExtendedPrecision`).
+    // the errors.
     #[test]
     fn posix_or_local_values_are_ncbis() {
         let table = include_str!("../../tests/unit/string_to_double_posix_or_local_vectors.tsv");
-        let (mut rows, mut refused) = (0, Vec::new());
+        let mut rows = 0;
         for row in table.lines().filter(|row| !row.starts_with('#')) {
             let (text, bits) = row.rsplit_once('\t').unwrap();
             match (string_to_double_posix_or_local(text.as_bytes()), bits) {
@@ -665,22 +1042,181 @@ mod tests {
                 (Ok(value), bits) if bits != "ERR" => {
                     assert_eq!(format!("{:016x}", value.to_bits()), bits, "{text:?}")
                 }
-                (Err(PosixOrLocalError::ExtendedPrecision), bits) if bits != "ERR" => {
-                    refused.push(text)
-                }
                 (other, bits) => panic!("{text:?}: {other:?}, NCBI {bits}"),
             }
             rows += 1;
         }
         assert_eq!(rows, 422);
+    }
+
+    /// The four conversions of a text as NCBI's probe prints them: `StringToDouble(text,
+    /// fDecimalPosixOrLocal)`, `StringToDouble(text)`, `StringToDoublePosix(text, &end, 0)` and
+    /// with `fDecimalPosixFinite`, each the bits of the double or `ERR`, the last two with
+    /// `:end`.
+    fn four_conversions(text: &[u8]) -> [String; 4] {
+        let bits = |value: f64| format!("{:016x}", value.to_bits());
+        let posix = |finite| {
+            let read = string_to_double_posix(text, finite);
+            format!(
+                "{}:{}",
+                read.value.map_or("OVERFLOW".into(), bits),
+                read.end
+            )
+        };
+        [
+            string_to_double_posix_or_local(text).map_or("ERR".into(), bits),
+            string_to_double(text).map_or("ERR".into(), bits),
+            posix(false),
+            posix(true),
+        ]
+    }
+
+    // `LOSAT/tests/unit/string_to_double_posix_vectors.tsv`: NCBI's own `StringToDouble` with
+    // both flag sets and `StringToDoublePosix` with both (its corelib linked to a probe,
+    // `swebok-improve-20261105/sw8/nfix/probe/x87`): mantissas of more than 18 digits and more
+    // than 15 places (`third`, `mul2`), exponents at the ends of NCBI's ranges, NaN (NCBI's
+    // `HUGE_VAL/HUGE_VAL` has the sign bit), and random texts. The probe compared 900,184 texts
+    // (these, 900,000 random ones and mantissas of up to 5,000 digits): all equal but the one
+    // whose `int` arithmetic overflows (below).
+    #[test]
+    fn posix_values_and_ends_are_ncbis() {
+        let table = include_str!("../../tests/unit/string_to_double_posix_vectors.tsv");
+        let mut rows = 0;
+        for row in table.lines().filter(|row| !row.starts_with('#')) {
+            let mut fields = row.split('\t');
+            let text = fields.next().unwrap();
+            let ncbi: Vec<&str> = fields.collect();
+            assert_eq!(
+                four_conversions(text.as_bytes()),
+                ncbi.as_slice(),
+                "{text:?}"
+            );
+            rows += 1;
+        }
+        assert_eq!(rows, 564);
+        // Texts of their own: white space first (`StringToDoublePosix` skips it, `StringToDouble`
+        // refuses it), the empty text, and long mantissas, whose x87 value passes the largest
+        // 80-bit value from 4,933 digits on (the infinity; scaled by at least 10^-614 it stays
+        // above the largest double, so NCBI's result is the infinity or, below 10^-614, zero).
+        let repeat = |byte: &str, count: usize| byte.repeat(count);
+        let cases: [(String, [&str; 4]); 12] = [
+            (
+                "\x0b1.5".into(),
+                ["ERR", "ERR", "3ff8000000000000:4", "3ff8000000000000:4"],
+            ),
+            (
+                "\x0c-2.5e".into(),
+                ["ERR", "ERR", "c004000000000000:6", "c004000000000000:6"],
+            ),
+            (
+                "".into(),
+                ["ERR", "ERR", "0000000000000000:0", "0000000000000000:0"],
+            ),
+            (
+                format!("1{}", repeat("0", 4931)),
+                [
+                    "7ff0000000000000",
+                    "7ff0000000000000",
+                    "7ff0000000000000:4932",
+                    "7ff0000000000000:4932",
+                ],
+            ),
+            (
+                format!("1{}", repeat("0", 4933)),
+                [
+                    "7ff0000000000000",
+                    "7ff0000000000000",
+                    "7ff0000000000000:4934",
+                    "7ff0000000000000:4934",
+                ],
+            ),
+            (
+                format!("1{}e", repeat("0", 5000)),
+                [
+                    "7ff0000000000000",
+                    "ERR",
+                    "7ff0000000000000:5002",
+                    "7ff0000000000000:5002",
+                ],
+            ),
+            (
+                format!("{}e1", repeat("9", 5000)),
+                [
+                    "7ff0000000000000",
+                    "7ff0000000000000",
+                    "7ff0000000000000:5002",
+                    "7fefffffffffffff:5002",
+                ],
+            ),
+            (
+                format!("{}e-1", repeat("9", 5000)),
+                [
+                    "7ff0000000000000",
+                    "7ff0000000000000",
+                    "7ff0000000000000:5003",
+                    "7ff0000000000000:5003",
+                ],
+            ),
+            (
+                format!("{}.{}e", repeat("9", 5000), repeat("9", 700)),
+                [
+                    "0000000000000000",
+                    "ERR",
+                    "0000000000000000:5702",
+                    "0010000000000000:5702",
+                ],
+            ),
+            (
+                format!("{}.{}e", repeat("9", 5000), repeat("9", 600)),
+                [
+                    "7ff0000000000000",
+                    "ERR",
+                    "7ff0000000000000:5602",
+                    "7ff0000000000000:5602",
+                ],
+            ),
+            (
+                format!("{}e-600", repeat("5", 4950)),
+                [
+                    "7ff0000000000000",
+                    "7ff0000000000000",
+                    "7ff0000000000000:4955",
+                    "7ff0000000000000:4955",
+                ],
+            ),
+            (
+                format!("{}e-616", repeat("5", 4950)),
+                [
+                    "7ff0000000000000",
+                    "7ff0000000000000",
+                    "0000000000000000:4955",
+                    "0010000000000000:4955",
+                ],
+            ),
+        ];
+        for (text, ncbi) in cases {
+            assert_eq!(
+                four_conversions(text.as_bytes()),
+                ncbi,
+                "{}",
+                &text[..text.len().min(20)]
+            );
+        }
+        // NCBI's `exponent - expvalue` overflows `int` (its build gives the infinity, undefined
+        // behaviour): refused, at NCBI's end; `strtod` reads the whole text, so `CArg_Double`
+        // takes its number (0).
         assert_eq!(
-            refused,
+            four_conversions(b"1.55e-2147483647"),
             [
-                "0.0000000000000001e",
-                "1234567890123456789e",
-                "1.234567890123456789e",
-                "9.99999999999999999e"
+                "0000000000000000",
+                "0000000000000000",
+                "OVERFLOW:16",
+                "OVERFLOW:16"
             ]
+        );
+        assert_eq!(
+            string_to_double_posix(b"1.55e-2147483647", false).value,
+            Err(IntOverflow)
         );
     }
 

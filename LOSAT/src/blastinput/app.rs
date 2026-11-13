@@ -649,8 +649,8 @@ pub fn xinclude_check_for(choice: &FormatChoice, out: Option<&Path>) -> anyhow::
 }
 
 /// A `-seg` value as NCBI's filtering handler reads it, with NCBI's errors. A locut or
-/// hicut that `NStr::StringToDouble` reads but that is not a finite decimal number (an
-/// infinity, NaN or a hexadecimal number) is rejected with LOSAT's message.
+/// hicut that `NStr::StringToDouble` reads but that is not a finite number (an infinity or
+/// NaN) is rejected with LOSAT's message, after NCBI's errors of both values.
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:396-406
 /// ```c
@@ -722,24 +722,21 @@ pub fn read_seg_option(value: &str, program: &str) -> Result<SegSpec, SegOptionE
     let invalid = || SegOptionError::Ncbi("Invalid input for filtering parameters");
     // `NStr::StringToInt(tokens[0])`, flags 0.
     let window = crate::ncbi_str::string_to_int(tokens[0].as_bytes(), 0).map_err(|_| invalid())?;
+    // NCBI reads the values with `NStr::StringToDouble(token)` (default flags,
+    // `ncbi_str::string_to_double`: glibc's `strtod`, decimal or hexadecimal, which must end at
+    // the end of the token); an error of either is NCBI's. LOSAT reads the finite ones.
     let mut cuts = [0.0; 2];
     for (cut, token) in cuts.iter_mut().zip(&tokens[1..]) {
-        use crate::blastinput::value_parsers::{ncbi_string_to_double, NcbiDoubleError};
-        // NCBI reads the values with `NStr::StringToDouble(token)` (default flags,
-        // `ncbi_str::string_to_double`: `strtod`, which must end at the end of the token); LOSAT
-        // reads the finite decimal ones. Its first byte passed `ncbi_string_to_double`'s test,
-        // the same as `StringToDouble`'s.
-        *cut = match ncbi_string_to_double(token) {
-            Ok(number) if number.is_finite() => number,
-            Ok(_) | Err(NcbiDoubleError::Unsupported)
-                if crate::ncbi_str::string_to_double(token.as_bytes()).is_ok() =>
-            {
-                return Err(SegOptionError::Losat(anyhow::anyhow!(
-                    "the SEG locut or hicut {token:?} (not a finite decimal number) is not supported by LOSAT's {program}"
-                )))
-            }
-            Ok(_) | Err(_) => return Err(invalid()),
-        };
+        *cut = crate::ncbi_str::string_to_double(token.as_bytes()).map_err(|_| invalid())?;
+    }
+    if let Some((_, token)) = cuts
+        .iter()
+        .zip(&tokens[1..])
+        .find(|(cut, _)| !cut.is_finite())
+    {
+        return Err(SegOptionError::Losat(anyhow::anyhow!(
+            "the SEG locut or hicut {token:?} (not a finite number) is not supported by LOSAT's {program}"
+        )));
     }
     Ok(SegSpec::WindowLocutHicut {
         window,
@@ -1110,6 +1107,7 @@ mod tests {
             "12 1e 2.5",
             "12 0x 2.5",
             "12 . 2.5",
+            "12 nan(1) 2.5",
         ] {
             let error = format!("{:#}", parse_seg_option(value, "TBLASTX").unwrap_err());
             assert!(
@@ -1117,14 +1115,43 @@ mod tests {
                 "{value}: {error}"
             );
         }
-        for value in ["12 0x10 2.5", "12 +inf 2.5", "12 1e400 2.5", "12 2.2 -nan"] {
+        for value in [
+            "12 +inf 2.5",
+            "12 1e400 2.5",
+            "12 2.2 -nan",
+            "12 +nan(1) 2.5",
+        ] {
             let error = format!("{:#}", parse_seg_option(value, "TBLASTX").unwrap_err());
             assert!(
                 error.contains("not supported by LOSAT's TBLASTX"),
                 "{value}: {error}"
             );
         }
+        // NCBI's error of the hicut comes before LOSAT's refusal of the locut.
+        let error = format!(
+            "{:#}",
+            parse_seg_option("12 +inf 2.5x", "TBLASTX").unwrap_err()
+        );
+        assert!(
+            error.contains("Invalid input for filtering parameters"),
+            "{error}"
+        );
         assert!(parse_seg_option("12 2.2 2.5", "TBLASTX").is_ok());
+        // `strtod` reads hexadecimal numbers: NCBI 2.17.0's `blastp -seg "12 0x1.2p1 0x1.4p1"`
+        // searches as `-seg "12 2.25 2.5"`, `-seg "12 0x10 2.5"` with the locut 16.
+        for (value, locut, hicut) in [
+            ("12 0x1.2p1 0x1.4p1", 2.25, 2.5),
+            ("12 0x10 2.5", 16.0, 2.5),
+        ] {
+            match parse_seg_option(value, "TBLASTX").unwrap() {
+                SegSpec::WindowLocutHicut {
+                    window: 12,
+                    locut: read_locut,
+                    hicut: read_hicut,
+                } => assert_eq!((read_locut, read_hicut), (locut, hicut), "{value}"),
+                other => panic!("{value}: {other:?}"),
+            }
+        }
     }
 
     fn message(error: anyhow::Error) -> String {

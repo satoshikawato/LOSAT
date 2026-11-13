@@ -69,6 +69,10 @@ fn reals_are_read_with_ncbis_arithmetic() {
         ("{ 765945647632464, 10, -15 }", 0x3fe8_82a0_7263_0a05),
         // glibc's pow(10, 23) is the double above 10^23's nearest.
         ("{ 3, 10, 23 }", 0x44cf_c384_2bd1_f072),
+        // More than 18 digits, which `StringToDoublePosix` adds up in x87 extended precision
+        // (`third`; NCBI's corelib, swebok-improve-20261105/sw8/nfix/probe/x87).
+        ("{ 1234567890123456789, 10, 0 }", 0x43b1_2210_f47d_e981),
+        ("{ 12345678901234567890123, 10, 0 }", 0x4484_ea15_b273_b38a),
     ] {
         assert_eq!(real_of(text).to_bits(), bits, "{text}");
     }
@@ -97,7 +101,6 @@ fn reals_are_read_with_ncbis_arithmetic() {
         "{ 1, 3, 0 }",
         "{ -, 10, 0 }",
         "{ 1, 10 }",
-        "{ 1234567890123456789, 10, 0 }",
         "0.005e-2147483647",
         "-0.005e-2147483647",
     ] {

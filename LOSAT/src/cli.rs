@@ -217,8 +217,8 @@ pub enum Commands {
     //     arg.Reset(new CProgramDescriptionArgs(kProgram,
     //                                "Translated Reverse Position Specific BLAST"));
     // ```
-    // `-h` and `-help` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the reader
-    // stops at them, `try_parse_from_command`).
+    // `-h`, `-help` and `-help-full` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the
+    // reader stops at them, `try_parse_from_command`).
     /// Translated Reverse Position Specific BLAST (rpstblastn)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpstblastn(rpstblastn::RpstblastnArgs),
@@ -377,12 +377,12 @@ where
         // and `-h -xmlhelp` print the help, exit status 0; line RG item E2). Every program of
         // this parser follows NCBI's reader; rpstblastn writes NCBI's texts
         // (`RpstblastnArgs::ncbi_help`). An option's value is not a flag (`-out -help` names a
-        // file).
-        // `-help-full` (`s_AutoHelpShowAll`) is `-help` with the hidden arguments. LOSAT's help
-        // lists the arguments LOSAT runs (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1), and
-        // none of them is hidden from NCBI's `-help` (NCBI's makeblastdb hides `-randomize`, which
-        // LOSAT refuses): its text is `-help`'s, as in NCBI's other programs (the same bytes, in
-        // every place, `E/SURVEY_E2.md`).
+        // file). `--help` is LOSAT's spelling of `-help` (clap's) and stops the reader too.
+        // `-help-full` (`s_AutoHelpShowAll`) is `-help` with the arguments defined `fHidden`
+        // (`ShowAllArguments`). Of NCBI's programs only makeblastdb has one, `-randomize`, which
+        // LOSAT refuses; LOSAT's help lists the arguments LOSAT runs (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+        // exception 1), so its text is `-help`'s, as NCBI's other programs write the bytes of
+        // `-help` (in every place: line RG, `E/SURVEY_E2.md`).
         let stops_at_help = !std::ptr::eq(scope, &command);
         if matches!(text, "-help" | "--help") || (stops_at_help && text == "-help-full") {
             translated.push("--help".into());

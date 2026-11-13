@@ -54,7 +54,7 @@ BLAST+.
    (unknown option, missing value, a value that does not parse, a value outside a
    declared range such as `-word_size 3`) prints LOSAT's parser message and exits with
    code 2; NCBI prints its USAGE text and the `CArgException` and exits with code 1.
-   `-help` and `-h` print LOSAT's help text. Errors that NCBI raises after parsing the
+   `-help`, `-help-full` (since version 1.17) and `-h` print LOSAT's help text. Errors that NCBI raises after parsing the
    arguments (`BLAST query/options error: ...`, input errors such as a missing
    `-subject`, engine errors) are not covered and must match NCBI.
 2. **Thread count with `-subject`.** LOSAT searches with the requested `-num_threads`.
@@ -250,7 +250,9 @@ BLAST+.
   (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT refuses, so
   LOSAT's text has no hidden option to add). The reader stops at `-h`, `-help` and `-help-full` as
   NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
-  place) and the full versions stay refused, in makeblastdb too (line RG item E2).
+  place) and the full versions stay refused, in makeblastdb too (line RG item E2). The library API
+  answers `-help-full` as `-help` (the help text in its error), and the Web app and ABI v1's BLASTX
+  and TBLASTN refuse it with their other help words.
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

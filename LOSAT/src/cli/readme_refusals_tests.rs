@@ -35,7 +35,7 @@ const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tbla
 const OWN_PARAGRAPHS: [&str; 4] = ["psiblast", "rpsblast", "rpsbproc", "makeblastdb"];
 
 /// The programs that refuse the NCBI C++ Toolkit options by name (`unknown_option_error`).
-const TOOLKIT_PROGRAMS: [&str; 9] = [
+const TOOLKIT_PROGRAMS: [&str; 10] = [
     "blastn",
     "blastp",
     "blastx",
@@ -43,6 +43,7 @@ const TOOLKIT_PROGRAMS: [&str; 9] = [
     "tblastx",
     "psiblast",
     "rpsblast",
+    "rpstblastn",
     "rpsbproc",
     "makeblastdb",
 ];

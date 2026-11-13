@@ -103,24 +103,21 @@ impl OidRange {
     //                 m_NodeMasks.push_back(mask);
     //             }
     // ```
-    // A value of 2^31 or more becomes a negative `int`; such a range is refused
-    // before the mask is made (`SeqDb::open_tree`), so the values here fit.
-    /// The 0-based half-open range `[begin, end)` of the mask, in the OIDs of
-    /// the whole volume set: `(begin, end)` as NCBI's `CSeqDB_AliasMask` holds
-    /// them.
-    pub fn bounds(&self) -> (i64, i64) {
-        let begin = self.first_oid.map_or(0, |first| first.saturating_sub(1));
-        let end = self.last_oid.map_or(i64::from(i32::MAX), i64::from);
-        (i64::from(begin), end)
-    }
-
-    /// Whether `FIRST_OID` or `LAST_OID` does not fit NCBI's `int` (2^31 or
-    /// more), which it then reads as a negative number.
-    pub fn exceeds_int(&self) -> bool {
-        [self.first_oid, self.last_oid]
-            .into_iter()
-            .flatten()
-            .any(|value| value > i32::MAX as u32)
+    // `NStr::StringToUInt` gives a `Uint4` that NCBI stores in an `int`: GCC wraps a value of
+    // 2^31 or more to a negative number (defined since C++20, implementation-defined before).
+    // `first_oid--` of `FIRST_OID 2147483648` decrements `INT_MIN`, which is undefined; NCBI
+    // BLAST+ 2.17.0 gives `INT_MAX` (probe p4a_r2_ao_fo2147483648 of line RG D1a-2), the value of
+    // `wrapping_sub(1)` here, which is also 2^31 - 1 without the wrap.
+    /// `(begin, end)` as NCBI's `CSeqDB_AliasMask` holds them (`int`): `begin` the 0-based
+    /// first OID (0 without `FIRST_OID`), `end` the `LAST_OID` (`INT_MAX` without it), in the
+    /// OIDs of the whole volume set. A value of 2^31 or more is negative, as NCBI reads it.
+    pub fn bounds(&self) -> (i32, i32) {
+        let begin = match self.first_oid {
+            None | Some(0) => 0,
+            Some(first) => first.wrapping_sub(1) as i32,
+        };
+        let end = self.last_oid.map_or(i32::MAX, |last| last as i32);
+        (begin, end)
     }
 }
 
@@ -2283,15 +2280,6 @@ pub(super) fn has_ranges(node: &AliasNode) -> bool {
     node.range.is_some() || node.subnodes.iter().any(has_ranges)
 }
 
-/// The first range of the tree that does not fit NCBI's `int` (`OidRange::exceeds_int`), with
-/// the alias file that has it.
-pub(super) fn range_beyond_int(node: &AliasNode) -> Option<&str> {
-    if node.range.is_some_and(|range| range.exceeds_int()) {
-        return Some(node.this_name.as_deref().unwrap_or("-"));
-    }
-    node.subnodes.iter().find_map(range_beyond_int)
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:91-99
 // ```c++
 //     for(int i = 0; i < volset.GetNumVols(); i++) {
@@ -2375,6 +2363,30 @@ pub(super) fn range_beyond_int(node: &AliasNode) -> Option<&str> {
 // the union, over the paths from the top node to each node that names the volume, of the
 // intersection of the ranges on the path with the volume, which is what is computed here.
 // The ranges count the OIDs of the whole volume set (`vol_start`, `vol_end` are global).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:104-114
+// ```c++
+//     CSeqDB_BitSet(size_t start, size_t end, ESpecialCase sp = eNone)
+//         : m_Start  (start),
+//           m_End    (end),
+//           m_Special(sp)
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:208-221
+// ```c++
+// void CSeqDB_BitSet::IntersectWith(const CSeqDB_BitSet & other, bool consume)
+// {
+//     if (m_Special == eAllClear || other.m_Special == eAllSet) {
+//         return;
+//     }
+//     ...
+//     if (m_Special == eAllSet && other.m_Special == eAllSet) {
+//         m_Start = max(m_Start, other.m_Start);
+//         m_End = min(m_End, other.m_End);
+//         return;
+//     }
+// ```
+// The `int` bounds of a range become `size_t`: a negative one is sign-extended past every OID
+// (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a negative
+// `LAST_OID` is no upper bound, as `bound` reads them.
 /// The OIDs that the OID ranges of the tree include, one bit per OID of the volume set (bit
 /// `oid % 64` of word `oid / 64`); `volume` gives the global OIDs `[start, end)` of a volume
 /// path. `None` when no node has a range: NCBI builds no OID list then, and every OID is
@@ -2387,39 +2399,42 @@ pub(super) fn range_mask(
     if !has_ranges(root) {
         return None;
     }
+    /// NCBI's `size_t` of an `int` bound.
+    fn bound(value: i32) -> u64 {
+        i64::from(value) as u64
+    }
     fn mark(
         node: &AliasNode,
-        lo: i64,
-        hi: i64,
+        lo: u64,
+        hi: u64,
         volume: &dyn Fn(&str) -> (u32, u32),
         words: &mut [u64],
     ) {
         let (lo, hi) = match node.range {
             Some(range) => {
                 let (begin, end) = range.bounds();
-                (lo.max(begin), hi.min(end))
+                (lo.max(bound(begin)), hi.min(bound(end)))
             }
             None => (lo, hi),
         };
         for path in &node.vol_names {
             let (start, end) = volume(path);
-            set_bits(words, lo.max(i64::from(start)), hi.min(i64::from(end)));
+            set_bits(words, lo.max(u64::from(start)), hi.min(u64::from(end)));
         }
         for subnode in &node.subnodes {
             mark(subnode, lo, hi, volume, words);
         }
     }
     let mut words = vec![0u64; (num_oids as usize).div_ceil(64)];
-    mark(root, 0, i64::MAX, volume, &mut words);
+    mark(root, 0, u64::MAX, volume, &mut words);
     Some(words)
 }
 
 /// Sets the bits `[from, to)` of `words` (nothing when `to <= from`).
-fn set_bits(words: &mut [u64], from: i64, to: i64) {
+fn set_bits(words: &mut [u64], from: u64, to: u64) {
     if to <= from {
         return;
     }
-    let (from, to) = (from as u64, to as u64);
     let mut at = from;
     while at < to {
         let word = (at / 64) as usize;
@@ -2472,8 +2487,9 @@ fn set_bits(words: &mut [u64], from: i64, to: i64) {
 // ```
 // The filter tree's top node has one sub-node per alias file of the top node
 // (`BuildFilterTree`, seqdbalias.cpp:1880-1894), and a node's only filter is its range (the
-// other filter keys are refused). The ranges here fit an `int` (`range_beyond_int` refuses
-// the others).
+// other filter keys are refused). The bounds are NCBI's `int`s (`OidRange::bounds`), negative
+// for a value of 2^31 or more: a negative `oid_begin` starts at 0, a negative `oid_end` ends at
+// 0, and `LAST_OID 0` (`oid_end` 0) ends at the last OID.
 /// The iteration range NCBI sets on its first OID-list build when the top node has exactly one
 /// alias file and that file has an OID range: `[begin, end)` as `SetIterationRange` clamps it
 /// to the `num_oids` OIDs of the volume set. `None` in every other case.
@@ -2481,14 +2497,14 @@ pub(super) fn top_iteration_range(root: &AliasNode, num_oids: u32) -> Option<(u3
     let [only] = root.subnodes.as_slice() else {
         return None;
     };
-    let (begin, end) = only.range?.bounds();
+    let (oid_begin, oid_end) = only.range?.bounds();
     let num_oids = i64::from(num_oids);
-    let mut restrict_begin = begin.max(0);
-    let mut restrict_end = end.max(0);
-    if begin == 0 && end == 0 {
+    let mut restrict_begin = i64::from(oid_begin.max(0));
+    let mut restrict_end = i64::from(oid_end.max(0));
+    if oid_begin == 0 && oid_end == 0 {
         restrict_end = num_oids;
     } else {
-        if end == 0 || restrict_end > num_oids {
+        if oid_end == 0 || restrict_end > num_oids {
             restrict_end = num_oids;
         }
         if restrict_begin > restrict_end {

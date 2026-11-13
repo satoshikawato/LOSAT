@@ -1537,7 +1537,7 @@ fn search(
         // average subject length is too short`, exit status 3.
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.num_oids() == 0 {
+                let read = if database.first_oid_read_fails() {
                     Err(PreliminaryReadError("Database memory map file error").into())
                 } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
                     Err(PreliminaryReadError("The average subject length is too short").into())
@@ -2076,6 +2076,12 @@ fn search(
                         0 | 5 | 6 | 7 | 10 | 20
                     )
                 });
+                // The pairwise report reads its subjects in the order of its `-sorthits`.
+                let pairwise = outputs
+                    .formats
+                    .first()
+                    .is_some_and(|format| super::stage_e_report::format_number(format.outfmt) == 0)
+                    .then(|| resolved.formatting.report_sort());
                 let plural_names =
                     taxdb_found && first_spec.as_ref().is_some_and(|spec| spec.checks_taxdb());
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
@@ -2128,6 +2134,7 @@ fn search(
                                             shown,
                                             rows,
                                             plural_names,
+                                            pairwise,
                                         )?,
                                     );
                                 } else {

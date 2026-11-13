@@ -274,6 +274,28 @@ fn offset_at(offsets: &[GreedyOffset], lower: i32, k: i32) -> GreedyOffset {
         .unwrap_or(INVALID_GREEDY_OFFSET)
 }
 
+/// The address of diagonal 0 of an earlier distance's row, for reads at the diagonals `lo..=hi`.
+///
+/// No NCBI counterpart: NCBI indexes `last_seq2_off[d - x][k]` after its bound tests on `k`. The
+/// bounds of a distance lie in the diagonals that its row holds (`AffineRows`); this checks it once
+/// per distance, so that the loop over `k` reads the row without a test per cell. Empty bounds
+/// (`lo > hi`: a distance below 0 or with no diagonal left) are never read.
+#[inline(always)]
+fn prior_row_base(row: &AffineRow, lo: i32, hi: i32) -> *const GreedyOffset {
+    if lo <= hi {
+        assert!(lo >= row.lower && ((hi - row.lower) as usize) < row.offsets.len());
+    }
+    row.offsets.as_ptr().wrapping_offset(-(row.lower as isize))
+}
+
+/// The offsets of diagonal `k` of a row whose `prior_row_base` is `base`.
+///
+/// SAFETY: `k` must lie in the `lo..=hi` that `prior_row_base` checked for `base`.
+#[inline(always)]
+unsafe fn prior_at(base: *const GreedyOffset, k: i32) -> GreedyOffset {
+    *base.wrapping_offset(k as isize)
+}
+
 /// Bookkeeping structure for affine greedy alignment (NCBI BLAST's SGreedyOffset).
 /// When aligning two sequences, stores the largest offset into the second sequence
 /// that leads to a high-scoring alignment for a given start point, tracking
@@ -2352,6 +2374,57 @@ fn find_first_mismatch_greedy(
     seq1_index - tmp
 }
 
+/// `s_FindFirstMismatch` for `rem == 4` with its fence test, for the affine kernel: the
+/// word-at-a-time scan of the non-affine kernels (`x_first_mismatch`) and the same fence test as
+/// `find_first_mismatch_greedy`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:327-339,351-362
+/// ```c
+///         while (seq1_index < len1 && seq2_index < len2 &&
+///                seq1[seq1_index] < 4 &&
+///                seq1[seq1_index] == seq2[seq2_index]) {
+///             ++seq1_index;
+///             ++seq2_index;
+///         }
+///         if (seq2_index < len2 && seq2[seq2_index] == FENCE_SENTRY) {
+///             ASSERT(fence_hit);
+///             *fence_hit = TRUE;
+///         }
+/// ```
+#[inline(always)]
+fn affine_first_mismatch<const REVERSE: bool>(
+    seq1: &[u8],
+    seq2: &[u8],
+    len1: i32,
+    len2: i32,
+    seq1_index: i32,
+    seq2_index: i32,
+    fence_hit: &mut bool,
+) -> i32 {
+    // The byte loop of `find_first_mismatch_greedy` indexes the slices with these offsets.
+    assert!(seq1_index >= 0 && seq2_index >= 0);
+    assert!(len1 as usize <= seq1.len() && len2 as usize <= seq2.len());
+    // SAFETY: `seq1` and `seq2` are readable for `len1` and `len2` bytes (asserted above).
+    let index = unsafe {
+        x_first_mismatch::<REVERSE>(
+            seq1.as_ptr(),
+            seq2.as_ptr(),
+            len1,
+            len2,
+            seq1_index,
+            seq2_index,
+        )
+    };
+    let stop2 = seq2_index + index;
+    if stop2 < len2 {
+        let at = if REVERSE { len2 - 1 - stop2 } else { stop2 };
+        if seq2[at as usize] == FENCE_SENTRY {
+            *fence_hit = true;
+        }
+    }
+    index
+}
+
 /// Affine traceback helper from match state.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:148-178
 fn get_next_affine_tback_from_match(
@@ -3966,12 +4039,79 @@ pub(crate) fn greedy_xdrop_offset(
 
 /// Affine greedy alignment with optional traceback.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
+///
+/// No NCBI counterpart: NCBI tests `reverse` inside `s_FindFirstMismatch` on every call; the
+/// direction is a type parameter here, as in the non-affine kernels (`x_first_mismatch`).
 fn blast_affine_greedy_align(
     seq1: &[u8],
     len1: i32,
     seq2: &[u8],
     len2: i32,
     reverse: bool,
+    xdrop_threshold: i32,
+    match_score: i32,
+    mismatch_score: i32,
+    in_gap_open: i32,
+    in_gap_extend: i32,
+    seq1_align_len: &mut i32,
+    seq2_align_len: &mut i32,
+    max_dist: i32,
+    affine_mem: &mut GreedyAffineMem,
+    non_affine_mem: &mut GreedyNonAffineMem,
+    edit_block: Option<&mut GapPrelimEditBlock>,
+    fence_hit: &mut bool,
+    seed: &mut GreedySeed,
+) -> i32 {
+    if reverse {
+        blast_affine_greedy_align_dir::<true>(
+            seq1,
+            len1,
+            seq2,
+            len2,
+            xdrop_threshold,
+            match_score,
+            mismatch_score,
+            in_gap_open,
+            in_gap_extend,
+            seq1_align_len,
+            seq2_align_len,
+            max_dist,
+            affine_mem,
+            non_affine_mem,
+            edit_block,
+            fence_hit,
+            seed,
+        )
+    } else {
+        blast_affine_greedy_align_dir::<false>(
+            seq1,
+            len1,
+            seq2,
+            len2,
+            xdrop_threshold,
+            match_score,
+            mismatch_score,
+            in_gap_open,
+            in_gap_extend,
+            seq1_align_len,
+            seq2_align_len,
+            max_dist,
+            affine_mem,
+            non_affine_mem,
+            edit_block,
+            fence_hit,
+            seed,
+        )
+    }
+}
+
+/// `blast_affine_greedy_align` for one direction.
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:755-1249 (BLAST_AffineGreedyAlign)
+fn blast_affine_greedy_align_dir<const REVERSE: bool>(
+    seq1: &[u8],
+    len1: i32,
+    seq2: &[u8],
+    len2: i32,
     mut xdrop_threshold: i32,
     mut match_score: i32,
     mut mismatch_score: i32,
@@ -4010,7 +4150,7 @@ fn blast_affine_greedy_align(
             len1,
             seq2,
             len2,
-            reverse,
+            REVERSE,
             xdrop_threshold,
             match_score,
             mismatch_score,
@@ -4084,7 +4224,7 @@ fn blast_affine_greedy_align(
         ring: edit_block.is_none().then_some((max_penalty + 1) as usize),
     };
 
-    index = find_first_mismatch_greedy(seq1, seq2, len1, len2, 0, 0, reverse, fence_hit);
+    index = affine_first_mismatch::<REVERSE>(seq1, seq2, len1, len2, 0, 0, fence_hit);
     if *fence_hit {
         return -1;
     }
@@ -4186,22 +4326,30 @@ fn blast_affine_greedy_align(
         } else {
             &empty
         };
-        let cur_lower = cur.lower;
-        let (open_lower, open_offsets) = (row_open.lower, &row_open.offsets[..]);
-        let (ext_lower, ext_offsets) = (row_ext.lower, &row_ext.offsets[..]);
-        let (match_row_lower, match_offsets) = (row_match.lower, &row_match.offsets[..]);
-        let cur_offsets = &mut cur.offsets[..];
+        // Each `k` reads an earlier row only at diagonals inside that distance's bounds (`k + 1`
+        // and `k - 1` in `open_lo..=open_hi` or `ext_lo..=ext_hi`, `k` in `match_lo..=match_hi`);
+        // `prior_row_base` checks once per distance that the bounds lie in the row, and the row
+        // of `d` holds exactly the diagonals `tmp_diag_lower..=tmp_diag_upper` (`start`).
+        let open_base = prior_row_base(row_open, open_lo, open_hi);
+        let ext_base = prior_row_base(row_ext, ext_lo, ext_hi);
+        let match_base = prior_row_base(row_match, match_lo, match_hi);
+        debug_assert!(
+            cur.lower == tmp_diag_lower
+                && cur.offsets.len() == (tmp_diag_upper - tmp_diag_lower + 1).max(0) as usize
+        );
+        let mut fence = false;
 
-        for k_val in tmp_diag_lower..=tmp_diag_upper {
+        for (k_val, cell) in (tmp_diag_lower..=tmp_diag_upper).zip(cur.offsets.iter_mut()) {
             k = k_val;
-            let cell = &mut cur_offsets[(k - cur_lower) as usize];
 
             let mut seq2_index_del = INVALID_OFFSET;
             if k + 1 >= open_lo && k < open_hi {
-                seq2_index_del = offset_at(open_offsets, open_lower, k + 1).match_off;
+                // SAFETY: `k + 1` lies in `open_lo..=open_hi`, checked for `open_base`.
+                seq2_index_del = unsafe { prior_at(open_base, k + 1) }.match_off;
             }
             if k + 1 >= ext_lo && k < ext_hi {
-                let ext_off = offset_at(ext_offsets, ext_lower, k + 1).delete_off;
+                // SAFETY: `k + 1` lies in `ext_lo..=ext_hi`, checked for `ext_base`.
+                let ext_off = unsafe { prior_at(ext_base, k + 1) }.delete_off;
                 if ext_off > seq2_index_del {
                     seq2_index_del = ext_off;
                 }
@@ -4214,10 +4362,12 @@ fn blast_affine_greedy_align(
 
             let mut seq2_index_ins = INVALID_OFFSET;
             if k > open_lo && k - 1 <= open_hi {
-                seq2_index_ins = offset_at(open_offsets, open_lower, k - 1).match_off;
+                // SAFETY: `k - 1` lies in `open_lo..=open_hi`, checked for `open_base`.
+                seq2_index_ins = unsafe { prior_at(open_base, k - 1) }.match_off;
             }
             if k > ext_lo && k - 1 <= ext_hi {
-                let ext_off = offset_at(ext_offsets, ext_lower, k - 1).insert_off;
+                // SAFETY: `k - 1` lies in `ext_lo..=ext_hi`, checked for `ext_base`.
+                let ext_off = unsafe { prior_at(ext_base, k - 1) }.insert_off;
                 if ext_off > seq2_index_ins {
                     seq2_index_ins = ext_off;
                 }
@@ -4226,8 +4376,8 @@ fn blast_affine_greedy_align(
 
             seq2_index = cell.insert_off.max(cell.delete_off);
             if k >= match_lo && k <= match_hi {
-                seq2_index =
-                    seq2_index.max(offset_at(match_offsets, match_row_lower, k).match_off + 1);
+                // SAFETY: `k` lies in `match_lo..=match_hi`, checked for `match_base`.
+                seq2_index = seq2_index.max(unsafe { prior_at(match_base, k) }.match_off + 1);
             }
 
             seq1_index = seq2_index + k - diag_origin;
@@ -4242,12 +4392,12 @@ fn blast_affine_greedy_align(
             }
             curr_diag_upper = k;
 
-            index = find_first_mismatch_greedy(
-                seq1, seq2, len1, len2, seq1_index, seq2_index, reverse, fence_hit,
+            index = affine_first_mismatch::<REVERSE>(
+                seq1, seq2, len1, len2, seq1_index, seq2_index, fence_hit,
             );
             if *fence_hit {
-                last_seq2_off.put(d, cur);
-                return -1;
+                fence = true;
+                break;
             }
 
             if index > longest_match_run {
@@ -4277,6 +4427,9 @@ fn blast_affine_greedy_align(
             }
         }
         last_seq2_off.put(d, cur);
+        if fence {
+            return -1;
+        }
 
         let curr_score = curr_extent * match_score_half - d * score_common_factor;
         let prev_max = max_score_base[(d as usize - 1) + max_score_offset];
@@ -5240,5 +5393,224 @@ mod tests {
             &mut scratch,
         )
         .is_none());
+    }
+
+    /// A small xorshift generator for the random tests below.
+    struct TestRng(u64);
+
+    impl TestRng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:327-339,351-362
+    /// ```c
+    ///         while (seq1_index < len1 && seq2_index < len2 &&
+    ///                seq1[seq1_index] < 4 &&
+    ///                seq1[seq1_index] == seq2[seq2_index]) {
+    /// ...
+    ///         if (seq2_index < len2 && seq2[seq2_index] == FENCE_SENTRY) {
+    /// ```
+    /// The affine kernel's scan (`affine_first_mismatch`) gives the byte loop's length and fence
+    /// flag (`find_first_mismatch_greedy`) on random pairs with ambiguous letters, fences and long
+    /// runs, in both directions, from starts inside, at and past the ends.
+    #[test]
+    fn affine_first_mismatch_equals_find_first_mismatch_greedy() {
+        let mut rng = TestRng(0x0BAD_5EED_1234_5678);
+        for _ in 0..20_000 {
+            let len1 = rng.below(48) as usize;
+            let seq1: Vec<u8> = (0..len1)
+                .map(|_| {
+                    if rng.below(24) == 0 {
+                        4 + rng.below(11) as u8
+                    } else {
+                        rng.below(4) as u8
+                    }
+                })
+                .collect();
+            let shift = rng.below(8) as usize;
+            let len2 = rng.below(48) as usize;
+            let seq2: Vec<u8> = (0..len2)
+                .map(|j| match rng.below(40) {
+                    0 => FENCE_SENTRY,
+                    1..=4 => rng.below(4) as u8,
+                    _ => seq1.get(j + shift).copied().unwrap_or(0).min(3),
+                })
+                .collect();
+            let s1 = rng.below(len1 as u64 + 3) as i32;
+            let s2 = rng.below(len2 as u64 + 3) as i32;
+            let (l1, l2) = (len1 as i32, len2 as i32);
+            for reverse in [false, true] {
+                let mut fence_old = false;
+                let old = find_first_mismatch_greedy(
+                    &seq1,
+                    &seq2,
+                    l1,
+                    l2,
+                    s1,
+                    s2,
+                    reverse,
+                    &mut fence_old,
+                );
+                let mut fence_new = false;
+                let new = if reverse {
+                    affine_first_mismatch::<true>(&seq1, &seq2, l1, l2, s1, s2, &mut fence_new)
+                } else {
+                    affine_first_mismatch::<false>(&seq1, &seq2, l1, l2, s1, s2, &mut fence_new)
+                };
+                assert_eq!(
+                    (new, fence_new),
+                    (old, fence_old),
+                    "reverse {reverse} s1 {s1} s2 {s2}"
+                );
+            }
+        }
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:755-761,1000-1047
+    /// ```c
+    /// Int4 BLAST_AffineGreedyAlign (const Uint1* seq1, Int4 len1,
+    ///                               const Uint1* seq2, Int4 len2,
+    ///                               Boolean reverse, Int4 xdrop_threshold,
+    /// ...
+    ///             if (k + 1 <= diag_upper[d - gap_open_extend] &&
+    ///                 k + 1 >= diag_lower[d - gap_open_extend]) {
+    /// ```
+    /// `reverse` reads both sequences from their ends, so the affine alignment of a pair with
+    /// `reverse` equals the forward alignment of the reversed pair: score, lengths, seed, fence
+    /// and edit script, on random related pairs with fences, ambiguous letters, several scoring
+    /// systems, X-drops from small to past every cell, short `max_dist` (no convergence), with and
+    /// without traceback. It runs both directions of the kernel (`blast_affine_greedy_align_dir`)
+    /// and its once-per-distance row checks (`prior_row_base`) on every distance.
+    #[test]
+    fn affine_greedy_reverse_equals_forward_on_reversed_pair() {
+        type Out = (
+            i32,
+            i32,
+            i32,
+            bool,
+            (i32, i32, i32),
+            Vec<(GapAlignOpType, i32)>,
+        );
+        fn run(
+            seq1: &[u8],
+            seq2: &[u8],
+            reverse: bool,
+            scoring: (i32, i32, i32, i32),
+            x_drop: i32,
+            max_dist: i32,
+            traceback: bool,
+            mem: &mut (GreedyAffineMem, GreedyNonAffineMem),
+        ) -> Out {
+            let (mut len_1, mut len_2) = (0, 0);
+            let mut fence_hit = false;
+            let mut seed = GreedySeed::default();
+            let mut block = GapPrelimEditBlock::new();
+            let score = blast_affine_greedy_align(
+                seq1,
+                seq1.len() as i32,
+                seq2,
+                seq2.len() as i32,
+                reverse,
+                x_drop,
+                scoring.0,
+                scoring.1,
+                scoring.2,
+                scoring.3,
+                &mut len_1,
+                &mut len_2,
+                max_dist,
+                &mut mem.0,
+                &mut mem.1,
+                traceback.then_some(&mut block),
+                &mut fence_hit,
+                &mut seed,
+            );
+            let ops = block.edit_ops[..block.num_ops]
+                .iter()
+                .map(|op| (op.op_type, op.num))
+                .collect();
+            (
+                score,
+                len_1,
+                len_2,
+                fence_hit,
+                (seed.start_q, seed.start_s, seed.match_length),
+                ops,
+            )
+        }
+        let mut rng = TestRng(0x1F2E_3D4C_5B6A_7988);
+        let scorings = [(1, 2), (1, 3), (2, 3), (1, 1), (2, 5), (4, 5)];
+        let x_drops = [2, 5, 10, 30, 100, 1_000, 20_000];
+        let (mut fences, mut runs) = (0, 0);
+        let mut mem = (GreedyAffineMem::new(), GreedyNonAffineMem::new());
+        for _ in 0..600 {
+            let len1 = 1 + rng.below(160) as usize;
+            let seq1: Vec<u8> = (0..len1)
+                .map(|_| {
+                    if rng.below(60) == 0 {
+                        4 + rng.below(11) as u8
+                    } else {
+                        rng.below(4) as u8
+                    }
+                })
+                .collect();
+            let mut seq2 = Vec::new();
+            for &b in &seq1 {
+                match rng.below(100) {
+                    0..=7 => seq2.push(rng.below(4) as u8),
+                    8..=9 => {}
+                    10..=11 => {
+                        seq2.push(b.min(3));
+                        seq2.push(rng.below(4) as u8);
+                    }
+                    _ => seq2.push(b.min(3)),
+                }
+            }
+            for _ in 0..rng.below(40) {
+                seq2.push(rng.below(4) as u8);
+            }
+            if seq2.is_empty() {
+                seq2.push(0);
+            }
+            if rng.below(4) == 0 {
+                let at = rng.below(seq2.len() as u64) as usize;
+                seq2[at] = FENCE_SENTRY;
+            }
+            let (reward, penalty) = scorings[rng.below(scorings.len() as u64) as usize];
+            let gap_open = rng.below(7) as i32;
+            let gap_extend = 1 + rng.below(4) as i32;
+            let x_drop = x_drops[rng.below(x_drops.len() as u64) as usize];
+            let max_dist = if rng.below(5) == 0 {
+                1 + rng.below(8) as i32
+            } else {
+                (len1.max(seq2.len()) / 2 + 10) as i32
+            };
+            let scoring = (reward, penalty, gap_open, gap_extend);
+            let rev1: Vec<u8> = seq1.iter().rev().copied().collect();
+            let rev2: Vec<u8> = seq2.iter().rev().copied().collect();
+            for traceback in [false, true] {
+                let backward = run(
+                    &seq1, &seq2, true, scoring, x_drop, max_dist, traceback, &mut mem,
+                );
+                let forward = run(
+                    &rev1, &rev2, false, scoring, x_drop, max_dist, traceback, &mut mem,
+                );
+                assert_eq!(
+                    backward, forward,
+                    "scoring {scoring:?} x_drop {x_drop} max_dist {max_dist} traceback {traceback}"
+                );
+                fences += usize::from(forward.3);
+                runs += 1;
+            }
+        }
+        assert!(fences >= 20 && runs == 1_200, "fences {fences} runs {runs}");
     }
 }

@@ -250,9 +250,10 @@ pub enum Commands {
 // Translate registered canonical keys only. Consume each value once so a path
 // or a quoted filtering specification can never be interpreted as another key.
 /// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
-/// (the library API, the Web engine): the toolkit's words that the start reads (`-logfile`,
-/// `-conffile`, `-dryrun`, the versions) are refused (`toolkit_file_word_error`; makeblastdb
-/// keeps its own `-logfile` argument), and so is `-xmlhelp` (`xml_help_refusal`).
+/// (the Web engine): the toolkit's words that the start reads (`-logfile`, `-conffile`,
+/// `-dryrun`) are refused (`toolkit_file_word_error`; makeblastdb keeps its own `-logfile`
+/// argument), and so are the versions (`version_word_error`) and `-xmlhelp`
+/// (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -260,6 +261,19 @@ where
     S: Into<OsString>,
 {
     try_parse_from_command(T::command(), argv)
+}
+
+/// `try_parse_from` for the library API, whose calls run an NCBI application start of their own
+/// (`api::start`): `-logfile`, `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`,
+/// whose texts only the command line writes, are refused (`version_word_error`,
+/// `xml_help_refusal`).
+pub(crate) fn try_parse_from_library<T, I, S>(argv: I) -> Result<T, clap::Error>
+where
+    T: Parser + CommandFactory,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    parse_command(T::command(), argv, Reader::Library)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -275,7 +289,7 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Some(start))
+    parse_command(T::command(), argv, Reader::CommandLine(start))
 }
 
 /// `try_parse_from` with `command`, one of `T`'s commands whose arguments a caller changed
@@ -290,15 +304,29 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(command, argv, None)
+    parse_command(command, argv, Reader::NoStart)
 }
 
-/// The reader of `try_parse_from`, `try_parse_from_start` and `try_parse_from_command`: `start` is
-/// the command line's application start, `None` for a caller that runs none.
+/// Who reads an argv (`parse_command`), which decides what NCBI's toolkit words do there.
+#[derive(Clone, Copy)]
+enum Reader<'a> {
+    /// A caller that runs no NCBI application start (the Web engine): the toolkit's words, the
+    /// versions and `-xmlhelp` are refused.
+    NoStart,
+    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
+    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
+    Library,
+    /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
+    /// the entry prints.
+    CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
+}
+
+/// The reader of `try_parse_from`, `try_parse_from_library`, `try_parse_from_start` and
+/// `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
     argv: I,
-    start: Option<&crate::blastinput::ncbi_environment::ApplicationStart>,
+    reader: Reader<'_>,
 ) -> Result<T, clap::Error>
 where
     T: clap::FromArgMatches,
@@ -306,7 +334,7 @@ where
     S: Into<OsString>,
 {
     let mut tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    if let Some(start) = start {
+    if let Reader::CommandLine(start) = reader {
         debug_assert_eq!(
             tokens.get(1).and_then(|token| token.to_str()),
             Some(start.program()),
@@ -323,9 +351,9 @@ where
         .filter(|program| TOOLKIT_PROGRAMS.contains(&program.get_name()))
     {
         if let Some(word) = ncbi_version_word(&tokens[2..]) {
-            return Err(toolkit_file_word_error(program.get_name(), word));
+            return Err(version_word_error(program.get_name(), word));
         }
-        if start.is_none() {
+        if matches!(reader, Reader::NoStart) {
             if let Some(word) = toolkit_file_word(&tokens[2..]) {
                 return Err(toolkit_file_word_error(program.get_name(), word));
             }
@@ -338,12 +366,13 @@ where
     } else if tokens.get(1).is_some_and(|token| token == "makeblastdb") {
         // makeblastdb's application reads the same words (its own refusals of the others come
         // with its arguments): a last `-logfile` or `-conffile` without a value is dropped,
-        // `-dryrun` goes to the entry (`main_entry`), and the library API refuses `-conffile`
-        // and `-dryrun` (NCBI BLAST+ 2.17.0, probes `makeblastdb.log_noval`,
+        // `-dryrun` goes to the entry (`main_entry`) or the library's call
+        // (`api::run_makeblastdb`), and a caller without a start refuses `-conffile` and
+        // `-dryrun` (NCBI BLAST+ 2.17.0, probes `makeblastdb.log_noval`,
         // `makeblastdb.conf_noval`: rc 0).
         use crate::blastinput::ncbi_environment::{preparse, Preparsed};
         if let Some(word) = ncbi_version_word(&tokens[2..]) {
-            return Err(toolkit_file_word_error("makeblastdb", word));
+            return Err(version_word_error("makeblastdb", word));
         }
         if let Preparsed::Words {
             words,
@@ -351,9 +380,9 @@ where
             dryrun,
         } = preparse(&tokens[2..])
         {
-            if start.is_none() && (conffile.is_some() || dryrun) {
-                // The library's makeblastdb takes `-logfile` (its own argument): the word named is
-                // the one refused.
+            if matches!(reader, Reader::NoStart) && (conffile.is_some() || dryrun) {
+                // makeblastdb takes `-logfile` (its own argument): the word named is the one
+                // refused.
                 let name = if conffile.is_some() {
                     "-conffile"
                 } else {
@@ -570,9 +599,9 @@ where
         // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
             let program = xml_help.unwrap_or_default();
-            return Err(match start {
-                Some(_) => xml_help_request(program),
-                None => clap::Error::raw(
+            return Err(match reader {
+                Reader::CommandLine(_) => xml_help_request(program),
+                Reader::NoStart | Reader::Library => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
                 ),
@@ -1095,9 +1124,9 @@ const TOOLKIT_PROGRAMS: &[&str] = &[
 // value of `-logfile` or `-conffile`)
 /// The version word (`-version` or a full version) that NCBI's application prints for `tokens`
 /// (`ncbi_environment::preparse`), in an option's value too. The command line never brings one
-/// here: `main` prints the version before parsing (`ncbi_version_request`). The library API and
-/// the Web engine, which parse their options here and run no application start, refuse it
-/// (`toolkit_file_word_error`).
+/// here: `main` prints the version before parsing (`ncbi_version_request`). The library API of
+/// the search programs and the Web engine, which parse their options here, refuse it
+/// (`version_word_error`).
 fn ncbi_version_word(tokens: &[OsString]) -> Option<&'static str> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
     match preparse(tokens) {
@@ -1140,14 +1169,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
         })
 }
 
-// No NCBI counterpart: NCBI has no library API. The application start of the command line
-// (`cli::main_entry`, `ncbi_environment::ApplicationStart`) reads `-logfile` and `-conffile`
-// before the arguments and prints the versions, and the entry ends a `-dryrun` after them;
-// LOSAT's library and the Web engine run none, so they do not take them (as the library takes
-// no PSSM file, `api::search`).
-/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`, `-version`
-/// or a full version) in `program` when the parser's caller ran no application start: the
-/// library API and the Web engine.
+// No NCBI counterpart: NCBI has no library API or Web engine. The application start of the
+// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`) and of each library
+// call (`api::start`) reads `-logfile` and `-conffile` before the arguments, and both end a
+// `-dryrun` after them; the Web engine runs none, so it does not take them (line RG item E1w).
+/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in
+/// `program` when the parser's caller runs no application start: the Web engine.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidValue,
@@ -1155,13 +1182,39 @@ fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     )
 }
 
-/// The text of `toolkit_file_word_error`, which blastdbcmd's library run writes too.
+/// The text of `toolkit_file_word_error`.
 pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
-    let name = word.trim_start_matches('-');
-    let name = name.split_once('=').map_or(name, |(key, _)| key);
+    let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on the command line of LOSAT's {shown} only: the library API and the Web engine run no NCBI application start, which reads it"
+        "the NCBI C++ Toolkit option -{name} runs on the command line and in the library API of LOSAT's {shown} only: the Web engine runs no NCBI application start, which reads it"
+    )
+}
+
+/// The name of the toolkit option `word` (`-conffile=FILE` is `conffile`).
+fn toolkit_option_name(word: &str) -> &str {
+    let name = word.trim_start_matches('-');
+    name.split_once('=').map_or(name, |(key, _)| key)
+}
+
+// No NCBI counterpart: NCBI's application prints the versions before its arguments
+// (ncbiapp.cpp:926-1001, quoted at `ncbi_environment::preparse`). The library API of the search
+// programs returns reports, and the Web engine shows them: neither has a place for the text
+// (line RG DECISIONS E3-2; the library's tools print it to their output, `ncbi_app::run_with`,
+// `api::run_makeblastdb`).
+/// LOSAT's refusal of the version word `word` (`-version` or a full version) in `program` where
+/// the parser's caller prints no version: the library API of the search programs and the Web
+/// engine.
+fn version_word_error(program: &str, word: &str) -> clap::Error {
+    clap::Error::raw(ErrorKind::InvalidValue, version_word_refusal(program, word))
+}
+
+/// The text of `version_word_error`.
+pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
+    let name = toolkit_option_name(word);
+    let shown = refusal_program_name(program);
+    format!(
+        "the NCBI C++ Toolkit option -{name} runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's version text"
     )
 }
 

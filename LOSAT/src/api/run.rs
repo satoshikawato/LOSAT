@@ -42,6 +42,7 @@ use super::local_blast::{
 };
 use super::program::Program;
 use super::search::Search;
+use super::start::{CallStart, RunLog};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
@@ -648,36 +649,27 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
 // change the output. A search of records reads neither, but for the directory of BLASTN's
-// `-window_masker_taxid`, which NCBI's library looks for itself.
+// `-window_masker_taxid`, which NCBI's library looks for itself. The settings are the call's
+// application start's (`start::CallStart::settings`).
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
     command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
+    start: &mut CallStart,
 ) -> anyhow::Result<()> {
     let (query, subject) = (inputs.query, inputs.subject);
     if inputs.database {
-        use crate::blastinput::ncbi_environment::library_application_settings;
-        let settings = |name: &str| library_application_settings(name).map_err(anyhow::Error::msg);
+        let settings = start.settings(&mut *outputs.diagnostics)?;
         return match command {
-            Commands::Blastp(args) => {
-                run_local_database_blastp(args, query, settings("blastp")?, outputs)
-            }
-            Commands::Tblastn(args) => {
-                run_local_database_tblastn(args, query, settings("tblastn")?, outputs)
-            }
-            Commands::Blastn(args) => {
-                run_local_database_blastn(args, query, settings("blastn")?, outputs)
-            }
-            Commands::Tblastx(args) => {
-                run_local_database_tblastx(args, query, settings("tblastx")?, outputs)
-            }
-            Commands::Blastx(args) => {
-                run_local_database_blastx(args, query, settings("blastx")?, outputs)
-            }
+            Commands::Blastp(args) => run_local_database_blastp(args, query, settings, outputs),
+            Commands::Tblastn(args) => run_local_database_tblastn(args, query, settings, outputs),
+            Commands::Blastn(args) => run_local_database_blastn(args, query, settings, outputs),
+            Commands::Tblastx(args) => run_local_database_tblastx(args, query, settings, outputs),
+            Commands::Blastx(args) => run_local_database_blastx(args, query, settings, outputs),
             Commands::Psiblast(args) => {
                 let args = psiblast_args(args, outputs)?;
-                run_local_database_blastp(args, query, settings("psiblast")?, outputs)
+                run_local_database_blastp(args, query, settings, outputs)
             }
             Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
@@ -714,9 +706,7 @@ pub(super) fn run_local(
             // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
             // a database search of the library does.
             if args.window_masker_taxid.is_some_and(|taxid| taxid != 0) {
-                use crate::blastinput::ncbi_environment::library_application_settings;
-                let settings =
-                    library_application_settings("blastn").map_err(anyhow::Error::msg)?;
+                let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
@@ -835,38 +825,48 @@ pub fn run(
     reports: &mut [(&str, &mut (dyn Write + Send))],
     diagnostics: &mut (dyn Write + Send),
 ) -> Result<(), Error> {
+    let mut start = CallStart::new(search, &mut *diagnostics)?;
+    if start.dry_run()? {
+        return Ok(());
+    }
     let formats: Vec<&str> = reports.iter().map(|(outfmt, _)| *outfmt).collect();
     let (groups, threads) = searches(search, inputs, &formats)?;
     let mut writers: Vec<Option<&mut (dyn Write + Send)>> = reports
         .iter_mut()
         .map(|(_, writer)| Some(&mut **writer))
         .collect();
+    let mut log = start.take_log();
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
-            // The warnings of the first search include the reader's and the queries' warnings
-            // that the next searches repeat; the command line writes them once.
-            let mut repeated = Vec::new();
-            let sink: &mut (dyn Write + Send) = if ordinal == 0 {
-                &mut *diagnostics
-            } else {
-                &mut repeated
+            let command = search.command(inputs)?;
+            let result = {
+                // The warnings of the first search include the reader's and the queries'
+                // warnings that the next searches repeat; the command line writes them once.
+                let mut repeated = Vec::new();
+                let mut first;
+                let sink: &mut (dyn Write + Send) = if ordinal == 0 {
+                    first = log.diagnostics(&mut *diagnostics);
+                    &mut *first
+                } else {
+                    &mut repeated
+                };
+                let mut outputs = ReportOutputs {
+                    formats: group
+                        .iter()
+                        .map(|&position| FormatOutput {
+                            outfmt: formats[position],
+                            sink: OutputSink::Writer(
+                                writers[position].take().expect("one group per format"),
+                            ),
+                        })
+                        .collect(),
+                    diagnostics: sink,
+                    hits: None,
+                    observer: None,
+                };
+                run_local(command, inputs, &mut outputs, &mut start)
             };
-            let mut outputs = ReportOutputs {
-                formats: group
-                    .iter()
-                    .map(|&position| FormatOutput {
-                        outfmt: formats[position],
-                        sink: OutputSink::Writer(
-                            writers[position].take().expect("one group per format"),
-                        ),
-                    })
-                    .collect(),
-                diagnostics: sink,
-                hits: None,
-                observer: None,
-            };
-            run_local(search.command(inputs)?, inputs, &mut outputs)
-                .map_err(|error| Error::search(&error))?;
+            result.map_err(|error| log.failed(&error))?;
         }
         Ok(())
     })
@@ -902,6 +902,11 @@ pub fn run_to_file(
             "run_to_file writes a file: `run` gives a report to a writer".to_string(),
         ));
     }
+    let mut start = CallStart::new(search, &mut *diagnostics)?;
+    // The command line's dry run does not make the `-out` file (line RG item E1b).
+    if start.dry_run()? {
+        return Ok(());
+    }
     let threads = {
         let formats = [outfmt];
         searches(search, inputs, &formats)?.1
@@ -911,17 +916,22 @@ pub fn run_to_file(
     let file =
         File::create(path).map_err(|_| Error::search(&crate::cli::inaccessible("out", path)))?;
     let mut file = BufWriter::new(file);
+    let mut log = start.take_log();
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
-        let mut outputs = ReportOutputs {
-            formats: vec![FormatOutput {
-                outfmt,
-                sink: OutputSink::Writer(&mut file),
-            }],
-            diagnostics: &mut *diagnostics,
-            hits: None,
-            observer: None,
+        let result = {
+            let mut sink = log.diagnostics(&mut *diagnostics);
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(&mut file),
+                }],
+                diagnostics: &mut *sink,
+                hits: None,
+                observer: None,
+            };
+            run_local(command, inputs, &mut outputs, &mut start)
         };
-        run_local(command, inputs, &mut outputs).map_err(|error| Error::search(&error))
+        result.map_err(|error| log.failed(&error))
     })?;
     file.flush()
         .map_err(|error| Error::search(&anyhow::Error::from(error)))
@@ -964,6 +974,7 @@ fn collect_one(
     formats: &[&str],
     positions: &[usize],
     diagnostics: &mut (dyn Write + Send),
+    (start, log): (&mut CallStart, &mut RunLog),
 ) -> Result<Searched, Error> {
     let command = search.command(inputs)?;
     let query_range = query_range_of(&command);
@@ -974,6 +985,7 @@ fn collect_one(
     let mut collected: Option<Arc<Vec<PairwiseHit>>> = None;
     let result = {
         let mut on_hits = |hits| collected = Some(hits);
+        let mut sink = log.diagnostics(diagnostics);
         let mut outputs = ReportOutputs {
             formats: positions
                 .iter()
@@ -983,13 +995,13 @@ fn collect_one(
                     sink: OutputSink::Writer(writer),
                 })
                 .collect(),
-            diagnostics,
+            diagnostics: &mut *sink,
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
-        run_local(command, inputs, &mut outputs)
+        run_local(command, inputs, &mut outputs, start)
     };
-    result.map_err(|error| Error::search(&error))?;
+    result.map_err(|error| log.failed(&error))?;
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder.fault(format!("HSP {hsp} started but did not end"));
     }
@@ -1166,22 +1178,49 @@ pub fn run_collect(
     inputs: Inputs<'_>,
     formats: &[&str],
 ) -> Result<Outcome, Error> {
-    let (groups, threads) = searches(search, inputs, formats)?;
     let mut diagnostics: Vec<u8> = Vec::new();
+    let mut start = CallStart::new(search, &mut diagnostics)?;
+    if start.dry_run()? {
+        return Ok(Outcome {
+            reports: formats
+                .iter()
+                .map(|outfmt| Report {
+                    outfmt: outfmt.to_string(),
+                    bytes: Vec::new(),
+                    spans: Vec::new(),
+                    subject_headings: Vec::new(),
+                })
+                .collect(),
+            hsps: Vec::new(),
+            query_stats: vec![None; inputs.query.len()],
+            diagnostics,
+        });
+    }
+    let (groups, threads) = searches(search, inputs, formats)?;
     let mut searched: Vec<Searched> = Vec::new();
+    let mut log = start.take_log();
     // The searches of one call share one thread pool (`with_run_pool`), as the command line's
     // one search has one.
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
             // The warnings of the first search include the reader's and the queries' warnings
-            // that the next searches repeat; the command line writes them once.
+            // that the next searches repeat; the command line writes them once (the next
+            // searches' do not go to the `-logfile` file either).
             let mut scratch = Vec::new();
-            let sink: &mut (dyn Write + Send) = if ordinal == 0 {
-                &mut diagnostics
+            let mut no_log = RunLog::none();
+            let (sink, log): (&mut (dyn Write + Send), _) = if ordinal == 0 {
+                (&mut diagnostics, &mut log)
             } else {
-                &mut scratch
+                (&mut scratch, &mut no_log)
             };
-            searched.push(collect_one(search, inputs, formats, group, sink)?);
+            searched.push(collect_one(
+                search,
+                inputs,
+                formats,
+                group,
+                sink,
+                (&mut start, log),
+            )?);
         }
         Ok(())
     })?;

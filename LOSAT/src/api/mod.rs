@@ -123,6 +123,7 @@ pub(crate) mod local_blast;
 mod program;
 mod run;
 mod search;
+mod start;
 mod tools;
 mod view;
 

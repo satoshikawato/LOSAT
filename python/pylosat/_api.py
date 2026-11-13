@@ -306,7 +306,9 @@ class Search:
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
     `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-out` and `-outfmt` are
     not options here, nor are psiblast's PSSM files (the library writes none). The search itself
-    is `run`, `batches` or `run_to_file`.
+    is `run`, `batches` or `run_to_file`. The NCBI C++ Toolkit's `-logfile`, `-conffile` and
+    `-dryrun` work as on the command line (`from_argv`): each search opens the file of `-logfile`
+    and loads the file of `-conffile`, and `dry_run` tells a search that searches nothing.
     """
 
     __slots__ = ("_argv", "_program")
@@ -362,6 +364,14 @@ class Search:
     def argv(self) -> tuple[str, ...]:
         """The command line's words after the program name."""
         return self._argv
+
+    @property
+    def dry_run(self) -> bool:
+        """Whether the words have `-dryrun`: a search then runs NCBI's application start (the file
+        of `-logfile`, the file of `-conffile`) and checks the settings, and searches nothing.
+        `run` gives an empty report per format, `run_to_file` makes no file and `batches` one
+        batch of no query; the query and subject are not read."""
+        return _pylosat.dry_run(self._program, list(self._argv))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Search):

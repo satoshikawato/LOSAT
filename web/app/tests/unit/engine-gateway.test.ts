@@ -1,11 +1,11 @@
-// The Wasm EngineGateway's runtime generations (src/infra/engine-worker/gateway.ts) with a
+// The Wasm EngineGateway's runtime generations (web/packages/losat/src/infra/engine-worker/gateway.ts) with a
 // fake Engine worker: runs, phases, cancel, renewal, faults, errors, the use count of the
 // threaded instance and the memory keeper's channel. The real Engine worker runs in the
 // browsers (tests/e2e/engine.spec.ts).
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { InputMismatchError, RunCancelledError, type EngineRunRequest, type RuntimeInfo } from '../../src/ports/engine';
-import { WasmEngine, type WasmEngineOptions } from '../../src/infra/engine-worker/gateway';
-import { InstanceUse } from '../../src/infra/engine-worker/instance-use';
+import { WasmEngine, type EngineAssets, type WasmEngineOptions } from 'losat';
+import { InputMismatchError, RunCancelledError, type EngineRunRequest, type RuntimeInfo } from 'losat/ports';
+import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
 import {
   SLOT_PREPARING,
   SLOT_RUNNING,
@@ -15,8 +15,7 @@ import {
   type WorkerPrepare,
   type WorkerRun,
   type WorkerRunResult,
-} from '../../src/infra/engine-worker/protocol';
-import type { EngineAssets } from '../../src/infra/reactor/assets';
+} from '../../../packages/losat/src/infra/engine-worker/protocol';
 
 class FakeWorker {
   readonly posted: EngineCommand[] = [];

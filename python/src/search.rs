@@ -272,6 +272,17 @@ pub fn segmasker<'py>(
     run_tool(py, argv, input, api::run_segmasker)
 }
 
+/// `convert2blastmask` with the command line's words: `input` is its standard input (`-in -`,
+/// and without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn convert2blastmask<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    run_tool(py, argv, input, api::run_convert2blastmask)
+}
+
 /// `run` without reports.
 fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTuple>> {
     let mut batches = api::run_batches(&loaded.search, loaded.inputs()).map_err(exception)?;

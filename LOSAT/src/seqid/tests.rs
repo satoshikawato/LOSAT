@@ -252,7 +252,7 @@ fn every_seq_id_encodes_as_makeblastdb_stored_it() {
 /// `report::db_subject::ParsedSubject` (`tabular_ids`, `tabular_gi`, `all_tabular_ids`, the titles
 /// of its definition lines), its `TabularTaxonomy::of_deflines`, written by the tabular writer
 /// (`TabularWriter::row`). `None` for a sequence that LOSAT refuses to show (`ParsedSubject::new`,
-/// `tabular_ids`).
+/// `tabular_ids`, `all_tabular_ids`); `match_rows` still fails when no sequence gives an NCBI row.
 fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
     let subject = ParsedSubject::new(set.clone()).ok()?;
     let [id, accession, accession_version] = subject.tabular_ids(protein).ok()?;

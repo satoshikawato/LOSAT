@@ -667,23 +667,26 @@ fn several_file_outputs_are_written_one_after_the_other() {
         run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs)
     };
 
-    let shared = temp_path("blocks_shared_out.txt");
-    call(&shared, &shared).expect("run_local");
-    let written = std::fs::read(&shared).expect("the file");
-    let _ = std::fs::remove_file(&shared);
+    // `TempFasta` removes the files when dropped, also when an assertion fails.
+    let shared = TempFasta(temp_path("blocks_shared_out.txt"));
+    call(&shared.0, &shared.0).expect("run_local");
+    let written = std::fs::read(&shared.0).expect("the file");
     assert!(
         written == whole.outputs[1],
-        "two outputs to one file leave the second report whole"
+        "two outputs to one file leave the second report whole: {} bytes, not {}",
+        written.len(),
+        whole.outputs[1].len()
     );
 
-    let first = temp_path("blocks_first_out.txt");
+    let first = TempFasta(temp_path("blocks_first_out.txt"));
     let missing = temp_path("blocks_no_such_dir").join("out7.txt");
-    call(&first, &missing).expect_err("the second output's file cannot be created");
-    let written = std::fs::read(&first).expect("the first file");
-    let _ = std::fs::remove_file(&first);
+    call(&first.0, &missing).expect_err("the second output's file cannot be created");
+    let written = std::fs::read(&first.0).expect("the first file");
     assert!(
         written == whole.outputs[0],
-        "the first report is whole when the second output fails"
+        "the first report is whole when the second output fails: {} bytes, not {}",
+        written.len(),
+        whole.outputs[0].len()
     );
 }
 

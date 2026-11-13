@@ -22,7 +22,7 @@
 //!             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 //! ```
 //!
-//! The reference (`Lookup::scan` + `word_finder`, which the diagnostic stages run) allocates and
+//! The reference (`Lookup::scan` + `word_finder`, which the tests compare with) allocates and
 //! zero-fills a buffer of `capacity()` pairs per (chunk, subject) and copies every batch into a
 //! new `(i32, i32)` vector before the diagonal loop reads it. `x_word_finder_scan` is
 //! `word_finder` with the scan loop of `Lookup::scan` inlined: the same `scan_range` state
@@ -34,8 +34,8 @@
 //! `scan_subject`) only write the buffer and return the number of pairs written, and only
 //! `pairs[0..hits)` is read afterwards, so stale contents beyond `hits` are never read. The
 //! pairs are visited in the same order with the same values (`u32 as i32`, as the copy did),
-//! and the diagonal statements below are those of `word_finder`. The caller uses this
-//! path only when nothing traces the seeds (not in the diagnostic stages).
+//! and the diagonal statements below are those of `word_finder`. The searches take this path
+//! for every subject but a `-subject` with scan ranges (`x_soft_subject.rs`).
 //!
 //! BXSCANBF (graduated 2026-10-26: no variable, always on): the scan of the standard
 //! lookup table is tblastn's branch-free scan (`tblastx/x_aascan_bf.rs`, `x_scan_one_range_bf`,

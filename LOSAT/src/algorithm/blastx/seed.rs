@@ -730,11 +730,11 @@ impl Lookup {
         Self::x_new_as(batch, parameters, options, parts, narrow_cutoff)
     }
 
-    /// EXPERIMENT (LOSAT_X_BXBUILDPAR): `Lookup::new` with a pooled standard table's passes on
-    /// `parts` tasks of the pool it runs on (`tblastx/lookup/x_lut_direct.rs`
-    /// `x_partitioned_passes`); the table is the same. The standard table takes 16-bit hits (a
-    /// [`NarrowLookup`]) where the lookup query fits and its hits per used cell, in hundredths,
-    /// reach `narrow_cutoff` (`None`: never).
+    /// EXPERIMENT (LOSAT_X_BXBUILDPAR): the table of `Lookup::new` (the tests' one-task build)
+    /// with a pooled standard table's passes on `parts` tasks of the pool it runs on
+    /// (`tblastx/lookup/x_lut_direct.rs` `x_partitioned_passes`); the table is the same. The
+    /// standard table takes 16-bit hits (a [`NarrowLookup`]) where the lookup query fits and its
+    /// hits per used cell, in hundredths, reach `narrow_cutoff` (`None`: never).
     pub(crate) fn x_new_as(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
@@ -1185,8 +1185,8 @@ pub(crate) fn x_scan_bytes<'a>(
 //                     diag_array[diag_coord].last_hit =
 //                         s_last_off - (wordsize - 1) + diag_offset;
 // ```
-// word_finder is the original port of this loop for one subject; the diagnostic stages run it
-// (they trace the seeds), and the unit tests of the faster loops compare with it.
+// word_finder is the original port of this loop for one subject; LOSAT_X_BXDIAGSHADOW and the
+// unit tests of the faster loops compare them with it.
 /// The reference word finder (the loop of NCBI's BlastAaWordFinder_TwoHit /
 /// _OneHit for one subject), kept verbatim.
 pub(crate) fn word_finder(
@@ -1218,8 +1218,8 @@ pub(crate) fn word_finder(
 }
 
 /// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`).
-// Only the tests call it: the reference that they compare the searches' word finders with
-// (the tests of `x_seed_diag` and `x_soft_subject`).
+// Only the tests call it: the reference that the tests of `x_seed_diag` compare the searches'
+// word finders with.
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn word_finder_bx_of<S: BxScoring>(
@@ -1280,7 +1280,7 @@ pub(super) fn word_finder_any<S: BxScoring>(
 }
 
 /// [`word_finder`] for a lookup table of either width ([`BxLookup`]).
-// Only the tests call it, as `word_finder_bx_of`.
+// Only the tests call it: the reference of the tests of `x_seed_diag` and `x_soft_subject`.
 #[cfg(test)]
 pub(super) fn word_finder_bx(
     batch: &PreparedQueryBatch,

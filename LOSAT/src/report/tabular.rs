@@ -1425,7 +1425,9 @@ impl TabularWriter<'_> {
                 // 			else
                 // 				m_Ostream << NA;
                 // ```
-                // An absent title is empty in `titles`, so both read as `N/A`.
+                // `x_PrintSubjectTitle` is the `stitle` arm below, `x_PrintSubjectAllTitles` the
+                // `salltitles` arm after it. An absent title is empty in `titles`, so both read as
+                // `N/A`.
                 SubjectTitle => match subject.titles.and_then(|titles| titles.first()) {
                     Some(title) if !title.is_empty() => out.extend_from_slice(title),
                     _ => out.extend_from_slice(NA),

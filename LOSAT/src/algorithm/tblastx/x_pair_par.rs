@@ -1732,7 +1732,7 @@ fn x_records_for(
 /// up (section above, rule 2), from the text of `/sys/kernel/mm/transparent_hugepage/enabled`
 /// (`enabled`, the selected value in brackets) and of `/proc/self/status` (`status`). False only
 /// when the process has huge pages disabled (`THP_enabled: 0`, prctl PR_SET_THP_DISABLE) or the
-/// kernel gives them only on request ("\[madvise\]") or never ("\[never\]"); true for "\[always\]", an
+/// kernel gives them only on request (`[madvise]`) or never (`[never]`); true for `[always]`, an
 /// unreadable file or text it does not recognise.
 fn x_thp_rounds_up(enabled: Option<&str>, status: Option<&str>) -> bool {
     let disabled_here = status.is_some_and(|text| {

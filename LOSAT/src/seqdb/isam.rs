@@ -23,9 +23,9 @@
 //!
 //! - `CSeqDBIsam` constructor, `x_InitSearch`, `x_FindIndexBounds`: [`StringIsam::open`] and
 //!   [`StringIsam::from_files`]; `x_OutOfBounds(string)`: the private `out_of_bounds`;
-//!   `GetIdBounds(string)`: `StringIsam::id_bounds`.
+//!   `GetIdBounds(string)`: `StringIsam::id_bounds`, which only the tests call.
 //! - `x_StringSearch` with `x_DiffSample`, `x_DiffCharLease`, `x_DiffChar`, `x_LoadPage`,
-//!   `x_ExtractAllData`, `x_ExtractPageData`, `x_ExtractData`: `StringIsam::string_search`
+//!   `x_ExtractAllData`, `x_ExtractPageData`, `x_ExtractData`: [`StringIsam::string_search_into`]
 //!   (every line of the volume that matches a term, as `(key, data)` strings).
 //! - `StringToOids`: [`StringIsam::string_to_oids`]; `CSeqDBVol::x_CheckVersions`:
 //!   [`check_versions`]; the string case of `CSeqDBVol::x_StringToOids`:

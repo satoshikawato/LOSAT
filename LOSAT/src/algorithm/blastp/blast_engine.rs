@@ -6217,6 +6217,10 @@ struct BlastpRanges<'a> {
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the input position of the first query of a block (0 for a
     // search of every query), added to `query_input`'s positions where a query is named.
     x_ordinal_base: usize,
+    /// A query chunk's search (`search_split_query_batches`): the effective search space of each
+    /// context of the chunk's whole batch, which NCBI sets as the chunk's options
+    /// (`SplitQuery_SetEffectiveSearchSpace`); `None` for every other search.
+    split_search_spaces: Option<&'a [i64]>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
@@ -6871,6 +6875,7 @@ fn search(
             query_input: &done_input,
             subject_placements: &subjects.placements,
             x_ordinal_base: 0,
+            split_search_spaces: None,
         };
         let stopped = std::sync::Mutex::new(stopped);
         let reports = BlastpReports {
@@ -7248,6 +7253,7 @@ fn search(
                                 query_input: &block_input,
                                 subject_placements: &subjects.placements,
                                 x_ordinal_base: block.start,
+                                split_search_spaces: None,
                             },
                             &BlastpReports {
                                 reader_warnings: &reader_warnings[block.clone()],
@@ -8275,6 +8281,7 @@ fn unsearched_batches_then_engine_error(
         query_input: &prefix_input,
         subject_placements: ranges.subject_placements,
         x_ordinal_base: ranges.x_ordinal_base,
+        split_search_spaces: None,
     };
     let prefix_reports = BlastpReports {
         reader_warnings: &reports.reader_warnings
@@ -8436,10 +8443,32 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool)
 // does not depend on the other queries of its batch, so the batches that NCBI does not
 // split are the search of all queries above; the queries of a batch that NCBI splits
 // (`blastp/protein_query_split.rs`) take the merged hit lists of the batch's query chunks,
-// each searched as a query set of its parts. The preliminary stage uses no effective search
-// space (its cutoffs and E-values use Spouge's FSC with the part's length), so the batch's
-// search spaces that NCBI gives a chunk do not change it. A chunk whose contexts all fail
-// the Karlin-Altschul setup finds nothing, as NCBI ignores its error.
+// each searched as a query set of its parts. NCBI gives a chunk the effective search spaces of
+// its batch's contexts as options, by the context's index in the chunk (`search_spaces` and
+// `exact_search_spaces`, the whole call's, one context per query;
+// `BlastpRanges::split_search_spaces`), and the chunk's own
+// length adjustments. With Spouge's FSC the preliminary cutoffs and E-values do not read them;
+// psiblast's `-sum_stats true` links with them, and without the Gumbel block (`OLD_FSC`) the
+// cutoffs read them. A chunk whose contexts all fail the Karlin-Altschul setup finds nothing,
+// as NCBI ignores its error.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-221
+// ```c++
+//         // Set the effective search space for the whole query
+//         SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+//                                            m_InternalData);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:173-181
+// ```c++
+//     BlastQueryInfo* qinfo = full_data->m_QueryInfo;
+//     _ASSERT(qinfo);
+//
+//     vector<Int8> eff_searchsp;
+//     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
+//         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
+//     }
+//     options->SetEffectiveSearchSpace(eff_searchsp);
+// ```
 #[allow(clippy::too_many_arguments)]
 fn search_split_query_batches(
     args: &ResolvedBlastpArgs,
@@ -8450,6 +8479,7 @@ fn search_split_query_batches(
     outputs: &mut ReportOutputs<'_>,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
     query_lengths: &[usize],
+    (search_spaces, exact_search_spaces): (&[SearchSpace], &[Option<i64>]),
     query_input: &seq_range::QueryInput,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
@@ -8497,6 +8527,13 @@ fn search_split_query_batches(
             "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTP"
         );
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
+        // The batch's `query_info->contexts[c].eff_searchsp` (one context per query).
+        let batch_search_spaces: Vec<i64> = range
+            .clone()
+            .map(|query| {
+                exact_search_spaces[query].unwrap_or(search_spaces[query].effective_space as i64)
+            })
+            .collect();
         for chunk in &chunks {
             // NCBI fails to make the query factory of a chunk without a query ("Empty
             // CBlastQueryVector"); `split_protein_batch` makes none.
@@ -8547,6 +8584,7 @@ fn search_split_query_batches(
                     query_input: &part_input,
                     subject_placements: &seq_range::Placements::default(),
                     x_ordinal_base: 0,
+                    split_search_spaces: Some(&batch_search_spaces),
                 },
                 // A chunk's search ends after its preliminary stage, before any report.
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): a chunk of a block after the first follows the
@@ -9676,17 +9714,39 @@ fn run_resolved_in_pool(
     let mut exact_search_spaces: Vec<Option<i64>> = Vec::new();
     let search_spaces: Vec<SearchSpace> = contexts
         .iter()
-        .map(|ctx| -> Result<SearchSpace> {
-            if options_searchsp != 0 {
+        .enumerate()
+        .map(|(context_index, ctx)| -> Result<SearchSpace> {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-697
+            // ```c
+            //     if (eff_len_options->num_searchspaces == 0) {
+            //         retval = 0;
+            //     } else if (eff_len_options->num_searchspaces == 1) {
+            //         ...
+            //         retval = eff_len_options->searchsp_eff[0];
+            //     } else if (eff_len_options->num_searchspaces > 1) {
+            //         ASSERT(context_index < eff_len_options->num_searchspaces);
+            //         retval = eff_len_options->searchsp_eff[context_index];
+            // ```
+            // A query chunk's search takes its batch's search spaces as options
+            // (`search_split_query_batches`), by the context's index in the chunk, unless the
+            // user's `-searchsp` is set (`SplitQuery_SetEffectiveSearchSpace` leaves it).
+            let given_searchsp = match ranges.split_search_spaces {
+                Some(batch) if options_searchsp == 0 => match batch {
+                    [one] => *one,
+                    _ => batch[context_index],
+                },
+                _ => options_searchsp,
+            };
+            if given_searchsp != 0 {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
                 // ```c
                 //          if (effective_search_space == 0) {
                 //          ...
                 //       query_info->contexts[index].eff_searchsp = effective_search_space;
                 // ```
-                exact_search_spaces.push(Some(options_searchsp));
+                exact_search_spaces.push(Some(given_searchsp));
                 return Ok(SearchSpace {
-                    effective_space: options_searchsp as f64,
+                    effective_space: given_searchsp as f64,
                     length_adjustment: if ctx.aa_len > 0 {
                         crate::stats::length_adjustment::compute_length_adjustment_ncbi(
                             ctx.aa_len as i64,
@@ -9774,9 +9834,14 @@ fn run_resolved_in_pool(
     // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
     // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
-    let cutoff_subject_length = match database {
-        None => blastp_preliminary_cutoff_subject_length(subjects),
-        Some(database) => database.cutoff_subject_length(),
+    // NCBI's `min_subject_length` (blast_setup.c:969-976, quoted above), which the hit-saving
+    // parameters read: the shortest length with the Gumbel block, else (`-searchsp`, `OLD_FSC`)
+    // the statistics' average, which only psiblast's `-sum_stats true` reads (its cutoff,
+    // `sum_stats_hit_cutoff`; the cutoffs without the block read the search space).
+    let cutoff_subject_length = match (database, gapped_gumbel.is_some()) {
+        (_, false) => (total_db_len / num_subjects.max(1)) as i32,
+        (None, true) => blastp_preliminary_cutoff_subject_length(subjects),
+        (Some(database), true) => database.cutoff_subject_length(),
     };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
@@ -11603,6 +11668,7 @@ fn run_resolved_in_pool(
         outputs,
         blastp_parallel_pool,
         &query_lengths,
+        (&search_spaces, &exact_search_spaces),
         ranges.query_input,
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,

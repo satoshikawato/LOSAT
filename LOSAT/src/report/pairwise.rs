@@ -776,6 +776,16 @@ fn ncbi_percent_match(numerator: usize, denominator: usize) -> usize {
     }
 }
 
+/// The `Expect` label of an HSP's header: `Expect(n)` for an HSP of a linked set of n > 1 HSPs
+/// (`sum_n`, `BlastHSP::num`), else `Expect` (showalign.cpp:3593-3598, quoted at
+/// `write_hsp_info`).
+#[inline]
+fn expect_label(sum_n: Option<i32>) -> String {
+    sum_n
+        .filter(|&count| count > 1)
+        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"))
+}
+
 /// Write HSP score information
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp x_DisplayAlignInfo()
@@ -807,10 +817,7 @@ pub fn write_hsp_info<W: Write>(
     //             }
     // ```
     // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
-    let expect = hit
-        .sum_n
-        .filter(|&count| count > 1)
-        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"));
+    let expect = expect_label(hit.sum_n);
     // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
     if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
@@ -5680,10 +5687,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     // if (hsp->num > 1) scores.push_back(s_MakeScore("sum_n", ..., hsp->num));
     // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
     // if (aln_vec_info->sum_n > 0) out << "(" << aln_vec_info->sum_n << ")";
-    let expect = hit
-        .sum_n
-        .filter(|&count| count > 1)
-        .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"));
+    let expect = expect_label(hit.sum_n);
     writeln!(
         writer,
         " Score = {} bits ({}),  {} = {}{}",

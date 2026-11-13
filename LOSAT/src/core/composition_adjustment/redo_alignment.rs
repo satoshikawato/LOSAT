@@ -490,9 +490,9 @@ pub struct WindowInfo {
 //     double near_identical_cutoff;
 // } Blast_RedoAlignParams;
 // ```
-// `unified_p`, `restricted_alignment`, `is_same_adjustment`, `re_matrix_adjustment_pseudocounts`,
-// `cutoff_evalue` and `do_link_hsps` are not stored: nothing reads them (`composition_test_index`
-// and `cutoff_score` carry what the redo takes from `unified_p` and `do_link_hsps`).
+// `unified_p`, `restricted_alignment`, `is_same_adjustment`, `re_matrix_adjustment_pseudocounts`
+// and `cutoff_evalue` are not stored: nothing reads them (`composition_test_index` carries what
+// the redo takes from `unified_p`).
 #[derive(Debug)]
 pub struct BlastRedoAlignParams {
     pub matrix_info: BlastMatrixInfo,

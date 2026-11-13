@@ -638,11 +638,10 @@ pub(crate) fn link_hsp_list<H: LinkedHspValues>(
     if list.hsps.is_empty() {
         return;
     }
-    // `BlastHSP`'s 0-based offsets and exclusive ends (`HitListHsp::offsets`: 1-based starts).
-    let link_hsps: Vec<crate::core::link_hsps::LinkHsp> = list
-        .hsps
-        .iter()
-        .map(|hsp| {
+    crate::core::link_hsps::link_in_place(
+        &mut list.hsps,
+        // `BlastHSP`'s 0-based offsets and exclusive ends (`HitListHsp::offsets`: 1-based starts).
+        |hsp| {
             let (q_start, q_end, s_start, s_end) = hsp.offsets();
             crate::core::link_hsps::LinkHsp {
                 context: 0,
@@ -652,24 +651,12 @@ pub(crate) fn link_hsp_list<H: LinkedHspValues>(
                 subject_end: s_start.max(s_end) as i32,
                 score: hsp.raw_score(),
             }
-        })
-        .collect();
-    let linked =
-        crate::core::link_hsps::even_gap_link_hsps(&link_hsps, &[context], subject_length, params);
-    let mut hsps: Vec<Option<H>> = std::mem::take(&mut list.hsps)
-        .into_iter()
-        .map(Some)
-        .collect();
-    list.hsps = linked
-        .into_iter()
-        .map(|linked| {
-            let mut hsp = hsps[linked.index]
-                .take()
-                .expect("the linking lists every HSP once");
-            hsp.take_linked(&linked);
-            hsp
-        })
-        .collect();
+        },
+        &[context],
+        subject_length,
+        params,
+        |hsp, linked| hsp.take_linked(linked),
+    );
     sort_hsplist_by_score(list);
     update_best_evalue(list);
 }

@@ -34,6 +34,7 @@
 
 use std::cmp::Ordering;
 
+use crate::stats::sum_statistics::defaults::{GAP_SIZE, OVERLAP_SIZE};
 use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, small_gap_sum_e};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:66-71
@@ -47,15 +48,12 @@ use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, smal
 // ```
 // With a gap probability of 1, the preliminary stage (which also links with small gaps) never
 // takes a large-gap set of more than one HSP (`1 - gap_prob == 0` gives it `INT4_MAX`); the
-// traceback links with large gaps only and does not divide by the probability.
+// traceback links with large gaps only and does not divide by the probability. `BLAST_GAP_SIZE`
+// and `BLAST_OVERLAP_SIZE` are `stats::sum_statistics::defaults`'.
 /// `BLAST_GAP_PROB_GAPPED`.
 pub(crate) const BLAST_GAP_PROB_GAPPED: f64 = 1.0;
 /// `BLAST_GAP_DECAY_RATE_GAPPED`.
 pub(crate) const BLAST_GAP_DECAY_RATE_GAPPED: f64 = 0.1;
-/// `BLAST_GAP_SIZE`.
-pub(crate) const BLAST_GAP_SIZE: i32 = 40;
-/// `BLAST_OVERLAP_SIZE`.
-pub(crate) const BLAST_OVERLAP_SIZE: i32 = 9;
 
 /// The linking parameters (`BlastLinkHSPParameters`) of a gapped protein search with sum
 /// statistics.
@@ -325,6 +323,33 @@ fn fwd_compare(h1: &LinkHsp, h2: &LinkHsp) -> Ordering {
         .then(h1.subject_offset.cmp(&h2.subject_offset))
 }
 
+/// `BLAST_LinkHsps`'s linking of a list `items` in place: each item's linking view (`hsp`) is
+/// linked (`even_gap_link_hsps`), the list takes the order the linking builds, and `take` gives
+/// each item its linked set's values. The caller then sorts the list by score and sets its best
+/// e-value (link_hsps.c:1801-1811).
+pub(crate) fn link_in_place<T>(
+    items: &mut Vec<T>,
+    hsp: impl Fn(&T) -> LinkHsp,
+    contexts: &[LinkContext],
+    subject_length: i32,
+    params: &EvenGapLinkParams,
+    take: impl Fn(&mut T, &LinkedHsp),
+) {
+    let hsps: Vec<LinkHsp> = items.iter().map(hsp).collect();
+    let linked = even_gap_link_hsps(&hsps, contexts, subject_length, params);
+    let mut slots: Vec<Option<T>> = std::mem::take(items).into_iter().map(Some).collect();
+    *items = linked
+        .into_iter()
+        .map(|linked| {
+            let mut item = slots[linked.index]
+                .take()
+                .expect("the linking lists every HSP once");
+            take(&mut item, &linked);
+            item
+        })
+        .collect();
+}
+
 /// Links the HSPs of one subject (`s_BlastEvenGapLinkHSPs` for an untranslated query and
 /// subject) and returns the list NCBI builds, in its order: every HSP once, with its linked set's
 /// e-value and size. `contexts` is indexed by `LinkHsp::context`; `subject_length` is the
@@ -365,8 +390,8 @@ pub(crate) fn even_gap_link_hsps(
     // ```
     // `link_hsp_params->gap_size` and `overlap_size` are the constants (`EvenGapLinkParams`); the
     // window of 50 is then the one every caller of `small_gap_sum_e` passes.
-    let window_size = BLAST_GAP_SIZE + BLAST_OVERLAP_SIZE + 1;
-    let trim_size = (BLAST_OVERLAP_SIZE + 1) / 2;
+    let window_size = GAP_SIZE + OVERLAP_SIZE + 1;
+    let trim_size = (OVERLAP_SIZE + 1) / 2;
     let gap_prob = params.gap_prob;
     let gap_decay_rate = params.gap_decay_rate;
     let cutoff = [params.cutoff_small_gap as i64, params.cutoff_big_gap as i64];
@@ -642,10 +667,12 @@ fn link_frame<'a>(
     }
 
     let score_of = |slot: usize| hsp_of(slot).score as i64;
-    let xsum_term = |slot: usize| {
+    // `H_hsp_xsum + score*kbp[H->hsp->context]->Lambda - kbp[H->hsp->context]->logK`, added in
+    // C's order: the score's term first, then logK subtracted.
+    let add_xsum = |h_hsp_xsum: f64, slot: usize| {
         let hsp = hsp_of(slot);
         let c = &contexts[hsp.context];
-        hsp.score as f64 * c.lambda - c.log_k
+        h_hsp_xsum + hsp.score as f64 * c.lambda - c.log_k
     };
 
     while number_of_hsps > 0 {
@@ -901,7 +928,7 @@ fn link_frame<'a>(
                             h2_index -= 1;
                         }
                     }
-                    let new_xsum = h_hsp_xsum + xsum_term(slot);
+                    let new_xsum = add_xsum(h_hsp_xsum, slot);
                     let new_sum = h_hsp_sum + (score_of(slot) - cutoff[index]);
                     let node = &mut nodes[slot];
                     node.sum[index] = new_sum;
@@ -1063,7 +1090,7 @@ fn link_frame<'a>(
                         }
                     }
                 }
-                let new_xsum = h_hsp_xsum + xsum_term(slot);
+                let new_xsum = add_xsum(h_hsp_xsum, slot);
                 let new_sum = h_hsp_sum + (score_of(slot) - cutoff[index]);
                 let node = &mut nodes[slot];
                 node.sum[index] = new_sum;

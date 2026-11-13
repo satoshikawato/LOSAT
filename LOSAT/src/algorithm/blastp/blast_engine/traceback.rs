@@ -352,9 +352,10 @@ impl OrdinaryTraceback<'_> {
         Ok((!hsp_list.hsps.is_empty()).then_some(hsp_list))
     }
 
-    /// `s_HSPListPostTracebackUpdate` for BLASTP (no linking, no RPS, a scale factor of 1):
-    /// the e-values from the unscaled `kbp_gap` (Spouge's finite-size correction with the
-    /// query's and the subject's lengths), the e-value reap, the bit scores.
+    /// `s_HSPListPostTracebackUpdate` for BLASTP (no RPS, a scale factor of 1): the e-values
+    /// from the unscaled `kbp_gap` (Spouge's finite-size correction with the query's and the
+    /// subject's lengths), or with psiblast's `-sum_stats true` the linked sets' e-values (large
+    /// gaps only), the e-value reap, the bit scores.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:229-250
     /// ```c

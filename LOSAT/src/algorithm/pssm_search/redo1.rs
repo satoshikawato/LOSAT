@@ -49,7 +49,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, test_near_identical, BlastCompoAlignment, BlastCompoSequenceData,
     EMatrixAdjustRule, MINIMUM_LENGTH_NEAR_IDENTICAL,
 };
-use crate::core::link_hsps::{even_gap_link_hsps, EvenGapLinkParams, LinkContext, LinkHsp};
+use crate::core::link_hsps::{link_in_place, EvenGapLinkParams, LinkContext, LinkHsp};
 use crate::stats::KarlinParams;
 use crate::utils::matrix::ncbistdaa;
 
@@ -1040,7 +1040,6 @@ impl RedoMatch<'_> {
     }
 }
 
-/// `BLAST_Nint`.
 /// `BLAST_LinkHsps` on a match's redone list (psiblast's `-sum_stats true`): every HSP takes its
 /// linked set's e-value and size, in the list the linking builds, sorted by score; the best
 /// e-value of the list, `None` for an empty list. The scores are the redo's scaled ones and the
@@ -1067,35 +1066,29 @@ fn link_redone(
     if redone.is_empty() {
         return None;
     }
-    let hsps: Vec<LinkHsp> = redone
-        .iter()
-        .map(|hsp| LinkHsp {
+    let context = LinkContext {
+        lambda: run.karlin.lambda,
+        log_k: run.log_k,
+        ..link.context
+    };
+    link_in_place(
+        redone,
+        |hsp| LinkHsp {
             context: 0,
             query_offset: hsp.align.query_start,
             query_end: hsp.align.query_end,
             subject_offset: hsp.align.match_start,
             subject_end: hsp.align.match_end,
             score: hsp.align.score,
-        })
-        .collect();
-    let context = LinkContext {
-        lambda: run.karlin.lambda,
-        log_k: run.log_k,
-        ..link.context
-    };
-    let linked = even_gap_link_hsps(&hsps, &[context], subject_length, &link.params);
-    let mut slots: Vec<Option<Redone>> = std::mem::take(redone).into_iter().map(Some).collect();
-    *redone = linked
-        .into_iter()
-        .map(|linked| {
-            let mut hsp = slots[linked.index]
-                .take()
-                .expect("the linking lists every HSP once");
+        },
+        &[context],
+        subject_length,
+        &link.params,
+        |hsp, linked| {
             hsp.e_value = linked.evalue;
             hsp.num = linked.num;
-            hsp
-        })
-        .collect();
+        },
+    );
     // `Blast_HSPListSortByScore`: glibc's `qsort`, a stable merge sort, when the list is not
     // sorted (a stable sort of a sorted list keeps it).
     redone.sort_by(|a, b| score_compare(&a.align, &b.align));
@@ -1109,6 +1102,7 @@ fn link_redone(
     Some(best_evalue)
 }
 
+/// `BLAST_Nint`.
 fn blast_nint(x: f64) -> i32 {
     (x + if x >= 0.0 { 0.5 } else { -0.5 }) as i32
 }

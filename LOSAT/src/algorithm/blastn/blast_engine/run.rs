@@ -5977,6 +5977,17 @@ fn call_batches<'a>(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
+// ```c++
+// inline Int8
+// CBlastOptionsLocal::GetEffectiveSearchSpace() const
+// {
+//     if (m_EffLenOpts->num_searchspaces == 0)
+//         return 0;
+//
+//     return m_EffLenOpts->searchsp_eff[0];
+// }
+// ```
 /// The `EffectiveSearchSpace` option of a batch whose first query is `first` (an index of
 /// `query_eff_searchsp`'s queries, two contexts each): the search space of its context 0, the
 /// option `SplitQuery_SetEffectiveSearchSpace` sets. The archive's (`archive_first_context`) and
@@ -7343,8 +7354,15 @@ pub fn run(
     // write, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
-    args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), archive_requested)?
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    // The run's options handle, which its archive and its search strategy share.
+    let options = crate::report::archive::OptionsHandle::default();
+    args.archive = archive::handle_for(
+        &args,
+        args.dust_filtering.as_deref(),
+        archive_requested,
+        &options,
+    )?
+    .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // The search strategy's request, with the refusals of the archive's, and the archive's
     // options handle.
     args.strategy = strategy_file
@@ -7360,7 +7378,7 @@ pub fn run(
                 },
                 args.database_name(),
                 "BLASTN",
-                args.archive.as_ref(),
+                &options,
             )
         })
         .transpose()?;
@@ -8269,8 +8287,13 @@ pub fn run_local(
     });
     if archive_requested && args.db.is_none() {
         QueryStrand::parse(&args.strand)?;
-        args.archive = archive::handle_for(&args, args.dust_filtering.as_deref(), true)?
-            .map(|handle| outputs.with_archive_outfmt(handle));
+        args.archive = archive::handle_for(
+            &args,
+            args.dust_filtering.as_deref(),
+            true,
+            &crate::report::archive::OptionsHandle::default(),
+        )?
+        .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
@@ -8397,6 +8420,7 @@ pub fn run_local_database(
         &args,
         args.dust_filtering.as_deref(),
         output_formats.contains(&BlastnOutputFormat::Archive),
+        &crate::report::archive::OptionsHandle::default(),
     )?
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
@@ -10161,7 +10185,7 @@ fn run_in_pool(
                 batch
                     .searched
                     .then(|| context0_search_space(&batch.query_eff_searchsp, 0)),
-            );
+            )?;
         }
         // The batch's LOSAT_TIMING block, where its search wrote it before.
         if !batch.timing.is_empty() {

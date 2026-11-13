@@ -289,13 +289,22 @@ impl OptionsHandle {
     /// `-searchsp` is not given. The `EffectiveSearchSpace` option is then 0
     /// (`BLAST_CalcEffLengths` returns at once for a database length of 0, blast_setup.c:729-732),
     /// though the statistics of the results read the length of OID 0 (`SeqDb::statistics_numbers`).
-    /// Set once per run, where the database is opened.
-    pub fn set_database_filter(&self, list: Option<options::Param>, empty_database: bool) {
+    /// Set once per run, where the database is opened; a second setting is LOSAT's internal
+    /// error.
+    pub fn set_database_filter(
+        &self,
+        list: Option<options::Param>,
+        empty_database: bool,
+    ) -> anyhow::Result<()> {
         let set = self.0.set(DatabaseFilter {
             list,
             empty: empty_database,
         });
-        debug_assert!(set.is_ok(), "a run opens its database once");
+        anyhow::ensure!(
+            set.is_ok(),
+            "LOSAT internal error: the database's list is set twice in one run"
+        );
+        Ok(())
     }
 
     /// The `TaxidList` or `NegativeTaxidList` program option (`set_database_filter`).
@@ -375,7 +384,8 @@ impl std::fmt::Debug for ArchiveHandle {
 impl ArchiveHandle {
     /// The handle of a run of `inputs.program` that writes the archive (`-outfmt 11`): the
     /// request from the recorded options, `ARCHIVE_FORMAT` read once. `database` is the
-    /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal.
+    /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal;
+    /// `options` is the run's options handle (made once per run; its search strategy shares it).
     /// Refuses, before anything is written, what LOSAT cannot write: a `-db` name or a
     /// `-window_masker_db` path with a byte that `ArchiveEncoding::writes_text` refuses (NCBI
     /// writes `#` and diagnostics there). These are the only strings the archive copies from
@@ -386,8 +396,15 @@ impl ArchiveHandle {
         inputs: &OptionInputs,
         database: Option<&str>,
         label: &str,
+        options: &OptionsHandle,
     ) -> anyhow::Result<Self> {
-        Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, label)
+        Self::for_encoding(
+            ArchiveEncoding::from_env(),
+            inputs,
+            database,
+            label,
+            options,
+        )
     }
 
     /// `for_program` for a given encoding (`ARCHIVE_FORMAT` read by the caller).
@@ -396,19 +413,21 @@ impl ArchiveHandle {
         inputs: &OptionInputs,
         database: Option<&str>,
         label: &str,
+        options: &OptionsHandle,
     ) -> anyhow::Result<Self> {
         Ok(Self::new(
             encoding,
             ArchiveRequest::for_inputs(encoding, inputs, database, label, "-outfmt 11")?,
+            options.clone(),
         ))
     }
 
-    /// The handle of a run's archive, with the run's own options handle (`options`).
-    pub fn new(encoding: ArchiveEncoding, request: ArchiveRequest) -> Self {
+    /// The handle of a run's archive, with the run's options handle `options`.
+    pub fn new(encoding: ArchiveEncoding, request: ArchiveRequest, options: OptionsHandle) -> Self {
         Self(Arc::new(Shared {
             encoding,
             request,
-            options: OptionsHandle::default(),
+            options,
             error_archive: AtomicBool::new(true),
             state: Mutex::new(Inner::default()),
         }))
@@ -534,15 +553,19 @@ fn is_visible(byte: u8) -> bool {
 /// and binary a byte outside `0x20..=0x7E`; in XML NCBI writes the byte, and only a control
 /// byte is refused). `role` is `query` or `subject`. The encoding is the environment's
 /// (`ArchiveEncoding::from_env`).
-pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow::Result<()> {
+pub(crate) fn check_titles<R: requests::RequestRecord>(
+    records: &[R],
+    role: &str,
+    label: &str,
+) -> anyhow::Result<()> {
     check_titles_for(ArchiveEncoding::from_env(), records, role, label)
 }
 
 /// `check_titles` for a given encoding (a caller that checks record by record reads the
 /// environment once).
-pub fn check_titles_for(
+pub(crate) fn check_titles_for<R: requests::RequestRecord>(
     encoding: ArchiveEncoding,
-    records: &[FastaRecord],
+    records: &[R],
     role: &str,
     label: &str,
 ) -> anyhow::Result<()> {
@@ -564,8 +587,8 @@ pub fn request_title_encoding(archive: bool, strategy: bool) -> Option<ArchiveEn
 /// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
 /// encoding) and the search strategy's (`strategy`, always ASN.1 text,
 /// `strategy::StrategyExport`).
-pub fn check_request_titles(
-    records: &[FastaRecord],
+pub(crate) fn check_request_titles<R: requests::RequestRecord>(
+    records: &[R],
     role: &str,
     label: &str,
     archive: bool,
@@ -762,7 +785,14 @@ mod tests {
             inputs
         };
         let ok = |encoding, path: Option<&str>, db: Option<&str>| {
-            ArchiveHandle::for_encoding(encoding, &inputs(path), db, "BLASTN").is_ok()
+            ArchiveHandle::for_encoding(
+                encoding,
+                &inputs(path),
+                db,
+                "BLASTN",
+                &OptionsHandle::default(),
+            )
+            .is_ok()
         };
         for encoding in [
             ArchiveEncoding::Text,
@@ -794,6 +824,7 @@ mod tests {
             &inputs(Some("w\u{e9}")),
             None,
             "BLASTN",
+            &OptionsHandle::default(),
         )
         .unwrap_err()
         .to_string();
@@ -824,6 +855,7 @@ mod tests {
                 algorithm: Vec::new(),
                 database: None,
             },
+            OptionsHandle::default(),
         );
         assert_eq!(handle.search_space_option(None), None);
         assert_eq!(handle.search_space_option(Some(8738)), Some(8738));
@@ -842,6 +874,7 @@ mod tests {
                 algorithm: Vec::new(),
                 database: None,
             },
+            OptionsHandle::default(),
         );
         let mut seen: Vec<u8> = Vec::new();
         {
@@ -900,6 +933,7 @@ mod tests {
                     algorithm: Vec::new(),
                     database: None,
                 },
+                OptionsHandle::default(),
             )
         };
         let lines = vec![(ERROR, b"Error: x".to_vec())];

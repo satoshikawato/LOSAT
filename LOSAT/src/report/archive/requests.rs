@@ -18,7 +18,7 @@
 //! Seq-locs, the `-query_loc` interval of its first query, and the user's masks (the lower case of
 //! `-lcase_masking`), with the `-subject` sequences (`x_Process_SearchDb`).
 
-use std::borrow::Cow;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 
@@ -32,12 +32,10 @@ use crate::blastinput::seq_range::RecordPlacement;
 /// What a request reads of a query or subject record. No NCBI counterpart: LOSAT has two record
 /// types (`blastinput::fasta_reader::FastaRecord`, BLASTX's `blastx::input::FastaRecord`).
 pub(crate) trait RequestRecord {
-    /// The record as the Bioseq of a request, whose defline line is `defline` (`defline`) and
-    /// molecule `protein`; a query of `-parse_deflines` with an id that is not local also as the
-    /// Seq-loc of its searched interval (`seq_loc`).
-    fn bioseq<'a>(&'a self, defline: &'a [u8], protein: bool) -> BioseqInput<'a>;
-    /// The defline line of the Bioseq: the line as read, else `>` and the title.
-    fn defline(&self) -> Cow<'_, [u8]>;
+    /// The record as the Bioseq of a request, of molecule `protein`, with its defline line (the
+    /// line as read, else `>` and the title); a query of `-parse_deflines` with an id that is not
+    /// local also as the Seq-loc of its searched interval (`seq_loc`).
+    fn bioseq(&self, protein: bool) -> BioseqInput<'_>;
     /// The number of letters searched (those of a `-query_loc` interval).
     fn searched_len(&self) -> usize;
     /// The lower-case runs `[from, to]` of the whole record (those of `-lcase_masking`), in the
@@ -52,20 +50,16 @@ pub(crate) trait RequestRecord {
 }
 
 impl RequestRecord for crate::blastinput::fasta_reader::FastaRecord {
-    fn bioseq<'a>(&'a self, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
+    fn bioseq(&self, protein: bool) -> BioseqInput<'_> {
         BioseqInput {
             id: &self.local_id,
             ids: self.believed().map(|ids| ids.ids.as_slice()),
             seq_loc: self.archive_seq_loc(),
-            defline,
+            defline: super::defline_of(self),
             title: &self.title,
             letters: self.archive_letters(),
             protein,
         }
-    }
-
-    fn defline(&self) -> Cow<'_, [u8]> {
-        super::defline_of(self)
     }
 
     fn searched_len(&self) -> usize {
@@ -176,8 +170,9 @@ impl LcaseFrames {
 }
 
 /// What the requests of a program's run take from the program: the molecules of the queries and
-/// of the subjects, and the `LCaseMask` parameters (`None`: none, without `-lcase_masking`, or
-/// written by the caller, BLASTN's archive).
+/// of the subjects, and how the lower-case runs become the `LCaseMask` parameters (`None`: the
+/// request has none, as without `-lcase_masking`, or the caller writes its own, BLASTN's archive;
+/// BLASTX's reader keeps runs only with `-lcase_masking`, so its policy is always `PlusAndMinus`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RequestPolicy {
     pub query_protein: bool,
@@ -185,15 +180,42 @@ pub(crate) struct RequestPolicy {
     pub lcase: Option<LcaseFrames>,
 }
 
-/// The requests of a run's query batches: the policy, the `-subject` records (every request holds
-/// each of them whole; `None` for `-db`) and the program's name in a refusal.
+/// The requests of a run's query batches (or of the batches of one call that writes their
+/// archives): the policy, the `-subject` records as the Bioseqs that every request holds (made
+/// once; `None` for `-db`) and the program's name in a refusal.
 pub(crate) struct RunRequests<'a, R> {
-    pub policy: RequestPolicy,
-    pub subjects: Option<&'a [R]>,
-    pub label: &'static str,
+    policy: RequestPolicy,
+    label: &'static str,
+    subject_records: &'a [R],
+    subjects: Vec<BioseqInput<'a>>,
+    /// Whether the search strategy's first request checked the subjects' titles (`write`).
+    subjects_checked: AtomicBool,
 }
 
-impl<R: RequestRecord> RunRequests<'_, R> {
+impl<'a, R: RequestRecord> RunRequests<'a, R> {
+    /// The requests of a run of `policy`, with the `-subject` records `subjects` (`None` for `-db`),
+    /// whose Bioseqs are made here once for every request.
+    pub(crate) fn new(
+        policy: RequestPolicy,
+        subjects: Option<&'a [R]>,
+        label: &'static str,
+    ) -> Self {
+        let subject_records = subjects.unwrap_or_default();
+        RunRequests {
+            policy,
+            label,
+            subject_records,
+            subjects: subject_records
+                .iter()
+                .map(|record| BioseqInput {
+                    seq_loc: None,
+                    ..record.bioseq(policy.subject_protein)
+                })
+                .collect(),
+            subjects_checked: AtomicBool::new(false),
+        }
+    }
+
     /// Calls `each` with the request of the batch of `queries` (each cut to its `-query_loc`;
     /// `first_placement` is where the first one's letters lie in its record, `None` without a
     /// range): the archive adds its results to it (`BatchArchive`), the search strategy writes it.
@@ -203,22 +225,9 @@ impl<R: RequestRecord> RunRequests<'_, R> {
         first_placement: Option<RecordPlacement>,
         each: impl FnOnce(&RequestInputs<'_>) -> T,
     ) -> T {
-        // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-        let subject_records = self.subjects.unwrap_or_default();
-        let subject_deflines: Vec<Cow<'_, [u8]>> = subject_records.iter().map(R::defline).collect();
-        let subjects: Vec<BioseqInput<'_>> = subject_records
-            .iter()
-            .zip(&subject_deflines)
-            .map(|(record, defline)| BioseqInput {
-                seq_loc: None,
-                ..record.bioseq(defline, self.policy.subject_protein)
-            })
-            .collect();
-        let deflines: Vec<Cow<'_, [u8]>> = queries.iter().map(R::defline).collect();
         let query_inputs: Vec<BioseqInput<'_>> = queries
             .iter()
-            .zip(&deflines)
-            .map(|(record, defline)| record.bioseq(defline, self.policy.query_protein))
+            .map(|record| record.bioseq(self.policy.query_protein))
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:587-605
         // ```c++
@@ -252,17 +261,37 @@ impl<R: RequestRecord> RunRequests<'_, R> {
             .map_or_else(Vec::new, |frames| frames.masks(queries));
         each(&RequestInputs {
             queries: &query_inputs,
-            subjects: &subjects,
+            subjects: &self.subjects,
             required,
             lcase_masks: &lcase_masks,
         })
     }
 
+    /// Refuses the titles of `queries` and, the first time, of the subjects that the search
+    /// strategy's requests hold when ASN.1 text cannot write them as NCBI does (`check_titles_in`).
+    /// A caller whose batch's request is certain to follow output it is about to write (the
+    /// reports of the batches before) calls it before that output.
+    pub(crate) fn check_titles(&self, queries: &[R]) -> Result<()> {
+        const OPTION: &str = "-export_search_strategy";
+        super::check_titles_in(ArchiveEncoding::Text, queries, "query", self.label, OPTION)?;
+        if !self.subjects_checked.load(Ordering::Relaxed) {
+            super::check_titles_in(
+                ArchiveEncoding::Text,
+                self.subject_records,
+                "subject",
+                self.label,
+                OPTION,
+            )?;
+            self.subjects_checked.store(true, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
     /// Writes the search strategy's request of the batch of `queries` (`with_batch`), whose first
-    /// query is the run's query `first_query`, where NCBI writes it (`StrategyExport::write_request`):
+    /// query is the run's query `first_query`, where NCBI writes it (`StrategyExport::write_with`):
     /// a request already written (a search of the batches again) or after the run's stop is not
-    /// made. The titles the request holds are refused first when ASN.1 text cannot write them as
-    /// NCBI does (`check_titles_in`).
+    /// made, and its titles are not looked at. The titles the request holds are refused first
+    /// (`check_titles`); a refused request writes nothing.
     pub(crate) fn write(
         &self,
         strategy: &StrategyExport,
@@ -270,32 +299,90 @@ impl<R: RequestRecord> RunRequests<'_, R> {
         queries: &[R],
         first_placement: Option<RecordPlacement>,
     ) -> Result<()> {
-        let span = first_query..first_query + queries.len();
-        if !strategy.takes(span.clone()) {
-            return Ok(());
-        }
-        const OPTION: &str = "-export_search_strategy";
-        super::check_titles_in(ArchiveEncoding::Text, queries, "query", self.label, OPTION)?;
-        if let Some(subjects) = self.subjects {
-            super::check_titles_in(
-                ArchiveEncoding::Text,
-                subjects,
-                "subject",
-                self.label,
-                OPTION,
-            )?;
-        }
-        self.with_batch(queries, first_placement, |request| {
-            strategy.write_request(span, request)
-        })
-        .map(drop)
+        strategy
+            .write_with(first_query..first_query + queries.len(), |write| {
+                self.check_titles(queries)?;
+                self.with_batch(queries, first_placement, |request| write(request))
+            })
+            .map(drop)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blastinput::app::Program;
     use crate::blastinput::fasta_reader::FastaRecord;
+    use crate::report::archive::options::OptionInputs;
+    use crate::report::archive::OptionsHandle;
+    use std::sync::{Arc, Mutex};
+
+    const PROTEIN: RequestPolicy = RequestPolicy {
+        query_protein: true,
+        subject_protein: true,
+        lcase: None,
+    };
+
+    #[derive(Clone, Default)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn export() -> (StrategyExport, Sink) {
+        let sink = Sink::default();
+        let export = StrategyExport::new(
+            Box::new(sink.clone()),
+            &OptionInputs::new(Program::Blastp, "blastp"),
+            None,
+            "BLASTP",
+            OptionsHandle::default(),
+        )
+        .unwrap();
+        (export, sink)
+    }
+
+    /// A query title that ASN.1 text cannot write refuses its request: nothing is written and the
+    /// run's cursor stays where it was; a request after the run's stop is not made, so its titles
+    /// are not looked at; a subject's title is refused with the first request.
+    #[test]
+    fn a_refused_title_writes_nothing_and_a_stopped_request_is_not_checked() {
+        let good = [FastaRecord::new("Query_1", b"q", b"MKV")];
+        let bad = [FastaRecord::new("Query_2", b"b\x7fta", b"MKV")];
+        let requests = RunRequests::<FastaRecord>::new(PROTEIN, None, "BLASTP");
+        let (strategy, sink) = export();
+        requests.write(&strategy, 0, &good, None).unwrap();
+        strategy.note_searched(0..1, None).unwrap();
+        let written = sink.0.lock().unwrap().len();
+        assert!(written > 0);
+        let refusal = requests.write(&strategy, 1, &bad, None).unwrap_err();
+        assert!(refusal.is::<super::super::TitleRefusal>(), "{refusal}");
+        assert!(refusal.to_string().contains("Query_2"), "{refusal}");
+        assert_eq!(sink.0.lock().unwrap().len(), written);
+        assert!(strategy.takes(1..2));
+        // After a stop the bad title is never written, so it is not refused.
+        strategy.stop_after(1);
+        requests.write(&strategy, 1, &bad, None).unwrap();
+        assert_eq!(sink.0.lock().unwrap().len(), written);
+        // A subject title: refused with the first request.
+        let subjects = [FastaRecord::new("Subject_1", b"s\x7f", b"MKV")];
+        let requests = RunRequests::new(PROTEIN, Some(&subjects[..]), "BLASTP");
+        let (strategy, sink) = export();
+        let refusal = requests.write(&strategy, 0, &good, None).unwrap_err();
+        assert!(
+            refusal.to_string().contains("subject Subject_1"),
+            "{refusal}"
+        );
+        assert!(sink.0.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn the_lower_case_runs_take_the_frames_of_the_program() {
@@ -334,15 +421,7 @@ mod tests {
 
     #[test]
     fn a_cut_first_query_gives_the_required_interval() {
-        let requests = RunRequests::<FastaRecord> {
-            policy: RequestPolicy {
-                query_protein: true,
-                subject_protein: true,
-                lcase: None,
-            },
-            subjects: None,
-            label: "BLASTP",
-        };
+        let requests = RunRequests::<FastaRecord>::new(PROTEIN, None, "BLASTP");
         let queries = [FastaRecord::new("Query_1", b"q", b"MKV")];
         let required = |placement| requests.with_batch(&queries, placement, |r| r.required);
         assert_eq!(required(None), None);

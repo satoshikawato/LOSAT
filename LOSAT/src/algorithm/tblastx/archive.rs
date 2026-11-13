@@ -117,13 +117,20 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
 pub(crate) fn handle_for(
     args: &TblastxArgs,
     archive_requested: bool,
+    options: &crate::report::archive::OptionsHandle,
 ) -> Result<Option<ArchiveHandle>> {
     if !archive_requested {
         return Ok(None);
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    ArchiveHandle::for_program(&option_inputs(args), args.database_name(), "TBLASTX").map(Some)
+    ArchiveHandle::for_program(
+        &option_inputs(args),
+        args.database_name(),
+        "TBLASTX",
+        options,
+    )
+    .map(Some)
 }
 
 /// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects, the
@@ -133,15 +140,15 @@ pub(super) fn requests(
     subjects: Option<&[FastaRecord]>,
     lcase_masking: bool,
 ) -> RunRequests<'_, FastaRecord> {
-    RunRequests {
-        policy: RequestPolicy {
+    RunRequests::new(
+        RequestPolicy {
             query_protein: false,
             subject_protein: false,
             lcase: lcase_masking.then_some(LcaseFrames::PlusAndMinus),
         },
         subjects,
-        label: "TBLASTX",
-    }
+        "TBLASTX",
+    )
 }
 
 /// `report::archive::check_titles` for TBLASTX's records (the archive's; the search strategy's
@@ -150,6 +157,24 @@ pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
     crate::report::archive::check_titles(records, role, "TBLASTX")
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
+// ```c++
+// inline Int8
+// CBlastOptionsLocal::GetEffectiveSearchSpace() const
+// {
+//     if (m_EffLenOpts->num_searchspaces == 0)
+//         return 0;
+//
+//     return m_EffLenOpts->searchsp_eff[0];
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
 /// The `EffectiveSearchSpace` option of a batch whose first query has the statistics `first`
 /// (`BatchArchive::searched_space`, `StrategyExport::note_searched`): the effective search space
 /// of context 0, when NCBI searched the batch.

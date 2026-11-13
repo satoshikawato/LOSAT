@@ -237,25 +237,21 @@ pub(super) fn render(
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes the
     // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`).
-    if outputs
-        .formats
-        .iter()
-        .any(|format| is_structured_xml(format.outfmt))
+    // (The search strategy's file holds the first batch's request alone: `search` stops the
+    // requests after it with the same decision, `StrategyExport::stop_after`.)
+    if crate::report::blast_xml::matrix::xml_formatting_fails(
+        outputs.formats.iter().map(|format| format.outfmt),
+        matrix_name,
+    ) && !query_records.is_empty()
     {
-        if let Err(error) =
-            super::blast_xml::unsupported_matrix(matrix_name, !query_records.is_empty())
-        {
-            // (The search strategy's file holds the first batch's request alone: `search` stops
-            // the requests after it, `StrategyExport::stop_after`.)
-            for format in outputs.formats.iter_mut() {
-                if let Some(kind) = xml2_kind(format.outfmt) {
-                    let mut writer = format.sink.open()?;
-                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-                    writer.flush()?;
-                }
+        for format in outputs.formats.iter_mut() {
+            if let Some(kind) = xml2_kind(format.outfmt) {
+                let mut writer = format.sink.open()?;
+                writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                writer.flush()?;
             }
-            return Err(error);
         }
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     let xml_is_xml2 = outputs
         .formats

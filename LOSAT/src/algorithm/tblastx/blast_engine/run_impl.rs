@@ -869,9 +869,12 @@ pub fn run(
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    // The run's options handle, which its archive and its search strategy share.
+    let options = crate::report::archive::OptionsHandle::default();
     args.archive = super::super::archive::handle_for(
         &args,
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
+        &options,
     )?
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
     // The search strategy's request, with the refusals of the archive's, and the archive's
@@ -889,7 +892,7 @@ pub fn run(
                 },
                 args.database_name(),
                 "TBLASTX",
-                args.archive.as_ref(),
+                &options,
             )
         })
         .transpose()?;
@@ -1648,8 +1651,12 @@ pub fn run_local(
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
     if archive_requested && args.archive.is_none() {
-        args.archive = super::super::archive::handle_for(&args, true)?
-            .map(|handle| outputs.with_archive_outfmt(handle));
+        args.archive = super::super::archive::handle_for(
+            &args,
+            true,
+            &crate::report::archive::OptionsHandle::default(),
+        )?
+        .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local(args, query_records, subject_records, view)
@@ -1718,8 +1725,12 @@ pub fn run_local_database(
         .formats
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
-    args.archive = super::super::archive::handle_for(&args, archive_requested)?
-        .map(|handle| outputs.with_archive_outfmt(handle));
+    args.archive = super::super::archive::handle_for(
+        &args,
+        archive_requested,
+        &crate::report::archive::OptionsHandle::default(),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
@@ -3643,7 +3654,7 @@ fn run_batch_loop(
             message.push('\n');
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:185-218 (the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the
         // BLAST XML report data of the first query that NCBI formats: the matrix of its
         // formatting table, found by the name as typed with `strcmp`)
         // ```c++
@@ -3656,19 +3667,13 @@ fn run_batch_loop(
         // ```
         // NCBI searches the first batch and writes nothing of it (the XML2 and JSON documents
         // only their start, `PrintProlog`); the search does not change the output.
-        if outputs
-            .formats
-            .iter()
-            .any(|format| report::output_format(format.outfmt).is_structured_xml())
-            && crate::report::blast_xml::matrix::FormattingMatrix::new(args.matrix_name()).is_none()
-        {
+        if crate::report::blast_xml::matrix::xml_formatting_fails(
+            outputs.formats.iter().map(|format| format.outfmt),
+            args.matrix_name(),
+        ) {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             outputs.diagnostics.write_all(&batch_warnings)?;
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: "BLAST engine error: unsupported score matrix\n".to_string(),
-            }
-            .into());
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
         }
         warnings[start].extend_from_slice(&batch_warnings);
         let batch = match take(start..end) {
@@ -3687,7 +3692,7 @@ fn run_batch_loop(
                             batch.searched,
                             &batch.queries[0],
                         ),
-                    );
+                    )?;
                 }
                 batch
             }

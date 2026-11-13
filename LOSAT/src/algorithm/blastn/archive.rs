@@ -108,11 +108,18 @@ pub(crate) fn handle_for(
     args: &BlastnArgs,
     dust: Option<&str>,
     archive_requested: bool,
+    options: &crate::report::archive::OptionsHandle,
 ) -> Result<Option<ArchiveHandle>> {
     if !archive_requested {
         return Ok(None);
     }
-    ArchiveHandle::for_program(&option_inputs(args, dust), args.database_name(), "BLASTN").map(Some)
+    ArchiveHandle::for_program(
+        &option_inputs(args, dust),
+        args.database_name(),
+        "BLASTN",
+        options,
+    )
+    .map(Some)
 }
 
 /// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects (the
@@ -125,15 +132,15 @@ pub(crate) fn requests(
     subjects: Option<&[FastaRecord]>,
     lcase_masking: bool,
 ) -> RunRequests<'_, FastaRecord> {
-    RunRequests {
-        policy: RequestPolicy {
+    RunRequests::new(
+        RequestPolicy {
             query_protein: false,
             subject_protein: false,
             lcase: lcase_masking.then_some(LcaseFrames::PlusTwice),
         },
         subjects,
-        label: "BLASTN",
-    }
+        "BLASTN",
+    )
 }
 
 /// `report::archive::check_titles` for BLASTN's records (the archive's; the search strategy's

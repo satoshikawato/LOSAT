@@ -353,8 +353,14 @@ fn run_inner(
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
-    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    // The run's options handle, which its archive and its search strategy share.
+    let options_handle = crate::report::archive::OptionsHandle::default();
+    let archive = archive::handle_for(
+        args,
+        format == Some(app::ReportFormat::ArchiveFormat),
+        &options_handle,
+    )?
+    .map(|handle| handle.with_outfmt_text(&args.outfmt));
     archive_slot.clone_from(&archive);
     // The search strategy's request, with the refusals of the archive's, and the archive's
     // options handle.
@@ -371,7 +377,7 @@ fn run_inner(
                 },
                 args.db.as_deref().map(crate::seqdb::db_argument_name),
                 "BLASTX",
-                archive.as_ref(),
+                &options_handle,
             )
         })
         .transpose()?;
@@ -1092,6 +1098,14 @@ fn run_inner(
         error
     };
     let query_scopes = std::cell::RefCell::new(read_ahead_scopes.or_else(query_scopes_of));
+    // The requests of the archives (outfmt 11), with every `-subject` record, made once for every
+    // batch.
+    let archive_requests = archive.as_ref().map(|_| {
+        archive::requests(match (&database, &pairwise_database) {
+            (Some(_), Some(_)) => None,
+            _ => Some(&subjects[..]),
+        })
+    });
     let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
@@ -1104,7 +1118,7 @@ fn run_inner(
             strategy.note_searched(
                 queries_before..queries_before + queries.len(),
                 archive::batch_searched_space(results),
-            );
+            )?;
         }
         if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
             scopes.add_batch_ids(
@@ -1112,7 +1126,7 @@ fn run_inner(
                 queries_before,
             )?;
         }
-        if let Some(handle) = &archive {
+        if let (Some(handle), Some(archive_requests)) = (&archive, &archive_requests) {
             // The BLAST archive (outfmt 11): one document per query batch, written from the
             // data of outfmt 8's Seq-aligns.
             for batch in results.iter_mut() {
@@ -1191,7 +1205,7 @@ fn run_inner(
                     batch: archive::CallBatch {
                         options: &options,
                         queries,
-                        subject_records,
+                        requests: archive_requests,
                         batches: results,
                     },
                     subjects: call_subjects,

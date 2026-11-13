@@ -34,7 +34,6 @@ use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RequestRecord, RunRequests};
-use crate::report::archive::ArchiveEncoding;
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
@@ -109,6 +108,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
 pub(crate) fn handle_for(
     args: &BlastxArgs,
     archive_requested: bool,
+    options: &crate::report::archive::OptionsHandle,
 ) -> Result<Option<ArchiveHandle>> {
     if !archive_requested {
         return Ok(None);
@@ -116,44 +116,25 @@ pub(crate) fn handle_for(
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX").map(Some)
+    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX", options).map(Some)
 }
 
 /// The refusal of a title that the archive cannot write as NCBI does
 /// (`report::archive::ArchiveEncoding::writes_text`: in text and binary a byte outside
 /// `0x20..=0x7E`, in XML a control byte) for BLASTX's records, before the first byte.
 pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles_in(
-        ArchiveEncoding::from_env(),
-        records,
-        role,
-        "BLASTX",
-        "-outfmt 11",
-    )
+    crate::report::archive::check_titles(records, role, "BLASTX")
 }
 
-/// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
-/// encoding) and the search strategy's (`strategy`, always ASN.1 text, as
-/// `RunRequests::write` checks them).
+/// `report::archive::check_request_titles` for BLASTX's records: the archive's (`archive`) and
+/// the search strategy's (`strategy`, as `RunRequests::write` checks them).
 pub(crate) fn check_request_titles(
     records: &[FastaRecord],
     role: &str,
     archive: bool,
     strategy: bool,
 ) -> Result<()> {
-    if archive {
-        check_titles(records, role)?;
-    }
-    if strategy {
-        crate::report::archive::check_titles_in(
-            ArchiveEncoding::Text,
-            records,
-            role,
-            "BLASTX",
-            "-export_search_strategy",
-        )?;
-    }
-    Ok(())
+    crate::report::archive::check_request_titles(records, role, "BLASTX", archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -508,8 +489,8 @@ pub(crate) struct CallBatch<'a> {
     pub options: &'a ResolvedOptions,
     /// The batch's queries; `BatchResults::query_ordinal` indexes them.
     pub queries: &'a [FastaRecord],
-    /// `-subject`: every subject record (the Bioseqs of the request); `None` for `-db`.
-    pub subject_records: Option<&'a [FastaRecord]>,
+    /// The requests of the run's archives (`requests`, with every `-subject` record; made once).
+    pub requests: &'a RunRequests<'a, FastaRecord>,
     /// The results of the batch: one entry, or several when the search split a batch above
     /// 10002 letters (`BATCH_SIZE`).
     pub batches: &'a [BatchResults],
@@ -546,6 +527,24 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
+// ```c++
+// inline Int8
+// CBlastOptionsLocal::GetEffectiveSearchSpace() const
+// {
+//     if (m_EffLenOpts->num_searchspaces == 0)
+//         return 0;
+//
+//     return m_EffLenOpts->searchsp_eff[0];
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
 /// The `EffectiveSearchSpace` option of a reader batch whose results are `batches` (its units;
 /// `BatchArchive::searched_space`, `StrategyExport::note_searched`): the search space of the first
 /// query's context 0 (frame +1; an invalid context keeps `-searchsp`, else 0,
@@ -562,19 +561,29 @@ pub(crate) fn batch_searched_space(batches: &[BatchResults]) -> Option<i64> {
 /// frames of a translated query (the reader keeps them only with `-lcase_masking`,
 /// `FastaRecord::archive_lowercase_runs`).
 pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_, FastaRecord> {
-    RunRequests {
-        policy: RequestPolicy {
+    RunRequests::new(
+        RequestPolicy {
             query_protein: false,
             subject_protein: true,
             lcase: Some(LcaseFrames::PlusAndMinus),
         },
         subjects,
-        label: "BLASTX",
-    }
+        "BLASTX",
+    )
 }
 
 impl RequestRecord for FastaRecord {
-    fn bioseq<'a>(&'a self, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
+    fn bioseq(&self, protein: bool) -> BioseqInput<'_> {
+        // The defline line: the line as read, else `>` and the title (`report::archive::defline_of`;
+        // BLASTX's `FastaRecord` is its own type, and an empty defline counts as missing).
+        let defline = match self.source.as_ref().map(|source| source.defline.as_slice()) {
+            Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
+            _ => {
+                let mut line = vec![b'>'];
+                line.extend_from_slice(self.title.as_bytes());
+                Cow::Owned(line)
+            }
+        };
         BioseqInput {
             id: &self.internal_id,
             ids: self.believed().map(|ids| ids.ids.as_slice()),
@@ -584,19 +593,6 @@ impl RequestRecord for FastaRecord {
             // The whole record, also when a range cut it (`FastaRecord::archive_letters`).
             letters: self.archive_letters(),
             protein,
-        }
-    }
-
-    /// The line as read, else `>` and the title (`report::archive::defline_of`; BLASTX's
-    /// `FastaRecord` is its own type, and an empty defline counts as missing).
-    fn defline(&self) -> Cow<'_, [u8]> {
-        match self.source.as_ref().map(|source| source.defline.as_slice()) {
-            Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
-            _ => {
-                let mut line = vec![b'>'];
-                line.extend_from_slice(self.title.as_bytes());
-                Cow::Owned(line)
-            }
         }
     }
 
@@ -767,7 +763,7 @@ fn with_batch(
         None => [KaBlock::missing(false), KaBlock::missing(true)],
     };
     let masks = results_masks(call);
-    requests(call.subject_records).with_batch(
+    call.requests.with_batch(
         call.queries,
         call.queries.first().map(FastaRecord::placement),
         |request| {

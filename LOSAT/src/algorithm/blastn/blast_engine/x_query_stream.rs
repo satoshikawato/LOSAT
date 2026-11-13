@@ -508,9 +508,9 @@ impl Store {
         // The parts see no title (`archive_title` below is false there): a run whose requests'
         // titles are looked at (`titles`) keeps the deflines (`with_defline`), so it never reads
         // in parts.
-        debug_assert!(
+        anyhow::ensure!(
             titles.is_none() || config.keep_defline,
-            "the archive's and the search strategy's records keep their deflines"
+            "LOSAT internal error: a reading that looks at the requests' titles keeps no defline"
         );
         let parts = if !config.keep_defline && !config.parse_deflines {
             in_parts(&again, start)

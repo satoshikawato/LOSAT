@@ -148,9 +148,14 @@ impl TblastnArgs {
         // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot
         // write, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
-        args.archive =
-            super::archive::handle_for(&args, format == Some(app::ReportFormat::ArchiveFormat))?
-                .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        // The run's options handle, which its archive and its search strategy share.
+        let options = crate::report::archive::OptionsHandle::default();
+        args.archive = super::archive::handle_for(
+            &args,
+            format == Some(app::ReportFormat::ArchiveFormat),
+            &options,
+        )?
+        .map(|handle| handle.with_outfmt_text(&args.outfmt));
         // The search strategy's request, with the refusals of the archive's, and the archive's
         // options handle.
         args.strategy = strategy_file
@@ -166,7 +171,7 @@ impl TblastnArgs {
                     },
                     args.database_name(),
                     "TBLASTN",
-                    args.archive.as_ref(),
+                    &options,
                 )
             })
             .transpose()?;
@@ -1028,8 +1033,12 @@ pub fn run_local(
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
     if archive_requested {
-        args.archive = super::archive::handle_for(&args, true)?
-            .map(|handle| outputs.with_archive_outfmt(handle));
+        args.archive = super::archive::handle_for(
+            &args,
+            true,
+            &crate::report::archive::OptionsHandle::default(),
+        )?
+        .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
@@ -1092,8 +1101,12 @@ pub fn run_local_database(
         .formats
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
-    args.archive = super::archive::handle_for(&args, archive_requested)?
-        .map(|handle| outputs.with_archive_outfmt(handle));
+    args.archive = super::archive::handle_for(
+        &args,
+        archive_requested,
+        &crate::report::archive::OptionsHandle::default(),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
@@ -1472,10 +1485,33 @@ fn search(
     if batches.searched_done > 0 {
         super::args::check_identity_compressed_lookup_of(&resolved)?;
     }
+    // The search strategy's requests of the batches (`-export_search_strategy`), with every
+    // `-subject` record: written in the loop below, and for the batch that stops the run (every
+    // query without letters) after the batches before it.
+    let requests = args.strategy.as_ref().map(|_| {
+        super::archive::requests(
+            database.is_none().then_some(subject_records),
+            resolved.lcase_masking,
+        )
+    });
     // The titles that the BLAST archive (outfmt 11) cannot write are refused after the batches
     // are searched (below): the batch that stops the run here, and one whose search fails, write
     // no archive.
     if batches.searched_done == 0 && batches.stop.is_some() {
+        // A first batch whose set-up fails has its search strategy request, written before the
+        // prolog (a refusal of its titles follows no byte).
+        if let (Some(strategy), Some(requests), Some(span)) = (
+            args.strategy.as_ref(),
+            requests.as_ref(),
+            batches.stop_batch.clone(),
+        ) {
+            requests.write(
+                strategy,
+                span.start,
+                &searched_queries[span.clone()],
+                query_input.placements.get(span.start),
+            )?;
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
         // ```c
         // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
@@ -1570,15 +1606,7 @@ fn search(
         // pipe, or `-query -` after `-subject -`).
         let searched_done = batches.searched_done;
         let queries = &searched_queries[..searched_done];
-        // The search strategy's requests of the batches (`-export_search_strategy`), with every
-        // `-subject` record, written in the loop below.
-        let requests = args.strategy.as_ref().map(|_| {
-            super::archive::requests(
-                database.is_none().then_some(subject_records),
-                resolved.lcase_masking,
-            )
-        });
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:205-218 (the BLAST
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the BLAST
         // XML report data of the first result NCBI formats: the matrix of its formatting table,
         // found by the name as typed)
         // ```c++
@@ -1590,17 +1618,14 @@ fn search(
         //                         "unsupported score matrix");
         // ```
         // NCBI fails when it formats the first batch in BLAST XML with a matrix name its XML data
-        // does not know (`stage_e_report::render`): the search strategy's file holds the first
-        // batch's request alone, whatever the number of batches (probe 7 of RG-F1, `-matrix
-        // blosum62` with outfmt 5 and 16).
+        // does not know (`stage_e_report::render`, the same decision): the search strategy's file
+        // holds the first batch's request alone, whatever the number of batches (probe 7 of RG-F1,
+        // `-matrix blosum62` with outfmt 5 and 16).
         if let Some(strategy) = args.strategy.as_ref() {
-            if outputs
-                .formats
-                .iter()
-                .any(|format| super::stage_e_report::is_structured_xml(format.outfmt))
-                && crate::report::blast_xml::matrix::FormattingMatrix::new(&resolved.matrix_name)
-                    .is_none()
-            {
+            if crate::report::blast_xml::matrix::xml_formatting_fails(
+                outputs.formats.iter().map(|format| format.outfmt),
+                &resolved.matrix_name,
+            ) {
                 if let Some(end) = batches.first_request_end() {
                     strategy.stop_after(end);
                 }
@@ -1713,9 +1738,10 @@ fn search(
             //                 SaveSearchStrategy(args, m_CmdLineArgs, query_factory, m_OptsHndl);
             // ```
             // The batch's search strategy request (`-export_search_strategy`): once its query
-            // factory is made, before its search, so every error of the batch's search follows it
-            // (the file is apart from the reports). Its `EffectiveSearchSpace` option is the one
-            // the batch before left (`note_searched` below).
+            // factory is made, before any error of the batch is acted on (`x_search_batches` may
+            // have searched it ahead; only the order of the file and of what the run writes
+            // matters, and the file is apart from the reports). Its `EffectiveSearchSpace` option
+            // is the one the batch before left (`note_searched` below).
             if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
                 requests.write(
                     strategy,
@@ -1776,7 +1802,7 @@ fn search(
                                     validity.iter().any(|&valid| valid),
                                     &lengths.lengths[0],
                                 ),
-                            );
+                            )?;
                         }
                         report
                     }
@@ -1957,6 +1983,19 @@ fn search(
         if args.archive.is_some() && !queries.is_empty() {
             super::archive::check_titles(queries, "query")?;
             super::archive::check_titles(subject_records, "subject")?;
+        }
+        // The request of the batch that stops the run (every query without letters) comes after
+        // these reports (below): its titles are refused before them, when the reports end with
+        // that batch (no batch failed, and NCBI's formats do not stop first).
+        if let (Some(strategy), Some(requests), Some(span), None) = (
+            args.strategy.as_ref(),
+            requests.as_ref(),
+            batches.stop_batch.clone(),
+            &failed,
+        ) {
+            if strategy.takes(span.clone()) {
+                requests.check_titles(&searched_queries[span])?;
+            }
         }
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
         // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
@@ -2394,13 +2433,13 @@ fn search(
     }
     // A batch whose set-up fails (every query without letters) has its search strategy request:
     // NCBI made its query factory before the search (`QueryBatches::stop_batch`), after the
-    // batches above.
-    if let (Some(strategy), Some(span)) = (args.strategy.as_ref(), batches.stop_batch.clone()) {
-        super::archive::requests(
-            database.is_none().then_some(subject_records),
-            resolved.lcase_masking,
-        )
-        .write(
+    // batches above (a first batch's was written before the prolog).
+    if let (Some(strategy), Some(requests), Some(span)) = (
+        args.strategy.as_ref(),
+        requests.as_ref(),
+        batches.stop_batch.clone(),
+    ) {
+        requests.write(
             strategy,
             span.start,
             &searched_queries[span.clone()],

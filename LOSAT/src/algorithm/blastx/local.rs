@@ -77,8 +77,12 @@ pub fn run_local(
     let (choices, resolutions) = read_options(&args, &requested, ids_read)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
-    let archive = archive::handle_for(&args, archive_requested)?
-        .map(|handle| outputs.with_archive_outfmt(handle));
+    let archive = archive::handle_for(
+        &args,
+        archive_requested,
+        &crate::report::archive::OptionsHandle::default(),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
     match archive {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -751,7 +755,7 @@ fn write_run(
                         batch: archive::CallBatch {
                             options,
                             queries,
-                            subject_records,
+                            requests: &archive::requests(subject_records),
                             batches: results,
                         },
                         subjects: call_subjects,
@@ -886,8 +890,12 @@ pub fn run_local_database(
     let requested = requested_formats(&args, outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
-    let archive = archive::handle_for(&args, archive_requested)?
-        .map(|handle| outputs.with_archive_outfmt(handle));
+    let archive = archive::handle_for(
+        &args,
+        archive_requested,
+        &crate::report::archive::OptionsHandle::default(),
+    )?
+    .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     match archive {
         Some(handle) => {

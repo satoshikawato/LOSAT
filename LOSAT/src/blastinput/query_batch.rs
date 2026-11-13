@@ -465,6 +465,13 @@ impl QueryBatches {
         self.starts[after.saturating_sub(1)]
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    // ```
     /// Where the searched queries of the run's first batch with a search strategy request end:
     /// the first searched batch, else the batch whose set-up fails (`stop_batch`); `None` when
     /// the run stops before it makes a query factory.

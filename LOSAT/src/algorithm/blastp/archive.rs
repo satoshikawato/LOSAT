@@ -118,6 +118,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
 pub(crate) fn handle_for(
     args: &BlastpArgs,
     archive_requested: bool,
+    options: &crate::report::archive::OptionsHandle,
 ) -> Result<Option<ArchiveHandle>> {
     if !archive_requested {
         return Ok(None);
@@ -125,7 +126,7 @@ pub(crate) fn handle_for(
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTP").map(Some)
+    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTP", options).map(Some)
 }
 
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
@@ -135,15 +136,15 @@ pub(crate) fn requests(
     subjects: Option<&[FastaRecord]>,
     lcase_masking: bool,
 ) -> RunRequests<'_, FastaRecord> {
-    RunRequests {
-        policy: RequestPolicy {
+    RunRequests::new(
+        RequestPolicy {
             query_protein: true,
             subject_protein: true,
             lcase: lcase_masking.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        label: "BLASTP",
-    }
+        "BLASTP",
+    )
 }
 
 /// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and

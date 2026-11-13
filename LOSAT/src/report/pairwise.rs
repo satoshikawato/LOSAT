@@ -675,9 +675,7 @@ impl<'a> DatabaseHeading<'a> {
     /// the generated title of a sequence with parsed Seq-ids (`heading_skipped_id`).
     fn skipped_id(self, protein: bool) -> Option<Vec<u8>> {
         match self {
-            DatabaseHeading::Title(title, source) if title.is_empty() => {
-                source.undecodable_id().map(<[u8]>::to_vec)
-            }
+            DatabaseHeading::Title([], source) => source.undecodable_id().map(<[u8]>::to_vec),
             DatabaseHeading::Title(..) => None,
             DatabaseHeading::Parsed(subject, every_line) => {
                 subject.heading_skipped_id(protein, every_line)

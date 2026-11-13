@@ -396,9 +396,10 @@ impl RpsRun<'_> {
             )
             .checked_mul(int_scale)
             .ok_or_else(|| scale_overflow(scale, self.program))?;
-        let gap_trigger = crate::algorithm::tblastx::ncbi_cutoffs::gap_trigger_raw_score(
+        let gap_trigger = crate::core::x_drop::gap_trigger_raw_score(
             self.gap_trigger_bits,
-            &query.kbp_std,
+            query.kbp_std.lambda,
+            query.kbp_std.k,
         );
         Ok(RpsCutoffs {
             x_dropoff,

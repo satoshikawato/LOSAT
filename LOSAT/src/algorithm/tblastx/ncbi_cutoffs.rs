@@ -11,11 +11,6 @@
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::KarlinParams;
 
-/// ln(2) constant used in NCBI BLAST
-/// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
-/// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
-
 /// Smallest float to avoid floating point exception in BlastKarlinEtoS_simple
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049
 const K_SMALL_FLOAT: f64 = 1.0e-297;
@@ -85,12 +80,13 @@ pub fn x_drop_raw_score(
 /// converts it, to `INT_MIN`: `core::blast_util::ncbi_int4_from_double`, as the X-drops are in
 /// `core::x_drop`)
 pub fn gap_trigger_raw_score(bit_trigger: f64, ungapped_params: &KarlinParams) -> i32 {
-    // NCBI: gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
-    // Note: kbp->logK = ln(K), so we use ungapped_params.k.ln()
-    let raw = (bit_trigger * NCBIMATH_LN2 + ungapped_params.k.ln()) / ungapped_params.lambda;
-
-    // C's (Int4) cast truncates toward zero.
-    crate::core::blast_util::ncbi_int4_from_double(raw)
+    // NCBI: gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda),
+    // every program's one conversion (`core::x_drop`).
+    crate::core::x_drop::gap_trigger_raw_score(
+        bit_trigger,
+        ungapped_params.lambda,
+        ungapped_params.k,
+    )
 }
 
 /// Result of effective length calculation for TBLASTX -subject mode.

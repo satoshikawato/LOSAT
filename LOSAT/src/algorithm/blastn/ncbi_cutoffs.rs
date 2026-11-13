@@ -24,9 +24,16 @@ pub const CUTOFF_E_BLASTN: f64 = 0.05;
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4049
 const K_SMALL_FLOAT: f64 = 1.0e-297;
 
-/// The gap trigger's raw score from its bits and the UNGAPPED Karlin params (kbp_std): every
-/// program's one conversion (blast_parameters.c:343-344; NCBI's default for blastn is 27 bits).
-pub use crate::algorithm::tblastx::ncbi_cutoffs::gap_trigger_raw_score;
+/// The gap trigger's raw score from its bits and the UNGAPPED Karlin params (kbp_std), by every
+/// program's one conversion (`core::x_drop::gap_trigger_raw_score`, blast_parameters.c:343-344;
+/// NCBI's default for blastn is 27 bits).
+pub fn gap_trigger_raw_score(gap_trigger_bits: f64, ungapped_params: &KarlinParams) -> i32 {
+    crate::core::x_drop::gap_trigger_raw_score(
+        gap_trigger_bits,
+        ungapped_params.lambda,
+        ungapped_params.k,
+    )
+}
 
 /// Calculate cutoff_score_max from E-value using GAPPED Karlin params.
 ///

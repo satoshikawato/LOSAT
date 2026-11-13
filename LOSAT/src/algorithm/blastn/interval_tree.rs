@@ -1197,6 +1197,35 @@ impl BlastIntervalTree {
     /// For eQueryAndSubject mode, it first checks for common endpoints and
     /// removes worse HSPs before adding.
     pub fn add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32, index_method: IndexMethod) {
+        self.add_hsp_of::<false>(hsp, query_context_offset, index_method);
+    }
+
+    /// `add_hsp`, or `false` where NCBI's insertion would split a node into a node whose left end
+    /// lies past its right end (`s_IntervalNodeInit` on a node `[p, p]` to the right, a split that
+    /// `BlastIntervalTreeAddHSP` then repeats without end); the insertion stops there, and the
+    /// caller stops its search. Only a range that starts past the tree's upper bound leads there (a
+    /// node `[p, p]` is entered only by a range that holds `p`, and goes right only for a start
+    /// past `p`), which only TBLASTN's one-hit word finder gives (`search_gapped::x_add_one_hit_hsp`).
+    /// (Below the lower bound, a split to the left of `[p, p]` would repeat `[p, p]`; no caller's
+    /// ranges start below 0.)
+    pub fn try_add_hsp(
+        &mut self,
+        hsp: TreeHsp,
+        query_context_offset: i32,
+        index_method: IndexMethod,
+    ) -> bool {
+        self.add_hsp_of::<true>(hsp, query_context_offset, index_method)
+    }
+
+    /// `add_hsp` (`REFUSE_INVERTED` false) and `try_add_hsp` (true), whose result it returns
+    /// (always `true` for `add_hsp`).
+    #[inline(always)]
+    fn add_hsp_of<const REFUSE_INVERTED: bool>(
+        &mut self,
+        hsp: TreeHsp,
+        query_context_offset: i32,
+        index_method: IndexMethod,
+    ) -> bool {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
         // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
         // if ( index_method == eQueryOnlyStrandIndifferent &&
@@ -1254,11 +1283,11 @@ impl BlastIntervalTree {
             // `interval_tree_has_hsp_endpoint` unless the point set shows it cannot find
             // anything.
             if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Left, x_on) {
-                return; // Better HSP with same endpoint already exists
+                return true; // Better HSP with same endpoint already exists
             }
             // Check right endpoint
             if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Right, x_on) {
-                return; // Better HSP with same endpoint already exists
+                return true; // Better HSP with same endpoint already exists
             }
         }
 
@@ -1314,14 +1343,14 @@ impl BlastIntervalTree {
         }
 
         // Start the insertion loop
-        self.add_hsp_internal(
+        self.add_hsp_internal::<REFUSE_INVERTED>(
             new_index,
             region_start,
             region_end,
             &hsp,
             false,
             index_method,
-        );
+        )
     }
 
     /// Legacy add_hsp without index_method (defaults to QueryAndSubject)
@@ -1332,7 +1361,9 @@ impl BlastIntervalTree {
 
     /// Internal helper for adding HSP after leaf node has been allocated
     /// NCBI reference: blast_itree.c:601-793
-    fn add_hsp_internal(
+    /// `false` (with `REFUSE_INVERTED` only) where a split would make an inverted node
+    /// (`try_add_hsp`).
+    fn add_hsp_internal<const REFUSE_INVERTED: bool>(
         &mut self,
         new_index: usize,
         region_start: i32,
@@ -1340,7 +1371,7 @@ impl BlastIntervalTree {
         hsp: &TreeHsp,
         mut index_subject_range: bool,
         index_method: IndexMethod,
-    ) {
+    ) -> bool {
         let mut root_index = 0usize;
         let mut current_region_start = region_start;
         let mut current_region_end = region_end;
@@ -1361,7 +1392,7 @@ impl BlastIntervalTree {
                 if leftptr == 0 {
                     // No left child - attach new leaf directly
                     self.nodes[root_index].leftptr = new_index as i32;
-                    return;
+                    return true;
                 }
 
                 // Check if existing node is a leaf or internal
@@ -1394,7 +1425,7 @@ impl BlastIntervalTree {
                 if rightptr == 0 {
                     // No right child - attach new leaf directly
                     self.nodes[root_index].rightptr = new_index as i32;
-                    return;
+                    return true;
                 }
 
                 // Check if existing node is a leaf or internal
@@ -1409,6 +1440,10 @@ impl BlastIntervalTree {
                 // Two leaves in same subtree - need to split
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:703-746
                 // NCBI continues the insertion loop after splitting; avoid recursion to match.
+                // (A split to the left keeps `leftend <= midpt`; only this one can invert.)
+                if REFUSE_INVERTED && self.x_right_split_inverts(root_index) {
+                    return false;
+                }
                 let mid_index = self.split_and_insert(
                     root_index,
                     rightptr as usize,
@@ -1431,7 +1466,7 @@ impl BlastIntervalTree {
                     // prepend the new node to the list of "midpoint" nodes
                     self.nodes[new_index].midptr = self.nodes[root_index].midptr;
                     self.nodes[root_index].midptr = new_index as i32;
-                    return;
+                    return true;
                 } else {
                     // NCBI reference: blast_itree.c:677-700
                     // Begin another tree at root_index, that indexes the subject range
@@ -1452,6 +1487,14 @@ impl BlastIntervalTree {
                 }
             }
         }
+    }
+
+    /// Whether the right child that `alloc_internal_node` would make under `parent_idx` has its left
+    /// end past its right end (`midpt + 1 > rightend`, blast_itree.c:106-108: a parent `[p, p]`).
+    fn x_right_split_inverts(&self, parent_idx: usize) -> bool {
+        let parent = &self.nodes[parent_idx];
+        (i64::from(parent.leftend) + i64::from(parent.rightend)) / 2 + 1
+            > i64::from(parent.rightend)
     }
 
     /// Handle the case where two leaves collide in the same subtree.

@@ -52,6 +52,10 @@ pub(super) trait TbnScore: Copy + Send + Sync {
     type Walks: XUngapWalks;
     /// The memory of one traceback (`GapAlignScratch` for the matrix's kernel).
     type TracebackScratch;
+    /// Whether the window of `gapped_start_int4` reads the query's letters: the matrix's does
+    /// (`matrix->data[*query_var][*subject_var]`), a PSSM's reads its rows instead
+    /// (`pssm->data[index1][*subject_var]`, blast_gapalign.c:3413-3416).
+    const WINDOW_READS_QUERY: bool;
 
     /// A traceback's memory, made where the traceback of an HSP makes it.
     fn traceback_scratch() -> Self::TracebackScratch;
@@ -186,6 +190,7 @@ impl TbnScore for MatrixScore {
     type Scratch = GapAlignScratch;
     type Walks = std::convert::Infallible;
     type TracebackScratch = GapAlignScratch;
+    const WINDOW_READS_QUERY: bool = true;
 
     #[inline(always)]
     fn traceback_scratch() -> Self::TracebackScratch {
@@ -461,6 +466,7 @@ impl<'a> TbnScore for PssmScore<'a> {
     type Scratch = (GapAlignScratch, PssmGapScratch);
     type Walks = XPssmWalks<'a>;
     type TracebackScratch = PssmGapScratch;
+    const WINDOW_READS_QUERY: bool = false;
 
     fn traceback_scratch() -> Self::TracebackScratch {
         PssmGapScratch::new()

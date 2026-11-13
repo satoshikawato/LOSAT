@@ -4276,8 +4276,9 @@ Scheduling (each value computed by one thread with the original function; order 
   letters, both strands counted, so about 4000 query letters; `window_size` and `scan_range` 0, unmasked subject, no
   debug or trace). The pool threads scan strips (512 x max(threads, 4) of them, at least 512 subject offsets each: 512
   offsets on 3 Mb from 12 threads on) with the scan kernel of the reference
-  (`run.rs`, the branch after `if two_stage_lookup_ref.is_none()`), each lookup hit becoming a seed with the context of
-  its query offset, and the pairs are folded in scan order through a copy of the reference's one-hit diagonal-hash code
+  (`scan_na_lookup` in `blastn/blast_engine/na_scan.rs`, which `run.rs` calls after
+  `if two_stage_lookup_ref.is_none()`), each lookup hit becoming a seed with the context of its query offset, and the
+  pairs are folded in scan order through a copy of the reference's one-hit diagonal-hash code
   (`last_hit` test, `s_TypeOfWord`, the ungapped extension on the context's query slice, the cutoff, every insert;
   `blastn/blast_engine/x_pair_seed_na.rs`); with `LOSAT_X_PAIRPARFOLD` (default) the fold is split by diagonal-hash
   bucket over the threads, without it the owner folds. Every lookup hit is a seed here (about 100 per subject offset for
@@ -4448,7 +4449,7 @@ Scheduling (each value computed by one thread with the original function; order 
   test), which are the only readers of the retrieve; the insert still walks the chain itself, and the next
   seed reads only the table, so the bound needs no term for the insert, and the hit list and the table
   are the reference's (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in
-  the two reference scans (`extend_offset_pairs` for the two-stage tables, and the seed closure of the
+  the two reference scans (`extend_offset_pairs` for the two-stage tables, and `scan_na_lookup` for the
   other tables, which blastn-short's word 7 reaches; not with debug, trace or window diagnostics, which
   print the values read) and in the strips folds of PAIRPAR and `LOSAT_X_PAIRPARDISC`; the off-diagonal
   retrieves (`scan_range`) stay walks. With the switch off the table has no bounds, an insert tests the

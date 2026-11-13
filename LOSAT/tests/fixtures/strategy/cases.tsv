@@ -316,3 +316,17 @@ rpstblastn.3v.nq.b2000	rpstblastn	BLASTDB={rps:rps_mini3v},BATCH_SIZE=2000	-quer
 rpstblastn.bound1	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/bound1.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpstblastn.noaux	rpstblastn	BLASTDB={rps:rps_mini-aux}	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-
 rpstblastn.badopt.pre	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss} -evalue abc	parser	2	old	-
+psiblast.db.three.it2.cbs2u	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -comp_based_stats 2u -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.three.cbs1u	psiblast	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -comp_based_stats 1u -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.nq.sw	rpstblastn	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/nq.fna -db rps_mini -use_sw_tback -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.q40.dbsize	rpsblast	BLASTDB={rps:rps_mini3v}	-query tests/fasta/rps/q40.faa -db rps_mini3v -dbsize 100000 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.q40.ssp0	rpsblast	BLASTDB={rps:rps_mini3v}	-query tests/fasta/rps/q40.faa -db rps_mini3v -searchsp 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpstblastn.3v.nq.ssp0.dbs0.b2000	rpstblastn	BLASTDB={rps:rps_mini3v},BATCH_SIZE=2000	-query tests/fasta/rps/nq.fna -db rps_mini3v -searchsp 0 -dbsize 0 -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3vL.q40	rpsblast	BLASTDB={rps:rps_mini3v+tests/fasta/strategy/rps3vL.pal}	-query tests/fasta/rps/q40.faa -db rps3vL -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.mixed.b400	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=400	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.3v.mixed.b400	rpsblast	BLASTDB={rps:rps_mini3v},BATCH_SIZE=400	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini3v -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+psiblast.db.title.b2	psiblast	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's PSIBLAST with -export_search_strategy
+psiblast.db.title.b2.it2	psiblast	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's PSIBLAST with -export_search_strategy
+rpsblast.title.b2	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastp.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's RPSBLAST with -export_search_strategy
+rpstblastn.title.b2	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	-query tests/fasta/strategy/title_b2_blastx.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	refuse	1	-	not supported by LOSAT's RPSTBLASTN with -export_search_strategy
+rpstblastn.stdin	rpstblastn	BLASTDB={rps:rps_mini}	-query - -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	refuse	1	-	unsupported RPSTBLASTN query input for -export_search_strategy

@@ -26,7 +26,8 @@
 //! `remaining-gaps-20261112/F/f1/freeze_strategy.py` of the line's records, NCBI BLAST+ 2.17.0).
 //! Every row runs at 1, 4 and 8 threads. An env value `{rps:NAMES[-EXT]}` is a folder of the
 //! run's own with the profile databases NAMES (`+`-separated) of `tests/db_search/rps` inflated,
-//! without their files of extension EXT (`rps_databases`); NCBI's messages name it `{RPS}`.
+//! without their files of extension EXT, and the files NAMES with a `/` copied (`rps_databases`);
+//! NCBI's messages name it `{RPS}`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -118,7 +119,8 @@ fn unix_separators(text: &str) -> String {
 
 /// `{rps:NAMES[-EXT]}`: the profile databases NAMES (separated by `+`) of `tests/db_search/rps`,
 /// their `NAME.*.gz` files inflated into `dir/rpsdb` without those of extension EXT (`-aux`: no
-/// `.aux` file). The folder's path.
+/// `.aux` file); a NAME with a `/` is a file of `LOSAT/` copied there (an alias file). The
+/// folder's path.
 fn rps_databases(spec: &str, dir: &Path) -> PathBuf {
     use std::io::Read;
     let (names, drop) = match spec.split_once('-') {
@@ -127,6 +129,10 @@ fn rps_databases(spec: &str, dir: &Path) -> PathBuf {
     };
     let target = dir.join("rpsdb");
     std::fs::create_dir_all(&target).unwrap();
+    for file in names.split('+').filter(|name| name.contains('/')) {
+        let file = Path::new(file);
+        std::fs::copy(engine().join(file), target.join(file.file_name().unwrap())).unwrap();
+    }
     let source = engine().join("tests/db_search/rps");
     for entry in std::fs::read_dir(&source).unwrap() {
         let file = entry.unwrap().file_name().to_string_lossy().into_owned();

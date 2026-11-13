@@ -43,7 +43,9 @@ use crate::algorithm::blastx::query_setup::{
 };
 use crate::algorithm::blastx::results::{Hsp, HspList};
 use crate::algorithm::blastx::runtime::BatchResults;
-use crate::algorithm::rps_search::engine::{RpsFrame, RpsQuery, RpsRun, RpsSearch, NUM_FRAMES};
+use crate::algorithm::rps_search::engine::{
+    RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
+};
 use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, per_volume_search_spaces, shift_ordinal_ids, Consensus,
     RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
@@ -135,6 +137,8 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             usize::try_from(options.num_threads.max(1)).unwrap_or(1)
         };
         crate::utils::threading::x_with_search_pool_local(threads, PROGRAM, |pool| {
+            // The workers' scratch, kept from batch to batch and volume to volume (`RpsWorkers`).
+            let workers = RpsWorkers::new(pool.threads());
             read(
                 &mut |queries| {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
@@ -158,6 +162,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                             &setup,
                             (db_length, db_count),
                             pool,
+                            &workers,
                         )
                         .map_err(|error| match error.downcast::<RpsBatchError>() {
                             // NCBI's errors of the set-up of the batch (`BLAST engine error`).
@@ -250,6 +255,7 @@ impl TranslatedRpsSearch {
         setup: &RpsVolumeSetup,
         (db_length, db_count): (i64, i64),
         pool: &crate::utils::threading::SearchPool<'_>,
+        workers: &RpsWorkers,
     ) -> Result<BatchResults> {
         let prepared =
             prepare_unit_queries(queries, None, options).map_err(RpsBatchError::Setup)?;
@@ -348,7 +354,12 @@ impl TranslatedRpsSearch {
                 options: &self.search,
                 program: PROGRAM,
             };
-            let traced = run.search_volume(&files, &Consensus::new(setup, volume, &files), pool)?;
+            let traced = run.search_volume(
+                &files,
+                &Consensus::new(setup, volume, &files),
+                pool,
+                workers,
+            )?;
             drop(run);
             drop(files);
             let mut lists: Vec<Option<BlastpHitList>> = traced

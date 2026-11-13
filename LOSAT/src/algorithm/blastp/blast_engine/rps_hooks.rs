@@ -28,7 +28,9 @@ use anyhow::{bail, Result};
 use super::{database, BlastpRuntimeLookup};
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::algorithm::rps_search::engine::{batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch};
+use crate::algorithm::rps_search::engine::{
+    batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers,
+};
 use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, shift_ordinal_ids, Consensus, RpsVolumeError,
     RpsVolumeSet, RpsVolumeSetup,
@@ -461,6 +463,8 @@ pub(super) fn rps_search(
     }
     let mut gapped_k = Vec::new();
     let mut setup = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32);
+    // The workers' scratch, kept from volume to volume (`RpsWorkers`).
+    let workers = RpsWorkers::new(pool.threads());
     for (position, &index) in order.iter().enumerate() {
         let volume = &db_volumes[index];
         let num_seqs = volume.num_oids();
@@ -587,7 +591,12 @@ pub(super) fn rps_search(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
             );
         }
-        let traced = engine.search_volume(&files, &Consensus::new(&setup, volume, &files), pool)?;
+        let traced = engine.search_volume(
+            &files,
+            &Consensus::new(&setup, volume, &files),
+            pool,
+            &workers,
+        )?;
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.
         drop(engine);

@@ -38,11 +38,11 @@ use anyhow::Result;
 
 use super::prelim::{RpsPrelim, RpsPrelimScratch};
 use super::redo::RpsRedoParams;
-use super::scan::{RpsBuckets, RpsTable};
+use super::scan::RpsTable;
 use super::traceback::{
     filter_results, formatter_identities, RpsTraceScratch, RpsTraceback, RpsTraced,
 };
-use super::wordfinder::{RpsDiagTable, RpsWordParams, RpsWordScratch};
+use super::wordfinder::{RpsWordParams, RpsWordScratch};
 use super::{RpsRows, RPS_K_MULT};
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::{RedoRun, SCALING_FACTOR};
@@ -503,12 +503,14 @@ impl RpsRun<'_> {
     }
 
     /// Every query's traced results on the volume `files`, whose consensus letters are
-    /// `consensus` (at the profiles' offsets), in query order.
+    /// `consensus` (at the profiles' offsets), in query order, on the scratch of the run's
+    /// workers (`workers`).
     pub(crate) fn search_volume(
         &self,
         files: &RpsVolumeFiles,
         consensus: &super::volumes::Consensus<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
+        workers: &RpsWorkers,
     ) -> Result<Vec<RpsTraced>> {
         let rows = files.rows();
         let offsets = files.offsets();
@@ -606,20 +608,9 @@ impl RpsRun<'_> {
         // list (`BlastHSPCBSStreamClose`, blast_traceback.c:1839-1846; `core::blast_hspstream`).
         let cbs_close =
             crate::core::blast_hspstream::adaptive_cbs_close(self.cbs > 0, self.hitlist_size);
-        let new_scratch = || {
-            let mut diag = RpsDiagTable::new();
-            diag.reset_for(rows.len() as i32, self.window);
-            (
-                RpsPrelimScratch::new(RpsWordScratch {
-                    diag,
-                    buckets: RpsBuckets::new(rows.len()),
-                }),
-                RpsTraceScratch::new(),
-            )
-        };
-        let search_one = |scratch: &mut (RpsPrelimScratch, RpsTraceScratch),
-                          q_idx: usize|
-         -> Result<RpsTraced> {
+        let search_one = |scratch: &mut RpsScratch, q_idx: usize| -> Result<RpsTraced> {
+            // The worker's table and buckets for this volume (what the worker kept stays).
+            scratch.prelim.word.prepare_for(rows.len(), self.window);
             let query = &self.queries[q_idx];
             let none = RpsTraced {
                 hit_list: None,
@@ -653,20 +644,25 @@ impl RpsRun<'_> {
                     query_index: q_idx as u32,
                     program: self.program,
                 };
-                prelim.search_frame(&mut scratch.0, &frame.aa_seq[1..], frame.frame)?;
+                prelim.search_frame(&mut scratch.prelim, &frame.aa_seq[1..], frame.frame)?;
                 searched = Some(prelim);
             }
             let Some(prelim) = searched else {
                 return Ok(none);
             };
-            let Some(mut lists) = prelim.finish(&mut scratch.0, query.stat_length()) else {
+            let Some(mut lists) = prelim.finish(&mut scratch.prelim, query.stat_length()) else {
                 return Ok(none);
             };
             if cbs_close {
                 lists.cbs_close_trim(self.hitlist_size);
             }
-            let mut traced =
-                traceback.trace_query(lists, query, q_idx as u32, self.gumbel, &mut scratch.1)?;
+            let mut traced = traceback.trace_query(
+                lists,
+                query,
+                q_idx as u32,
+                self.gumbel,
+                &mut scratch.trace,
+            )?;
             if let Some(hit_list) = traced.hit_list.as_mut() {
                 if query
                     .frames
@@ -694,16 +690,81 @@ impl RpsRun<'_> {
             return pool.install(|| {
                 (0..self.queries.len())
                     .into_par_iter()
-                    .map_init(new_scratch, search_one)
+                    .map(|q_idx| workers.with(|scratch| search_one(scratch, q_idx)))
                     .collect()
             });
         }
         let _ = pool;
-        let mut scratch = new_scratch();
         (0..self.queries.len())
-            .map(|q_idx| search_one(&mut scratch, q_idx))
+            .map(|q_idx| workers.with(|scratch| search_one(scratch, q_idx)))
             .collect()
     }
+}
+
+/// The scratch of one worker of an RPS search: its preliminary stage's (the word finder's
+/// diagonal table and buckets, the gapped kernels' memory) and its traceback's.
+struct RpsScratch {
+    prelim: RpsPrelimScratch,
+    trace: RpsTraceScratch,
+}
+
+impl RpsScratch {
+    fn new() -> Self {
+        Self {
+            prelim: RpsPrelimScratch::new(RpsWordScratch::new()),
+            trace: RpsTraceScratch::new(),
+        }
+    }
+}
+
+/// The scratch of a run's workers (series PR, item PS12s, D3): one for each thread of the run's
+/// pool (`rayon::current_thread_index`; one for a search without a pool), kept from volume to
+/// volume and from query batch to query batch, where each search of a volume made its own
+/// (whose buckets grew again by doubling). A worker's diagonal table stays where the next
+/// volume's table has the same length, and its buckets' blocks stay
+/// (`RpsWordScratch::prepare_for`); a search's values do not depend on what its scratch held
+/// before (`wordfinder.rs`), so only the memory and its reuse change.
+pub(crate) struct RpsWorkers {
+    slots: Vec<std::sync::Mutex<RpsScratch>>,
+}
+
+impl RpsWorkers {
+    /// The scratch of a run of `threads` threads (empty until a worker searches).
+    pub(crate) fn new(threads: usize) -> Self {
+        Self {
+            slots: (0..threads.max(1))
+                .map(|_| std::sync::Mutex::new(RpsScratch::new()))
+                .collect(),
+        }
+    }
+
+    /// `work` on the calling worker's scratch, or on a scratch of its own where that one is not
+    /// free (no task of a search waits for the pool, so a worker never holds its scratch twice)
+    /// or the thread is not one of the pool's.
+    fn with<T>(&self, work: impl FnOnce(&mut RpsScratch) -> T) -> T {
+        match self
+            .slots
+            .get(worker_index())
+            .and_then(|slot| slot.try_lock().ok())
+        {
+            Some(mut scratch) => work(&mut scratch),
+            None => work(&mut RpsScratch::new()),
+        }
+    }
+}
+
+/// The index of the calling thread in the pool it works for (0 outside a pool).
+fn worker_index() -> usize {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    return rayon::current_thread_index().unwrap_or(0);
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    0
 }
 
 /// The gapped K that the outfmt 0 footer of each query prints: for the first query of a batch,

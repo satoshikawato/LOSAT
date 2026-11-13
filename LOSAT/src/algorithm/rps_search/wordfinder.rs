@@ -106,6 +106,19 @@ impl RpsDiagTable {
         self.window = window;
     }
 
+    /// The table of a volume of `concat_length` rows: the table as it is when it has that
+    /// volume's length and the window already (series PR, item PS12s, D3: a worker keeps its
+    /// table from volume to volume), else a zeroed one (`reset_for`). The entries an earlier
+    /// volume's queries wrote read as "no hit on this diagonal yet", as those of an earlier query
+    /// of the same volume do (the offset rule of `exit`, which keeps NCBI's clear at
+    /// `INT4_MAX / 4`): a query's hits do not depend on what the table held.
+    pub(crate) fn prepare_for(&mut self, concat_length: i32, window: i32) {
+        let length = diag_array_length(concat_length, window);
+        if self.array.len() != length as usize || self.window != window {
+            self.reset_for(concat_length, window);
+        }
+    }
+
     /// `Blast_ExtendWordExit`: the offset after a query of `subject_length` letters.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:171-178
@@ -171,6 +184,23 @@ pub(crate) struct RpsWordParams<'a> {
 pub(crate) struct RpsWordScratch {
     pub(crate) diag: RpsDiagTable,
     pub(crate) buckets: RpsBuckets,
+}
+
+impl RpsWordScratch {
+    /// A scratch without a table or a block (sized by `prepare_for`).
+    pub(crate) fn new() -> Self {
+        Self {
+            diag: RpsDiagTable::new(),
+            buckets: RpsBuckets::new(0),
+        }
+    }
+
+    /// The table and the buckets of a volume of `num_rows` concatenated rows
+    /// (`RpsDiagTable::prepare_for`, `RpsBuckets::reset_for`): what the scratch kept stays.
+    pub(crate) fn prepare_for(&mut self, num_rows: usize, window: i32) {
+        self.diag.prepare_for(num_rows as i32, window);
+        self.buckets.reset_for(num_rows);
+    }
 }
 
 /// `BlastRPSWordFinder` on `subject` (the query's letters): the initial HSPs into `init_hsps`
@@ -328,7 +358,7 @@ fn two_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        for bucket in &buckets.buckets {
+        for bucket in buckets.slices() {
             for pair in bucket {
                 let query_offset = pair.q_off as i32;
                 let subject_offset = pair.s_off as i32;
@@ -438,7 +468,7 @@ fn one_hit(
             buckets,
             MAX_SCAN_HITS,
         );
-        for bucket in &buckets.buckets {
+        for bucket in buckets.slices() {
             for pair in bucket {
                 let query_offset = pair.q_off as i32;
                 let subject_offset = pair.s_off as i32;
@@ -592,5 +622,73 @@ mod tests {
         assert!(!fresh.is_empty());
         assert_eq!(run(&[&other]), fresh);
         assert_eq!(run(&[&other, &query, &other]), fresh);
+    }
+
+    // D3 of PS12s: a worker's table kept from one volume to the next of the same table length
+    // gives a query the hits of a fresh table (the offset rule), and a volume of another length
+    // gets a zeroed table of its own length.
+    #[test]
+    fn a_table_kept_from_another_volume_gives_the_hits_of_a_fresh_one() {
+        use crate::seqdb::rps::RPS_BACKBONE_SIZE;
+        // Two volumes whose tables have 1,024 entries (984 and 900 rows), each one profile scoring
+        // +5 on letter `letter` and -4 elsewhere; the word of three such letters hits every row.
+        let volume = |rows_count: usize, letter: usize| {
+            let mut rows = vec![[-4i32; 28]; rows_count];
+            for row in rows.iter_mut().take(rows_count - 1) {
+                row[letter] = 5;
+            }
+            rows[rows_count - 1] = [-32767; 28];
+            let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
+            let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
+            let w = (letter << 10) | (letter << 5) | letter;
+            let entries: Vec<i32> = (2..rows_count as i32 - 1).step_by(37).collect();
+            cells[w] = [entries.len() as i32, entries[0], 0, 0];
+            pv[w / 64] |= 1 << (w % 64);
+            (rows, cells, pv, entries[1..].to_vec())
+        };
+        let (rows_a, cells_a, pv_a, overflow_a) = volume(984, 1);
+        let (rows_b, cells_b, pv_b, overflow_b) = volume(900, 3);
+        let a = RpsWordParams {
+            rows: RpsRows { rows: &rows_a },
+            table: RpsTable {
+                cells: &cells_a,
+                overflow: &overflow_a,
+                pv: &pv_a,
+            },
+            window: 40,
+            cutoff: 1,
+            dropoff: 20,
+        };
+        let b = RpsWordParams {
+            rows: RpsRows { rows: &rows_b },
+            table: RpsTable {
+                cells: &cells_b,
+                overflow: &overflow_b,
+                pv: &pv_b,
+            },
+            ..a
+        };
+        let query_a = [1u8; 40];
+        let query_b: Vec<u8> = (0..60).map(|i| if i % 7 == 6 { 20 } else { 3 }).collect();
+        let hits =
+            |scratch: &mut RpsWordScratch, params: &RpsWordParams<'_>, rows: usize, q: &[u8]| {
+                scratch.prepare_for(rows, 40);
+                let mut hits = Vec::new();
+                word_finder(params, scratch, q, &mut hits);
+                hits
+            };
+        let fresh_b = hits(&mut RpsWordScratch::new(), &b, 900, &query_b);
+        assert!(!fresh_b.is_empty());
+        let mut scratch = RpsWordScratch::new();
+        assert!(!hits(&mut scratch, &a, 984, &query_a).is_empty());
+        assert_eq!(scratch.diag.array.len(), 1024);
+        let kept = scratch.diag.array.as_ptr();
+        assert_eq!(hits(&mut scratch, &b, 900, &query_b), fresh_b);
+        assert_eq!(scratch.diag.array.as_ptr(), kept, "the table is kept");
+        // A volume whose table has another length gets a table of its own.
+        scratch.prepare_for(5035, 40);
+        assert_eq!(scratch.diag.array.len(), 8192);
+        assert_eq!(scratch.diag.offset, 40);
+        assert!(scratch.diag.array.iter().all(|&entry| entry == 0));
     }
 }

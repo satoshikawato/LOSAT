@@ -57,7 +57,7 @@ use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 /// LOSAT_X_PAIRPARNA declines the chunk, with the names there; every field is a shared reference
 /// or a `Copy` value.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:964-969,991-992
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:964-969,985-992
 /// (`s_BlastNaExtendDirect`) and :651,656,658 (`s_BlastnDiagTableExtendInitialHit`; the hash's
 /// function has the same lines at :819,823,825)
 /// ```c
@@ -68,6 +68,12 @@ use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 ///                       BLAST_SequenceBlk * subject, Int4 ** matrix,
 ///                       BlastQueryInfo * query_info,
 /// ...
+///     else if (lookup_wrap->lut_type == eSmallNaLookupTable) {
+///         BlastSmallNaLookupTable *lut =
+///                         (BlastSmallNaLookupTable *) lookup_wrap->lut;
+///         word_length = lut->word_length;
+///     }
+///     else {
 ///         BlastNaLookupTable *lut = (BlastNaLookupTable *) lookup_wrap->lut;
 ///         word_length = lut->word_length;
 /// ...

@@ -42,7 +42,7 @@
 //! chunk: one call of `scan_subject_kmers_with_ranges` with `word_length == lut_word_length`, and
 //! per pair of a lookup hit the context of the query offset, the diagonal, the `last_hit` test,
 //! `s_TypeOfWord`, the ungapped extension on the context's own query slice, the cutoff,
-//! `ungapped_hits.push` and the diagonal-hash insert. Phase 1, on any thread
+//! `x_push_ungapped` and the diagonal-hash insert. Phase 1, on any thread
 //! (`scan_strip_na`): the same scan kernel on one strip of a scan range with the `s_range` of
 //! the whole range; every lookup hit of a word in the table's order; for each pair the context
 //! of the query offset (which reads only the inputs), giving a `Seed` (no bounds test and no

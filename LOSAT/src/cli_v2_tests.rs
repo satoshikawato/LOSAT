@@ -1326,7 +1326,9 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (ALL, "18", None, UNSUPPORTED),
+        // Line RG T2: the organism report in every program.
+        (SHARED, "18", None, Writes(TaxFormat)),
+        (SHARED, "18 qseqid", None, Writes(TaxFormat)),
         // Line CLI C2: BLASTN (PR 1), TBLASTN and TBLASTX (PR 2), BLASTP and BLASTX (PR 3) write 10
         // and 20 with the shared tabular writer.
         (SHARED, "10", None, Writes(CommaSeparatedValues)),

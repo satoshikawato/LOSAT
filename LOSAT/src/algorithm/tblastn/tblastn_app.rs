@@ -1996,8 +1996,10 @@ fn search(
                     .formats
                     .first()
                     .and_then(|format| super::tabular::tabular_spec(format.outfmt));
-                let plural_names =
-                    taxdb_found && first_spec.as_ref().is_some_and(|spec| spec.checks_taxdb());
+                let plural_names = taxdb_found
+                    && first_spec
+                        .as_ref()
+                        .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
                     if plural_names
                         && hitlists
@@ -2246,7 +2248,7 @@ fn parsed_shown(
         tabular: formats.iter().any(|format| {
             matches!(
                 super::stage_e_report::format_number(format.outfmt),
-                6 | 7 | 10 | 20
+                6 | 7 | 10 | 18 | 20
             ) && crate::report::tabular::reads_subject(
                 super::tabular::tabular_spec(format.outfmt).as_ref(),
                 crate::blastinput::app::Program::Tblastn,
@@ -2287,7 +2289,7 @@ fn parsed_shown(
         // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in `run`).
         prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
             |&number| match number {
-                10 | 20 => 6,
+                10 | 18 | 20 => 6,
                 number => number,
             },
         )) && !crate::algorithm::common::database::prefetch_always_off(),

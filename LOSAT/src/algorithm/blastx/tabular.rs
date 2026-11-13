@@ -319,6 +319,11 @@ pub(super) fn write_blastx_tabular(
     mut probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
 ) -> Result<()> {
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        return write_blastx_tax_report(
+            writer, stderr, options, spec, queries, subjects, shown, batches,
+        );
+    }
     let needs = spec.needs();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
     // ```c++
@@ -597,6 +602,125 @@ pub(super) fn write_blastx_tabular(
                 //     m_Ostream.flush();
                 // }
                 // ```
+                writer.flush().map_err(TabularFlushError)?;
+                Ok(())
+            })()
+            .map_err(tabular_io_error)?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes the organism report (outfmt 18, `report::tax_report`) of the query batches `batches`
+/// to `writer`: for each query its warning (`report::query_warning`) and its fetches' texts on
+/// `stderr`, then the caption, the `Query=` block (the query record's length, also with
+/// `-query_loc`, as outfmt 0's) and the table of the HSPs that the tabular rows show
+/// (`write_blastx_tabular`). The definition lines of the reported subjects and the lookups of
+/// their taxids are made before the first byte, so that LOSAT's refusals come before it.
+#[allow(clippy::too_many_arguments)]
+fn write_blastx_tax_report(
+    writer: &mut impl Write,
+    stderr: &mut dyn Write,
+    options: &ResolvedOptions,
+    spec: &TabularSpec,
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Result<()> {
+    use crate::report::tax_report::{
+        subject_deflines, write_query, SubjectTable, TaxHsp, TaxLookups, TaxSource,
+    };
+    let program = options.program().upper;
+    // The HSPs of a query that the tabular rows show (`write_blastx_tabular`).
+    let shown_hsps = |lists: &[super::results::HspList]| -> Vec<TaxHsp> {
+        lists[..lists.len().min(options.shown_lists())]
+            .iter()
+            .flat_map(|list| {
+                list.hsps
+                    .iter()
+                    .filter(|hsp| has_seqalign(hsp, options.gapped))
+                    .map(move |hsp| TaxHsp {
+                        subject: list.oid,
+                        evalue: hsp.evalue,
+                        bit_score: hsp.bit_score,
+                    })
+            })
+            .collect()
+    };
+    let parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
+        ShownSubjects::Fasta { parsed, .. } => &parsed.subjects,
+        ShownSubjects::Database { reported, .. } => reported.parsed(),
+    };
+    let mut table = SubjectTable::new(parsed);
+    for batch in batches {
+        for lists in &batch.queries {
+            for hsp in shown_hsps(lists) {
+                let oid = hsp.subject;
+                let source = match (shown, table.parsed(oid)) {
+                    (ShownSubjects::Fasta { .. }, Some(subject)) => TaxSource::Parsed {
+                        subject,
+                        ordinal: None,
+                    },
+                    (ShownSubjects::Fasta { .. }, None) => TaxSource::Record {
+                        local_id: subjects[oid].internal_id.as_bytes(),
+                        title: subjects[oid].title.as_bytes(),
+                    },
+                    (ShownSubjects::Database { reported, .. }, Some(subject)) => {
+                        TaxSource::Parsed {
+                            subject,
+                            ordinal: Some(reported.ordinal(oid)),
+                        }
+                    }
+                    (ShownSubjects::Database { reported, .. }, None) => TaxSource::Stored {
+                        ordinal: reported.ordinal(oid),
+                        title: reported
+                            .stored_titles()
+                            .get(oid)
+                            .map_or(&[][..], |title| title),
+                        taxid: reported
+                            .tabular_taxonomy(oid)
+                            .map_or_else(|| reported.taxid(oid), |taxonomy| taxonomy.taxid),
+                    },
+                };
+                table.add(oid, || {
+                    subject_deflines(source, true, options.taxdb_found, program)
+                })?;
+            }
+        }
+    }
+    let subject_names = match shown {
+        ShownSubjects::Fasta { .. } => {
+            crate::algorithm::common::database::subject_tax_names(spec, program)?
+        }
+        ShownSubjects::Database { .. } => None,
+    };
+    let names = match shown {
+        ShownSubjects::Database { reported, .. } => reported.tabular_names(),
+        ShownSubjects::Fasta { .. } => subject_names.as_ref(),
+    };
+    let lookups = TaxLookups::new(names, program)?;
+    for batch in batches {
+        for (qidx, lists) in batch.queries.iter().enumerate() {
+            let query = &queries[batch.query_ordinal + qidx];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+            // ```c++
+            //     if (results.HasWarnings()) {
+            //         ERR_POST(Warning << results.GetWarningStrings());
+            //     }
+            // ```
+            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
+            stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
+            (|| -> Result<()> {
+                write_query(
+                    &mut *writer,
+                    &mut *stderr,
+                    query.query_line().as_bytes(),
+                    query.placement().length,
+                    &shown_hsps(lists),
+                    &table,
+                    &lookups,
+                )?;
                 writer.flush().map_err(TabularFlushError)?;
                 Ok(())
             })()

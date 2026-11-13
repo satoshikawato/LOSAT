@@ -176,10 +176,12 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     // ```
     if error.is::<super::blast_xml::XmlRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
+        || error.is::<crate::report::tax_report::TaxReportRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, or of a `-sorthits` table whose
+        // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
-        // writes): not an error of NCBI's engine or of its output stream.
+        // writes), or of an organism report (outfmt 18, made before its first byte): not an
+        // error of NCBI's engine or of its output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
@@ -698,7 +700,10 @@ fn run_inner(
     // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
     // asks its database; a `-subject` search the search path of NCBI's databases (the
     // environment and the registry), as BLASTP's and BLASTN's.
-    if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
+    if options
+        .tabular
+        .is_some_and(|spec| spec.looks_up_every_taxid())
+    {
         options.taxdb_found = match &database {
             Some(database) => database.taxdb_found(),
             None => crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?,
@@ -1313,7 +1318,7 @@ pub(super) struct ReportedAsks {
 impl ReportedAsks {
     /// What the reports of `options.outfmt` ask.
     pub(super) fn of(options: &super::args::ResolvedOptions) -> Self {
-        let tabular = matches!(options.outfmt, 6 | 7 | 10 | 20);
+        let tabular = matches!(options.outfmt, 6 | 7 | 10 | 18 | 20);
         Self {
             tabular,
             tabular_reads: tabular
@@ -1337,7 +1342,7 @@ impl ReportedAsks {
             },
             // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
             prefetched: prefetches_subjects(Some(match options.outfmt {
-                10 | 20 => 6,
+                10 | 18 | 20 => 6,
                 outfmt => i32::from(outfmt),
             })) && !crate::algorithm::common::database::prefetch_always_off(),
         }
@@ -1477,7 +1482,7 @@ pub(super) fn reported_batch(
     // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
     // lookups of the taxonomy names come with the rows (`tabular`).
     let prefetch_format = match options.outfmt {
-        10 | 20 => 6,
+        10 | 18 | 20 => 6,
         outfmt => i32::from(outfmt),
     };
     let mut reported = reported;

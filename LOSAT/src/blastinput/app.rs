@@ -376,7 +376,9 @@ impl Program {
             FlatQueryAnchoredNoIdentities => false,
             // 10 and 20 with the shared tabular writer (line CLI C2).
             CommaSeparatedValues => self.shared_tabular(),
-            TaxFormat => false,
+            // Line RG T2: the organism report, which reads the hit lists as the shared tabular
+            // writer does (`report::tax_report`).
+            TaxFormat => self.shared_tabular(),
             CommaSeparatedValuesWithHeader => self.shared_tabular(),
             // Line OF track S (structured formats): 5 for BLASTP and BLASTN (OF4a), BLASTX
             // (OF4b part 1), TBLASTN (OF4b part 3) and TBLASTX (OF4b part 4): every program;

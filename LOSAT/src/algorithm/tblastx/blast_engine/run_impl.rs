@@ -2336,7 +2336,7 @@ fn write_tblastx_outputs(
             || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
             || matches!(
                 output_format,
-                report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+                report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
             ))
         .then(|| {
             crate::report::query_warnings::QueryWarnings::new(
@@ -3336,7 +3336,7 @@ fn run_batch_loop(
     let plural_names = outputs.formats.first().is_some_and(|format| {
         matches!(
             report::output_format(format.outfmt),
-            report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
         )
     });
     // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's

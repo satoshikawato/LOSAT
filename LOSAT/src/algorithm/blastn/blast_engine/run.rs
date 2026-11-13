@@ -6633,7 +6633,7 @@ fn post_process_hits_and_write(
             )
             || output_format
                 .tabular_spec()
-                .is_some_and(|spec| spec.checks_taxdb()))
+                .is_some_and(|spec| spec.looks_up_every_taxid()))
         .then(|| {
             crate::report::query_warnings::QueryWarnings::of_posts(
                 warning_lines.take().unwrap_or(&[]),
@@ -7239,6 +7239,46 @@ fn write_custom_tabular(
             parsed: report.database_parsed,
         },
     };
+    // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
+    // with `-query_loc` (as outfmt 0's, `QueryNames`).
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        let queries: Vec<crate::report::tax_report::TaxQuery<'_>> = hit_lists
+            .iter()
+            .enumerate()
+            .map(|(q_idx, hit_list)| crate::report::tax_report::TaxQuery {
+                title: query_titles
+                    .get(q_idx)
+                    .map_or(&b""[..], |title| title.as_ref()),
+                length: report
+                    .ranges
+                    .queries
+                    .placements
+                    .length(q_idx, query_lengths.get(q_idx).copied().unwrap_or_default()),
+                hsps: hit_list
+                    .iter()
+                    .flat_map(|hit_list| &hit_list.hsplist_array)
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| crate::report::tax_report::TaxHsp {
+                        subject: hsp.s_idx as usize,
+                        evalue: hsp.e_value,
+                        bit_score: hsp.bit_score,
+                    })
+                    .collect(),
+            })
+            .collect();
+        return crate::algorithm::common::tabular::write_tax_report(
+            spec,
+            &subjects,
+            report.subjects.records(),
+            false,
+            report.tabular_taxdb_found,
+            names.as_ref(),
+            "BLASTN",
+            &queries,
+            writer,
+            warnings,
+        );
+    }
     let tab = BlastnTabular {
         spec,
         queries: report.queries,
@@ -10223,7 +10263,7 @@ fn run_in_pool(
                 let plural_names = taxdb_found
                     && matches!(
                         output_formats.first(),
-                        Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
+                        Some(BlastnOutputFormat::CustomTabular(spec)) if spec.looks_up_every_taxid()
                     );
                 let rows_open = |hit_lists: &[Option<BlastnHitList>]| -> Result<()> {
                     if plural_names
@@ -16873,10 +16913,22 @@ mod tests {
                 "{outfmt}"
             );
         }
-        for outfmt in ["1", "18"] {
-            assert_eq!(
-                cli_output_formats(outfmt, file).unwrap_err().to_string(),
-                format!("output format {outfmt} is not supported by LOSAT's BLASTN")
+        assert_eq!(
+            cli_output_formats("1", file).unwrap_err().to_string(),
+            "output format 1 is not supported by LOSAT's BLASTN"
+        );
+        // Outfmt 18, the organism report (line RG T2), rides the custom tabular report's hit
+        // lists; NCBI keeps no field list for it.
+        for outfmt in ["18", "18 qseqid"] {
+            let formats = cli_output_formats(outfmt, file).unwrap();
+            assert!(
+                matches!(
+                    formats.as_slice(),
+                    [BlastnOutputFormat::CustomTabular(spec)]
+                        if spec.kind == crate::report::tabular::TabularKind::TaxReport
+                            && spec.fields.is_empty()
+                ),
+                "{outfmt}: {formats:?}"
             );
         }
         // SAM (OF6) reads its words and ignores the rest and a delimiter.

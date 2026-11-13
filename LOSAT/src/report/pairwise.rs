@@ -2102,7 +2102,7 @@ fn write_blastp_database_header_spacing<W: Write>(
 // out << "\nLength=";
 // out << cbs.GetInst().GetLength() <<"\n";
 // ```
-fn write_blastp_query_header<W: Write>(
+pub(crate) fn write_blastp_query_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
     query_length: usize,

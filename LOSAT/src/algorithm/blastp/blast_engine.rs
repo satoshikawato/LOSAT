@@ -13207,7 +13207,7 @@ fn run_resolved_in_pool(
             // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
             let plural_names = matches!(
                 format_plans.first(),
-                Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
+                Some(BlastpReport::CustomTabular(spec)) if spec.looks_up_every_taxid()
             );
             let rows = match format_plans.first() {
                 Some(BlastpReport::CustomTabular(spec)) => {
@@ -13483,10 +13483,16 @@ fn run_resolved_in_pool(
             .map(|observer| FormatProbe::new(observer, format_index));
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
-        // format, and the archive saves the warnings of its batches' queries.
+        // The taxonomy database's messages of XML2 and JSON, and of the organism report's
+        // lookups, go to the diagnostics at every format, and the archive saves the warnings of
+        // its batches' queries.
         let mut warnings = (warning_lines.is_some()
-            || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive))
+            || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive)
+            || matches!(
+                outfmt,
+                BlastpReport::CustomTabular(spec)
+                    if spec.kind == crate::report::tabular::TabularKind::TaxReport
+            ))
         .then(|| {
             crate::report::query_warnings::QueryWarnings::new(
                 warning_lines.take().unwrap_or(&[]),
@@ -14204,6 +14210,24 @@ fn run_resolved_in_pool(
                     },
                     names: names.as_ref(),
                 };
+                // Outfmt 18, the organism report: the `Query=` block shows the query record's
+                // length, also with `-query_loc` (as outfmt 0's, `pairwise_queries`).
+                if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+                    let record_lengths: Vec<usize> = query_lengths
+                        .iter()
+                        .enumerate()
+                        .map(|(q_idx, &length)| ranges.query_input.placements.length(q_idx, length))
+                        .collect();
+                    super::tabular::write_blastp_tax_report(
+                        &tab,
+                        &record_lengths,
+                        &hit_lists,
+                        &mut writer,
+                        warnings.as_mut(),
+                    )?;
+                    writer.flush()?;
+                    return Ok(());
+                }
                 // The rows of the queries' HSPs when a field shows them (and rpsblast's
                 // identities, `tabular::needs_rows`), a window at a time (`query_rows`).
                 let mut rows = super::tabular::needs_rows(needs.rows, spec, args.app).then(|| {

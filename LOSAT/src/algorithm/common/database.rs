@@ -3540,7 +3540,44 @@ pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str)
     };
     let path =
         SearchPath::from_environment(registry).map_err(|error| database_error(error, program))?;
-    Ok(path.resolve_file("taxdb.bti").is_some())
+    let found = path.resolve_file("taxdb.bti").is_some();
+    SUBJECT_TAXDB.get_or_init(|| std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(path)));
+    Ok(found)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+// ```c++
+// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
+//                                 SSeqDBTaxInfo  & info  )
+// {
+// 	static CTaxDBFileInfo t;
+// ```
+/// The taxonomy database that the reports of the process's `-subject` searches look names up in
+/// (the organism report, outfmt 18): NCBI's `GetTaxNames` keeps one for the process, opened at
+/// the first lookup through the search path of NCBI's databases, which the first
+/// [`subject_taxdb_found`] of the process gives.
+static SUBJECT_TAXDB: std::sync::OnceLock<std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>> =
+    std::sync::OnceLock::new();
+
+/// The lookups of the organism report (outfmt 18) of a `-subject` search, whose subjects have
+/// no `Blast-def-line` and so the taxid 0 (`report::tax_report`), in the process's taxonomy
+/// database ([`SUBJECT_TAXDB`]); `None` where no search of the process asked for it (no lookup
+/// is then made, as without `taxdb.bti`). A database that LOSAT cannot read as NCBI does is
+/// refused as in [`tabular_names`].
+pub(crate) fn subject_tax_names(
+    spec: &crate::report::tabular::TabularSpec,
+    program: &str,
+) -> Result<Option<crate::report::tabular::TabularNames>> {
+    let Some(taxdb) = SUBJECT_TAXDB.get() else {
+        return Ok(None);
+    };
+    let zero = crate::report::tabular::TabularTaxonomy {
+        taxid: 0,
+        taxids: vec![0],
+    };
+    crate::report::tabular::TabularNames::look_up(spec, taxdb, [&zero], program)
+        .map(Some)
+        .map_err(|error| taxdb_error(error, program))
 }
 
 /// The names of the taxonomy database that the rows of a tabular report with a name field look

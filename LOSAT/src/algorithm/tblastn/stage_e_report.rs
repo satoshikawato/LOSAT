@@ -162,6 +162,8 @@ pub(super) fn reads_subject_letters<'a>(
         8 | 9 | 11 | 12 => false,
         6 | 7 | 10 | 20 => super::tabular::tabular_spec(outfmt)
             .is_some_and(|spec| super::tabular::reads_rows(&spec)),
+        // The organism report (`report::tax_report`) shows scores and definition lines.
+        18 => false,
         _ => true,
     })
 }
@@ -384,7 +386,7 @@ pub(super) fn render(
             || format_number(format.outfmt) == ARCHIVE_FORMAT
             || custom_tabular
                 .as_ref()
-                .is_some_and(crate::report::tabular::TabularSpec::checks_taxdb))
+                .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))
         .then(|| {
             crate::report::query_warnings::QueryWarnings::new(
                 warning_lines.take().unwrap_or(&[]),
@@ -397,25 +399,28 @@ pub(super) fn render(
         match format_number(format.outfmt) {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
             // (`tabular`); never the default 6 and 7 below.
-            6 | 7 | 10 | 20 if custom_tabular.is_some() => super::tabular::write_tblastn_tabular(
-                &super::tabular::TblastnTabular {
-                    spec: custom_tabular.as_ref().expect("a custom tabular report"),
-                    inputs: tabular,
-                    queries: query_records,
-                    letters: subject_letters,
-                    subject_ids: &subject_ids,
-                    shown,
-                    query_batch_skipped,
-                    ranges,
-                    genetic_code,
-                    matrix: scoring.matrix,
-                    program_version: super::tabular::program_version(pssm.is_some()),
-                },
-                hitlists,
-                &mut writer,
-                warnings.as_mut(),
-                probe.as_mut(),
-            )?,
+            6 | 7 | 10 | 18 | 20 if custom_tabular.is_some() => {
+                super::tabular::write_tblastn_tabular(
+                    &super::tabular::TblastnTabular {
+                        spec: custom_tabular.as_ref().expect("a custom tabular report"),
+                        inputs: tabular,
+                        queries: query_records,
+                        letters: subject_letters,
+                        subject_ids: &subject_ids,
+                        subject_records,
+                        shown,
+                        query_batch_skipped,
+                        ranges,
+                        genetic_code,
+                        matrix: scoring.matrix,
+                        program_version: super::tabular::program_version(pssm.is_some()),
+                    },
+                    hitlists,
+                    &mut writer,
+                    warnings.as_mut(),
+                    probe.as_mut(),
+                )?
+            }
             6 | 7 => write_tabular(
                 &mut writer,
                 program,

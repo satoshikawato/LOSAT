@@ -1722,9 +1722,10 @@ impl TblastxOutputFormat {
 /// ```
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
-    // Only a value with a custom specification, or outfmt 10 or 20, reads the field list.
+    // Only a value with a custom specification, or outfmt 10 or 20, reads the field list;
+    // outfmt 18 (the organism report) is written from the same hit list.
     if let Ok(choice) = &choice {
-        if choice.custom() || matches!(choice.number, 10 | 20) {
+        if choice.custom() || matches!(choice.number, 10 | 18 | 20) {
             if let Some(spec) = crate::blastinput::app::ReportFormat::from_number(choice.number)
                 .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
             {

@@ -329,6 +329,11 @@ pub enum TabularKind {
     Csv,
     /// outfmt 20: outfmt 10 after a line of the field names.
     CsvWithHeader,
+    /// outfmt 18, the organism report (`report::tax_report`): no fields; it reads the final hit
+    /// lists as the tabular reports do (NCBI's `PrintOneResultSet` writes it after the same
+    /// checks of the results, from the same Seq-align set), and each subject's Bioseq,
+    /// definition lines and the names of their taxids.
+    TaxReport,
 }
 
 /// A tabular report with its field list and delimiter.
@@ -462,6 +467,14 @@ impl TabularSpec {
             ReportFormat::TabularWithComments => (TabularKind::Commented, "\t"),
             ReportFormat::CommaSeparatedValues => (TabularKind::Csv, ","),
             ReportFormat::CommaSeparatedValuesWithHeader => (TabularKind::CsvWithHeader, ","),
+            // NCBI's `ParseFormattingString` keeps no field list for outfmt 18.
+            ReportFormat::TaxFormat => {
+                return Some(TabularSpec {
+                    kind: TabularKind::TaxReport,
+                    fields: Vec::new(),
+                    delimiter: String::new(),
+                })
+            }
             _ => return None,
         };
         let fields = parse_fields(&choice.spec);
@@ -595,6 +608,18 @@ impl TabularSpec {
     /// for the letters of `nident` and the frames ([`SubjectFetch::WithIdentities`]).
     pub fn subject_fetch(&self, program: crate::blastinput::app::Program) -> SubjectFetch {
         use crate::blastinput::app::Program;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
+        // ```c++
+        //         try {
+        //             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
+        //             if( !handle ) continue;
+        //
+        //             const CRef<CBlast_def_line_set> bdlRef =  CSeqDB::ExtractBlastDefline(handle);
+        // ```
+        // The organism report reads the Bioseq of each HSP that it does not skip.
+        if self.kind == TabularKind::TaxReport {
+            return SubjectFetch::Every;
+        }
         let no_fetch = program == Program::Blastn;
         let translated = matches!(
             program,
@@ -678,6 +703,14 @@ impl TabularSpec {
     }
 
     pub fn needs(&self) -> TabularNeeds {
+        // The organism report shows the names of each definition line's taxid.
+        if self.kind == TabularKind::TaxReport {
+            return TabularNeeds {
+                taxonomy: true,
+                taxonomy_names: true,
+                ..TabularNeeds::default()
+            };
+        }
         const NAMES: [TabularField; 8] = [
             SubjectSciName,
             SubjectCommonName,
@@ -728,6 +761,13 @@ impl TabularSpec {
             SubjectBlastNames,
             SubjectSuperKingdoms,
         ])
+    }
+
+    /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
+    /// the plural names (`x_SetTaxInfoAll`, `checks_taxdb`) and the organism report (outfmt 18,
+    /// `CTaxFormat::x_InitBlastDBTaxInfo`); its rows write the texts of those lookups.
+    pub fn looks_up_every_taxid(&self) -> bool {
+        self.checks_taxdb() || self.kind == TabularKind::TaxReport
     }
 
     /// Whether a singular name is among the fields (`x_SetTaxInfo` looks `staxid` up).
@@ -926,10 +966,16 @@ impl TabularNames {
             answers: Default::default(),
         };
         let (plural, singular) = (spec.checks_taxdb(), spec.has_singular_names());
+        let report = spec.kind == TabularKind::TaxReport;
         let mut asked: Vec<i32> = Vec::new();
         for taxonomy in taxonomies {
-            if plural {
+            if plural || report {
                 asked.extend(&taxonomy.taxids);
+            }
+            // The organism report asks for the `taxid` of each definition line, 0 where it has
+            // none or where the line's other taxids (`links`) hid it in `taxids`.
+            if report {
+                asked.push(0);
             }
             if singular && taxonomy.taxid != 0 {
                 asked.push(taxonomy.taxid);
@@ -964,10 +1010,37 @@ impl TabularNames {
     }
 
     /// What the lookup of `taxid` found (`None`: not found, or not looked up).
-    fn get(&self, taxid: i32) -> Option<&crate::seqdb::taxdb::TaxNames> {
+    pub(crate) fn get(&self, taxid: i32) -> Option<&crate::seqdb::taxdb::TaxNames> {
         self.answers
             .get(&taxid)
             .and_then(|(found, _)| found.as_ref())
+    }
+
+    /// The names that the lookups found.
+    pub(crate) fn found(&self) -> impl Iterator<Item = &crate::seqdb::taxdb::TaxNames> {
+        self.answers
+            .values()
+            .filter_map(|(found, _)| found.as_ref())
+    }
+
+    /// The standard-error lines of one lookup of `taxid` (`CSeqDB::GetTaxInfo` of the organism
+    /// report, `report::tax_report`), the texts of opening before the first lookup of the report
+    /// that has them.
+    pub(crate) fn lookup_messages(&self, taxid: i32) -> Vec<u8> {
+        let mut text = Vec::new();
+        let mut push = |line: &str| {
+            text.extend_from_slice(
+                crate::seqdb::taxdb::err_post_line(&self.program, line).as_bytes(),
+            );
+            text.push(b'\n');
+        };
+        if !self.opened.replace(true) {
+            self.open.iter().for_each(|line| push(line));
+        }
+        if let Some((_, messages)) = self.answers.get(&taxid) {
+            messages.iter().for_each(|line| push(line));
+        }
+        text
     }
 
     /// The standard-error lines of the lookups of one row of a subject of `taxonomy`, in NCBI's

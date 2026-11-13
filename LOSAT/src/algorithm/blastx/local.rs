@@ -952,7 +952,10 @@ fn search_database(
     for options in &mut resolved {
         options.query_range = query_range;
         options.filtered_empty = database.filtered_empty();
-        if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
+        if options
+            .tabular
+            .is_some_and(|spec| spec.looks_up_every_taxid())
+        {
             options.taxdb_found = database.taxdb_found();
         }
     }

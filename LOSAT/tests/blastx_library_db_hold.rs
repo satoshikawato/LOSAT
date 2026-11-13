@@ -6,8 +6,8 @@
 //! OF). The side files of outfmt 13 and 14 are part of what is held.
 //!
 //! The library runs are `examples/library_command_line` (the command line's arguments through
-//! `LOSAT::api::run` and `run_to_file`; a failure ends with status 1), each next to the command
-//! line's run of the same arguments, and `LOSAT::api::run` with several formats in one call.
+//! `losat::api::run` and `run_to_file`; a failure ends with status 1), each next to the command
+//! line's run of the same arguments, and `losat::api::run` with several formats in one call.
 //! `BATCH_SIZE=1` makes a query batch of each record; a first record without a hit makes the
 //! refusal one of a later batch.
 //!
@@ -400,13 +400,13 @@ fn a_held_library_run_that_ncbis_error_stops_writes_the_batches_before() {
     }
 }
 
-/// One call of `LOSAT::api::run` with several formats: when a later batch refuses a subject with
+/// One call of `losat::api::run` with several formats: when a later batch refuses a subject with
 /// parsed Seq-ids, no format has written a byte (the tabular rows of the first batch are held
 /// with the document), whichever format comes first. The first query (more than 10,002 bases, a
 /// batch of its own under the default batch size) has no hit; the second is refused.
 #[test]
 fn a_library_call_with_several_formats_holds_them_all() {
-    use LOSAT::api::{read_inputs, run, validate, Inputs, Program};
+    use losat::api::{read_inputs, run, validate, Inputs, Program};
     // The call runs in this process: with one of the variables that the other tests clear for
     // their runs, its batches or its database's taxonomy are not those of this test.
     if let Some((name, _)) = std::env::vars_os().find(|(name, _)| {

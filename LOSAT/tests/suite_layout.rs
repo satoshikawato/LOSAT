@@ -564,7 +564,7 @@ fn cargo_toml_lists_the_binaries() {
         {
             problems.push(format!(
                 "[[test]] `{}` has path `{}`: the name must be the file stem (`--test <suite>` and the \
-                 nextest binary id `LOSAT::<suite>` rely on it)",
+                 nextest binary id `losat::<suite>` rely on it)",
                 target.name, target.path
             ));
         }

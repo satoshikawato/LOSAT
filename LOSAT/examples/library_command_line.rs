@@ -4,7 +4,7 @@
 //! cargo run --release --example library_command_line -- blastn -db nt -query query.fna -outfmt 6
 //! ```
 //!
-//! Reads the query and subject files into memory, searches with `LOSAT::api::run`, or
+//! Reads the query and subject files into memory, searches with `losat::api::run`, or
 //! `run_to_file` with `-out`, and writes the search's warnings and a failure's message to
 //! standard error, so that a run compares with `losat <program>` with the same arguments
 //! (`tests/db_search_fixtures.py check --library`). `makeblastdb`, `blastdbcmd`, `dustmasker`,
@@ -16,7 +16,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
-use LOSAT::api::{
+use losat::api::{
     read_input_file, read_inputs, run, run_blastdbcmd, run_convert2blastmask, run_dustmasker,
     run_makeblastdb, run_segmasker, run_to_file, validate, Error, Inputs, Program, Role,
 };

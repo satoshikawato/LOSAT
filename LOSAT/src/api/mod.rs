@@ -7,9 +7,9 @@
 //! # Use
 //!
 //! ```no_run
-//! use LOSAT::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
+//! use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
 //!
-//! # fn main() -> Result<(), LOSAT::api::Error> {
+//! # fn main() -> Result<(), losat::api::Error> {
 //! let query = read_fasta(Program::Blastp, Role::Query, b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let subject = read_fasta(Program::Blastp, Role::Subject, b">s\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n")?;
 //! let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "2"])?;
@@ -28,7 +28,7 @@
 //! `BLASTDB` search path):
 //!
 //! ```no_run
-//! # use LOSAT::api::{read_inputs, run_collect, validate, Error, Inputs, Program};
+//! # use losat::api::{read_inputs, run_collect, validate, Error, Inputs, Program};
 //! # fn use_it(fasta: &[u8]) -> Result<(), Error> {
 //! let search = validate(Program::Blastn, &["-taxids", "9606", "-evalue", "1e-5"])?;
 //! let (query, _) = read_inputs(&search, fasta, b"")?;
@@ -39,7 +39,7 @@
 //! Many queries, one of NCBI's query batches in memory at a time:
 //!
 //! ```no_run
-//! # use LOSAT::api::{run_batches, Error, Inputs, Search};
+//! # use losat::api::{run_batches, Error, Inputs, Search};
 //! # fn use_it(search: &Search, inputs: Inputs<'_>) -> Result<(), Error> {
 //! let batches = run_batches(search, inputs)?;
 //! let total = batches.query_count();

@@ -100,7 +100,7 @@ cargo publish --dry-run --locked \
 
 For changes to the library API (`LOSAT/src/api` and the types it re-exports, except `FastaRecord`, which
 rustdoc does not show yet: library plan §14): the CI job `public api`
-compares the public API of `LOSAT::api` with the reviewed listing `LOSAT/tests/public_api.txt`. After a
+compares the public API of `losat::api` with the reviewed listing `LOSAT/tests/public_api.txt`. After a
 deliberate change, update the listing and commit it with the change; when the job fails it also uploads
 the new listing as the artifact `public-api`. The script names the pinned tool and toolchain, and does not
 install them:

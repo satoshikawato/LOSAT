@@ -1,4 +1,4 @@
-//! The library API (`LOSAT::api`, docs/losat_library_surface_plan.md §6): a search of records in
+//! The library API (`losat::api`, docs/losat_library_surface_plan.md §6): a search of records in
 //! memory writes the bytes of the command line, one report per `-outfmt`, with the command line's
 //! warnings; the typed values are the columns of `-outfmt 6` and the `Statistics` of outfmt 5; two
 //! searches at once give the reports of each alone; the example writes nothing to standard error;
@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::library_examples::example_binary;
 
-use LOSAT::api::{
+use losat::api::{
     describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
     run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs,
     Outcome, Program, Role, Strand, ValueKind, API_OWNED,
@@ -1439,7 +1439,7 @@ fn engine_tests(name: &str) -> String {
 
 impl DatabaseCase {
     /// The query file's records and the search, as `-db` runs them.
-    fn read(&self) -> (Vec<u8>, Vec<FastaRecord>, LOSAT::api::Search) {
+    fn read(&self) -> (Vec<u8>, Vec<FastaRecord>, losat::api::Search) {
         let bytes = std::fs::read(engine_tests(self.query)).unwrap();
         let search = validate(self.program, self.options).unwrap();
         let (records, none) = read_inputs(&search, &bytes, b"").unwrap();

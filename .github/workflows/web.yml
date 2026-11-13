@@ -123,7 +123,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: web/app/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run check
         if: matrix.project == 'chromium'
@@ -337,7 +337,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: web/app/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: reactors
@@ -352,11 +352,15 @@ jobs:
       # waited on every package, holding the job for hours; this step stops it instead.
       - run: npx playwright install --with-deps ${{ matrix.browsers }}
         timeout-minutes: 10
-      - name: RecordScanner contract and inflation on the serial reactor (Node)
+      # Every unit test that needs the reactors (about 90 s): engine-runtime (the RecordScanner
+      # contract, inflation, describe), hsp-correspondence (the HSP records against every outfmt 0
+      # fixture), engine-memory and window-masker. Until 2026-11-14 only engine-runtime ran here, and
+      # the PS7 rows of the manifest (2026-11-12) broke hsp-correspondence unseen.
+      - name: Unit tests on the reactors (Node)
         if: matrix.project == 'chromium' && matrix.shard == '1/2'
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
-        run: npx vitest run tests/unit/engine-runtime.test.ts
+        run: npx vitest run
       - name: V-BR and every E2E test with the engine in the build (${{ matrix.project }} ${{ matrix.shard }})
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors

@@ -505,6 +505,13 @@ impl Store {
         // A part's reader numbers its records from the part's first (`-parse_deflines`, whose
         // records with ids take no number and whose reader adds every record to the search's
         // scope of ids, is never read batch by batch: `run.rs`).
+        // The parts see no title (`archive_title` below is false there): a run whose requests'
+        // titles are looked at (`titles`) keeps the deflines (`with_defline`), so it never reads
+        // in parts.
+        debug_assert!(
+            titles.is_none() || config.keep_defline,
+            "the archive's and the search strategy's records keep their deflines"
+        );
         let parts = if !config.keep_defline && !config.parse_deflines {
             in_parts(&again, start)
         } else {

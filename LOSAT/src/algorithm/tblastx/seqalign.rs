@@ -156,7 +156,7 @@ pub(crate) fn write_tblastx_seqalign(
     query_placements: &Placements,
     subjects: &SeqalignSubjects<'_>,
     subject_letters: SubjectLetters<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
@@ -172,9 +172,7 @@ pub(crate) fn write_tblastx_seqalign(
     let mut next = 0usize;
     for (q_idx, query) in queries.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
+        warnings.before_query(q_idx, &mut *writer)?;
         let start = next;
         while next < hits.len() && hits[next].hit.q_idx as usize == q_idx {
             next += 1;
@@ -200,6 +198,8 @@ pub(crate) fn write_tblastx_seqalign(
             &hsp_records,
             &mut buf,
             &mut *writer,
+            &mut *warnings.sink,
+            "tblastx",
         )?;
     }
     debug_assert_eq!(next, hits.len(), "the final list is in query order");

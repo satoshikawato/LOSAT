@@ -1319,6 +1319,7 @@ pub(super) fn render_queries_with(
         return super::seqalign::write_blastx_seqalign(
             serial,
             writer,
+            stderr,
             options.gapped,
             queries,
             subjects,

@@ -630,7 +630,7 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
             .unwrap()
             .asn
             .unwrap();
-        let text = String::from_utf8(asn).unwrap();
+        let text = String::from_utf8(asn.bytes).unwrap();
         let expected = format!("    query seq {{\n      id {{\n{id}      }},\n");
         assert!(text.contains(&expected), "{defline}:\n{text:.400}");
     }

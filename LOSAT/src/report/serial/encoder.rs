@@ -34,6 +34,8 @@
 //! variant's 0-based position in its ASN.1 SEQUENCE or CHOICE (absent OPTIONAL members still
 //! count), which only the binary encoder writes (its context tag `[tag]`).
 
+use super::visible::BadChars;
+
 /// An error that NCBI's object stream raises while it writes a value, which LOSAT reports
 /// instead of writing the document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,10 +43,11 @@ pub enum SerialError {
     /// `CObjectOStreamJson::WriteDouble2` on a NaN or an infinity
     /// (`real::JsonDoubleError`).
     JsonDouble(super::real::JsonDoubleError),
-    /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream, which NCBI replaces
-    /// by `#` with an error message (`eFNP_ReplaceAndWarn`); the callers refuse such strings
-    /// before the search, so this does not occur.
-    NonVisibleChar(u8),
+    /// A byte of 0x01..0x1F other than TAB, LF and CR in a string of an XML stream, which NCBI
+    /// replaces by `#` with an error message (`x_VerifyChar`, objostrxml.cpp:548-553) that LOSAT
+    /// does not write. (The ASN.1 text and binary streams write `#` and note the byte,
+    /// `Encoder::take_bad_chars`.)
+    XmlControlChar(u8),
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
     NonFiniteReal,
@@ -68,9 +71,9 @@ impl std::fmt::Display for SerialError {
             SerialError::NonFiniteReal => f.write_str(
                 "a NaN or an infinite real number in an ASN.1 binary stream is not supported by LOSAT",
             ),
-            SerialError::NonVisibleChar(byte) => write!(
+            SerialError::XmlControlChar(byte) => write!(
                 f,
-                "a character 0x{byte:02x} outside the visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT"
+                "a control character 0x{byte:02x} in an XML string (which NCBI BLAST+ replaces by '#' with an error message) is not supported by LOSAT"
             ),
             SerialError::NonAsciiChar(byte) => write!(
                 f,
@@ -98,7 +101,7 @@ pub trait Encoder {
     }
     /// `WriteFileHeader(type)`: the start of a document whose top-level object is of the
     /// ASN.1 type `type_name` (`Seq-annot`).
-    fn begin_document(&mut self, type_name: &str);
+    fn begin_document(&mut self, type_name: &'static str);
     /// `EndOfWrite` and the separator after the top-level object.
     fn end_document(&mut self);
     /// `BeginClass`: a SEQUENCE value of the ASN.1 type `type_name` starts (only the XML
@@ -119,7 +122,7 @@ pub trait Encoder {
     /// `EndNamedType`.
     fn end_named(&mut self) {}
     /// `BeginClassMember(id)`: member `name` (position `tag`) of the current SEQUENCE.
-    fn member(&mut self, name: &str, tag: u8);
+    fn member(&mut self, name: &'static str, tag: u8);
     /// `EndClassMember`.
     fn end_member(&mut self);
     /// `BeginContainer`: a SEQUENCE OF (`set` false) or SET OF (`set` true) value starts.
@@ -131,7 +134,7 @@ pub trait Encoder {
     /// `BeginChoice` and `BeginChoiceVariant(id)`: a CHOICE value of the ASN.1 type
     /// `type_name` with variant `name` (position `tag`). Only the XML stream reads the type
     /// name (in its standard-XML mode it writes `<Type>` and the variant as a member).
-    fn variant(&mut self, type_name: &str, name: &str, tag: u8);
+    fn variant(&mut self, type_name: &'static str, name: &'static str, tag: u8);
     /// `EndChoiceVariant` and `EndChoice`.
     fn end_variant(&mut self);
     /// `WriteInt4`.
@@ -180,8 +183,13 @@ pub trait Encoder {
     /// a list of string elements and `end_variant`; the XML stream in its standard-XML mode
     /// writes the type's tag around one member tag for each string, with no list around
     /// them (`<Target><subjects>a</subjects><subjects>b</subjects></Target>`).
-    fn variant_string_list<I>(&mut self, type_name: &str, name: &str, tag: u8, items: I)
-    where
+    fn variant_string_list<I>(
+        &mut self,
+        type_name: &'static str,
+        name: &'static str,
+        tag: u8,
+        items: I,
+    ) where
         I: IntoIterator,
         I::Item: AsRef<[u8]>,
     {
@@ -196,4 +204,12 @@ pub trait Encoder {
     }
     /// The first error raised while writing (the document is then not written), if any.
     fn error(&self) -> Option<SerialError>;
+    /// The strings written so far with bytes that the stream wrote as `#` (each with NCBI's
+    /// messages, `BadChars::post`), taken from the encoder: the ASN.1 text and binary streams'
+    /// repair of a VisibleString (`eFNP_ReplaceAndWarn`, the default of
+    /// `SERIAL_WRONG_CHARS_WRITE`). The caller posts them where NCBI's stream posts them, as it
+    /// writes the document. The XML and JSON streams note none.
+    fn take_bad_chars(&mut self) -> Vec<BadChars> {
+        Vec::new()
+    }
 }

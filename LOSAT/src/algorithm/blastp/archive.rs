@@ -132,10 +132,7 @@ pub(crate) fn handle_for(
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
 /// mask of each query's lower-case runs (SEG is never one).
-pub(crate) fn requests(
-    subjects: Option<&[FastaRecord]>,
-    lcase_masking: bool,
-) -> RunRequests<'_, FastaRecord> {
+pub(crate) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -143,19 +140,7 @@ pub(crate) fn requests(
             lcase: lcase_masking.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        "BLASTP",
     )
-}
-
-/// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and
-/// the search strategy's (`strategy`).
-pub(crate) fn check_request_titles(
-    records: &[FastaRecord],
-    role: &str,
-    archive: bool,
-    strategy: bool,
-) -> Result<()> {
-    crate::report::archive::check_request_titles(records, role, "BLASTP", archive, strategy)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -332,7 +317,7 @@ pub(crate) fn for_each_batch(
 /// query.
 pub(crate) fn write_blastp_archives(
     call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     first_context: &dyn Fn(usize) -> FirstContext,
     writer: &mut dyn Write,
 ) -> Result<()> {
@@ -344,10 +329,8 @@ pub(crate) fn write_blastp_archives(
         gapped: true,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
         }
         let mut aligns = BlastpAligns {
             run,
@@ -362,7 +345,13 @@ pub(crate) fn write_blastp_archives(
             engine_counts: call.engine_counts,
             first: span.start,
         };
-        write_archive(call.handle, batch, &mut aligns, &mut *writer)
+        write_archive(
+            call.handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
     })
 }
 

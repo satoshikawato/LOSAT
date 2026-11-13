@@ -334,7 +334,7 @@ pub(crate) fn read_in_pssm(
     // search's own messages, status 0; tblastn the same with `[tblastn]`).
     for bad in &bad_chars {
         let mut lines = Vec::new();
-        bad.post(reader.ncbi_name, &mut lines);
+        bad.post(Some(reader.ncbi_name), &mut lines);
         diagnostics.write_all(&lines)?;
     }
     let read = match read {

@@ -178,7 +178,7 @@ impl MaskDiagnostic {
         match self {
             MaskDiagnostic::BadChars(bad) => {
                 let mut text = Vec::new();
-                bad.post(program, &mut text);
+                bad.post(Some(program), &mut text);
                 text.pop();
                 text
             }

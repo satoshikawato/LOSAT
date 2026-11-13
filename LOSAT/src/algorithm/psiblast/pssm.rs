@@ -259,7 +259,7 @@ pub(crate) struct PssmScoring<'a> {
 /// `-out_ascii_pssm`.
 #[derive(Debug)]
 pub(crate) struct QueryPssm {
-    pub(crate) asn: Option<Vec<u8>>,
+    pub(crate) asn: Option<crate::report::serial::pssm::PssmText>,
     pub(crate) ascii: Option<Vec<u8>>,
     /// The engine's PSSM, which the next round searches (`algorithm::psiblast::rounds`).
     pub(crate) engine: PsiPssm,
@@ -455,10 +455,7 @@ pub(crate) fn query_pssm(
     let asn = match request.asn_path {
         Some(_) => {
             let value = pssm_with_parameters(&pssm, letters, &query, scoring, request.pseudocount);
-            Some(
-                crate::report::serial::pssm::asn_text(&value)
-                    .map_err(|error| anyhow::anyhow!("{error}"))?,
-            )
+            Some(crate::report::serial::pssm::asn_text(&value))
         }
         None => None,
     };
@@ -1303,57 +1300,6 @@ pub(crate) fn write_ascii_pssm(
     out.into_bytes()
 }
 
-/// With `-out_pssm`, the refusal of a query whose title has a byte outside the visible ASCII
-/// range (0x20 to 0x7E), before the search: the PSSM's Bioseq holds the title as a
-/// VisibleString, and NCBI's ASN.1 text stream writes `#` for each such byte with an error message
-/// of three lines for each (`Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title`,
-/// `Bad char [0xC3] in string at line 12`, the title; NCBI 2.17.0, a UTF-8 title, status 0),
-/// which LOSAT does not reproduce (as outfmt 11's titles, `report::archive::check_titles`). The
-/// FASTA reader cuts a title at its first byte below 0x20, so the bytes refused are those from
-/// 0x7F on.
-// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
-// ```c++
-// void CObjectOStreamAsn::WriteString(const char* ptr, size_t length)
-// {
-//     m_Output.PutChar('"');
-//     CTempString original(ptr, length);
-//     size_t valid=0;
-//     while ( length > 0 ) {
-//         char c = *ptr;
-//         if ( x_FixCharsMethod() != eFNP_Allow ) {
-//             if ( !GoodVisibleChar(c) ) {
-//                 if (valid == 0) {
-// #if SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_WRITING
-//                     valid = CUtf8::EvaluateSymbolLength(CTempString(ptr,length));
-// #endif
-//                     if (valid == 0) {
-//                         c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, original, x_FixCharsSubst());
-//                     }
-// ```
-// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:456-459
-// ```c++
-// bool GoodVisibleChar(char c)
-// {
-//     return c >= ' ' && c <= '~';
-// }
-// ```
-pub(crate) fn check_pssm_titles(
-    records: &[crate::blastinput::fasta_reader::FastaRecord],
-) -> Result<()> {
-    if let Some(record) = records.iter().find(|record| {
-        record
-            .title
-            .iter()
-            .any(|byte| !(0x20..=0x7E).contains(byte))
-    }) {
-        anyhow::bail!(
-            "the title of the query {} has a character the PSSM file cannot write as NCBI does (outside the visible ASCII range), which is not supported by LOSAT's PSIBLAST with -out_pssm",
-            record.local_id
-        );
-    }
-    Ok(())
-}
-
 /// `CAutoOutputFileReset`: the file of one PSSM option, opened again at each write
 /// (`GetStream`). Without `-save_each_pssm` an existing file of the name is deleted and the file
 /// made again, so the last PSSM stays; with it the writes are `F.1`, `F.2`, ...
@@ -1674,6 +1620,9 @@ pub(crate) struct PssmFiles {
 #[derive(Debug, Default)]
 pub(crate) struct PssmReadMessages {
     lines: Vec<(u32, Vec<u8>)>,
+    /// What NCBI posts as it then writes the PSSM's ASN.1 file (`SavePssmToFile`, after the
+    /// reads): the messages of the bytes it writes as `#` (`PssmText::posts`).
+    saved: Vec<u8>,
 }
 
 impl PssmReadMessages {
@@ -1682,8 +1631,13 @@ impl PssmReadMessages {
         self.lines.push((subject, line));
     }
 
+    /// The messages of the PSSM's ASN.1 file, which NCBI writes after the reads (`saved`).
+    pub(crate) fn add_saved(&mut self, posts: &[u8]) {
+        self.saved.extend_from_slice(posts);
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
-        self.lines.is_empty()
+        self.lines.is_empty() && self.saved.is_empty()
     }
 
     /// The bytes of the messages, in their order.
@@ -1691,6 +1645,7 @@ impl PssmReadMessages {
         self.lines
             .iter()
             .flat_map(|(_, line)| line.iter().copied())
+            .chain(self.saved.iter().copied())
             .collect()
     }
 

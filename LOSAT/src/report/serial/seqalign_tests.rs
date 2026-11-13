@@ -18,7 +18,7 @@
 //! The records are those of NCBI's HSPs (the starts, lengths and scores printed in the
 //! files; an e-value or bit score as its 15 printed digits, which give back the same double).
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::Encoder;
 use super::{write_query, SeqAlignError, SerialFormat};
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp::{self, Del, Ins, Sub};
@@ -153,7 +153,8 @@ fn megablast_documents(format: SerialFormat) -> Vec<u8> {
             &query("Query_1", 480),
             &subjects,
             &hsps,
-            &mut buf
+            &mut buf,
+            &mut Vec::new()
         ),
         Ok(true)
     );
@@ -165,7 +166,8 @@ fn megablast_documents(format: SerialFormat) -> Vec<u8> {
             &query("Query_2", 90),
             &subjects,
             &[],
-            &mut buf
+            &mut buf,
+            &mut Vec::new()
         ),
         Ok(false)
     );
@@ -250,7 +252,15 @@ fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
         (query("Query_2", 45), &query2[..]),
     ] {
         assert_eq!(
-            write_query(format, &run, &query, &subjects, hsps, &mut buf),
+            write_query(
+                format,
+                &run,
+                &query,
+                &subjects,
+                hsps,
+                &mut buf,
+                &mut Vec::new()
+            ),
             Ok(true)
         );
     }
@@ -388,6 +398,7 @@ fn score_list_follows_ncbi_conditions() {
         &subjects,
         &[linked],
         &mut buf,
+        &mut Vec::new(),
     )
     .unwrap();
     let text = String::from_utf8(buf).unwrap();
@@ -439,7 +450,8 @@ fn score_zero_hsps_write_nothing() {
                 &query("Query_1", 10),
                 &subjects,
                 &[zero],
-                &mut buf
+                &mut buf,
+                &mut Vec::new()
             ),
             Ok(false)
         );
@@ -468,7 +480,8 @@ fn untranslated_ungapped_runs_are_refused() {
                 &query("Query_1", 10),
                 &subjects,
                 &[one],
-                &mut buf
+                &mut buf,
+                &mut Vec::new()
             ),
             Err(SeqAlignError::Unsupported(program))
         );
@@ -487,14 +500,40 @@ fn json_strings_are_escaped_as_ncbi() {
     assert_eq!(buf, b"\"a\\\"b\\\\c\\u0001\\u001F\x7f\xc3\xa9d\"");
 }
 
-/// A byte outside the visible range is an error of the ASN.1 text encoder (the callers
-/// refuse such titles before the search).
+/// A byte outside the visible range is written as `#` by the ASN.1 text encoder and noted at the
+/// stream's line with its trace and the string as given (NCBI 2.17.0, `blastn -outfmt 8` with a
+/// database titled `t\xe9tle db`: `Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str`
+/// / `Bad char [0xE9] in string at line 25` / the title, probe `o8` of M4a-1b part 5).
 #[test]
-fn asn_text_records_a_non_visible_byte() {
+fn asn_text_writes_a_hash_and_notes_a_non_visible_byte() {
     let mut buf = Vec::new();
     let mut enc = super::asn_text::AsnTextEncoder::new(&mut buf);
-    enc.visible_str(b"a\tb");
-    assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("a", 0);
+    enc.int(1);
+    enc.end_member();
+    enc.member("names", 1);
+    enc.begin_list(false);
+    enc.element();
+    enc.visible_str(b"x\ty");
+    enc.end_list();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let bad = enc.take_bad_chars();
+    assert_eq!(bad.len(), 1);
+    let mut posted = Vec::new();
+    bad[0].post(Some("blastn"), &mut posted);
+    assert_eq!(
+        posted,
+        b"Error: (803.7) [blastn] T.names.E\nBad char [0x9] in string at line 4\nx\ty\n".to_vec()
+    );
+    assert_eq!(
+        buf,
+        b"T ::= {\n  a 1,\n  names {\n    \"x#y\"\n  }\n}\n".to_vec()
+    );
 }
 
 /// `COStreamBuffer::PutInt4`.
@@ -512,8 +551,8 @@ fn integers_are_decimal() {
     }
 }
 
-/// LOSAT's refusals of a database for the Seq-annot formats (`check_database`): a database
-/// named `n/a` or `SRA` (any case), and for the ASN.1 text and binary a title byte outside 0x20..0x7E.
+/// LOSAT's refusal of a database for the Seq-annot formats (`check_database`): a database
+/// named `n/a` or `SRA` (any case).
 #[test]
 fn databases_that_ncbi_describes_otherwise_are_refused() {
     use super::seqalign::check_database;
@@ -523,7 +562,7 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
             SerialFormat::AsnBinary,
             SerialFormat::Json,
         ] {
-            let error = check_database(format, name, b"title", Program::Blastn).unwrap_err();
+            let error = check_database(format, name, Program::Blastn).unwrap_err();
             assert!(
                 error
                     .to_string()
@@ -532,33 +571,14 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
             );
         }
     }
-    assert!(check_database(SerialFormat::AsnText, "db/x", b"a\tb", Program::Blastp).is_err());
-    assert!(check_database(SerialFormat::AsnText, "db/x", b"\xc3\xa9", Program::Blastp).is_err());
-    assert!(check_database(SerialFormat::AsnBinary, "db/x", b"a\tb", Program::Blastp).is_err());
-    assert!(check_database(
-        SerialFormat::AsnBinary,
-        "db/x",
-        b"\xc3\xa9",
-        Program::Blastp
-    )
-    .is_err());
-    assert!(check_database(
-        SerialFormat::AsnBinary,
-        "db/x",
-        b"plain title",
-        Program::Blastp
-    )
-    .is_ok());
-    for title in [&b"a\tb"[..], b"\xc3\xa9", b"plain title"] {
-        assert!(check_database(SerialFormat::Json, "db/x", title, Program::Blastp).is_ok());
-    }
-    assert!(check_database(
+    for format in [
         SerialFormat::AsnText,
-        "db/nash",
-        b"fixture/sprot.fa",
-        Program::Blastp
-    )
-    .is_ok());
+        SerialFormat::AsnBinary,
+        SerialFormat::Json,
+    ] {
+        assert!(check_database(format, "db/x", Program::Blastp).is_ok());
+        assert!(check_database(format, "db/nash", Program::Blastp).is_ok());
+    }
 }
 
 /// The mapper of a `-subject` search's remap leaves out a first and a last Std-seg with a gap
@@ -583,7 +603,8 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
                 &query("Query_1", 300),
                 &subjects,
                 &[one],
-                &mut buf
+                &mut buf,
+                &mut Vec::new()
             ),
             Ok(true)
         );
@@ -636,7 +657,8 @@ fn ungapped_translated_hsps_are_diags_seq_aligns() {
             &query,
             &subjects,
             &[first, second, third],
-            &mut buf
+            &mut buf,
+            &mut Vec::new()
         ),
         Ok(true)
     );
@@ -705,6 +727,7 @@ fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
                 &subjects,
                 &hsps,
                 &mut buf,
+                &mut Vec::new(),
             )
             .unwrap());
             String::from_utf8(buf).unwrap().replace([' ', '\n'], "")

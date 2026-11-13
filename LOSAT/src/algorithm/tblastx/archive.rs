@@ -136,10 +136,7 @@ pub(crate) fn handle_for(
 /// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects, the
 /// `-subject` records `subjects` (`None` for `-db`), and with `-lcase_masking` (`lcase_masking`)
 /// the lower-case runs of each query in both frames of a translated query.
-pub(super) fn requests(
-    subjects: Option<&[FastaRecord]>,
-    lcase_masking: bool,
-) -> RunRequests<'_, FastaRecord> {
+pub(super) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: false,
@@ -147,14 +144,7 @@ pub(super) fn requests(
             lcase: lcase_masking.then_some(LcaseFrames::PlusAndMinus),
         },
         subjects,
-        "TBLASTX",
     )
-}
-
-/// `report::archive::check_titles` for TBLASTX's records (the archive's; the search strategy's
-/// requests check theirs where they are written, `RunRequests::write`).
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "TBLASTX")
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
@@ -381,7 +371,7 @@ fn for_each_batch(
 pub(super) fn write_tblastx_archives(
     handle: &ArchiveHandle,
     data: &ArchiveData<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
@@ -393,10 +383,8 @@ pub(super) fn write_tblastx_archives(
         gapped: false,
     };
     for_each_batch(data, |span, batch| {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
         }
         let mut aligns = TblastxAligns {
             run: RunRecord {
@@ -407,7 +395,13 @@ pub(super) fn write_tblastx_archives(
             data,
             span,
         };
-        write_archive(handle, batch, &mut aligns, &mut *writer)
+        write_archive(
+            handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
     })
 }
 

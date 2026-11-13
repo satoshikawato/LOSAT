@@ -320,7 +320,7 @@ fn write_date<E: Encoder>(enc: &mut E, date: &Date) {
     enc.end_variant();
 }
 
-fn optional_str<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: Option<&[u8]>) {
+fn optional_str<E: Encoder>(enc: &mut E, name: &'static str, tag: u8, value: Option<&[u8]>) {
     if let Some(value) = value {
         enc.member(name, tag);
         enc.visible_str(value);
@@ -328,7 +328,7 @@ fn optional_str<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: Option<&[u8
     }
 }
 
-fn optional_int<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: Option<i32>) {
+fn optional_int<E: Encoder>(enc: &mut E, name: &'static str, tag: u8, value: Option<i32>) {
     if let Some(value) = value {
         enc.member(name, tag);
         enc.int(value);

@@ -399,9 +399,12 @@ pub(super) fn render(
         let custom_tabular = super::tabular::tabular_spec(format.outfmt);
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
         // name (`x_CheckTaxDB`, `tabular`).
+        // So do the messages of the bytes that the Seq-annot formats write as `#`
+        // (`report::serial::write_query_to`).
         let mut warnings = (warning_lines.is_some()
             || xml2_kind(format.outfmt).is_some()
             || format_number(format.outfmt) == ARCHIVE_FORMAT
+            || matches!(format_number(format.outfmt), 8 | 9 | 12)
             || custom_tabular
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::checks_taxdb))
@@ -557,7 +560,9 @@ pub(super) fn render(
                 shown,
                 hitlists,
                 ranges,
-                warnings.as_mut(),
+                warnings
+                    .as_mut()
+                    .expect("a Seq-annot format has its warnings"),
             )?,
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
             // ```c++
@@ -572,7 +577,7 @@ pub(super) fn render(
                     render.handle,
                     render,
                     &archive_data(),
-                    warnings.as_mut(),
+                    warnings.as_mut().expect("the archive has its warnings"),
                     &mut writer,
                 )?
             }

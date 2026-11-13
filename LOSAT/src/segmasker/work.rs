@@ -146,7 +146,10 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match run_masks(args, settings, stdin, out) {
+    let mut posts = Vec::new();
+    let result = run_masks(args, settings, stdin, out, &mut posts);
+    diag.write_text(&posts);
+    match result {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
             diag.cerr(format!("{}\n", exception.what()).as_bytes());
@@ -163,12 +166,14 @@ pub(super) fn run(
     }
 }
 
-/// The body of `Run`'s `try` block, and the writer's destruction after it.
+/// The body of `Run`'s `try` block, and the writer's destruction after it; `posts` gets the
+/// messages that the serial documents post as they are written (`MaskWriter::print`).
 fn run_masks(
     args: &Args,
     settings: &ApplicationSettings,
     stdin: &mut Cin<'_>,
     out: &mut dyn Write,
+    posts: &mut Vec<u8>,
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
     // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`: a value
@@ -213,12 +218,12 @@ fn run_masks(
                 iupac: &record.iupacaa,
                 protein: true,
             };
-            writer.print(&seq, &mask, parse_seqids, &mut out)?;
+            writer.print(&seq, &mask, parse_seqids, &mut out, posts)?;
             serial_write_failure::<Failure>(&out, outfmt, super::PROGRAM)?;
         }
         Ok(())
     })();
-    finish(writer, &mut out, result, outfmt, super::PROGRAM)
+    finish(writer, &mut out, result, outfmt, super::PROGRAM, posts)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/segmask/segmask.cpp:40-52

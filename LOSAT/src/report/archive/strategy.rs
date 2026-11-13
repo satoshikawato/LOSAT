@@ -67,9 +67,13 @@ use anyhow::Result;
 use super::options::OptionInputs;
 use super::writer::{text_out, write_strategy_document, RequestInputs};
 use super::{ArchiveEncoding, ArchiveRequest, OptionsHandle, SearchSpaceCarry};
+use crate::report::serial::encoder::Encoder;
 
 struct State {
     sink: Box<dyn Write + Send>,
+    /// The run's standard error, where the messages of the bytes that a request writes as `#` go
+    /// (`write_with`).
+    diagnostics: Box<dyn Write + Send>,
     /// The `EffectiveSearchSpace` option after the batches noted so far (`note_searched`).
     carry: SearchSpaceCarry,
     /// The run's searched queries whose batches' requests are written: the next request starts
@@ -85,6 +89,8 @@ struct Shared {
     request: ArchiveRequest,
     /// The run's options handle, shared with the run's archive (`OptionsHandle`).
     options: OptionsHandle,
+    /// The run's archive (outfmt 11), which saves the messages posted before it is written.
+    archive: Option<super::ArchiveHandle>,
     state: Mutex<State>,
 }
 
@@ -230,10 +236,13 @@ impl StrategyExport {
     /// The export of a run of `inputs.program` into `sink` (`create_strategy_file`). `database`
     /// is the `-db` argument as NCBI keeps it (`None` for `-subject`); `label` names the program
     /// in a refusal; `options` is the run's options handle, which its archive shares.
-    /// The request is the archive's (`ArchiveRequest::for_inputs`), with the same refusal of a
-    /// `-db` name or `-window_masker_db` path that ASN.1 text cannot hold.
+    /// The request is the archive's (`ArchiveRequest::for_inputs`, in ASN.1 text). The messages
+    /// of the bytes that a request writes as `#` go to `diagnostics`, and `archive`, the run's
+    /// archive if it writes one, saves them (`ArchiveHandle::write_saved_posts`).
     pub fn new(
         sink: Box<dyn Write + Send>,
+        diagnostics: Box<dyn Write + Send>,
+        archive: Option<super::ArchiveHandle>,
         inputs: &OptionInputs,
         database: Option<&str>,
         label: &str,
@@ -249,8 +258,10 @@ impl StrategyExport {
         Ok(Self(Arc::new(Shared {
             request,
             options,
+            archive,
             state: Mutex::new(State {
                 sink,
+                diagnostics,
                 carry: SearchSpaceCarry::default(),
                 next_query: 0,
                 noted_through: 0,
@@ -262,7 +273,10 @@ impl StrategyExport {
     /// The export of a run into its strategy file (`open_strategy_file`), buffered: the program's
     /// recorded options `inputs` with the `HitlistSize` of the run's format `outfmt` and `counts`
     /// (the archive's is outfmt 11's), and the run's options handle `options` (made once per run
-    /// and given to its archive too, `ArchiveHandle::for_program`).
+    /// and given to its archive too, `ArchiveHandle::for_program`). The messages of the bytes the
+    /// requests write as `#` go to the standard error (the library refuses the option,
+    /// `api::search`), and the run's archive `archive` saves them.
+    #[allow(clippy::too_many_arguments)]
     pub fn for_run(
         file: std::fs::File,
         mut inputs: OptionInputs,
@@ -271,10 +285,13 @@ impl StrategyExport {
         database: Option<&str>,
         label: &str,
         options: &OptionsHandle,
+        archive: Option<&super::ArchiveHandle>,
     ) -> Result<Self> {
         inputs.hitlist_size = hitlist_size(outfmt, counts);
         Self::new(
             Box::new(std::io::BufWriter::new(file)),
+            Box::new(std::io::stderr()),
+            archive.cloned(),
             &inputs,
             database,
             label,
@@ -342,13 +359,30 @@ impl StrategyExport {
                     state.carry.option(),
                     shared.options.database_list(),
                 );
+                // NCBI posts the messages of the bytes it writes as `#` as its stream writes the
+                // request (`SaveSearchStrategy`, before the batch's search): its handler saves them
+                // for the batch's archive.
+                let bad_chars = out.enc.take_bad_chars();
                 let written = out.finish();
+                let posted = match &shared.archive {
+                    Some(archive) => archive.write_saved_posts(
+                        &mut *state.diagnostics,
+                        &bad_chars,
+                        queries.start,
+                    ),
+                    None => crate::report::serial::visible::write_posts(
+                        &bad_chars,
+                        Some(shared.request.program),
+                        &mut *state.diagnostics,
+                    ),
+                };
                 // The file is complete after every request: the command line's exit does not run
                 // destructors.
                 let flushed = state.sink.flush();
                 state.next_query = queries.end;
                 written?;
                 flushed?;
+                posted?;
                 Ok(())
             })?;
             Ok(true)
@@ -478,6 +512,8 @@ mod tests {
         inputs.searchsp = searchsp;
         let export = StrategyExport::new(
             Box::new(sink.clone()),
+            Box::new(std::io::sink()),
+            None,
             &inputs,
             Some("in/db/bp"),
             "BLASTP",
@@ -637,6 +673,8 @@ mod tests {
         let sink = Sink::default();
         let export = StrategyExport::new(
             Box::new(sink.clone()),
+            Box::new(std::io::sink()),
+            None,
             &OptionInputs::new(Program::Blastp, "blastp"),
             Some("in/db/bp"),
             "BLASTP",

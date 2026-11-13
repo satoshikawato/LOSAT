@@ -584,10 +584,9 @@ fn the_error_comes_before_its_error_archive_in_one_stream() {
     }
 }
 
-/// BLASTX reads its query file once before the search with outfmt 5, 11 and 13 to 16, to refuse a
-/// title its writers cannot write before any byte (`blast_xml::prescan_queries`,
-/// `archive::prescan_query_titles`). Under `-parse_deflines` that read stops where the search's
-/// does, so a reader error that NCBI meets before it writes a title comes first: a first line
+/// BLASTX reads its query file once before the search with outfmt 5 and 13 to 16, to refuse a
+/// title its writers cannot write before any byte (`blast_xml::prescan_queries`; outfmt 11 reads it
+/// once, with the search). Under `-parse_deflines` that read stops where the search's does, so a reader error that NCBI meets before it writes a title comes first: a first line
 /// that is not a defline (any format, NCBI 2.17.0, probe `SM/prescan/probe.py`), or a Seq-id NCBI
 /// cannot make in the batch of the record with the title. With `BATCH_SIZE=1` that record is its
 /// own batch, which NCBI writes before it reads the bad Seq-id: LOSAT refuses its title before any

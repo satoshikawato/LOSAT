@@ -6677,11 +6677,14 @@ fn post_process_hits_and_write(
         // format.
         // So do those of the formatters of a tabular field list that shows a taxonomy name
         // (`x_CheckTaxDB`, `algorithm::blastn::tabular`).
+        // So do the messages of the bytes that the Seq-annot formats write as `#`
+        // (`report::serial::write_hit_list_seqaligns`).
         let mut format_warnings = (warning_lines.is_some()
             || matches!(
                 output_format,
                 BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
             )
+            || output_format.serial().is_some()
             || output_format
                 .tabular_spec()
                 .is_some_and(|spec| spec.checks_taxdb()))
@@ -6789,7 +6792,9 @@ fn post_process_hits_and_write(
                 subjects,
                 report.ranges.subjects.placements,
                 &mut writer,
-                format_warnings.as_mut(),
+                format_warnings
+                    .as_mut()
+                    .expect("a Seq-annot format has its warnings"),
             )?;
         } else if output_format == BlastnOutputFormat::Archive {
             // The BLAST archive (outfmt 11): one document per query batch of the call.
@@ -6813,7 +6818,9 @@ fn post_process_hits_and_write(
             };
             archive::write_blastn_archives(
                 &call,
-                format_warnings.as_mut(),
+                format_warnings
+                    .as_mut()
+                    .expect("the archive has its warnings"),
                 &|first| archive_first_context(report, query_lengths, first),
                 &mut writer,
             )?;
@@ -7379,6 +7386,7 @@ pub fn run(
                 args.database_name(),
                 "BLASTN",
                 &options,
+                args.archive.as_ref(),
             )
         })
         .transpose()?;
@@ -7851,7 +7859,6 @@ fn open_search_database(
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastn,
             )?;
         }
@@ -7995,10 +8002,6 @@ fn search_cli(
             query_config,
             query_range.as_ref(),
             args.num_threads,
-            crate::report::archive::request_title_encoding(
-                args.archive.is_some(),
-                args.strategy.is_some(),
-            ),
         )?;
         (Vec::new(), end, store)
     } else if x_store_acts && x_query_drop::parts_on() {
@@ -9644,8 +9647,6 @@ fn run_in_pool(
         query_input,
         &lengths,
         batching,
-        (args.archive.is_some() || args.strategy.is_some())
-            && queries.archive_title(args.archive.is_some(), args.strategy.is_some()),
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
     // (`lookup::x_mb_lut_keep`), freed when the loop ends.
@@ -10585,23 +10586,8 @@ fn run_in_pool(
         //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
         // ```
         // NCBI completes this batch here and writes its BLAST archive (outfmt 11): its queries
-        // and, with `-subject`, every subject. The batch that stops the run (a reader error,
-        // `Empty CBlastQueryVector`, an error of its search, all above) writes neither, and the
-        // error archive holds no sequence. So a title the archive cannot write is refused here,
-        // for the batch's queries and, in the first batch, the subjects, before the batch's
-        // reports and the reader's messages that come with them. It comes before the first byte:
-        // the reports of the batches before are written after the loop where a query's title is
-        // refused (`x_rpt_stream::Off::ArchiveTitle`), and the first batch's are the first.
-        // (The search strategy's requests check their titles where they are written, above.)
-        if args.archive.is_some() {
-            archive::check_titles(batch_records.searched(), "query")?;
-            if let (0, SubjectSource::Prepared(prepared)) = (start, source) {
-                archive::check_titles(
-                    subject_ranges.records.unwrap_or(prepared.records),
-                    "subject",
-                )?;
-            }
-        }
+        // and, with `-subject`, every subject (a byte of a title outside 0x20..0x7E as `#`, with
+        // its message, `report::archive::write_archive`).
         // EXPERIMENT (LOSAT_X_RPTSTREAM): the batch's reports, written now, after the mixer
         // has its gie, as NCBI's loop prints a batch's result sets (`x_rpt_stream.rs`). The
         // batch's lists and values are taken back from the end of what the loop keeps, numbered

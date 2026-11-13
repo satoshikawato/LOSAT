@@ -119,33 +119,3 @@ fn the_molecule_of_the_id_decides_the_residues() {
         (0, "6 - 10\n".to_string(), String::new())
     );
 }
-
-// NCBI writes `#` for each byte of `-masking_options` outside the visible ASCII range of the
-// ASN.1 VisibleString and posts `Error: (803.7) Blast-db-mask-info.algo-options` with the byte's
-// line or offset (convert2blastmask 2.17.0, `-masking_options 'é window=64'`, exit status 0);
-// LOSAT's serial writer refuses the byte, as in an archive. The XML form writes the bytes
-// (fixture `opt_utf8_xml`).
-#[test]
-fn a_masking_option_outside_the_visible_ascii_range_is_refused_in_asn() {
-    for outfmt in ["maskinfo_asn1_text", "maskinfo_asn1_bin"] {
-        let (status, out, err) = run_words(
-            &[
-                "-masking_algorithm",
-                "dust",
-                "-masking_options",
-                "é window=64",
-                "-outfmt",
-                outfmt,
-            ],
-            b">a\nacgt\n",
-        );
-        assert_eq!((status, out), (1, String::new()), "{outfmt}");
-        assert_eq!(
-            err,
-            "Error: an object on which LOSAT's serial writer stops (a character 0xc3 outside the \
-             visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT) is not \
-             supported by LOSAT's CONVERT2BLASTMASK\n",
-            "{outfmt}"
-        );
-    }
-}

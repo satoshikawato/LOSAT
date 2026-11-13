@@ -104,14 +104,35 @@ fn visible_strings_have_short_and_long_lengths() {
     );
 }
 
-/// A byte outside 0x20..0x7E is an error (the callers refuse such titles before the search),
-/// as in the ASN.1 text encoder.
+/// A byte outside 0x20..0x7E is written as `#` and noted at the bytes the document has written
+/// before it (`GetStreamPos`; NCBI 2.17.0, `ARCHIVE_FORMAT=bin blastn -outfmt 11` with the title
+/// `q1 first query café`: `Bad char [0xC3] in string at byte 213`, then `[0xA9] ... at byte 214`,
+/// probe `bn11bin` of M4a-1b part 5), with the stream's trace and the string as given, and no
+/// error.
 #[test]
-fn a_non_visible_byte_is_an_error() {
-    let mut buf = Vec::new();
+fn a_non_visible_byte_is_written_as_a_hash_and_noted() {
+    let mut buf = b"before".to_vec();
     let mut enc = AsnBinaryEncoder::new(&mut buf);
-    enc.visible_str(b"a\tb");
-    assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("title", 0);
+    enc.visible_str(b"a\t\xe9b");
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let bad = enc.take_bad_chars();
+    assert_eq!(bad.len(), 1);
+    let mut posted = Vec::new();
+    bad[0].post(Some("blastn"), &mut posted);
+    // 30 80, a0 80, 1a 04, `a`: the tab is the document's eighth byte (7 before it).
+    assert_eq!(
+        posted,
+        b"Error: (803.7) [blastn] T.title\nBad char [0x9] in string at byte 7\na\t\xe9b\n\
+          Error: (803.7) [blastn] T.title\nBad char [0xE9] in string at byte 8\na\t\xe9b\n"
+            .to_vec()
+    );
+    assert_eq!(&buf[6..], b"\x30\x80\xa0\x80\x1a\x04a##b\x00\x00\x00\x00");
 }
 
 /// `WriteDouble2(data, DBL_DIG)`: `09`, the length (digits + 1), the decimal form byte 0 and

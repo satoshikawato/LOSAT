@@ -1,18 +1,17 @@
-//! The refusal of a title that the BLAST archive (outfmt 11) cannot write as NCBI does
-//! (`report::archive::check_titles`, a byte outside `0x20..=0x7E` in text) looks only at the
-//! records that NCBI BLAST+ 2.17.0 writes, on a whole run of the binary of each search program
-//! with `-subject` (line NP, series SM, DECISIONS 24), and with `-db` without its header file,
-//! whose batch with hits NCBI fails (DECISIONS 25).
+//! A title byte outside `0x20..=0x7E` that the BLAST archive (outfmt 11) writes as NCBI does
+//! (`report::archive::write_archive`: `#` for the byte and NCBI's `Error: (803.7)` messages, one per
+//! byte) only in the records that NCBI BLAST+ 2.17.0 writes, on a whole run of the binary of each
+//! search program with `-subject` (line NP, series SM, DECISIONS 24; M4a-1b part 5), and with `-db`
+//! without its header file, whose batch with hits NCBI fails (DECISIONS 25).
 //!
 //! NCBI writes the archive of each query batch that it completes (`WriteArchive`: the batch's
 //! queries and every `-subject` record); the batch that stops the run (a reader error, a last
 //! batch without letters, `Empty CBlastQueryVector` with `BATCH_SIZE=0`) writes neither, and the
-//! error archive holds no sequence. Where NCBI writes the title (with `#` and its `Bad char`
-//! messages), LOSAT refuses it before the first byte; where NCBI does not, LOSAT writes NCBI's
-//! output (the `arch_title*` rows of `tests/fasta_input_fixtures.py` and `db.archtitle.*` of
-//! `tests/db_search_manifest/` hold NCBI's bytes; this test adds BLASTX's `-subject`, which
-//! the first harness does not run, LOSAT's experimental reading and report paths of BLASTN, and
-//! the library API's `-subject` searches with a batch size, which no harness runs).
+//! error archive holds no sequence: no message is posted for its titles. (The `arch_title*` rows of
+//! `tests/fasta_input_fixtures.py` and `db.archtitle.*` of `tests/db_search_manifest/` hold NCBI's
+//! bytes; this test adds BLASTX's `-subject`, which the first harness does not run, LOSAT's
+//! experimental reading and report paths of BLASTN, and the library API's `-subject` searches
+//! with a batch size, which no harness runs.)
 //!
 //! The query files (`tests/fixtures/fasta_input/`): `batch_title_late` (record 5 has `café` in its
 //! title, record 6 a data line that NCBI's reader refuses), `batch_title_lastempty` (records 5 to 7
@@ -111,14 +110,16 @@ fn run(program: &str, query: &Path, subject: &Path, env: &[(&str, &str)], thread
     }
 }
 
-const REFUSAL: &str = "has a character the archive cannot write as NCBI does";
+/// NCBI's message of a byte that an archive writes as `#`.
+const POSTED: &str = "Error: (803.7) [";
 
 /// A title that NCBI never writes: LOSAT ends as NCBI does (`status`, the error text `error`),
-/// after the archives of the batches before (`written`: whether there are some).
+/// after the archives of the batches before (`written`: whether there are some), and posts no
+/// message for the title.
 fn not_refused(what: &str, run: &Run, status: i32, error: &str, written: bool) {
     assert!(
-        !run.stderr.contains(REFUSAL),
-        "{what}: refused: {}",
+        !run.stderr.contains(POSTED),
+        "{what}: posted: {}",
         run.stderr
     );
     assert_eq!(
@@ -135,25 +136,37 @@ fn not_refused(what: &str, run: &Run, status: i32, error: &str, written: bool) {
     assert_eq!(archives > 1, written, "{what}: {archives} archives");
 }
 
-/// A title that NCBI writes: LOSAT refuses it before the first byte.
-fn refused(what: &str, run: &Run) {
-    assert_eq!(run.status, Some(1), "{what}: status, stderr {}", run.stderr);
+/// A title that NCBI writes: LOSAT writes `caf##` and posts NCBI's message for each of the two
+/// bytes of `é` (`Bad char [0xC3]`, `[0xA9]`, the trace of the Bioseq's title), refusing nothing.
+fn posted(what: &str, run: &Run) {
     assert!(
-        run.stderr.contains(REFUSAL),
+        !run.stderr.contains("not supported by LOSAT"),
+        "{what}: refused: {}",
+        run.stderr
+    );
+    for byte in ["0xC3", "0xA9"] {
+        assert!(
+            run.stderr
+                .contains(&format!("Bad char [{byte}] in string at line ")),
+            "{what}: stderr {}",
+            run.stderr
+        );
+    }
+    assert!(
+        run.stderr.contains(POSTED) && run.stderr.contains("] Blast4-archive.request.body."),
         "{what}: stderr {}",
         run.stderr
     );
     assert!(
-        run.stdout.is_empty(),
-        "{what}: wrote {} bytes",
-        run.stdout.len()
+        String::from_utf8_lossy(&run.stdout).contains("caf##"),
+        "{what}: no title with '#'"
     );
 }
 
 const READER_ERROR: &str = "BLAST query error: CFastaReader: Near line";
 
 #[test]
-fn a_title_in_a_batch_that_ncbi_does_not_write_is_not_refused() {
+fn a_title_in_a_batch_that_ncbi_does_not_write_posts_nothing() {
     for (program, query_kind, subject_kind) in PROGRAMS {
         let (each, two) = sizes(query_kind);
         let subject = fixture(&format!(
@@ -200,7 +213,7 @@ fn a_title_in_a_batch_that_ncbi_does_not_write_is_not_refused() {
                 threads,
             );
             if program == "blastn" {
-                refused(&what("subject, BATCH_SIZE=0"), &result);
+                posted(&what("subject, BATCH_SIZE=0"), &result);
             } else {
                 not_refused(
                     &what("subject, BATCH_SIZE=0"),
@@ -215,7 +228,7 @@ fn a_title_in_a_batch_that_ncbi_does_not_write_is_not_refused() {
 }
 
 #[test]
-fn a_title_in_a_batch_that_ncbi_writes_is_refused_before_the_first_byte() {
+fn a_title_in_a_batch_that_ncbi_writes_is_written_with_its_messages() {
     for (program, query_kind, subject_kind) in PROGRAMS {
         let (each, _) = sizes(query_kind);
         let subject = fixture(&format!(
@@ -224,9 +237,9 @@ fn a_title_in_a_batch_that_ncbi_writes_is_refused_before_the_first_byte() {
         ));
         for threads in ["1", "4"] {
             let what = |case: &str| format!("{program} {case} threads {threads}");
-            // Record 5's batch is completed after four others: BLASTN refuses it before the first
-            // batch's archive, whether its reading keeps the records or reads them again batch by
-            // batch, and whether its reports are written batch by batch or after the loop.
+            // Record 5's batch is completed after four others: BLASTN writes it, whether its reading
+            // keeps the records or reads them again batch by batch, and whether its reports are
+            // written batch by batch or after the loop.
             let late = file("batch_title_late", query_kind);
             let paths: &[&[(&str, &str)]] = if program == "blastn" {
                 &[
@@ -241,12 +254,11 @@ fn a_title_in_a_batch_that_ncbi_writes_is_refused_before_the_first_byte() {
                 let mut env = vec![("BATCH_SIZE", each)];
                 env.extend_from_slice(path);
                 let result = run(program, &late, &subject, &env, threads);
-                refused(&what(&format!("late each {path:?}")), &result);
+                posted(&what(&format!("late each {path:?}")), &result);
             }
             // BLASTP's block search (LOSAT_X_BPQBLOCK, here a block of each batch) writes each
-            // block's archive before it searches the next: a run with such a title (the second
-            // record of `batch_title.s`, read without a reader error) takes the search of all
-            // queries, which refuses it before the first byte.
+            // block's archive before it searches the next, with the title (the second record of
+            // `batch_title.s`, read without a reader error) as the search of all queries does.
             if program == "blastp" {
                 let result = run(
                     program,
@@ -255,7 +267,7 @@ fn a_title_in_a_batch_that_ncbi_writes_is_refused_before_the_first_byte() {
                     &[("BATCH_SIZE", each), ("LOSAT_X_BPQBLOCK", "60")],
                     threads,
                 );
-                refused(&what("blocks"), &result);
+                posted(&what("blocks"), &result);
             }
             // The subjects are written with the first batch.
             let clean = file("batch_clean", query_kind);
@@ -266,7 +278,7 @@ fn a_title_in_a_batch_that_ncbi_writes_is_refused_before_the_first_byte() {
                 &[],
                 threads,
             );
-            refused(&what("subject"), &result);
+            posted(&what("subject"), &result);
         }
     }
 }
@@ -277,7 +289,7 @@ fn a_title_in_a_batch_that_ncbi_writes_is_refused_before_the_first_byte() {
 /// refusal looks at the same records. (Its `-subject` entries lost their own checks of every
 /// record.)
 #[test]
-fn the_library_refuses_only_the_titles_that_ncbi_writes() {
+fn the_library_posts_only_the_titles_that_ncbi_writes() {
     let example = example_binary("library_command_line");
     let library = |program: &str, query: &Path, subject: &Path, env: &[(&str, &str)]| -> Run {
         let mut command = Command::new(&example);
@@ -319,14 +331,14 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes() {
             true,
         );
         // One batch with letters: its archive holds the title.
-        refused(
+        posted(
             &what("lastempty default"),
             &library(program, &last, &subject, &[]),
         );
         // A batch size of 0 reads no query (BLASTN's is the mixer's).
         let result = library(program, &clean, &bad_subject, &[("BATCH_SIZE", "0")]);
         if program == "blastn" {
-            refused(&what("subject, BATCH_SIZE=0"), &result);
+            posted(&what("subject, BATCH_SIZE=0"), &result);
         } else {
             not_refused(
                 &what("subject, BATCH_SIZE=0"),
@@ -336,13 +348,13 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes() {
                 false,
             );
         }
-        refused(
+        posted(
             &what("subject"),
             &library(program, &clean, &bad_subject, &[]),
         );
         // The second batch's title (`batch_title.s` read as the query, one record a batch): the
         // first batch's archive is held until the refusal drops it.
-        refused(
+        posted(
             &what("second batch"),
             &library(
                 program,
@@ -472,14 +484,13 @@ fn database_without_headers(dir: &Path, name: &str, dbtype: &str, sequences: &[S
 /// records that hit the database, the first with a hyphen (the reader's warning, read with its
 /// batch); `BATCH_SIZE` 60 (180) makes a batch of the first two and one of each record after. A
 /// title that the archive cannot write in the batch that fails, or in the batch after it, is never
-/// written: LOSAT gives the run's bytes without that title, also where the run holds its output
-/// for the later title (`archive::ArchiveHold`: the first batch's archive comes before the
-/// warning in a stream that both go to). One in the first batch is written: LOSAT refuses it
-/// before the first byte. The command line (`-num_threads` 1 and 4, apart and merged) and the
+/// written: LOSAT gives the run's bytes without that title (the first batch's archive comes before
+/// the warning in a stream that both go to). One in the first batch is written, with `#` and NCBI's
+/// messages. The command line (`-num_threads` 1 and 4, apart and merged) and the
 /// library API (`examples/library_command_line`, whose formats and diagnostics are separate
 /// streams of the caller).
 #[test]
-fn a_title_in_the_batch_that_a_missing_header_file_fails_is_not_refused() {
+fn a_title_in_the_batch_that_a_missing_header_file_fails_is_not_written() {
     let dir = TempDir::new("nohdr");
     let proteins = random_proteins(2, 150);
     let nucleotides: Vec<String> = proteins
@@ -603,7 +614,7 @@ fn a_title_in_the_batch_that_a_missing_header_file_fails_is_not_refused() {
                     );
                 }
             }
-            refused(&what("u1"), &search("u1"));
+            posted(&what("u1"), &search("u1"));
         }
     }
 }

@@ -263,7 +263,7 @@ const SMALL_PSSM: &str = r#"PssmWithParameters ::= {
 #[test]
 fn a_pssm_is_written_in_the_modules_order_and_read_back() {
     let value = small_pssm(b"a \"quoted\" title");
-    let text = asn_text(&value).unwrap();
+    let text = asn_text(&value).bytes;
     assert_eq!(String::from_utf8(text.clone()).unwrap(), SMALL_PSSM);
     assert_eq!(read_pssm_with_parameters(&text).unwrap(), value);
 }
@@ -431,7 +431,7 @@ fn ncbis_pssm_with_zero_frequency_ratios_reads_and_writes_back() {
     assert_eq!(final_data.h, 0.0);
     assert!(text.ends_with(b"}\n\n"));
     assert_same_text(
-        &asn_text(&value).unwrap(),
+        &asn_text(&value).bytes,
         &text[..text.len() - 1],
         "pssm_zero_fratios.asn",
     );
@@ -446,7 +446,7 @@ fn psiblasts_pssm_files_read_and_write_back_byte_for_byte() {
     for name in ["db.ps.asn.rnd.6.asn", "db.ps.asn.tkrnd.6.asn"] {
         let text = std::fs::read(fixture("db_search").join(name)).unwrap();
         let value = read_pssm_with_parameters(&text).unwrap();
-        assert_same_text(&asn_text(&value).unwrap(), &text, name);
+        assert_same_text(&asn_text(&value).bytes, &text, name);
         let data = value.pssm.intermediate_data.as_ref().unwrap();
         assert_eq!(
             data.information_content.is_some(),
@@ -493,7 +493,7 @@ fn pssm_files_of_a_directory_read_and_write_back() {
         }
         match read_pssm_with_parameters(&text) {
             Ok(value) => {
-                if asn_text(&value).unwrap() != text {
+                if asn_text(&value).bytes != text {
                     failures.push(format!("{}: written back differently", path.display()));
                 }
             }

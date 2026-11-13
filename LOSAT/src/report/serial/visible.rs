@@ -1,12 +1,14 @@
-//! NCBI's repair of a VisibleString as its object streams read it: the method
-//! `eFNP_ReplaceAndWarn` (the default of `SERIAL_WRONG_CHARS_READ`) stores `#` for each byte
-//! outside `' '..='~'` and posts an error for it with the reader's stack trace, its position and
-//! the bytes being read (`ReplaceVisibleChar`). The readers of ASN.1 text
+//! NCBI's repair of a VisibleString as its object streams read and write it: the method
+//! `eFNP_ReplaceAndWarn` (the default of `SERIAL_WRONG_CHARS_READ` and of
+//! `SERIAL_WRONG_CHARS_WRITE`) stores or writes `#` for each byte outside `' '..='~'` and posts
+//! an error for it with the stream's stack trace, its position and the bytes being read or the
+//! string being written (`ReplaceVisibleChar`). The readers of ASN.1 text
 //! (`asn_text_reader::Reader::string`, which also cuts the string into NCBI's chunks) and of
-//! ASN.1 binary (`fix_visible_chars`, the whole string), and the writer of definition lines
-//! (`writedb::header`), note the bad bytes of each string as one [`BadChars`], which carries the
-//! stream's trace (`object_stack::ObjectStack`) and builds NCBI's messages
-//! ([`BadChars::message`], the one producer of their text).
+//! ASN.1 binary (`fix_visible_chars`, the whole string), the writer of definition lines
+//! (`writedb::header`) and the ASN.1 text and binary encoders of the serialized documents
+//! (`asn_text`, `asn_ber`, `Encoder::take_bad_chars`) note the bad bytes of each string as one
+//! [`BadChars`], which carries the stream's trace (`object_stack::ObjectStack`) and builds
+//! NCBI's messages ([`BadChars::message`], the one producer of their text).
 //!
 //! UTF-8 is not let through (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0).
 // NCBI reference (598d8ae6): c++/include/serial/objistr.hpp:1160-1163
@@ -20,6 +22,15 @@
 // ```c++
 // NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_READ);
 // NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_READ, eFNP_ReplaceAndWarn);
+// ```
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:277-278
+// ```c++
+// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE);
+// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE, eFNP_ReplaceAndWarn);
+// ```
+// NCBI reference (598d8ae6): c++/include/serial/objistr.hpp:1164
+// ```c++
+// #define SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_WRITING 0
 // ```
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1898
 // ```c++
@@ -93,7 +104,7 @@ pub(crate) enum Shown {
 /// (`GetStackTraceASN`), the stream's position at the byte and the string, which is kept once
 /// (not per byte).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BadChars {
+pub struct BadChars {
     trace: String,
     bytes: Vec<u8>,
     shown: Shown,
@@ -191,14 +202,58 @@ impl BadChars {
     }
 
     /// The lines that NCBI's application `program` writes to its standard error for these bytes:
-    /// `Error: (803.7) [program] <message>` and a newline, one per byte, appended to `out`.
-    pub(crate) fn post(&self, program: &str, out: &mut Vec<u8>) {
+    /// `Error: (803.7) [program] <message>` and a newline, one per byte, appended to `out`; an
+    /// application without a name in its diagnostics (`None`: the masking programs, such as
+    /// convert2blastmask 2.17.0) writes `Error: (803.7) <message>`.
+    pub(crate) fn post(&self, program: Option<&str>, out: &mut Vec<u8>) {
         for k in 0..self.len() {
-            out.extend_from_slice(format!("Error: (803.7) [{program}] ").as_bytes());
-            out.extend_from_slice(&self.message(k));
-            out.push(b'\n');
+            self.post_one(k, program, out);
         }
     }
+
+    /// The post of the `k`-th bad byte (`post`).
+    fn post_one(&self, k: usize, program: Option<&str>, out: &mut Vec<u8>) {
+        out.extend_from_slice(b"Error: (803.7) ");
+        if let Some(program) = program {
+            out.extend_from_slice(format!("[{program}] ").as_bytes());
+        }
+        out.extend_from_slice(&self.message(k));
+        out.push(b'\n');
+    }
+
+    /// `post` of every string of `bad`, in order.
+    pub(crate) fn post_all(bad: &[BadChars], program: Option<&str>, out: &mut Vec<u8>) {
+        for bad_chars in bad {
+            bad_chars.post(program, out);
+        }
+    }
+}
+
+/// Each post of `BadChars::post_all` on its own (one message of NCBI's diagnostic handler each).
+pub(crate) fn each_post(bad: &[BadChars], program: Option<&str>) -> Vec<Vec<u8>> {
+    let mut posts = Vec::new();
+    for bad_chars in bad {
+        for k in 0..bad_chars.len() {
+            let mut text = Vec::new();
+            bad_chars.post_one(k, program, &mut text);
+            posts.push(text);
+        }
+    }
+    posts
+}
+
+/// `BadChars::post_all` written to `diagnostics` (nothing for no string).
+pub(crate) fn write_posts(
+    bad: &[BadChars],
+    program: Option<&str>,
+    diagnostics: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    if bad.is_empty() {
+        return Ok(());
+    }
+    let mut text = Vec::new();
+    BadChars::post_all(bad, program, &mut text);
+    diagnostics.write_all(&text)
 }
 
 /// `CObjectIStreamAsnBinary::FixVisibleChars(string&, eFNP_ReplaceAndWarn)`: each bad byte of
@@ -241,7 +296,7 @@ mod tests {
         let bad = fix_visible_chars(&mut s, trace, Position::Byte(49)).unwrap();
         assert_eq!(s, b"#i#dow");
         let mut posted = Vec::new();
-        bad.post("makeblastdb", &mut posted);
+        bad.post(Some("makeblastdb"), &mut posted);
         assert_eq!(
             posted,
             b"Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x9] in string at byte 49\n\ti\xe9dow\n\

@@ -555,21 +555,32 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
     out.enc.end_document();
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-306
+// ```c++
+//             if (isArchiveFormat) {
+//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+//                 m_Bah.ResetMessages();
+// ```
 /// Writes the archive of one query batch to `sink` and takes the messages saved since the
 /// previous archive. `ARCHIVE_FORMAT` values that NCBI does not write leave the sink
-/// untouched.
+/// untouched. The messages of the bytes that the ASN.1 text or binary stream writes as `#` (a
+/// title, the `-db` name or the `-window_masker_db` path outside 0x20..0x7E) go to `diagnostics`
+/// as NCBI posts them while it writes the archive, and are not saved for the next archive:
+/// NCBI's handler saves them, and `ResetMessages` after `WriteArchive` drops them
+/// (`ArchiveHandle::write_unsaved_posts`).
 pub fn write_archive<A: AlignSource>(
     handle: &ArchiveHandle,
     batch: &BatchArchive<'_>,
     aligns: &mut A,
     sink: &mut dyn Write,
+    diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    let messages = handle.take_messages();
+    let messages = handle.take_messages_through(batch.request.queries.len());
     let space = handle.search_space_option(batch.searched_space);
     let list = handle.options().database_list();
     let request = handle.request();
-    match handle.encoding() {
-        ArchiveEncoding::Nothing => Ok(()),
+    let bad_chars = match handle.encoding() {
+        ArchiveEncoding::Nothing => return Ok(()),
         ArchiveEncoding::Xml => {
             let mut buf = Vec::new();
             let mut out = ArchiveOut {
@@ -578,7 +589,7 @@ pub fn write_archive<A: AlignSource>(
                 io_error: None,
             };
             write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
-            out.finish()
+            return out.finish();
         }
         ArchiveEncoding::Text => {
             let mut buf = Vec::new();
@@ -588,7 +599,9 @@ pub fn write_archive<A: AlignSource>(
                 io_error: None,
             };
             write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
-            out.finish()
+            let bad_chars = out.enc.take_bad_chars();
+            out.finish()?;
+            bad_chars
         }
         ArchiveEncoding::Binary => {
             let mut buf = Vec::new();
@@ -598,9 +611,13 @@ pub fn write_archive<A: AlignSource>(
                 io_error: None,
             };
             write_search_archive(&mut out, request, batch, space, list, &messages, aligns)?;
-            out.finish()
+            let bad_chars = out.enc.take_bad_chars();
+            out.finish()?;
+            bad_chars
         }
-    }
+    };
+    handle.write_unsaved_posts(diagnostics, &bad_chars)?;
+    Ok(())
 }
 
 /// Writes the error archive (`PrintErrorArchive`): the messages saved since the last
@@ -636,6 +653,9 @@ pub fn write_error_archive(
                 io_error: None,
             };
             write_error_document(&mut out, &messages);
+            // The messages are sanitized (`diag_log::sanitize`: 0x20..0x7E only), so the stream
+            // writes no `#` here.
+            debug_assert!(out.enc.take_bad_chars().is_empty());
             out.finish()
         }
         ArchiveEncoding::Binary => {
@@ -646,6 +666,9 @@ pub fn write_error_archive(
                 io_error: None,
             };
             write_error_document(&mut out, &messages);
+            // The messages are sanitized (`diag_log::sanitize`: 0x20..0x7E only), so the stream
+            // writes no `#` here.
+            debug_assert!(out.enc.take_bad_chars().is_empty());
             out.finish()
         }
     }

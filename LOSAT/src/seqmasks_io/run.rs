@@ -97,16 +97,18 @@ pub(crate) fn serial_write_failure<F: RunFailure>(
 /// `maskinfo_*` writer's destructor writes it also when an exception leaves NCBI's `Run`)
 /// unless the run stopped writing; the output is flushed (NCBI's `cerr` is tied to `cout`, so
 /// the output comes before the diagnostics of a failure, and a closed pipe ends the run there,
-/// without them); then the failure, or the serial stream's report of a failed write.
+/// without them); then the failure, or the serial stream's report of a failed write. The
+/// messages that the object's stream posts go to `posts` (`MaskWriter::finish`).
 pub(crate) fn finish<F: RunFailure>(
     writer: MaskWriter,
     out: &mut Ostream<'_>,
     mut result: Result<(), F>,
     outfmt: &str,
     program: &str,
+    posts: &mut Vec<u8>,
 ) -> Result<(), F> {
     if !matches!(&result, Err(failure) if failure.stops_writing()) {
-        if let Err(error) = writer.finish(out) {
+        if let Err(error) = writer.finish(out, posts) {
             result = Err(write_failure(error, program));
         }
     }

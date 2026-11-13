@@ -1293,3 +1293,12 @@ OID at the range's end). Frozen with the release build on the developer machine 
   `db.ps.q1.in.*`.
 - `tests/fixtures/pssm/q1_tfp_id5.asn.gz`: the same PSSM with its query's `local str "Query_1"` replaced by `local id 5`
   by hand (rows `db.ps.q1.in.id5.*`).
+
+## A database title outside the visible ASCII range (M4a-1b part 5)
+
+`title_bad` (version 4, nucleotide): the records of `tests/fasta/outfmt11/arch_s.fna` and `arch_tbn_s.fna`, built by NCBI
+BLAST+ 2.17.0 `makeblastdb -dbtype nucl -blastdb_version 4 -title "café db <DEL>"` (the title holds the bytes 0xC3 0xA9 and
+0x7F). The rows `db.dbtitle.*` (BLASTN and
+TBLASTN, outfmt 8 and 9) write the title into each query's Seq-annot (`desc` user object `Blast Database Title`) with `#` for
+each such byte, and NCBI posts `Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str` / `Bad char [0xC3] in string
+at line N` (outfmt 9: `at byte N`) / the title for each byte of each query's document.

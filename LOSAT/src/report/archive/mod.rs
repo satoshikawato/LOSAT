@@ -115,21 +115,29 @@ impl ArchiveEncoding {
         Self::of(std::env::var_os("ARCHIVE_FORMAT").as_deref())
     }
 
-    /// Whether this encoding writes every byte of `text` into a VisibleString of the archive
-    /// as NCBI does, without a diagnostic.
-    ///
-    /// Text and binary: only `0x20..=0x7E` (`GoodVisibleChar`); NCBI writes `#` for any other
-    /// byte and posts a `Bad char` diagnostic for each, whose text and place LOSAT does not
-    /// reproduce. XML: the archive's stream has no encoding, so every byte is written as it
-    /// is (TAB, LF and CR as character references) except `0x01..=0x1F` without those three,
-    /// which `x_VerifyChar` (`BAD_CHAR`) replaces by `#` with a diagnostic
-    /// (objostrxml.cpp:548-565).
+    /// Whether this encoding writes every byte of `text` into a string of the archive as LOSAT
+    /// reproduces it. Text and binary: every byte (NCBI writes `#` for a byte outside
+    /// `0x20..=0x7E` and posts its message, `write_archive`). XML: the archive's stream has no
+    /// encoding, so every byte is written as it is (TAB, LF and CR as character references)
+    /// except `0x01..=0x1F` without those three, which `x_VerifyChar` (`BAD_CHAR`) replaces by
+    /// `#` with a message that LOSAT does not write (objostrxml.cpp:548-565,
+    /// `SerialError::XmlControlChar`).
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-553
+    /// ```c++
+    /// inline bool BAD_CHAR(char x) {
+    ///     return (x < 0x20 && x > 0x0 && x != 0x9 && x != 0xA && x != 0xD);
+    /// }
+    /// inline char CObjectOStreamXml::x_VerifyChar(char x) {
+    ///     return BAD_CHAR(x) ?
+    ///         ReplaceVisibleChar(x, x_FixCharsMethod(), this, kEmptyStr, x_FixCharsSubst()) : x;
+    /// }
+    /// ```
     pub fn writes_text(self, text: &[u8]) -> bool {
         match self {
             ArchiveEncoding::Xml => !text
                 .iter()
                 .any(|byte| matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f)),
-            _ => text.iter().all(|&byte| is_visible(byte)),
+            _ => true,
         }
     }
 }
@@ -206,7 +214,7 @@ impl ArchiveRequest {
             if let Some(text) = text {
                 if !encoding.writes_text(text.as_bytes()) {
                     anyhow::bail!(
-                        "a {what} with a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML) is not supported by LOSAT's {label} with {option}"
+                        "a {what} with a control character (which NCBI BLAST+ replaces by '#' with an error message in the XML archive) is not supported by LOSAT's {label} with {option}"
                     );
                 }
             }
@@ -340,11 +348,46 @@ impl OptionsHandle {
 #[derive(Clone, Debug, Default)]
 struct RunState {
     log: DiagLog,
+    /// The messages of a search strategy's requests (`write_saved_posts`), each with the run's
+    /// first query of its batch and its place among the messages of `log` (`DiagLog::len` when it
+    /// was saved): a program that writes the requests of later batches before the archives of the
+    /// batches before (BLASTP, TBLASTN, TBLASTX: a call searches its batches, then reports them)
+    /// has NCBI's messages of a later request taken by that request's archive, in their place
+    /// (`take_messages_through`).
+    held: Vec<(usize, usize, Message)>,
+    /// The searched queries of the archives written so far.
+    archived: usize,
     /// The `EffectiveSearchSpace` option after the archives written so far.
     carry: SearchSpaceCarry,
     /// Whether the diagnostics that are written now are not the archive's (the warnings that
     /// another format of the same search writes, which a run of the archive alone does not).
     muted: bool,
+}
+
+impl RunState {
+    /// The messages saved since the last archive, with those of `held` whose request starts
+    /// before the searched query `end` in their places; the other held messages come first in
+    /// the next archive (saved before anything after this one).
+    fn take(&mut self, end: usize) -> Vec<Message> {
+        let log = self.log.take();
+        let held = std::mem::take(&mut self.held);
+        let (now, later): (Vec<_>, Vec<_>) =
+            held.into_iter().partition(|&(first, _, _)| first < end);
+        let mut messages = Vec::with_capacity(log.len() + now.len());
+        let mut now = now.into_iter().peekable();
+        for (index, message) in log.into_iter().enumerate() {
+            while let Some((_, _, held)) = now.next_if(|&(_, at, _)| at <= index) {
+                messages.push(held);
+            }
+            messages.push(message);
+        }
+        messages.extend(now.map(|(_, _, held)| held));
+        self.held = later
+            .into_iter()
+            .map(|(first, _, message)| (first, 0, message))
+            .collect();
+        messages
+    }
 }
 
 #[derive(Default)]
@@ -520,14 +563,75 @@ impl ArchiveHandle {
         written
     }
 
-    /// Whether messages are saved since the last archive.
-    pub fn has_messages(&self) -> bool {
-        self.with_state(|state| !state.log.is_empty())
+    /// Writes NCBI's messages of the bytes that an archive wrote as `#` (`BadChars::post`, the
+    /// request's program as the application) to `diagnostics`, without saving them: NCBI posts
+    /// them while it writes the archive, after `GetMessages`, and `ResetMessages` drops them.
+    pub fn write_unsaved_posts(
+        &self,
+        diagnostics: &mut dyn Write,
+        bad_chars: &[crate::report::serial::visible::BadChars],
+    ) -> std::io::Result<()> {
+        if bad_chars.is_empty() {
+            return Ok(());
+        }
+        let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
+        let written = crate::report::serial::visible::write_posts(
+            bad_chars,
+            Some(self.0.request.program),
+            diagnostics,
+        );
+        self.with_state(|state| state.muted = muted);
+        written
     }
 
-    /// The messages saved since the last archive.
+    /// Writes each of NCBI's messages of the bytes that a search strategy's request wrote as `#`
+    /// to `diagnostics` and saves it as one error message for the archive of the request's batch,
+    /// whose first query is the run's searched query `first_query` (NCBI's handler saves each post
+    /// made before `WriteArchive`, and the request of a batch comes after the archive of the batch
+    /// before: `held`).
+    pub fn write_saved_posts(
+        &self,
+        diagnostics: &mut dyn Write,
+        bad_chars: &[crate::report::serial::visible::BadChars],
+        first_query: usize,
+    ) -> std::io::Result<()> {
+        let program = Some(self.0.request.program);
+        for post in crate::report::serial::visible::each_post(bad_chars, program) {
+            let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
+            let written = diagnostics.write_all(&post);
+            self.with_state(|state| {
+                state.muted = muted;
+                let text = crate::report::diag_log::sanitize(&post);
+                if !muted && !text.is_empty() {
+                    let at = state.log.len();
+                    state.held.push((first_query, at, (ERROR, text)));
+                }
+            });
+            written?;
+        }
+        Ok(())
+    }
+
+    /// Whether messages are saved since the last archive.
+    pub fn has_messages(&self) -> bool {
+        self.with_state(|state| !state.log.is_empty() || !state.held.is_empty())
+    }
+
+    /// The messages saved since the last archive, those of every search strategy's request
+    /// included (`held`).
     pub fn take_messages(&self) -> Vec<Message> {
-        self.with_state(|state| state.log.take())
+        self.with_state(|state| state.take(usize::MAX))
+    }
+
+    /// The messages of the archive of the next batch, of `queries` searched queries: those saved
+    /// since the last archive, with the messages of the search strategy's requests of this batch
+    /// and the batches before in their places (`held`).
+    pub fn take_messages_through(&self, queries: usize) -> Vec<Message> {
+        self.with_state(|state| {
+            state.archived += queries;
+            let end = state.archived;
+            state.take(end)
+        })
     }
 
     /// The `EffectiveSearchSpace` option of the next archive: the batch's own value when
@@ -540,109 +644,6 @@ impl ArchiveHandle {
         })
     }
 }
-
-/// Whether `byte` is one of NCBI's visible characters (`GoodVisibleChar`: `' '` to `'~'`).
-/// In the text and binary archives NCBI writes `#` for any other byte of a VisibleString and
-/// posts a diagnostic for each, whose text and place LOSAT does not reproduce (XML: see
-/// `ArchiveEncoding::writes_text`).
-fn is_visible(byte: u8) -> bool {
-    (0x20..=0x7E).contains(&byte)
-}
-
-/// The refusal of a title that `encoding` cannot write as NCBI does (`writes_text`: in text
-/// and binary a byte outside `0x20..=0x7E`; in XML NCBI writes the byte, and only a control
-/// byte is refused). `role` is `query` or `subject`. The encoding is the environment's
-/// (`ArchiveEncoding::from_env`).
-pub(crate) fn check_titles<R: requests::RequestRecord>(
-    records: &[R],
-    role: &str,
-    label: &str,
-) -> anyhow::Result<()> {
-    check_titles_for(ArchiveEncoding::from_env(), records, role, label)
-}
-
-/// `check_titles` for a given encoding (a caller that checks record by record reads the
-/// environment once).
-pub(crate) fn check_titles_for<R: requests::RequestRecord>(
-    encoding: ArchiveEncoding,
-    records: &[R],
-    role: &str,
-    label: &str,
-) -> anyhow::Result<()> {
-    check_titles_in(encoding, records, role, label, "-outfmt 11")
-}
-
-/// The encoding whose rule the titles of a run's requests follow, for a reader that checks
-/// record by record: ASN.1 text when the run writes a search strategy (whose refusals hold the
-/// archive's in every encoding, `ArchiveEncoding::writes_text`), else the archive's
-/// (`ArchiveEncoding::from_env`); `None` without either (`check_request_titles`).
-pub fn request_title_encoding(archive: bool, strategy: bool) -> Option<ArchiveEncoding> {
-    if strategy {
-        Some(ArchiveEncoding::Text)
-    } else {
-        archive.then(ArchiveEncoding::from_env)
-    }
-}
-
-/// `check_titles` for the requests of a run: the archive's (`archive`, in the environment's
-/// encoding) and the search strategy's (`strategy`, always ASN.1 text,
-/// `strategy::StrategyExport`).
-pub(crate) fn check_request_titles<R: requests::RequestRecord>(
-    records: &[R],
-    role: &str,
-    label: &str,
-    archive: bool,
-    strategy: bool,
-) -> anyhow::Result<()> {
-    if archive {
-        check_titles(records, role, label)?;
-    }
-    if strategy {
-        check_titles_in(
-            ArchiveEncoding::Text,
-            records,
-            role,
-            label,
-            "-export_search_strategy",
-        )?;
-    }
-    Ok(())
-}
-
-/// The refusal of the first of `records` whose title `encoding` cannot write as NCBI does
-/// (`check_titles`), for the requests that `option` asks for (`-outfmt 11`,
-/// `-export_search_strategy`).
-pub(crate) fn check_titles_in<R: requests::RequestRecord>(
-    encoding: ArchiveEncoding,
-    records: &[R],
-    role: &str,
-    label: &str,
-    option: &str,
-) -> anyhow::Result<()> {
-    if let Some(record) = records
-        .iter()
-        .find(|record| !encoding.writes_text(record.title()))
-    {
-        return Err(anyhow::Error::new(TitleRefusal(format!(
-            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with {option}",
-            record.local_id()
-        ))));
-    }
-    Ok(())
-}
-
-/// The error of `check_titles`, so that a caller can tell this refusal from the others (to
-/// remove an `-out` file it created for nothing).
-#[derive(Debug)]
-pub struct TitleRefusal(String);
-
-impl std::fmt::Display for TitleRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for TitleRefusal {}
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
@@ -801,27 +802,37 @@ mod tests {
         ] {
             assert!(ok(encoding, None, None));
             assert!(ok(encoding, Some("wm&<\"'q/mg.obinary"), Some("d b&<")));
-            // A control byte: NCBI writes `#` and a diagnostic, but TAB, LF and CR in XML.
-            for bad in ["a\x01b", "a\x1fb", "a\x0bb", "a\x0eb"] {
-                assert!(!ok(encoding, Some(bad), None), "{encoding:?} {bad:?}");
-                assert!(!ok(encoding, None, Some(bad)), "{encoding:?} {bad:?}");
-            }
+        }
+        // A control byte: refused in XML (NCBI writes `#` and a message LOSAT does not write), but
+        // TAB, LF and CR, which XML writes as references; written as `#` with NCBI's message in text
+        // and binary (`write_archive`).
+        for bad in ["a\x01b", "a\x1fb", "a\x0bb", "a\x0eb"] {
+            assert!(!ok(ArchiveEncoding::Xml, Some(bad), None), "{bad:?}");
+            assert!(!ok(ArchiveEncoding::Xml, None, Some(bad)), "{bad:?}");
+            assert!(ok(ArchiveEncoding::Text, Some(bad), Some(bad)), "{bad:?}");
+            assert!(ok(ArchiveEncoding::Binary, Some(bad), Some(bad)), "{bad:?}");
         }
         for good in ["a\tb", "a\nb", "a\rb"] {
             assert!(ok(ArchiveEncoding::Xml, Some(good), Some(good)));
-            assert!(!ok(ArchiveEncoding::Text, Some(good), None));
+            assert!(ok(ArchiveEncoding::Text, Some(good), None));
         }
-        // Bytes from 0x7F up: refused in text and binary, written as they are in XML.
+        // Bytes from 0x7F up: written as they are in XML, as `#` with NCBI's message in text and
+        // binary.
         for high in ["wm\u{e9}/mg.obinary", "d\u{7f}b", "\u{1f600}"] {
-            assert!(ok(ArchiveEncoding::Xml, Some(high), Some(high)), "{high:?}");
-            for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
-                assert!(!ok(encoding, Some(high), None), "{encoding:?} {high:?}");
-                assert!(!ok(encoding, None, Some(high)), "{encoding:?} {high:?}");
+            for encoding in [
+                ArchiveEncoding::Text,
+                ArchiveEncoding::Binary,
+                ArchiveEncoding::Xml,
+            ] {
+                assert!(
+                    ok(encoding, Some(high), Some(high)),
+                    "{encoding:?} {high:?}"
+                );
             }
         }
         let refusal = ArchiveHandle::for_encoding(
-            ArchiveEncoding::Text,
-            &inputs(Some("w\u{e9}")),
+            ArchiveEncoding::Xml,
+            &inputs(Some("w\x01")),
             None,
             "BLASTN",
             &OptionsHandle::default(),
@@ -832,17 +843,64 @@ mod tests {
         assert!(refusal.contains("-outfmt 11"), "{refusal}");
     }
 
+    /// NCBI 2.17.0 (`blastn -outfmt 11`, `-window_masker_db .../w\u{e9}.obinary`, probe `wm11` of
+    /// M4a-1b part 5): `Error: (803.7) [blastn]
+    /// Blast4-archive.request.body.queue-search.algorithm-options.E.value.string` / `Bad char
+    /// [0xC3] in string at line 49` / the path, one post per byte, after the archive (not saved for
+    /// the next archive).
     #[test]
-    fn titles_with_high_bytes_are_refused_in_text_and_binary_only() {
-        let records = [FastaRecord::new("Query_1", "caf\u{e9}".as_bytes(), b"ACGT")];
-        for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
-            let refusal = check_titles_for(encoding, &records, "query", "BLASTN").unwrap_err();
-            assert!(refusal.is::<TitleRefusal>());
+    fn an_archive_posts_its_bad_bytes_without_saving_them() {
+        let handle = ArchiveHandle::new(
+            ArchiveEncoding::Text,
+            ArchiveRequest {
+                program: "blastn",
+                service: "megablast",
+                algorithm: Vec::new(),
+                database: Some(b"t\xc3\xa9al".to_vec()),
+            },
+            OptionsHandle::default(),
+        );
+        let batch = BatchArchive {
+            request: RequestInputs {
+                queries: &[],
+                subjects: &[],
+                required: None,
+                lcase_masks: &[],
+            },
+            masks: &[],
+            ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
+            search_space: 0,
+            length_adjustment: 0,
+            searched_space: None,
+        };
+        struct NoAligns;
+        impl AlignSource for NoAligns {
+            fn write<E: crate::report::serial::encoder::Encoder>(
+                &mut self,
+                _out: &mut ArchiveOut<'_, E>,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
         }
-        assert!(check_titles_for(ArchiveEncoding::Xml, &records, "query", "BLASTN").is_ok());
-        let del = [FastaRecord::new("Query_1", b"ti\x7ftle", b"ACGT")];
-        assert!(check_titles_for(ArchiveEncoding::Xml, &del, "query", "BLASTN").is_ok());
-        assert!(check_titles_for(ArchiveEncoding::Text, &del, "query", "BLASTN").is_err());
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        write_archive(&handle, &batch, &mut NoAligns, &mut sink, &mut diagnostics).unwrap();
+        let text = String::from_utf8_lossy(&sink).into_owned();
+        let line = text
+            .lines()
+            .position(|line| line.contains("database \"t##al\""))
+            .expect("the name is written with '#'")
+            + 1;
+        assert_eq!(
+            diagnostics,
+            format!(
+                "Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.subject.database\n\
+                 Bad char [0xC3] in string at line {line}\nt\u{e9}al\n\
+                 Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.subject.database\n\
+                 Bad char [0xA9] in string at line {line}\nt\u{e9}al\n"
+            )
+            .into_bytes()
+        );
+        assert!(!handle.has_messages());
     }
 
     #[test]

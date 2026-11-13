@@ -55,7 +55,10 @@ pub(super) fn run(
             Err(reason) => Err(reason.as_str()),
         },
     };
-    match work::run(&options, stdin, &mut output) {
+    let mut posts = Vec::new();
+    let result = work::run(&options, stdin, &mut output, &mut posts);
+    diag.write_text(&posts);
+    match result {
         Ok(()) => 0,
         Err(failure) => match report(failure) {
             Report::Posts { lines, status } => {

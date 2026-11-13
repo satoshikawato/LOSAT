@@ -631,24 +631,39 @@ fn write_params<E: Encoder>(enc: &mut E, params: &PssmParameters) {
     enc.end_sequence();
 }
 
-/// `value` in ASN.1 text (`MSerial_AsnText`), as one document; `Err` when the encoder refuses a
-/// value (a byte outside the visible ASCII range in a VisibleString, which the callers refuse
-/// first).
-pub fn asn_text(value: &PssmWithParameters) -> Result<Vec<u8>, super::encoder::SerialError> {
+/// A PSSM's document in ASN.1 text (`MSerial_AsnText`) and the strings it holds with bytes
+/// written as `#` (a query title outside 0x20..0x7E), whose messages NCBI posts as its stream
+/// writes the file (`SavePssmToFile`; each file is a new stream, so the lines count from 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PssmText {
+    pub bytes: Vec<u8>,
+    pub bad_chars: Vec<super::visible::BadChars>,
+}
+
+impl PssmText {
+    /// NCBI's messages of the bytes written as `#`, as the application `app` posts them
+    /// (`Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title` ...).
+    pub(crate) fn posts(&self, app: &str) -> Vec<u8> {
+        let mut text = Vec::new();
+        super::visible::BadChars::post_all(&self.bad_chars, Some(app), &mut text);
+        text
+    }
+}
+
+/// `value` in ASN.1 text (`MSerial_AsnText`), as one document.
+pub fn asn_text(value: &PssmWithParameters) -> PssmText {
     asn_text_with_karlin(value, None)
 }
 
 /// `asn_text` of `value` with `karlin`, when given, in place of the six values of its `finalData`
 /// (the object is not copied).
-pub fn asn_text_with_karlin(
-    value: &PssmWithParameters,
-    karlin: Option<FinalKarlin>,
-) -> Result<Vec<u8>, super::encoder::SerialError> {
+pub fn asn_text_with_karlin(value: &PssmWithParameters, karlin: Option<FinalKarlin>) -> PssmText {
     let mut out = Vec::new();
     let mut enc = super::asn_text::AsnTextEncoder::new(&mut out);
     write_document(&mut enc, value, karlin);
-    if let Some(error) = enc.error() {
-        return Err(error);
+    let bad_chars = enc.take_bad_chars();
+    PssmText {
+        bytes: out,
+        bad_chars,
     }
-    Ok(out)
 }

@@ -672,71 +672,73 @@ fn the_out_file_receives_the_archive() {
 }
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
-/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte.
+/// and 0x7F) is written as `#`, with NCBI's message per byte after the archive (NCBI 2.17.0,
+/// `blastx -outfmt 11`: `Error: (803.7) [blastx]
+/// Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title` / `Bad
+/// char [0xC3] in string at line 23` / the title, probe `bx11` of M4a-1b part 5; a `-subject` title
+/// under `subject.sequences.E.descr.E.title`, probe `bn11s`).
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_are_written_with_their_messages() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_bx_s.faa"));
     let plain = plain.to_str().unwrap();
-    for (bytes, name) in [
+    for (bytes, name, written, posted) in [
         (
             &b">t caf\xc3\xa9\nATGAAAGTGCTGGCGGCGGGCATTGTGGCGCTGCTG\n"[..],
             "utf8",
+            "t caf##",
+            &["0xC3", "0xA9"][..],
         ),
         (
             &b">t ti\x7ftle\nATGAAAGTGCTGGCGGCGGGCATTGTGGCGCTGCTG\n"[..],
             "del",
+            "t ti#tle",
+            &["0x7F"][..],
         ),
     ] {
         let titled = dir.join(format!("titled_{name}.fna"));
         std::fs::write(&titled, bytes).unwrap();
         let titled = titled.to_str().unwrap();
-        for (args, role) in [
-            (vec!["-query", titled, "-subject", plain], "query"),
-            (vec!["-query", plain, "-subject", titled], "subject"),
+        for (args, role, trace) in [
+            (
+                vec!["-query", titled, "-subject", plain],
+                "query",
+                "queries.bioseq-set.seq-set.E.seq.descr.E.title",
+            ),
+            (
+                vec!["-query", plain, "-subject", titled],
+                "subject",
+                "subject.sequences.E.descr.E.title",
+            ),
         ] {
             let mut full = args.clone();
             full.extend_from_slice(&["-outfmt", "11"]);
             let output = run(&[], &full, "1");
-            assert_ne!(output.status.code(), Some(0), "{role}");
-            assert!(output.stdout.is_empty(), "{role}: nothing is written");
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
-            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
+            assert_eq!(output.status.code(), Some(0), "{name} {role}: {stderr}");
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains(written),
+                "{name} {role}"
+            );
+            for byte in posted {
+                assert!(
+                    stderr.contains(&format!(
+                        "Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.{trace}\nBad char [{byte}] in string at line "
+                    )),
+                    "{name} {role}: {stderr}"
+                );
+            }
         }
-        // The same title is fine in outfmt 8: only the archive refuses it.
-        let output = run(
-            &[],
-            &["-query", titled, "-subject", plain, "-outfmt", "8"],
-            "1",
-        );
-        assert_eq!(output.status.code(), Some(0), "{name}");
-    }
-    for database in ["caf\u{e9}", "d\u{7f}b"] {
-        let output = run(
-            &[],
-            &["-query", plain, "-db", database, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
-        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A title the archive cannot write in a batch that NCBI completes before a reader error: the
-/// archive of that batch would be written before the error, so LOSAT refuses before the first
-/// byte (the prescan checks the titles batch by batch, with the run's batch size). The bad record
-/// is in the second batch (`BATCH_SIZE=60`), or after the first 10,002 letters (the default).
+/// A title with a byte outside `0x20..=0x7E` in a batch that NCBI completes before a reader error:
+/// the archive of that batch is written, with `#` and NCBI's messages, before the error
+/// (`BATCH_SIZE=60`, and the default batch of 10,002 letters).
 #[test]
-fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
+fn a_non_ascii_title_before_a_reader_error_is_written_before_the_error() {
     let dir = std::env::temp_dir().join(format!(
         "losat_outfmt11_bx_batchtitle_{}",
         std::process::id()
@@ -779,9 +781,17 @@ fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
         );
         let label = format!("{file:?} {batch_size:?}");
         assert_eq!(output.status.code(), Some(1), "{label}");
-        assert!(output.stdout.is_empty(), "{label}: nothing is written");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("bq1 caf## title"),
+            "{label}: the first batch's archive"
+        );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("visible ASCII"), "{label}: {stderr}");
+        let posted = stderr.find("Bad char [0xC3] in string at line ");
+        let error = stderr.find("CFastaReader");
+        assert!(
+            posted.is_some() && error.is_some() && posted < error,
+            "{label}: {stderr}"
+        );
         // The same file without outfmt 11 reaches the reader error (the archive's refusal is
         // not involved).
         let output = run(
@@ -804,11 +814,11 @@ fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A named FIFO as `-query` with outfmt 11 is refused at once (the prescan would open it a second
-/// time and wait for a writer that never comes): the type is decided on the open handle.
+/// A named FIFO as `-query` with outfmt 11 is read once, as a regular file is: the archive is that
+/// of the same records in a file (no read of the query before the search).
 #[cfg(unix)]
 #[test]
-fn a_fifo_query_is_refused_without_waiting() {
+fn a_fifo_query_is_read_once() {
     use std::time::{Duration, Instant};
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_fifo_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -859,14 +869,26 @@ fn a_fifo_query_is_refused_without_waiting() {
         let _ = writer.join();
     }
     let output = child.wait_with_output().unwrap();
-    let status = status.expect("the run must refuse the FIFO, not wait on it");
-    assert_eq!(status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("regular file"),
+    let status = status.expect("the run must read the FIFO, not wait on it");
+    assert_eq!(
+        status.code(),
+        Some(0),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let file = run(
+        &[],
+        &[
+            "-query",
+            engine().join(input("arch_bx_q.fna")).to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "11",
+        ],
+        "1",
+    );
+    assert_eq!(output.stdout, file.stdout);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

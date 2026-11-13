@@ -20,3 +20,13 @@
   `,... (only first 20 shown)`), status 3, after the outfmt 0 prolog. A `*` in an `iupacaa` query was searched before; it is
   an error as in NCBI. Still refused: a query with a gap letter, with lower-case `iupacaa` letters (NCBI's identity counts
   compare the Bioseq's own characters) and with letters that do not match its `length`.
+- The ASN.1 text and binary documents write a string byte outside the visible ASCII range as NCBI BLAST+ 2.17.0 does: `#`
+  in the document and NCBI's error per byte on the standard error (`Error: (803.7) [blastn]` with the member's path, such as
+  `Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title`, `Bad char [0xC3] in string at
+  line 23` or `at byte 213`, and the whole string). This covers the titles, the `-db` name and the `-window_masker_db` path of
+  `-outfmt 11` and `-export_search_strategy` in the five programs (the strategy's errors also go to the messages of the batch's
+  archive, as in NCBI), a database title in `-outfmt 8` and `9` (once per query's document), the query title of psiblast's
+  `-out_pssm` files (each file written) and convert2blastmask's `-masking_options` in `maskinfo_asn1_text` and
+  `maskinfo_asn1_bin` (`Error: (803.7) Blast-db-mask-info.algo-options`). These were refused before. blastx with `-outfmt 11`
+  or `-export_search_strategy` now also reads a query that is not a regular file (a pipe, `-query -`). Still refused: a control
+  character in the XML archive (`ARCHIVE_FORMAT=xml`) of a `-db` name or `-window_masker_db` path.

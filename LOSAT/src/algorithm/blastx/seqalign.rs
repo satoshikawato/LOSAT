@@ -64,11 +64,13 @@ pub(super) enum SeqalignSubjects<'a> {
 }
 
 /// Writes the documents of every query of `batches` to `writer`. A structured format writes
-/// none of a query's own warnings (`ReportFormat::writes_query_warnings`), so nothing goes
-/// to standard error here.
+/// none of a query's own warnings (`ReportFormat::writes_query_warnings`); what goes to
+/// standard error (`stderr`) here are the messages of the bytes that a document writes as `#`
+/// (`write_query_to`).
 pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
     writer: &mut impl Write,
+    stderr: &mut dyn Write,
     gapped: bool,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
@@ -109,6 +111,8 @@ pub(super) fn write_blastx_seqalign(
                 &hsp_records,
                 &mut buf,
                 writer,
+                stderr,
+                "blastx",
             )?;
         }
     }

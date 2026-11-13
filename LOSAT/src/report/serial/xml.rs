@@ -359,7 +359,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// ```
     /// (`SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:786: `US-ASCII`; the DTD prefix
     /// `SetDefaultDTDFilePrefix`, :789.)
-    fn begin_document(&mut self, type_name: &str) {
+    fn begin_document(&mut self, type_name: &'static str) {
         if self.piece == Piece::Xml2Document {
             // `WriteFileHeader` of the standard-XML mode: no DOCTYPE (objostrxml.cpp:232-276,
             // `m_UseSchemaRef` / `m_EnforcedStdXml`).
@@ -428,7 +428,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `BeginClassMember`: `<Type_member>` (`PrintTagName`, objostrxml.cpp:1089-1138: the
     /// class's name, an underscore and the member's name, outside the standard-XML mode; in it
     /// the member's name alone).
-    fn member(&mut self, name: &str, _tag: u8) {
+    fn member(&mut self, name: &'static str, _tag: u8) {
         if self.std_xml {
             self.push_name(&[name.as_bytes()]);
             let start = *self.marks.last().expect("just pushed");
@@ -485,7 +485,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `BeginChoice` and `BeginChoiceVariant`: in the standard-XML mode the CHOICE's type tag
     /// and the variant's name as a member tag (`<Target><db>`); outside it NCBI's stream
     /// writes an element LOSAT's outfmt 5 never needs.
-    fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
+    fn variant(&mut self, type_name: &'static str, name: &'static str, tag: u8) {
         if OBJECT {
             if type_name.contains('_') {
                 // An anonymous CHOICE: the member's tag is already open.
@@ -529,8 +529,13 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// A SEQUENCE OF VisibleString variant in the standard-XML mode: the member's tag is
     /// repeated for each string, with no wrapper around them
     /// (`<Target><subjects>Subject_1</subjects><subjects>Subject_2</subjects></Target>`).
-    fn variant_string_list<I>(&mut self, type_name: &str, name: &str, tag: u8, items: I)
-    where
+    fn variant_string_list<I>(
+        &mut self,
+        type_name: &'static str,
+        name: &'static str,
+        tag: u8,
+        items: I,
+    ) where
         I: IntoIterator,
         I::Item: AsRef<[u8]>,
     {
@@ -666,8 +671,9 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     ///             ... hi (if not 0) and lo in lower-case hex ... ';'
     /// ```
     /// A byte of 0x01-0x1F other than TAB, LF and CR is replaced by `#` with an error
-    /// message (`x_VerifyChar`, `BAD_CHAR`), which LOSAT does not write: an error here (the
-    /// callers refuse such strings first). A byte >= 0x80 makes the US-ASCII stream of outfmt 5
+    /// message (`x_VerifyChar`, `BAD_CHAR`), which LOSAT does not write: an error here
+    /// (`SerialError::XmlControlChar`; the archive refuses such a `-db` name or
+    /// `-window_masker_db` path first, `ArchiveEncoding::writes_text`, and titles hold none). A byte >= 0x80 makes the US-ASCII stream of outfmt 5
     /// throw (`CUtf8::SymbolToChar`, corelib/ncbistr.cpp:6900-6903), an error here too; the
     /// archive's stream has no encoding, so `WriteEncodedChar` takes its first branch
     /// (objostrxml.cpp:559-565) and the byte passes `x_VerifyChar` and is written as it is (the
@@ -689,7 +695,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
                     self.out.push(b"0123456789abcdef"[usize::from(byte & 0xf)]);
                     self.out.push(b';');
                 }
-                0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
+                0x01..=0x1f => self.fail(SerialError::XmlControlChar(byte)),
                 0x80..=0xff if OBJECT => self.out.push(byte),
                 0x80..=0xff => self.fail(SerialError::NonAsciiChar(byte)),
                 _ => self.out.push(byte),

@@ -46,7 +46,7 @@ use anyhow::{bail, Result};
 
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::KarlinBlk;
-use crate::report::serial::pssm::{PssmWithParameters, SeqData};
+use crate::report::serial::pssm::{PssmText, PssmWithParameters, SeqData};
 
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
@@ -207,17 +207,14 @@ impl InPssmRounds {
     pub(crate) fn files(
         &self,
         request: &PssmRequest,
-    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {
+    ) -> Result<(Option<PssmText>, Option<Vec<u8>>)> {
         let Some(object) = self.object.as_ref() else {
             return Ok((None, None));
         };
-        let asn = match request.asn_path {
-            Some(_) => Some(
-                crate::report::serial::pssm::asn_text(object)
-                    .map_err(|error| anyhow::anyhow!("{error}"))?,
-            ),
-            None => None,
-        };
+        let asn = request
+            .asn_path
+            .as_ref()
+            .map(|_| crate::report::serial::pssm::asn_text(object));
         let ascii = request.ascii_path.as_ref().map(|_| ascii_pssm(object));
         Ok((asn, ascii))
     }
@@ -256,7 +253,7 @@ impl InPssmRounds {
         request: &PssmRequest,
         ungapped: KarlinBlk,
         gapped: KarlinBlk,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<Option<PssmText>> {
         let (Some(object), Some(_)) = (self.object.as_ref(), request.asn_path.as_ref()) else {
             return Ok(None);
         };
@@ -269,9 +266,10 @@ impl InPssmRounds {
             kappa_ungapped: ungapped.k,
             h_ungapped: ungapped.h,
         };
-        crate::report::serial::pssm::asn_text_with_karlin(object, Some(karlin))
-            .map(Some)
-            .map_err(|error| anyhow::anyhow!("{error}"))
+        Ok(Some(crate::report::serial::pssm::asn_text_with_karlin(
+            object,
+            Some(karlin),
+        )))
     }
 }
 
@@ -581,7 +579,8 @@ mod tests {
             .written_back(&request(true, false), ungapped, GAPPED)
             .unwrap()
             .unwrap();
-        let read = crate::blastinput::pssm_text::read_pssm_with_parameters(&text).unwrap();
+        assert!(text.bad_chars.is_empty());
+        let read = crate::blastinput::pssm_text::read_pssm_with_parameters(&text.bytes).unwrap();
         let data = read.pssm.final_data.unwrap();
         assert_eq!(
             (data.lambda_ungapped, data.kappa_ungapped, data.h_ungapped),

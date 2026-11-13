@@ -28,7 +28,7 @@ pub(crate) mod object_stack;
 pub mod pssm;
 pub mod real;
 pub mod seqalign;
-pub(crate) mod visible;
+pub mod visible;
 pub mod xml;
 pub(crate) mod xml_reader;
 

@@ -311,7 +311,7 @@ fn a_string_byte_from_0x7f_up_is_written_as_it_is_and_a_control_byte_is_an_error
     let mut buf = Vec::new();
     let mut enc = XmlEncoder::archive(&mut buf);
     enc.visible_str(b"a\x01b");
-    assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(1)));
+    assert_eq!(enc.error(), Some(SerialError::XmlControlChar(1)));
     // The US-ASCII stream of outfmt 5 still refuses a byte >= 0x80.
     let mut buf = Vec::new();
     let mut enc = XmlEncoder::object(&mut buf);
@@ -540,7 +540,7 @@ impl<E: Encoder> Flushing<'_, E> {
 }
 
 impl<E: Encoder> Encoder for Flushing<'_, E> {
-    fn begin_document(&mut self, type_name: &str) {
+    fn begin_document(&mut self, type_name: &'static str) {
         self.inner.begin_document(type_name);
         self.flush();
     }
@@ -564,7 +564,7 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.end_named();
         self.flush();
     }
-    fn member(&mut self, name: &str, tag: u8) {
+    fn member(&mut self, name: &'static str, tag: u8) {
         self.inner.member(name, tag);
         self.flush();
     }
@@ -584,7 +584,7 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.end_list();
         self.flush();
     }
-    fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
+    fn variant(&mut self, type_name: &'static str, name: &'static str, tag: u8) {
         self.inner.variant(type_name, name, tag);
         self.flush();
     }

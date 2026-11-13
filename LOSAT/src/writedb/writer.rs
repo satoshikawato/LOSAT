@@ -129,7 +129,7 @@ impl std::fmt::Debug for WriteDb {
 // fixture p23_nonascii and the S3a probes.
 fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChars]) {
     for bad_chars in bad {
-        bad_chars.post("makeblastdb", diagnostics);
+        bad_chars.post(Some("makeblastdb"), diagnostics);
     }
 }
 

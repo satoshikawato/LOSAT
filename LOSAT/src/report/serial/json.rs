@@ -259,7 +259,7 @@ impl Encoder for JsonEncoder<'_> {
     ///     }
     /// }
     /// ```
-    fn begin_document(&mut self, type_name: &str) {
+    fn begin_document(&mut self, type_name: &'static str) {
         if self.array_element {
             return;
         }
@@ -339,7 +339,7 @@ impl Encoder for JsonEncoder<'_> {
     ///     m_SkippedMemberId.erase();
     /// }
     /// ```
-    fn member(&mut self, name: &str, _tag: u8) {
+    fn member(&mut self, name: &'static str, _tag: u8) {
         self.next_element();
         self.write_key(name);
     }
@@ -425,7 +425,7 @@ impl Encoder for JsonEncoder<'_> {
     ///     WriteMemberId(id);
     /// }
     /// ```
-    fn variant(&mut self, _type_name: &str, name: &str, _tag: u8) {
+    fn variant(&mut self, _type_name: &'static str, name: &'static str, _tag: u8) {
         self.start_block();
         self.next_element();
         self.write_key(name);

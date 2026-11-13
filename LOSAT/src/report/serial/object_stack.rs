@@ -2,9 +2,10 @@
 //! that a stream reads or writes, whose names make `GetStackTraceASN`. One `ObjectStack` is held
 //! by each stream that LOSAT reads or writes as NCBI's object streams do: the shared ASN.1 text
 //! reader (`asn_text_reader::Reader`: PSSM, Seq-id, rpsbproc archive and mask text), the binary
-//! mask reader (`writedb::mask_info::ber`) and the writer of definition lines
-//! (`writedb::header`); the trace goes into every note of a replaced byte
-//! (`visible::BadChars`).
+//! mask reader (`writedb::mask_info::ber`), the writer of definition lines (`writedb::header`)
+//! and the ASN.1 text and binary encoders of every serialized document (`asn_text`, `asn_ber`:
+//! PSSM, Seq-annot, archive, search strategy, mask files); the trace goes into every note of a
+//! replaced byte (`visible::BadChars`).
 // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-119
 // ```c++
 // string CObjectStack::GetStackTraceASN(void) const
@@ -93,6 +94,15 @@ impl ObjectStack {
     /// The frames above `depth` dropped.
     pub(crate) fn truncate(&mut self, depth: usize) {
         self.frames.truncate(depth);
+    }
+
+    /// The frame on top names `name`: a writer's container frame becomes the element frame `E`
+    /// at its first element (`BeginContainerElement`; no string is written between two elements,
+    /// so one frame serves them all).
+    pub(crate) fn set_top(&mut self, name: &'static str) {
+        if let Some(top) = self.frames.last_mut() {
+            *top = name;
+        }
     }
 
     /// `SetTopMemberId`: the frame at `depth` names the member `name`.

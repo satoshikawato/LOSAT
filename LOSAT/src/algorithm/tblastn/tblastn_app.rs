@@ -172,6 +172,7 @@ impl TblastnArgs {
                     args.database_name(),
                     "TBLASTN",
                     &options,
+                    args.archive.as_ref(),
                 )
             })
             .transpose()?;
@@ -716,7 +717,6 @@ fn open_search_database(
                 crate::report::serial::seqalign::check_database(
                     serial,
                     database.name(),
-                    &database.pairwise_database().definition,
                     crate::blastinput::app::Program::Tblastn,
                 )?;
             }
@@ -1972,31 +1972,8 @@ fn search(
         //                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
         // ```
         // The archive of each batch that NCBI completes holds its queries and, with `-subject`,
-        // every subject. The batch that stops the run writes neither: a reader error, `Empty
-        // CBlastQueryVector` or a batch of queries without letters (`read_query_batches`), and a
-        // batch whose search fails (`failed`: the sequence file or a header file that NCBI cannot
-        // read); the error archive holds no sequence. So a title the archive cannot write is
-        // refused here, where the batches have been searched and their definition lines read, and
-        // before the first byte of any report.
-        // (The search strategy's requests check their titles where they are written, in the
-        // loop above.)
-        if args.archive.is_some() && !queries.is_empty() {
-            super::archive::check_titles(queries, "query")?;
-            super::archive::check_titles(subject_records, "subject")?;
-        }
-        // The request of the batch that stops the run (every query without letters) comes after
-        // these reports (below): its titles are refused before them, when the reports end with
-        // that batch (no batch failed, and NCBI's formats do not stop first).
-        if let (Some(strategy), Some(requests), Some(span), None) = (
-            args.strategy.as_ref(),
-            requests.as_ref(),
-            batches.stop_batch.clone(),
-            &failed,
-        ) {
-            if strategy.takes(span.clone()) {
-                requests.check_titles(&searched_queries[span])?;
-            }
-        }
+        // every subject (a byte of a title outside 0x20..0x7E as `#`, with its message,
+        // `report::archive::write_archive`).
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
         // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640

@@ -249,17 +249,27 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
 ///     output_stream << flush;
 ///     return 0;
 /// ```
+/// `posts` gets the messages that the serial documents post as they are written
+/// (`MaskWriter::print`), which the caller writes before the run's failure.
 pub(super) fn run(
     options: &Options<'_>,
     stdin: &mut Cin<'_>,
     out: &mut dyn Write,
+    posts: &mut Vec<u8>,
 ) -> Result<(), Failure> {
     let mut writer = writer(options)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(out);
-    let result = masks_of_input(options, stdin, &mut writer, &mut out);
-    finish(writer, &mut out, result, options.outfmt, super::PROGRAM)
+    let result = masks_of_input(options, stdin, &mut writer, &mut out, posts);
+    finish(
+        writer,
+        &mut out,
+        result,
+        options.outfmt,
+        super::PROGRAM,
+        posts,
+    )
 }
 
 fn masks_of_input(
@@ -267,6 +277,7 @@ fn masks_of_input(
     stdin: &mut Cin<'_>,
     writer: &mut MaskWriter,
     out: &mut Ostream<'_>,
+    posts: &mut Vec<u8>,
 ) -> Result<(), Failure> {
     let mut source = reader(options, stdin)?;
     let level = options.level as u32;
@@ -283,7 +294,7 @@ fn masks_of_input(
             iupac: &record.iupac,
             protein: false,
         };
-        writer.print(&seq, &mask, options.parse_seqids, out)?;
+        writer.print(&seq, &mask, options.parse_seqids, out, posts)?;
         serial_write_failure::<Failure>(out, options.outfmt, super::PROGRAM)?;
     }
     Ok(())

@@ -382,15 +382,10 @@ fn reader_batches(
 /// the epilogs and the hit list of a search of records.
 fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Result<()> {
     let &RunReports {
-        lowercase,
-        query_records,
-        query_range,
-        batch_size,
         resolved,
         subjects,
         shown,
         ref database,
-        archive,
         out,
         ref xml_scan,
         ..
@@ -410,28 +405,9 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         .iter_mut()
         .map(|format| format.sink.open())
         .collect::<io::Result<Vec<_>>>()?;
-    // The archive (outfmt 11) refuses a title where it writes the batch, after its search
-    // (`archive::check_batch_titles`, below): when a batch that the search may write has a query
-    // title it cannot write (`archive::batches_may_refuse`, on the records in memory) or the
-    // subjects have one, every format is held in order from its prolog on (`archive::ArchiveHold`),
-    // so that the refusal follows no byte, as on the command line. Otherwise no batch's check can
-    // refuse, and the batches are not checked again (`titles_may_refuse`).
-    let titles_may_refuse = archive.is_some()
-        && batch_size > 0
-        && (archive::batches_may_refuse(&resolved[0], true, false, &mut |deliver| {
-            reader_batches(
-                query_records,
-                lowercase,
-                query_range,
-                batch_size,
-                true,
-                deliver,
-                &mut |_| Ok(()),
-            )
-        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
-    // holds every format in order, as the archive's titles do and as the command line holds its
+    // holds every format in order, as the command line holds its
     // document (`blast_xml::HeldOutput`), so that the refusal follows no byte. So does a `-db` run
     // in which a later batch could still refuse the taxonomy database or a subject with parsed
     // Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
@@ -447,7 +423,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 Some(run) => run.database.later_batch_may_refuse(writes_names),
                 None => super::blast_xml::subjects_may_be_refused(subjects),
             });
-    let hold = (titles_may_refuse || xml_may_refuse).then(archive::ArchiveHold::new);
+    let hold = xml_may_refuse.then(archive::ArchiveHold::new);
     let mut writers: Vec<Box<dyn Write + '_>> = match &hold {
         Some(hold) => {
             hold.hold();
@@ -481,23 +457,18 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
         run,
         &mut writers,
         &mut documents,
-        titles_may_refuse,
         wants_hits,
         diagnostics,
         observer,
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
-    // error: when the archive's titles are what it held for (`titles_may_refuse`), NCBI's bytes
-    // if the error is NCBI's own (its error archive follows where NCBI writes one,
-    // `ReportOutputs::finish_archive`) and nothing after LOSAT's refusal (`ArchiveHold::end_with`);
-    // when only the documents are, nothing after one of their refusals and the bytes of the
-    // batches before after any other error (`ArchiveHold::end_document_with`), as the command line.
+    // error: nothing after one of the documents' refusals and the bytes of the batches before
+    // after any other error (`ArchiveHold::end_document_with`), as the command line.
     // The observer's events of a held run come before its bytes reach their sinks, so a position
     // read from a sink at an event is not that of the event (`FormatObserver`): the same for every
     // hold of this function, a `-subject` run's too.
     match (&hold, &written) {
         (Some(hold), Ok(_)) => hold.release()?,
-        (Some(hold), Err(error)) if titles_may_refuse => hold.end_with(error),
         (Some(hold), Err(error)) => hold.end_document_with(error),
         (None, _) => {}
     }
@@ -513,14 +484,12 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
 
 /// `report_batches` from the prologs to the epilogs, into `writers` (each format's, behind the
 /// hold of a run that holds its formats) and `documents` (the writer of each XML2 or JSON
-/// document): whatever ends it, `report_batches` then ends the hold. `titles_may_refuse`: a batch
-/// that the search may write has a title the archive cannot write. Returns the run's hit list
+/// document): whatever ends it, `report_batches` then ends the hold. Returns the run's hit list
 /// (`wants_hits`) and the database sequences it names.
 fn write_run(
     run: &RunReports<'_>,
     writers: &mut [Box<dyn Write + '_>],
     documents: &mut [Option<super::blast_xml::RunXml2>],
-    titles_may_refuse: bool,
     wants_hits: bool,
     diagnostics: &mut &mut (dyn Write + Send),
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
@@ -663,18 +632,6 @@ fn write_run(
             )?),
             None => None,
         };
-        // The archive (outfmt 11) of this batch, which NCBI writes once its search and the read of
-        // its definition lines have not failed: the titles it cannot write are refused before any
-        // format of the batch (`archive::check_batch_titles`; the run holds its formats, so the
-        // refusal follows no byte of the batches before); only a run whose read before the search
-        // found such a title can refuse (`titles_may_refuse`).
-        if titles_may_refuse {
-            archive::check_batch_titles(
-                queries,
-                database.is_none().then_some(subjects),
-                queries_before == 0,
-            )?;
-        }
         let hits = match made_hits {
             true => Some(
                 report::pairwise_hits(
@@ -762,6 +719,7 @@ fn write_run(
                         names,
                     },
                     writer,
+                    &mut *diagnostics,
                 )
                 .map_err(archive_error)?;
                 writer.flush().map_err(output_error)?;
@@ -978,7 +936,6 @@ fn search_database(
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastx,
             )?;
         }

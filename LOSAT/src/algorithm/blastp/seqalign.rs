@@ -104,7 +104,8 @@ pub(crate) fn write_blastp_seqalign(
     subject_placements: &Placements,
     engine_counts: &EngineCounts,
     writer: &mut dyn Write,
-    warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
+    app: &str,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,
@@ -118,6 +119,7 @@ pub(crate) fn write_blastp_seqalign(
         queries,
         writer,
         warnings,
+        app,
         |q_idx, hit_list, subject_records, hsp_records| {
             query_records(
                 hit_list,

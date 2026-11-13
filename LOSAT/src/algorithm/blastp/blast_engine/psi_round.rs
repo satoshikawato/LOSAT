@@ -64,7 +64,6 @@ pub(super) fn search_rounds(
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    titles_may_refuse: bool,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
     // chunks of a split query are set up without the PSSM; `in_pssm::check_in_pssm_options`)
@@ -109,7 +108,12 @@ pub(super) fn search_rounds(
                     &plan.request,
                     args.out.as_deref().filter(|path| path.as_os_str() != "-"),
                 )
-                .write(asn.as_deref(), ascii.as_deref())?;
+                .write(
+                    asn.as_ref(),
+                    ascii.as_deref(),
+                    args.app.ncbi_name(),
+                    &mut *outputs.diagnostics,
+                )?;
             }
         } else {
             write_reports_without_queries(args, subject_source, subject_label, outputs)?;
@@ -128,7 +132,6 @@ pub(super) fn search_rounds(
                 outputs,
                 pool,
                 epilog,
-                titles_may_refuse,
             )
         })?;
     }
@@ -191,7 +194,6 @@ fn run_queries(
     outputs: &mut ReportOutputs<'_>,
     pool: &crate::utils::threading::SearchPool<'_>,
     epilog: bool,
-    titles_may_refuse: bool,
 ) -> Result<()> {
     let mut files = RoundFiles::new(
         &plan.request,
@@ -232,13 +234,21 @@ fn run_queries(
         while state.go() {
             let round = state.number();
             match (&pssm, input_files.as_mut()) {
-                (Some(current), _) => {
-                    files.write(current.asn.as_deref(), current.ascii.as_deref())?
-                }
+                (Some(current), _) => files.write(
+                    current.asn.as_ref(),
+                    current.ascii.as_deref(),
+                    args.app.ncbi_name(),
+                    &mut *outputs.diagnostics,
+                )?,
                 (None, Some((asn, ascii))) if round == 1 => {
                     // NCBI's prolog comes before the rounds (`PrintProlog`), so before a file
                     // that cannot be written stops the run here.
-                    if let Err(error) = files.write(asn.as_deref(), ascii.as_deref()) {
+                    if let Err(error) = files.write(
+                        asn.as_ref(),
+                        ascii.as_deref(),
+                        args.app.ncbi_name(),
+                        &mut *outputs.diagnostics,
+                    ) {
                         if calls == 0 {
                             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                         }
@@ -311,7 +321,6 @@ fn run_queries(
                     last_call: false,
                     psi_round: Some(&io),
                     stopped_pssms: None,
-                    titles_may_refuse,
                     query_scopes: batches
                         .query_scopes
                         .as_ref()
@@ -374,12 +383,20 @@ fn run_queries(
         // ASCII PSSM is round 1's (`m_AncillaryData` is still the input PSSM's).
         if plan.save_last {
             match (&pssm, &plan.input, &input_files, searched_input) {
-                (Some(current), _, _, _) => {
-                    files.write(current.asn.as_deref(), current.ascii.as_deref())?
-                }
+                (Some(current), _, _, _) => files.write(
+                    current.asn.as_ref(),
+                    current.ascii.as_deref(),
+                    args.app.ncbi_name(),
+                    &mut *outputs.diagnostics,
+                )?,
                 (None, Some(input), Some((_, ascii)), Some((ungapped, gapped))) => {
                     let asn = input.written_back(&plan.request, ungapped, gapped)?;
-                    files.write(asn.as_deref(), ascii.as_deref())?;
+                    files.write(
+                        asn.as_ref(),
+                        ascii.as_deref(),
+                        args.app.ncbi_name(),
+                        &mut *outputs.diagnostics,
+                    )?;
                 }
                 _ => {}
             }

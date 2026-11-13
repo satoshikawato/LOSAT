@@ -307,10 +307,11 @@ fn switches_off_write_the_same_strategy_files() {
     }
 }
 
-/// blastx refuses a query that is not a regular file (a pipe) with the strategy, as with outfmt 11
-/// (DECISIONS 26 of line RG): the titles of the whole input are read before the first batch.
+/// blastx reads a query that is not a regular file (a pipe) once with the strategy, as a regular
+/// file: the strategy file and the report are those of the frozen row `blastx.sub` (the same
+/// records from a file).
 #[test]
-fn blastx_refuses_a_piped_query() {
+fn blastx_reads_a_piped_query_once() {
     use std::io::Write;
     let dir = std::env::temp_dir().join(format!("losat_strategy_pipe_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -337,15 +338,11 @@ fn blastx_refuses_a_piped_query() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("run losat");
-    // The refusal may come before the whole input is read.
     let _ = child.stdin.take().unwrap().write_all(&query);
     let output = child.wait_with_output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(output.stdout.is_empty());
-    assert!(
-        stderr.contains("unsupported BLASTX query input for -export_search_strategy"),
-        "{stderr}"
-    );
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(Some(output.stdout), frozen("blastx.sub", "out"));
+    assert_eq!(std::fs::read(&ss).ok(), frozen("blastx.sub", "ss"));
     let _ = std::fs::remove_dir_all(&dir);
 }

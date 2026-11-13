@@ -893,6 +893,7 @@ pub fn run(
                 args.database_name(),
                 "TBLASTX",
                 &options,
+                args.archive.as_ref(),
             )
         })
         .transpose()?;
@@ -968,13 +969,7 @@ pub fn run(
             return Err(error);
         }
     };
-    // Whether this run creates `-out` (a Q3 refusal removes a file it created for nothing).
-    let out_is_new = args
-        .out
-        .as_deref()
-        .is_some_and(|path| path.as_os_str() != "-" && !path.exists());
     let out_file = open_out_file(&args)?;
-    let out_path = args.out.clone();
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
@@ -1023,21 +1018,8 @@ pub fn run(
     }
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
-    // A title that the archive cannot hold is refused where NCBI would write its Bioseq, which
-    // is known only after the search. When the file was not there and nothing was written to it,
-    // no empty file is left behind (the other programs create `-out` before their option checks,
-    // as NCBI does, and leave it empty: DECISIONS 24 f of line NP, series SM).
     let write_failed = stream.failed;
     drop(stream);
-    if out_is_new
-        && matches!(&result, Err(error) if error.downcast_ref::<crate::report::archive::TitleRefusal>().is_some())
-    {
-        if let Some(path) = out_path.as_deref() {
-            if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
     // ```c
     //     catch (const std::ios::failure&) {                                      \
@@ -1488,7 +1470,6 @@ fn open_search_database(
                 crate::report::serial::seqalign::check_database(
                     serial,
                     database.name(),
-                    &database.pairwise_database().definition,
                     crate::blastinput::app::Program::Tblastx,
                 )?;
             }
@@ -2420,8 +2401,15 @@ fn write_tblastx_outputs(
             .map(|observer| FormatProbe::new(observer, format_index));
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
         // name (`x_CheckTaxDB`, `tabular`).
+        // So do the messages of the bytes that the Seq-annot formats write as `#`
+        // (`report::serial::write_query_to`).
         let mut warnings = (warning_lines.is_some()
-            || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
+            || matches!(
+                output_format,
+                report::TblastxOutputFormat::Xml2(_)
+                    | report::TblastxOutputFormat::Seqalign(_)
+                    | report::TblastxOutputFormat::Archive
+            )
             || matches!(
                 output_format,
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
@@ -2642,7 +2630,9 @@ fn write_tblastx_outputs(
                         },
                     },
                     run.subject_letters,
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("a Seq-annot format has its warnings"),
                 )?
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
@@ -2662,7 +2652,7 @@ fn write_tblastx_outputs(
                 crate::algorithm::tblastx::archive::write_tblastx_archives(
                     handle,
                     &archive_data(run, &hits, &engine_counts, &subjects),
-                    warnings.as_mut(),
+                    warnings.as_mut().expect("the archive has its warnings"),
                     &mut writer,
                 )?
             }
@@ -4138,18 +4128,6 @@ impl BatchReports<'_> {
             };
             &batch_runs
         };
-        // The BLAST archive (outfmt 11) writes the Bioseq of every query of the batches NCBI
-        // completes and, with `-subject`, of every subject in each archive: a title it cannot
-        // write is refused before the first byte, exactly where NCBI would write that Bioseq.
-        // NCBI writes none of them when no batch is completed (an error archive or nothing).
-        // (The search strategy's requests check their titles where they are written,
-        // `run_batch_loop`.)
-        if self.args.archive.is_some() && !reported.is_empty() {
-            super::super::archive::check_titles(queries, "query")?;
-            if let ShownSubjects::Fasta { records, .. } = self.subjects {
-                super::super::archive::check_titles(records, "subject")?;
-            }
-        }
         let mut hits = done.hits;
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).

@@ -104,8 +104,8 @@ impl PsiRoundPlan {
         }))
     }
 
-    /// The PSSM files of the run, for the checks before the search (`check_pssm_titles`,
-    /// `check_pssm_files`); `None` without `-out_pssm` and `-out_ascii_pssm`.
+    /// The PSSM files of the run, for the check before the search (`check_pssm_files`); `None`
+    /// without `-out_pssm` and `-out_ascii_pssm`.
     pub(crate) fn file_request(&self) -> Option<&PssmRequest> {
         (self.request.asn_path.is_some() || self.request.ascii_path.is_some())
             .then_some(&self.request)
@@ -451,10 +451,20 @@ impl RoundFiles {
     /// with its serial stream's write error (DECISIONS 10 of line PS: after the report of the round
     /// before, or with `-in_pssm` before round 1, after the prolog; no partial file is left); an ASCII file that cannot be opened gets nothing, as
     /// NCBI's unchecked `ofstream`.
-    pub(crate) fn write(&mut self, asn: Option<&[u8]>, ascii: Option<&[u8]>) -> Result<()> {
-        if let (Some(stream), Some(bytes)) = (self.asn.as_mut(), asn) {
+    /// The messages of the bytes that the ASN.1 file writes as `#` (`PssmText::posts`, NCBI's
+    /// `app`) go to `diagnostics` as its stream writes the file, before the bytes.
+    pub(crate) fn write(
+        &mut self,
+        asn: Option<&crate::report::serial::pssm::PssmText>,
+        ascii: Option<&[u8]>,
+        app: &str,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<()> {
+        if let (Some(stream), Some(asn)) = (self.asn.as_mut(), asn) {
             let file = stream.next_file();
             self.check.check("-out_pssm", &file.path)?;
+            diagnostics.write_all(&asn.posts(app))?;
+            let bytes = &asn.bytes;
             let written = file.open().and_then(|mut out| {
                 out.write_all(bytes)?;
                 out.flush()

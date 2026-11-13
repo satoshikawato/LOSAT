@@ -30,19 +30,19 @@ use super::names::NO_DEFINITION_LINE;
 use super::records::{QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
 use crate::common::GapEditOp;
 
-pub(crate) fn string_member<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: &[u8]) {
+pub(crate) fn string_member<E: Encoder>(enc: &mut E, name: &'static str, tag: u8, value: &[u8]) {
     enc.member(name, tag);
     enc.visible_str(value);
     enc.end_member();
 }
 
-pub(crate) fn int_member<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: i32) {
+pub(crate) fn int_member<E: Encoder>(enc: &mut E, name: &'static str, tag: u8, value: i32) {
     enc.member(name, tag);
     enc.int(value);
     enc.end_member();
 }
 
-pub(crate) fn real_member<E: Encoder>(enc: &mut E, name: &str, tag: u8, value: f64) {
+pub(crate) fn real_member<E: Encoder>(enc: &mut E, name: &'static str, tag: u8, value: f64) {
     enc.member(name, tag);
     enc.real(value);
     enc.end_member();

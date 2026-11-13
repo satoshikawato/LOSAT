@@ -179,6 +179,11 @@ impl DiagLog {
     pub fn is_empty(&self) -> bool {
         self.saved.is_empty()
     }
+
+    /// The number of messages saved since the last call of `take`.
+    pub fn len(&self) -> usize {
+        self.saved.len()
+    }
 }
 
 /// `NStr::Sanitize(str)` with its default flags (`fSS_print`): a printable ASCII byte stays,

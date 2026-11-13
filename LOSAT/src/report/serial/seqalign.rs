@@ -64,7 +64,7 @@ use super::asn_ber::AsnBinaryEncoder;
 use super::asn_text::AsnTextEncoder;
 use super::encoder::{Encoder, SerialError};
 use super::json::JsonEncoder;
-use super::visible::good_visible_char;
+use super::visible::BadChars;
 
 /// The serialized formats of a Seq-annot of Seq-aligns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -775,46 +775,12 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
     enc.end_member();
 }
 
-/// LOSAT's refusals of a database search (`-db name`, title `title`: NCBI's
-/// `m_DbInfo.front().definition`, `PairwiseDatabase::definition`) for a Seq-annot format,
-/// made before the search:
-/// - a database named `n/a` or `SRA` (compared without case), for which NCBI writes another
-///   third user object (`CreateSeqAnnotFromSeqAlignSet` above);
-/// - for the ASN.1 text, a title with a byte outside 0x20..0x7E, which NCBI's stream
-///   replaces by `#` with an error message on standard error (the default
-///   `eFNP_ReplaceAndWarn`).
-///
-/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
-/// ```c++
-/// NCBI_PARAM_ENUM_ARRAY(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE)
-/// {
-///     {"SKIP",               eFNP_Skip},
-///     ...
-/// };
-/// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE);
-/// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE, eFNP_ReplaceAndWarn);
-/// ```
-/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1871
-/// ```c++
-/// char ReplaceVisibleChar(char c, EFixNonPrint fix_method,
-///     const CObjectStack* io, const CTempString& str, char subst)
-/// {
-///     ...
-///     if ( fix_method != eFNP_Replace ) {
-///         string message;
-///         if (io != NULL) {
-///             message += io->GetStackTrace() + "\n";
-///         }
-///         message += "Bad char [0x" +
-///                    NStr::NumericToString((unsigned char)c,0,16)+
-///                    "] in string";
-/// ```
-pub fn check_database(
-    format: SerialFormat,
-    name: &str,
-    title: &[u8],
-    program: Program,
-) -> anyhow::Result<()> {
+/// LOSAT's refusal of a database search (`-db name`) for a Seq-annot format, made before the
+/// search: a database named `n/a` or `SRA` (compared without case), for which NCBI writes another
+/// third user object (`CreateSeqAnnotFromSeqAlignSet` above). (A database title with a byte
+/// outside 0x20..0x7E is written with `#` for each such byte, and NCBI's error messages are posted
+/// for each query's document: `write_query_to`.)
+pub fn check_database(format: SerialFormat, name: &str, program: Program) -> anyhow::Result<()> {
     let number = match format {
         SerialFormat::AsnText => 8,
         SerialFormat::AsnBinary => 9,
@@ -823,14 +789,6 @@ pub fn check_database(
     if name.eq_ignore_ascii_case("n/a") || name.eq_ignore_ascii_case("SRA") {
         anyhow::bail!(
             "a database named \"{name}\" (which NCBI BLAST+ describes as no database or as SRA in output format {number}) is not supported by LOSAT's {}",
-            program.name()
-        );
-    }
-    if matches!(format, SerialFormat::AsnText | SerialFormat::AsnBinary)
-        && title.iter().any(|&byte| !good_visible_char(byte))
-    {
-        anyhow::bail!(
-            "a database title with a character outside the visible ASCII range (which NCBI BLAST+ replaces by '#' with an error message in output format {number}) is not supported by LOSAT's {}",
             program.name()
         );
     }
@@ -1951,9 +1909,11 @@ impl std::error::Error for SeqAlignError {}
 
 /// Appends to `buf` the document of one query (`format`): the Seq-annot of its Seq-aligns,
 /// from `hsps` (in NCBI's Seq-align order: subject by subject in hit-list order, each
-/// subject's HSPs sorted by e-value) and the `subjects` they index. Returns false and
-/// appends nothing when the query has no Seq-align (`results.HasAlignments()` is false:
-/// NCBI writes nothing for it). On an error, `buf` is left as it was.
+/// subject's HSPs sorted by e-value) and the `subjects` they index, and to `bad_chars` the
+/// strings that the document holds with bytes written as `#` (`Encoder::take_bad_chars`).
+/// Returns false and appends nothing when the query has no Seq-align
+/// (`results.HasAlignments()` is false: NCBI writes nothing for it). On an error, `buf` is left
+/// as it was.
 pub fn write_query(
     format: SerialFormat,
     run: &RunRecord<'_>,
@@ -1961,6 +1921,7 @@ pub fn write_query(
     subjects: &[SubjectRecord<'_>],
     hsps: &[HspRecord<'_>],
     buf: &mut Vec<u8>,
+    bad_chars: &mut Vec<BadChars>,
 ) -> Result<bool, SeqAlignError> {
     if !writes(run) {
         return Err(SeqAlignError::Unsupported(run.program));
@@ -1973,16 +1934,19 @@ pub fn write_query(
         SerialFormat::AsnText => {
             let mut enc = AsnTextEncoder::new(buf);
             write_seq_annot(&mut enc, run, query, subjects, hsps);
+            bad_chars.extend(enc.take_bad_chars());
             enc.error()
         }
         SerialFormat::AsnBinary => {
             let mut enc = AsnBinaryEncoder::new(buf);
             write_seq_annot(&mut enc, run, query, subjects, hsps);
+            bad_chars.extend(enc.take_bad_chars());
             enc.error()
         }
         SerialFormat::Json => {
             let mut enc = JsonEncoder::new(buf);
             write_seq_annot(&mut enc, run, query, subjects, hsps);
+            bad_chars.extend(enc.take_bad_chars());
             enc.error()
         }
     };
@@ -1994,7 +1958,11 @@ pub fn write_query(
 }
 
 /// Writes the document of one query to `writer` through `buf`, which is cleared first: what
-/// `write_query` makes, or nothing when the query has no Seq-align.
+/// `write_query` makes, or nothing when the query has no Seq-align. The messages of the bytes
+/// written as `#` (a database title outside 0x20..0x7E: `Seq-annot.desc.E.user.data.E.label.str`)
+/// go to `diagnostics` as NCBI's application `app` posts them while its stream writes the
+/// document (each query's document is a new stream: its lines and bytes count from its start),
+/// after the documents before it.
 pub(crate) fn write_query_to(
     format: SerialFormat,
     run: &RunRecord<'_>,
@@ -2003,25 +1971,35 @@ pub(crate) fn write_query_to(
     hsps: &[HspRecord<'_>],
     buf: &mut Vec<u8>,
     writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+    app: &str,
 ) -> anyhow::Result<()> {
     buf.clear();
-    if write_query(format, run, query, subjects, hsps, buf)? {
+    let mut bad_chars = Vec::new();
+    let written = write_query(format, run, query, subjects, hsps, buf, &mut bad_chars)?;
+    if !bad_chars.is_empty() {
+        writer.flush()?;
+        super::visible::write_posts(&bad_chars, Some(app), diagnostics)?;
+    }
+    if written {
         writer.write_all(buf)?;
     }
     Ok(())
 }
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it. `records` fills the subject and HSP records of the hit list of
-/// query `q_idx` (replacing their contents) for `write_query_to`; a query without a hit list
-/// writes nothing but its warnings.
+/// query's warnings before it and the messages of its document's bad bytes after them
+/// (`write_query_to`, to the warnings' diagnostics). `records` fills the subject and HSP records
+/// of the hit list of query `q_idx` (replacing their contents) for `write_query_to`; a query
+/// without a hit list writes nothing but its warnings.
 pub(crate) fn write_hit_list_seqaligns<'a, L>(
     format: SerialFormat,
     run: &RunRecord<'_>,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
     writer: &mut dyn Write,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
+    app: &str,
     mut records: impl FnMut(usize, &'a L, &mut Vec<SubjectRecord<'a>>, &mut Vec<HspRecord<'a>>),
 ) -> anyhow::Result<()> {
     let mut subject_records: Vec<SubjectRecord<'a>> = Vec::new();
@@ -2029,9 +2007,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
+        warnings.before_query(q_idx, &mut *writer)?;
         let Some(hit_list) = hit_list else {
             continue;
         };
@@ -2044,6 +2020,8 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
             &hsp_records,
             &mut buf,
             &mut *writer,
+            &mut *warnings.sink,
+            app,
         )?;
     }
     Ok(())

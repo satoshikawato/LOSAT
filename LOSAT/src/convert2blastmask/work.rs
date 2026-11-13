@@ -104,7 +104,10 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match run_masks(args, stdin, out) {
+    let mut posts = Vec::new();
+    let result = run_masks(args, stdin, out, &mut posts);
+    diag.write_text(&posts);
+    match result {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
             diag.cerr(format!("{}\n", exception.what()).as_bytes());
@@ -122,7 +125,13 @@ pub(super) fn run(
 }
 
 /// The body of `Run`'s `try` block, and the writer's destruction after it.
-fn run_masks(args: &Args, stdin: &mut Cin<'_>, out: &mut dyn Write) -> Result<(), Failure> {
+/// `posts` gets the messages that the object's stream posts (`MaskWriter::finish`).
+fn run_masks(
+    args: &Args,
+    stdin: &mut Cin<'_>,
+    out: &mut dyn Write,
+    posts: &mut Vec<u8>,
+) -> Result<(), Failure> {
     let value = |name| {
         args.value(name)
             .expect("a key with a default or a mandatory key")
@@ -152,6 +161,7 @@ fn run_masks(args: &Args, stdin: &mut Cin<'_>, out: &mut dyn Write) -> Result<()
         result,
         outfmt,
         super::PROGRAM,
+        posts,
     )
 }
 

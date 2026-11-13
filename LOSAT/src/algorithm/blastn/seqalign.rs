@@ -97,7 +97,7 @@ pub(crate) fn write_blastn_seqalign(
     subjects: SubjectNames<'_>,
     subject_placements: &Placements,
     writer: &mut dyn Write,
-    warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
@@ -111,6 +111,7 @@ pub(crate) fn write_blastn_seqalign(
         queries,
         writer,
         warnings,
+        "blastn",
         |_, hit_list, subject_records, hsp_records| {
             query_records(
                 hit_list,

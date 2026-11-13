@@ -2,7 +2,8 @@
 //! outfmt 11) over its output buffer (`COStreamBuffer`), for the calls of `Encoder`.
 //!
 //! Each document is written by a new stream, so the indentation and the line length start
-//! at 0 for every document.
+//! at 0 and the line count (`GetPosition`, in the messages of a replaced byte) at 1 for every
+//! document.
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:816-827
 //! ```c++
@@ -31,8 +32,9 @@
 //! in the buffer, and the whole document stands for the buffer here.
 
 use super::encoder::{Encoder, SerialError};
+use super::object_stack::ObjectStack;
 use super::real::write_asn_text_double;
-use super::visible::good_visible_char;
+use super::visible::{good_visible_char, BadChars, Position, SUBST};
 
 /// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
 const STRING_WRAP: usize = 78;
@@ -51,7 +53,43 @@ pub struct AsnTextEncoder<'b> {
     line_length: usize,
     /// `CObjectOStreamAsn::m_BlockStart`.
     block_start: bool,
-    error: Option<SerialError>,
+    /// `COStreamBuffer::m_Line`: 1 and one more for each end of line (`GetPosition`).
+    line: usize,
+    /// The stream's object stack (`GetStackTraceASN`), from the calls of `Encoder`: the root type
+    /// (`begin_document`), a frame per member and per variant, and one `E` frame for the elements
+    /// of a list (pushed at its first element, as NCBI's one `eFrameArrayElement` frame for all of
+    /// them); the class, choice and array frames add nothing to the trace (`object_stack`).
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:810-819
+    // ```c++
+    // void CObjectOStream::WriteContainer(const CContainerTypeInfo* cType,
+    //                                     TConstObjectPtr containerPtr)
+    // {
+    //     BEGIN_OBJECT_FRAME2(eFrameArray, cType);
+    //     BeginContainer(cType);
+    //
+    //     CContainerTypeInfo::CConstIterator i;
+    //     if ( cType->InitIterator(i, containerPtr) ) {
+    //         TTypeInfo elementType = cType->GetElementType();
+    //         BEGIN_OBJECT_FRAME2(eFrameArrayElement, elementType);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:906-911
+    // ```c++
+    // void CObjectOStream::WriteClassMember(const CMemberId& memberId,
+    //                                       TTypeInfo memberType,
+    //                                       TConstObjectPtr memberPtr)
+    // {
+    //     BEGIN_OBJECT_FRAME2(eFrameClassMember, memberId);
+    //     BeginClassMember(memberId);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/choice.cpp:451-453
+    // ```c++
+    //         variantInfo = choiceType->GetVariantInfo(index);
+    //         BEGIN_OBJECT_FRAME_OF2(out, eFrameChoiceVariant, variantInfo->GetId());
+    //         out.BeginChoiceVariant(choiceType, variantInfo->GetId());
+    // ```
+    stack: ObjectStack,
+    /// The strings written with bytes replaced by `#` (`take_bad_chars`).
+    bad_chars: Vec<BadChars>,
 }
 
 impl<'b> AsnTextEncoder<'b> {
@@ -64,7 +102,9 @@ impl<'b> AsnTextEncoder<'b> {
             indent: 0,
             line_length: 0,
             block_start: false,
-            error: None,
+            line: 1,
+            stack: ObjectStack::default(),
+            bad_chars: Vec::new(),
         }
     }
 
@@ -106,6 +146,7 @@ impl<'b> AsnTextEncoder<'b> {
     /// ```
     fn eol(&mut self) {
         self.out.push(b'\n');
+        self.line += 1;
         self.line_length = 0;
         let indent = self.indent;
         self.out.resize(self.out.len() + indent, b' ');
@@ -176,6 +217,7 @@ impl<'b> AsnTextEncoder<'b> {
     fn wrap_at_line_length(&mut self, line_length: usize) {
         if self.line_length >= line_length {
             self.out.push(b'\n');
+            self.line += 1;
             self.line_length = 0;
         }
     }
@@ -285,6 +327,7 @@ impl<'b> AsnTextEncoder<'b> {
         }
         let count = self.out.len() - pos;
         self.out.insert(pos, b'\n');
+        self.line += 1;
         self.line_length = count;
     }
 }
@@ -302,7 +345,8 @@ impl Encoder for AsnTextEncoder<'_> {
     /// ```
     /// (`WriteId` brackets a name with a space, `<` or `:`, objostrasn.cpp:489-504; a type
     /// name has none.)
-    fn begin_document(&mut self, type_name: &str) {
+    fn begin_document(&mut self, type_name: &'static str) {
+        self.stack.set_root(type_name);
         self.put(type_name.as_bytes());
         self.put(b" ::= ");
     }
@@ -319,6 +363,11 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     fn end_document(&mut self) {
+        debug_assert!(
+            self.stack.depth() <= 1,
+            "every frame of the document is closed: {}",
+            self.stack.trace()
+        );
         self.put(b"\n");
     }
 
@@ -368,13 +417,16 @@ impl Encoder for AsnTextEncoder<'_> {
     ///     }
     /// ```
     /// (The member names of the ASN.1 modules start with a lower-case letter.)
-    fn member(&mut self, name: &str, _tag: u8) {
+    fn member(&mut self, name: &'static str, _tag: u8) {
+        self.stack.push(name);
         self.next_element();
         self.put(name.as_bytes());
         self.put(b" ");
     }
 
-    fn end_member(&mut self) {}
+    fn end_member(&mut self) {
+        self.stack.pop();
+    }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:563-566
     /// ```c++
@@ -384,6 +436,7 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     fn begin_list(&mut self, _set: bool) {
+        self.stack.push("");
         self.start_block();
     }
 
@@ -395,6 +448,7 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     fn element(&mut self) {
+        self.stack.set_top("E");
         self.next_element();
     }
 
@@ -406,6 +460,7 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     fn end_list(&mut self) {
+        self.stack.pop();
         self.end_block();
     }
 
@@ -431,7 +486,8 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     /// The variant's name and a space, on the line of what precedes it.
-    fn variant(&mut self, _type_name: &str, name: &str, _tag: u8) {
+    fn variant(&mut self, _type_name: &'static str, name: &'static str, _tag: u8) {
+        self.stack.push(name);
         self.block_start = false;
         self.put(name.as_bytes());
         self.put(b" ");
@@ -448,6 +504,7 @@ impl Encoder for AsnTextEncoder<'_> {
     /// }
     /// ```
     fn end_variant(&mut self) {
+        self.stack.pop();
         self.block_start = false;
     }
 
@@ -549,16 +606,30 @@ impl Encoder for AsnTextEncoder<'_> {
     ///     }
     /// ```
     /// A byte outside 0x20..0x7E (`GoodVisibleChar`, include/serial/impl/objistr.inl:456-459)
-    /// is NCBI's replacement with an error message; the callers refuse such strings before
-    /// the search, and the encoder records the error here.
+    /// is written as `#` and noted at the stream's line before the wrap of its place
+    /// (`ReplaceVisibleChar` comes before `WrapAt`), with the whole string as given
+    /// (`original`); `take_bad_chars` hands the notes to the caller, which posts NCBI's
+    /// messages (`visible::BadChars::post`).
+    /// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1871 (quoted at
+    /// `visible`: the message is the stack trace, "Bad char [0x..] in string at " +
+    /// `GetPosition()` and the string)
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:100-103
+    /// ```c++
+    /// string CObjectOStreamAsn::GetPosition(void) const
+    /// {
+    ///     return "line "+NStr::SizetToString(m_Output.GetLine());
+    /// }
+    /// ```
     fn visible_str(&mut self, value: &[u8]) {
         self.put(b"\"");
-        for &byte in value {
+        let mut bad: Option<BadChars> = None;
+        for (index, &byte) in value.iter().enumerate() {
+            let mut byte = byte;
             if !good_visible_char(byte) {
-                if self.error.is_none() {
-                    self.error = Some(SerialError::NonVisibleChar(byte));
-                }
-                continue;
+                let stack = &self.stack;
+                bad.get_or_insert_with(|| BadChars::written(stack.trace(), value))
+                    .note(index, Position::Line(self.line));
+                byte = SUBST;
             }
             if self.line_length > STRING_WRAP {
                 self.put_eol_at_word_end(STRING_WRAP);
@@ -567,6 +638,9 @@ impl Encoder for AsnTextEncoder<'_> {
             if byte == b'"' {
                 self.put(b"\"");
             }
+        }
+        if let Some(bad) = bad {
+            self.bad_chars.push(bad);
         }
         self.put(b"\"");
     }
@@ -664,8 +738,13 @@ impl Encoder for AsnTextEncoder<'_> {
         Ok(())
     }
 
+    /// The ASN.1 text stream raises no error (a bad byte of a string is written as `#`).
     fn error(&self) -> Option<SerialError> {
-        self.error
+        None
+    }
+
+    fn take_bad_chars(&mut self) -> Vec<BadChars> {
+        std::mem::take(&mut self.bad_chars)
     }
 }
 

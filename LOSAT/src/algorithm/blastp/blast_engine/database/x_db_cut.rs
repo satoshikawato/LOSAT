@@ -106,9 +106,13 @@ pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize) -> u64 {
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The bytes of the database's sequences as a one-volume sequence file holds them: the letters, a
 /// sentinel byte after each sequence and one before the first (each further volume has one more).
+/// The sequences are the included ones (`SeqDb::included_length`); an index that cannot be read
+/// counts as the largest database, whose blocks are those of one thread (the search then meets
+/// the error in the order of one thread).
 pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
     database
-        .total_letters()
+        .included_letters()
+        .unwrap_or(u64::MAX)
         .saturating_add(u64::from(database.num_sequences()))
         .saturating_add(1)
 }
@@ -125,6 +129,9 @@ pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<
 /// The cut of `database` on `pool` (`x_cut_block_bytes` at the pool's threads, 1 when it is off).
 fn x_db_cut_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     let threads = if pool.enabled() { pool.threads() } else { 1 };
+    if threads <= 1 {
+        return BLOCK_BYTES;
+    }
     x_cut_block_bytes(x_sequence_bytes(database), threads)
 }
 

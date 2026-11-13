@@ -286,6 +286,8 @@ pub(super) fn write_tblastx_tabular(
     }
     let reads_rows = spec.fields.iter().any(|field| ROW_FIELDS.contains(field));
     let counts_block = spec.fields.iter().any(|field| COUNTS_BLOCK.contains(field));
+    // Which rows read their subject (`TabularSpec::subject_fetch`).
+    let fetch = spec.subject_fetch(crate::blastinput::app::Program::Tblastx);
     let mut buf: Vec<u8> = Vec::new();
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();
     let (mut window, mut qrow, mut srow): (Vec<u8>, Vec<u8>, Vec<u8>) =
@@ -386,18 +388,6 @@ pub(super) fn write_tblastx_tabular(
             let subject = values.nucleotide_subject(names, qcovs, -1);
             let subject_record_length = i32::try_from(record_length(s_idx))?;
             for &hsp_index in group {
-                // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
-                // `x_SetTaxInfo`) follow the rows before it.
-                if let (Some(names), Some(warnings)) = (names, warnings.as_deref_mut()) {
-                    let text = names.row_messages(spec, subject.taxonomy);
-                    if !text.is_empty() {
-                        writer.write_all(&buf)?;
-                        buf.clear();
-                        writer.flush()?;
-                        warnings.sink.write_all(&text)?;
-                        warnings.sink.flush()?;
-                    }
-                }
                 let hsp = &hits[hsp_index];
                 let hit = &hsp.hit;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:762-768
@@ -419,6 +409,34 @@ pub(super) fn write_tblastx_tabular(
                     0
                 };
                 let rows_read = reads_rows && (counts_block || engine_ident > 0);
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                // ```c++
+                //        		const CBioseq_Handle& subject_bh =
+                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                // ```
+                // A row that reads the subject (`TabularSpec::subject_fetch`, by the engine's
+                // identities for `nident` alone) loads it first where the query's batch did not
+                // prefetch it: the texts of its taxonomy lookups follow the rows before it
+                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident as usize) {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        warnings.subject_read(q_idx, hit.s_idx, &mut *writer)?;
+                    }
+                }
+                // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
+                // `x_SetTaxInfo`) follow the rows before it.
+                if let (Some(names), Some(warnings)) = (names, warnings.as_deref_mut()) {
+                    let text = names.row_messages(spec, subject.taxonomy);
+                    if !text.is_empty() {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        writer.flush()?;
+                        warnings.sink.write_all(&text)?;
+                        warnings.sink.flush()?;
+                    }
+                }
                 if rows_read {
                     run.subject_letters.rows_into(
                         hsp,

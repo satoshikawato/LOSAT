@@ -484,6 +484,8 @@ fn write_tabular_rows<const RPS: bool>(
 ) -> Result<()> {
     let spec = tab.spec;
     let needs = spec.needs();
+    // Which rows read their subject (`TabularSpec::subject_fetch`).
+    let fetch = spec.subject_fetch(crate::blastinput::app::Program::Blastp);
     let rows_read = if RPS {
         needs_rows(needs.rows, spec, tab.app)
     } else {
@@ -668,6 +670,21 @@ fn write_tabular_rows<const RPS: bool>(
                 qcovus: -1,
             };
             for hsp in &hsp_list.hsps {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                // ```c++
+                //        		const CBioseq_Handle& subject_bh =
+                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                // ```
+                // A row that reads the subject loads it first where the query's batch did not
+                // prefetch it: the texts of its taxonomy lookups follow the rows before it
+                // (`QueryWarnings::subject_read`), before those of the row's own lookups.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(hsp.num_ident) {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
+                    }
+                }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
                 if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {

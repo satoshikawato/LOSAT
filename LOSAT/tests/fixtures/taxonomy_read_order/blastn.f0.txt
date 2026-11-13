@@ -1,0 +1,202 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: txr_n (parsed Seq-ids)
+           2 sequences; 1,500 total letters
+
+
+
+Query= qn
+
+Length=750
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AAA00001.1 a_title                                                    1109    0.0  
+Error: [blastn] Error: Offset error at end of taxdb file.
+BBB00001.1 b_title                                                    748     0.0  
+
+
+>AAA00001.1 a_title
+Length=750
+
+ Score = 1109 bits (1229),  Expect = 0.0
+ Identities = 698/751 (93%), Gaps = 2/751 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGTAAAAATGGTCGTATGTGGGAAGGTGATTGTAGCAGCAAATTTCTGAATGAATATAAA  60
+            ||||||||||||||||||||||||||||||   |||||||||||||||||||||||||||
+Sbjct  1    CGTAAAAATGGTCGTATGTGGGAAGGTGATCAGAGCAGCAAATTTCTGAATGAATATAAA  60
+
+Query  61   GTGCATGATCATGATTGTAGCATGGATGAAAATCAGATTAAACTGAGCCGTCGTTTTCAT  120
+            ||||||||||||||||||||||||||||||||||||  |||||||||||||  |||||||
+Sbjct  61   GTGCATGATCATGATTGTAGCATGGATGAAAATCAGGATAAACTGAGCCGTAATTTTCAT  120
+
+Query  121  GGTGGTCAGAATGGTAGCAGCCATCAGCTGTGTTTTTATAAACGTCCGTTTGAAAAAGCT  180
+            ||||||||||||||||||||||||   |||||||||||||||||||||||||||||| | 
+Sbjct  121  GGTGGTCAGAATGGTAGCAGCCATTTTCTGTGTTTTTATAAACGTCCGTTTGAAAAAACC  180
+
+Query  181  CCGCCGGATATGGTGCATAGCCATCGTAATAGCCAGCTGATTGCTATTAATGTGAGCAAA  240
+            ||||||||||||||||||   ||||||||||||||||||||||||||||| |||||||||
+Sbjct  181  CCGCCGGATATGGTGCATGCTCATCGTAATAGCCAGCTGATTGCTATTAAAGTGAGCAAA  240
+
+Query  241  GCTCATTGGGGTCCGGGTACCTGGCTGGAACCGGTGAAACTGAGCCAGTGTGATGAAAAT  300
+            ||||||||||||||||||||||||||||||||||||||||||||| | |||||||  |||
+Sbjct  241  GCTCATTGGGGTCCGGGTACCTGGCTGGAACCGGTGAAACTGAGCGATTGTGATGCTAAT  300
+
+Query  301  ACCGCTGAAAAAGAAGGTCGTGGTACCAAAGATCGTGGTCCGGTGAAACTGAAAGAACAG  360
+            ||| | ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  ACCCCGGAAAAAGAAGGTCGTGGTACCAAAGATCGTGGTCCGGTGAAACTGAAAGAACAG  360
+
+Query  361  ACCTGGTGGCCGGGTAAAATGAAAATTACCTGGATTCATATGTGTAATGTGTGTGGTATT  420
+            ||||||||||||||||  ||||||||||||||||||||||||  ||||||||||||||||
+Sbjct  361  ACCTGGTGGCCGGGTACCATGAAAATTACCTGGATTCATATGCATAATGTGTGTGGTATT  420
+
+Query  421  CAGACCTATGCTCTGGGTTGGAGCACCGATCCGCTGAAAATTGCTTATACCGCTATTTAT  480
+            ||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  421  CAGACCTATGCTCCGGGTTGGAGCACCGATCCGCTGAAAATTGCTTATACCGCTATTTAT  480
+
+Query  481  ATTGATATGTGGCGTATTTGGCATGTGATTATGTTTAGCAATAGCAATTGGACCAATGGT  540
+            |||||||||||||||   |||  |||||||||||||||||||   |||||||||||||||
+Sbjct  481  ATTGATATGTGGCGTCAGTGGGGTGTGATTATGTTTAGCAATCTGAATTGGACCAATGGT  540
+
+Query  541  ACCGGTCGTGCTCCGCTGCGTTATGCTAAAATTGCTATTATTAAAGTGCTGTGTATGACC  600
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||
+Sbjct  541  ACCGGTCGTGCTCCGCTGCGTTATGCTAAAATTGCTATTATTAAAGTGCTGTGTATTACC  600
+
+Query  601  GCTTGGAATGGTATTGTGCCGTTTGGTGAAATGAGCATTGGTCATCGTCATAAAGATGTG  660
+            ||| | ||||||||||||   |||||||||||||||||||||||||||||||||||||||
+Sbjct  601  GCTAGCAATGGTATTGTGTATTTTGGTGAAATGAGCATTGGTCATCGTCATAAAGATGTG  660
+
+Query  661  AAAGGTCCGTGTATTTGTCATAATAAT-CATGTGCCGTGTCGTCGTAAAATGACCTGTGA  719
+            ||| | |||   |||||||||||||||  |||| |||   |||| |||||||||||||||
+Sbjct  661  AAAAGCCCGCCGATTTGTCATAATAATGAATGT-CCGAAACGTCATAAAATGACCTGTGA  719
+
+Query  720  TTGGATGCATGATACCATGCATAAATGGGGT  750
+            |||||||||||||||||||||||||||||||
+Sbjct  720  TTGGATGCATGATACCATGCATAAATGGGGT  750
+
+
+ Score = 24.7 bits (26),  Expect = 0.039
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Plus
+
+Query  340  CCGGTGAAACTGA  352
+            |||||||||||||
+Sbjct  271  CCGGTGAAACTGA  283
+
+
+ Score = 24.7 bits (26),  Expect = 0.039
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Plus
+
+Query  271  CCGGTGAAACTGA  283
+            |||||||||||||
+Sbjct  340  CCGGTGAAACTGA  352
+
+
+ Score = 21.1 bits (22),  Expect = 0.47
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  379  ATGAAAATTAC  389
+            |||||||||||
+Sbjct  120  ATGAAAATTAC  110
+
+
+>BBB00001.1 b_title
+Length=750
+
+ Score = 748 bits (829),  Expect = 0.0
+ Identities = 618/751 (82%), Gaps = 2/751 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGTAAAAATGGTCGTATGTGGGAAGGTGATTGTAGCAGCAAATTTCTGAATGAATATAAA  60
+            |||||||||||||||||||||||| | |||||||||||||||  ||||||||||||||||
+Sbjct  1    CGTAAAAATGGTCGTATGTGGGAAAGCGATTGTAGCAGCAAAGCTCTGAATGAATATAAA  60
+
+Query  61   GTGCATGATCATGATTGT-AGCATGGATGAAAATCAGATTAAACTGAGCCGTCGTTTTCA  119
+            |||||||||||||||||| | ||| |||||||||||| | ||||||    | ||||||||
+Sbjct  61   GTGCATGATCATGATTGTCATCAT-GATGAAAATCAGGTGAAACTGGAAAGCCGTTTTCA  119
+
+Query  120  TGGTGGTCAGAATGGTAGCAGCCATCAGCTGTGTTTTTATAAACGTCCGTTTGAAAAAGC  179
+            |||||||||| | |||      |||   |||||||||||||||||||||  |||||||||
+Sbjct  120  TGGTGGTCAGCAGGGTTTTGTGCATTTTCTGTGTTTTTATAAACGTCCGGATGAAAAAGC  179
+
+Query  180  TCCGCCGGATATGGTGCATAGCCATCGTAATAGCCAGCTGATTGCTATTAATGTGAGCAA  239
+            |||||||||| |||  |||||||||||||||||| | |||||||||   |||  ||||||
+Sbjct  180  TCCGCCGGATCTGGGTCATAGCCATCGTAATAGCAAACTGATTGCTCAGAATTGGAGCAA  239
+
+Query  240  AGCTCATTGGGGTCCGGGTACCTGGCTGGAACCGGTGAAACTGAGCCAGTGTGATGAAAA  299
+            |||||||  ||||||||||   |||||||||   |||||||||   |||| |||||||||
+Sbjct  240  AGCTCATATGGGTCCGGGTGATTGGCTGGAATGTGTGAAACTGCAGCAGTATGATGAAAA  299
+
+Query  300  TACCGCTGAAAAAGAAGGTCGTGGTACCAAAGATCGTGGTCCGGTGAAACTGAAAGAACA  359
+            | | ||| | |||||||||||||     |||| |||||||||||||||||  ||||||||
+Sbjct  300  TGCTGCTCAGAAAGAAGGTCGTGTGGGTAAAGGTCGTGGTCCGGTGAAACGTAAAGAACA  359
+
+Query  360  GACCTGGTGGCCGGGTAAAATGAAAATTACCTGGATTCATATGTGTAATGTGTGTGGTAT  419
+            |||||||||||  ||||||   |||||||||   ||| | |||||| | |     |||||
+Sbjct  360  GACCTGGTGGCGTGGTAAAGATAAAATTACCCATATTGAAATGTGTCAGGATGAAGGTAT  419
+
+Query  420  TCAGACCTATGCTCTGGGTTGGAGCACCGATCCGCTGAAAATTGCTTATACCGCTATTTA  479
+            ||||||||||||||||||||||   |  ||||||||||||||| |   ||||||||||||
+Sbjct  420  TCAGACCTATGCTCTGGGTTGGGTGAATGATCCGCTGAAAATTACCGCTACCGCTATTTA  479
+
+Query  480  TATTGATATGTGGCGTATTTGGCATGTGATTATGTTTAGCAATAGCAATTGGACCAATGG  539
+            |||||||||||||||||||||  |||||   |     ||||||||||||  |||||||||
+Sbjct  480  TATTGATATGTGGCGTATTTGTTATGTGCCGAATACCAGCAATAGCAATGTGACCAATGG  539
+
+Query  540  TACCGGTCGTGCTCCGCTGCGTTATGCTAAAATTGCTATTATTAAAGTGCTGTGTATGAC  599
+            |||||||  |||||||||| ||||||||||| | ||||||||||||   |||||||||  
+Sbjct  540  TACCGGTGCTGCTCCGCTGGGTTATGCTAAACTGGCTATTATTAAAACCCTGTGTATGCA  599
+
+Query  600  CGCTTGGAATGGTATTGTGCCGTTTGGTGAAATGAGCATTGGTCATCGTCATAAAGATGT  659
+              | |||  ||||  ||    |||||||||||||||||||||||||||||||||||||||
+Sbjct  600  TACCTGGGGTGGTGCTGAATGGTTTGGTGAAATGAGCATTGGTCATCGTCATAAAGATGT  659
+
+Query  660  GAAAGGTCCGTGTATTTGTCATAATAATCATGTGCCGTGTCGTCGTAAAATGACCTGTGA  719
+            ||||||||||  ||||||||||  |  || ||||||||||||||||||||||   |||||
+Sbjct  660  GAAAGGTCCGGATATTTGTCATTGTGCTCGTGTGCCGTGTCGTCGTAAAATGTATTGTGA  719
+
+Query  720  TTGGATGCATGATACCATGCATAAATGGGGT  750
+            |||||  ||| ||||||||||||||||||||
+Sbjct  720  TTGGAGCCATAATACCATGCATAAATGGGGT  750
+
+
+ Score = 21.1 bits (22),  Expect = 0.47
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Plus
+
+Query  380  TGAAAATTACC  390
+            |||||||||||
+Sbjct  455  TGAAAATTACC  465
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1083392
+
+
+  Database: txr_n (parsed Seq-ids)
+    Posted date:  Nov 13, 2026  1:45 PM
+  Number of letters in database: 1,500
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

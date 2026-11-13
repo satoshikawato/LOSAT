@@ -3634,6 +3634,45 @@ pub(crate) fn prefetch_messages<'s>(
     subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
     program: &str,
 ) -> Result<Vec<u8>> {
+    let reads = subject_read_texts(
+        db,
+        run,
+        subjects
+            .into_iter()
+            .map(|(ordinal, parsed)| (0, ordinal, parsed)),
+        false,
+        program,
+    )?;
+    Ok(reads.into_iter().flat_map(|(_, text)| text).collect())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838
+// ```c++
+//     bool setSubjectTaxInfoAll = (x_IsFieldRequested(eSubjectTaxIds) ||
+//     						     x_IsFieldRequested(eSubjectSciNames) ||
+//     ...
+//     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+//        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+//     {
+//         try {
+//        		const CBioseq_Handle& subject_bh =
+//                 scope.GetBioseqHandle(align.GetSeq_id(1));
+// ```
+/// [`prefetch_messages`] of `subjects`, each `(key, ordinal, parsed Seq-ids)`, by subject: the
+/// text that the first read of each subject writes, with the subject's `key` (the name a report
+/// writer gives it), in the order of `subjects`; a subject whose read writes nothing has no
+/// entry. A query's report whose batch's prefetch is off writes each where it reads the subject
+/// (`report::query_warnings::SubjectReads`). `rows_open`: the report's rows look the plural
+/// names up (taxid 0 too, `TaxdbRun::open_for_rows`), each row after it loads its subject, so
+/// the first row opens the taxonomy database after the first subject's read, where that read
+/// did not.
+pub(crate) fn subject_read_texts<'s, K>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<Item = (K, u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
+    rows_open: bool,
+    program: &str,
+) -> Result<Vec<(K, Vec<u8>)>> {
     if !run.found(db) {
         return Ok(Vec::new());
     }
@@ -3643,12 +3682,13 @@ pub(crate) fn prefetch_messages<'s>(
     run.refuse_cache_collision(db, program)?;
     let taxdb = run.taxdb(search_path);
     let lower = program.to_ascii_lowercase();
-    let mut text = String::new();
+    let mut reads = Vec::new();
     let mut fetched: std::collections::HashSet<u32> = Default::default();
-    for (ordinal, parsed) in subjects {
+    for (key, ordinal, parsed) in subjects {
         if !fetched.insert(ordinal) {
             continue;
         }
+        let first = fetched.len() == 1;
         // A subject with parsed Seq-ids is read by its Seq-align id (`prefetch_reads`: the blob of
         // the sequence the scope gets, whose taxids its volume looks up). In
         // the formats that read the Bioseq, `ParsedSubject::fetched` refuses every subject that
@@ -3657,16 +3697,25 @@ pub(crate) fn prefetch_messages<'s>(
         // (`prefetched_ranks`). One without them is read by its ordinal id, its own blob.
         let blob = match parsed {
             Some(subject) => match prefetch_reads(db, ordinal, subject, true, program)? {
-                Ok(Some(blob)) => blob,
-                Ok(None) => continue,
+                Ok(Some(blob)) => Some(blob),
+                Ok(None) => None,
                 Err(reason) => return Err(parsed_refusal(ordinal, &reason, program)),
             },
-            None => ordinal,
+            None => Some(ordinal),
         };
-        let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
-        run.volume_lookups_of(db, &taxdb, blob, &lookups, &lower, &mut text, program)?;
+        if let Some(blob) = blob {
+            let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
+            let mut text = String::new();
+            run.volume_lookups_of(db, &taxdb, blob, &lookups, &lower, &mut text, program)?;
+            if !text.is_empty() {
+                reads.push((key, text.into_bytes()));
+            }
+        }
+        if first && rows_open {
+            run.open_for_rows(db, program)?;
+        }
     }
-    Ok(text.into_bytes())
+    Ok(reads)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513

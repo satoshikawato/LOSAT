@@ -116,7 +116,7 @@ use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
-use crate::report::query_warnings::query_warning;
+use crate::report::query_warnings::{query_warning, QueryReads};
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::stats::KarlinParams;
 use crate::utils::dust::MaskedInterval;
@@ -5729,6 +5729,10 @@ struct SamTarget<'a> {
 /// final hit list.
 struct BlastnReportInputs<'a> {
     queries: &'a [FastaRecord],
+    /// The texts of the subjects that each query's report reads one by one (its batch's
+    /// prefetch off), by query, which the first format's writer places where it reads them
+    /// (`QueryWarnings::subject_read`).
+    query_reads: &'a [crate::report::query_warnings::QueryReads],
     /// The subject records and their letters (theirs, or their packed subjects': with
     /// LOSAT_X_BNSTORE a subject set's, with `-db` the reported sequences' stored data).
     subjects: SubjectLetters<'a>,
@@ -6635,11 +6639,18 @@ fn post_process_hits_and_write(
                 .tabular_spec()
                 .is_some_and(|spec| spec.checks_taxdb()))
         .then(|| {
-            crate::report::query_warnings::QueryWarnings::of_posts(
-                warning_lines.take().unwrap_or(&[]),
+            let first = warning_lines.take();
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
+                first.unwrap_or(&[]),
                 report.archive,
                 &mut *outputs.diagnostics,
-            )
+            );
+            // The first format's writer also writes the texts of the subjects that the reports
+            // read one by one (`BlastnReportInputs::query_reads`).
+            match first {
+                Some(_) => warnings.with_subject_reads(report.query_reads),
+                None => warnings,
+            }
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
@@ -9498,6 +9509,7 @@ fn run_in_pool(
             BatchResults {
                 hit_lists: Vec::new(),
                 warnings: &[],
+                reads: &[],
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
@@ -9557,6 +9569,9 @@ fn run_in_pool(
     let mut context_karlin = Vec::with_capacity(2 * lengths.len());
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Posts> = vec![Posts::new(); lengths.len()];
+    // The texts of the subjects that each query's report reads one by one, by query, where the
+    // first format places them (`BlastnReportInputs::query_reads`).
+    let mut query_reads: Vec<QueryReads> = vec![Vec::new(); lengths.len()];
     // The handle of the BLAST archive, which saves each whole post of `warnings` as one message
     // (`Posts::write`).
     let archive = args.archive.clone();
@@ -9656,6 +9671,7 @@ fn run_in_pool(
                         BatchResults {
                             hit_lists,
                             warnings: &warnings[..start],
+                            reads: &query_reads[..start],
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
@@ -9707,6 +9723,7 @@ fn run_in_pool(
                     BatchResults {
                         hit_lists,
                         warnings: &warnings[..start],
+                        reads: &query_reads[..start],
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
@@ -9798,6 +9815,7 @@ fn run_in_pool(
                         BatchResults {
                             hit_lists,
                             warnings: &warnings[..start],
+                            reads: &query_reads[..start],
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
@@ -9879,6 +9897,7 @@ fn run_in_pool(
                     BatchResults {
                         hit_lists,
                         warnings: &warnings[..start],
+                        reads: &query_reads[..start],
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
@@ -10008,6 +10027,7 @@ fn run_in_pool(
                             BatchResults {
                                 hit_lists,
                                 warnings: &warnings[..start],
+                                reads: &query_reads[..start],
                                 lengths: &lengths[..start],
                                 unsearched,
                                 query_masks: &query_masks,
@@ -10158,6 +10178,7 @@ fn run_in_pool(
                         BatchResults {
                             hit_lists,
                             warnings: &warnings[..start],
+                            reads: &query_reads[..start],
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
@@ -10239,6 +10260,23 @@ fn run_in_pool(
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
                     database::seq_aligns_of(hit_lists, !args.ungapped)
                 };
+                // A query's own fetches where the batch's prefetch is off: the texts of the
+                // subjects its report reads, kept by subject where the first format writes them
+                // where it reads each (`BlastnOutputFormat::places_subject_reads`), else returned
+                // for the query's warnings.
+                let places = output_formats
+                    .first()
+                    .is_some_and(|format| format.places_subject_reads());
+                let query_fetch = |query: usize,
+                                   shown: &[Option<BlastnHitList>],
+                                   reads: &mut [QueryReads]|
+                 -> Result<Vec<u8>> {
+                    if !places {
+                        return database.prefetch_messages(&titles, shown);
+                    }
+                    reads[query] = database.subject_read_texts(&titles, shown, plural_names)?;
+                    Ok(Vec::new())
+                };
                 let seq_aligns = seq_aligns_of(&batch_hit_lists);
                 // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                 // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
@@ -10267,10 +10305,11 @@ fn run_in_pool(
                         };
                         batch_hit_lists
                             .iter()
-                            .map(|hit_list| {
+                            .enumerate()
+                            .map(|(index, hit_list)| {
                                 let shown = std::slice::from_ref(hit_list);
                                 let messages = if fetches && seq_aligns_of(shown) > 0 {
-                                    database.prefetch_messages(&titles, shown)?
+                                    query_fetch(start + index, shown, &mut query_reads)?
                                 } else {
                                     Vec::new()
                                 };
@@ -10473,6 +10512,7 @@ fn run_in_pool(
                     BatchResults {
                         hit_lists: batch_lists,
                         warnings: &warnings[start..end],
+                        reads: &query_reads[start..end],
                         lengths: &lengths[start..end],
                         unsearched: batch_unsearched,
                         query_masks: &batch_masks,
@@ -10489,6 +10529,9 @@ fn run_in_pool(
             // of the current batch).
             for query_warnings in &mut warnings[start..end] {
                 *query_warnings = Posts::new();
+            }
+            for reads in &mut query_reads[start..end] {
+                *reads = Vec::new();
             }
         }
         // EXPERIMENT (LOSAT_X_QSTREAM, LOSAT_X_BNQPACK): the batch's records are kept for a later
@@ -10523,6 +10566,7 @@ fn run_in_pool(
             BatchResults {
                 hit_lists,
                 warnings: &warnings,
+                reads: &query_reads,
                 lengths: &lengths,
                 unsearched,
                 query_masks: &query_masks,
@@ -10555,6 +10599,7 @@ fn run_in_pool(
             BatchResults {
                 hit_lists: Vec::new(),
                 warnings: &[],
+                reads: &[],
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
@@ -10720,6 +10765,9 @@ struct BatchResults<'a> {
     hit_lists: Vec<Option<BlastnHitList>>,
     /// The warnings written before each query's report (`QueryWarnings`).
     warnings: &'a [Posts],
+    /// The texts of the subjects that each query's report reads one by one
+    /// (`BlastnReportInputs::query_reads`).
+    reads: &'a [crate::report::query_warnings::QueryReads],
     lengths: &'a [usize],
     unsearched: Vec<bool>,
     query_masks: &'a [Vec<MaskedInterval>],
@@ -11012,6 +11060,7 @@ fn write_reports_untimed(
         Vec::new()
     };
     let report_inputs = BlastnReportInputs {
+        query_reads: results.reads,
         queries: query_records,
         subjects: subject_letters,
         ranges,

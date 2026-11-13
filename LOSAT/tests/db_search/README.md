@@ -700,6 +700,13 @@ sequence data`). `ids/prd_mb.pal` (`prd_mb0ys`: Y `gb|BBB00001.1|` of 100 letter
 `gb|BBB00001|`, C) is `tests/psiblast_pssm_read_order.rs`'s: with `-max_target_seqs 1` no report reads B, whose PSSM read
 fails, and the last query's warning comes before the epilog where both streams go to one file.
 
+Where the reports read their subjects one by one (line DBID taxrow; `ids/txr_p` and `ids/txr_n` by `make_ids.py
+--taxrow-only`, A `gb|AAA00001.1|` taxid 9606, the best hit of `ids/txr_q.faa` / `ids/txr_q.fna`, and B `gb|BBB00001.1|`
+taxid 99990): with `PRE_FETCH_SEQS_LIMIT=0` NCBI's formatter loads each subject when it formats it, so the offset error of
+`tests/seqdb/taxdb/offset_last_past_end` comes between A's and B's tabular rows, description lines and BLAST XML `Hit`s
+where both streams go to one file. `tests/taxonomy_read_order.rs` compares LOSAT's merged stream with NCBI 2.17.0's
+(`tests/fixtures/taxonomy_read_order`) in the six programs, with `ids/prd_txself` for a plural name's open.
+
 Review 3 of pssmread (rows `db.id.prd3.*`; `ids/prd_np` and its version 4 copy `ids/prd_np_4` from `ids/prd_np.faa`, A and B
 without `-parse_seqids` and taxid 99990 by `-taxid 99990`, and `ids/prd_tc` from `ids/prd_tc.faa`, A taxid 99990 and B taxid
 150 by `prd_tc.map`, all by `make_ids.py --pssmread-only`; the prefetch off and a report that reads nothing of the subjects):

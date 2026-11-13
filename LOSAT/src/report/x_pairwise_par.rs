@@ -66,7 +66,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, OnceLock};
 
 use super::pairwise::PairwiseHit;
-use super::query_warnings::QueryWarnings;
+use super::query_warnings::{QueryWarnings, SubjectReadHook};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::utils::threading::SearchPool;
 
@@ -302,12 +302,14 @@ pub(crate) trait QuerySections: Sync {
     }
 
     /// `\n\n`, the query's header, then "No hits found" and the query's footer (`group` is
-    /// `None`), or the description table and the blank line after it.
+    /// `None`), or the description table and the blank line after it; `read` before each
+    /// description line, where NCBI loads its subject (`QueryWarnings::subject_read`).
     fn head<W: Write>(
         &self,
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
+        read: SubjectReadHook<'_, W>,
     ) -> io::Result<()>;
 
     /// The alignments of the HSPs `part` of subject `s_idx` of the query (`group`), the
@@ -387,9 +389,17 @@ fn write_serial<S: QuerySections, W: Write>(
             warnings.before_query(q_idx, &mut *writer)?;
         }
         let group = QueryGroup::for_sections(query_hits, subject_titles, sections);
-        sections.head(writer, q_idx, group.as_ref())?;
+        // NCBI loads each subject that the query's batch did not prefetch at its description
+        // line, or one the table does not show at its alignment's heading
+        // (`QueryWarnings::subject_read`).
+        let mut read = |s_idx: u32, writer: &mut W| match warnings.as_deref_mut() {
+            Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
+            None => Ok(()),
+        };
+        sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
             for &s_idx in group.aligned(sections.num_alignments()) {
+                read(s_idx, &mut *writer)?;
                 let hsps = group.subject_hits[&s_idx].len();
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx, 0..hsps)?;
             }
@@ -528,16 +538,26 @@ fn pieces<S: QuerySections>(
     pieces
 }
 
-/// One piece into its own buffer, by the serial writer's calls; with what a failed call left
-/// in the buffer (the serial writer has written it before the error) and the error.
+/// One piece into its own buffer, by the serial writer's calls; with the places in the buffer
+/// where the serial writer reads a subject (`QueryWarnings::subject_read`; only when `marks`),
+/// what a failed call left in the buffer (the serial writer has written it before the error)
+/// and the error.
 fn format_piece<S: QuerySections>(
     sections: &S,
     group: Option<&QueryGroup<'_>>,
     piece: Piece,
-) -> (Vec<u8>, io::Result<()>) {
+    marks: bool,
+) -> Formatted {
     let mut buffer = Vec::new();
+    let mut reads: Vec<(usize, u32)> = Vec::new();
+    let mut mark = |s_idx: u32, buffer: &mut Vec<u8>| {
+        if marks {
+            reads.push((buffer.len(), s_idx));
+        }
+        Ok(())
+    };
     let result = (|| match piece.part {
-        Part::Head => sections.head(&mut buffer, piece.query, group),
+        Part::Head => sections.head(&mut buffer, piece.query, group, &mut mark),
         Part::Alignments((first, first_hsp), (last, end_hsp)) => {
             let group = group.expect("a query with alignment pieces has hits");
             let aligned = group.aligned(sections.num_alignments());
@@ -549,6 +569,9 @@ fn format_piece<S: QuerySections>(
                     group.subject_hits[&s_idx].len()
                 };
                 if from < to {
+                    if from == 0 {
+                        mark(s_idx, &mut buffer)?;
+                    }
                     sections.subject(&mut buffer, None, group, s_idx, from..to)?;
                 }
             }
@@ -556,7 +579,19 @@ fn format_piece<S: QuerySections>(
         }
         Part::Foot => sections.foot(&mut buffer, piece.query),
     })();
-    (buffer, result)
+    Formatted {
+        buffer,
+        reads,
+        result,
+    }
+}
+
+/// A piece formatted into its own buffer (`format_piece`).
+struct Formatted {
+    buffer: Vec<u8>,
+    /// Where the serial writer reads a subject: the buffer's length then and the subject.
+    reads: Vec<(usize, u32)>,
+    result: io::Result<()>,
 }
 
 /// `f` of every item, in order: on `pool`, or in order on this thread without threads (where
@@ -645,17 +680,34 @@ fn write_parallel_with<S: QuerySections, W: Write>(
                 to += 1;
             }
             let chunk = &planned[at..to];
-            let buffers = map(pool, chunk, |&piece| {
-                format_piece(sections, groups[piece.query - first].as_ref(), piece)
+            // The pieces of a query whose reads write texts mark where the serial writer reads
+            // its subjects; the texts are written there (`QueryWarnings::subject_read`).
+            let marked: Vec<bool> = chunk
+                .iter()
+                .map(|piece| {
+                    warnings
+                        .as_deref()
+                        .is_some_and(|warnings| warnings.reads_with_texts(piece.query))
+                })
+                .collect();
+            let indexed: Vec<(Piece, bool)> = chunk.iter().copied().zip(marked).collect();
+            let buffers = map(pool, &indexed, |&(piece, marks)| {
+                format_piece(sections, groups[piece.query - first].as_ref(), piece, marks)
             });
-            for (piece, (buffer, result)) in chunk.iter().zip(buffers) {
+            for (piece, formatted) in chunk.iter().zip(buffers) {
                 if piece.part == Part::Head {
                     if let Some(warnings) = warnings.as_deref_mut() {
                         warnings.before_query(piece.query, &mut *writer)?;
                     }
                 }
-                writer.write_all(&buffer)?;
-                result?;
+                super::query_warnings::write_marked(
+                    &formatted.buffer,
+                    &formatted.reads,
+                    piece.query,
+                    &mut *writer,
+                    warnings.as_deref_mut(),
+                )?;
+                formatted.result?;
             }
             chunks += 1;
             at = to;
@@ -721,9 +773,16 @@ mod tests {
             writer: &mut W,
             q_idx: usize,
             group: Option<&QueryGroup<'_>>,
+            read: SubjectReadHook<'_, W>,
         ) -> io::Result<()> {
             let subjects = group.map_or(0, |group| group.subject_order.len());
-            writeln!(writer, "head {q_idx} subjects {subjects}")
+            writeln!(writer, "head {q_idx} subjects {subjects}")?;
+            // One line per subject, each read before it (as a description line).
+            for &s_idx in group.map_or(&[][..], |group| group.subject_order.as_slice()) {
+                read(s_idx, writer)?;
+                writeln!(writer, "line {s_idx}")?;
+            }
+            Ok(())
         }
 
         fn subject<W: Write>(
@@ -802,10 +861,11 @@ mod tests {
                 let planned = pieces(&marks, 0, &groups, piece_bytes);
                 let mut joined = Vec::new();
                 for &piece in &planned {
-                    let (buffer, result) =
-                        format_piece(&marks, groups[piece.query].as_ref(), piece);
-                    result.unwrap();
-                    joined.extend_from_slice(&buffer);
+                    let formatted =
+                        format_piece(&marks, groups[piece.query].as_ref(), piece, false);
+                    formatted.result.unwrap();
+                    assert!(formatted.reads.is_empty());
+                    joined.extend_from_slice(&formatted.buffer);
                 }
                 assert_eq!(
                     String::from_utf8(joined).unwrap(),
@@ -867,6 +927,92 @@ mod tests {
     }
 
     /// The parallel writer's reports of `marks` in several chunks and pieces are `serial`.
+    /// One log of the report and the warnings' texts in the order written.
+    #[derive(Clone, Default)]
+    struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl Write for Log {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_texts_of_the_reads_come_where_the_serial_writer_reads_the_subjects() {
+        let hits = report_hits();
+        let by_query = by_query(&hits);
+        let titles = titles();
+        let marks = Marks {
+            num_alignments: 10,
+            fail_at: None,
+            joined: None,
+        };
+        // Query 0 shows subjects 5, 2 and 7, query 2 subjects 1 and 5; subject 6's text is not
+        // placed (no line reads it) and comes after query 2's report.
+        let reads: Vec<crate::report::query_warnings::QueryReads> = vec![
+            vec![(2, b"T2\n".to_vec()), (7, b"T7\n".to_vec())],
+            Vec::new(),
+            vec![(5, b"T5\n".to_vec()), (6, b"T6\n".to_vec())],
+        ];
+        let before = vec![b"W0\n".to_vec(), b"W1\n".to_vec(), b"W2\n".to_vec()];
+        let run = |parallel: Option<(usize, usize)>| -> String {
+            let log = Log::default();
+            let (mut report, mut sink) = (log.clone(), log.clone());
+            let mut warnings = QueryWarnings::new(&before, &mut sink).with_subject_reads(&reads);
+            match parallel {
+                None => write_serial(
+                    &mut report,
+                    &marks,
+                    0,
+                    &by_query,
+                    &titles,
+                    None,
+                    Some(&mut warnings),
+                )
+                .unwrap(),
+                Some((budget, piece_bytes)) => {
+                    crate::utils::threading::with_search_pool(4, "test", |pool| {
+                        write_parallel_with(
+                            &mut report,
+                            &marks,
+                            0,
+                            &by_query,
+                            &titles,
+                            Some(&mut warnings),
+                            pool,
+                            budget,
+                            piece_bytes,
+                        )?;
+                        Ok(())
+                    })
+                    .unwrap();
+                }
+            }
+            warnings.after_last_query(3, &mut report).unwrap();
+            drop(warnings);
+            let text = log.0.lock().unwrap().clone();
+            String::from_utf8(text).unwrap()
+        };
+        let serial = run(None);
+        assert!(
+            serial.starts_with("W0\nhead 0 subjects 3\nline 5\nT2\nline 2\nT7\nline 7\n"),
+            "{serial}"
+        );
+        assert!(
+            serial.contains("W2\nhead 2 subjects 2\nline 1\nT5\nline 5\n"),
+            "{serial}"
+        );
+        assert!(serial.ends_with("T6\n"), "{serial}");
+        for chunks in [(1, 1), (1_000, 500), (usize::MAX, 2_000)] {
+            assert_eq!(run(Some(chunks)), serial, "{chunks:?}");
+        }
+    }
+
     fn parallel_reports_equal(
         marks: &Marks,
         by_query: &[Vec<(HspIndex, &PairwiseHit)>],

@@ -1,0 +1,109 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: txr_p (parsed Seq-ids)
+           2 sequences; 500 total letters
+
+
+
+Query= q
+
+Length=250
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AAA00001.1 a_title                                                    461     2e-171
+
+
+>AAA00001.1 a_title
+Length=250
+
+ Score = 461 bits (1186),  Expect = 2e-171, Method: Compositional matrix adjust.
+ Identities = 225/250 (90%), Positives = 227/250 (91%), Gaps = 0/250 (0%)
+
+Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKA  60
+            RKNGRMWEGD SSKFLNEYKVHDHDCSMDENQ KLSR FHGGQNGSSH LCFYKRPFEK 
+Sbjct  1    RKNGRMWEGDQSSKFLNEYKVHDHDCSMDENQDKLSRNFHGGQNGSSHFLCFYKRPFEKT  60
+
+Query  61   PPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQ  120
+            PPDMVH+HRNSQLIAI VSKAHWGPGTWLEPVKLS CD NT EKEGRGTKDRGPVKLKEQ
+Sbjct  61   PPDMVHAHRNSQLIAIKVSKAHWGPGTWLEPVKLSDCDANTPEKEGRGTKDRGPVKLKEQ  120
+
+Query  121  TWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNG  180
+            TWWPG MKITWIHM NVCGIQTYA GWSTDPLKIAYTAIYIDMWR W VIMFSN NWTNG
+Sbjct  121  TWWPGTMKITWIHMHNVCGIQTYAPGWSTDPLKIAYTAIYIDMWRQWGVIMFSNLNWTNG  180
+
+Query  181  TGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCD  240
+            TGRAPLRYAKIAIIKVLC+TA NGIV FGEMSIGHRHKDVK P ICHNN  P R KMTCD
+Sbjct  181  TGRAPLRYAKIAIIKVLCITASNGIVYFGEMSIGHRHKDVKSPPICHNNECPKRHKMTCD  240
+
+Query  241  WMHDTMHKWG  250
+            WMHDTMHKWG
+Sbjct  241  WMHDTMHKWG  250
+
+
+Error: [blastp] Error: Offset error at end of taxdb file.
+>BBB00001.1 b_title
+Length=250
+
+ Score = 369 bits (947),  Expect = 4e-135, Method: Compositional matrix adjust.
+ Identities = 188/250 (75%), Positives = 195/250 (78%), Gaps = 0/250 (0%)
+
+Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKA  60
+            RKNGRMWE DCSSK LNEYKVHDHDC  DENQ+KL  RFHGGQ G  H LCFYKRP EKA
+Sbjct  1    RKNGRMWESDCSSKALNEYKVHDHDCHHDENQVKLESRFHGGQQGFVHFLCFYKRPDEKA  60
+
+Query  61   PPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQ  120
+            PPD+ HSHRNS+LIA N SKAH GPG WLE VKL Q DEN A+KEGR  K RGPVK KEQ
+Sbjct  61   PPDLGHSHRNSKLIAQNWSKAHMGPGDWLECVKLQQYDENAAQKEGRVGKGRGPVKRKEQ  120
+
+Query  121  TWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNG  180
+            TWW GK KIT I MC   GIQTYALGW  DPLKI  TAIYIDMWRI +V   SNSN TNG
+Sbjct  121  TWWRGKDKITHIEMCQDEGIQTYALGWVNDPLKITATAIYIDMWRICYVPNTSNSNVTNG  180
+
+Query  181  TGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCD  240
+            TG APL YAK+AIIK LCM  W G   FGEMSIGHRHKDVKGP ICH   VPCRRKM CD
+Sbjct  181  TGAAPLGYAKLAIIKTLCMHTWGGAEWFGEMSIGHRHKDVKGPDICHCARVPCRRKMYCD  240
+
+Query  241  WMHDTMHKWG  250
+            W H+TMHKWG
+Sbjct  241  WSHNTMHKWG  250
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.136    0.482    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 97682
+
+
+  Database: txr_p (parsed Seq-ids)
+    Posted date:  Nov 13, 2026  1:45 PM
+  Number of letters in database: 500
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -1,0 +1,11 @@
+# TBLASTN 2.17.0+
+# Query: q
+# Database: ids/txr_n
+# Fields: query id, subject id, evalue
+# 4 hits found
+q	gb|AAA00001.1|	2.06e-171
+Error: [tblastn] Error: Offset error at end of taxdb file.
+q	gb|BBB00001.1|	3.96e-135
+q	gb|BBB00001.1|	0.85
+q	gb|BBB00001.1|	5.0
+# BLAST processed 1 queries

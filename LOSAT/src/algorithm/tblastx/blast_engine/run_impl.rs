@@ -2012,6 +2012,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The warnings written before each query's report (`QueryWarnings`): the reader's
     /// messages of the query's batch (before its first query) and the query's own.
     pub warnings: &'a [Vec<u8>],
+    /// The texts of the subjects that each query's report reads one by one (its batch's
+    /// prefetch off), by query, which the first format's writer places where it reads them
+    /// (`QueryWarnings::subject_read`).
+    pub query_reads: &'a [crate::report::query_warnings::QueryReads],
     /// The queries' input and ranges.
     pub ranges: &'a QueryRuns<'a>,
     /// Whether the reports end with the epilog (not when the search stops at a batch).
@@ -2339,10 +2343,17 @@ fn write_tblastx_outputs(
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
             ))
         .then(|| {
-            crate::report::query_warnings::QueryWarnings::new(
-                warning_lines.take().unwrap_or(&[]),
+            let first = warning_lines.take();
+            let warnings = crate::report::query_warnings::QueryWarnings::new(
+                first.unwrap_or(&[]),
                 &mut *outputs.diagnostics,
-            )
+            );
+            // The first format's writer also writes the texts of the subjects that the reports
+            // read one by one (`TblastxReportRun::query_reads`).
+            match first {
+                Some(_) => warnings.with_subject_reads(run.query_reads),
+                None => warnings,
+            }
         });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
@@ -3015,6 +3026,7 @@ fn run_in_pool(
                 }),
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
+        reads: std::cell::RefCell::default(),
     };
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:176-178
     // ```c
@@ -3330,6 +3342,12 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // Whether the first format writes the texts of the subjects that a query's report reads one
+    // by one where it reads each (`TblastxOutputFormat::places_subject_reads`).
+    let places_reads = outputs
+        .formats
+        .first()
+        .is_some_and(|format| report::output_format(format.outfmt).places_subject_reads());
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
     // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
     // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -3793,14 +3811,31 @@ fn run_batch_loop(
                                         .collect()
                                 }
                             };
-                            query_fetches.push(if !shown.is_empty() {
+                            // The first format writes the texts where it reads each subject
+                            // (`TblastxOutputFormat::places_subject_reads`), else before the
+                            // report.
+                            query_fetches.push(if shown.is_empty() {
+                                Vec::new()
+                            } else if places_reads {
+                                let texts = super::super::database::subject_read_texts(
+                                    database,
+                                    shown,
+                                    &reports.titles.borrow(),
+                                    plural_names,
+                                )?;
+                                let mut reads = reports.reads.borrow_mut();
+                                let index = start + query as usize;
+                                if reads.len() <= index {
+                                    reads.resize_with(index + 1, Vec::new);
+                                }
+                                reads[index] = texts;
+                                Vec::new()
+                            } else {
                                 super::super::database::prefetch_messages(
                                     database,
                                     shown,
                                     &reports.titles.borrow(),
                                 )?
-                            } else {
-                                Vec::new()
                             });
                             if plural_names && from < to {
                                 database.open_for_tabular_rows()?;
@@ -3953,6 +3988,9 @@ struct BatchReports<'a> {
     /// The queries whose reports were written: those of the batches that the loop wrote when it
     /// took them (`report_stream`), which the next call follows.
     queries_written: std::cell::Cell<usize>,
+    /// The texts of the subjects that each query's report reads one by one (its batch's prefetch
+    /// off), by query, where the first format places them (`TblastxReportRun::query_reads`).
+    reads: std::cell::RefCell<Vec<crate::report::query_warnings::QueryReads>>,
 }
 
 impl BatchReports<'_> {
@@ -3972,6 +4010,7 @@ impl BatchReports<'_> {
         let t_output = crate::utils::xtiming::clock();
         let first = self.queries_written.get();
         let reported = first..first + done.searched.len();
+        let reads = self.reads.borrow();
         let queries = &self.query_runs.records[reported.clone()];
         // The queries' input and ranges, numbered from `first` as `done` (`report_stream`).
         let batch_input;
@@ -4141,6 +4180,7 @@ impl BatchReports<'_> {
                 searched: &done.searched,
                 filtered_empty: self.filtered_empty,
                 warnings: &warnings[reported.clone()],
+                query_reads: reads.get(reported.clone()).unwrap_or(&[]),
                 ranges,
                 epilog,
                 queries_before: first,

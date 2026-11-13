@@ -1,0 +1,9 @@
+# BLASTP 2.17.0+
+# Query: q
+# Database: ids/txr_p
+# Fields: query id, subject id, evalue
+# 2 hits found
+q	gb|AAA00001.1|	1.85e-171
+Error: [blastp] Error: Offset error at end of taxdb file.
+q	gb|BBB00001.1|	3.56e-135
+# BLAST processed 1 queries

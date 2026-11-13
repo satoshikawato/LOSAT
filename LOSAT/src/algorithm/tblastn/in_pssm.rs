@@ -24,7 +24,6 @@ use crate::algorithm::pssm_search::in_pssm::{read_in_pssm, PssmReader};
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
-use crate::blastinput::fasta_reader::FastaRecord;
 
 /// The program line of PSI-TBLASTN's reports (`Blast_ProgramNameFromType` of
 /// `eBlastTypePsiTblastn`, upper-cased by the formatter).
@@ -150,30 +149,6 @@ pub(super) fn check_limits(
         );
     }
     Ok(())
-}
-
-/// The query record of a PSSM search: psiblast's record of the PSSM's Bioseq (its Seq-id string,
-/// its title, its letters). With `-parse_deflines` NCBI's reports show the Seq-id before the title
-/// (`Query= Query_1 <title>`, `qseqid` `Query_1`; a PSSM without a title shows its id alone), as
-/// the title of a record whose first word is that id shows them.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
-/// ```c++
-///     string all_id_str = GetSeqIdString(cbs, believe_query);
-///     all_id_str += " ";
-///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
-/// ```
-pub(super) fn query_record(psi: &PsiSearch, parse_deflines: bool) -> FastaRecord {
-    let query = &psi.query;
-    if !parse_deflines {
-        return query.clone();
-    }
-    let mut title = query.local_id.clone().into_bytes();
-    if !query.title.is_empty() {
-        title.push(b' ');
-        title.extend_from_slice(&query.title);
-    }
-    FastaRecord::new(query.local_id.clone(), &title, query.seq())
 }
 
 /// The lookup segments of a query of `length` letters whose filtering locations are `masks`

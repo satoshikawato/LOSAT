@@ -138,7 +138,9 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
             row_labels: None,
             by_row: Some(false),
             query: Some(PssmQuery {
-                ids: vec![PssmSeqId::Local(ObjectId::Str(b"Query_7".to_vec()))],
+                ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
+                    b"Query_7".to_vec(),
+                ))],
                 titles: Some(vec![title.to_vec()]),
                 inst: SeqInst {
                     repr: ("raw", 2),
@@ -357,7 +359,8 @@ fn skipped_members_are_named_and_an_empty_descr_is_an_error() {
 // title, frequency ratios of 26 rows, the parameters without gap costs.
 #[test]
 fn ncbis_pssm_with_frequency_ratios_is_read() {
-    use crate::report::serial::pssm::{PssmSeqId, SeqData, TextseqId};
+    use crate::report::serial::pssm::SeqData;
+    use crate::seqid::model::{ParsedSeqId, TextseqId};
     let value = read_pssm_with_parameters(&gunzip("pssm/pssm_freq_ratios.asn.gz")).unwrap();
     let pssm = &value.pssm;
     assert_eq!((pssm.num_rows, pssm.num_columns), (26, 232));
@@ -366,17 +369,13 @@ fn ncbis_pssm_with_frequency_ratios_is_read() {
     assert_eq!(
         query.ids,
         vec![
-            PssmSeqId::Gi(129295),
-            PssmSeqId::Textseq {
-                variant: "swissprot",
-                tag: 7,
-                id: TextseqId {
-                    name: Some(b"OVALX_CHICK".to_vec()),
-                    accession: Some(b"P01013".to_vec()),
-                    release: None,
-                    version: None,
-                },
-            },
+            ParsedSeqId::Gi(129295),
+            ParsedSeqId::Swissprot(TextseqId {
+                name: Some(b"OVALX_CHICK".to_vec()),
+                accession: Some(b"P01013".to_vec()),
+                release: None,
+                version: None,
+            }),
         ]
     );
     assert_eq!(

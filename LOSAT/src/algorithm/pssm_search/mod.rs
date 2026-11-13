@@ -73,7 +73,13 @@ pub struct PsiSearch {
     /// position-based composition-based statistics read; empty when the PSSM has none.
     pub(crate) freq_ratios: Vec<[f64; crate::core::blast_util::BLASTAA_SIZE]>,
     pub(crate) stats: PssmStats,
+    /// The query record as the reports show it without `-parse_deflines` (`query_record`).
     pub(crate) query: FastaRecord,
+    /// The Seq-ids of the PSSM's query Bioseq of `-in_pssm` (at least one), the one owner of them:
+    /// the first is the id of the query's Seq-loc (psiblast_app.cpp:540, `GetFirstId()`), which
+    /// its Seq-aligns, the later rounds' PSSMs and the warnings take; the reports show them as
+    /// `query_record` makes them. Empty for a FASTA query's later rounds (`from_engine`).
+    pub(crate) query_ids: Vec<crate::seqid::ParsedSeqId>,
     pub(crate) validation_error: Option<String>,
     /// The warnings of `PsiBlastSetupScoreBlock` for the search's options (the frequency ratios
     /// all zero, the composition-based statistics reset to mode 1), which the query's warning
@@ -181,6 +187,42 @@ impl PsiSearch {
         &self.query
     }
 
+    /// The query record of the PSSM search of `-in_pssm` as the reports show it (psiblast's,
+    /// tblastn's PSI-TBLASTN): the record of the PSSM's Bioseq (`in_pssm::psi_search_and_object`),
+    /// whose one local id `-parse_deflines` shows as it shows a FASTA query's ids (NCBI's formatter
+    /// takes `believe_query` of `-parse_deflines`, psiblast_app.cpp:482-484, tblastn_app.cpp; NCBI
+    /// BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`).
+    pub(crate) fn query_record(&self, parse_deflines: bool) -> FastaRecord {
+        match (self.query_ids.as_slice(), parse_deflines) {
+            ([crate::seqid::ParsedSeqId::Local(_)], true) => {
+                self.query.clone().believing(self.query_ids.clone())
+            }
+            _ => self.query.clone(),
+        }
+    }
+
+    /// `query_record`, whose ids, when the reports show them, join the scope `scope` of the
+    /// `-subject` records that `-parse_deflines` reads, as a FASTA query's do (NCBI's scope holds
+    /// the PSSM's Bioseq, psiblast_app.cpp:537: a subject with one of its ids shows as the query, or
+    /// NCBI's tblastn fails; `IdScope::add_record` refuses it).
+    pub(crate) fn query_record_in(
+        &self,
+        parse_deflines: bool,
+        scope: Option<&crate::seqid::id_scope::IdScope>,
+        program: &str,
+    ) -> anyhow::Result<FastaRecord> {
+        let query = self.query_record(parse_deflines);
+        if let (Some(scope), Some(believed)) = (scope, query.believed()) {
+            scope.add_record(&believed.ids, None, "query", program)?;
+        }
+        Ok(query)
+    }
+
+    /// The id of the query's Seq-loc of `-in_pssm` (`query_ids`), `None` for a FASTA query.
+    pub(crate) fn query_seq_loc_id(&self) -> Option<&crate::seqid::ParsedSeqId> {
+        self.query_ids.first()
+    }
+
     /// The PSSM search of a later round of the FASTA query `query` (psiblast's rounds,
     /// `algorithm::psiblast::rounds`): the engine's PSSM of the round before, in full precision
     /// (NCBI's `CPssmWithParameters` in memory, never read back from text): its scores, its
@@ -228,6 +270,7 @@ impl PsiSearch {
                 h: stat(pssm.gapped.h),
             },
             query,
+            query_ids: Vec::new(),
             validation_error: None,
             setup_messages,
             warning_title: None,

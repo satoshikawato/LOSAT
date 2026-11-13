@@ -52,6 +52,8 @@ mod ncbi_lookup_paths;
 mod ncbi_toolkit_dryrun;
 #[path = "../ncbi_toolkit_file_options.rs"]
 mod ncbi_toolkit_file_options;
+#[path = "../ncbi_toolkit_help.rs"]
+mod ncbi_toolkit_help;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]

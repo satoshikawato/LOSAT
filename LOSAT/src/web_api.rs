@@ -1567,6 +1567,11 @@ mod tests {
             run_pair("tblastn", query_text, subject_text, "6", "-out\0x"),
             Err("file/help arguments are unsupported for the TBLASTN web API".to_string())
         );
+        // `-help-full` asks for the CLI's help, as `-help` (line RG item E2).
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, "6", "-help-full"),
+            Err("file/help arguments are unsupported for the TBLASTN web API".to_string())
+        );
         // The serial module has no threads to give (as the CLI built without them).
         #[cfg(not(feature = "parallel"))]
         assert!(run_pair(

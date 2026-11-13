@@ -2380,16 +2380,31 @@ fn find_first_mismatch_greedy(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:327-339,351-362
 /// ```c
-///         while (seq1_index < len1 && seq2_index < len2 &&
-///                seq1[seq1_index] < 4 &&
-///                seq1[seq1_index] == seq2[seq2_index]) {
-///             ++seq1_index;
-///             ++seq2_index;
-///         }
-///         if (seq2_index < len2 && seq2[seq2_index] == FENCE_SENTRY) {
-///             ASSERT(fence_hit);
-///             *fence_hit = TRUE;
-///         }
+///     if (reverse) {
+///         if (rem == 4) {
+///             while (seq1_index < len1 && seq2_index < len2 &&
+///                    seq1[len1-1 - seq1_index] < 4 &&
+///                    seq1[len1-1 - seq1_index] == seq2[len2-1 - seq2_index]) {
+///                 ++seq1_index;
+///                 ++seq2_index;
+///             }
+///             if (seq2_index < len2 && seq2[len2-1-seq2_index] == FENCE_SENTRY) {
+///                 ASSERT(fence_hit);
+///                 *fence_hit = TRUE;
+///             }
+/// ...
+///     else {
+///         if (rem == 4) {
+///             while (seq1_index < len1 && seq2_index < len2 &&
+///                    seq1[seq1_index] < 4 &&
+///                    seq1[seq1_index] == seq2[seq2_index]) {
+///                 ++seq1_index;
+///                 ++seq2_index;
+///             }
+///             if (seq2_index < len2 && seq2[seq2_index] == FENCE_SENTRY) {
+///                 ASSERT(fence_hit);
+///                 *fence_hit = TRUE;
+///             }
 /// ```
 #[inline(always)]
 fn affine_first_mismatch<const REVERSE: bool>(
@@ -2404,7 +2419,8 @@ fn affine_first_mismatch<const REVERSE: bool>(
     // The byte loop of `find_first_mismatch_greedy` indexes the slices with these offsets.
     assert!(seq1_index >= 0 && seq2_index >= 0);
     assert!(len1 as usize <= seq1.len() && len2 as usize <= seq2.len());
-    // SAFETY: `seq1` and `seq2` are readable for `len1` and `len2` bytes (asserted above).
+    // SAFETY: `seq1` and `seq2` are readable for `len1` and `len2` bytes, and both starts are
+    // `>= 0` (asserted above).
     let index = unsafe {
         x_first_mismatch::<REVERSE>(
             seq1.as_ptr(),
@@ -2654,7 +2670,8 @@ struct XGreedyRowState {
 /// below 4, i.e. when `(b1 ^ b2) | (b1 & 0xFC)` is zero; eight positions are
 /// tested per step and the first non-zero byte is the first mismatch.
 ///
-/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
+/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes, and `seq1_index` and
+/// `seq2_index` must be `>= 0`.
 #[inline(always)]
 unsafe fn x_first_mismatch<const REVERSE: bool>(
     seq1: *const u8,
@@ -4171,6 +4188,9 @@ fn blast_affine_greedy_align_dir<const REVERSE: bool>(
     let score_common_factor = gdb3(&mut op_cost, &mut gap_open, &mut gap_extend);
     let gap_open_extend = gap_open + gap_extend;
     let max_penalty = op_cost.max(gap_open_extend);
+    // The rows of `d - gap_open_extend`, `d - gap_extend` and `d - op_cost` are earlier distances
+    // (`prior_row_base`); the option checks refuse every scoring that would make one of them 0.
+    debug_assert!(gap_extend >= 1 && gap_open_extend >= 1 && op_cost >= 1);
 
     let scaled_max_dist = max_dist * gap_extend;
     let diag_origin = max_dist + 2;
@@ -4333,7 +4353,9 @@ fn blast_affine_greedy_align_dir<const REVERSE: bool>(
         let open_base = prior_row_base(row_open, open_lo, open_hi);
         let ext_base = prior_row_base(row_ext, ext_lo, ext_hi);
         let match_base = prior_row_base(row_match, match_lo, match_hi);
-        debug_assert!(
+        // once per distance: the walk below visits every cell of the row (a shorter row would
+        // leave cells out silently)
+        assert!(
             cur.lower == tmp_diag_lower
                 && cur.offsets.len() == (tmp_diag_upper - tmp_diag_lower + 1).max(0) as usize
         );
@@ -4999,18 +5021,6 @@ mod tests {
     /// which is what running tracebacks ahead of time on other scratches relies on.
     #[test]
     fn x_greedy_alignment_on_a_used_scratch_equals_a_new_scratch() {
-        struct Rng(u64);
-        impl Rng {
-            fn next(&mut self) -> u64 {
-                self.0 ^= self.0 << 13;
-                self.0 ^= self.0 >> 7;
-                self.0 ^= self.0 << 17;
-                self.0
-            }
-            fn below(&mut self, n: u64) -> u64 {
-                self.next() % n
-            }
-        }
         fn run(
             query: &[u8],
             subject: &[u8],
@@ -5064,7 +5074,7 @@ mod tests {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(1500);
-        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let mut rng = TestRng(0x2545_F491_4F6C_DD1D);
         let mut used = GreedyAlignScratch::new();
         let mut aligned = 0usize;
         let mut with_gaps = 0usize;
@@ -5074,7 +5084,7 @@ mod tests {
             let substitution = [0u64, 2, 5, 20, 60, 150][rng.below(6) as usize]; // per mille
             let indel = [0u64, 0, 2, 10, 30][rng.below(5) as usize]; // per mille
             let ambiguity = if case % 7 == 0 { 8 } else { 0 }; // per mille
-            let random_base = |rng: &mut Rng| rng.below(4) as u8;
+            let random_base = |rng: &mut TestRng| rng.below(4) as u8;
             let core: Vec<u8> = (0..core_len).map(|_| random_base(&mut rng)).collect();
             let mut query = Vec::new();
             let mut subject = Vec::new();
@@ -5395,7 +5405,7 @@ mod tests {
         .is_none());
     }
 
-    /// A small xorshift generator for the random tests below.
+    /// A small xorshift generator for the random tests of this module.
     struct TestRng(u64);
 
     impl TestRng {
@@ -5420,7 +5430,10 @@ mod tests {
     /// ```
     /// The affine kernel's scan (`affine_first_mismatch`) gives the byte loop's length and fence
     /// flag (`find_first_mismatch_greedy`) on random pairs with ambiguous letters, fences and long
-    /// runs, in both directions, from starts inside, at and past the ends.
+    /// runs, in both directions, from starts inside, at and past the ends. Both slices run on past
+    /// their lengths by 0-9 bytes (bases that continue the other sequence, and fences), as the
+    /// reverse calls pass the whole query and subject with the offsets as lengths: a scan that read
+    /// past a length, or addressed a slice from its end instead of its length, would differ.
     #[test]
     fn affine_first_mismatch_equals_find_first_mismatch_greedy() {
         let mut rng = TestRng(0x0BAD_5EED_1234_5678);
@@ -5447,6 +5460,30 @@ mod tests {
             let s1 = rng.below(len1 as u64 + 3) as i32;
             let s2 = rng.below(len2 as u64 + 3) as i32;
             let (l1, l2) = (len1 as i32, len2 as i32);
+            let (mut seq1, mut seq2) = (seq1, seq2);
+            let (tail1, tail2) = (rng.below(10) as usize, rng.below(10) as usize);
+            for i in 0..tail1 {
+                // `seq2[j]` continues `seq1[j + shift]` (above)
+                let b = (len1 + i)
+                    .checked_sub(shift)
+                    .and_then(|j| seq2.get(j))
+                    .copied()
+                    .unwrap_or(0)
+                    .min(3);
+                seq1.push(if rng.below(3) == 0 {
+                    rng.below(4) as u8
+                } else {
+                    b
+                });
+            }
+            for i in 0..tail2 {
+                let b = seq1.get(len2 + i + shift).copied().unwrap_or(0).min(3);
+                seq2.push(match rng.below(12) {
+                    0 => FENCE_SENTRY,
+                    1..=3 => rng.below(4) as u8,
+                    _ => b,
+                });
+            }
             for reverse in [false, true] {
                 let mut fence_old = false;
                 let old = find_first_mismatch_greedy(
